@@ -1,0 +1,50 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id                  String       @id @default(cuid())
+  name                String
+  format              String       @default("9:16")
+  status              String       @default("created")
+  rawVideoPath        String?
+  normalizedPath      String?
+  renderedVideoPath   String?
+  videoDuration       Float?
+  videoWidth          Int?
+  videoHeight         Int?
+  videoFps            Int?
+  transcriptionJson   String?
+  subtitlesJson       String?
+  silencesJson        String?
+  scenesJson          String?
+  paletteJson         String?
+  narrativeFormat     String?
+  error               String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  renderJobs          RenderJob[]
+}
+
+model RenderJob {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status    String   @default("queued")
+  outputPath String?
+  error     String?
+  progress  Float    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+}

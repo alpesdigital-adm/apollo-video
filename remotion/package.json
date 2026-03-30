@@ -1,0 +1,23 @@
+{
+  "name": "video-editor-remotion",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx remotion studio",
+    "render": "npx remotion render",
+    "build": "npx remotion bundle"
+  },
+  "dependencies": {
+    "remotion": "4.0.434",
+    "@remotion/cli": "4.0.434",
+    "@remotion/renderer": "4.0.434",
+    "@remotion/player": "4.0.434",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/react": "^18.2.48"
+  }
+}
