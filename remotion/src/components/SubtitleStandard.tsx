@@ -42,7 +42,7 @@ export const SubtitleStandard: React.FC<SubtitleStandardProps> = ({
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'center',
-        paddingBottom: '40px',
+        paddingBottom: '120px',
         opacity,
       }}
     >
@@ -51,13 +51,13 @@ export const SubtitleStandard: React.FC<SubtitleStandardProps> = ({
           backgroundColor: 'rgba(0, 0, 0, 0.7)',
           padding: '16px 32px',
           borderRadius: '8px',
-          maxWidth: '80%',
+          maxWidth: '72%',
           textAlign: 'center',
         }}
       >
         <div
           style={{
-            fontSize: '48px',
+            fontSize: '56px',
             fontWeight: '500',
             color: palette.text,
             fontFamily: 'Arial, sans-serif',

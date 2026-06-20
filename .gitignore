@@ -36,6 +36,12 @@ yarn-error.log*
 # project specific
 uploads/
 renders/
+/public/uploads/
+/public/renders/
+/public/generated-images/
+/tmp/
+/maquina-de-criativos.zip
+/.claude/
 
 # IDE
 .vscode/

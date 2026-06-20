@@ -13,6 +13,23 @@ export type SceneType =
   | 'Flow'
   | 'CTA'
   | 'StickFigures'
+  | 'ImageInsert'
+
+export type NarrativeRole =
+  | 'hook'
+  | 'context'
+  | 'proof'
+  | 'process'
+  | 'objection'
+  | 'decision'
+  | 'cta'
+
+export type VisualRole =
+  | 'evidence'
+  | 'contrast'
+  | 'process'
+  | 'context'
+  | 'decision'
 
 export interface BaseScene {
   id: string
@@ -90,6 +107,17 @@ export interface StickFiguresScene extends BaseScene {
   caption: string
 }
 
+export interface ImageInsertScene extends BaseScene {
+  type: 'ImageInsert'
+  layout: 'full' | 'split-bottom' | 'top-image-compact'
+  narrativeRole?: NarrativeRole
+  visualRole?: VisualRole
+  imagePrompt: string
+  imagePath?: string
+  imageAlt?: string
+  sourceText?: string
+}
+
 export type Scene =
   | FullScreenScene
   | LowerThirdScene
@@ -101,6 +129,7 @@ export type Scene =
   | FlowScene
   | CTAScene
   | StickFiguresScene
+  | ImageInsertScene
 
 export interface ColorPalette {
   primary: string

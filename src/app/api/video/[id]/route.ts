@@ -23,8 +23,13 @@ export async function GET(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
-    // Use rendered video if available, otherwise normalized, otherwise raw
-    const videoPath = project.renderedVideoPath || project.normalizedPath || project.rawVideoPath
+    const source = request.nextUrl.searchParams.get('source')
+    const videoPath =
+      source === 'raw'
+        ? project.rawVideoPath
+        : source === 'primary'
+          ? project.normalizedPath || project.rawVideoPath
+          : project.renderedVideoPath || project.normalizedPath || project.rawVideoPath
 
     if (!videoPath || !existsSync(videoPath)) {
       return NextResponse.json({ error: 'Video file not found' }, { status: 404 })

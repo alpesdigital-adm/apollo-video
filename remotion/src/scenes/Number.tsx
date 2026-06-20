@@ -1,19 +1,15 @@
 import React from 'react';
-import {
-  AbsoluteFill,
-  useCurrentFrame,
-  spring,
-  useVideoConfig,
-  interpolate,
-} from 'remotion';
+import { InsertFrame, Kicker, Panel, SmartText, getInsertStyle } from '../components/InsertPrimitives';
 
 interface NumberProps {
-  value: number;
+  value: number | string;
   label?: string;
   prefix?: string;
   suffix?: string;
   format: '9:16' | '16:9';
   palette: any;
+  stylePreset?: string;
+  durationInFrames?: number;
 }
 
 export const Number: React.FC<NumberProps> = ({
@@ -21,79 +17,52 @@ export const Number: React.FC<NumberProps> = ({
   label,
   prefix,
   suffix,
-  palette,
+  format,
+  stylePreset,
+  durationInFrames,
 }) => {
-  const frame = useCurrentFrame();
-  const config = useVideoConfig();
-
-  const scale = spring({
-    frame,
-    fps: config.fps,
-    from: 0.3,
-    to: 1,
-    duration: 40,
-    damp: 0.8,
-  });
-
-  const countFrame = interpolate(
-    frame,
-    [0, 40, config.durationInFrames],
-    [0, value, value],
-    { extrapolateRight: 'clamp' }
-  );
-
-  const displayNumber = Math.round(countFrame);
-
-  const opacity = interpolate(
-    frame,
-    [0, 15, config.durationInFrames - 20, config.durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  );
+  const style = getInsertStyle(stylePreset);
+  const displayValue = `${prefix || ''}${value || ''}${suffix || ''}`.trim();
 
   return (
-    <AbsoluteFill
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        opacity,
-      }}
+    <InsertFrame
+      format={format}
+      stylePreset={stylePreset}
+      durationInFrames={durationInFrames}
+      placement="bottom"
+      scrim
     >
-      <div
-        style={{
-          transform: `scale(${scale})`,
-          textAlign: 'center',
-        }}
-      >
+      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 820 : 980}>
+        <Kicker stylePreset={stylePreset}>Criterio</Kicker>
         <div
           style={{
-            fontSize: '180px',
-            fontWeight: 'bold',
-            color: palette.accent,
-            margin: '0',
-            lineHeight: '1',
+            display: 'inline-flex',
+            borderRadius: 999,
+            background: style.accent,
+            color: style.accentText,
+            padding: '16px 28px',
+            marginBottom: 28,
+            fontSize: 38,
+            fontWeight: 900,
+            lineHeight: 1,
           }}
         >
-          <span>{prefix}</span>
-          {displayNumber}
-          <span>{suffix}</span>
+          {displayValue || '1'}
         </div>
-
         {label && (
-          <p
-            style={{
-              fontSize: '64px',
-              color: palette.text,
-              margin: '40px 0 0 0',
-              opacity: 0.8,
-            }}
+          <SmartText
+            stylePreset={stylePreset}
+            variant="title"
+            align="center"
+            maxChars={66}
+            maxLines={2}
+            baseSize={format === '9:16' ? 54 : 64}
+            minSize={34}
           >
             {label}
-          </p>
+          </SmartText>
         )}
-      </div>
-    </AbsoluteFill>
+      </Panel>
+    </InsertFrame>
   );
 };

@@ -42,6 +42,8 @@ export interface SubtitleEntry {
 
 export type VideoFormat = '9:16' | '16:9'
 
+export type InsertStylePreset = 'creator-clean' | 'editorial-bold' | 'minimal-glass'
+
 export type ProjectStatus =
   | 'created'
   | 'uploading'

@@ -20,7 +20,13 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   const currentTime = frame / config.fps;
 
   const currentSubtitle = subtitles.find(
-    (sub) => currentTime >= sub.startTime && currentTime < sub.endTime
+    (sub) => {
+      if (typeof sub.startFrame === 'number' && typeof sub.endFrame === 'number') {
+        return frame >= sub.startFrame && frame < sub.endFrame;
+      }
+
+      return currentTime >= sub.startTime && currentTime < sub.endTime;
+    }
   );
 
   if (!currentSubtitle) {

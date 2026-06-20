@@ -1,11 +1,5 @@
 import React from 'react';
-import {
-  AbsoluteFill,
-  useCurrentFrame,
-  spring,
-  useVideoConfig,
-  interpolate,
-} from 'remotion';
+import { AccentRule, InsertFrame, Kicker, Panel, SmartText, getInsertStyle } from '../components/InsertPrimitives';
 
 interface CardProps {
   number: number;
@@ -14,6 +8,8 @@ interface CardProps {
   description?: string;
   format: '9:16' | '16:9';
   palette: any;
+  stylePreset?: string;
+  durationInFrames?: number;
 }
 
 export const Card: React.FC<CardProps> = ({
@@ -21,95 +17,67 @@ export const Card: React.FC<CardProps> = ({
   icon,
   title,
   description,
-  palette,
+  format,
+  stylePreset,
+  durationInFrames,
 }) => {
-  const frame = useCurrentFrame();
-  const config = useVideoConfig();
-
-  const scale = spring({
-    frame,
-    fps: config.fps,
-    from: 0.5,
-    to: 1,
-    duration: 35,
-    damp: 0.8,
-  });
-
-  const opacity = interpolate(
-    frame,
-    [0, 15, config.durationInFrames - 20, config.durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  );
+  const style = getInsertStyle(stylePreset);
 
   return (
-    <AbsoluteFill
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        opacity,
-      }}
+    <InsertFrame
+      format={format}
+      stylePreset={stylePreset}
+      durationInFrames={durationInFrames}
+      placement="bottom"
+      scrim
     >
-      <div
-        style={{
-          transform: `scale(${scale})`,
-          backgroundColor: 'rgba(255, 255, 255, 0.05)',
-          border: `2px solid ${palette.accent}`,
-          borderRadius: '24px',
-          padding: '40px',
-          maxWidth: '400px',
-          width: '90%',
-          textAlign: 'center',
-          backdropFilter: 'blur(10px)',
-        }}
-      >
-        <div
-          style={{
-            fontSize: '24px',
-            marginBottom: '20px',
-            minHeight: '40px',
-          }}
-        >
-          {icon || '✨'}
-        </div>
-
-        <div
-          style={{
-            fontSize: '80px',
-            fontWeight: 'bold',
-            color: palette.accent,
-            margin: '20px 0',
-          }}
-        >
-          {number}
-        </div>
-
-        <h3
-          style={{
-            fontSize: '48px',
-            fontWeight: 'bold',
-            color: palette.text,
-            margin: '20px 0 10px 0',
-          }}
-        >
-          {title}
-        </h3>
-
-        {description && (
-          <p
+      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 820 : 980}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 24 }}>
+          <div
             style={{
-              fontSize: '32px',
-              color: palette.text,
-              margin: '10px 0 0 0',
-              opacity: 0.7,
-              lineHeight: '1.4',
+              width: 78,
+              height: 78,
+              borderRadius: 22,
+              background: style.accent,
+              color: style.accentText,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 36,
+              fontWeight: 900,
+              flexShrink: 0,
             }}
           >
-            {description}
-          </p>
+            {icon || number || '•'}
+          </div>
+          <Kicker stylePreset={stylePreset}>Insight</Kicker>
+        </div>
+        <SmartText
+          stylePreset={stylePreset}
+          variant="title"
+          maxChars={58}
+          maxLines={2}
+          baseSize={format === '9:16' ? 58 : 66}
+          minSize={36}
+        >
+          {title}
+        </SmartText>
+        {description && (
+          <>
+            <AccentRule stylePreset={stylePreset} />
+            <SmartText
+              stylePreset={stylePreset}
+              variant="muted"
+              maxChars={88}
+              maxLines={3}
+              baseSize={34}
+              minSize={27}
+            >
+              {description}
+            </SmartText>
+          </>
         )}
-      </div>
-    </AbsoluteFill>
+      </Panel>
+    </InsertFrame>
   );
 };

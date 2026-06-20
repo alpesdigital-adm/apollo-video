@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import { RemotionProjectPlayer } from '@/components/RemotionProjectPlayer'
 import type { Scene } from '@/lib/types/scene'
 import type { SubtitleEntry } from '@/lib/types/project'
 import type { ProjectStatus } from '@/lib/types/project'
@@ -10,12 +11,38 @@ interface ProjectData {
   id: string
   name: string
   status: ProjectStatus
+  error?: string | null
   format: '9:16' | '16:9'
+  engineKind?: 'narrative' | 'visual'
+  stylePreset?: string
+  editPlan?: {
+    durationFrames: number
+    cuts: unknown[]
+    overlays: unknown[]
+    lineage?: {
+      units: Array<{
+        id: string
+        kind: string
+        role?: string
+        visualRole?: string
+      }>
+    }
+    ports?: {
+      acceptsNarration: boolean
+      acceptsVisualMontage: boolean
+      canUseBroll: boolean
+      canUseMusicDrivenCuts: boolean
+    }
+  } | null
   videoDuration: number
+  videoFps?: number
+  renderedVideoPath?: string | null
   scenes: Scene[]
   subtitles: SubtitleEntry[]
+  silences: Array<{ startTime: number; endTime: number; duration: number }>
   palette: any
-  transcriptionJson: any
+  transcription: any
+  renderJob?: { id: string; status: string; progress: number; error?: string } | null
 }
 
 const PIPELINE_STEPS = [
@@ -24,7 +51,8 @@ const PIPELINE_STEPS = [
   { name: 'Transcribe', status: 'transcribing' },
   { name: 'Analyze', status: 'analyzing' },
   { name: 'Ready', status: 'ready' },
-  { name: 'Render', status: 'rendering' }
+  { name: 'Render', status: 'rendering' },
+  { name: 'Complete', status: 'complete' }
 ]
 
 export default function EditorPage() {
@@ -39,6 +67,7 @@ export default function EditorPage() {
   const [refineInput, setRefineInput] = useState('')
   const [isRefining, setIsRefining] = useState(false)
   const [isRendering, setIsRendering] = useState(false)
+  const pipelineInFlight = useRef<ProjectStatus | null>(null)
 
   // Load project
   useEffect(() => {
@@ -47,10 +76,25 @@ export default function EditorPage() {
     return () => clearInterval(interval)
   }, [])
 
-  // Auto-trigger normalization when project created
+  // Auto-trigger the complete v0.1 processing pipeline.
   useEffect(() => {
-    if (project && project.status === 'created') {
-      triggerNormalization()
+    if (!project || pipelineInFlight.current === project.status) return
+
+    if (project.status === 'created') {
+      pipelineInFlight.current = project.status
+      triggerNormalization().finally(() => {
+        pipelineInFlight.current = null
+      })
+    } else if (project.status === 'transcribing') {
+      pipelineInFlight.current = project.status
+      triggerTranscription().finally(() => {
+        pipelineInFlight.current = null
+      })
+    } else if (project.status === 'analyzing') {
+      pipelineInFlight.current = project.status
+      triggerAnalysis().finally(() => {
+        pipelineInFlight.current = null
+      })
     }
   }, [project?.status])
 
@@ -172,6 +216,7 @@ export default function EditorPage() {
 
   function getPipelineProgress() {
     const statusIndex = PIPELINE_STEPS.findIndex((s) => s.status === project?.status)
+    if (project?.status === 'complete') return PIPELINE_STEPS.length
     return statusIndex >= 0 ? statusIndex + 1 : 0
   }
 
@@ -186,9 +231,21 @@ export default function EditorPage() {
       Number: '🔢',
       Flow: '➡️',
       CTA: '🎯',
-      StickFigures: '👥'
+      StickFigures: '👥',
+      ImageInsert: 'IMG'
     }
     return icons[type] || '📹'
+  }
+
+  function formatRoleLabel(value: unknown): string {
+    if (typeof value !== 'string' || !value) {
+      return ''
+    }
+
+    return value
+      .split('-')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ')
   }
 
   if (loading) {
@@ -248,6 +305,16 @@ export default function EditorPage() {
             <span className="text-sm text-zinc-500 px-3 py-1 rounded-full bg-zinc-800">
               {project.format}
             </span>
+            {project.engineKind && (
+              <span className="text-sm text-amber-300 px-3 py-1 rounded-full bg-amber-400/10 border border-amber-400/30">
+                {project.engineKind === 'narrative' ? 'Narrative Engine' : 'Visual Engine'}
+              </span>
+            )}
+            {project.stylePreset && (
+              <span className="text-sm text-zinc-300 px-3 py-1 rounded-full bg-zinc-800 border border-zinc-700">
+                {project.stylePreset}
+              </span>
+            )}
           </div>
         </div>
       </header>
@@ -265,6 +332,7 @@ export default function EditorPage() {
           <div className="flex gap-2">
             {PIPELINE_STEPS.map((step, index) => {
               const isComplete =
+                project.status === 'complete' ||
                 PIPELINE_STEPS.findIndex((s) => s.status === project.status) >= index
               const isCurrent = project.status === step.status
 
@@ -302,17 +370,94 @@ export default function EditorPage() {
           </div>
         </div>
 
+        {project.status === 'error' && (
+          <div className="mb-8 rounded-xl border border-red-500/40 bg-red-500/10 p-6">
+            <h2 className="font-bold text-red-300 mb-2">Processing stopped</h2>
+            <p className="text-sm text-red-200/80 mb-4">
+              {project.error || 'The pipeline failed, but no detailed error was recorded.'}
+            </p>
+            <button
+              onClick={() => {
+                if (project.transcription) {
+                  triggerAnalysis()
+                } else {
+                  triggerTranscription()
+                }
+              }}
+              className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white font-semibold transition-colors"
+            >
+              Retry from failed step
+            </button>
+          </div>
+        )}
+
         {/* Main Editor Layout */}
         {project.status === 'ready' || project.status === 'rendering' || project.status === 'complete' ? (
           <div className="grid grid-cols-12 gap-6">
-            {/* Left: Preview (placeholder) */}
+            {/* Left: Processed video preview */}
             <div className="col-span-5">
-              <div className="rounded-xl bg-black/50 border border-zinc-800 aspect-video flex items-center justify-center overflow-hidden">
-                <div className="text-center">
-                  <p className="text-zinc-500 mb-2">Preview</p>
-                  <p className="text-xs text-zinc-600">Remotion Player would load here</p>
+              {project.status === 'complete' && project.renderedVideoPath ? (
+                <div className="rounded-xl bg-black/50 border border-zinc-800 overflow-hidden">
+                  <video
+                    src={`/api/video/${project.id}`}
+                    controls
+                    className={`w-full bg-black ${project.format === '9:16' ? 'aspect-[9/16]' : 'aspect-video'}`}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-xl bg-black/50 border border-zinc-800 overflow-hidden">
+                  <RemotionProjectPlayer
+                    projectId={project.id}
+                    format={project.format}
+                    fps={project.videoFps || 30}
+                    durationFrames={
+                      project.editPlan?.durationFrames ||
+                      Math.ceil((project.videoDuration || 1) * (project.videoFps || 30))
+                    }
+                    scenes={project.scenes || []}
+                    subtitles={project.subtitles || []}
+                    transcription={project.transcription}
+                    stylePreset={project.stylePreset || 'creator-clean'}
+                    palette={
+                      project.palette || {
+                        primary: '#FFB800',
+                        secondary: '#20202A',
+                        accent: '#FF6B35',
+                        background: '#050508',
+                        text: '#FFFFFF'
+                      }
+                    }
+                  />
+                </div>
+              )}
+
+              <div className="mt-4 grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                  <p className="text-xs text-zinc-500">Duration</p>
+                  <p className="font-semibold">{Math.round(project.videoDuration || 0)}s</p>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                  <p className="text-xs text-zinc-500">Auto cuts</p>
+                  <p className="font-semibold">{project.silences?.length || 0}</p>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                  <p className="text-xs text-zinc-500">Subtitles</p>
+                  <p className="font-semibold">{project.subtitles?.length || 0}</p>
                 </div>
               </div>
+              {project.editPlan && (
+                <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                  <p className="text-xs text-zinc-500">Timeline</p>
+                  <p className="font-semibold">
+                    {project.editPlan.durationFrames} frames - {project.editPlan.overlays.length} overlays
+                  </p>
+                  {project.editPlan.lineage?.units?.length ? (
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {project.editPlan.lineage.units.length} lineage units
+                    </p>
+                  ) : null}
+                </div>
+              )}
             </div>
 
             {/* Right: Scene Editor */}
@@ -323,9 +468,17 @@ export default function EditorPage() {
                 <div className="max-h-96 overflow-y-auto space-y-3 pr-4">
                   {project.scenes && project.scenes.length > 0 ? (
                     project.scenes.map((scene) => (
-                      <button
+                      <div
                         key={scene.id}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => setSelectedScene(scene)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            setSelectedScene(scene)
+                          }
+                        }}
                         className={`w-full text-left p-4 rounded-lg border transition-all ${
                           selectedScene?.id === scene.id
                             ? 'bg-amber-400/10 border-amber-400'
@@ -337,9 +490,21 @@ export default function EditorPage() {
                             <div className="flex items-center gap-2 mb-2">
                               <span className="text-lg">{getSceneTypeIcon(scene.type)}</span>
                               <span className="font-semibold text-sm">{scene.type}</span>
+                              {(scene as any).narrativeRole && (
+                                <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                                  {formatRoleLabel((scene as any).narrativeRole)}
+                                </span>
+                              )}
+                              {(scene as any).visualRole && (
+                                <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-300">
+                                  {formatRoleLabel((scene as any).visualRole)}
+                                </span>
+                              )}
                             </div>
                             <p className="text-xs text-zinc-400 line-clamp-2">
                               {(scene as any).text ||
+                                (scene as any).imageAlt ||
+                                (scene as any).imagePrompt ||
                                 (scene as any).title ||
                                 (scene as any).message ||
                                 'Scene content'}
@@ -368,7 +533,7 @@ export default function EditorPage() {
                             </svg>
                           </button>
                         </div>
-                      </button>
+                      </div>
                     ))
                   ) : (
                     <div className="text-center py-8 text-zinc-500">
@@ -414,6 +579,15 @@ export default function EditorPage() {
             >
               {isRendering ? 'Starting Render...' : 'Renderizar'}
             </button>
+          </div>
+        )}
+
+        {project.status === 'rendering' && (
+          <div className="mt-8 p-6 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-center">
+            <p className="text-emerald-300 font-semibold">Rendering...</p>
+            <p className="text-sm text-emerald-300/70 mt-2">
+              Progress: {Math.round(project.renderJob?.progress || 0)}%
+            </p>
           </div>
         )}
 

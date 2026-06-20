@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import type { VideoFormat, ProjectStatus } from '@/lib/types/project'
+import { INSERT_STYLE_PRESETS, DEFAULT_INSERT_STYLE_PRESET } from '@/lib/style-presets'
+import type { VideoFormat, ProjectStatus, InsertStylePreset } from '@/lib/types/project'
 
 interface Project {
   id: string
   name: string
   format: VideoFormat
+  stylePreset?: InsertStylePreset
   status: ProjectStatus
   createdAt: string
   updatedAt: string
@@ -18,7 +20,10 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null)
   const [dragActive, setDragActive] = useState(false)
+  const [selectedStylePreset, setSelectedStylePreset] =
+    useState<InsertStylePreset>(DEFAULT_INSERT_STYLE_PRESET)
 
   // Load recent projects
   useEffect(() => {
@@ -48,8 +53,10 @@ export default function Dashboard() {
 
     try {
       setUploading(true)
+      setUploadMessage('Uploading and reading video metadata...')
       const formData = new FormData()
       formData.append('file', file)
+      formData.append('stylePreset', selectedStylePreset)
 
       const response = await fetch('/api/upload', {
         method: 'POST',
@@ -62,9 +69,16 @@ export default function Dashboard() {
       }
 
       const data = await response.json()
-      router.push(`/project/${data.projectId}`)
+      if (!data.projectId) {
+        throw new Error('Upload finished but no project id was returned')
+      }
+
+      setUploadMessage('Upload complete. Opening project...')
+      await loadProjects()
+      window.location.assign(`/project/${data.projectId}`)
     } catch (error) {
       console.error('Upload failed:', error)
+      setUploadMessage(null)
       alert(`Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setUploading(false)
@@ -110,10 +124,10 @@ export default function Dashboard() {
       error: { bg: 'bg-red-500/10', text: 'text-red-400', label: 'Error' }
     }
 
-    const status = statusMap[status]
+    const badge = statusMap[status]
     return (
-      <span className={`px-2 py-1 rounded text-xs font-medium ${status.bg} ${status.text}`}>
-        {status.label}
+      <span className={`px-2 py-1 rounded text-xs font-medium ${badge.bg} ${badge.text}`}>
+        {badge.label}
       </span>
     )
   }
@@ -144,6 +158,48 @@ export default function Dashboard() {
       <main className="max-w-6xl mx-auto px-6 py-12">
         {/* Upload Zone */}
         <div className="mb-12">
+          <div className="mb-6">
+            <div className="flex items-end justify-between gap-4 mb-3">
+              <div>
+                <h2 className="text-lg font-bold">Estilo dos inserts</h2>
+                <p className="text-sm text-zinc-500">
+                  O preset escolhido guia todos os textos, cards e overlays do video.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {INSERT_STYLE_PRESETS.map((preset) => {
+                const isSelected = selectedStylePreset === preset.id
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => setSelectedStylePreset(preset.id)}
+                    className={`text-left rounded-xl border p-4 transition-all ${
+                      isSelected
+                        ? 'border-amber-400 bg-amber-400/10 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]'
+                        : 'border-zinc-800 bg-zinc-900/40 hover:border-zinc-600'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <span className="font-semibold">{preset.name}</span>
+                      <span
+                        className={`h-4 w-4 rounded-full border ${
+                          isSelected
+                            ? 'border-amber-300 bg-amber-400'
+                            : 'border-zinc-600 bg-zinc-900'
+                        }`}
+                      />
+                    </div>
+                    <p className="text-sm text-zinc-500 leading-snug">
+                      {preset.description}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           <label
             onDragEnter={handleDrag}
             onDragLeave={handleDrag}
@@ -185,7 +241,11 @@ export default function Dashboard() {
               <p className="text-sm text-zinc-500">
                 Supports MP4, MOV, AVI and other common video formats
               </p>
-              {uploading && <p className="text-amber-400 mt-4">Uploading...</p>}
+              {uploading && (
+                <p className="text-amber-400 mt-4">
+                  {uploadMessage || 'Uploading...'}
+                </p>
+              )}
             </div>
           </label>
         </div>

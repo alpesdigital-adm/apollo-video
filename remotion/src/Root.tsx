@@ -7,6 +7,7 @@ import {
   HORIZONTAL_WIDTH,
   HORIZONTAL_HEIGHT,
   FPS,
+  DEFAULT_DURATION_SECONDS,
 } from './lib/constants';
 import { CompositionProps } from './lib/types';
 
@@ -15,6 +16,7 @@ const defaultProps: CompositionProps = {
   subtitles: [],
   videoSrc: '',
   format: '9:16',
+  stylePreset: 'creator-clean',
   palette: {
     primary: '#FF6B6B',
     secondary: '#4ECDC4',
@@ -30,7 +32,7 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="vertical"
         component={VideoComposition}
-        durationInFrames={FPS * 60}
+        durationInFrames={FPS * DEFAULT_DURATION_SECONDS}
         fps={FPS}
         width={VERTICAL_WIDTH}
         height={VERTICAL_HEIGHT}
@@ -38,31 +40,17 @@ export const RemotionRoot: React.FC = () => {
           ...defaultProps,
           format: '9:16',
         }}
-        schema={{
-          scenes: { type: 'object' as const },
-          subtitles: { type: 'object' as const },
-          videoSrc: { type: 'string' as const },
-          format: { type: 'enum' as const, options: ['9:16', '16:9'] },
-          palette: { type: 'object' as const },
-        }}
       />
       <Composition
         id="horizontal"
         component={VideoComposition}
-        durationInFrames={FPS * 60}
+        durationInFrames={FPS * DEFAULT_DURATION_SECONDS}
         fps={FPS}
         width={HORIZONTAL_WIDTH}
         height={HORIZONTAL_HEIGHT}
         defaultProps={{
           ...defaultProps,
           format: '16:9',
-        }}
-        schema={{
-          scenes: { type: 'object' as const },
-          subtitles: { type: 'object' as const },
-          videoSrc: { type: 'string' as const },
-          format: { type: 'enum' as const, options: ['9:16', '16:9'] },
-          palette: { type: 'object' as const },
         }}
       />
     </>

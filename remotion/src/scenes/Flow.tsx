@@ -1,10 +1,5 @@
 import React from 'react';
-import {
-  AbsoluteFill,
-  useCurrentFrame,
-  useVideoConfig,
-  interpolate,
-} from 'remotion';
+import { InsertFrame, Kicker, Panel, SmartText, compactText, getInsertStyle } from '../components/InsertPrimitives';
 
 interface FlowStep {
   number: number;
@@ -15,132 +10,74 @@ interface FlowProps {
   steps: FlowStep[];
   format: '9:16' | '16:9';
   palette: any;
+  stylePreset?: string;
+  durationInFrames?: number;
 }
 
-export const Flow: React.FC<FlowProps> = ({ steps, palette }) => {
-  const frame = useCurrentFrame();
-  const config = useVideoConfig();
-
-  const totalDuration = config.durationInFrames - 30;
-  const stepDuration = totalDuration / steps.length;
-
-  const opacity = interpolate(
-    frame,
-    [0, 15, config.durationInFrames - 20, config.durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  );
+export const Flow: React.FC<FlowProps> = ({
+  steps,
+  format,
+  stylePreset,
+  durationInFrames,
+}) => {
+  const style = getInsertStyle(stylePreset);
+  const visibleSteps = (steps || []).slice(0, format === '9:16' ? 4 : 5);
 
   return (
-    <AbsoluteFill
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '60px',
-        opacity,
-      }}
+    <InsertFrame
+      format={format}
+      stylePreset={stylePreset}
+      durationInFrames={durationInFrames}
+      placement="bottom"
+      scrim
     >
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '40px',
-          width: '100%',
-          maxWidth: '600px',
-        }}
-      >
-        {steps.map((step, index) => {
-          const stepStartFrame = index * stepDuration;
-          const stepEndFrame = stepStartFrame + stepDuration;
-
-          const stepOpacity = interpolate(
-            frame,
-            [stepStartFrame, stepStartFrame + 10, stepEndFrame - 10, stepEndFrame],
-            [0, 1, 1, 0.3],
-            { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-          );
-
-          const scale = interpolate(
-            frame,
-            [stepStartFrame, stepStartFrame + 15],
-            [0.8, 1],
-            { extrapolateRight: 'clamp' }
-          );
-
-          const lineOpacity = index < steps.length - 1
-            ? interpolate(
-              frame,
-              [stepEndFrame - 20, stepEndFrame],
-              [0, 1],
-              { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-            )
-            : 0;
-
-          return (
-            <div key={index}>
+      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 900 : 1120}>
+        <Kicker stylePreset={stylePreset}>Checklist</Kicker>
+        <div style={{ display: 'grid', gap: 16 }}>
+          {visibleSteps.map((step, index) => (
+            <div
+              key={index}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '58px 1fr',
+                gap: 18,
+                alignItems: 'center',
+                border: `1px solid ${style.border}`,
+                borderRadius: Math.max(14, style.radius - 12),
+                background: index === 0 ? style.panelSoft : 'rgba(255,255,255,0.05)',
+                padding: '18px 22px',
+              }}
+            >
               <div
                 style={{
+                  width: 58,
+                  height: 58,
+                  borderRadius: 18,
+                  background: style.accent,
+                  color: style.accentText,
                   display: 'flex',
-                  gap: '30px',
                   alignItems: 'center',
-                  opacity: stepOpacity,
-                  transform: `scale(${scale})`,
-                  transformOrigin: 'left center',
+                  justifyContent: 'center',
+                  fontSize: 28,
+                  fontWeight: 900,
                 }}
               >
-                <div
-                  style={{
-                    width: '80px',
-                    height: '80px',
-                    borderRadius: '50%',
-                    backgroundColor: palette.accent,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: '48px',
-                      fontWeight: 'bold',
-                      color: palette.background,
-                    }}
-                  >
-                    {step.number}
-                  </span>
-                </div>
-
-                <p
-                  style={{
-                    fontSize: '44px',
-                    color: palette.text,
-                    margin: '0',
-                    lineHeight: '1.3',
-                  }}
-                >
-                  {step.text}
-                </p>
+                {step.number || index + 1}
               </div>
-
-              {index < steps.length - 1 && (
-                <div
-                  style={{
-                    marginLeft: '40px',
-                    marginTop: '20px',
-                    marginBottom: '20px',
-                    width: '3px',
-                    height: '40px',
-                    backgroundColor: palette.accent,
-                    opacity: lineOpacity,
-                  }}
-                />
-              )}
+              <SmartText
+                stylePreset={stylePreset}
+                variant="body"
+                maxChars={54}
+                maxLines={2}
+                baseSize={format === '9:16' ? 34 : 38}
+                minSize={26}
+              >
+                {compactText(step.text, 54)}
+              </SmartText>
             </div>
-          );
-        })}
-      </div>
-    </AbsoluteFill>
+          ))}
+        </div>
+      </Panel>
+    </InsertFrame>
   );
 };

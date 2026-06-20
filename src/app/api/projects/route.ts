@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
         id: true,
         name: true,
         format: true,
+        stylePreset: true,
         status: true,
         createdAt: true,
         updatedAt: true

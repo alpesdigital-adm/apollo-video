@@ -3,6 +3,7 @@ import {
   AbsoluteFill,
   Sequence,
   OffthreadVideo,
+  useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
 import { CompositionProps, Scene } from './lib/types';
@@ -17,6 +18,7 @@ import { Number as NumberScene } from './scenes/Number';
 import { Flow } from './scenes/Flow';
 import { CTA } from './scenes/CTA';
 import { StickFigures } from './scenes/StickFigures';
+import { ImageInsert, ImageInsertTrack } from './scenes/ImageInsert';
 
 interface SceneComponentProps {
   format: '9:16' | '16:9';
@@ -27,39 +29,59 @@ interface SceneComponentProps {
 const renderSceneComponent = (
   scene: Scene,
   format: '9:16' | '16:9',
-  palette: any
+  palette: any,
+  stylePreset?: string,
+  durationInFrames?: number
 ): React.ReactNode => {
   const props: SceneComponentProps = {
     format,
     palette,
+    stylePreset,
+    durationInFrames,
     ...scene.props,
   };
+  const sceneProps = props as any;
 
   switch (scene.type) {
     case 'fullscreen':
-      return <FullScreen {...props} />;
+      return <FullScreen {...sceneProps} />;
     case 'lower-third':
-      return <LowerThird {...props} />;
+      return <LowerThird {...sceneProps} />;
     case 'split':
-      return <Split {...props} />;
+      return <Split {...sceneProps} />;
     case 'split-vertical':
-      return <SplitVertical {...props} />;
+      return <SplitVertical {...sceneProps} />;
     case 'card':
-      return <Card {...props} />;
+      return <Card {...sceneProps} />;
     case 'message':
-      return <Message {...props} />;
+      return <Message {...sceneProps} />;
     case 'number':
-      return <NumberScene {...props} />;
+      return <NumberScene {...sceneProps} />;
     case 'flow':
-      return <Flow {...props} />;
+      return <Flow {...sceneProps} />;
     case 'cta':
-      return <CTA {...props} />;
+      return <CTA {...sceneProps} />;
     case 'stick-figures':
-      return <StickFigures {...props} />;
+      return <StickFigures {...sceneProps} />;
+    case 'image-insert':
+      return <ImageInsert {...sceneProps} />;
     default:
       return null;
   }
 };
+
+function hasImageAsset(scene: Scene): boolean {
+  return Boolean(scene.props?.imageSrc || scene.props?.imagePath);
+}
+
+function isSplitImageScene(scene: Scene): boolean {
+  const layout = scene.props?.layout;
+  return (
+    scene.type === 'image-insert' &&
+    hasImageAsset(scene) &&
+    (layout === 'split-bottom' || layout === 'top-image-compact')
+  );
+}
 
 export const VideoComposition: React.FC<CompositionProps> = ({
   scenes,
@@ -67,8 +89,50 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   videoSrc,
   format,
   palette,
+  stylePreset,
 }) => {
   const config = useVideoConfig();
+  const frame = useCurrentFrame();
+  const splitImageScenes = scenes
+    .filter(isSplitImageScene)
+    .sort((a, b) => {
+      const aStart = a.fromFrame ?? Math.round(a.from * config.fps);
+      const bStart = b.fromFrame ?? Math.round(b.from * config.fps);
+      return aStart - bStart;
+    });
+  const splitTrackStart = splitImageScenes[0]
+    ? splitImageScenes[0].fromFrame ?? Math.round(splitImageScenes[0].from * config.fps)
+    : null;
+  const splitTrackEnd = splitImageScenes.length > 0
+    ? Math.max(
+        ...splitImageScenes.map((scene) => scene.toFrame ?? Math.round(scene.to * config.fps))
+      )
+    : null;
+  const activeSplitImage = splitImageScenes.find((scene) => {
+    const startFrame = scene.fromFrame ?? Math.round(scene.from * config.fps);
+    const nextScene = splitImageScenes[splitImageScenes.indexOf(scene) + 1];
+    const endFrame = nextScene
+      ? nextScene.fromFrame ?? Math.round(nextScene.from * config.fps)
+      : splitTrackEnd ?? scene.toFrame ?? Math.round(scene.to * config.fps);
+
+    return (
+      frame >= startFrame &&
+      frame < endFrame
+    );
+  }) || splitImageScenes[0];
+  const isSplitImageActive =
+    splitTrackStart !== null &&
+    splitTrackEnd !== null &&
+    frame >= splitTrackStart &&
+    frame < splitTrackEnd;
+  const activeSplitLayout = isSplitImageActive ? activeSplitImage?.props?.layout : undefined;
+  const isTopImageCompact = activeSplitLayout === 'top-image-compact';
+  const splitVideoObjectPosition =
+    typeof activeSplitImage?.props?.videoObjectPosition === 'string'
+      ? activeSplitImage.props.videoObjectPosition
+      : isTopImageCompact
+        ? 'center 32%'
+        : 'center 25%';
 
   return (
     <AbsoluteFill style={{ backgroundColor: palette.background }}>
@@ -77,17 +141,27 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         <OffthreadVideo
           src={videoSrc}
           style={{
+            position: 'absolute',
+            top: isTopImageCompact ? '30%' : 0,
+            left: 0,
             width: '100%',
-            height: '100%',
+            height: isTopImageCompact ? '70%' : isSplitImageActive ? '50%' : '100%',
             objectFit: 'cover',
+            objectPosition: isSplitImageActive ? splitVideoObjectPosition : 'center center',
+            backgroundColor: palette.background,
           }}
         />
       )}
 
       {/* Scene Layers */}
       {scenes.map((scene, index) => {
-        const startFrame = Math.round(scene.from * config.fps);
-        const duration = Math.round((scene.to - scene.from) * config.fps);
+        if (isSplitImageScene(scene)) {
+          return null;
+        }
+
+        const startFrame = scene.fromFrame ?? Math.round(scene.from * config.fps);
+        const endFrame = scene.toFrame ?? Math.round(scene.to * config.fps);
+        const duration = Math.max(1, endFrame - startFrame);
 
         return (
           <Sequence
@@ -95,10 +169,19 @@ export const VideoComposition: React.FC<CompositionProps> = ({
             from={startFrame}
             durationInFrames={duration}
           >
-            {renderSceneComponent(scene, format, palette)}
+            {renderSceneComponent(scene, format, palette, stylePreset, duration)}
           </Sequence>
         );
       })}
+
+      <ImageInsertTrack
+        scenes={splitImageScenes.map((scene) => ({
+          fromFrame: scene.fromFrame ?? Math.round(scene.from * config.fps),
+          toFrame: scene.toFrame ?? Math.round(scene.to * config.fps),
+          props: scene.props as any,
+        }))}
+        palette={palette}
+      />
 
       {/* Subtitle Layer */}
       <SubtitleOverlay

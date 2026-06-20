@@ -1,11 +1,5 @@
 import React from 'react';
-import {
-  AbsoluteFill,
-  useCurrentFrame,
-  spring,
-  useVideoConfig,
-  interpolate,
-} from 'remotion';
+import { InsertFrame, Kicker, Panel, SmartText } from '../components/InsertPrimitives';
 
 interface LowerThirdProps {
   title: string;
@@ -13,90 +7,52 @@ interface LowerThirdProps {
   accentColor?: string;
   format: '9:16' | '16:9';
   palette: any;
+  stylePreset?: string;
+  durationInFrames?: number;
 }
 
 export const LowerThird: React.FC<LowerThirdProps> = ({
   title,
   subtitle,
-  accentColor,
-  palette,
+  format,
+  stylePreset,
+  durationInFrames,
 }) => {
-  const frame = useCurrentFrame();
-  const config = useVideoConfig();
-
-  const translateX = spring({
-    frame,
-    fps: config.fps,
-    from: -400,
-    to: 0,
-    duration: 40,
-    damp: 0.8,
-  });
-
-  const opacity = interpolate(
-    frame,
-    [0, 15, config.durationInFrames - 20, config.durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  );
-
   return (
-    <AbsoluteFill
-      style={{
-        display: 'flex',
-        alignItems: 'flex-end',
-        justifyContent: 'flex-start',
-        opacity,
-      }}
+    <InsertFrame
+      format={format}
+      stylePreset={stylePreset}
+      durationInFrames={durationInFrames}
+      placement="bottom"
+      scrim={false}
     >
-      <div
-        style={{
-          transform: `translateX(${translateX}px)`,
-          padding: '40px',
-          width: '100%',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '20px',
-          }}
+      <Panel stylePreset={stylePreset} soft maxWidth={format === '9:16' ? 840 : 980}>
+        <Kicker stylePreset={stylePreset}>Contexto</Kicker>
+        <SmartText
+          stylePreset={stylePreset}
+          variant="title"
+          maxChars={54}
+          maxLines={2}
+          baseSize={format === '9:16' ? 54 : 60}
+          minSize={36}
         >
-          <div
-            style={{
-              width: '8px',
-              height: '120px',
-              backgroundColor: accentColor || palette.accent,
-              borderRadius: '4px',
-            }}
-          />
-          <div>
-            <h2
-              style={{
-                fontSize: '64px',
-                fontWeight: 'bold',
-                color: palette.text,
-                margin: '0 0 10px 0',
-              }}
+          {title}
+        </SmartText>
+        {subtitle && (
+          <div style={{ marginTop: 14 }}>
+            <SmartText
+              stylePreset={stylePreset}
+              variant="muted"
+              maxChars={74}
+              maxLines={2}
+              baseSize={32}
+              minSize={26}
             >
-              {title}
-            </h2>
-            {subtitle && (
-              <p
-                style={{
-                  fontSize: '40px',
-                  color: palette.text,
-                  margin: '0',
-                  opacity: 0.8,
-                }}
-              >
-                {subtitle}
-              </p>
-            )}
+              {subtitle}
+            </SmartText>
           </div>
-        </div>
-      </div>
-    </AbsoluteFill>
+        )}
+      </Panel>
+    </InsertFrame>
   );
 };

@@ -4,4 +4,4 @@ export const VERTICAL_HEIGHT = 1920;
 export const HORIZONTAL_WIDTH = 1920;
 export const HORIZONTAL_HEIGHT = 1080;
 
-export const DEFAULT_DURATION_SECONDS = 60;
+export const DEFAULT_DURATION_SECONDS = 15 * 60;

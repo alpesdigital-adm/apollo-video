@@ -1,10 +1,5 @@
 import React from 'react';
-import {
-  AbsoluteFill,
-  useCurrentFrame,
-  useVideoConfig,
-  interpolate,
-} from 'remotion';
+import { AccentRule, InsertFrame, Kicker, Panel, SmartText } from '../components/InsertPrimitives';
 
 interface CTAProps {
   text: string;
@@ -12,91 +7,56 @@ interface CTAProps {
   emoji?: string;
   format: '9:16' | '16:9';
   palette: any;
+  stylePreset?: string;
+  durationInFrames?: number;
 }
 
 export const CTA: React.FC<CTAProps> = ({
   text,
   highlightWord,
   emoji,
-  palette,
+  format,
+  stylePreset,
+  durationInFrames,
 }) => {
-  const frame = useCurrentFrame();
-  const config = useVideoConfig();
-
-  const opacity = interpolate(
-    frame,
-    [0, 15, config.durationInFrames - 20, config.durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  );
-
-  const pulseScale = 1 + Math.sin((frame / config.fps) * Math.PI * 2) * 0.15;
-
-  const highlightIndex = highlightWord
-    ? text.split(' ').findIndex(word => word.toLowerCase() === highlightWord.toLowerCase())
-    : -1;
-
-  const words = text.split(' ');
-
   return (
-    <AbsoluteFill
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '40px',
-        padding: '60px',
-        opacity,
-      }}
+    <InsertFrame
+      format={format}
+      stylePreset={stylePreset}
+      durationInFrames={durationInFrames}
+      placement="bottom"
+      scrim
     >
-      <div style={{ textAlign: 'center' }}>
-        <h2
-          style={{
-            fontSize: '80px',
-            fontWeight: 'bold',
-            color: palette.text,
-            margin: '0 0 30px 0',
-            lineHeight: '1.3',
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '20px',
-            justifyContent: 'center',
-          }}
+      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 880 : 1120}>
+        <Kicker stylePreset={stylePreset}>Proxima acao</Kicker>
+        <SmartText
+          stylePreset={stylePreset}
+          variant="title"
+          align="center"
+          maxChars={76}
+          maxLines={3}
+          baseSize={format === '9:16' ? 62 : 74}
+          minSize={40}
         >
-          {words.map((word, idx) => (
-            <span
-              key={idx}
-              style={{
-                color: idx === highlightIndex ? palette.accent : palette.text,
-                transform: idx === highlightIndex ? `scale(${pulseScale})` : 'scale(1)',
-                transition: 'transform 0.1s ease',
-              }}
+          {text}
+        </SmartText>
+        {(highlightWord || emoji) && (
+          <>
+            <AccentRule stylePreset={stylePreset} />
+            <SmartText
+              stylePreset={stylePreset}
+              variant="accent"
+              align="center"
+              maxChars={54}
+              maxLines={2}
+              baseSize={42}
+              minSize={30}
             >
-              {word}
-            </span>
-          ))}
-        </h2>
-      </div>
-
-      {emoji && (
-        <div
-          style={{
-            fontSize: '120px',
-            animation: `bounce 1s infinite`,
-            transform: `scale(${pulseScale})`,
-          }}
-        >
-          {emoji}
-        </div>
-      )}
-
-      <style>{`
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-20px); }
-        }
-      `}</style>
-    </AbsoluteFill>
+              {[highlightWord, emoji].filter(Boolean).join(' ')}
+            </SmartText>
+          </>
+        )}
+      </Panel>
+    </InsertFrame>
   );
 };

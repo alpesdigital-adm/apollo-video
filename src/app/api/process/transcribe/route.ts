@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { extractAudio, detectSilences } from '@/lib/services/ffmpeg'
-import { transcribeAudio } from '@/lib/services/whisper'
+import { cutSilencesFromVideo, detectSilences, extractAudio } from '@/lib/services/ffmpeg'
+import { getPreferredTranscriptionAudioExtension, transcribeAudio } from '@/lib/services/whisper'
+import { generateSubtitlesFromTranscription } from '@/lib/utils/silence'
+import type { Silence } from '@/lib/types/project'
 import path from 'path'
 import fs from 'fs'
-import type { SubtitleEntry } from '@/lib/types/project'
 
 export async function POST(request: NextRequest) {
   let tempAudioPath: string | null = null
@@ -19,6 +20,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Get project from database
+    const forceTranscription = Boolean(body.force)
+    const skipAutoCut = Boolean(body.skipAutoCut)
     const project = await prisma.project.findUnique({
       where: { id: projectId }
     })
@@ -31,29 +34,67 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Normalized video not found' }, { status: 400 })
     }
 
+    if (!forceTranscription && project.transcriptionJson && project.subtitlesJson && project.silencesJson) {
+      await prisma.project.update({
+        where: { id: projectId },
+        data: {
+          status: 'analyzing',
+          error: null
+        }
+      })
+
+      return NextResponse.json({
+        success: true,
+        transcription: JSON.parse(project.transcriptionJson),
+        subtitles: JSON.parse(project.subtitlesJson),
+        silences: JSON.parse(project.silencesJson),
+        format: project.format,
+        reusedExistingTranscription: true
+      })
+    }
+
     // Create temp directory for audio processing
     const uploadDir = path.join(process.cwd(), 'public', 'uploads')
-    tempAudioPath = path.join(uploadDir, `${projectId}-audio.wav`)
+    const audioExtension = getPreferredTranscriptionAudioExtension()
+    tempAudioPath = path.join(uploadDir, `${projectId}-audio.${audioExtension}`)
 
     // Extract audio from normalized video
     await extractAudio(project.normalizedPath, tempAudioPath)
 
-    // Transcribe audio using Whisper
+    // Transcribe audio using the configured high-quality provider.
     const transcription = await transcribeAudio(tempAudioPath)
 
-    // Detect silences in audio
-    const silences = await detectSilences(tempAudioPath)
+    let silences: Silence[] = []
+    let cutPath = project.normalizedPath
+    let cutResult: { cutSilences: Silence[]; outputDuration: number } = {
+      cutSilences: [],
+      outputDuration:
+        project.videoDuration ||
+        transcription.segments[transcription.segments.length - 1]?.end ||
+        0
+    }
 
-    // Generate subtitles from transcription
-    const subtitles: SubtitleEntry[] = transcription.segments.map((segment, index) => ({
-      id: index,
-      text: segment.text,
-      startTime: segment.start,
-      endTime: segment.end,
-      startFrame: Math.round(segment.start * (project.videoFps || 30)),
-      endFrame: Math.round(segment.end * (project.videoFps || 30)),
-      words: segment.words
-    }))
+    if (!skipAutoCut) {
+      // Detect silences in audio
+      const silenceThreshold = Number(process.env.AUTO_CUT_SILENCE_DB || -35)
+      const silenceDuration = Number(process.env.AUTO_CUT_MIN_SILENCE || 0.55)
+      silences = await detectSilences(tempAudioPath, silenceThreshold, silenceDuration)
+
+      // Cut the actual media and shift transcript timings to the new edited timeline.
+      cutPath = path.join(uploadDir, `${projectId}-autocut.mp4`)
+      cutResult = await cutSilencesFromVideo(
+        project.normalizedPath,
+        cutPath,
+        silences,
+        project.videoDuration || 0
+      )
+    }
+
+    const subtitles = generateSubtitlesFromTranscription(
+      transcription,
+      cutResult.cutSilences,
+      project.videoFps || 30
+    )
 
     // Detect video format based on aspect ratio
     const width = project.videoWidth || 1920
@@ -66,8 +107,17 @@ export async function POST(request: NextRequest) {
       data: {
         transcriptionJson: JSON.stringify(transcription),
         subtitlesJson: JSON.stringify(subtitles),
-        silencesJson: JSON.stringify(silences),
+        silencesJson: JSON.stringify(cutResult.cutSilences),
+        normalizedPath: cutPath,
+        videoDuration: cutResult.outputDuration,
         format: aspectRatio,
+        engineKind: 'narrative',
+        editPlanJson: null,
+        scenesJson: null,
+        paletteJson: null,
+        narrativeFormat: null,
+        renderedVideoPath: null,
+        error: null,
         status: 'analyzing'
       }
     })
@@ -82,16 +132,21 @@ export async function POST(request: NextRequest) {
       success: true,
       transcription,
       subtitles,
-      silences,
+      silences: cutResult.cutSilences,
       format: aspectRatio
     })
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Transcription failed'
+
     // Update status to error if projectId is available
     if (projectId) {
       try {
         await prisma.project.update({
           where: { id: projectId },
-          data: { status: 'error' }
+          data: {
+            status: 'error',
+            error: message
+          }
         })
       } catch (dbError) {
         console.error('Failed to update error status:', dbError)
@@ -110,7 +165,7 @@ export async function POST(request: NextRequest) {
     console.error('Transcribe error:', error)
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : 'Transcription failed'
+        error: message
       },
       { status: 500 }
     )

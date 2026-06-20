@@ -1,14 +1,59 @@
 /**
- * FFmpeg service for video processing operations
+ * FFmpeg service for video processing operations.
  */
 
 import { execFile } from 'child_process'
+import { existsSync } from 'fs'
+import path from 'path'
 import { promisify } from 'util'
 import type { Silence } from '../types/project'
 import { FPS } from '../types/timing'
 import { parseSilenceDetection } from '../utils/silence'
 
 const execFileAsync = promisify(execFile)
+
+function resolveExecutablePath(
+  envName: string,
+  candidates: string[],
+  fallback: string
+): string {
+  const envPath = process.env[envName]
+  if (envPath && existsSync(envPath)) {
+    return envPath
+  }
+
+  const executablePath = candidates.find((candidate) => existsSync(candidate))
+  return executablePath || fallback
+}
+
+const executableSuffix = process.platform === 'win32' ? '.exe' : ''
+const ffmpegPath = resolveExecutablePath(
+  'FFMPEG_PATH',
+  [
+    path.join(
+      process.cwd(),
+      'node_modules',
+      'ffmpeg-static',
+      `ffmpeg${executableSuffix}`
+    )
+  ],
+  'ffmpeg'
+)
+const ffprobePath = resolveExecutablePath(
+  'FFPROBE_PATH',
+  [
+    path.join(
+      process.cwd(),
+      'node_modules',
+      'ffprobe-static',
+      'bin',
+      process.platform,
+      process.arch,
+      `ffprobe${executableSuffix}`
+    )
+  ],
+  'ffprobe'
+)
 
 export interface VideoInfo {
   width: number
@@ -17,21 +62,17 @@ export interface VideoInfo {
   fps: number
 }
 
-/**
- * Normalize a video file for consistent processing
- * Converts to H.264, 30fps CFR, with proper keyframe settings
- * @param inputPath Path to input video file
- * @param outputPath Path to output normalized video
- * @returns Video metadata (duration in seconds, width, height, fps)
- */
+export interface AutoCutResult {
+  cutSilences: Silence[]
+  outputDuration: number
+}
+
 export async function normalizeVideo(
   inputPath: string,
   outputPath: string
 ): Promise<VideoInfo> {
   try {
-    // Run ffmpeg with normalization settings
-    const command = 'ffmpeg'
-    const args = [
+    await execFileAsync(ffmpegPath, [
       '-i',
       inputPath,
       '-c:v',
@@ -54,128 +95,213 @@ export async function normalizeVideo(
       '128k',
       '-y',
       outputPath
-    ]
+    ])
 
-    await execFileAsync(command, args)
-
-    // Get video info after normalization
-    const info = await getVideoInfo(outputPath)
-    return info
+    return getVideoInfo(outputPath)
   } catch (error) {
     throw new Error(`Failed to normalize video: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
-/**
- * Extract audio from a video file as WAV for Whisper processing
- * @param videoPath Path to input video file
- * @param outputPath Path to output WAV file
- */
+function getAudioEncodeArgs(outputPath: string): string[] {
+  const extension = path.extname(outputPath).toLowerCase()
+
+  if (extension === '.flac') {
+    return ['-c:a', 'flac', '-compression_level', '8']
+  }
+
+  return ['-acodec', 'pcm_s16le']
+}
+
 export async function extractAudio(videoPath: string, outputPath: string): Promise<void> {
   try {
-    const command = 'ffmpeg'
-    const args = [
+    await execFileAsync(ffmpegPath, [
       '-i',
       videoPath,
       '-vn',
-      '-acodec',
-      'pcm_s16le',
       '-ar',
       '16000',
       '-ac',
       '1',
+      ...getAudioEncodeArgs(outputPath),
       '-y',
       outputPath
-    ]
-
-    await execFileAsync(command, args)
+    ])
   } catch (error) {
     throw new Error(`Failed to extract audio: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
-/**
- * Detect silence in audio using ffmpeg silencedetect filter
- * @param audioPath Path to audio file
- * @param threshold Silence threshold in dB (default -40)
- * @param duration Minimum silence duration in seconds (default 0.8)
- * @returns Array of Silence objects with timing and frame information
- */
 export async function detectSilences(
   audioPath: string,
-  threshold: number = -40,
-  duration: number = 0.8
+  threshold: number = -35,
+  duration: number = 0.55
 ): Promise<Silence[]> {
   try {
-    const command = 'ffmpeg'
-    const args = [
-      '-i',
-      audioPath,
-      '-af',
-      `silencedetect=n=${threshold}dB:d=${duration}`,
-      '-f',
-      'null',
-      '-'
-    ]
+    let stderr = ''
 
     try {
-      await execFileAsync(command, args)
+      const result = await execFileAsync(ffmpegPath, [
+        '-i',
+        audioPath,
+        '-af',
+        `silencedetect=n=${threshold}dB:d=${duration}`,
+        '-f',
+        'null',
+        '-'
+      ])
+      stderr = result.stderr || ''
     } catch (error) {
-      // ffmpeg returns exit code 1 for null output, but stderr contains the silencedetect output
-      // This is expected behavior
+      stderr = error instanceof Error && 'stderr' in error ? String((error as any).stderr || '') : ''
     }
 
-    // Get stderr from the error (contains silencedetect output)
-    if (error instanceof Error && 'stderr' in error) {
-      const stderr = (error as any).stderr || ''
-      return parseSilenceDetection(stderr, FPS)
-    }
-
-    return []
+    return parseSilenceDetection(stderr, FPS)
   } catch (error) {
     throw new Error(`Failed to detect silences: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
-/**
- * Get video information using ffprobe
- * @param videoPath Path to video file
- * @returns Video metadata including dimensions, duration, and fps
- */
+export function selectAutoCutSilences(
+  silences: Silence[],
+  options: { minDuration?: number; margin?: number } = {}
+): Silence[] {
+  const minDuration = options.minDuration ?? 0.55
+  const margin = options.margin ?? 0.12
+
+  return silences
+    .filter((silence) => silence.duration >= minDuration + margin * 2)
+    .map((silence) => {
+      const startTime = silence.startTime + margin
+      const endTime = silence.endTime - margin
+      const duration = Math.max(0, endTime - startTime)
+
+      return {
+        startTime,
+        endTime,
+        startFrame: Math.round(startTime * FPS),
+        endFrame: Math.round(endTime * FPS),
+        duration
+      }
+    })
+    .filter((silence) => silence.duration >= 0.25)
+}
+
+export async function cutSilencesFromVideo(
+  inputPath: string,
+  outputPath: string,
+  silences: Silence[],
+  sourceDuration: number
+): Promise<AutoCutResult> {
+  const cutSilences = selectAutoCutSilences(silences)
+  const sameInputOutput = path.resolve(inputPath) === path.resolve(outputPath)
+
+  if (sameInputOutput) {
+    const outputInfo = await getVideoInfo(outputPath)
+    return { cutSilences, outputDuration: outputInfo.duration || sourceDuration }
+  }
+
+  if (cutSilences.length === 0) {
+    await execFileAsync(ffmpegPath, ['-i', inputPath, '-c', 'copy', '-y', outputPath])
+    return { cutSilences: [], outputDuration: sourceDuration }
+  }
+
+  const keepRanges: Array<{ start: number; end: number }> = []
+  let cursor = 0
+
+  for (const silence of cutSilences) {
+    if (silence.startTime > cursor) {
+      keepRanges.push({ start: cursor, end: silence.startTime })
+    }
+    cursor = Math.max(cursor, silence.endTime)
+  }
+
+  if (cursor < sourceDuration) {
+    keepRanges.push({ start: cursor, end: sourceDuration })
+  }
+
+  const ranges = keepRanges.filter((range) => range.end - range.start >= 0.05)
+  if (ranges.length === 0) {
+    throw new Error('Auto-cut would remove the entire video')
+  }
+
+  const filters: string[] = []
+  const concatInputs: string[] = []
+
+  ranges.forEach((range, index) => {
+    filters.push(
+      `[0:v]trim=start=${range.start.toFixed(3)}:end=${range.end.toFixed(3)},setpts=PTS-STARTPTS[v${index}]`
+    )
+    filters.push(
+      `[0:a]atrim=start=${range.start.toFixed(3)}:end=${range.end.toFixed(3)},asetpts=PTS-STARTPTS[a${index}]`
+    )
+    concatInputs.push(`[v${index}][a${index}]`)
+  })
+
+  filters.push(`${concatInputs.join('')}concat=n=${ranges.length}:v=1:a=1[outv][outa]`)
+
+  await execFileAsync(ffmpegPath, [
+    '-i',
+    inputPath,
+    '-filter_complex',
+    filters.join(';'),
+    '-map',
+    '[outv]',
+    '-map',
+    '[outa]',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'fast',
+    '-crf',
+    '22',
+    '-r',
+    '30',
+    '-g',
+    '30',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '128k',
+    '-y',
+    outputPath
+  ])
+
+  const outputInfo = await getVideoInfo(outputPath)
+  return { cutSilences, outputDuration: outputInfo.duration }
+}
+
 export async function getVideoInfo(videoPath: string): Promise<VideoInfo> {
   try {
-    const command = 'ffprobe'
-    const args = [
+    const { stdout } = await execFileAsync(ffprobePath, [
       '-v',
       'error',
       '-select_streams',
       'v:0',
       '-show_entries',
-      'stream=width,height,duration,r_frame_rate',
+      'stream=width,height,duration,r_frame_rate:format=duration',
       '-of',
-      'default=noprint_wrappers=1:nokey=1:noprint_wrappers=1',
+      'json',
       videoPath
-    ]
+    ])
 
-    const { stdout } = await execFileAsync(command, args)
-    const lines = stdout.trim().split('\n')
-
-    if (lines.length < 4) {
-      throw new Error('Unexpected ffprobe output format')
+    const data = JSON.parse(stdout)
+    const stream = data.streams?.[0]
+    if (!stream) {
+      throw new Error('No video stream found')
     }
 
-    const width = parseInt(lines[0], 10)
-    const height = parseInt(lines[1], 10)
-    const duration = parseFloat(lines[2])
+    const [fpsNum, fpsDen] = String(stream.r_frame_rate || '30/1')
+      .split('/')
+      .map((part) => Number(part))
 
-    // Parse frame rate (format: "30/1" or "24000/1001")
-    const frameRateParts = lines[3].split('/')
-    const fps =
-      frameRateParts.length === 2
-        ? parseInt(frameRateParts[0], 10) / parseInt(frameRateParts[1], 10)
-        : 30
+    const width = Number(stream.width)
+    const height = Number(stream.height)
+    const duration = Number(stream.duration || data.format?.duration)
+    const fps = fpsDen ? fpsNum / fpsDen : fpsNum || FPS
 
-    if (isNaN(width) || isNaN(height) || isNaN(duration) || isNaN(fps)) {
+    if (!width || !height || !duration || !fps) {
       throw new Error('Failed to parse video metadata')
     }
 

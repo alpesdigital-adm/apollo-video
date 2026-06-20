@@ -1,89 +1,64 @@
 import React from 'react';
-import {
-  AbsoluteFill,
-  useCurrentFrame,
-  spring,
-  useVideoConfig,
-  interpolate,
-} from 'remotion';
+import { AccentRule, InsertFrame, Kicker, Panel, SmartText } from '../components/InsertPrimitives';
 
 interface FullScreenProps {
   title: string;
   subtitle?: string;
-  backgroundColor?: string;
-  textColor?: string;
+  text?: string;
   format: '9:16' | '16:9';
   palette: any;
+  stylePreset?: string;
+  durationInFrames?: number;
 }
 
 export const FullScreen: React.FC<FullScreenProps> = ({
   title,
   subtitle,
-  backgroundColor,
-  textColor,
-  palette,
+  text,
+  format,
+  stylePreset,
+  durationInFrames,
 }) => {
-  const frame = useCurrentFrame();
-  const config = useVideoConfig();
-
-  const scale = spring({
-    frame,
-    fps: config.fps,
-    from: 0.8,
-    to: 1,
-    duration: 30,
-    damp: 0.8,
-  });
-
-  const opacity = interpolate(
-    frame,
-    [0, 20, config.durationInFrames - 20, config.durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  );
+  const mainText = title || text || 'Highlight';
 
   return (
-    <AbsoluteFill
-      style={{
-        backgroundColor: backgroundColor || palette.primary,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        opacity,
-      }}
+    <InsertFrame
+      format={format}
+      stylePreset={stylePreset}
+      durationInFrames={durationInFrames}
+      placement="bottom"
+      scrim
     >
-      <div
-        style={{
-          transform: `scale(${scale})`,
-          textAlign: 'center',
-        }}
-      >
-        <h1
-          style={{
-            fontSize: '96px',
-            fontWeight: 'bold',
-            color: textColor || palette.text,
-            margin: '0 0 20px 0',
-            textShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
-          }}
+      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 880 : 1120}>
+        <Kicker stylePreset={stylePreset}>Ponto-chave</Kicker>
+        <SmartText
+          stylePreset={stylePreset}
+          variant="title"
+          align="center"
+          maxChars={72}
+          maxLines={3}
+          baseSize={format === '9:16' ? 74 : 82}
+          minSize={44}
         >
-          {title}
-        </h1>
+          {mainText}
+        </SmartText>
         {subtitle && (
-          <p
-            style={{
-              fontSize: '48px',
-              color: textColor || palette.text,
-              margin: '0',
-              opacity: 0.8,
-              textShadow: '0 2px 10px rgba(0, 0, 0, 0.5)',
-            }}
-          >
-            {subtitle}
-          </p>
+          <>
+            <AccentRule stylePreset={stylePreset} />
+            <SmartText
+              stylePreset={stylePreset}
+              variant="muted"
+              align="center"
+              maxChars={84}
+              maxLines={2}
+              baseSize={38}
+              minSize={30}
+            >
+              {subtitle}
+            </SmartText>
+          </>
         )}
-      </div>
-    </AbsoluteFill>
+      </Panel>
+    </InsertFrame>
   );
 };

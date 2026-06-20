@@ -1,96 +1,66 @@
 import React from 'react';
-import {
-  AbsoluteFill,
-  useCurrentFrame,
-  spring,
-  useVideoConfig,
-  interpolate,
-} from 'remotion';
+import { InsertFrame, Kicker, Panel, SmartText, getInsertStyle } from '../components/InsertPrimitives';
 
 interface SplitProps {
   title: string;
   content: string;
+  topText?: string;
+  bottomText?: string;
   panelColor?: string;
   format: '9:16' | '16:9';
   palette: any;
+  stylePreset?: string;
+  durationInFrames?: number;
 }
 
 export const Split: React.FC<SplitProps> = ({
   title,
   content,
-  panelColor,
-  palette,
+  topText,
+  bottomText,
+  format,
+  stylePreset,
+  durationInFrames,
 }) => {
-  const frame = useCurrentFrame();
-  const config = useVideoConfig();
-
-  const translateY = spring({
-    frame,
-    fps: config.fps,
-    from: -400,
-    to: 0,
-    duration: 40,
-    damp: 0.8,
-  });
-
-  const opacity = interpolate(
-    frame,
-    [0, 15, config.durationInFrames - 20, config.durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  );
+  const style = getInsertStyle(stylePreset);
+  const first = topText || title;
+  const second = bottomText || content;
 
   return (
-    <AbsoluteFill style={{ opacity }}>
-      <div
-        style={{
-          width: '100%',
-          height: '50%',
-          backgroundColor: panelColor || 'rgba(0, 0, 0, 0.6)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '40px',
-          boxSizing: 'border-box',
-          transform: `translateY(${translateY}px)`,
-          position: 'absolute',
-          top: 0,
-          left: 0,
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <h2
-            style={{
-              fontSize: '72px',
-              fontWeight: 'bold',
-              color: palette.text,
-              margin: '0 0 20px 0',
-            }}
-          >
-            {title}
-          </h2>
-          <p
-            style={{
-              fontSize: '48px',
-              color: palette.text,
-              margin: '0',
-              opacity: 0.8,
-              lineHeight: '1.4',
-            }}
-          >
-            {content}
-          </p>
+    <InsertFrame
+      format={format}
+      stylePreset={stylePreset}
+      durationInFrames={durationInFrames}
+      placement="bottom"
+      scrim
+    >
+      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 880 : 1180}>
+        <Kicker stylePreset={stylePreset}>Antes de decidir</Kicker>
+        <div style={{ display: 'grid', gap: 18 }}>
+          {[first, second].filter(Boolean).map((text, index) => (
+            <div
+              key={index}
+              style={{
+                borderRadius: Math.max(14, style.radius - 10),
+                border: `1px solid ${index === 0 ? style.border : style.accent}`,
+                background: index === 0 ? 'rgba(255,255,255,0.06)' : style.panelSoft,
+                padding: '26px 30px',
+              }}
+            >
+              <SmartText
+                stylePreset={stylePreset}
+                variant={index === 1 ? 'accent' : 'title'}
+                maxChars={66}
+                maxLines={2}
+                baseSize={format === '9:16' ? 44 : 52}
+                minSize={30}
+              >
+                {text}
+              </SmartText>
+            </div>
+          ))}
         </div>
-      </div>
-      <div
-        style={{
-          width: '100%',
-          height: '50%',
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-        }}
-      />
-    </AbsoluteFill>
+      </Panel>
+    </InsertFrame>
   );
 };

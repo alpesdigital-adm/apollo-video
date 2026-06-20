@@ -25,6 +25,9 @@ model Project {
   transcriptionJson   String?
   subtitlesJson       String?
   silencesJson        String?
+  engineKind          String       @default("narrative")
+  stylePreset         String       @default("creator-clean")
+  editPlanJson        String?
   scenesJson          String?
   paletteJson         String?
   narrativeFormat     String?

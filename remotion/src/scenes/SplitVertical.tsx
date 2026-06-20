@@ -1,11 +1,5 @@
 import React from 'react';
-import {
-  AbsoluteFill,
-  useCurrentFrame,
-  spring,
-  useVideoConfig,
-  interpolate,
-} from 'remotion';
+import { InsertFrame, Kicker, Panel, SmartText, getInsertStyle } from '../components/InsertPrimitives';
 
 interface SplitVerticalProps {
   leftLabel: string;
@@ -14,6 +8,8 @@ interface SplitVerticalProps {
   rightContent: string;
   format: '9:16' | '16:9';
   palette: any;
+  stylePreset?: string;
+  durationInFrames?: number;
 }
 
 export const SplitVertical: React.FC<SplitVerticalProps> = ({
@@ -21,113 +17,74 @@ export const SplitVertical: React.FC<SplitVerticalProps> = ({
   rightLabel,
   leftContent,
   rightContent,
-  palette,
+  format,
+  stylePreset,
+  durationInFrames,
 }) => {
-  const frame = useCurrentFrame();
-  const config = useVideoConfig();
-
-  const leftTranslateX = spring({
-    frame,
-    fps: config.fps,
-    from: -300,
-    to: 0,
-    duration: 40,
-    damp: 0.8,
-  });
-
-  const rightTranslateX = spring({
-    frame: Math.max(0, frame - 10),
-    fps: config.fps,
-    from: 300,
-    to: 0,
-    duration: 40,
-    damp: 0.8,
-  });
-
-  const opacity = interpolate(
-    frame,
-    [0, 15, config.durationInFrames - 20, config.durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  );
+  const style = getInsertStyle(stylePreset);
+  const vertical = format === '9:16';
 
   return (
-    <AbsoluteFill
-      style={{
-        display: 'flex',
-        opacity,
-      }}
+    <InsertFrame
+      format={format}
+      stylePreset={stylePreset}
+      durationInFrames={durationInFrames}
+      placement="bottom"
+      scrim
     >
-      <div
-        style={{
-          flex: 1,
-          backgroundColor: 'rgba(255, 107, 107, 0.2)',
-          padding: '40px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          transform: `translateX(${leftTranslateX}px)`,
-          borderRight: `2px solid ${palette.text}`,
-        }}
-      >
-        <h3
+      <Panel stylePreset={stylePreset} align="center" maxWidth={vertical ? 900 : 1240}>
+        <Kicker stylePreset={stylePreset}>Comparativo</Kicker>
+        <div
           style={{
-            fontSize: '48px',
-            fontWeight: 'bold',
-            color: palette.accent,
-            margin: '0 0 30px 0',
+            display: 'grid',
+            gridTemplateColumns: vertical ? '1fr' : '1fr 1fr',
+            gap: vertical ? 14 : 22,
+            alignItems: 'stretch',
           }}
         >
-          {leftLabel}
-        </h3>
-        <p
-          style={{
-            fontSize: '40px',
-            color: palette.text,
-            margin: '0',
-            textAlign: 'center',
-            lineHeight: '1.4',
-          }}
-        >
-          {leftContent}
-        </p>
-      </div>
-
-      <div
-        style={{
-          flex: 1,
-          backgroundColor: 'rgba(78, 205, 196, 0.2)',
-          padding: '40px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          transform: `translateX(${rightTranslateX}px)`,
-        }}
-      >
-        <h3
-          style={{
-            fontSize: '48px',
-            fontWeight: 'bold',
-            color: palette.accent,
-            margin: '0 0 30px 0',
-          }}
-        >
-          {rightLabel}
-        </h3>
-        <p
-          style={{
-            fontSize: '40px',
-            color: palette.text,
-            margin: '0',
-            textAlign: 'center',
-            lineHeight: '1.4',
-          }}
-        >
-          {rightContent}
-        </p>
-      </div>
-    </AbsoluteFill>
+          {[
+            { label: leftLabel || 'Cenario', content: leftContent },
+            { label: rightLabel || 'Decisao', content: rightContent },
+          ].map((item, index) => (
+            <div
+              key={index}
+              style={{
+                border: `1px solid ${style.border}`,
+                borderRadius: Math.max(14, style.radius - 8),
+                background: index === 1 ? style.panelSoft : 'rgba(255,255,255,0.06)',
+                padding: vertical ? '20px 24px' : '28px 30px',
+                minHeight: vertical ? 132 : 260,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+              }}
+            >
+              <SmartText
+                stylePreset={stylePreset}
+                variant={index === 1 ? 'accent' : 'muted'}
+                maxChars={28}
+                maxLines={1}
+                baseSize={vertical ? 24 : 28}
+                minSize={22}
+              >
+                {item.label}
+              </SmartText>
+              <div style={{ marginTop: 20 }}>
+                <SmartText
+                  stylePreset={stylePreset}
+                  variant="title"
+                  maxChars={56}
+                  maxLines={vertical ? 2 : 3}
+                  baseSize={vertical ? 40 : 50}
+                  minSize={34}
+                >
+                  {item.content}
+                </SmartText>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </InsertFrame>
   );
 };
