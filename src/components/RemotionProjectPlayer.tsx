@@ -11,7 +11,6 @@ import {
   normalizeSubtitleWords,
   resolveLayoutSegments,
   resolvePunchIns,
-  resolveAudioSfxEvents,
   type AudioInputProps,
   type RemotionCreator,
   type RemotionSceneInput,
@@ -80,11 +79,10 @@ export function RemotionProjectPlayer({
       ? (editPlan.hookTitle as string)
       : undefined
 
-  const sfxEvents = resolveAudioSfxEvents(editPlan)
-  const audio: AudioInputProps | undefined =
-    sfxEvents.length > 0 || musicPick
-      ? { events: sfxEvents, ...(musicPick ? { music: musicPick } : {}) }
-      : undefined
+  // SFX removidos por decisão de produto (2026-07-03) — só trilha de fundo.
+  const audio: AudioInputProps | undefined = musicPick
+    ? { events: [], music: musicPick }
+    : undefined
 
   const inputProps = {
     scenes: prepareRemotionScenes(

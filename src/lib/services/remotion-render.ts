@@ -13,14 +13,13 @@ import {
   resolveCreatorForProps,
   resolveLayoutSegments,
   resolvePunchIns,
-  resolveAudioSfxEvents,
   type RemotionInputProps,
   type RemotionSceneInput,
   type AudioInputProps
 } from '@/lib/remotion/input-props'
 import { readCreatorProfile } from '@/lib/creator-profile'
 import { readStylePrefs } from '@/lib/style-prefs'
-import { pickMusicForProject, sfxAssetExists } from '@/lib/audio-assets'
+import { pickMusicForProject } from '@/lib/audio-assets'
 
 interface StartProjectRenderOptions {
   clearExistingRender?: boolean
@@ -150,15 +149,11 @@ export async function startProjectRender(
       : undefined
 
   const appBaseUrl = getAppBaseUrl()
-  const sfxEvents = resolveAudioSfxEvents(editPlan, { baseUrl: appBaseUrl, assetExists: sfxAssetExists })
+  // SFX removidos por decisão de produto (2026-07-03) — só trilha de fundo.
   const musicPick = pickMusicForProject(projectId)
-  const audio: AudioInputProps | undefined =
-    sfxEvents.length > 0 || musicPick
-      ? {
-          events: sfxEvents,
-          ...(musicPick ? { music: { src: `${appBaseUrl}${musicPick.src}`, volume: musicPick.volume } } : {})
-        }
-      : undefined
+  const audio: AudioInputProps | undefined = musicPick
+    ? { events: [], music: { src: `${appBaseUrl}${musicPick.src}`, volume: musicPick.volume } }
+    : undefined
 
   const inputProps: RemotionInputProps = {
     scenes: prepareRemotionScenes(

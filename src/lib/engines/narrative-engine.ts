@@ -473,10 +473,8 @@ export const narrativeEngine: VideoEngine = {
       cuts,
       subtitles: context.subtitles,
       overlays: context.scenes.map((scene) => sceneToOverlay(scene, context.fps)),
-      audio: [
-        ...buildNarrativeAudioEvents(cuts, context.fps),
-        ...buildSfxAudioEvents(context.scenes, layoutSegments, hookTitle, context.fps)
-      ],
+      // SFX removidos por decisão de produto (2026-07-03); mantidos só os fades decorativos.
+      audio: buildNarrativeAudioEvents(cuts, context.fps),
       ports: {
         acceptsNarration: true,
         acceptsVisualMontage: false,
