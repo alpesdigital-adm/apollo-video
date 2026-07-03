@@ -19,6 +19,13 @@ interface SubtitleTikTokProps {
   mode?: 'default' | 'two-word-center';
   // Subtitle preset. 'kinetic' (default) = comportamento original intocado.
   subtitleStyle?: SubtitleStyle;
+  // Vertical anchor of the subtitle block. 'bottom' (default) = the usual lower
+  // third; 'top' = displaced to the top of the head so it clears a big centered
+  // statement on the stage. Ignored by 'two-word-center' (always on the seam).
+  placement?: 'top' | 'bottom';
+  // Multiplier folded into the block opacity, used by the top/bottom positional
+  // crossfade in SubtitleOverlay. Defaults to 1.
+  placementOpacity?: number;
 }
 
 // Per-preset spec for the parametrized subtitle presets (everything except the
@@ -141,6 +148,8 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   isVisible,
   mode = 'default',
   subtitleStyle = 'kinetic',
+  placement = 'bottom',
+  placementOpacity = 1,
 }) => {
   const frame = useCurrentFrame();
   const config = useVideoConfig();
@@ -149,6 +158,12 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   if (!isVisible) {
     return null;
   }
+
+  // Vertical anchor for the block (top-of-head displacement vs. lower third).
+  // ~14% clears both a centered statement and, on the rare crossfade-edge frame
+  // where they coexist, a two-line manchete sitting at ~8%.
+  const vpos: React.CSSProperties =
+    placement === 'top' ? { top: '14%' } : { bottom: 560 };
 
   const accentColor = palette?.accent ?? DEFAULT_ACCENT;
 
@@ -253,13 +268,13 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
     }
 
     return (
-      <AbsoluteFill style={{ opacity }}>
+      <AbsoluteFill style={{ opacity: opacity * placementOpacity }}>
         <div
           style={{
             position: 'absolute',
             left: 0,
             right: 0,
-            bottom: 560,
+            ...vpos,
             display: 'flex',
             justifyContent: 'center',
             padding: '0 60px',
@@ -321,7 +336,7 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   return (
     <AbsoluteFill
       style={{
-        opacity,
+        opacity: opacity * placementOpacity,
       }}
     >
       <div
@@ -329,7 +344,7 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
           position: 'absolute',
           left: 86,
           right: 86,
-          bottom: 560,
+          ...vpos,
           textAlign: 'center',
           fontFamily: 'Aptos, Segoe UI, Helvetica, Arial, sans-serif',
           color: '#FFFFFF',

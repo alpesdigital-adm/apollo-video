@@ -127,6 +127,7 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
         {videoSrc && (
           <OffthreadVideo
             src={videoSrc}
+            muted
             style={{
               position: 'absolute',
               inset: 0,
@@ -205,6 +206,7 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
           {videoSrc && (
             <OffthreadVideo
               src={videoSrc}
+              muted
               style={{
                 width: '100%',
                 height: '100%',
@@ -247,6 +249,7 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
         {videoSrc && (
           <OffthreadVideo
             src={videoSrc}
+            muted
             style={{
               position: 'absolute',
               inset: 0,
@@ -359,43 +362,49 @@ const TweetCard: React.FC<TweetCardProps> = ({
 
   return (
     <AbsoluteFill style={{ backgroundColor: palette.background }}>
-      {/* Blurred, dimmed base video background */}
+      {/* Blurred, dimmed base video background — muted (audio comes from the
+          single narrator source in VideoComposition). Heavier blur + darker
+          brightness so the card reads as the clear subject. */}
       {videoSrc && (
         <OffthreadVideo
           src={videoSrc}
+          muted
           style={{
             position: 'absolute',
             inset: 0,
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            filter: composeFilter('blur(40px)', 'brightness(0.5)', grade.filter, baseFilterParts.join(' ')),
+            transform: 'scale(1.1)',
+            filter: composeFilter('blur(55px)', 'brightness(0.4)', grade.filter, baseFilterParts.join(' ')),
           }}
         />
       )}
+      {/* Extra dark scrim to make the card pop off the background. */}
+      <AbsoluteFill style={{ backgroundColor: 'rgba(0,0,0,0.28)' }} />
       {/* Grade overlay behind the card — the card itself keeps its own look. */}
       {getGradeOverlayLayers(grade).map((layer) => (
         <div key={layer.key} style={layer.style} />
       ))}
 
-      <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', padding: '0 0' }}>
         <div
           style={{
-            width: '86%',
+            width: '92%',
             transform: `scale(${cardScale})`,
-            backgroundColor: '#15181c',
-            borderRadius: 20,
-            padding: '40px 40px 40px',
-            boxShadow: '0 30px 90px rgba(0,0,0,0.65), 0 8px 24px rgba(0,0,0,0.55)',
+            backgroundColor: '#16191d',
+            borderRadius: 24,
+            padding: '44px 44px 48px',
+            boxShadow: '0 40px 120px rgba(0,0,0,0.75), 0 12px 32px rgba(0,0,0,0.6)',
             fontFamily: 'Aptos, Segoe UI, Helvetica, Arial, sans-serif',
           }}
         >
-          {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 26 }}>
+          {/* Header — bigger, more breathing room */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 32 }}>
             <div
               style={{
-                width: 44,
-                height: 44,
+                width: 56,
+                height: 56,
                 borderRadius: '50%',
                 overflow: 'hidden',
                 backgroundColor: '#2b2f36',
@@ -410,21 +419,22 @@ const TweetCard: React.FC<TweetCardProps> = ({
                 />
               )}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
-              <span style={{ color: '#FFFFFF', fontWeight: 800, fontSize: 34 }}>{name}</span>
-              <span style={{ color: '#8b95a1', fontWeight: 500, fontSize: 28 }}>{handle}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+              <span style={{ color: '#FFFFFF', fontWeight: 800, fontSize: 38 }}>{name}</span>
+              <span style={{ color: '#8b95a1', fontWeight: 500, fontSize: 30 }}>{handle}</span>
             </div>
           </div>
 
-          {/* Body text */}
+          {/* Quote text */}
           {text && (
             <div
               style={{
                 color: '#FFFFFF',
-                fontSize: 40,
-                lineHeight: 1.28,
-                fontWeight: 500,
-                marginBottom: 30,
+                fontSize: 50,
+                lineHeight: 1.3,
+                fontWeight: 600,
+                letterSpacing: '-0.01em',
+                marginBottom: 34,
                 display: '-webkit-box',
                 WebkitLineClamp: 4,
                 WebkitBoxOrient: 'vertical',
@@ -435,12 +445,13 @@ const TweetCard: React.FC<TweetCardProps> = ({
             </div>
           )}
 
-          {/* Sharp base-video slot (16:9) */}
+          {/* Sharp base-video slot — 4:5 vertical-friendly, face kept via
+              objectPosition center top, cover so it never distorts. Muted. */}
           <div
             style={{
               width: '100%',
-              aspectRatio: '16 / 9',
-              borderRadius: 16,
+              aspectRatio: '4 / 5',
+              borderRadius: 24,
               overflow: 'hidden',
               backgroundColor: '#000',
             }}
@@ -448,12 +459,14 @@ const TweetCard: React.FC<TweetCardProps> = ({
             {videoSrc && (
               <OffthreadVideo
                 src={videoSrc}
+                muted
                 style={{
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
+                  objectPosition: 'center top',
                   transform: baseTransform,
-                  transformOrigin: 'center 35%',
+                  transformOrigin: 'center 30%',
                   filter: composeFilter(grade.filter, baseFilterParts.join(' ')),
                 }}
               />

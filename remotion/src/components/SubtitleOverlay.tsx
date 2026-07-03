@@ -11,6 +11,11 @@ interface SubtitleOverlayProps {
   palette: ColorPalette;
   layoutSegments?: LayoutSegment[];
   subtitleStyle?: SubtitleStyle;
+  // 0-1. 1 = a stage typographic scene owns the frame, so the karaoke subtitle
+  // displaces to the TOP of the head (never colliding with the centered
+  // statement); 0 = normal bottom placement. Values in between = the ~8-frame
+  // positional crossfade (bottom fades out / top fades in). Defaults to 0.
+  topFactor?: number;
 }
 
 export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
@@ -19,6 +24,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   palette,
   layoutSegments,
   subtitleStyle,
+  topFactor = 0,
 }) => {
   const frame = useCurrentFrame();
   const config = useVideoConfig();
@@ -40,14 +46,49 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   }
 
   if (format === '9:16') {
+    // split-50's centered two-word mode keeps precedence — it is already on the
+    // seam and must not be displaced.
+    if (activeSegment?.layout === 'split-50') {
+      return (
+        <SubtitleTikTok
+          subtitle={currentSubtitle}
+          palette={palette}
+          isVisible={!!currentSubtitle}
+          mode="two-word-center"
+          subtitleStyle={subtitleStyle}
+        />
+      );
+    }
+
+    const tf = Math.max(0, Math.min(1, topFactor));
+    // Positional crossfade: render the bottom copy (fading out) and the top copy
+    // (fading in) as separate nodes so the subtitle appears to move between the
+    // two anchors without sliding. Only one is meaningfully visible at rest.
     return (
-      <SubtitleTikTok
-        subtitle={currentSubtitle}
-        palette={palette}
-        isVisible={!!currentSubtitle}
-        mode={activeSegment?.layout === 'split-50' ? 'two-word-center' : 'default'}
-        subtitleStyle={subtitleStyle}
-      />
+      <>
+        {tf < 1 && (
+          <SubtitleTikTok
+            subtitle={currentSubtitle}
+            palette={palette}
+            isVisible={!!currentSubtitle}
+            mode="default"
+            subtitleStyle={subtitleStyle}
+            placement="bottom"
+            placementOpacity={1 - tf}
+          />
+        )}
+        {tf > 0 && (
+          <SubtitleTikTok
+            subtitle={currentSubtitle}
+            palette={palette}
+            isVisible={!!currentSubtitle}
+            mode="default"
+            subtitleStyle={subtitleStyle}
+            placement="top"
+            placementOpacity={tf}
+          />
+        )}
+      </>
     );
   }
 

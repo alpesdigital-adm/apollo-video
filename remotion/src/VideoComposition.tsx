@@ -218,7 +218,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   // the frame — the manchete crosses through it without hiding.
   const MIN_OCCUPATION_SECONDS = 0.5;
 
-  const { entranceFrame, qualifiedWindows } = useMemo(() => {
+  const { entranceFrame, qualifiedWindows, occupiedIntervals } = useMemo(() => {
     const minOccupationFrames = Math.round(MIN_OCCUPATION_SECONDS * config.fps);
     const minRunwayFrames = Math.round(MIN_RUNWAY_SECONDS * config.fps);
 
@@ -273,11 +273,52 @@ export const VideoComposition: React.FC<CompositionProps> = ({
     return {
       entranceFrame: qualified.length > 0 ? qualified[0].from : Infinity,
       qualifiedWindows: qualified,
+      // Raw (unfiltered) occupancy of the stage by a typographic scene — used to
+      // DISPLACE the karaoke subtitle to the top of the head so it never
+      // collides with a big centered statement. Even a short takeover displaces,
+      // so we use `merged` (not the significance-filtered set).
+      occupiedIntervals: merged,
     };
   }, [scenes, layoutSegments, config.fps, config.durationInFrames]);
 
   const isQualifiedFreeAt = (f: number): boolean =>
     qualifiedWindows.some((w) => f >= w.from && f < w.to);
+
+  // Subtitle displacement: while a stage-typographic scene owns the frame (same
+  // occupancy that hides the manchete), the karaoke subtitle rides at the TOP of
+  // the head instead of the bottom, so it never embola with the centered
+  // statement. Ramp both directions over SUB_FADE_FRAMES for a positional
+  // crossfade (fade-out bottom / fade-in top), matching the manchete's ease.
+  const isStageActiveAt = (f: number): boolean =>
+    occupiedIntervals.some((iv) => f >= iv.from && f < iv.to);
+
+  const SUB_FADE_FRAMES = 8;
+  let subtitleTopFactor: number;
+  if (isStageActiveAt(frame)) {
+    let framesSinceClear = SUB_FADE_FRAMES;
+    for (let i = 1; i <= SUB_FADE_FRAMES; i += 1) {
+      if (!isStageActiveAt(frame - i)) {
+        framesSinceClear = i - 1;
+        break;
+      }
+    }
+    subtitleTopFactor = interpolate(framesSinceClear, [0, SUB_FADE_FRAMES], [0, 1], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp',
+    });
+  } else {
+    let framesSinceObstructed = 0;
+    while (
+      framesSinceObstructed < SUB_FADE_FRAMES &&
+      isStageActiveAt(frame - framesSinceObstructed - 1)
+    ) {
+      framesSinceObstructed += 1;
+    }
+    subtitleTopFactor = interpolate(framesSinceObstructed, [0, SUB_FADE_FRAMES], [1, 0], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp',
+    });
+  }
 
   const HOOK_FADE_FRAMES = 6;
   let hookVisibility = 0;
@@ -333,6 +374,28 @@ export const VideoComposition: React.FC<CompositionProps> = ({
 
   return (
     <AbsoluteFill style={{ backgroundColor: palette.background }}>
+      {/* SINGLE narrator AUDIO source for the WHOLE timeline. This is the ONLY
+          audible element carrying the narrator's voice — every VISUAL video of
+          the narrator (base layer, split-50, blur-bg, tweet-card, ImageInsert,
+          AssetCard) is `muted`, so no frame ever has two audible narrator
+          tracks (fixes the overlapping/echo audio). Rendered invisibly (1px,
+          opacity 0) but always mounted, so its audio is extracted continuously
+          and stays perfectly aligned with frame 0 like the old base layer did. */}
+      {videoSrc && (
+        <OffthreadVideo
+          src={videoSrc}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: 1,
+            height: 1,
+            opacity: 0,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+
       {/* Background Video — a layout segment takes over its own window */}
       {activeSegment ? (
         <LayoutSegmentRenderer
@@ -348,6 +411,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
           <>
             <OffthreadVideo
               src={videoSrc}
+              muted
               style={{
                 position: 'absolute',
                 top: isTopImageCompact ? '30%' : 0,
@@ -419,13 +483,15 @@ export const VideoComposition: React.FC<CompositionProps> = ({
       {/* Background music track — looped, fades in/out at the timeline edges */}
       {audio?.music && <Audio src={audio.music.src} loop volume={musicVolumeAt} />}
 
-      {/* Subtitle Layer */}
+      {/* Subtitle Layer — displaces to the top of the head while a stage
+          typographic scene owns the frame (subtitleTopFactor) */}
       <SubtitleOverlay
         subtitles={subtitles}
         format={format}
         palette={palette}
         layoutSegments={layoutSegments}
         subtitleStyle={subtitleStyle}
+        topFactor={subtitleTopFactor}
       />
 
       {/* Persistent hook headline (top) — renders nothing when unset; hides
