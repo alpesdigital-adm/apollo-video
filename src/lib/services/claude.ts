@@ -139,6 +139,63 @@ export function normalizeNarrativeRole(value: unknown, startLeg: number, subtitl
     : inferNarrativeRole(startLeg, subtitleCount)
 }
 
+export const SEGMENT_LAYOUTS = ['split-50', 'blur-bg', 'tweet-card']
+
+/**
+ * Normaliza os campos de segmento (segmentLayout / segmentEffects) de uma cena.
+ * Aceita apenas valores da whitelist; `null`/`''`/inválido remove o campo — assim
+ * o diretor pode tirar uma cena de split/blur/tweet passando segmentLayout=null,
+ * e o analyze descarta silenciosamente qualquer valor que a IA invente.
+ * Fonte única compartilhada entre o pipeline de analyze e o project-director.
+ */
+export function normalizeSegmentFields(sceneData: any): void {
+  if (SEGMENT_LAYOUTS.includes(sceneData.segmentLayout)) {
+    // mantém
+  } else {
+    delete sceneData.segmentLayout
+  }
+
+  const eff = sceneData.segmentEffects
+  if (eff && typeof eff === 'object') {
+    const out: { zoom?: 'in' | 'out'; bw?: boolean } = {}
+    if (eff.zoom === 'in' || eff.zoom === 'out') out.zoom = eff.zoom
+    if (eff.bw === true) out.bw = true
+    if (out.zoom || out.bw) {
+      sceneData.segmentEffects = out
+    } else {
+      delete sceneData.segmentEffects
+    }
+  } else {
+    delete sceneData.segmentEffects
+  }
+}
+
+/**
+ * Restrições específicas do analyze para o LAYOUT de segmento (não os efeitos):
+ * `split-50` e `blur-bg` usam a imagem, então só sobrevivem em cenas ImageInsert;
+ * `tweet-card` renderiza o texto da cena como post, então só sobrevive quando a
+ * cena tem um campo `text` de no máximo 20 palavras. Fora dessas condições o
+ * segmentLayout é removido silenciosamente — a cena e os segmentEffects ficam.
+ * Deve rodar DEPOIS de sanitizeSceneCopy (quando `text` já está no formato final).
+ */
+export function enforceAnalyzeSegmentConstraints(sceneData: any): void {
+  const layout = sceneData.segmentLayout
+  if (!layout) return
+
+  if ((layout === 'split-50' || layout === 'blur-bg') && sceneData.type !== 'ImageInsert') {
+    delete sceneData.segmentLayout
+    return
+  }
+
+  if (layout === 'tweet-card') {
+    const text = typeof sceneData.text === 'string' ? sceneData.text.trim() : ''
+    const wordCount = text ? text.split(/\s+/).filter(Boolean).length : 0
+    if (!text || wordCount > 20) {
+      delete sceneData.segmentLayout
+    }
+  }
+}
+
 function limitCopy(value: unknown, maxChars: number): string {
   const text = String(value || '')
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?/gu, '')
@@ -576,6 +633,22 @@ ImageInsert (quando usado):
 - narrativeRole: "hook", "context", "proof", "process", "objection", "decision" ou "cta" (metadado editorial). visualRole: "evidence", "contrast", "process", "context" ou "decision".
 - Evite visuais genéricos de stock/IA (estradas vazias, barras de busca brilhando, nós de rede abstratos, mãos perfeitas digitando, interfaces falsas, diagramas isométricos, metáforas surreais, sorrisos plásticos).
 
+LAYOUTS DE SEGMENTO E EFEITOS (opcionais — você atribui por conta própria; são PONTUAÇÃO, não papel de parede):
+Por padrão TODA cena é fullscreen (vídeo base cheio + a cena por cima). Um "layout de segmento" reposiciona o vídeo base durante a janela daquela cena; um "efeito" mexe no próprio vídeo base. São campos OPCIONAIS por cena — omita quando não agregam.
+- segmentLayout (SÓ em cena ImageInsert, exceto tweet-card):
+  - "split-50": trechos ILUSTRATIVOS mais longos em que a narração descreve algo visual — a imagem do insert vira a metade de cima e a legenda vira 2 palavras gigantes no meio. Preferido para b-roll mais longo. USE SÓ em ImageInsert.
+  - "blur-bg": ênfase DRAMÁTICA sobre uma imagem (variação do split-50, imagem desfocada de fundo). USE SÓ em ImageInsert e COM MODERAÇÃO.
+  - "tweet-card": momento de CITAÇÃO / afirmação punchy — aparece como um post com o perfil do criador. USE numa cena com campo "text" curto (≤ 20 palavras). NÃO precisa ser ImageInsert. NO MÁXIMO 1 por vídeo.
+- segmentEffects (compõem com qualquer layout OU sozinhos numa cena só de efeito):
+  - zoom "in": punch-in de ênfase num momento forte da fala. zoom "out": alívio/abertura. Uma cena pode ser SÓ efeito (sem layout e sem texto novo) — ex.: um FullScreen curto ou um punch-in pontual.
+  - bw true: preto e branco, contraste dramático/negativo (problema, dor).
+- DIREÇÃO POR ATO (movimento alto no topo, calmo no fim):
+  - HOOK: 1 troca de layout OU 1-2 punch-ins (zoom in). Movimento alto.
+  - CORPO: 1-2 segmentos de layout ESPAÇADOS (split-50 preferido para b-roll longo) + punch-ins pontuais.
+  - FINAL: SEM layout novo — o CTA já domina a tela.
+- VARIEDADE (regras duras): no MÁXIMO 3-4 segmentos de layout no vídeo inteiro; NUNCA o mesmo layout duas vezes seguidas; entre dois segmentos volte ao fullscreen (o padrão); tweet-card no máximo 1 por vídeo. Layout é PONTUAÇÃO — a maioria das cenas fica fullscreen.
+- COMO RETORNAR: adicione "segmentLayout" e/ou "segmentEffects" na própria cena. Ex. de insert com layout: { ..., "type": "ImageInsert", "segmentLayout": "split-50" }. Ex. de cena só de efeito: { ..., "type": "FullScreen", "text": "Isso muda tudo", "highlight": "tudo", "segmentEffects": { "zoom": "in" } }. Ex. de citação: { ..., "type": "FullScreen", "text": "Ninguém te contou isso antes", "segmentLayout": "tweet-card" }. Valores fora dessas listas são ignorados.
+
 Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysisTone}.${buildBrandColorPromptSection(brandColors)}`
 
     const numberedSubtitles = subtitles
@@ -724,6 +797,17 @@ Garanta que o JSON seja válido e completo.`
         return sanitizeSceneCopy(normalized) as Scene
       })
       .filter((scene: Scene | null): scene is Scene => scene !== null)
+
+    // Fase 1b — layouts de segmento e efeitos atribuídos pela própria IA.
+    // Normaliza (whitelist) os campos segmentLayout/segmentEffects de TODAS as
+    // cenas e aplica as restrições de layout (split-50/blur-bg só em ImageInsert;
+    // tweet-card só com text ≤ 20 palavras). Roda após sanitizeSceneCopy, com o
+    // `text` já no formato final. Mutação in-place; os campos são opcionais e
+    // sobrevivem a curateSceneDensity/resolveSceneTiming (spreads preservam).
+    for (const scene of validatedScenes) {
+      normalizeSegmentFields(scene)
+      enforceAnalyzeSegmentConstraints(scene)
+    }
 
     const { palette, colorGroup } = resolvePaletteWithBrandColors(analysisData, brandColors)
 

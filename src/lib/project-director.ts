@@ -17,6 +17,7 @@ import path from 'path'
 import {
   VALID_SCENE_TYPES,
   normalizeNarrativeRole,
+  normalizeSegmentFields,
   normalizeTypographicScene,
   sanitizeSceneCopy
 } from './services/claude'
@@ -37,35 +38,6 @@ const DEFAULT_PALETTE: ColorPalette = {
 
 function isValidHex(value: unknown): value is string {
   return typeof value === 'string' && HEX_RE.test(value.trim())
-}
-
-const SEGMENT_LAYOUTS = ['split-50', 'blur-bg', 'tweet-card']
-
-/**
- * Normaliza os campos de segmento (segmentLayout / segmentEffects) de uma cena.
- * Aceita apenas valores válidos; `null`/`''`/inválido remove o campo — assim o
- * diretor pode tirar uma cena de split/blur/tweet passando segmentLayout=null.
- */
-function normalizeSegmentFields(sceneData: any): void {
-  if (SEGMENT_LAYOUTS.includes(sceneData.segmentLayout)) {
-    // mantém
-  } else {
-    delete sceneData.segmentLayout
-  }
-
-  const eff = sceneData.segmentEffects
-  if (eff && typeof eff === 'object') {
-    const out: { zoom?: 'in' | 'out'; bw?: boolean } = {}
-    if (eff.zoom === 'in' || eff.zoom === 'out') out.zoom = eff.zoom
-    if (eff.bw === true) out.bw = true
-    if (out.zoom || out.bw) {
-      sceneData.segmentEffects = out
-    } else {
-      delete sceneData.segmentEffects
-    }
-  } else {
-    delete sceneData.segmentEffects
-  }
 }
 
 /**
