@@ -181,22 +181,30 @@ export function toRemotionScene(
 /**
  * Prepare scenes for Remotion:
  *  1. Sort by fromFrame (ascending).
- *  2. Clamp toFrame so duration >= minDurationFrames — WITHOUT moving fromFrame.
+ *  2. Clamp toFrame so duration >= minDurationFrames — WITHOUT moving fromFrame —
+ *     but NEVER past the next scene's fromFrame (scenes are full-canvas layers;
+ *     two visible at once bleed into each other).
+ *  3. Drop scenes whose remaining window is an unreadable flash.
  *
  * FORBIDDEN: cursor accumulation, gap between scenes, shifting fromFrame.
  * The startFrame produced by resolveSceneTiming() is the source of truth.
- * Residual overlap between consecutive scenes is acceptable.
  */
 export function prepareRemotionScenes(
   scenes: RemotionSceneInput[],
   fps: number
 ): RemotionSceneInput[] {
   const minDurationFrames = Math.round(fps * MIN_SCENE_SECONDS)
+  const minVisibleFrames = Math.max(2, Math.round(fps * 0.35))
 
-  return [...scenes]
-    .sort((a, b) => a.fromFrame - b.fromFrame)
-    .map((scene) => {
-      const toFrame = Math.max(scene.toFrame, scene.fromFrame + minDurationFrames)
+  const sorted = [...scenes].sort((a, b) => a.fromFrame - b.fromFrame)
+
+  return sorted
+    .map((scene, index) => {
+      const next = sorted[index + 1]
+      let toFrame = Math.max(scene.toFrame, scene.fromFrame + minDurationFrames)
+      if (next) {
+        toFrame = Math.min(toFrame, Math.max(next.fromFrame, scene.fromFrame))
+      }
       return {
         ...scene,
         toFrame,
@@ -204,6 +212,7 @@ export function prepareRemotionScenes(
         // fromFrame and from are intentionally unchanged
       }
     })
+    .filter((scene) => scene.toFrame - scene.fromFrame >= minVisibleFrames)
 }
 
 export interface CreatorProfileLike {
