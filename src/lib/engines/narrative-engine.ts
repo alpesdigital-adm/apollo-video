@@ -12,6 +12,7 @@ import type {
   PlanPunchIn
 } from '../types/edl'
 import type { Scene } from '../types/scene'
+import type { SubtitleEntry } from '../types/project'
 import { readStylePrefs } from '../style-prefs'
 import { framesToSeconds, secondsToFrames } from '../utils/timing'
 import type { VideoEngine, VideoEngineContext } from './video-engine'
@@ -321,14 +322,35 @@ function buildLayoutSegments(scenes: Scene[], fps: number): LayoutSegment[] {
  * frame doesn't flicker. Only intervals that actually scale (1.06) are emitted —
  * VideoComposition keeps the base video at 1.0 wherever no punch-in is active.
  */
-function buildPunchIns(cuts: EditCut[], durationFrames: number, fps: number): PlanPunchIn[] {
-  const points = Array.from(
-    new Set(
-      cuts
-        .map((cut) => Math.max(0, Math.min(cut.sourceStartFrame, durationFrames)))
-        .filter((frame) => Number.isFinite(frame))
-    )
-  ).sort((a, b) => a - b)
+function buildPunchIns(
+  cuts: EditCut[],
+  durationFrames: number,
+  fps: number,
+  subtitles: SubtitleEntry[] = []
+): PlanPunchIn[] {
+  const rawPoints = cuts
+    .map((cut) => Math.max(0, Math.min(cut.sourceStartFrame, durationFrames)))
+    .filter((frame) => Number.isFinite(frame))
+
+  // FIX 5: a narrator with almost no pauses yields <4 boundaries, so the punch-in
+  // track comes out empty and the jump cuts aren't disguised. When silence cuts
+  // give fewer than 4 boundaries, complement with synthetic boundaries derived
+  // from the subtitles — the end of every 2nd subtitle, kept only if ≥1.6s from
+  // the previous synthetic boundary — until the timeline is covered.
+  if (new Set(rawPoints).size < 4 && subtitles.length > 0) {
+    const minSpacingFrames = Math.max(1, Math.round(fps * 1.6))
+    let lastSynthetic = -Infinity
+    for (let i = 1; i < subtitles.length; i += 2) {
+      const frame = Math.max(0, Math.min(subtitles[i].endFrame ?? 0, durationFrames))
+      if (!Number.isFinite(frame)) continue
+      if (frame - lastSynthetic >= minSpacingFrames) {
+        rawPoints.push(frame)
+        lastSynthetic = frame
+      }
+    }
+  }
+
+  const points = Array.from(new Set(rawPoints)).sort((a, b) => a - b)
 
   if (points.length < 2) return []
 
@@ -426,7 +448,7 @@ export const narrativeEngine: VideoEngine = {
 
     const layoutSegments = buildLayoutSegments(context.scenes, context.fps)
     const punchIns = readStylePrefs().jumpCutPunchIns
-      ? buildPunchIns(cuts, durationFrames, context.fps)
+      ? buildPunchIns(cuts, durationFrames, context.fps, context.subtitles)
       : []
     const hookTitle =
       typeof context.hookTitle === 'string' && context.hookTitle.trim()

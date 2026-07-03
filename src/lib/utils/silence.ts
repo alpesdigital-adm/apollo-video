@@ -61,6 +61,89 @@ export function parseSilenceDetection(ffmpegOutput: string, fps: number = FPS): 
 }
 
 /**
+ * Reconcile a subtitle's `words` array against the tokens of its `text` so that
+ * EVERY token of the text is present, in order. Whisper's word-level timestamps
+ * (or downstream re-segmentation) can drop boundary words — we observed a
+ * subtitle "…ninguém dá muita atenção" whose words ended at "muita", and one
+ * whose text started "e de repente" whose words started at "de". The renderer
+ * highlights per word, so a dropped token is a word that never lights up.
+ *
+ * Strategy: tokenize `text`, align each token to the next matching timed word
+ * (normalized compare, forward-only), keep that word's timing when matched, and
+ * interpolate timing for any token with no timed match from its neighbors
+ * (falling back to the segment [start,end] bounds at the edges). No token of
+ * `text` is ever left out of the returned array.
+ */
+function reconcileWordsWithText(
+  text: string,
+  timedWords: TranscriptionWord[],
+  boundStart: number,
+  boundEnd: number
+): TranscriptionWord[] {
+  const tokens = text.trim().split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return []
+
+  const normalize = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+
+  // Forward-only alignment: for each text token, find the next timed word (from
+  // the last matched position) whose normalized form matches.
+  const matchIdx: (number | null)[] = new Array(tokens.length).fill(null)
+  let cursor = 0
+  for (let i = 0; i < tokens.length; i++) {
+    const nt = normalize(tokens[i])
+    if (!nt) continue
+    for (let k = cursor; k < timedWords.length; k++) {
+      if (normalize(timedWords[k].word) === nt) {
+        matchIdx[i] = k
+        cursor = k + 1
+        break
+      }
+    }
+  }
+
+  const starts: number[] = new Array(tokens.length)
+  const ends: number[] = new Array(tokens.length)
+  const strings: string[] = new Array(tokens.length)
+
+  for (let i = 0; i < tokens.length; i++) {
+    const k = matchIdx[i]
+    if (k !== null) {
+      starts[i] = timedWords[k].start
+      ends[i] = timedWords[k].end
+      strings[i] = timedWords[k].word
+    } else {
+      strings[i] = tokens[i]
+    }
+  }
+
+  // Interpolate timing for unmatched tokens from the nearest matched neighbors,
+  // clamped to the segment bounds so nothing lands outside the visible window.
+  for (let i = 0; i < tokens.length; i++) {
+    if (matchIdx[i] !== null) continue
+
+    let prev = i - 1
+    while (prev >= 0 && matchIdx[prev] === null) prev--
+    let next = i + 1
+    while (next < tokens.length && matchIdx[next] === null) next++
+
+    const anchorStart = prev >= 0 ? ends[prev] : boundStart
+    const anchorEnd = next < tokens.length ? starts[next] : boundEnd
+    const gapCount = next - prev // tokens spanning the gap (inclusive of endpoints)
+    const span = Math.max(0, anchorEnd - anchorStart)
+    const step = gapCount > 0 ? span / gapCount : 0
+    const offset = i - prev
+    starts[i] = anchorStart + step * (offset - 1)
+    ends[i] = anchorStart + step * offset
+  }
+
+  return tokens.map((_, i) => ({
+    word: strings[i],
+    start: starts[i],
+    end: ends[i]
+  }))
+}
+
+/**
  * Generate subtitle entries from a Whisper transcription
  * Creates SubtitleEntry objects with timing adjusted for silence cuts
  * @param transcription The Whisper transcription with segments and word-level timing
@@ -144,6 +227,16 @@ export function generateSubtitlesFromTranscription(
       end: adjustTimeForSilences(word.end)
     }))
 
+    // Reconcile so EVERY token of segment.text is represented in words (in order).
+    // Boundary tokens that Whisper omitted from word-level timing get interpolated
+    // timing from their neighbors instead of silently vanishing from the highlight.
+    const reconciledWords = reconcileWordsWithText(
+      segment.text,
+      adjustedWords,
+      adjustedStartTime,
+      speechEndTime
+    )
+
     subtitles.push({
       id: i,
       text: segment.text,
@@ -151,7 +244,7 @@ export function generateSubtitlesFromTranscription(
       endTime: adjustedEndTime,
       startFrame,
       endFrame,
-      words: adjustedWords
+      words: reconciledWords
     })
   }
 

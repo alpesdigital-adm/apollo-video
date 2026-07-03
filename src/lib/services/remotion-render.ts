@@ -34,7 +34,12 @@ interface ActiveRenderEntry {
   lastProgressWrite: number
 }
 
-const activeRenders = new Map<string, ActiveRenderEntry>()
+// In dev, each Next route compiles its own bundle, so module-level state is NOT
+// shared across route bundles (the status route saw an empty Map while a render
+// was live and falsely reconciled it as orphaned). Anchor the registry on
+// globalThis so every bundle in the same process shares one Map.
+const g = globalThis as any
+const activeRenders: Map<string, ActiveRenderEntry> = (g.__apolloActiveRenders ??= new Map())
 
 const RENDER_TIMEOUT_MS = Number(process.env.RENDER_TIMEOUT_MS) || 30 * 60000
 
@@ -294,26 +299,42 @@ export async function startProjectRender(
 
   remotionProcess.stdout?.on('data', (data) => {
     const chunk = String(data)
-    const pct = parseRenderProgress(chunk)
-    if (pct === null) return
-
     const now = Date.now()
-    if (pct <= lastProgressValue || now - renderEntry.lastProgressWrite < 1000) {
+    const pct = parseRenderProgress(chunk)
+
+    // Progress update: only when it advances by ≥1 point (throttled to 1s).
+    if (pct !== null && pct > lastProgressValue && now - renderEntry.lastProgressWrite >= 1000) {
+      lastProgressValue = pct
+      renderEntry.lastProgressWrite = now
+      console.log(`Render progress for project ${projectId}: ${pct}%`)
+
+      prisma.renderJob
+        .update({
+          where: { id: renderJob.id },
+          data: { status: 'rendering', progress: pct }
+        })
+        .catch((error) => {
+          console.error('Failed to update render progress:', error)
+        })
       return
     }
 
-    lastProgressValue = pct
-    renderEntry.lastProgressWrite = now
-    console.log(`Render progress for project ${projectId}: ${pct}%`)
-
-    prisma.renderJob
-      .update({
-        where: { id: renderJob.id },
-        data: { status: 'rendering', progress: pct }
-      })
-      .catch((error) => {
-        console.error('Failed to update render progress:', error)
-      })
+    // Heartbeat: during the final encode/concat phase there are no frame lines,
+    // so progress stops advancing and RenderJob.updatedAt goes stale (>3min),
+    // tripping orphan reconciliation on a perfectly healthy render. On ANY chunk,
+    // if ≥5s since the last write, touch the job (rewrite the current progress)
+    // purely to renew updatedAt.
+    if (now - renderEntry.lastProgressWrite >= 5000) {
+      renderEntry.lastProgressWrite = now
+      prisma.renderJob
+        .update({
+          where: { id: renderJob.id },
+          data: { progress: lastProgressValue }
+        })
+        .catch((error) => {
+          console.error('Failed to heartbeat render job:', error)
+        })
+    }
   })
 
   let stderr = ''
