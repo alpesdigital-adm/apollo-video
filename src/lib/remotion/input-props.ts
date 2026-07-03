@@ -41,6 +41,12 @@ export interface RemotionLayoutSegment {
   props?: Record<string, any>
 }
 
+export interface RemotionPunchIn {
+  fromFrame: number
+  toFrame: number
+  scale: number
+}
+
 export interface AudioSfxEventInput {
   kind: string
   src: string
@@ -77,6 +83,7 @@ export interface RemotionInputProps {
   hookTitle?: string
   creator?: RemotionCreator
   layoutSegments?: RemotionLayoutSegment[]
+  punchIns?: RemotionPunchIn[]
   audio?: AudioInputProps
 }
 
@@ -356,6 +363,32 @@ export function resolveLayoutSegments(
       }
     })
     .filter((seg): seg is RemotionLayoutSegment => seg !== null)
+}
+
+/**
+ * Resolve the plan's `punchIns` into RemotionPunchIn props (pure — no URLs).
+ * Each entry needs a finite [fromFrame, toFrame) window and a numeric scale.
+ * Returns [] for old plans without the field (→ base video keeps scale 1.0).
+ */
+export function resolvePunchIns(
+  plan: { punchIns?: unknown } | null | undefined
+): RemotionPunchIn[] {
+  const punchIns = plan?.punchIns
+  if (!Array.isArray(punchIns)) return []
+
+  return punchIns
+    .map((raw: any): RemotionPunchIn | null => {
+      if (!raw || typeof raw !== 'object') return null
+      const fromFrame = Number(raw.fromFrame)
+      const toFrame = Number(raw.toFrame)
+      const scale = Number(raw.scale)
+      if (!Number.isFinite(fromFrame) || !Number.isFinite(toFrame) || toFrame <= fromFrame) {
+        return null
+      }
+      if (!Number.isFinite(scale) || scale <= 0) return null
+      return { fromFrame, toFrame, scale }
+    })
+    .filter((entry): entry is RemotionPunchIn => entry !== null)
 }
 
 export interface ResolveAudioSfxOptions extends ToRemotionSceneOptions {

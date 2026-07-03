@@ -200,6 +200,28 @@ export function enforceAnalyzeSegmentConstraints(sceneData: any): void {
   }
 }
 
+/**
+ * Pacote 5 — whitelist the two per-scene edit tactics that apply across the
+ * pipeline and the director:
+ *  - transitionIn: só 'flash' sobrevive (qualquer tipo de cena);
+ *  - variant: só 'torn-paper' | 'crt-glitch' e SOMENTE em FullScreen (title-card).
+ * (o stutter do ImageInsert é tratado em normalizeImageInsertMedia). Valores
+ * inválidos são removidos silenciosamente. Mutação in-place.
+ */
+export function normalizeSceneTactics(sceneData: any): void {
+  if (sceneData.transitionIn !== 'flash') {
+    delete sceneData.transitionIn
+  }
+
+  if (sceneData.type === 'FullScreen') {
+    if (sceneData.variant !== 'torn-paper' && sceneData.variant !== 'crt-glitch') {
+      delete sceneData.variant
+    }
+  } else {
+    delete sceneData.variant
+  }
+}
+
 function limitCopy(value: unknown, maxChars: number): string {
   const text = String(value || '')
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?/gu, '')
@@ -333,6 +355,13 @@ export function sanitizeSceneCopy(sceneData: any): any {
  */
 function normalizeImageInsertMedia(sceneData: any): void {
   sceneData.motion = sceneData.motion === true
+
+  // Pacote 5: stutter cluster flag — keep only when explicitly true.
+  if (sceneData.stutter === true) {
+    sceneData.stutter = true
+  } else {
+    delete sceneData.stutter
+  }
 
   sceneData.source = sceneData.source === 'stock' ? 'stock' : 'generate'
 
@@ -757,6 +786,11 @@ Por padrão TODA cena é fullscreen (vídeo base cheio + a cena por cima). Um "l
 - VARIEDADE (regras duras): no MÁXIMO 3-4 segmentos de layout no vídeo inteiro; NUNCA o mesmo layout duas vezes seguidas; entre dois segmentos volte ao fullscreen (o padrão); tweet-card no máximo 1 por vídeo. Layout é PONTUAÇÃO — a maioria das cenas fica fullscreen.
 - COMO RETORNAR: adicione "segmentLayout" e/ou "segmentEffects" na própria cena. Ex. de insert com layout: { ..., "type": "ImageInsert", "segmentLayout": "split-50" }. Ex. de cena só de efeito: { ..., "type": "FullScreen", "text": "Isso muda tudo", "highlight": "tudo", "segmentEffects": { "zoom": "in" } }. Ex. de citação: { ..., "type": "FullScreen", "text": "Ninguém te contou isso antes", "segmentLayout": "tweet-card" }. Valores fora dessas listas são ignorados.
 
+TÁTICAS DE EDIÇÃO PONTUAIS (opcionais — ÊNFASE rara, nunca padrão; valores inválidos são ignorados):
+- stutter (SÓ em ImageInsert, boolean): "stutter": true dá 5 micro-saltos rápidos na mídia no primeiro ~1,6s da cena (efeito de "trava"/repetição). NO MÁXIMO 1 por vídeo, no insert de PROVA/IMPACTO do hook. Funciona com imagem e vídeo.
+- transitionIn (qualquer tipo de cena): "transitionIn": "flash" estoura um flash branco-quente na ENTRADA da cena. Use no gancho e/ou na virada principal. NO MÁXIMO 1-2 por vídeo.
+- variant (SÓ em FullScreen, title-card de ABERTURA/hook): "variant": "torn-paper" (faixa vermelha rasgada, urgência/notícia) ou "variant": "crt-glitch" (glitch RGB + scanlines, tech/erro). Use no title-card de abertura quando o tom pedir impacto; sem variant = kinético padrão. NO MÁXIMO 1 por vídeo.
+
 TÍTULO-HOOK PERSISTENTE (hookTitle — OPCIONAL, no nível raiz do JSON, não é uma cena):
 - Uma manchete-promessa curta (NO MÁXIMO 10 palavras) que fica FIXA no topo do vídeo inteiro, reforçando a promessa central. Estilo específico e numérico quando possível (ex.: "Como vendi 185 ingressos em 3h53min", "O erro que custou R$40 mil").
 - Extraia a promessa REAL da transcrição; NÃO invente números que o áudio não sustenta. Se o vídeo não tem uma promessa-manchete clara, OMITA o campo (não force).
@@ -939,6 +973,7 @@ Garanta que o JSON seja válido e completo.`
     for (const scene of validatedScenes) {
       normalizeSegmentFields(scene)
       enforceAnalyzeSegmentConstraints(scene)
+      normalizeSceneTactics(scene)
     }
 
     const { palette, colorGroup } = resolvePaletteWithBrandColors(analysisData, brandColors)
@@ -1086,9 +1121,9 @@ function summarizeSceneForPrompt(scene: Scene): string {
     'leftLabel', 'rightLabel', 'leftText', 'rightText', 'number', 'description',
     'sender', 'message', 'value', 'label', 'steps', 'situation', 'caption',
     'layout', 'imagePrompt', 'imageAlt', 'sourceText', 'narrativeRole', 'visualRole',
-    'motion', 'source', 'stockQuery',
+    'motion', 'source', 'stockQuery', 'stutter',
     'assetId', 'style', 'name', 'caption',
-    'segmentLayout'
+    'segmentLayout', 'transitionIn', 'variant'
   ]
   const parts: string[] = []
   for (const field of fields) {
@@ -1145,7 +1180,7 @@ A instrução pode mirar: o VÍDEO TODO, UMA cena específica, UM trecho (refere
 TIPOS DE CENA VÁLIDOS: FullScreen, LowerThird, Split, SplitVertical, Card, Message, Number, Flow, CTA, StickFigures, ImageInsert${assetCatalog && assetCatalog.length > 0 ? ', AssetCard' : ''}.
 
 OPERAÇÕES DISPONÍVEIS (retorne no máximo ~10 no total):
-- {"op":"update_scene","sceneId":"<id existente>","changes":{<apenas props válidas do tipo da cena>}} — altera texto/props de uma cena existente. TAMBÉM aceita LAYOUT DE SEGMENTO: "segmentLayout" ("split-50" | "blur-bg" | "tweet-card" | null para voltar a tela cheia) reposiciona o vídeo base durante a janela da cena; "segmentEffects" ({"zoom":"in"|"out","bw":true}) aplica efeito no vídeo base (combinável com qualquer layout, ou sozinho para efeito em tela cheia).
+- {"op":"update_scene","sceneId":"<id existente>","changes":{<apenas props válidas do tipo da cena>}} — altera texto/props de uma cena existente. TAMBÉM aceita LAYOUT DE SEGMENTO: "segmentLayout" ("split-50" | "blur-bg" | "tweet-card" | null para voltar a tela cheia) reposiciona o vídeo base durante a janela da cena; "segmentEffects" ({"zoom":"in"|"out","bw":true}) aplica efeito no vídeo base (combinável com qualquer layout, ou sozinho para efeito em tela cheia). E TÁTICAS DE EDIÇÃO PONTUAIS (ênfase rara): "stutter":true (SÓ ImageInsert — 5 micro-saltos no 1º ~1,6s, máx 1/vídeo no hook), "transitionIn":"flash" (flash branco na entrada, qualquer cena, máx 1-2/vídeo), "variant":"torn-paper"|"crt-glitch" (SÓ FullScreen — title-card estilizado de abertura). Passe o valor null/ausente para remover uma tática.
 - {"op":"delete_scene","sceneId":"<id existente>"} — remove uma cena.
 - {"op":"add_scene","scene":{"type":"<tipo>","startLeg":<int>,"durationInSubtitles":<1-3>, <props do tipo>}} — cria cena nova. startLeg e durationInSubtitles são OBRIGATÓRIOS.
 - {"op":"update_palette","changes":{"accent":"#RRGGBB", ...}} — muda cores GLOBAIS. Chaves válidas: primary, secondary, accent, background, text. Valores HEX (#RGB ou #RRGGBB).

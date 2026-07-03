@@ -17,6 +17,7 @@ import path from 'path'
 import {
   VALID_SCENE_TYPES,
   normalizeNarrativeRole,
+  normalizeSceneTactics,
   normalizeSegmentFields,
   normalizeTypographicScene,
   sanitizeAssetCardScene,
@@ -78,6 +79,8 @@ function validateSceneData(
 
   // Layout de segmento (opcional): whitelist + valores válidos. null/'' remove.
   normalizeSegmentFields(sceneData)
+  // Táticas de edição pontuais (Pacote 5): transitionIn (flash) + variant (FullScreen).
+  normalizeSceneTactics(sceneData)
 
   if (sceneData.type === 'AssetCard') {
     // Requires a real asset id; sem catálogo válido a cena é inviável.

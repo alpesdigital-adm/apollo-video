@@ -61,6 +61,12 @@ export interface LayoutSegment {
   props?: Record<string, any>;
 }
 
+export interface PunchIn {
+  fromFrame: number;
+  toFrame: number;
+  scale: number;
+}
+
 export interface AudioSfxEvent {
   kind: string;
   src: string;
@@ -91,5 +97,7 @@ export interface CompositionProps extends Record<string, unknown> {
   palette: ColorPalette;
   creator?: CreatorProfile;
   layoutSegments?: LayoutSegment[];
+  // Pacote 5: jump-cut punch-in track applied to the base video.
+  punchIns?: PunchIn[];
   audio?: AudioProps;
 }

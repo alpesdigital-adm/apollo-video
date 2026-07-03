@@ -8,9 +8,11 @@ import type {
   EditRange,
   EditSource,
   LayoutSegment,
-  LayoutSegmentEffects
+  LayoutSegmentEffects,
+  PlanPunchIn
 } from '../types/edl'
 import type { Scene } from '../types/scene'
+import { readStylePrefs } from '../style-prefs'
 import { framesToSeconds, secondsToFrames } from '../utils/timing'
 import type { VideoEngine, VideoEngineContext } from './video-engine'
 import { assertEnginePlan } from './video-engine'
@@ -312,6 +314,51 @@ function buildLayoutSegments(scenes: Scene[], fps: number): LayoutSegment[] {
   return segments.sort((a, b) => a.fromFrame - b.fromFrame)
 }
 
+/**
+ * Jump-cut punch-in track (Pacote 5). Each interval BETWEEN two consecutive
+ * silence cuts gets a base-video scale that alternates 1.0 / 1.06 (starting at
+ * 1.0). Intervals shorter than 0.8s inherit the previous interval's scale so the
+ * frame doesn't flicker. Only intervals that actually scale (1.06) are emitted —
+ * VideoComposition keeps the base video at 1.0 wherever no punch-in is active.
+ */
+function buildPunchIns(cuts: EditCut[], durationFrames: number, fps: number): PlanPunchIn[] {
+  const points = Array.from(
+    new Set(
+      cuts
+        .map((cut) => Math.max(0, Math.min(cut.sourceStartFrame, durationFrames)))
+        .filter((frame) => Number.isFinite(frame))
+    )
+  ).sort((a, b) => a - b)
+
+  if (points.length < 2) return []
+
+  const shortFrames = Math.max(1, Math.round(fps * 0.8))
+  const punchIns: PlanPunchIn[] = []
+  let nextBig = 1.0
+  let prevAssigned = 1.0
+
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const fromFrame = points[i]
+    const toFrame = points[i + 1]
+    if (toFrame <= fromFrame) continue
+
+    let scale: number
+    if (toFrame - fromFrame < shortFrames) {
+      scale = prevAssigned
+    } else {
+      scale = nextBig
+      nextBig = nextBig === 1.0 ? 1.06 : 1.0
+    }
+    prevAssigned = scale
+
+    if (scale !== 1.0) {
+      punchIns.push({ fromFrame, toFrame, scale })
+    }
+  }
+
+  return punchIns
+}
+
 function buildCreativeLineage(context: VideoEngineContext, durationFrames: number): CreativeLineage {
   return {
     projectId: context.projectId,
@@ -378,6 +425,9 @@ export const narrativeEngine: VideoEngine = {
     ]
 
     const layoutSegments = buildLayoutSegments(context.scenes, context.fps)
+    const punchIns = readStylePrefs().jumpCutPunchIns
+      ? buildPunchIns(cuts, durationFrames, context.fps)
+      : []
     const hookTitle =
       typeof context.hookTitle === 'string' && context.hookTitle.trim()
         ? context.hookTitle.trim()
@@ -414,6 +464,7 @@ export const narrativeEngine: VideoEngine = {
       lineage: buildCreativeLineage(context, durationFrames),
       layoutSegments,
       ...(hookTitle ? { hookTitle } : {}),
+      ...(punchIns.length > 0 ? { punchIns } : {}),
       notes: [
         'Engine optimized for narrated videos with speech-timed subtitles and scene overlays.',
         'Future visual engines should implement the same EditPlan contract and can replace ranges/overlays/audio without changing the renderer.'

@@ -27,6 +27,7 @@ import {
   LayoutSegmentRenderer,
   findActiveLayoutSegment,
 } from './components/LayoutSegmentLayer';
+import { FlashTransition } from './components/FlashTransition';
 
 interface SceneComponentProps {
   format: '9:16' | '16:9';
@@ -105,10 +106,19 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   hookTitle,
   creator,
   layoutSegments,
+  punchIns,
   audio,
 }) => {
   const config = useVideoConfig();
   const frame = useCurrentFrame();
+
+  // Jump-cut punch-in: alternating scale on the base video between silence cuts.
+  // Only applied on the plain base-video layer (below) — an active layout segment
+  // renders its own base video with its own zoom/effect, which takes precedence.
+  const activePunchIn = (punchIns ?? []).find(
+    (p) => frame >= p.fromFrame && frame < p.toFrame
+  );
+  const punchScale = activePunchIn ? activePunchIn.scale : 1;
 
   // Segment layout track. A scene carrying `segmentLayout` produces a segment
   // over its window; the fromFrame equals the scene's startFrame, so we suppress
@@ -211,6 +221,8 @@ export const VideoComposition: React.FC<CompositionProps> = ({
               height: isTopImageCompact ? '70%' : isSplitImageActive ? '50%' : '100%',
               objectFit: 'cover',
               objectPosition: isSplitImageActive ? splitVideoObjectPosition : 'center center',
+              transform: punchScale !== 1 ? `scale(${punchScale})` : undefined,
+              transformOrigin: 'center 35%',
               backgroundColor: palette.background,
             }}
           />
@@ -246,6 +258,16 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         }))}
         palette={palette}
       />
+
+      {/* Flash transitions — white-hot burst centered on a scene's entrance */}
+      {scenes.map((scene, index) =>
+        scene.props?.transitionIn === 'flash' ? (
+          <FlashTransition
+            key={`flash-${index}`}
+            startFrame={scene.fromFrame ?? Math.round(scene.from * config.fps)}
+          />
+        ) : null
+      )}
 
       {/* SFX Layer — one Audio per event, gated by the segment it announces */}
       {audio?.events?.map((event, index) => (

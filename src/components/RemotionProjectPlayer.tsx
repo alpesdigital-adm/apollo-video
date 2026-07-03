@@ -10,6 +10,7 @@ import {
   prepareRemotionScenes,
   normalizeSubtitleWords,
   resolveLayoutSegments,
+  resolvePunchIns,
   resolveAudioSfxEvents,
   type AudioInputProps,
   type RemotionCreator,
@@ -27,7 +28,7 @@ interface RemotionProjectPlayerProps {
   transcription: Transcription | null
   stylePreset: string
   palette: any
-  editPlan?: { layoutSegments?: unknown; hookTitle?: unknown; audio?: unknown } | null
+  editPlan?: { layoutSegments?: unknown; hookTitle?: unknown; punchIns?: unknown; audio?: unknown } | null
   musicPick?: { src: string; volume: number } | null
 }
 
@@ -102,6 +103,7 @@ export function RemotionProjectPlayer({
     ...(hookTitle ? { hookTitle } : {}),
     creator,
     layoutSegments: resolveLayoutSegments(editPlan),
+    punchIns: resolvePunchIns(editPlan),
     ...(audio ? { audio } : {})
   }
 

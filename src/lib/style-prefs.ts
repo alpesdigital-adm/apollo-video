@@ -23,10 +23,13 @@ export const SUBTITLE_STYLES: SubtitleStyle[] = [
 
 export interface StylePrefs {
   subtitleStyle: SubtitleStyle
+  // Pacote 5: alternating punch-in scale between silence cuts (disguises jump cuts).
+  jumpCutPunchIns: boolean
 }
 
 const DEFAULT_PREFS: StylePrefs = {
-  subtitleStyle: 'kinetic'
+  subtitleStyle: 'kinetic',
+  jumpCutPunchIns: true
 }
 
 export function isValidSubtitleStyle(value: unknown): value is SubtitleStyle {
@@ -53,7 +56,11 @@ export function readStylePrefs(): StylePrefs {
     return {
       subtitleStyle: isValidSubtitleStyle(parsed?.subtitleStyle)
         ? parsed.subtitleStyle
-        : DEFAULT_PREFS.subtitleStyle
+        : DEFAULT_PREFS.subtitleStyle,
+      jumpCutPunchIns:
+        typeof parsed?.jumpCutPunchIns === 'boolean'
+          ? parsed.jumpCutPunchIns
+          : DEFAULT_PREFS.jumpCutPunchIns
     }
   } catch (error) {
     console.error('Failed to read style prefs:', error)

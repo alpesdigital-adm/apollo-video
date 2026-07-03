@@ -105,6 +105,7 @@ export default function SettingsPage() {
   const [colorsErrorMessage, setColorsErrorMessage] = useState<string | null>(null)
 
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>('kinetic')
+  const [jumpCutPunchIns, setJumpCutPunchIns] = useState(true)
   const [styleLoading, setStyleLoading] = useState(true)
   const [styleSaveState, setStyleSaveState] = useState<SaveState>('idle')
 
@@ -301,6 +302,9 @@ export default function SettingsPage() {
         ) {
           setSubtitleStyle(data.subtitleStyle as SubtitleStyle)
         }
+        if (typeof data?.jumpCutPunchIns === 'boolean') {
+          setJumpCutPunchIns(data.jumpCutPunchIns)
+        }
       }
     } catch (error) {
       console.error('Failed to load subtitle style:', error)
@@ -327,6 +331,28 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Failed to save subtitle style:', error)
       setSubtitleStyle(previous)
+      setStyleSaveState('error')
+    }
+  }
+
+  async function saveJumpCutPunchIns(next: boolean) {
+    const previous = jumpCutPunchIns
+    setJumpCutPunchIns(next)
+    try {
+      setStyleSaveState('saving')
+      const response = await fetch('/api/settings/style', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jumpCutPunchIns: next })
+      })
+      if (!response.ok) {
+        throw new Error('Falha ao salvar punch-in')
+      }
+      setStyleSaveState('saved')
+      setTimeout(() => setStyleSaveState('idle'), 2000)
+    } catch (error) {
+      console.error('Failed to save jump-cut punch-ins:', error)
+      setJumpCutPunchIns(previous)
       setStyleSaveState('error')
     }
   }
@@ -674,6 +700,22 @@ export default function SettingsPage() {
                 </label>
               ))}
             </div>
+            <label className="flex items-start gap-3 rounded-lg border border-zinc-800 hover:border-zinc-700 p-4 cursor-pointer transition-colors mt-6">
+              <input
+                type="checkbox"
+                name="jumpCutPunchIns"
+                checked={jumpCutPunchIns}
+                onChange={(event) => saveJumpCutPunchIns(event.target.checked)}
+                className="mt-1"
+              />
+              <span>
+                <span className="block text-sm text-white">Punch-in alternado nos cortes</span>
+                <span className="block text-xs text-zinc-500 mt-0.5">
+                  Alterna um leve zoom no vídeo base entre os cortes de silêncio para disfarçar os
+                  jump cuts. Aplica-se aos próximos renders.
+                </span>
+              </span>
+            </label>
             {styleSaveState === 'saved' && (
               <p className="text-sm text-amber-400 mt-4">Estilo salvo ✓</p>
             )}

@@ -21,6 +21,8 @@ interface ImageInsertProps {
   visualRole?: 'evidence' | 'contrast' | 'process' | 'context' | 'decision';
   durationInFrames?: number;
   palette: ColorPalette;
+  // Pacote 5: 5 deterministic micro-jumps over the first ~1.6s of the scene.
+  stutter?: boolean;
 }
 
 export const ImageInsert: React.FC<ImageInsertProps> = ({
@@ -30,11 +32,18 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
   layout = 'full',
   durationInFrames = 90,
   palette,
+  stutter,
 }) => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   const src = videoSrc || imageSrc || imagePath || '';
   const isVideo = Boolean(videoSrc);
   const motion = getImageMotion(src, layout, frame, durationInFrames);
+  // When stutter is on, a deterministic micro-jump transform overrides Ken Burns
+  // (for stills) and drives the otherwise-static video, then settles to scale(1).
+  const stutterTransform = stutter ? getStutterTransform(frame, fps) : null;
+  const imageTransform =
+    stutterTransform ?? `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`;
   const opacity = interpolate(
     frame,
     [0, 8, Math.max(9, durationInFrames - 8), durationInFrames],
@@ -72,6 +81,7 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
                 width: '100%',
                 height: '100%',
                 objectFit: 'cover',
+                transform: stutterTransform ?? undefined,
                 filter: 'saturate(1.04) contrast(1.03)',
               }}
             />
@@ -83,7 +93,7 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
                 width: '100%',
                 height: '100%',
                 objectFit: 'cover',
-                transform: `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`,
+                transform: imageTransform,
                 filter: 'saturate(1.04) contrast(1.03)',
               }}
             />
@@ -132,6 +142,7 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
             width: '100%',
             height: '100%',
             objectFit: 'cover',
+            transform: stutterTransform ?? undefined,
             filter: 'saturate(1.03) contrast(1.02)',
           }}
         />
@@ -143,7 +154,7 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            transform: `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`,
+            transform: imageTransform,
             filter: 'saturate(1.03) contrast(1.02)',
           }}
         />
@@ -243,6 +254,9 @@ export const ImageInsertTrack: React.FC<ImageInsertTrackProps> = ({
           const localFrame = Math.max(0, frame - imageStart);
           const localDuration = Math.max(1, imageEnd - imageStart);
           const motion = getImageMotion(src, layout, localFrame, localDuration);
+          const stutterTransform = scene.props.stutter
+            ? getStutterTransform(localFrame, config.fps)
+            : null;
 
           return (
             <Img
@@ -256,7 +270,9 @@ export const ImageInsertTrack: React.FC<ImageInsertTrackProps> = ({
                 height: '100%',
                 objectFit: 'cover',
                 opacity,
-                transform: `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`,
+                transform:
+                  stutterTransform ??
+                  `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`,
                 filter: 'saturate(1.06) contrast(1.04)',
               }}
             />
@@ -326,6 +342,27 @@ function getTrackImageOpacity({
   const fadeOut = 1 - ramp(frame, fadeOutStart, fadeOutEnd);
 
   return Math.max(0, Math.min(1, fadeIn * fadeOut));
+}
+
+// Pacote 5 — deterministic stutter cluster: 5 fixed micro-jumps (scale + offset)
+// over the first ~1.6s, then a settled scale(1). No randomness; frame-driven.
+const STUTTER_STEPS: Array<{ scale: number; x: number; y: number }> = [
+  { scale: 1.0, x: 0, y: 0 },
+  { scale: 1.14, x: 14, y: -14 },
+  { scale: 1.04, x: -14, y: 14 },
+  { scale: 1.18, x: 14, y: 14 },
+  { scale: 1.08, x: -14, y: -14 },
+];
+
+function getStutterTransform(frame: number, fps: number): string {
+  const stepFrames = Math.max(1, Math.round(fps / 3)); // ~10 frames @30fps
+  const total = stepFrames * STUTTER_STEPS.length; // ~1.6s @30fps
+  if (frame < 0 || frame >= total) {
+    return 'translate3d(0px, 0px, 0) scale(1)';
+  }
+  const idx = Math.min(STUTTER_STEPS.length - 1, Math.floor(frame / stepFrames));
+  const step = STUTTER_STEPS[idx];
+  return `translate3d(${step.x}px, ${step.y}px, 0) scale(${step.scale})`;
 }
 
 function hashString(value: string): number {

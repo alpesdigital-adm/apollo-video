@@ -12,6 +12,7 @@ import {
   normalizeSubtitleWords,
   resolveCreatorForProps,
   resolveLayoutSegments,
+  resolvePunchIns,
   resolveAudioSfxEvents,
   type RemotionInputProps,
   type RemotionSceneInput,
@@ -171,6 +172,7 @@ export async function startProjectRender(
     ...(hookTitle ? { hookTitle } : {}),
     creator: resolveCreatorForProps(readCreatorProfile(), appBaseUrl),
     layoutSegments: resolveLayoutSegments(editPlan, { baseUrl: appBaseUrl }),
+    punchIns: resolvePunchIns(editPlan),
     ...(audio ? { audio } : {})
   }
 

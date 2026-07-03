@@ -84,6 +84,14 @@ export interface LayoutSegment {
   props?: Record<string, unknown>
 }
 
+// Pacote 5: jump-cut punch-in. An interval between two consecutive silence cuts
+// that scales the base video slightly, alternating 1.0/1.06 to disguise cuts.
+export interface PlanPunchIn {
+  fromFrame: number
+  toFrame: number
+  scale: number
+}
+
 export interface CreativeLineageUnit {
   id: string
   kind: 'source-video' | 'subtitle-window' | 'generated-image' | 'overlay'
@@ -138,4 +146,7 @@ export interface EditPlan {
   // Optional persistent hook headline pinned to the top of the whole video.
   // Absent = no headline (backwards-compatible with v1 plans).
   hookTitle?: string
+  // Optional jump-cut punch-in track (alternating base-video scale between
+  // silence cuts). Absent/empty = base video keeps a steady scale.
+  punchIns?: PlanPunchIn[]
 }

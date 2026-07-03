@@ -50,6 +50,8 @@ export interface BaseScene {
   // repositions the base video (split/blur/tweet) instead of staying fullscreen.
   segmentLayout?: SegmentSceneLayout
   segmentEffects?: SegmentSceneEffects
+  // Pacote 5: flash transition on this scene's entrance (any scene type).
+  transitionIn?: 'flash'
 }
 
 export interface FullScreenScene extends BaseScene {
@@ -58,6 +60,8 @@ export interface FullScreenScene extends BaseScene {
   fontSize?: number
   color?: string
   bgColor?: string
+  // Pacote 5: stylized title-card variant for the opening/hook. Omit = kinetic.
+  variant?: 'torn-paper' | 'crt-glitch'
 }
 
 export interface LowerThirdScene extends BaseScene {
@@ -132,6 +136,8 @@ export interface ImageInsertScene extends BaseScene {
   sourceText?: string
   // B-roll motion (Pacote 3): when true, animate the still via image-to-video.
   motion?: boolean
+  // Pacote 5: stutter cluster — 5 deterministic micro-jumps over the first ~1.6s.
+  stutter?: boolean
   // Where the media comes from: 'generate' (AI still, default) or 'stock' (Pexels).
   source?: 'generate' | 'stock'
   // Short English search query used when source === 'stock'.
