@@ -37,6 +37,7 @@ interface ProjectData {
   videoDuration: number
   videoFps?: number
   renderedVideoPath?: string | null
+  hasRefineSnapshot?: boolean
   scenes: Scene[]
   subtitles: SubtitleEntry[]
   silences: Array<{ startTime: number; endTime: number; duration: number }>
@@ -67,6 +68,13 @@ export default function EditorPage() {
   const [refineInput, setRefineInput] = useState('')
   const [isRefining, setIsRefining] = useState(false)
   const [isRendering, setIsRendering] = useState(false)
+  const [isUndoing, setIsUndoing] = useState(false)
+  const [refineError, setRefineError] = useState<string | null>(null)
+  const [directorResult, setDirectorResult] = useState<{
+    summary: string
+    applied: string[]
+    skipped: string[]
+  } | null>(null)
   const pipelineInFlight = useRef<ProjectStatus | null>(null)
 
   // Load project
@@ -186,31 +194,61 @@ export default function EditorPage() {
     }
   }
 
-  async function handleRefineScene() {
-    if (!selectedScene || !refineInput.trim()) return
+  async function handleDirectProject() {
+    if (!refineInput.trim()) return
 
+    setRefineError(null)
     try {
       setIsRefining(true)
-      const response = await fetch('/api/scenes/refine', {
+      const response = await fetch('/api/projects/refine', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           projectId,
-          sceneId: selectedScene.id,
-          instruction: refineInput
+          instruction: refineInput,
+          sceneId: selectedScene?.id
         })
       })
+      const data = await response.json().catch(() => null)
       if (!response.ok) {
-        throw new Error('Failed to refine scene')
+        throw new Error(data?.error || 'Falha ao aplicar a instrução')
       }
-      const data = await response.json()
-      setSelectedScene(data.scene)
+      setDirectorResult({
+        summary: data.summary || 'Instrução processada.',
+        applied: Array.isArray(data.applied) ? data.applied : [],
+        skipped: Array.isArray(data.skipped) ? data.skipped : []
+      })
       setRefineInput('')
+      setSelectedScene(null)
       await loadProject()
     } catch (err) {
-      console.error('Refine error:', err)
+      setDirectorResult(null)
+      setRefineError(err instanceof Error ? err.message : 'Falha ao aplicar a instrução')
     } finally {
       setIsRefining(false)
+    }
+  }
+
+  async function handleUndoRefine() {
+    setRefineError(null)
+    try {
+      setIsUndoing(true)
+      const response = await fetch('/api/projects/refine/undo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId })
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.error || 'Falha ao desfazer')
+      }
+      setDirectorResult(null)
+      setSelectedScene(null)
+      await loadProject()
+    } catch (err) {
+      setRefineError(err instanceof Error ? err.message : 'Falha ao desfazer')
+    } finally {
+      setIsUndoing(false)
     }
   }
 
@@ -546,26 +584,103 @@ export default function EditorPage() {
           </div>
         ) : null}
 
-        {/* Refine UI (shown when scene selected) */}
-        {selectedScene && (project.status === 'ready' || project.status === 'complete') && (
+        {/* Director com IA — escopo de projeto (vídeo todo, cena, trecho ou paleta) */}
+        {(project.status === 'ready' || project.status === 'complete') && (
           <div className="mt-8 p-6 rounded-xl bg-zinc-900/50 border border-amber-400/20">
-            <h3 className="font-bold mb-4 text-amber-400">Refine with AI</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-bold text-amber-400">Editar com IA</h3>
+              {selectedScene ? (
+                <span className="text-xs text-amber-300/90 px-3 py-1 rounded-full bg-amber-400/10 border border-amber-400/30">
+                  Escopo sugerido: cena {project.scenes.findIndex((s) => s.id === selectedScene.id) + 1}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedScene(null)}
+                    className="ml-2 text-amber-300/70 hover:text-amber-200"
+                  >
+                    limpar
+                  </button>
+                </span>
+              ) : (
+                <span className="text-xs text-zinc-500">Escopo: vídeo todo</span>
+              )}
+            </div>
+            <p className="text-xs text-zinc-500 mb-4">
+              Descreva a mudança em pt-BR. Pode mirar o vídeo todo, uma cena, um trecho da fala ou as cores
+              (ex.: &quot;alterar a cor de laranja para dourado nos inserts, no vídeo todo&quot;).
+            </p>
             <div className="flex gap-3">
               <input
                 type="text"
                 value={refineInput}
                 onChange={(e) => setRefineInput(e.target.value)}
-                placeholder="Describe changes you want to make..."
-                className="flex-1 px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 focus:border-amber-400 outline-none transition-colors"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isRefining && refineInput.trim()) {
+                    handleDirectProject()
+                  }
+                }}
+                placeholder="Descreva a mudança que você quer..."
+                disabled={isRefining}
+                className="flex-1 px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 focus:border-amber-400 outline-none transition-colors disabled:opacity-50"
               />
               <button
-                onClick={handleRefineScene}
+                onClick={handleDirectProject}
                 disabled={isRefining || !refineInput.trim()}
-                className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium flex items-center gap-2"
               >
-                {isRefining ? 'Refining...' : 'Refine'}
+                {isRefining && (
+                  <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-black" />
+                )}
+                {isRefining ? 'Aplicando...' : 'Aplicar'}
               </button>
             </div>
+
+            {refineError && (
+              <div className="mt-4 p-4 rounded-lg bg-red-500/10 border border-red-500/50">
+                <p className="text-sm font-semibold text-red-400">Erro ao aplicar</p>
+                <p className="text-sm text-red-300/90 mt-1">{refineError}</p>
+              </div>
+            )}
+
+            {directorResult && !refineError && (
+              <div className="mt-4 p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/30">
+                <p className="text-sm text-zinc-200">{directorResult.summary}</p>
+                {directorResult.applied.length > 0 && (
+                  <ul className="mt-3 space-y-1">
+                    {directorResult.applied.map((item, i) => (
+                      <li key={`ap-${i}`} className="text-xs text-emerald-300 flex gap-2">
+                        <span>✓</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {directorResult.applied.length === 0 && (
+                  <p className="mt-2 text-xs text-amber-300/90">Nenhuma alteração foi aplicada.</p>
+                )}
+                {directorResult.skipped.length > 0 && (
+                  <ul className="mt-3 space-y-1">
+                    {directorResult.skipped.map((item, i) => (
+                      <li key={`sk-${i}`} className="text-xs text-zinc-500 flex gap-2">
+                        <span>—</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {project.hasRefineSnapshot && (
+              <div className="mt-4">
+                <button
+                  onClick={handleUndoRefine}
+                  disabled={isUndoing || isRefining}
+                  className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isUndoing ? 'Desfazendo...' : 'Desfazer última edição'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 

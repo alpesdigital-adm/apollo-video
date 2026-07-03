@@ -7,7 +7,7 @@ import fs from 'fs'
 import path from 'path'
 import { getInsertStylePresetMeta } from '../style-presets'
 import type { Transcription, SubtitleEntry, VideoFormat } from '../types/project'
-import type { Scene, AnalysisResult, NarrativeRole, SceneType } from '../types/scene'
+import type { Scene, AnalysisResult, NarrativeRole, SceneType, ColorPalette } from '../types/scene'
 
 function readEnvFileValue(filePath: string, key: string): string | null {
   if (!fs.existsSync(filePath)) {
@@ -86,7 +86,7 @@ async function createMessageWithModelFallback(params: any) {
 }
 
 // Valid scene types for validation
-const VALID_SCENE_TYPES: SceneType[] = [
+export const VALID_SCENE_TYPES: SceneType[] = [
   'FullScreen',
   'LowerThird',
   'Split',
@@ -100,8 +100,8 @@ const VALID_SCENE_TYPES: SceneType[] = [
   'ImageInsert'
 ]
 
-const VALID_VISUAL_ROLES = ['evidence', 'contrast', 'process', 'context', 'decision']
-const VALID_NARRATIVE_ROLES: NarrativeRole[] = [
+export const VALID_VISUAL_ROLES = ['evidence', 'contrast', 'process', 'context', 'decision']
+export const VALID_NARRATIVE_ROLES: NarrativeRole[] = [
   'hook',
   'context',
   'proof',
@@ -127,7 +127,7 @@ function inferNarrativeRole(startLeg: number, subtitleCount: number): NarrativeR
   return 'context'
 }
 
-function normalizeNarrativeRole(value: unknown, startLeg: number, subtitleCount: number): NarrativeRole {
+export function normalizeNarrativeRole(value: unknown, startLeg: number, subtitleCount: number): NarrativeRole {
   return VALID_NARRATIVE_ROLES.includes(value as NarrativeRole)
     ? (value as NarrativeRole)
     : inferNarrativeRole(startLeg, subtitleCount)
@@ -164,7 +164,7 @@ function limitWords(value: unknown, maxWords: number): string {
   return words.slice(0, Math.max(1, maxWords)).join(' ')
 }
 
-function sanitizeSceneCopy(sceneData: any): any {
+export function sanitizeSceneCopy(sceneData: any): any {
   switch (sceneData.type) {
     case 'FullScreen':
       sceneData.text = limitWords(limitCopy(sceneData.text || sceneData.title, 70), 6)
@@ -264,7 +264,7 @@ function coerceString(...values: unknown[]): string {
  * missing content that cannot be recovered, so the caller can DISCARD it.
  * ImageInsert scenes are handled separately in the analyze/refine flows.
  */
-function normalizeTypographicScene(sceneData: any): any | null {
+export function normalizeTypographicScene(sceneData: any): any | null {
   switch (sceneData.type) {
     case 'FullScreen': {
       const highlight = coerceString(sceneData.highlight, sceneData.highlightWord)
@@ -728,5 +728,156 @@ Return the modified scene as a complete, valid JSON object with all required fie
     return sanitizeSceneCopy(normalized) as Scene
   } catch (error) {
     throw new Error(`Scene refinement failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PROMPT DIRETOR — interpreta uma instrução livre do usuário (que pode mirar o
+// vídeo todo, uma cena, um trecho ou a paleta) e devolve OPERAÇÕES estruturadas.
+// O código (project-director.ts) é quem VALIDA e APLICA. Aqui só interpretamos.
+// ---------------------------------------------------------------------------
+
+export type DirectorOperation =
+  | { op: 'update_scene'; sceneId: string; changes: Record<string, unknown> }
+  | { op: 'delete_scene'; sceneId: string }
+  | { op: 'add_scene'; scene: Record<string, unknown> }
+  | { op: 'update_palette'; changes: Record<string, string> }
+
+export interface DirectorResult {
+  summary: string
+  operations: DirectorOperation[]
+}
+
+function summarizeSceneForPrompt(scene: Scene): string {
+  const data = scene as any
+  const fields = [
+    'text', 'highlight', 'title', 'subtitle', 'topText', 'bottomText',
+    'leftLabel', 'rightLabel', 'leftText', 'rightText', 'number', 'description',
+    'sender', 'message', 'value', 'label', 'steps', 'situation', 'caption',
+    'layout', 'imagePrompt', 'imageAlt', 'sourceText', 'narrativeRole', 'visualRole'
+  ]
+  const parts: string[] = []
+  for (const field of fields) {
+    const value = data[field]
+    if (value === undefined || value === null || value === '') {
+      continue
+    }
+    const text = Array.isArray(value) ? value.join(' | ') : String(value)
+    parts.push(`${field}="${text.length > 64 ? `${text.slice(0, 64)}…` : text}"`)
+  }
+  return parts.join(', ')
+}
+
+/**
+ * Interpreta a instrução do usuário como um DIRETOR de edição e devolve
+ * operações estruturadas. Não persiste nem valida profundamente — o chamador
+ * (project-director.ts) valida cada operação com os mesmos validadores do
+ * pipeline (normalizeTypographicScene / sanitizeSceneCopy) e as aplica.
+ */
+export async function directProject(
+  instruction: string,
+  scenes: Scene[],
+  subtitles: SubtitleEntry[],
+  palette: ColorPalette | null,
+  selectedSceneId?: string
+): Promise<DirectorResult> {
+  try {
+    const numberedScenes = scenes
+      .map(
+        (scene, index) =>
+          `#${index} id=${scene.id} type=${scene.type} startLeg=${scene.startLeg} :: ${summarizeSceneForPrompt(scene)}`
+      )
+      .join('\n')
+
+    const numberedSubtitles = subtitles
+      .map((subtitle, index) => `${index}: [${subtitle.startTime.toFixed(2)}s] ${subtitle.text}`)
+      .join('\n')
+
+    const paletteText = palette
+      ? Object.entries(palette)
+          .map(([key, value]) => `${key}=${value}`)
+          .join(', ')
+      : '(sem paleta definida)'
+
+    const scopeHint = selectedSceneId
+      ? `A cena atualmente selecionada é id=${selectedSceneId}. Trate isso APENAS como uma DICA de escopo — se a instrução claramente fala do vídeo todo, da paleta, ou de outro trecho, IGNORE a seleção.`
+      : 'Nenhuma cena está selecionada; assuma escopo do vídeo todo salvo instrução em contrário.'
+
+    const systemPrompt = `Você é o DIRETOR de edição de um editor de vídeo IA. Recebe UMA instrução em linguagem natural do usuário e o estado atual do projeto (cenas, legendas, paleta). Você NÃO edita diretamente: você devolve uma lista de OPERAÇÕES que o código vai validar e aplicar.
+
+A instrução pode mirar: o VÍDEO TODO, UMA cena específica, UM trecho (referenciado pelas legendas), ou a PALETA de cores. Interprete o ESCOPO a partir do texto.
+
+TIPOS DE CENA VÁLIDOS: FullScreen, LowerThird, Split, SplitVertical, Card, Message, Number, Flow, CTA, StickFigures, ImageInsert.
+
+OPERAÇÕES DISPONÍVEIS (retorne no máximo ~10 no total):
+- {"op":"update_scene","sceneId":"<id existente>","changes":{<apenas props válidas do tipo da cena>}} — altera texto/props de uma cena existente.
+- {"op":"delete_scene","sceneId":"<id existente>"} — remove uma cena.
+- {"op":"add_scene","scene":{"type":"<tipo>","startLeg":<int>,"durationInSubtitles":<1-3>, <props do tipo>}} — cria cena nova. startLeg e durationInSubtitles são OBRIGATÓRIOS.
+- {"op":"update_palette","changes":{"accent":"#RRGGBB", ...}} — muda cores GLOBAIS. Chaves válidas: primary, secondary, accent, background, text. Valores HEX (#RGB ou #RRGGBB).
+
+REGRAS DE INTERPRETAÇÃO:
+- ESCOPO GLOBAL: quando o usuário disser "vídeo todo", "em todo lugar", "sempre", ou não especificar uma cena, aplique globalmente.
+- COR: mudanças de COR (ex.: "trocar laranja por dourado", "deixar o destaque azul") são QUASE SEMPRE update_palette — NÃO tente mudar cor cena a cena. A cor de acento/destaque dos inserts e textos vem da paleta (campo accent). Se o usuário fala em "laranja"/"dourado" nos inserts e no vídeo todo, isso é update_palette em accent (e talvez primary/secondary conforme o tom pedido).
+- Só use update_scene/add_scene/delete_scene quando a instrução for realmente sobre conteúdo/estrutura de cena(s).
+- Respeite os TETOS de copy: textos plotados sobre o vídeo (FullScreen, CTA, Split, StickFigures) no máximo 6 palavras; textos secundários no máximo 5. Prefira fragmentos curtos.
+- Em ImageInsert, imagePrompt não pode conter texto/letras/logos. Para regenerar a imagem de um insert, mude imagePrompt no update_scene.
+- NUNCA invente ids de cena — use apenas os ids listados. Para add_scene, NÃO forneça id (o código gera).
+- Se a instrução for impossível ou não fizer sentido, devolva operations vazio e explique no summary.
+
+FORMATO DE SAÍDA — responda SOMENTE com JSON válido, sem markdown:
+{
+  "summary": "resumo em pt-BR do que você fez (1-2 frases)",
+  "operations": [ ... ]
+}`
+
+    const userPrompt = `INSTRUÇÃO DO USUÁRIO:
+${instruction}
+
+${scopeHint}
+
+PALETA ATUAL: ${paletteText}
+
+CENAS ATUAIS (numeradas):
+${numberedScenes || '(nenhuma cena)'}
+
+LEGENDAS (índice: [tempo] texto) — para referência de trecho:
+${numberedSubtitles || '(sem legendas)'}
+
+Devolva o JSON com summary e operations.`
+
+    const message = await createMessageWithModelFallback({
+      max_tokens: 3072,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    })
+
+    const content = message.content[0]
+    if (content.type !== 'text') {
+      throw new Error('Unexpected response type from Claude')
+    }
+
+    let parsed: any
+    try {
+      const jsonMatch = content.text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [null, content.text]
+      const jsonString = jsonMatch[1] || content.text
+      parsed = JSON.parse(jsonString)
+    } catch (parseError) {
+      throw new Error(
+        `Failed to parse director JSON response: ${parseError instanceof Error ? parseError.message : String(parseError)}`
+      )
+    }
+
+    const operations: DirectorOperation[] = Array.isArray(parsed?.operations)
+      ? parsed.operations.slice(0, 10)
+      : []
+
+    return {
+      summary: typeof parsed?.summary === 'string' && parsed.summary.trim()
+        ? parsed.summary.trim()
+        : 'Instrução interpretada.',
+      operations
+    }
+  } catch (error) {
+    throw new Error(`Project direction failed: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
