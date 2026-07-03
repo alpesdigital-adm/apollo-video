@@ -858,6 +858,453 @@ function resolvePaletteWithBrandColors(
   return { palette: basePalette }
 }
 
+// ---------------------------------------------------------------------------
+// DIREÇÃO EM DUAS PASSADAS — a passada 1 mapeia a narração em BLOCOS; a passada 2
+// (a chamada principal) monta as cenas com COTAS por bloco; o código então mede
+// déficits, faz REPAROS cirúrgicos e, por fim, PROMOÇÃO DETERMINÍSTICA onde
+// seguro. Objetivo: matar o "série D" (muito texto, zero imagem/layout/efeito).
+// ---------------------------------------------------------------------------
+
+export type BlockRole = 'gancho' | 'contexto' | 'prova' | 'historia' | 'virada' | 'cta'
+
+export interface NarrativeBlock {
+  papel: BlockRole
+  startLeg: number
+  endLeg: number
+  resumo: string
+  momentoChave: string | null
+  citacaoForte: string | null
+  dorOuProblema: boolean
+}
+
+const VALID_BLOCK_ROLES: BlockRole[] = ['gancho', 'contexto', 'prova', 'historia', 'virada', 'cta']
+
+/** Shared JSON extractor: strips a markdown ```json fence if present, then parses. */
+function parseJsonFromClaude(text: string): any {
+  const jsonMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [null, text]
+  const jsonString = jsonMatch[1] || text
+  return JSON.parse(jsonString)
+}
+
+function nullableString(value: unknown, maxChars: number): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  return trimmed.length > maxChars ? trimmed.slice(0, maxChars).trim() : trimmed
+}
+
+/**
+ * PASSADA 1 — ROTEIRO. Chamada Claude enxuta: recebe transcrição + legendas
+ * numeradas e devolve BLOCOS narrativos cobrindo a timeline inteira (5-10).
+ * Cada bloco carrega papel, intervalo de legendas, resumo, momento visual mais
+ * forte, uma citação digna de tweet (ou null) e se trata de dor/problema.
+ * Nunca lança: numa falha devolve [] (a passada 2 roda sem cotas de bloco).
+ */
+async function runScriptPass(
+  transcriptionText: string,
+  subtitles: SubtitleEntry[]
+): Promise<NarrativeBlock[]> {
+  if (subtitles.length === 0) return []
+
+  const numberedSubtitles = subtitles
+    .map((subtitle, index) => `${index}: [${subtitle.startTime.toFixed(2)}s] ${subtitle.text}`)
+    .join('\n')
+
+  const systemPrompt = `Você é um roteirista que lê a NARRAÇÃO de um vídeo e a divide em BLOCOS narrativos (entre 5 e 10), cobrindo a timeline INTEIRA sem buracos nem sobreposição. Cada bloco é um trecho contíguo de legendas com um papel narrativo.
+
+PAPÉIS: "gancho" (abertura/tensão), "contexto" (situação/pano de fundo), "prova" (evidência, número, exemplo concreto), "historia" (caso/relato vivido), "virada" (o insight/mudança), "cta" (chamada final).
+
+Para CADA bloco identifique:
+- papel: um dos acima.
+- startLeg / endLeg: índices inteiros 0-based da primeira e última legenda do bloco (contíguos; o startLeg do próximo bloco = endLeg anterior + 1; o 1º bloco começa em 0; o último termina na última legenda).
+- resumo: 1 frase curta do que acontece.
+- momentoChave: a imagem/objeto/cena física mais forte para ilustrar o bloco (ou null).
+- citacaoForte: uma frase FALADA no bloco, curta e punchy, digna de virar um post/tweet (ou null se não houver nenhuma marcante).
+- dorOuProblema: true se o bloco fala de uma DOR, medo, erro ou problema; senão false.
+
+Responda SOMENTE com JSON válido, sem markdown:
+{ "blocks": [ { "papel": "gancho", "startLeg": 0, "endLeg": 3, "resumo": "...", "momentoChave": "...", "citacaoForte": "...", "dorOuProblema": false } ] }`
+
+  const userPrompt = `Transcrição completa:
+${transcriptionText}
+
+Timeline de legendas numeradas (índice: [tempo] texto):
+${numberedSubtitles}
+
+Divida em 5-10 blocos cobrindo TODA a timeline. Devolva só o JSON com "blocks".`
+
+  try {
+    const message = await createMessageWithModelFallback({
+      max_tokens: 1500,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    })
+    const content = message.content[0]
+    if (content.type !== 'text') return []
+    const parsed = parseJsonFromClaude(content.text)
+    const raw = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.blocks) ? parsed.blocks : []
+    const maxLeg = Math.max(0, subtitles.length - 1)
+    const blocks: NarrativeBlock[] = raw
+      .map((b: any): NarrativeBlock | null => {
+        if (!b || typeof b !== 'object') return null
+        const papel = VALID_BLOCK_ROLES.includes(b.papel) ? (b.papel as BlockRole) : 'contexto'
+        let startLeg = Math.max(0, Math.min(Math.floor(Number(b.startLeg) || 0), maxLeg))
+        let endLeg = Math.max(0, Math.min(Math.floor(Number(b.endLeg) || startLeg), maxLeg))
+        if (endLeg < startLeg) endLeg = startLeg
+        return {
+          papel,
+          startLeg,
+          endLeg,
+          resumo: nullableString(b.resumo, 200) || '',
+          momentoChave: nullableString(b.momentoChave, 200),
+          citacaoForte: nullableString(b.citacaoForte, 160),
+          dorOuProblema: b.dorOuProblema === true
+        }
+      })
+      .filter((b: NarrativeBlock | null): b is NarrativeBlock => b !== null)
+      .slice(0, 10)
+    return blocks
+  } catch (error) {
+    console.warn(`[analyze] passada 1 (roteiro) falhou, seguindo sem blocos: ${error instanceof Error ? error.message : String(error)}`)
+    return []
+  }
+}
+
+/**
+ * Build the per-block quota section fed to PASSADA 2. Every block gets explicit
+ * COTAS mapped to the code floors (title-card+flash+motion no gancho, split-50
+ * na prova/história, tweet-card na citação, bw na dor, ImageInsert específico em
+ * bloco longo). '' quando não há blocos (passada 2 roda no modo antigo).
+ */
+function buildBlocksDirectiveSection(blocks: NarrativeBlock[]): string {
+  if (!blocks.length) return ''
+  // Só o PRIMEIRO bloco com citação forte recebe a cota de tweet-card: o playbook
+  // manda no MÁXIMO 1 tweet-card por vídeo (o código também corta os excedentes).
+  const tweetBlockIdx = blocks.findIndex((b) => b.citacaoForte)
+  const lines = blocks.map((b, i) => {
+    const cotas: string[] = []
+    if (b.papel === 'gancho') {
+      cotas.push('abra com um title-card FullScreen (variant torn-paper OU crt-glitch) + transitionIn:"flash", e inclua um ImageInsert com motion:true')
+    }
+    if (b.papel === 'prova' || b.papel === 'historia') {
+      cotas.push('inclua um ImageInsert com segmentLayout:"split-50" e imagePrompt ESPECÍFICO do que é dito aqui (PROIBIDO b-roll genérico de escritório/pessoas/estrada)')
+    }
+    if (b.citacaoForte && i === tweetBlockIdx) {
+      cotas.push(`transforme a citação "${b.citacaoForte}" num tweet-card (FullScreen com text curto = a citação + segmentLayout:"tweet-card"). É o ÚNICO tweet-card do vídeo`)
+    }
+    if (b.dorOuProblema) {
+      cotas.push('marque UMA cena deste bloco com segmentEffects:{"bw":true} (é dor/problema, pede preto e branco)')
+    }
+    if (b.endLeg - b.startLeg >= 3) {
+      cotas.push('bloco longo: pelo menos 1 ImageInsert com imagePrompt concreto citando a fala deste bloco')
+    }
+    return `- Bloco ${i} [${b.papel}] legendas ${b.startLeg}-${b.endLeg}: ${b.resumo}${b.momentoChave ? ` | momento visual: ${b.momentoChave}` : ''}${cotas.length ? `\n    COTAS OBRIGATÓRIAS: ${cotas.join('; ')}` : ''}`
+  })
+  return `\n\nBLOCOS NARRATIVOS DA PASSADA DE ROTEIRO (cubra TODOS na ordem cronológica; CUMPRA as COTAS de cada bloco — são verificadas por código depois e o que faltar será consertado):\n${lines.join('\n')}\n`
+}
+
+/**
+ * Validate + normalize ONE raw scene object into a Scene (or null to discard).
+ * Extracted so both the main analyze map and the repair pass share the exact
+ * same per-scene rules (type whitelist, startLeg clamp, copy budgets, media).
+ */
+function validateSceneData(
+  sceneData: any,
+  subtitles: SubtitleEntry[],
+  validAssetIds: Set<string>,
+  transcriptionText: string
+): Scene | null {
+  if (!VALID_SCENE_TYPES.includes(sceneData.type)) {
+    console.warn(`Discarding scene with unsupported type: ${sceneData.type}`)
+    return null
+  }
+  if (
+    typeof sceneData.startLeg !== 'number' ||
+    !Number.isFinite(sceneData.startLeg) ||
+    sceneData.startLeg < 0 ||
+    sceneData.startLeg >= subtitles.length
+  ) {
+    console.warn(`Invalid startLeg ${sceneData.startLeg}, clamping to valid range`)
+  }
+  sceneData.startLeg = Math.max(
+    0,
+    Math.min(Math.floor(Number(sceneData.startLeg) || 0), Math.max(0, subtitles.length - 1))
+  )
+  if (typeof sceneData.durationInSubtitles !== 'number' || sceneData.durationInSubtitles < 1) {
+    sceneData.durationInSubtitles = 2
+  }
+  sceneData.durationInSubtitles = Math.max(1, Math.min(Math.floor(sceneData.durationInSubtitles), 3))
+  delete sceneData.startFrame
+  delete sceneData.endFrame
+
+  if (sceneData.type === 'AssetCard') {
+    const card = sanitizeAssetCardScene(sceneData, validAssetIds)
+    if (!card) {
+      console.warn('Discarding AssetCard scene with invalid/unknown assetId')
+      return null
+    }
+    return card as Scene
+  }
+
+  if (sceneData.type === 'ImageInsert') {
+    if (sceneData.assetId !== undefined) {
+      const id = typeof sceneData.assetId === 'string' ? sceneData.assetId.trim() : ''
+      if (id && validAssetIds.has(id)) {
+        sceneData.assetId = id
+      } else {
+        console.warn(`Removing unknown assetId from ImageInsert: ${sceneData.assetId}`)
+        delete sceneData.assetId
+      }
+    }
+    sceneData.narrativeRole = normalizeNarrativeRole(sceneData.narrativeRole, sceneData.startLeg, subtitles.length)
+    if (!sceneData.imagePrompt) {
+      const subtitle = subtitles[sceneData.startLeg]
+      sceneData.imagePrompt = `Premium contextual visual inspired by this spoken moment: "${subtitle?.text || transcriptionText.slice(0, 160)}". No text, no letters, no logos.`
+    }
+    if (!sceneData.sourceText) {
+      sceneData.sourceText = subtitles[sceneData.startLeg]?.text || ''
+    }
+    // analyzeContent: stutter é tática manual do diretor, nunca da IA.
+    return sanitizeSceneCopy(sceneData, { stripStutter: true }) as Scene
+  }
+
+  const normalized = normalizeTypographicScene(sceneData)
+  if (!normalized) {
+    console.warn(`Discarding ${sceneData.type} scene missing required content`)
+    return null
+  }
+  return sanitizeSceneCopy(normalized, { stripStutter: true }) as Scene
+}
+
+/** Run the three shared segment/tactic normalizers over one scene, in place. */
+function normalizeSceneSegments(scene: any): void {
+  normalizeSegmentFields(scene)
+  enforceAnalyzeSegmentConstraints(scene)
+  normalizeSceneTactics(scene)
+}
+
+/**
+ * Deterministic VARIETY cap so the fix for "zero layout" never overshoots into
+ * spam: at most 1 tweet-card in the whole video (playbook rule) and at most 4
+ * segment layouts total; extras revert to fullscreen (segmentLayout removed).
+ * Keeps the first of each (split-50s survive over excess tweet-cards). Returns a
+ * list of the cuts made, for logging. Mutates scenes in place.
+ */
+function capSegmentLayouts(scenes: Scene[]): string[] {
+  const notes: string[] = []
+  let tweetSeen = false
+  for (const s of scenes as any[]) {
+    if (s.segmentLayout === 'tweet-card') {
+      if (tweetSeen) {
+        delete s.segmentLayout
+        notes.push(`tweet-card extra→fullscreen (${s.id})`)
+      } else {
+        tweetSeen = true
+      }
+    }
+  }
+  let count = 0
+  for (const s of scenes as any[]) {
+    if (!s.segmentLayout) continue
+    if (count >= 4) {
+      delete s.segmentLayout
+      notes.push(`layout extra→fullscreen (${s.id})`)
+      continue
+    }
+    count++
+  }
+  return notes
+}
+
+const DEFICIT_LABELS: Record<string, string> = {
+  imginsert:
+    'B-ROLL INSUFICIENTE: menos de 40% das cenas são ImageInsert. Adicione cenas ImageInsert nos blocos mais longos, cada uma com imagePrompt ESPECÍFICO da fala (nada de escritório/pessoas genéricas).',
+  split50:
+    'NENHUM segmentLayout "split-50". Escolha o melhor ImageInsert ilustrativo (bloco de prova/história) e devolva um update_scene com segmentLayout:"split-50".',
+  tweet:
+    'NENHUM tweet-card apesar de haver citação forte nos blocos. Crie 1 cena FullScreen com o text = a citação forte (≤ 20 palavras) e segmentLayout:"tweet-card".',
+  bw:
+    'NENHUMA cena em preto e branco apesar de haver bloco de DOR/PROBLEMA. Aplique segmentEffects:{"bw":true} numa cena do trecho de dor (update_scene).',
+  motion:
+    'MENOS de 2 ImageInserts com motion:true. Marque motion:true (update_scene) nos 2 inserts de maior impacto (priorize o gancho).',
+  flash:
+    'NENHUMA cena com transitionIn:"flash". Marque transitionIn:"flash" (update_scene) na PRIMEIRA cena tipográfica do gancho.'
+}
+
+/**
+ * Measure the code floors on the current scene set. Returns the KEYS of every
+ * violated floor (empty = clean). Floors gated on duration/blocks exactly as the
+ * mission specifies: ImageInsert%≥40 (>45s), ≥1 split-50 (>60s), tweet-card iff
+ * a block has citacaoForte, bw iff a block is dorOuProblema, ≥2 motion, ≥1 flash.
+ */
+function computeAnalysisDeficits(scenes: Scene[], blocks: NarrativeBlock[], spokenDuration: number): string[] {
+  const deficits: string[] = []
+  const n = scenes.length
+  if (n === 0) return deficits
+  const imageInserts = scenes.filter((s) => s.type === 'ImageInsert')
+  const pct = Math.round((imageInserts.length / n) * 100)
+  if (spokenDuration > 45 && pct < 40) deficits.push('imginsert')
+  const splitCount = scenes.filter((s) => (s as any).segmentLayout === 'split-50').length
+  if (spokenDuration > 60 && splitCount === 0) deficits.push('split50')
+  const tweetCount = scenes.filter((s) => (s as any).segmentLayout === 'tweet-card').length
+  if (blocks.some((b) => b.citacaoForte) && tweetCount === 0) deficits.push('tweet')
+  const bwCount = scenes.filter((s) => (s as any).segmentEffects?.bw === true).length
+  if (blocks.some((b) => b.dorOuProblema) && bwCount === 0) deficits.push('bw')
+  const motionCount = scenes.filter((s) => (s as any).motion === true).length
+  if (motionCount < 2 && imageInserts.length > 0) deficits.push('motion')
+  const flashCount = scenes.filter((s) => (s as any).transitionIn === 'flash').length
+  if (flashCount === 0) deficits.push('flash')
+  return deficits
+}
+
+/**
+ * REPARO CIRÚRGICO — uma chamada Claude curta que recebe os déficits, os blocos e
+ * as cenas atuais e devolve APENAS operações mínimas (add_scene/update_scene) para
+ * suprir o que faltou. Nunca lança (falha → []).
+ */
+async function runRepairPass(
+  deficits: string[],
+  scenes: Scene[],
+  blocks: NarrativeBlock[],
+  subtitles: SubtitleEntry[]
+): Promise<any[]> {
+  const numberedScenes = scenes
+    .map((s, i) => `#${i} id=${s.id} type=${s.type} startLeg=${s.startLeg} dur=${s.durationInSubtitles} :: ${summarizeSceneForPrompt(s)}`)
+    .join('\n')
+  const blockList = blocks
+    .map((b, i) => `Bloco ${i} [${b.papel}] leg ${b.startLeg}-${b.endLeg}${b.citacaoForte ? ` | citação: "${b.citacaoForte}"` : ''}${b.dorOuProblema ? ' | DOR' : ''}: ${b.resumo}`)
+    .join('\n')
+  const problems = deficits.map((d) => `- ${DEFICIT_LABELS[d] || d}`).join('\n')
+
+  const systemPrompt = `Você é o diretor de cena consertando LACUNAS pontuais numa análise de vídeo já pronta. NÃO refaça o resto: devolva só as operações mínimas para suprir os itens faltantes. Máximo UMA operação por lacuna.
+Regras: use SOMENTE ids de cena que existem na lista; imagePrompt SEM texto/letras/logos e ESPECÍFICO da fala do bloco; respeite os tetos de copy (texto sobre vídeo ≤ 6 palavras); PROIBIDO travessão. split-50/blur-bg só em ImageInsert; tweet-card com text ≤ 20 palavras.
+Responda SOMENTE com JSON, sem markdown:
+{ "operations": [ {"op":"add_scene","scene":{"type":"...","startLeg":<int>,"durationInSubtitles":<1-3>, ...props}}, {"op":"update_scene","sceneId":"<id existente>","changes":{ ...props ou segmentLayout/segmentEffects/motion/transitionIn/variant }} ] }`
+
+  const userPrompt = `LACUNAS a suprir:
+${problems}
+
+BLOCOS:
+${blockList || '(sem blocos)'}
+
+CENAS ATUAIS:
+${numberedScenes || '(nenhuma)'}
+
+Devolva só o JSON com "operations" (mínimas, uma por lacuna).`
+
+  try {
+    const message = await createMessageWithModelFallback({
+      max_tokens: 1500,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    })
+    const content = message.content[0]
+    if (content.type !== 'text') return []
+    const parsed = parseJsonFromClaude(content.text)
+    return Array.isArray(parsed?.operations) ? parsed.operations.slice(0, 8) : []
+  } catch (error) {
+    console.warn(`[analyze] reparo falhou: ${error instanceof Error ? error.message : String(error)}`)
+    return []
+  }
+}
+
+/** Apply repair operations (add/update) with the SAME validators as the main flow. */
+function applyRepairOperations(
+  ops: any[],
+  scenes: Scene[],
+  subtitles: SubtitleEntry[],
+  validAssetIds: Set<string>,
+  transcriptionText: string
+): { scenes: Scene[]; applied: number } {
+  let applied = 0
+  let idCounter = scenes.length
+  const out: Scene[] = [...scenes]
+  for (const op of ops) {
+    if (op?.op === 'add_scene' && op.scene && typeof op.scene === 'object') {
+      const raw = { ...op.scene, id: typeof op.scene.id === 'string' && op.scene.id ? op.scene.id : `r${++idCounter}` }
+      const v = validateSceneData(raw, subtitles, validAssetIds, transcriptionText)
+      if (v) {
+        normalizeSceneSegments(v)
+        out.push(v)
+        applied++
+      }
+    } else if (op?.op === 'update_scene' && typeof op.sceneId === 'string' && op.changes && typeof op.changes === 'object') {
+      const idx = out.findIndex((s) => s.id === op.sceneId)
+      if (idx >= 0) {
+        const original = out[idx] as any
+        // Keep id/type from the original scene; segment/tactic tweaks never change type.
+        const merged = { ...original, ...op.changes, id: original.id, type: original.type }
+        const v = validateSceneData(merged, subtitles, validAssetIds, transcriptionText)
+        if (v) {
+          normalizeSceneSegments(v)
+          out[idx] = v
+          applied++
+        }
+      }
+    }
+  }
+  return { scenes: out, applied }
+}
+
+/**
+ * PROMOÇÃO DETERMINÍSTICA — último recurso por código quando um déficit sobrevive
+ * ao reparo, aplicada só onde é SEGURO (split-50 no ImageInsert mais longo; bw na
+ * cena do bloco de dor; motion nos 2 primeiros inserts; flash na 1ª cena
+ * tipográfica do gancho). imginsert/tweet não têm fallback seguro (ficam no
+ * reparo). Loga cada promoção. Retorna as cenas e a lista de promoções.
+ */
+function applyDeterministicPromotions(
+  scenes: Scene[],
+  blocks: NarrativeBlock[],
+  spokenDuration: number
+): { scenes: Scene[]; promotions: string[] } {
+  const promotions: string[] = []
+  const out = [...scenes] as any[]
+  const deficits = computeAnalysisDeficits(out as Scene[], blocks, spokenDuration)
+  const inDorBlock = (s: any) => blocks.some((b) => b.dorOuProblema && s.startLeg >= b.startLeg && s.startLeg <= b.endLeg)
+  const inHookBlock = (s: any) => blocks.some((b) => b.papel === 'gancho' && s.startLeg >= b.startLeg && s.startLeg <= b.endLeg)
+
+  if (deficits.includes('split50')) {
+    const inserts = out.filter((s) => s.type === 'ImageInsert')
+    if (inserts.length) {
+      const longest = inserts.reduce((a, b) => (b.durationInSubtitles > a.durationInSubtitles ? b : a))
+      longest.segmentLayout = 'split-50'
+      normalizeSceneSegments(longest)
+      if (longest.segmentLayout === 'split-50') promotions.push(`split-50→${longest.id}`)
+    }
+  }
+  if (deficits.includes('bw')) {
+    const target = out.find(inDorBlock) || out[Math.floor(out.length / 2)]
+    if (target) {
+      target.segmentEffects = { ...(target.segmentEffects || {}), bw: true }
+      normalizeSceneSegments(target)
+      if (target.segmentEffects?.bw === true) promotions.push(`bw→${target.id}`)
+    }
+  }
+  if (deficits.includes('motion')) {
+    const already = out.filter((s) => s.type === 'ImageInsert' && s.motion === true).length
+    let need = 2 - already
+    for (const ins of out.filter((s) => s.type === 'ImageInsert' && s.motion !== true)) {
+      if (need <= 0) break
+      ins.motion = true
+      promotions.push(`motion→${ins.id}`)
+      need--
+    }
+  }
+  if (deficits.includes('flash')) {
+    const target =
+      out.find((s) => inHookBlock(s) && s.type !== 'ImageInsert' && s.type !== 'AssetCard') ||
+      out.find((s) => s.type !== 'ImageInsert' && s.type !== 'AssetCard') ||
+      out[0]
+    if (target) {
+      target.transitionIn = 'flash'
+      normalizeSceneSegments(target)
+      if (target.transitionIn === 'flash') promotions.push(`flash→${target.id}`)
+    }
+  }
+  return { scenes: out as Scene[], promotions }
+}
+
 /**
  * Analyze transcription to generate video scene structure
  * Uses Claude to determine narrative format, color palette, and scene breakdown
@@ -867,6 +1314,9 @@ function resolvePaletteWithBrandColors(
  *   with `forced`, that group's colors are used as-is (round-robin mode). When
  *   provided with only `groups`, Claude picks one (ai-pick mode). When omitted,
  *   the palette is fully AI-invented (previous behavior).
+ * @param minimal When true, skips ALL scene AI calls (both passes) and returns
+ *   scenes:[] with the group's default palette and no hookTitle — the video is
+ *   just cut + subtitles, edited by hand via the beats panel. Cheap, no AI.
  * @returns AnalysisResult with narrative format, palette, and scenes
  */
 export async function analyzeContent(
@@ -875,7 +1325,8 @@ export async function analyzeContent(
   subtitles: SubtitleEntry[],
   stylePreset: string = 'creator-clean',
   brandColors?: AnalyzeContentBrandColors,
-  assetCatalog?: AssetCatalogItem[]
+  assetCatalog?: AssetCatalogItem[],
+  minimal: boolean = false
 ): Promise<AnalysisResult> {
   try {
     // For simplicity in the initial analysis, we'll work with the text
@@ -884,6 +1335,23 @@ export async function analyzeContent(
 
     const styleMeta = getInsertStylePresetMeta(stylePreset)
     const validAssetIds = new Set((assetCatalog || []).map((a) => a.id))
+
+    // MODO MÍNIMO — sem NENHUMA chamada de cena: só corte + legendas. O dono edita
+    // pelas batidas. Barato e sem IA: retorna scenes:[] com a paleta default do grupo.
+    if (minimal) {
+      const { palette, colorGroup } = resolvePaletteWithBrandColors({}, brandColors)
+      return {
+        narrativeFormat: 'Corte e legendas (modo mínimo, sem cenas de IA)',
+        palette,
+        scenes: [],
+        ...(colorGroup ? { colorGroup } : {})
+      }
+    }
+
+    // PASSADA 1 — ROTEIRO: mapeia a narração em BLOCOS narrativos que guiam a
+    // passada 2 (cotas por bloco) e os pisos verificados por código.
+    const blocks = await runScriptPass(transcriptionText, subtitles)
+    const blocksDirective = buildBlocksDirectiveSection(blocks)
 
     const systemPrompt = `Você é um editor de vídeo sênior especializado em vídeos narrados premium para redes sociais (Reels/Shorts/TikTok/YouTube).
 Seu trabalho é montar uma sequência de cenas visuais que pontuam os momentos-chave da narração. Você combina inserts de imagem (B-roll) com cenas tipográficas animadas para tornar a fala mais concreta, crível e fácil de entender.
@@ -975,7 +1443,9 @@ REGRAS DE RITMO — OBRIGATÓRIAS, VERIFICADAS POR CÓDIGO (estas prevalecem sob
 - vídeos com mais de ~60s de fala DEVEM conter PELO MENOS 1 cena com segmentLayout (split-50 preferido para b-roll longo, ou blur-bg/tweet-card). Um vídeo longo sem nenhuma troca de layout é reprovado.
 - EXATAMENTE 1 cena com "transitionIn": "flash" — e ela deve ser a PRIMEIRA cena tipográfica do hook (a abertura estoura em flash branco-quente). Não espalhe flash por várias cenas.
 - "motion": true nos 2 inserts de MAIOR impacto do vídeo (sempre priorize o hook). Movimento é ênfase — exatamente nos 2 mais fortes, não em todos.
-Estas quatro regras são conferidas por código após sua resposta; cumpra-as ao montar as cenas.`
+Estas quatro regras são conferidas por código após sua resposta; cumpra-as ao montar as cenas.
+
+COTAS POR BLOCO (no pedido do usuário abaixo vêm os BLOCOS da passada de roteiro com COTAS OBRIGATÓRIAS): trate cada COTA como uma exigência dura — o gancho ganha title-card+flash+b-roll com motion; prova/história ganham split-50 com b-roll ESPECÍFICO; citação forte vira tweet-card; bloco de dor ganha preto e branco; bloco longo ganha ImageInsert concreto. O que faltar será consertado por código, então é melhor você já entregar. PROIBIDO b-roll genérico (escritório/pessoas caminhando/estrada vazia): todo imagePrompt deve citar o contexto CONCRETO da fala do bloco.`
 
     const numberedSubtitles = subtitles
       .map((subtitle, index) => `${index}: [${subtitle.startTime.toFixed(2)}s] ${subtitle.text}`)
@@ -991,7 +1461,7 @@ ${transcriptionText}
 
 Numbered subtitle timeline:
 ${numberedSubtitles}
-
+${blocksDirective}
 Responda com um objeto JSON contendo narrativeFormat, palette e scenes${brandColors && brandColors.groups.length > 0 && !brandColors.forced ? ' (e chosenColorGroup — obrigatório neste caso, ver instruções de grupos de cores da marca acima)' : ''}.
 Cada cena carrega SEMPRE: id, type, startLeg (índice inteiro 0-based da legenda), durationInSubtitles (1-3) e as props do seu tipo.
 
@@ -1032,9 +1502,9 @@ Diretrizes de composição:
 
 Garanta que o JSON seja válido e completo.`
 
-    // Call Claude API
+    // Call Claude API (PASSADA 2 — DIREÇÃO por bloco)
     const message = await createMessageWithModelFallback({
-      max_tokens: 4096,
+      max_tokens: 6000,
       system: systemPrompt,
       messages: [
         {
@@ -1067,82 +1537,9 @@ Garanta que o JSON seja válido e completo.`
     }
 
     const validatedScenes: Scene[] = analysisData.scenes
-      .map((sceneData: any): Scene | null => {
-        // Validate scene type: keep any of the 11 supported types. Unknown types
-        // are discarded rather than force-converted to ImageInsert.
-        if (!VALID_SCENE_TYPES.includes(sceneData.type)) {
-          console.warn(`Discarding scene with unsupported type: ${sceneData.type}`)
-          return null
-        }
-
-        // Validate and clamp startLeg (shared across all types)
-        if (
-          typeof sceneData.startLeg !== 'number' ||
-          !Number.isFinite(sceneData.startLeg) ||
-          sceneData.startLeg < 0 ||
-          sceneData.startLeg >= subtitles.length
-        ) {
-          console.warn(`Invalid startLeg ${sceneData.startLeg}, clamping to valid range`)
-        }
-        sceneData.startLeg = Math.max(
-          0,
-          Math.min(Math.floor(Number(sceneData.startLeg) || 0), Math.max(0, subtitles.length - 1))
-        )
-
-        // Ensure durationInSubtitles is valid (1-3 per contract)
-        if (typeof sceneData.durationInSubtitles !== 'number' || sceneData.durationInSubtitles < 1) {
-          sceneData.durationInSubtitles = 2
-        }
-        sceneData.durationInSubtitles = Math.max(1, Math.min(Math.floor(sceneData.durationInSubtitles), 3))
-
-        // Ensure startFrame and endFrame are not set (will be computed later)
-        delete sceneData.startFrame
-        delete sceneData.endFrame
-
-        if (sceneData.type === 'AssetCard') {
-          const card = sanitizeAssetCardScene(sceneData, validAssetIds)
-          if (!card) {
-            console.warn('Discarding AssetCard scene with invalid/unknown assetId')
-            return null
-          }
-          return card as Scene
-        }
-
-        if (sceneData.type === 'ImageInsert') {
-          // Optional library asset reference: keep only when it is a real id.
-          if (sceneData.assetId !== undefined) {
-            const id = typeof sceneData.assetId === 'string' ? sceneData.assetId.trim() : ''
-            if (id && validAssetIds.has(id)) {
-              sceneData.assetId = id
-            } else {
-              console.warn(`Removing unknown assetId from ImageInsert: ${sceneData.assetId}`)
-              delete sceneData.assetId
-            }
-          }
-          sceneData.narrativeRole = normalizeNarrativeRole(
-            sceneData.narrativeRole,
-            sceneData.startLeg,
-            subtitles.length
-          )
-          if (!sceneData.imagePrompt) {
-            const subtitle = subtitles[sceneData.startLeg]
-            sceneData.imagePrompt = `Premium contextual visual inspired by this spoken moment: "${subtitle?.text || transcriptionText.slice(0, 160)}". No text, no letters, no logos.`
-          }
-          if (!sceneData.sourceText) {
-            sceneData.sourceText = subtitles[sceneData.startLeg]?.text || ''
-          }
-          // analyzeContent: stutter é tática manual do diretor, nunca da IA.
-          return sanitizeSceneCopy(sceneData, { stripStutter: true }) as Scene
-        }
-
-        // Typographic scene: validate/coerce required props, discard if impossible.
-        const normalized = normalizeTypographicScene(sceneData)
-        if (!normalized) {
-          console.warn(`Discarding ${sceneData.type} scene missing required content`)
-          return null
-        }
-        return sanitizeSceneCopy(normalized, { stripStutter: true }) as Scene
-      })
+      .map((sceneData: any): Scene | null =>
+        validateSceneData(sceneData, subtitles, validAssetIds, transcriptionText)
+      )
       .filter((scene: Scene | null): scene is Scene => scene !== null)
 
     // Fase 1b — layouts de segmento e efeitos atribuídos pela própria IA.
@@ -1152,38 +1549,46 @@ Garanta que o JSON seja válido e completo.`
     // `text` já no formato final. Mutação in-place; os campos são opcionais e
     // sobrevivem a curateSceneDensity/resolveSceneTiming (spreads preservam).
     for (const scene of validatedScenes) {
-      normalizeSegmentFields(scene)
-      enforceAnalyzeSegmentConstraints(scene)
-      normalizeSceneTactics(scene)
+      normalizeSceneSegments(scene)
     }
 
-    // Pós-validação das REGRAS DE RITMO (só loga — não inventa cenas). Usa o fim
-    // da última legenda como proxy da duração falada do vídeo.
-    const spokenDuration =
-      subtitles.length > 0 ? subtitles[subtitles.length - 1].endTime : 0
-    const sceneCount = validatedScenes.length
-    if (sceneCount > 0) {
-      if (spokenDuration > 45) {
-        const imageInserts = validatedScenes.filter((s) => s.type === 'ImageInsert').length
-        const pct = Math.round((imageInserts / sceneCount) * 100)
-        if (pct < 40) {
-          console.warn(`[analyze] modelo entregou ${pct}% ImageInsert, esperado ≥40% (vídeo ${Math.round(spokenDuration)}s)`)
-        }
+    // PISOS VERIFICADOS + REPARO + PROMOÇÃO. Usa o fim da última legenda como
+    // proxy da duração falada. Mede déficits, tenta até 3 rodadas de reparo
+    // cirúrgico (add/update) e, no que sobrar, aplica promoção determinística.
+    const spokenDuration = subtitles.length > 0 ? subtitles[subtitles.length - 1].endTime : 0
+    let workingScenes: Scene[] = validatedScenes
+    let deficits = computeAnalysisDeficits(workingScenes, blocks, spokenDuration)
+    console.log(
+      `[analyze] cenas=${workingScenes.length} vídeo=${Math.round(spokenDuration)}s déficits iniciais: ${deficits.length ? deficits.join(', ') : 'nenhum'}`
+    )
+    for (let round = 0; round < 3 && deficits.length > 0; round++) {
+      const ops = await runRepairPass(deficits, workingScenes, blocks, subtitles)
+      if (ops.length === 0) break
+      const result = applyRepairOperations(ops, workingScenes, subtitles, validAssetIds, transcriptionText)
+      workingScenes = result.scenes
+      const next = computeAnalysisDeficits(workingScenes, blocks, spokenDuration)
+      console.log(
+        `[analyze] reparo rodada ${round + 1}: ${result.applied} op(s) aplicada(s); déficits restantes: ${next.length ? next.join(', ') : 'nenhum'}`
+      )
+      if (result.applied === 0) break
+      deficits = next
+    }
+    if (deficits.length > 0) {
+      const promoted = applyDeterministicPromotions(workingScenes, blocks, spokenDuration)
+      workingScenes = promoted.scenes
+      if (promoted.promotions.length) {
+        console.log(`[analyze] promoções determinísticas: ${promoted.promotions.join(', ')}`)
       }
-      if (spokenDuration > 60) {
-        const withLayout = validatedScenes.filter((s) => Boolean((s as any).segmentLayout)).length
-        if (withLayout < 1) {
-          console.warn(`[analyze] modelo entregou 0 segmentLayout, esperado ≥1 (vídeo ${Math.round(spokenDuration)}s)`)
-        }
+      const finalDeficits = computeAnalysisDeficits(workingScenes, blocks, spokenDuration)
+      if (finalDeficits.length) {
+        console.warn(`[analyze] déficits que persistiram (sem fallback seguro): ${finalDeficits.join(', ')}`)
       }
-      const flashCount = validatedScenes.filter((s) => (s as any).transitionIn === 'flash').length
-      if (flashCount !== 1) {
-        console.warn(`[analyze] modelo entregou ${flashCount} transitionIn:'flash', esperado exatamente 1 na primeira cena tipográfica do hook`)
-      }
-      const motionCount = validatedScenes.filter((s) => (s as any).motion === true).length
-      if (motionCount < 2) {
-        console.warn(`[analyze] modelo entregou ${motionCount} inserts com motion:true, esperado ≥2 (os 2 inserts mais fortes)`)
-      }
+    }
+
+    // Cap de variedade: no máximo 1 tweet-card e 4 layouts no vídeo (anti-spam).
+    const layoutCapNotes = capSegmentLayouts(workingScenes)
+    if (layoutCapNotes.length) {
+      console.log(`[analyze] cap de layouts: ${layoutCapNotes.join(', ')}`)
     }
 
     const { palette, colorGroup } = resolvePaletteWithBrandColors(analysisData, brandColors)
@@ -1218,7 +1623,7 @@ Garanta que o JSON seja válido e completo.`
         hookTitle = undefined
       }
     }
-    if (hookTitle && hookTitleDuplicatesScene(hookTitle, validatedScenes)) {
+    if (hookTitle && hookTitleDuplicatesScene(hookTitle, workingScenes)) {
       console.warn(
         `[analyze] hookTitle descartado por duplicar o texto de uma cena: "${hookTitle}"`
       )
@@ -1228,7 +1633,7 @@ Garanta que o JSON seja válido e completo.`
     return {
       narrativeFormat: analysisData.narrativeFormat || 'Professional video content',
       palette,
-      scenes: validatedScenes,
+      scenes: workingScenes,
       ...(colorGroup ? { colorGroup } : {}),
       ...(hookTitle ? { hookTitle } : {})
     }

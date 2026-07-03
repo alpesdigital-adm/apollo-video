@@ -111,6 +111,9 @@ export async function POST(request: NextRequest) {
     // user has assets — otherwise the prompt is unchanged.
     const assetCatalog = getAssetCatalog()
 
+    // Modo mínimo: sem chamadas de cena (só corte + legendas). body.minimal=true.
+    const minimal = body.minimal === true
+
     // Call Claude API to analyze content and generate scenes
     const analysisResult = await analyzeContent(
       transcription.text,
@@ -118,7 +121,8 @@ export async function POST(request: NextRequest) {
       subtitles,
       stylePreset,
       brandColors,
-      assetCatalog.length > 0 ? assetCatalog : undefined
+      assetCatalog.length > 0 ? assetCatalog : undefined,
+      minimal
     )
 
     // Resolve scene timing - convert startLeg to actual frame numbers
