@@ -196,24 +196,43 @@ export const ImageInsertTrack: React.FC<ImageInsertTrackProps> = ({
     return null;
   }
 
-  const groupStart = sortedScenes[0].fromFrame;
-  const groupEnd = Math.max(...sortedScenes.map((scene) => scene.toFrame));
-  if (frame < groupStart || frame >= groupEnd) {
+  const crossfadeFrames = Math.max(10, Math.round(config.fps * 0.42));
+  // Uma imagem só é "segurada" até a próxima quando elas formam um bloco
+  // consecutivo (gap curto). Imagens distantes respeitam a janela da própria
+  // cena — segurar até a próxima cobria dezenas de segundos de outras cenas.
+  const chainGapFrames = Math.round(config.fps * 1.5);
+
+  const windows = sortedScenes.map((scene, index) => {
+    const next = sortedScenes[index + 1];
+    const chainedIntoNext = Boolean(
+      next && next.fromFrame - scene.toFrame <= chainGapFrames
+    );
+    return {
+      scene,
+      start: scene.fromFrame,
+      end: chainedIntoNext && next ? next.fromFrame : scene.toFrame,
+      chainedIntoNext,
+      chainedFromPrev: false,
+    };
+  });
+  windows.forEach((window, index) => {
+    if (index > 0) {
+      window.chainedFromPrev = windows[index - 1].chainedIntoNext;
+    }
+  });
+
+  const activeWindow = windows.find((w) => frame >= w.start && frame < w.end);
+  if (!activeWindow) {
     return null;
   }
 
-  const activeScene =
-    [...sortedScenes].reverse().find((scene) => frame >= scene.fromFrame) ||
-    sortedScenes[0];
-  const layout = activeScene.props.layout || 'top-image-compact';
+  const layout = activeWindow.scene.props.layout || 'top-image-compact';
   const isTopImageCompact = layout === 'top-image-compact';
   const isSplit = layout === 'split-bottom' || isTopImageCompact;
 
   if (!isSplit) {
     return null;
   }
-
-  const crossfadeFrames = Math.max(10, Math.round(config.fps * 0.42));
 
   return (
     <AbsoluteFill style={{ pointerEvents: 'none' }}>
@@ -229,22 +248,18 @@ export const ImageInsertTrack: React.FC<ImageInsertTrackProps> = ({
           backgroundColor: palette.background,
         }}
       >
-        {sortedScenes.map((scene, index) => {
+        {windows.map((window) => {
+          const scene = window.scene;
           const src = scene.props.imageSrc || scene.props.imagePath || '';
-          const nextScene = sortedScenes[index + 1];
-          const imageStart = scene.fromFrame;
-          const imageEnd = nextScene ? nextScene.fromFrame : groupEnd;
-          const isFirst = index === 0;
-          const isLast = index === sortedScenes.length - 1;
+          const imageStart = window.start;
+          const imageEnd = window.end;
           const opacity = getTrackImageOpacity({
             frame,
             imageStart,
             imageEnd,
-            groupStart,
-            groupEnd,
             crossfadeFrames,
-            isFirst,
-            isLast,
+            chainedFromPrev: window.chainedFromPrev,
+            chainedIntoNext: window.chainedIntoNext,
           });
 
           if (opacity <= 0.001) {
@@ -318,27 +333,27 @@ function getTrackImageOpacity({
   frame,
   imageStart,
   imageEnd,
-  groupStart,
-  groupEnd,
   crossfadeFrames,
-  isFirst,
-  isLast,
+  chainedFromPrev,
+  chainedIntoNext,
 }: {
   frame: number;
   imageStart: number;
   imageEnd: number;
-  groupStart: number;
-  groupEnd: number;
   crossfadeFrames: number;
-  isFirst: boolean;
-  isLast: boolean;
+  chainedFromPrev: boolean;
+  chainedIntoNext: boolean;
 }): number {
-  const fadeInStart = isFirst ? groupStart : imageStart - crossfadeFrames;
-  const fadeInEnd = isFirst ? groupStart + crossfadeFrames : imageStart + crossfadeFrames;
-  const fadeOutStart = isLast ? groupEnd - crossfadeFrames : imageEnd - crossfadeFrames;
-  const fadeOutEnd = isLast ? groupEnd : imageEnd + crossfadeFrames;
+  // Encadeada com a anterior: crossfade centrado no limite (a anterior segura
+  // até imageStart). Sem encadeamento: fade in contido na própria janela.
+  const fadeInStart = chainedFromPrev ? imageStart - crossfadeFrames : imageStart;
+  const fadeInEnd = imageStart + crossfadeFrames;
+  // Encadeada com a próxima: crossfade centrado no limite. Sem encadeamento:
+  // fade out termina NA janela — nunca vaza para cenas seguintes.
+  const fadeOutStart = imageEnd - crossfadeFrames;
+  const fadeOutEnd = chainedIntoNext ? imageEnd + crossfadeFrames : imageEnd;
 
-  const fadeIn = isFirst && groupStart <= 1 ? 1 : ramp(frame, fadeInStart, fadeInEnd);
+  const fadeIn = imageStart <= 1 ? 1 : ramp(frame, fadeInStart, fadeInEnd);
   const fadeOut = 1 - ramp(frame, fadeOutStart, fadeOutEnd);
 
   return Math.max(0, Math.min(1, fadeIn * fadeOut));

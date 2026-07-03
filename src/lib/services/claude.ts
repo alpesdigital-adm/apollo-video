@@ -842,7 +842,7 @@ TÁTICAS DE EDIÇÃO PONTUAIS (opcionais — ÊNFASE rara, nunca padrão; valore
 - variant (SÓ em FullScreen, title-card de ABERTURA/hook): "variant": "torn-paper" (faixa vermelha rasgada, urgência/notícia) ou "variant": "crt-glitch" (glitch RGB + scanlines, tech/erro). Use no title-card de abertura quando o tom pedir impacto; sem variant = kinético padrão. NO MÁXIMO 1 por vídeo.
 
 TÍTULO-HOOK PERSISTENTE (hookTitle — OPCIONAL, no nível raiz do JSON, não é uma cena):
-- Uma manchete-promessa curta (NO MÁXIMO 10 palavras) que fica FIXA no topo do vídeo inteiro, reforçando a promessa central. Estilo específico e numérico quando possível (ex.: "Como vendi 185 ingressos em 3h53min", "O erro que custou R$40 mil").
+- Uma manchete-promessa que fica FIXA no topo do vídeo, escrita com QUALIDADE DE COPYWRITER SÊNIOR: pensamento COMPLETO e fechado (sujeito + tensão/resultado), específica e numérica quando o áudio sustenta (ex.: "Como vendi 185 ingressos em 3h53min", "O erro que custou R$40 mil"). Alvo: 5-9 palavras; NUNCA uma frase interrompida no meio ("...o problema é como você" é INACEITÁVEL — parece rascunho). PROIBIDO terminar em palavra pendurada (como, você, que, de, para, com, sem, mais, é). Se não couber completa e forte em até 12 palavras, OMITA o campo.
 - Extraia a promessa REAL da transcrição; NÃO invente números que o áudio não sustenta. Se o vídeo não tem uma promessa-manchete clara, OMITA o campo (não force).
 - A manchete NÃO pode repetir nem parafrasear o texto de NENHUMA cena — em especial a cena de ABERTURA (title-card do hook). Ela é uma promessa COMPLEMENTAR, um ângulo diferente do que as cenas já dizem; nunca o mesmo enunciado. Se a única manchete que você consegue é ~igual ao texto de alguma cena, retorne hookTitle null (OMITA) — melhor sem manchete do que duplicada.
 
@@ -1069,10 +1069,32 @@ Garanta que o JSON seja válido e completo.`
     // returns nothing usable — old behavior (no headline) is preserved. A
     // headline that merely restates a scene (esp. the opening title-card) is
     // discarded: the manchete must be a COMPLEMENTARY promise, not a duplicate.
+    // Manchete NUNCA é truncada mecanicamente (copy amputado parece rascunho):
+    // ou vem completa dentro do limite, ou é descartada.
     let hookTitle =
       typeof analysisData.hookTitle === 'string' && analysisData.hookTitle.trim()
-        ? limitWords(analysisData.hookTitle, 10)
+        ? analysisData.hookTitle.trim()
         : undefined
+    if (hookTitle && hookTitle.split(/\s+/).length > 12) {
+      console.warn(`[analyze] hookTitle descartado por exceder 12 palavras: "${hookTitle}"`)
+      hookTitle = undefined
+    }
+    const DANGLING_ENDINGS = new Set([
+      'como', 'você', 'voce', 'que', 'de', 'para', 'pra', 'com', 'sem', 'por',
+      'o', 'a', 'os', 'as', 'e', 'ou', 'mas', 'se', 'seu', 'sua', 'um', 'uma',
+      'na', 'no', 'em', 'do', 'da', 'ao', 'à', 'é', 'mais', 'muito', 'quando'
+    ])
+    if (hookTitle) {
+      const lastWord = hookTitle
+        .split(/\s+/)
+        .pop()!
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]/gu, '')
+      if (DANGLING_ENDINGS.has(lastWord)) {
+        console.warn(`[analyze] hookTitle descartado por terminar pendurado: "${hookTitle}"`)
+        hookTitle = undefined
+      }
+    }
     if (hookTitle && hookTitleDuplicatesScene(hookTitle, validatedScenes)) {
       console.warn(
         `[analyze] hookTitle descartado por duplicar o texto de uma cena: "${hookTitle}"`
