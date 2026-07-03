@@ -473,7 +473,9 @@ export async function generateImageInsertAssets({
 
   const generatedScenes: Scene[] = []
   for (const [index, scene] of scenes.entries()) {
-    if (scene.type !== 'ImageInsert' || scene.imagePath) {
+    // Skip non-inserts, already-generated stills, and inserts backed by a user
+    // library asset (Pacote 4 — assetId was resolved to imagePath/videoSrc).
+    if (scene.type !== 'ImageInsert' || scene.imagePath || (scene as any).assetId) {
       generatedScenes.push(scene)
       continue
     }

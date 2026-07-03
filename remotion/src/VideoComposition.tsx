@@ -22,6 +22,7 @@ import { Flow } from './scenes/Flow';
 import { CTA } from './scenes/CTA';
 import { StickFigures } from './scenes/StickFigures';
 import { ImageInsert, ImageInsertTrack } from './scenes/ImageInsert';
+import { AssetCard } from './scenes/AssetCard';
 import {
   LayoutSegmentRenderer,
   findActiveLayoutSegment,
@@ -73,6 +74,8 @@ const renderSceneComponent = (
       return <StickFigures {...sceneProps} />;
     case 'image-insert':
       return <ImageInsert {...sceneProps} />;
+    case 'asset-card':
+      return <AssetCard {...sceneProps} />;
     default:
       return null;
   }

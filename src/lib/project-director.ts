@@ -19,6 +19,7 @@ import {
   normalizeNarrativeRole,
   normalizeSegmentFields,
   normalizeTypographicScene,
+  sanitizeAssetCardScene,
   sanitizeSceneCopy
 } from './services/claude'
 import type { DirectorOperation } from './services/claude'
@@ -46,7 +47,11 @@ function isValidHex(value: unknown): value is string {
  * o fluxo de analyze faz. Retorna null quando a cena é inviável (deve ser
  * ignorada e reportada pelo chamador).
  */
-function validateSceneData(sceneData: any, subtitles: SubtitleEntry[]): Scene | null {
+function validateSceneData(
+  sceneData: any,
+  subtitles: SubtitleEntry[],
+  validAssetIds?: Set<string>
+): Scene | null {
   if (!sceneData || typeof sceneData !== 'object') {
     return null
   }
@@ -74,7 +79,21 @@ function validateSceneData(sceneData: any, subtitles: SubtitleEntry[]): Scene | 
   // Layout de segmento (opcional): whitelist + valores válidos. null/'' remove.
   normalizeSegmentFields(sceneData)
 
+  if (sceneData.type === 'AssetCard') {
+    // Requires a real asset id; sem catálogo válido a cena é inviável.
+    return sanitizeAssetCardScene(sceneData, validAssetIds) as Scene | null
+  }
+
   if (sceneData.type === 'ImageInsert') {
+    // Optional library asset reference: keep only when it is a real id.
+    if (sceneData.assetId !== undefined) {
+      const id = typeof sceneData.assetId === 'string' ? sceneData.assetId.trim() : ''
+      if (id && (!validAssetIds || validAssetIds.has(id))) {
+        sceneData.assetId = id
+      } else {
+        delete sceneData.assetId
+      }
+    }
     sceneData.narrativeRole = normalizeNarrativeRole(
       sceneData.narrativeRole,
       sceneData.startLeg,
@@ -128,7 +147,8 @@ export function applyDirectorOperations(
   operations: DirectorOperation[],
   scenes: Scene[],
   palette: ColorPalette | null,
-  subtitles: SubtitleEntry[]
+  subtitles: SubtitleEntry[],
+  validAssetIds?: Set<string>
 ): ApplyOperationsResult {
   const workingScenes: Scene[] = scenes.map((scene) => ({ ...scene }))
   const workingPalette: ColorPalette = { ...(palette || DEFAULT_PALETTE) }
@@ -166,7 +186,7 @@ export function applyDirectorOperations(
           delete merged.reusedImagePath
           delete merged.imageGenerationError
         }
-        const validated = validateSceneData(merged, subtitles)
+        const validated = validateSceneData(merged, subtitles, validAssetIds)
         if (!validated) {
           skipped.push(`Alteração inválida para a cena ${sceneId}`)
           break
@@ -201,7 +221,7 @@ export function applyDirectorOperations(
         raw.id = typeof raw.id === 'string' && raw.id && !existingIds.has(raw.id)
           ? raw.id
           : generateSceneId(existingIds)
-        const validated = validateSceneData(raw, subtitles)
+        const validated = validateSceneData(raw, subtitles, validAssetIds)
         if (!validated) {
           skipped.push(`Nova cena inválida (${raw.type || 'tipo desconhecido'}) — ignorada`)
           break

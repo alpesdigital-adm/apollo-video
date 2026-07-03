@@ -180,13 +180,22 @@ export default function Dashboard() {
                 Video Editor <span className="text-amber-400">IA</span>
               </h1>
             </div>
-            <a
-              href="/settings"
-              className="text-sm text-zinc-400 hover:text-amber-400 transition-colors"
-              title="Configurações"
-            >
-              ⚙ Configurações
-            </a>
+            <div className="flex items-center gap-4">
+              <a
+                href="/assets"
+                className="text-sm text-zinc-400 hover:text-amber-400 transition-colors"
+                title="Biblioteca de assets"
+              >
+                📚 Assets
+              </a>
+              <a
+                href="/settings"
+                className="text-sm text-zinc-400 hover:text-amber-400 transition-colors"
+                title="Configurações"
+              >
+                ⚙ Configurações
+              </a>
+            </div>
           </div>
         </div>
       </header>

@@ -119,8 +119,11 @@ const TYPE_MAP: Record<string, string> = {
   Flow: 'flow',
   CTA: 'cta',
   StickFigures: 'stick-figures',
-  ImageInsert: 'image-insert'
+  ImageInsert: 'image-insert',
+  AssetCard: 'asset-card'
 }
+
+const VALID_ASSET_CARD_STYLES = ['credibility', 'meme', 'news'] as const
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -212,6 +215,22 @@ export function toRemotionScene(
     // A stock scene can have a video with no still — keep it as long as some media exists.
     if (!adaptedProps.imageSrc && !adaptedProps.videoSrc) return null
     adaptedProps.layout = normalizeImageInsertLayout(adaptedProps.layout)
+  }
+  if (type === 'AssetCard') {
+    // The asset media was already resolved to imageSrc/videoSrc server-side; here
+    // we only apply the same base-URL rule (absolute for render, relative in the
+    // browser player) and drop the scene when no media survived.
+    adaptedProps.imageSrc = resolveImageSrc(adaptedProps.imageSrc, opts.baseUrl)
+    const resolvedAssetVideo = resolveImageSrc(adaptedProps.videoSrc, opts.baseUrl)
+    if (resolvedAssetVideo) {
+      adaptedProps.videoSrc = resolvedAssetVideo
+    } else {
+      delete adaptedProps.videoSrc
+    }
+    if (!adaptedProps.imageSrc && !adaptedProps.videoSrc) return null
+    adaptedProps.style = VALID_ASSET_CARD_STYLES.includes(adaptedProps.style)
+      ? adaptedProps.style
+      : 'credibility'
   }
 
   return {

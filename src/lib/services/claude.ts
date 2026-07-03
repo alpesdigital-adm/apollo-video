@@ -9,6 +9,7 @@ import { getInsertStylePresetMeta } from '../style-presets'
 import type { Transcription, SubtitleEntry, VideoFormat } from '../types/project'
 import type { Scene, AnalysisResult, NarrativeRole, SceneType, ColorPalette } from '../types/scene'
 import type { BrandColorGroup } from '../brand-colors'
+import type { AssetCatalogItem } from '../asset-library'
 
 export interface AnalyzeContentBrandColors {
   groups: BrandColorGroup[]
@@ -103,8 +104,11 @@ export const VALID_SCENE_TYPES: SceneType[] = [
   'Flow',
   'CTA',
   'StickFigures',
-  'ImageInsert'
+  'ImageInsert',
+  'AssetCard'
 ]
+
+export const VALID_ASSET_CARD_STYLES = ['credibility', 'meme', 'news'] as const
 
 export const VALID_VISUAL_ROLES = ['evidence', 'contrast', 'process', 'context', 'decision']
 export const VALID_NARRATIVE_ROLES: NarrativeRole[] = [
@@ -343,6 +347,70 @@ function normalizeImageInsertMedia(sceneData: any): void {
   } else {
     delete sceneData.stockQuery
   }
+}
+
+/**
+ * Validate/normalize an AssetCard scene (Pacote 4). Requires a valid assetId
+ * present in the passed catalog id-set (invalid → null, so the caller DROPS it —
+ * an AssetCard with no real asset can't render). Whitelists style, caps the
+ * optional name/caption, and strips foreign fields. Mutates in place.
+ */
+export function sanitizeAssetCardScene(sceneData: any, validAssetIds?: Set<string>): any | null {
+  const assetId = typeof sceneData.assetId === 'string' ? sceneData.assetId.trim() : ''
+  if (!assetId) return null
+  if (validAssetIds && !validAssetIds.has(assetId)) return null
+
+  sceneData.assetId = assetId
+  sceneData.style = (VALID_ASSET_CARD_STYLES as readonly string[]).includes(sceneData.style)
+    ? sceneData.style
+    : 'credibility'
+
+  const name = limitCopy(limitWords(sceneData.name, 6), 48)
+  if (name) sceneData.name = name
+  else delete sceneData.name
+
+  const caption = limitCopy(limitWords(sceneData.caption, 8), 60)
+  if (caption) sceneData.caption = caption
+  else delete sceneData.caption
+
+  // Strip any typographic field the model may have leaked onto the card.
+  for (const field of [
+    'text', 'title', 'subtitle', 'description', 'message', 'value', 'label',
+    'topText', 'bottomText', 'leftText', 'rightText', 'leftLabel', 'rightLabel',
+    'situation', 'steps', 'highlight', 'imagePrompt', 'imageAlt', 'sourceText', 'layout'
+  ]) {
+    delete sceneData[field]
+  }
+  return sceneData
+}
+
+/**
+ * Compact "BIBLIOTECA DE ASSETS" prompt section (shared by analyze + director).
+ * Returns '' when the catalog is empty so the prompt is unchanged with no assets.
+ */
+function buildAssetCatalogSection(catalog?: AssetCatalogItem[]): string {
+  if (!catalog || catalog.length === 0) return ''
+
+  const list = catalog
+    .slice(0, 50)
+    .map(
+      (a) =>
+        `- id=${a.id} [${a.kind}] "${a.label}"${a.tags.length ? ` — tags: ${a.tags.join(', ')}` : ''}`
+    )
+    .join('\n')
+
+  return `
+
+BIBLIOTECA DE ASSETS (mídias PRÓPRIAS do usuário — use SOMENTE os ids abaixo, NUNCA invente um id):
+${list}
+
+Você pode usar esses assets de duas formas:
+- Cena AssetCard: { "type": "AssetCard", "startLeg": <int>, "durationInSubtitles": 1, "assetId": "<id da lista>", "style": "<credibility|meme|news>", ... }. Dura ~1-1.5s (feita para rajada). Estilos:
+  - "credibility": foto de PESSOA (rosto) num card + o NOME abaixo (campo "name"). Use em RAJADA de prova social: 2 a 4 AssetCard credibility SEGUIDOS (~1s cada, startLeg consecutivos) quando houver fotos de pessoas taggeadas (cliente, aluno, autoridade, depoimento).
+  - "meme": imagem de cultura pop / analogia (meme de filme ou série) com "caption" curta (≤8 palavras). NO MÁXIMO 1 por vídeo, para uma analogia cultural pontual.
+  - "news": print de notícia como HOOK alternativo. SEM texto extra (não preencha name/caption).
+- ImageInsert com "assetId": quando um asset da biblioteca ilustrar o momento MELHOR do que gerar uma imagem, adicione "assetId": "<id da lista>" ao ImageInsert (em vez de depender só do imagePrompt).
+REGRA DURA: só use assetId que EXISTA na lista acima. Combine o asset pelas tags/label com o momento da fala.`
 }
 
 function coerceString(...values: unknown[]): string {
@@ -607,7 +675,8 @@ export async function analyzeContent(
   format: VideoFormat,
   subtitles: SubtitleEntry[],
   stylePreset: string = 'creator-clean',
-  brandColors?: AnalyzeContentBrandColors
+  brandColors?: AnalyzeContentBrandColors,
+  assetCatalog?: AssetCatalogItem[]
 ): Promise<AnalysisResult> {
   try {
     // For simplicity in the initial analysis, we'll work with the text
@@ -615,6 +684,7 @@ export async function analyzeContent(
     // In a full implementation, this would parse segments more carefully
 
     const styleMeta = getInsertStylePresetMeta(stylePreset)
+    const validAssetIds = new Set((assetCatalog || []).map((a) => a.id))
 
     const systemPrompt = `Você é um editor de vídeo sênior especializado em vídeos narrados premium para redes sociais (Reels/Shorts/TikTok/YouTube).
 Seu trabalho é montar uma sequência de cenas visuais que pontuam os momentos-chave da narração. Você combina inserts de imagem (B-roll) com cenas tipográficas animadas para tornar a fala mais concreta, crível e fácil de entender.
@@ -691,7 +761,7 @@ TÍTULO-HOOK PERSISTENTE (hookTitle — OPCIONAL, no nível raiz do JSON, não �
 - Uma manchete-promessa curta (NO MÁXIMO 10 palavras) que fica FIXA no topo do vídeo inteiro, reforçando a promessa central. Estilo específico e numérico quando possível (ex.: "Como vendi 185 ingressos em 3h53min", "O erro que custou R$40 mil").
 - Extraia a promessa REAL da transcrição; NÃO invente números que o áudio não sustenta. Se o vídeo não tem uma promessa-manchete clara, OMITA o campo (não force).
 
-Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysisTone}.${buildBrandColorPromptSection(brandColors)}`
+Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysisTone}.${buildBrandColorPromptSection(brandColors)}${buildAssetCatalogSection(assetCatalog)}`
 
     const numberedSubtitles = subtitles
       .map((subtitle, index) => `${index}: [${subtitle.startTime.toFixed(2)}s] ${subtitle.text}`)
@@ -815,7 +885,26 @@ Garanta que o JSON seja válido e completo.`
         delete sceneData.startFrame
         delete sceneData.endFrame
 
+        if (sceneData.type === 'AssetCard') {
+          const card = sanitizeAssetCardScene(sceneData, validAssetIds)
+          if (!card) {
+            console.warn('Discarding AssetCard scene with invalid/unknown assetId')
+            return null
+          }
+          return card as Scene
+        }
+
         if (sceneData.type === 'ImageInsert') {
+          // Optional library asset reference: keep only when it is a real id.
+          if (sceneData.assetId !== undefined) {
+            const id = typeof sceneData.assetId === 'string' ? sceneData.assetId.trim() : ''
+            if (id && validAssetIds.has(id)) {
+              sceneData.assetId = id
+            } else {
+              console.warn(`Removing unknown assetId from ImageInsert: ${sceneData.assetId}`)
+              delete sceneData.assetId
+            }
+          }
           sceneData.narrativeRole = normalizeNarrativeRole(
             sceneData.narrativeRole,
             sceneData.startLeg,
@@ -998,6 +1087,7 @@ function summarizeSceneForPrompt(scene: Scene): string {
     'sender', 'message', 'value', 'label', 'steps', 'situation', 'caption',
     'layout', 'imagePrompt', 'imageAlt', 'sourceText', 'narrativeRole', 'visualRole',
     'motion', 'source', 'stockQuery',
+    'assetId', 'style', 'name', 'caption',
     'segmentLayout'
   ]
   const parts: string[] = []
@@ -1023,7 +1113,8 @@ export async function directProject(
   scenes: Scene[],
   subtitles: SubtitleEntry[],
   palette: ColorPalette | null,
-  selectedSceneId?: string
+  selectedSceneId?: string,
+  assetCatalog?: AssetCatalogItem[]
 ): Promise<DirectorResult> {
   try {
     const numberedScenes = scenes
@@ -1051,7 +1142,7 @@ export async function directProject(
 
 A instrução pode mirar: o VÍDEO TODO, UMA cena específica, UM trecho (referenciado pelas legendas), ou a PALETA de cores. Interprete o ESCOPO a partir do texto.
 
-TIPOS DE CENA VÁLIDOS: FullScreen, LowerThird, Split, SplitVertical, Card, Message, Number, Flow, CTA, StickFigures, ImageInsert.
+TIPOS DE CENA VÁLIDOS: FullScreen, LowerThird, Split, SplitVertical, Card, Message, Number, Flow, CTA, StickFigures, ImageInsert${assetCatalog && assetCatalog.length > 0 ? ', AssetCard' : ''}.
 
 OPERAÇÕES DISPONÍVEIS (retorne no máximo ~10 no total):
 - {"op":"update_scene","sceneId":"<id existente>","changes":{<apenas props válidas do tipo da cena>}} — altera texto/props de uma cena existente. TAMBÉM aceita LAYOUT DE SEGMENTO: "segmentLayout" ("split-50" | "blur-bg" | "tweet-card" | null para voltar a tela cheia) reposiciona o vídeo base durante a janela da cena; "segmentEffects" ({"zoom":"in"|"out","bw":true}) aplica efeito no vídeo base (combinável com qualquer layout, ou sozinho para efeito em tela cheia).
@@ -1075,7 +1166,7 @@ FORMATO DE SAÍDA — responda SOMENTE com JSON válido, sem markdown:
 {
   "summary": "resumo em pt-BR do que você fez (1-2 frases)",
   "operations": [ ... ]
-}`
+}${buildAssetCatalogSection(assetCatalog)}`
 
     const userPrompt = `INSTRUÇÃO DO USUÁRIO:
 ${instruction}

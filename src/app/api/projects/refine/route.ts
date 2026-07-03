@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { directProject } from '@/lib/services/claude'
 import { applyDirectorOperations, saveSnapshot } from '@/lib/project-director'
 import { generateImageInsertAssets } from '@/lib/services/image-generation'
+import { getAssetCatalog, resolveAssetsInScenes } from '@/lib/asset-library'
 import { narrativeEngine } from '@/lib/engines/narrative-engine'
 import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
 import { resolveSceneTiming } from '@/lib/utils/timing'
@@ -57,11 +58,28 @@ export async function POST(request: NextRequest) {
     const fps = project.videoFps || 30
     const stylePreset = project.stylePreset || 'creator-clean'
 
+    // Asset library (Pacote 4): catálogo compacto p/ o prompt + set de ids p/ validar.
+    const assetCatalog = getAssetCatalog()
+    const validAssetIds = new Set(assetCatalog.map((a) => a.id))
+
     // 1. Interpretar a instrução como operações (IA).
-    const direction = await directProject(instruction, scenes, subtitles, palette, sceneId)
+    const direction = await directProject(
+      instruction,
+      scenes,
+      subtitles,
+      palette,
+      sceneId,
+      assetCatalog.length > 0 ? assetCatalog : undefined
+    )
 
     // 2. Validar e aplicar as operações (código).
-    const applyResult = applyDirectorOperations(direction.operations, scenes, palette, subtitles)
+    const applyResult = applyDirectorOperations(
+      direction.operations,
+      scenes,
+      palette,
+      subtitles,
+      validAssetIds
+    )
     const { scenes: updatedScenes, palette: updatedPalette, applied, skipped } = applyResult
 
     // Título-hook: preserva o existente (editPlan) salvo se o diretor mudou.
@@ -92,8 +110,9 @@ export async function POST(request: NextRequest) {
       editPlanJson: project.editPlanJson
     })
 
-    // 4. Re-resolver timing (startLeg → frame) — mesma regra do analyze.
-    const scenesWithTiming = resolveSceneTiming(updatedScenes, subtitles, fps)
+    // 4. Resolver assetId → paths de mídia, depois re-resolver timing (startLeg → frame).
+    const resolvedAssetScenes = resolveAssetsInScenes(updatedScenes)
+    const scenesWithTiming = resolveSceneTiming(resolvedAssetScenes, subtitles, fps)
 
     // 5. Gerar imagens para ImageInsert novos/sem imagem (reusa as antigas como pool).
     const scenesWithAssets = await generateImageInsertAssets({

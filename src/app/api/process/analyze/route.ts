@@ -8,6 +8,7 @@ import { narrativeEngine } from '@/lib/engines/narrative-engine'
 import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
 import { curateSceneDensity, resolveSceneTiming } from '@/lib/utils/timing'
 import { pickBrandGroup, readBrandColors } from '@/lib/brand-colors'
+import { getAssetCatalog, resolveAssetsInScenes } from '@/lib/asset-library'
 import type { AnalyzeContentBrandColors } from '@/lib/services/claude'
 import type { Silence, SubtitleEntry, Transcription } from '@/lib/types/project'
 import type { Scene } from '@/lib/types/scene'
@@ -106,13 +107,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Asset library (Pacote 4): pass the compact catalog to Claude only when the
+    // user has assets — otherwise the prompt is unchanged.
+    const assetCatalog = getAssetCatalog()
+
     // Call Claude API to analyze content and generate scenes
     const analysisResult = await analyzeContent(
       transcription.text,
       format,
       subtitles,
       stylePreset,
-      brandColors
+      brandColors,
+      assetCatalog.length > 0 ? assetCatalog : undefined
     )
 
     // Resolve scene timing - convert startLeg to actual frame numbers
@@ -121,7 +127,9 @@ export async function POST(request: NextRequest) {
       curatedScenes,
       useCloseUpCompactLayout
     )
-    const scenesWithTiming = resolveSceneTiming(layoutAdjustedScenes, subtitles, fps)
+    // Resolve any assetId → media paths BEFORE the engine / image generation.
+    const resolvedAssetScenes = resolveAssetsInScenes(layoutAdjustedScenes)
+    const scenesWithTiming = resolveSceneTiming(resolvedAssetScenes, subtitles, fps)
     const scenesWithAssets = await generateImageInsertAssets({
       projectId,
       scenes: scenesWithTiming,

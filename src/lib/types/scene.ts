@@ -14,6 +14,7 @@ export type SceneType =
   | 'CTA'
   | 'StickFigures'
   | 'ImageInsert'
+  | 'AssetCard'
 
 export type NarrativeRole =
   | 'hook'
@@ -137,6 +138,23 @@ export interface ImageInsertScene extends BaseScene {
   stockQuery?: string
   // Resolved animated/stock clip path (e.g. /generated-videos/... or /stock/...).
   videoSrc?: string
+  // Pacote 4: reference to a user library asset. When present and valid, the
+  // asset media replaces generation (resolved to imagePath/videoSrc server-side).
+  assetId?: string
+}
+
+// Pacote 4 — cena que usa uma mídia PRÓPRIA da biblioteca do usuário.
+export interface AssetCardScene extends BaseScene {
+  type: 'AssetCard'
+  assetId: string
+  // credibility: foto+nome em rajada de prova social; meme: imagem+caption;
+  // news: print de notícia quase full-width (sem texto extra).
+  style: 'credibility' | 'meme' | 'news'
+  name?: string
+  caption?: string
+  // Paths resolvidos server-side a partir do assetId (imagem OU vídeo).
+  imageSrc?: string
+  videoSrc?: string
 }
 
 export type Scene =
@@ -151,6 +169,7 @@ export type Scene =
   | CTAScene
   | StickFiguresScene
   | ImageInsertScene
+  | AssetCardScene
 
 export interface ColorPalette {
   primary: string
