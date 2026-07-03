@@ -4,8 +4,11 @@ import {
   useCurrentFrame,
   useVideoConfig,
   interpolate,
+  spring,
 } from 'remotion';
 import { SubtitleEntry, ColorPalette, SubtitleWord } from '../lib/types';
+
+const DEFAULT_ACCENT = '#FFB800';
 
 interface SubtitleTikTokProps {
   subtitle: SubtitleEntry;
@@ -13,8 +16,44 @@ interface SubtitleTikTokProps {
   isVisible: boolean;
 }
 
+// Returns the frame at which the given timed word starts, relative to the
+// composition timeline (not relative to the subtitle).
+function wordStartFrame(word: SubtitleWord, fps: number): number {
+  return Math.round(word.start * fps);
+}
+
+interface KaraokeWord {
+  word: string;
+  timedWord: SubtitleWord | null; // null = no timing info for this word
+}
+
+// Match plain-text words in `phraseText` back to the timed words array so
+// we can attach timing info per word for the highlight.
+function buildKaraokeWords(
+  phraseText: string,
+  chunkTimedWords: SubtitleWord[]
+): KaraokeWord[] {
+  const phraseWords = phraseText.split(' ').filter(Boolean);
+  // Build a lookup from normalized word text to its timed entry (first match).
+  // We consume entries in order to handle repeated words correctly.
+  const remaining = [...chunkTimedWords];
+
+  return phraseWords.map((pw) => {
+    const idx = remaining.findIndex(
+      (tw) => tw.word.toLowerCase() === pw.toLowerCase()
+    );
+    if (idx !== -1) {
+      const timedWord = remaining[idx];
+      remaining.splice(idx, 1);
+      return { word: pw, timedWord };
+    }
+    return { word: pw, timedWord: null };
+  });
+}
+
 export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   subtitle,
+  palette,
   isVisible,
 }) => {
   const frame = useCurrentFrame();
@@ -25,6 +64,7 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
     return null;
   }
 
+  const accentColor = palette?.accent ?? DEFAULT_ACCENT;
   const duration = subtitle.endTime - subtitle.startTime;
   const timeInSubtitle = currentTime - subtitle.startTime;
 
@@ -35,8 +75,43 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   );
 
+  // --- Determine active chunk and its timed words ---
+  const timedWords = normalizeTimedWords(subtitle.words);
+  const hasWordTimings = timedWords.length > 0;
+
   const phrase = getCurrentSubtitlePhrase(subtitle, currentTime, timeInSubtitle, duration);
+
+  // Get timed words that belong to the current phrase chunk so we can do
+  // per-word highlight. Only available when word timestamps exist.
+  let chunkTimedWords: SubtitleWord[] = [];
+  if (hasWordTimings) {
+    const chunks = buildTimedPhraseChunks(timedWords);
+    const activeChunk = chunks.find(
+      (c) => currentTime >= c.start - 0.04 && currentTime < c.end + 0.08
+    ) ?? chunks.reduce<typeof chunks[0] | null>((best, c) => {
+      if (!best) return c;
+      const bestDist = Math.abs(currentTime - (best.start + best.end) / 2);
+      const cDist = Math.abs(currentTime - (c.start + c.end) / 2);
+      return cDist < bestDist ? c : best;
+    }, null);
+
+    if (activeChunk) {
+      chunkTimedWords = timedWords.filter(
+        (tw) => tw.start >= activeChunk.start - 0.04 && tw.end <= activeChunk.end + 0.08
+      );
+    }
+  }
+
   const lines = splitSubtitleLines(phrase);
+
+  // When we have word timing, build a flat list of KaraokeWord for the whole
+  // phrase so we can assign colors per-word across lines.
+  const karaokeWords = hasWordTimings && chunkTimedWords.length > 0
+    ? buildKaraokeWords(phrase, chunkTimedWords)
+    : null;
+
+  // Pointer into karaokeWords to distribute across lines
+  let wordCursor = 0;
 
   return (
     <AbsoluteFill
@@ -56,21 +131,124 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
           textShadow: '0 5px 18px rgba(0, 0, 0, 0.95), 0 1px 2px rgba(0,0,0,0.9)',
         }}
       >
-        {lines.map((line, index) => (
-          <div
-            key={index}
-            style={{
-              fontSize: getLineFontSize(line),
-              fontWeight: 850,
-              lineHeight: 1.08,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {line}
-          </div>
-        ))}
+        {lines.map((line, lineIndex) => {
+          const fontSize = getLineFontSize(line);
+
+          if (!karaokeWords) {
+            // Fallback: static white line (no timing info)
+            return (
+              <div
+                key={lineIndex}
+                style={{
+                  fontSize,
+                  fontWeight: 850,
+                  lineHeight: 1.08,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {line}
+              </div>
+            );
+          }
+
+          // Assign karaoke words to this line
+          const lineWordCount = line.split(' ').filter(Boolean).length;
+          const lineKaraokeWords = karaokeWords.slice(wordCursor, wordCursor + lineWordCount);
+          wordCursor += lineWordCount;
+
+          return (
+            <div
+              key={lineIndex}
+              style={{
+                fontSize,
+                fontWeight: 850,
+                lineHeight: 1.08,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {lineKaraokeWords.map((kw, wi) => (
+                <KaraokeWordSpan
+                  key={wi}
+                  word={kw.word}
+                  timedWord={kw.timedWord}
+                  currentTime={currentTime}
+                  frame={frame}
+                  fps={config.fps}
+                  accentColor={accentColor}
+                  isLast={wi === lineKaraokeWords.length - 1}
+                />
+              ))}
+            </div>
+          );
+        })}
       </div>
     </AbsoluteFill>
+  );
+};
+
+interface KaraokeWordSpanProps {
+  word: string;
+  timedWord: SubtitleWord | null;
+  currentTime: number;
+  frame: number;
+  fps: number;
+  accentColor: string;
+  isLast: boolean;
+}
+
+const KaraokeWordSpan: React.FC<KaraokeWordSpanProps> = ({
+  word,
+  timedWord,
+  currentTime,
+  frame,
+  fps,
+  accentColor,
+  isLast,
+}) => {
+  let color: string;
+  let scale = 1;
+
+  if (timedWord !== null) {
+    const isActive = currentTime >= timedWord.start && currentTime < timedWord.end;
+    const isPast = currentTime >= timedWord.end;
+
+    if (isActive) {
+      color = accentColor;
+      // Pop: spring from 1→1.12 over ~4 frames when word becomes active
+      const framesSinceStart = frame - wordStartFrame(timedWord, fps);
+      const pop = spring({
+        frame: Math.max(0, framesSinceStart),
+        fps,
+        config: { damping: 14, stiffness: 200, mass: 0.6 },
+        from: 1.0,
+        to: 1.12,
+        durationInFrames: 6,
+      });
+      scale = pop;
+    } else if (isPast) {
+      color = '#FFFFFF';
+    } else {
+      // Future word
+      color = 'rgba(255,255,255,0.75)';
+    }
+  } else {
+    // No timing for this word — treat as white (no highlight)
+    color = '#FFFFFF';
+  }
+
+  return (
+    <span
+      style={{
+        color,
+        display: 'inline-block',
+        transform: `scale(${scale})`,
+        transformOrigin: 'center bottom',
+        // Space after word (except last in line)
+        marginRight: isLast ? 0 : '0.22em',
+      }}
+    >
+      {word}
+    </span>
   );
 };
 

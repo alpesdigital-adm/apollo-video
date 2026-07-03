@@ -230,27 +230,140 @@ function sanitizeSceneCopy(sceneData: any): any {
   return sceneData
 }
 
-function extractScenePrompt(sceneData: any): string {
-  const values = [
-    sceneData.imagePrompt,
-    sceneData.prompt,
-    sceneData.text,
-    sceneData.title,
-    sceneData.subtitle,
-    sceneData.description,
-    sceneData.message,
-    sceneData.value,
-    sceneData.label,
-    sceneData.topText,
-    sceneData.bottomText,
-    sceneData.leftText,
-    sceneData.rightText,
-    sceneData.situation,
-    sceneData.caption,
-    ...(Array.isArray(sceneData.steps) ? sceneData.steps : [])
-  ]
+function coerceString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value)
+    }
+  }
+  return ''
+}
 
-  return limitCopy(values.filter(Boolean).join(' '), 700)
+/**
+ * Normalize and validate a typographic (non-ImageInsert) scene's required props.
+ * Attempts simple coercion (e.g. text -> title). Returns null when the scene is
+ * missing content that cannot be recovered, so the caller can DISCARD it.
+ * ImageInsert scenes are handled separately in the analyze/refine flows.
+ */
+function normalizeTypographicScene(sceneData: any): any | null {
+  switch (sceneData.type) {
+    case 'FullScreen': {
+      const text = coerceString(sceneData.text, sceneData.title, sceneData.subtitle)
+      if (!text) {
+        return null
+      }
+      sceneData.text = text
+      return sceneData
+    }
+    case 'LowerThird': {
+      const title = coerceString(sceneData.title, sceneData.text)
+      const subtitle = coerceString(sceneData.subtitle, sceneData.description, sceneData.label)
+      if (!title && !subtitle) {
+        return null
+      }
+      sceneData.title = title || subtitle
+      sceneData.subtitle = subtitle
+      return sceneData
+    }
+    case 'Split': {
+      const topText = coerceString(sceneData.topText, sceneData.title)
+      const bottomText = coerceString(sceneData.bottomText, sceneData.content, sceneData.description)
+      if (!topText && !bottomText) {
+        return null
+      }
+      sceneData.topText = topText
+      sceneData.bottomText = bottomText
+      return sceneData
+    }
+    case 'SplitVertical': {
+      const leftText = coerceString(sceneData.leftText, sceneData.leftContent, sceneData.leftLabel)
+      const rightText = coerceString(sceneData.rightText, sceneData.rightContent, sceneData.rightLabel)
+      if (!leftText || !rightText) {
+        return null
+      }
+      sceneData.leftText = leftText
+      sceneData.rightText = rightText
+      sceneData.leftLabel = coerceString(sceneData.leftLabel) || 'Antes'
+      sceneData.rightLabel = coerceString(sceneData.rightLabel) || 'Depois'
+      return sceneData
+    }
+    case 'Card': {
+      const title = coerceString(sceneData.title, sceneData.text)
+      const description = coerceString(sceneData.description, sceneData.subtitle)
+      if (!title) {
+        return null
+      }
+      const parsedNumber = Number(sceneData.number)
+      sceneData.number = Number.isFinite(parsedNumber) && parsedNumber > 0 ? Math.floor(parsedNumber) : 1
+      sceneData.title = title
+      sceneData.description = description
+      return sceneData
+    }
+    case 'Message': {
+      const message = coerceString(sceneData.message, sceneData.text, sceneData.messageText)
+      if (!message) {
+        return null
+      }
+      sceneData.sender = coerceString(sceneData.sender, sceneData.senderName) || 'Mensagem'
+      sceneData.message = message
+      return sceneData
+    }
+    case 'Number': {
+      const value = coerceString(sceneData.value, sceneData.number)
+      const label = coerceString(sceneData.label, sceneData.description, sceneData.title)
+      if (!value || !label) {
+        return null
+      }
+      sceneData.value = value
+      sceneData.label = label
+      return sceneData
+    }
+    case 'Flow': {
+      const steps = Array.isArray(sceneData.steps)
+        ? sceneData.steps
+            .map((step: unknown) =>
+              typeof step === 'object' && step !== null
+                ? coerceString((step as any).text, (step as any).label)
+                : coerceString(step)
+            )
+            .filter((step: string) => step.length > 0)
+        : []
+      if (steps.length < 2) {
+        return null
+      }
+      sceneData.steps = steps
+      return sceneData
+    }
+    case 'CTA': {
+      const text = coerceString(sceneData.text, sceneData.title)
+      if (!text) {
+        return null
+      }
+      sceneData.text = text
+      // highlight must be a substring of text; fall back to the last word.
+      const highlight = coerceString(sceneData.highlight, sceneData.highlightWord)
+      sceneData.highlight =
+        highlight && text.toLowerCase().includes(highlight.toLowerCase())
+          ? highlight
+          : text.trim().split(/\s+/).slice(-1)[0] || text
+      return sceneData
+    }
+    case 'StickFigures': {
+      const situation = coerceString(sceneData.situation, sceneData.leftCaption, sceneData.text)
+      const caption = coerceString(sceneData.caption, sceneData.rightCaption, sceneData.description)
+      if (!situation && !caption) {
+        return null
+      }
+      sceneData.situation = situation || caption
+      sceneData.caption = caption || situation
+      return sceneData
+    }
+    default:
+      return null
+  }
 }
 
 /**
@@ -273,27 +386,50 @@ export async function analyzeContent(
 
     const styleMeta = getInsertStylePresetMeta(stylePreset)
 
-    const systemPrompt = `You are an expert video editor and content analyst specializing in premium narrated social videos.
-Your job is to choose a small number of visual insert moments and describe AI-generated images that make the narration feel more concrete, credible, and easier to understand.
+    const systemPrompt = `Você é um editor de vídeo sênior especializado em vídeos narrados premium para redes sociais (Reels/Shorts/TikTok/YouTube).
+Seu trabalho é montar uma sequência de cenas visuais que pontuam os momentos-chave da narração. Você combina inserts de imagem (B-roll) com cenas tipográficas animadas para tornar a fala mais concreta, crível e fácil de entender.
 
-Important constraints:
-- Subtitles are the only text layer. Do not create text cards, word inserts, captions, labels, UI screenshots, charts with text, logos, typography, or readable writing inside image prompts.
-- Output only ImageInsert scenes.
-- Always use startLeg indices as 0-based integer positions from the numbered subtitle timeline.
-- Use image inserts selectively. Target 50-60% of the natural visual opportunities, not every subtitle block.
-- For videos around 60-90 seconds, output 4-6 ImageInsert scenes. For videos around 15-30 seconds, output 2-3 ImageInsert scenes. Never exceed 7 scenes unless the timeline has many distinct chapters.
-- Keep at least 6-9 seconds between most insert starts unless there is a strong editorial reason.
-- Set durationInSubtitles to 2-4.
-- Prefer layout "split-bottom" for most AI-generated inserts so the speaker remains present. Use layout "top-image-compact" when the original talking-head video is a close-up selfie: image occupies the top 30%, video occupies the lower 70%. Use layout "full" only for a strong chapter change with a non-human or face-obscured visual. Avoid full-screen generated people, faces, or new "actors" that compete with the speaker.
-- For vertical social platforms, assume the right rail and bottom third may be covered by TikTok/Reels/Shorts UI. Image inserts can occupy visual space, but subtitles must remain readable above them.
-- Classify every insert with a narrativeRole: "hook", "context", "proof", "process", "objection", "decision", or "cta". These roles are editorial metadata only; do not force the whole video into a rigid ad formula.
-- Prefer "proof", "process", "objection", and "decision" when the narration makes a claim, explains how something works, handles friction, or compares choices. Use "hook" only near the opening and "cta" only near the end.
-- Each image must have a clear narrative job: "evidence" (makes the claim more believable), "contrast" (shows the difference between two choices), "process" (shows what is happening behind the scenes), "context" (sets the real-world situation), or "decision" (shows evaluation/tradeoff).
-- The image should answer: "what concrete situation makes this spoken sentence true?" If it only decorates the sentence, do not use an insert there.
-- Image prompts must be grounded, documentary/editorial, and plausibly real. Prefer imperfect real workspaces, business context, devices seen from a distance, notes, dashboards blurred beyond readability, or people making decisions. If people appear, prefer over-the-shoulder, hands, partial body, back view, or face out of frame.
-- Avoid generic AI/stock visuals: empty roads, glowing search bars, abstract network nodes, perfect close-up hands typing, fake phone interfaces, isometric diagrams, surreal metaphors, studio product shots, obvious split-screen symbolism, plastic smiles, and anything that looks like a stock photo.
-- Avoid literal on-screen text descriptions like "Google Ads" rendered as words. Represent concepts through real behavior and context instead.
-- Selected visual style: ${styleMeta.name}. Follow this tone: ${styleMeta.analysisTone}.`
+TIPOS DE CENA DISPONÍVEIS (11 tipos — use o mais adequado ao SIGNIFICADO da fala):
+- ImageInsert: ilustração documental de objeto, lugar, situação ou pessoa em contexto real (B-roll). Use quando a fala descreve uma cena física concreta.
+- Number: um número, métrica ou percentual FALADO (ex.: "3x", "R$15k", "80%"). value = o número curto; label = o que ele significa.
+- Flow: uma lista de passos ou etapas sequenciais (3 a 5 passos). steps = array de strings curtas.
+- Card: um item de lista / conceito com título + descrição curta.
+- SplitVertical: comparação, antes-e-depois, ou dois lados contrastantes. leftText/rightText + leftLabel/rightLabel.
+- FullScreen: uma frase de impacto, quote ou afirmação forte em tela cheia. text = a frase.
+- Message: uma pergunta retórica ou mensagem estilo conversa (WhatsApp). sender + message.
+- CTA: a chamada final para ação. text + highlight (highlight DEVE ser uma palavra contida em text). NO MÁXIMO 1 por vídeo, perto do fim.
+- LowerThird: rótulo de contexto sobreposto quando um rosto está visível na fala (nome/cargo). title + subtitle.
+- Split: painel de contexto acima + fala abaixo. topText + bottomText.
+- StickFigures: situação social/humana simples ilustrada com figuras de palito. situation + caption.
+
+REGRAS DE SELEÇÃO SEMÂNTICA:
+- Escolha o tipo pelo CONTEÚDO da fala, não por decoração. número falado → Number; lista/passos → Flow ou Card; comparação/antes-depois → SplitVertical; frase de impacto/quote → FullScreen; pergunta retórica/mensagem → Message; chamada final → CTA; rótulo com rosto visível → LowerThird; objeto/lugar/situação física real → ImageInsert.
+- MIX ALVO: 40-60% das cenas devem ser ImageInsert; o restante tipográfico. VARIE — nunca duas cenas do MESMO tipo em sequência (consecutivas).
+- DENSIDADE: aproximadamente 1 cena a cada 8-15 segundos de fala. As cenas PONTUAM momentos-chave; não são papel de parede contínuo.
+- Para vídeos de ~60-90s, gere 5-8 cenas. Para ~15-30s, gere 3-4 cenas. Nunca ultrapasse ~10 cenas a menos que existam muitos capítulos distintos.
+- Sempre use startLeg como índice inteiro 0-based da timeline de legendas numeradas.
+- durationInSubtitles entre 1 e 3.
+
+REGRAS DE COPY (pt-br, texto punchy — fragmentos, NUNCA frases longas):
+- FullScreen: text com no máximo 7 palavras.
+- Card: title com no máximo 5 palavras; description com no máximo 12 palavras.
+- Number: value curto (ex.: "3x", "R$15k", "80%"); label com no máximo 6 palavras.
+- CTA: text com no máximo 6 palavras E highlight presente dentro de text (uma palavra do próprio text).
+- Flow: 3-5 passos, cada passo com no máximo 5 palavras.
+- SplitVertical: leftLabel/rightLabel curtos (1-3 palavras); leftText/rightText curtos.
+- Message: sender curto; message curta.
+- LowerThird: title = nome/rótulo; subtitle = contexto curto.
+- Split: topText = contexto curto; bottomText = fala curta.
+- StickFigures: situation + caption curtos.
+- SEM emoji em qualquer campo (exceção: Message pode usar emoji, opcional).
+
+ImageInsert (quando usado):
+- imagePrompt: descrição documental/editorial concreta e plausivelmente real (ambiente, sujeito, ação, distância de câmera, luz). SEM texto, SEM letras, SEM logos, SEM UI legível dentro da imagem.
+- Prefira layout "split-bottom" para a maioria dos inserts (o apresentador continua presente). Use "top-image-compact" quando o vídeo original for um close-up selfie. Use "full" só para uma virada de capítulo com visual não-humano.
+- narrativeRole: "hook", "context", "proof", "process", "objection", "decision" ou "cta" (metadado editorial). visualRole: "evidence", "contrast", "process", "context" ou "decision".
+- Evite visuais genéricos de stock/IA (estradas vazias, barras de busca brilhando, nós de rede abstratos, mãos perfeitas digitando, interfaces falsas, diagramas isométricos, metáforas surreais, sorrisos plásticos).
+
+Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysisTone}.`
 
     const numberedSubtitles = subtitles
       .map((subtitle, index) => `${index}: [${subtitle.startTime.toFixed(2)}s] ${subtitle.text}`)
@@ -310,39 +446,44 @@ ${transcriptionText}
 Numbered subtitle timeline:
 ${numberedSubtitles}
 
-Respond with a JSON object containing:
+Responda com um objeto JSON contendo narrativeFormat, palette e scenes.
+Cada cena carrega SEMPRE: id, type, startLeg (índice inteiro 0-based da legenda), durationInSubtitles (1-3) e as props do seu tipo.
+
+Formato:
 {
-  "narrativeFormat": "A 1-2 sentence description of the overall narrative approach",
+  "narrativeFormat": "Descrição em 1-2 frases da abordagem narrativa geral",
   "palette": {
-    "primary": "#HEX color for main brand color",
-    "secondary": "#HEX color for secondary elements",
-    "accent": "#HEX color for highlights and CTAs",
-    "background": "#HEX color for backgrounds",
-    "text": "#HEX color for text"
+    "primary": "#HEX cor principal da marca",
+    "secondary": "#HEX cor secundária",
+    "accent": "#HEX cor de destaques e CTA",
+    "background": "#HEX cor de fundo",
+    "text": "#HEX cor de texto"
   },
   "scenes": [
-    {
-      "id": "unique-scene-id",
-      "type": "ImageInsert",
-      "startLeg": 0,
-      "durationInSubtitles": 2,
-      "layout": "full, split-bottom, or top-image-compact",
-      "narrativeRole": "one of: hook, context, proof, process, objection, decision, cta",
-      "visualRole": "one of: evidence, contrast, process, context, decision",
-      "imagePrompt": "Detailed AI image prompt with no text, no letters, no logos, and no UI",
-      "imageAlt": "Short internal description",
-      "sourceText": "The exact subtitle or short spoken phrase this insert supports"
-    }
+    { "id": "s1", "type": "FullScreen", "startLeg": 0, "durationInSubtitles": 2, "text": "Frase de impacto curta" },
+    { "id": "s2", "type": "Number", "startLeg": 4, "durationInSubtitles": 2, "value": "3x", "label": "mais vendas" },
+    { "id": "s3", "type": "ImageInsert", "startLeg": 8, "durationInSubtitles": 2, "layout": "split-bottom", "narrativeRole": "proof", "visualRole": "evidence", "imagePrompt": "Documentary B-roll still, no text, no letters, no logos", "imageAlt": "descrição interna curta", "sourceText": "trecho exato da fala que este insert apoia" },
+    { "id": "s4", "type": "Flow", "startLeg": 12, "durationInSubtitles": 3, "steps": ["Passo um", "Passo dois", "Passo três"] },
+    { "id": "s5", "type": "SplitVertical", "startLeg": 16, "durationInSubtitles": 2, "leftLabel": "Antes", "rightLabel": "Depois", "leftText": "situação ruim", "rightText": "situação boa" },
+    { "id": "s6", "type": "Card", "startLeg": 20, "durationInSubtitles": 2, "number": 1, "title": "Título curto", "description": "Descrição breve do ponto" },
+    { "id": "s7", "type": "Message", "startLeg": 24, "durationInSubtitles": 2, "sender": "Cliente", "message": "Pergunta ou fala curta" },
+    { "id": "s8", "type": "CTA", "startLeg": 28, "durationInSubtitles": 2, "text": "Comece agora mesmo", "highlight": "agora" }
   ]
 }
 
-Scene count guidance:
-- Prefer fewer, stronger image inserts.
-- Keep subtitles as the continuous reading layer; inserts are contextual visual support only.
-- imagePrompt should be 1-3 sentences, concrete enough for image generation, and must explicitly say "no text, no letters, no logos".
-- Write prompts for credible B-roll stills, not metaphor posters. Use specific physical details: environment, subject, action, camera distance, lighting, and what should be blurred or abstracted.
+Props obrigatórias por tipo:
+- ImageInsert: layout ("full" | "split-bottom" | "top-image-compact"), imagePrompt (SEM texto/letras/logos), narrativeRole, visualRole, imageAlt, sourceText.
+- FullScreen: text. LowerThird: title, subtitle. Split: topText, bottomText.
+- SplitVertical: leftText, rightText, leftLabel, rightLabel. Card: number, title, description.
+- Message: sender, message. Number: value, label. Flow: steps (array de strings).
+- CTA: text, highlight (highlight = palavra contida em text). StickFigures: situation, caption.
 
-Ensure the JSON is valid and complete.`
+Diretrizes de composição:
+- Escolha o TIPO pelo significado da fala. Misture inserts de imagem com cenas tipográficas (mix alvo 40-60% ImageInsert). VARIE — nunca dois tipos iguais consecutivos.
+- Pontue momentos-chave (~1 cena a cada 8-15s); as legendas seguem como camada de leitura contínua.
+- Para ImageInsert, imagePrompt de 1-3 frases, concreto para geração de imagem, e deve dizer explicitamente "no text, no letters, no logos". Escreva stills de B-roll críveis, não pôsteres de metáfora.
+
+Garanta que o JSON seja válido e completo.`
 
     // Call Claude API
     const message = await createMessageWithModelFallback({
@@ -378,59 +519,64 @@ Ensure the JSON is valid and complete.`
       throw new Error('Invalid scenes array in response')
     }
 
-    const validatedScenes: Scene[] = analysisData.scenes.map((sceneData: any) => {
-      // Validate scene type
-      if (!VALID_SCENE_TYPES.includes(sceneData.type) || sceneData.type !== 'ImageInsert') {
-        console.warn(`Unsupported analysis scene type: ${sceneData.type}, converting to ImageInsert`)
-        sceneData = {
-          ...sceneData,
-          type: 'ImageInsert',
-          layout: ['split-bottom', 'top-image-compact'].includes(sceneData.layout)
-            ? sceneData.layout
-            : 'full',
-          imagePrompt: extractScenePrompt(sceneData)
+    const validatedScenes: Scene[] = analysisData.scenes
+      .map((sceneData: any): Scene | null => {
+        // Validate scene type: keep any of the 11 supported types. Unknown types
+        // are discarded rather than force-converted to ImageInsert.
+        if (!VALID_SCENE_TYPES.includes(sceneData.type)) {
+          console.warn(`Discarding scene with unsupported type: ${sceneData.type}`)
+          return null
         }
-      }
 
-      // Validate and clamp startLeg
-      if (
-        typeof sceneData.startLeg !== 'number' ||
-        !Number.isFinite(sceneData.startLeg) ||
-        sceneData.startLeg < 0 ||
-        sceneData.startLeg >= subtitles.length
-      ) {
-        console.warn(`Invalid startLeg ${sceneData.startLeg}, clamping to valid range`)
-      }
-      sceneData.startLeg = Math.max(
-        0,
-        Math.min(Math.floor(Number(sceneData.startLeg) || 0), Math.max(0, subtitles.length - 1))
-      )
+        // Validate and clamp startLeg (shared across all types)
+        if (
+          typeof sceneData.startLeg !== 'number' ||
+          !Number.isFinite(sceneData.startLeg) ||
+          sceneData.startLeg < 0 ||
+          sceneData.startLeg >= subtitles.length
+        ) {
+          console.warn(`Invalid startLeg ${sceneData.startLeg}, clamping to valid range`)
+        }
+        sceneData.startLeg = Math.max(
+          0,
+          Math.min(Math.floor(Number(sceneData.startLeg) || 0), Math.max(0, subtitles.length - 1))
+        )
 
-      // Ensure durationInSubtitles is valid
-      if (typeof sceneData.durationInSubtitles !== 'number' || sceneData.durationInSubtitles < 2) {
-        sceneData.durationInSubtitles = 2
-      }
+        // Ensure durationInSubtitles is valid (1-3 per contract)
+        if (typeof sceneData.durationInSubtitles !== 'number' || sceneData.durationInSubtitles < 1) {
+          sceneData.durationInSubtitles = 2
+        }
+        sceneData.durationInSubtitles = Math.max(1, Math.min(Math.floor(sceneData.durationInSubtitles), 3))
 
-      sceneData.durationInSubtitles = Math.min(Math.floor(sceneData.durationInSubtitles), 4)
-      sceneData.narrativeRole = normalizeNarrativeRole(
-        sceneData.narrativeRole,
-        sceneData.startLeg,
-        subtitles.length
-      )
-      if (!sceneData.imagePrompt) {
-        const subtitle = subtitles[sceneData.startLeg]
-        sceneData.imagePrompt = `Premium contextual visual inspired by this spoken moment: "${subtitle?.text || transcriptionText.slice(0, 160)}". No text, no letters, no logos.`
-      }
-      if (!sceneData.sourceText) {
-        sceneData.sourceText = subtitles[sceneData.startLeg]?.text || ''
-      }
+        // Ensure startFrame and endFrame are not set (will be computed later)
+        delete sceneData.startFrame
+        delete sceneData.endFrame
 
-      // Ensure startFrame and endFrame are not set (will be computed later)
-      delete sceneData.startFrame
-      delete sceneData.endFrame
+        if (sceneData.type === 'ImageInsert') {
+          sceneData.narrativeRole = normalizeNarrativeRole(
+            sceneData.narrativeRole,
+            sceneData.startLeg,
+            subtitles.length
+          )
+          if (!sceneData.imagePrompt) {
+            const subtitle = subtitles[sceneData.startLeg]
+            sceneData.imagePrompt = `Premium contextual visual inspired by this spoken moment: "${subtitle?.text || transcriptionText.slice(0, 160)}". No text, no letters, no logos.`
+          }
+          if (!sceneData.sourceText) {
+            sceneData.sourceText = subtitles[sceneData.startLeg]?.text || ''
+          }
+          return sanitizeSceneCopy(sceneData) as Scene
+        }
 
-      return sanitizeSceneCopy(sceneData) as Scene
-    })
+        // Typographic scene: validate/coerce required props, discard if impossible.
+        const normalized = normalizeTypographicScene(sceneData)
+        if (!normalized) {
+          console.warn(`Discarding ${sceneData.type} scene missing required content`)
+          return null
+        }
+        return sanitizeSceneCopy(normalized) as Scene
+      })
+      .filter((scene: Scene | null): scene is Scene => scene !== null)
 
     return {
       narrativeFormat: analysisData.narrativeFormat || 'Professional video content',
@@ -510,13 +656,14 @@ Return the modified scene as a complete, valid JSON object with all required fie
     }
     refinedScene.startLeg = Math.max(0, Math.floor(refinedScene.startLeg))
 
-    // Validate durationInSubtitles
-    if (typeof refinedScene.durationInSubtitles !== 'number' || refinedScene.durationInSubtitles < 2) {
+    // Validate durationInSubtitles (1-3 per contract)
+    if (typeof refinedScene.durationInSubtitles !== 'number' || refinedScene.durationInSubtitles < 1) {
       refinedScene.durationInSubtitles = 2
     }
-    refinedScene.durationInSubtitles = Math.min(Math.floor(refinedScene.durationInSubtitles), 4)
+    refinedScene.durationInSubtitles = Math.max(1, Math.min(Math.floor(refinedScene.durationInSubtitles), 3))
 
-    // Validate scene type
+    // Validate scene type: keep any of the 11 supported types; fall back to the
+    // original scene's type when the model returns an unknown one.
     if (!VALID_SCENE_TYPES.includes(refinedScene.type)) {
       refinedScene.type = scene.type
     }
@@ -529,9 +676,17 @@ Return the modified scene as a complete, valid JSON object with all required fie
         ? refinedScene.visualRole
         : (scene as any).visualRole || 'context'
       refinedScene.sourceText = refinedScene.sourceText || (scene as any).sourceText || ''
+      return sanitizeSceneCopy(refinedScene) as Scene
     }
 
-    return sanitizeSceneCopy(refinedScene) as Scene
+    // Typographic scene: validate/coerce required props. If the refined result is
+    // unusable, fall back to the original scene rather than dropping it entirely.
+    const normalized = normalizeTypographicScene(refinedScene)
+    if (!normalized) {
+      console.warn(`Refined ${refinedScene.type} scene missing required content; keeping original scene`)
+      return scene
+    }
+    return sanitizeSceneCopy(normalized) as Scene
   } catch (error) {
     throw new Error(`Scene refinement failed: ${error instanceof Error ? error.message : String(error)}`)
   }

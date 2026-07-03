@@ -3,158 +3,28 @@ import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { prisma } from '@/lib/db'
 import type { EditPlan } from '@/lib/types/edl'
-import type { Scene } from '@/lib/types/scene'
 import type { SubtitleEntry, Transcription } from '@/lib/types/project'
+import type { Scene } from '@/lib/types/scene'
 import { FPS } from '@/lib/types/timing'
-
-interface InputProps {
-  scenes: Array<{
-    type: string
-    from: number
-    to: number
-    fromFrame: number
-    toFrame: number
-    props: Record<string, any>
-  }>
-  subtitles: SubtitleEntry[]
-  transcription: Transcription
-  palette: any
-  videoSrc: string
-  format: '9:16' | '16:9'
-  stylePreset?: string
-}
+import {
+  toRemotionScene,
+  prepareRemotionScenes,
+  normalizeSubtitleWords,
+  type RemotionInputProps,
+  type RemotionSceneInput
+} from '@/lib/remotion/input-props'
 
 interface StartProjectRenderOptions {
   clearExistingRender?: boolean
   statusOnStart?: 'rendering'
 }
 
-type RemotionSceneInput = InputProps['scenes'][number]
-
-function normalizeImageInsertLayout(value: unknown): 'full' | 'split-bottom' | 'top-image-compact' {
-  return value === 'split-bottom' || value === 'top-image-compact' ? value : 'full'
-}
-
 function getAppBaseUrl(): string {
   return (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3333').replace(/\/$/, '')
 }
 
-function toPublicUrl(value: string | undefined): string {
-  if (!value) {
-    return ''
-  }
-
-  if (/^https?:\/\//i.test(value)) {
-    return value
-  }
-
-  if (value.startsWith('/')) {
-    return `${getAppBaseUrl()}${value}`
-  }
-
-  return value
-}
-
-function normalizeRemotionScenes(scenes: RemotionSceneInput[], fps: number): RemotionSceneInput[] {
-  const gapFrames = Math.max(6, Math.round(fps * 0.35))
-  const minDurationFrames = Math.max(1, Math.round(fps * 2.8))
-  let cursorFrame = 0
-
-  return [...scenes]
-    .sort((a, b) => a.fromFrame - b.fromFrame)
-    .map((scene) => {
-      const durationFrames = Math.max(scene.toFrame - scene.fromFrame, minDurationFrames)
-      const fromFrame = Math.max(scene.fromFrame, cursorFrame)
-      const toFrame = fromFrame + durationFrames
-      cursorFrame = toFrame + gapFrames
-
-      return {
-        ...scene,
-        from: fromFrame / fps,
-        to: toFrame / fps,
-        fromFrame,
-        toFrame
-      }
-    })
-}
-
 function getRenderManifestPath(outputPath: string): string {
   return outputPath.replace(/\.mp4$/i, '.manifest.json')
-}
-
-function toRemotionScene(scene: Scene, fps: number): RemotionSceneInput | null {
-  const startFrame = scene.startFrame || 0
-  const endFrame = scene.endFrame || startFrame + Math.round(fps * 2.8)
-  const {
-    id: _id,
-    type,
-    startLeg: _startLeg,
-    durationInSubtitles: _durationInSubtitles,
-    startFrame: _startFrame,
-    endFrame: _endFrame,
-    ...props
-  } = scene as any
-
-  const typeMap: Record<string, string> = {
-    FullScreen: 'fullscreen',
-    LowerThird: 'lower-third',
-    Split: 'split',
-    SplitVertical: 'split-vertical',
-    Card: 'card',
-    Message: 'message',
-    Number: 'number',
-    Flow: 'flow',
-    CTA: 'cta',
-    StickFigures: 'stick-figures',
-    ImageInsert: 'image-insert'
-  }
-
-  const adaptedProps = { ...props }
-  if (type === 'FullScreen' && !adaptedProps.title) {
-    adaptedProps.title = adaptedProps.text || 'Highlight'
-  }
-  if (type === 'Split') {
-    adaptedProps.title = adaptedProps.title || adaptedProps.topText || 'Context'
-    adaptedProps.content = adaptedProps.content || adaptedProps.bottomText || ''
-  }
-  if (type === 'SplitVertical') {
-    adaptedProps.leftContent = adaptedProps.leftContent || adaptedProps.leftText || ''
-    adaptedProps.rightContent = adaptedProps.rightContent || adaptedProps.rightText || ''
-    adaptedProps.leftLabel = adaptedProps.leftLabel || 'Antes'
-    adaptedProps.rightLabel = adaptedProps.rightLabel || 'Depois'
-  }
-  if (type === 'Message') {
-    adaptedProps.senderName = adaptedProps.senderName || adaptedProps.sender || 'Mensagem'
-    adaptedProps.messageText = adaptedProps.messageText || adaptedProps.message || ''
-  }
-  if (type === 'Flow' && Array.isArray(adaptedProps.steps)) {
-    adaptedProps.steps = adaptedProps.steps.map((step: any, index: number) =>
-      typeof step === 'string' ? { number: index + 1, text: step } : step
-    )
-  }
-  if (type === 'CTA') {
-    adaptedProps.highlightWord = adaptedProps.highlightWord || adaptedProps.highlight
-  }
-  if (type === 'StickFigures') {
-    adaptedProps.leftCaption = adaptedProps.leftCaption || adaptedProps.situation || ''
-    adaptedProps.rightCaption = adaptedProps.rightCaption || adaptedProps.caption || ''
-  }
-  if (type === 'ImageInsert') {
-    adaptedProps.imageSrc = toPublicUrl(adaptedProps.imageSrc || adaptedProps.imagePath)
-    if (!adaptedProps.imageSrc) {
-      return null
-    }
-    adaptedProps.layout = normalizeImageInsertLayout(adaptedProps.layout)
-  }
-
-  return {
-    type: typeMap[type] || 'fullscreen',
-    from: startFrame / fps,
-    to: Math.max(endFrame, startFrame + fps) / fps,
-    fromFrame: startFrame,
-    toFrame: Math.max(endFrame, startFrame + fps),
-    props: adaptedProps
-  }
 }
 
 export async function startProjectRender(
@@ -211,40 +81,16 @@ export async function startProjectRender(
     })
   }
 
-  const renderSubtitles = subtitles.map((subtitle) => {
-    const words = subtitle.words
-      ?.map((word: any) => {
-        if (typeof word === 'string') {
-          return word
-        }
-
-        return {
-          word: String(word.word || '').trim(),
-          start: Number(word.start),
-          end: Number(word.end)
-        }
-      })
-      .filter((word: any) => (
-        typeof word === 'string'
-          ? Boolean(word)
-          : Boolean(word.word) && Number.isFinite(word.start) && Number.isFinite(word.end)
-      ))
-
-    return {
-      ...subtitle,
-      words: words && words.length > 0 ? words : subtitle.text.split(/\s+/).filter(Boolean)
-    }
-  }) as any
   const fps = project.videoFps || FPS
 
-  const inputProps: InputProps = {
-    scenes: normalizeRemotionScenes(
+  const inputProps: RemotionInputProps = {
+    scenes: prepareRemotionScenes(
       scenes
-        .map((scene) => toRemotionScene(scene, fps))
+        .map((scene) => toRemotionScene(scene, fps, { baseUrl: getAppBaseUrl() }))
         .filter((scene): scene is RemotionSceneInput => Boolean(scene)),
       fps
     ),
-    subtitles: renderSubtitles,
+    subtitles: normalizeSubtitleWords(subtitles),
     transcription,
     palette,
     videoSrc: `${getAppBaseUrl()}/api/video/${project.id}?source=primary`,
