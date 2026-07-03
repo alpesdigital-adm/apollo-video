@@ -218,37 +218,48 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   // the frame — the manchete crosses through it without hiding.
   const MIN_OCCUPATION_SECONDS = 0.5;
 
-  const { entranceFrame, qualifiedWindows, occupiedIntervals } = useMemo(() => {
+  const { entranceFrame, qualifiedWindows, sceneIntervals, tweetIntervals } = useMemo(() => {
     const minOccupationFrames = Math.round(MIN_OCCUPATION_SECONDS * config.fps);
     const minRunwayFrames = Math.round(MIN_RUNWAY_SECONDS * config.fps);
 
     // 1) Raw intervals where a HEADLINE scene or tweet-card segment owns the
     // frame — same membership criteria as the old per-frame check, but built
     // once as [from, to) ranges instead of scanned on every frame.
-    const raw: Array<{ from: number; to: number }> = [];
+    const mergeIntervals = (
+      raw: Array<{ from: number; to: number }>
+    ): Array<{ from: number; to: number }> => {
+      const sorted = [...raw].sort((a, b) => a.from - b.from);
+      const out: Array<{ from: number; to: number }> = [];
+      sorted.forEach((interval) => {
+        const last = out[out.length - 1];
+        if (last && interval.from <= last.to) {
+          last.to = Math.max(last.to, interval.to);
+        } else {
+          out.push({ from: interval.from, to: interval.to });
+        }
+      });
+      return out;
+    };
+
+    const sceneRaw: Array<{ from: number; to: number }> = [];
     scenes.forEach((scene) => {
       if (isSplitImageScene(scene) || generatedSegment(scene)) return;
       if (!HEADLINE_SCENE_TYPES.has(scene.type)) return;
       const startFrame = scene.fromFrame ?? Math.round(scene.from * config.fps);
       const endFrame = scene.toFrame ?? Math.round(scene.to * config.fps);
-      if (endFrame > startFrame) raw.push({ from: startFrame, to: endFrame });
+      if (endFrame > startFrame) sceneRaw.push({ from: startFrame, to: endFrame });
     });
+    const tweetRaw: Array<{ from: number; to: number }> = [];
     (layoutSegments ?? []).forEach((seg) => {
       if (seg.layout === 'tweet-card' && seg.toFrame > seg.fromFrame) {
-        raw.push({ from: seg.fromFrame, to: seg.toFrame });
+        tweetRaw.push({ from: seg.fromFrame, to: seg.toFrame });
       }
     });
-    raw.sort((a, b) => a.from - b.from);
 
-    const merged: Array<{ from: number; to: number }> = [];
-    raw.forEach((interval) => {
-      const last = merged[merged.length - 1];
-      if (last && interval.from <= last.to) {
-        last.to = Math.max(last.to, interval.to);
-      } else {
-        merged.push({ from: interval.from, to: interval.to });
-      }
-    });
+    const sceneMerged = mergeIntervals(sceneRaw);
+    const tweetMerged = mergeIntervals(tweetRaw);
+    // União (cenas + tweet) governa a exclusividade da manchete, como antes.
+    const merged = mergeIntervals([...sceneRaw, ...tweetRaw]);
 
     // 2) Drop blips shorter than MIN_OCCUPATION_SECONDS — they don't count as
     // "occupied" for window purposes, so they get absorbed into free space.
@@ -273,11 +284,11 @@ export const VideoComposition: React.FC<CompositionProps> = ({
     return {
       entranceFrame: qualified.length > 0 ? qualified[0].from : Infinity,
       qualifiedWindows: qualified,
-      // Raw (unfiltered) occupancy of the stage by a typographic scene — used to
-      // DISPLACE the karaoke subtitle to the top of the head so it never
-      // collides with a big centered statement. Even a short takeover displaces,
-      // so we use `merged` (not the significance-filtered set).
-      occupiedIntervals: merged,
+      // Cenas tipográficas de palco → a legenda DESLOCA para o topo.
+      sceneIntervals: sceneMerged,
+      // Tweet-card é camada de LEITURA (a citação está no card) → a legenda
+      // ESCONDE, nunca desloca para cima do header do card.
+      tweetIntervals: tweetMerged,
     };
   }, [scenes, layoutSegments, config.fps, config.durationInFrames]);
 
@@ -290,35 +301,41 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   // statement. Ramp both directions over SUB_FADE_FRAMES for a positional
   // crossfade (fade-out bottom / fade-in top), matching the manchete's ease.
   const isStageActiveAt = (f: number): boolean =>
-    occupiedIntervals.some((iv) => f >= iv.from && f < iv.to);
+    sceneIntervals.some((iv) => f >= iv.from && f < iv.to);
+  const isTweetActiveAt = (f: number): boolean =>
+    tweetIntervals.some((iv) => f >= iv.from && f < iv.to);
 
   const SUB_FADE_FRAMES = 8;
-  let subtitleTopFactor: number;
-  if (isStageActiveAt(frame)) {
-    let framesSinceClear = SUB_FADE_FRAMES;
-    for (let i = 1; i <= SUB_FADE_FRAMES; i += 1) {
-      if (!isStageActiveAt(frame - i)) {
-        framesSinceClear = i - 1;
-        break;
+  // Rampa 0→1 quando isActiveAt liga, 1→0 quando desliga (crossfade suave).
+  const rampFor = (isActiveAt: (f: number) => boolean): number => {
+    if (isActiveAt(frame)) {
+      let framesSinceClear = SUB_FADE_FRAMES;
+      for (let i = 1; i <= SUB_FADE_FRAMES; i += 1) {
+        if (!isActiveAt(frame - i)) {
+          framesSinceClear = i - 1;
+          break;
+        }
       }
+      return interpolate(framesSinceClear, [0, SUB_FADE_FRAMES], [0, 1], {
+        extrapolateLeft: 'clamp',
+        extrapolateRight: 'clamp',
+      });
     }
-    subtitleTopFactor = interpolate(framesSinceClear, [0, SUB_FADE_FRAMES], [0, 1], {
-      extrapolateLeft: 'clamp',
-      extrapolateRight: 'clamp',
-    });
-  } else {
     let framesSinceObstructed = 0;
     while (
       framesSinceObstructed < SUB_FADE_FRAMES &&
-      isStageActiveAt(frame - framesSinceObstructed - 1)
+      isActiveAt(frame - framesSinceObstructed - 1)
     ) {
       framesSinceObstructed += 1;
     }
-    subtitleTopFactor = interpolate(framesSinceObstructed, [0, SUB_FADE_FRAMES], [1, 0], {
+    return interpolate(framesSinceObstructed, [0, SUB_FADE_FRAMES], [1, 0], {
       extrapolateLeft: 'clamp',
       extrapolateRight: 'clamp',
     });
-  }
+  };
+
+  const subtitleTopFactor = rampFor(isStageActiveAt);
+  const subtitleHideFactor = rampFor(isTweetActiveAt);
 
   const HOOK_FADE_FRAMES = 6;
   let hookVisibility = 0;
@@ -492,6 +509,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         layoutSegments={layoutSegments}
         subtitleStyle={subtitleStyle}
         topFactor={subtitleTopFactor}
+        hideFactor={subtitleHideFactor}
       />
 
       {/* Persistent hook headline (top) — renders nothing when unset; hides

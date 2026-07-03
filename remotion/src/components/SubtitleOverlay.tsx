@@ -16,7 +16,19 @@ interface SubtitleOverlayProps {
   // statement); 0 = normal bottom placement. Values in between = the ~8-frame
   // positional crossfade (bottom fades out / top fades in). Defaults to 0.
   topFactor?: number;
+  // 0-1. 1 = uma camada de LEITURA full-canvas (tweet-card) está ativa e a
+  // legenda se ESCONDE por completo (o card é o texto do momento). Defaults 0.
+  hideFactor?: number;
 }
+
+// LEI DE COORDENAÇÃO DA LEGENDA (matriz única — casos novos entram AQUI, nunca
+// como patch em outro lugar):
+//   split-50 ativo            → modo two-word na costura (precedência máxima)
+//   tweet-card ativo          → legenda ESCONDIDA (hideFactor; o card já é a leitura)
+//   cena tipográfica de palco → legenda no TOPO (topFactor; manchete se esconde
+//                               nessas cenas por exclusividade, o topo fica livre)
+//   resto (narrador, b-roll, AssetCard, blur-bg) → RODAPÉ padrão
+// Camada 2 (planejada): âncora por batida calculada por vision no thumbnail.
 
 export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   subtitles,
@@ -25,6 +37,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   layoutSegments,
   subtitleStyle,
   topFactor = 0,
+  hideFactor = 0,
 }) => {
   const frame = useCurrentFrame();
   const config = useVideoConfig();
@@ -61,6 +74,11 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     }
 
     const tf = Math.max(0, Math.min(1, topFactor));
+    const hf = Math.max(0, Math.min(1, hideFactor));
+    if (hf >= 1) {
+      return null;
+    }
+    const visible = 1 - hf;
     // Positional crossfade: render the bottom copy (fading out) and the top copy
     // (fading in) as separate nodes so the subtitle appears to move between the
     // two anchors without sliding. Only one is meaningfully visible at rest.
@@ -74,7 +92,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
             mode="default"
             subtitleStyle={subtitleStyle}
             placement="bottom"
-            placementOpacity={1 - tf}
+            placementOpacity={(1 - tf) * visible}
           />
         )}
         {tf > 0 && (
@@ -85,7 +103,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
             mode="default"
             subtitleStyle={subtitleStyle}
             placement="top"
-            placementOpacity={tf}
+            placementOpacity={tf * visible}
           />
         )}
       </>
