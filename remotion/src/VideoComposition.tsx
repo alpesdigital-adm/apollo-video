@@ -321,14 +321,19 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         extrapolateRight: 'clamp',
       });
     }
-    let framesSinceObstructed = 0;
+    // Conta quantos frames consecutivos IMEDIATAMENTE anteriores estavam
+    // ocupados: acabou de liberar → contagem alta → fator ainda alto (desce
+    // suave); liberado há tempo → contagem 0 → fator 0. A versão anterior
+    // mapeava invertido ([1,0]) e travava o fator em 1 PARA SEMPRE ~8 frames
+    // após qualquer ocupação — legendas sumiam do 1:30 em diante (bug real).
+    let priorObstructed = 0;
     while (
-      framesSinceObstructed < SUB_FADE_FRAMES &&
-      isActiveAt(frame - framesSinceObstructed - 1)
+      priorObstructed < SUB_FADE_FRAMES &&
+      isActiveAt(frame - priorObstructed - 1)
     ) {
-      framesSinceObstructed += 1;
+      priorObstructed += 1;
     }
-    return interpolate(framesSinceObstructed, [0, SUB_FADE_FRAMES], [1, 0], {
+    return interpolate(priorObstructed, [0, SUB_FADE_FRAMES], [0, 1], {
       extrapolateLeft: 'clamp',
       extrapolateRight: 'clamp',
     });
