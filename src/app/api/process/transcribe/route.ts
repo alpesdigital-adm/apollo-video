@@ -4,6 +4,7 @@ import { cutSilencesFromVideo, detectSilences, extractAudio, generatePreviewProx
 import { getPreferredTranscriptionAudioExtension, transcribeAudio } from '@/lib/services/whisper'
 import { generateSubtitlesFromTranscription } from '@/lib/utils/silence'
 import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
+import { runSubtitleAnchors } from '@/lib/beat-vision'
 import type { Silence } from '@/lib/types/project'
 import path from 'path'
 import fs from 'fs'
@@ -182,6 +183,14 @@ export async function POST(request: NextRequest) {
     } catch (thumbsError) {
       console.warn(`Failed to clear stale beat thumbs for project ${projectId}:`, thumbsError)
     }
+
+    // Camada 2 (fire-and-forget): recomputa thumbs e âncora por batida via vision,
+    // regravando subtitlesJson com o campo `anchor`. NUNCA bloqueia nem falha a
+    // rota — usa lock 'anchors' próprio e captura qualquer erro.
+    const anchorProjectId = projectId
+    void runSubtitleAnchors(anchorProjectId).catch((anchorError) => {
+      console.warn(`[transcribe] subtitle anchors failed for ${anchorProjectId}:`, anchorError)
+    })
 
     return NextResponse.json({
       success: true,

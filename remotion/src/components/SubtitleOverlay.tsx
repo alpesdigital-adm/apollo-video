@@ -27,8 +27,15 @@ interface SubtitleOverlayProps {
 //   tweet-card ativo          → legenda ESCONDIDA (hideFactor; o card já é a leitura)
 //   cena tipográfica de palco → legenda no TOPO (topFactor; manchete se esconde
 //                               nessas cenas por exclusividade, o topo fica livre)
+//   ÂNCORA DA BATIDA (Camada 2) → 'top' quando o rosto/ação dominante está no
+//                               terço de BAIXO do frame real (vision no thumbnail,
+//                               currentSubtitle.anchor). Só decide quando NENHUMA
+//                               regra de composição acima mandou (é o penúltimo).
 //   resto (narrador, b-roll, AssetCard, blur-bg) → RODAPÉ padrão
-// Camada 2 (planejada): âncora por batida calculada por vision no thumbnail.
+// Precedência: split-50 (costura) > tweet-hide > palco (top) > âncora da batida
+// > rodapé. Implementada abaixo: split-50 e hide fazem short-circuit; o topFactor
+// efetivo = max(topFactor de composição, âncora 'top'), então palco e âncora
+// concordam no topo e a âncora nunca sobrepõe uma regra de composição.
 
 export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   subtitles,
@@ -73,11 +80,16 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
       );
     }
 
-    const tf = Math.max(0, Math.min(1, topFactor));
     const hf = Math.max(0, Math.min(1, hideFactor));
     if (hf >= 1) {
       return null;
     }
+    // Camada 2: quando nenhuma regra de composição forçou o topo, a âncora por
+    // batida (vision) decide. Combinada por max com o topFactor de composição —
+    // palco (top) e âncora concordam; a âncora nunca sobrepõe split-50/hide
+    // (que já saíram acima) nem rebaixa uma cena de palco.
+    const anchorTop = currentSubtitle.anchor === 'top' ? 1 : 0;
+    const tf = Math.max(0, Math.min(1, Math.max(topFactor, anchorTop)));
     const visible = 1 - hf;
     // Positional crossfade: render the bottom copy (fading out) and the top copy
     // (fading in) as separate nodes so the subtitle appears to move between the

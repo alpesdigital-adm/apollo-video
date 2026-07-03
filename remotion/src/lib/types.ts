@@ -28,6 +28,10 @@ export interface SubtitleEntry {
   startFrame?: number;
   endFrame?: number;
   words?: Array<string | SubtitleWord>;
+  // Per-beat vertical anchor from Camada 2 (vision over the beat thumbnail).
+  // 'top' = dominant face/action sits in the LOWER third, so the karaoke
+  // subtitle displaces up; 'bottom'/undefined = default lower third.
+  anchor?: 'top' | 'bottom';
 }
 
 export interface CreatorProfile {

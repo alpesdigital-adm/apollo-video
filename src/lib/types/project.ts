@@ -38,6 +38,12 @@ export interface SubtitleEntry {
   startFrame: number
   endFrame: number
   words: TranscriptionWord[]
+  // Camada 2 da coordenação de legenda: âncora vertical calculada POR BATIDA a
+  // partir do conteúdo real do frame (vision sobre o thumbnail). 'top' quando o
+  // rosto/ação dominante está no terço de BAIXO (a legenda desvia para o topo);
+  // 'bottom' (ou ausente) = rodapé padrão. Consumida na matriz do SubtitleOverlay
+  // como fallback, abaixo das regras de composição (split-50 / tweet / palco).
+  anchor?: 'top' | 'bottom'
 }
 
 export type VideoFormat = '9:16' | '16:9'
