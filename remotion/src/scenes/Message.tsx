@@ -29,32 +29,33 @@ export const Message: React.FC<MessageProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      zone="top"
-      align="left"
+      zone="stage"
+      align="center"
       scrim={false}
     >
       <div
         style={{
           transform: `translateY(${(1 - pop) * 16}px) scale(${pop})`,
-          transformOrigin: 'left top',
-          maxWidth: format === '9:16' ? 720 : 900,
-          background: 'rgba(255,255,255,0.14)',
+          transformOrigin: 'center',
+          width: format === '9:16' ? '72%' : '62%',
+          background: 'rgba(255,255,255,0.15)',
           backdropFilter: 'blur(10px)',
           WebkitBackdropFilter: 'blur(10px)',
-          borderRadius: 26,
-          borderTopLeftRadius: 8,
-          padding: '22px 28px',
-          boxShadow: TEXT_SHADOW_SOFT,
+          borderRadius: 30,
+          borderBottomRightRadius: 10,
+          padding: format === '9:16' ? '30px 36px' : '26px 32px',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.45)',
+          textAlign: 'left',
         }}
       >
         {senderName && (
           <div
             style={{
               color: style.accent,
-              fontSize: 26,
+              fontSize: 32,
               fontWeight: 800,
               letterSpacing: '-0.01em',
-              marginBottom: 8,
+              marginBottom: 10,
               textShadow: TEXT_SHADOW_SOFT,
             }}
           >
@@ -67,8 +68,8 @@ export const Message: React.FC<MessageProps> = ({
           align="left"
           maxChars={82}
           maxLines={3}
-          baseSize={format === '9:16' ? 42 : 48}
-          minSize={30}
+          baseSize={format === '9:16' ? 52 : 52}
+          minSize={36}
         >
           {messageText}
         </KineticText>

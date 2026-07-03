@@ -30,32 +30,32 @@ export const Split: React.FC<SplitProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      zone="top"
-      align="left"
+      zone="stage"
+      align="center"
     >
       {first && (
         <KineticText
           stylePreset={stylePreset}
           variant="muted"
-          align="left"
+          align="center"
           maxChars={64}
           maxLines={2}
-          baseSize={format === '9:16' ? 38 : 42}
-          minSize={30}
+          baseSize={format === '9:16' ? 40 : 42}
+          minSize={32}
         >
           {first}
         </KineticText>
       )}
       {second && (
-        <div style={{ marginTop: 18 }}>
+        <div style={{ marginTop: 20 }}>
           <KineticText
             stylePreset={stylePreset}
             variant="title"
-            align="left"
+            align="center"
             maxChars={62}
-            maxLines={2}
-            baseSize={format === '9:16' ? 60 : 66}
-            minSize={38}
+            maxLines={3}
+            baseSize={format === '9:16' ? 84 : 74}
+            minSize={50}
             startDelay={6}
           >
             {second}

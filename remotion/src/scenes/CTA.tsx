@@ -37,18 +37,18 @@ export const CTA: React.FC<CTAProps> = ({
         format={format}
         stylePreset={stylePreset}
         durationInFrames={durationInFrames}
-        zone="top"
-        align="left"
+        zone="stage"
+        align="center"
       >
         <KineticText
           stylePreset={stylePreset}
           highlight={highlightWord}
           variant="title"
-          align="left"
+          align="center"
           maxChars={64}
           maxLines={3}
-          baseSize={format === '9:16' ? 78 : 84}
-          minSize={46}
+          baseSize={format === '9:16' ? 104 : 92}
+          minSize={60}
           pulse
         >
           {text}
@@ -95,8 +95,11 @@ const CTABox: React.FC<{ text: string; format: '9:16' | '16:9'; durationInFrames
     <div
       style={{
         position: 'absolute',
-        left: isVertical ? 84 : 130,
+        left: 0,
+        right: 0,
         bottom: isVertical ? '30%' : '16%',
+        display: 'flex',
+        justifyContent: 'center',
         opacity: progress,
         transform: `translateY(${translateY}px) scale(${0.96 + progress * 0.04})`,
       }}

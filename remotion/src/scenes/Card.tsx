@@ -26,37 +26,44 @@ export const Card: React.FC<CardProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      zone="top"
-      align="left"
+      zone="stage"
+      align="center"
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 22 }}>
-        <div style={{ paddingTop: 6 }}>
-          <Marker stylePreset={stylePreset} size={format === '9:16' ? 58 : 66}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: format === '9:16' ? 30 : 36,
+        }}
+      >
+        <div style={{ flexShrink: 0 }}>
+          <Marker stylePreset={stylePreset} size={format === '9:16' ? 150 : 140}>
             {icon || number || '—'}
           </Marker>
         </div>
-        <div style={{ flex: 1 }}>
+        <div style={{ textAlign: 'left', maxWidth: format === '9:16' ? 620 : 760 }}>
           <KineticText
             stylePreset={stylePreset}
             variant="title"
             align="left"
-            maxChars={56}
+            maxChars={44}
             maxLines={2}
-            baseSize={format === '9:16' ? 62 : 68}
-            minSize={40}
+            baseSize={format === '9:16' ? 70 : 74}
+            minSize={44}
           >
             {title}
           </KineticText>
           {description && (
-            <div style={{ marginTop: 16 }}>
+            <div style={{ marginTop: 14 }}>
               <KineticText
                 stylePreset={stylePreset}
                 variant="muted"
                 align="left"
-                maxChars={88}
+                maxChars={80}
                 maxLines={3}
-                baseSize={36}
-                minSize={28}
+                baseSize={format === '9:16' ? 38 : 40}
+                minSize={34}
                 startDelay={5}
               >
                 {description}

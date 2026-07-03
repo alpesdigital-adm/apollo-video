@@ -27,31 +27,37 @@ export const Flow: React.FC<FlowProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      zone="top"
-      align="left"
+      zone="stage"
+      align="center"
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: format === '9:16' ? 26 : 22 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: format === '9:16' ? 30 : 24,
+        }}
+      >
         {visibleSteps.map((step, index) => (
-          <div key={index} style={{ display: 'flex', alignItems: 'flex-start', gap: 22 }}>
-            <div style={{ paddingTop: 2 }}>
-              <Marker stylePreset={stylePreset} size={format === '9:16' ? 44 : 50}>
-                {step.number || index + 1}
-              </Marker>
-            </div>
-            <div style={{ flex: 1 }}>
-              <KineticText
-                stylePreset={stylePreset}
-                variant="title"
-                align="left"
-                maxChars={54}
-                maxLines={2}
-                baseSize={format === '9:16' ? 42 : 48}
-                minSize={30}
-                startDelay={index * 5}
-              >
-                {compactText(step.text, 54)}
-              </KineticText>
-            </div>
+          <div
+            key={index}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24 }}
+          >
+            <Marker stylePreset={stylePreset} size={format === '9:16' ? 62 : 58}>
+              {step.number || index + 1}
+            </Marker>
+            <KineticText
+              stylePreset={stylePreset}
+              variant="title"
+              align="left"
+              maxChars={44}
+              maxLines={1}
+              baseSize={format === '9:16' ? 56 : 54}
+              minSize={38}
+              startDelay={index * 5}
+            >
+              {compactText(step.text, 44)}
+            </KineticText>
           </div>
         ))}
       </div>

@@ -40,31 +40,31 @@ export const FullScreen: React.FC<FullScreenProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      zone="top"
-      align="left"
+      zone="stage"
+      align="center"
     >
       <KineticText
         stylePreset={stylePreset}
         highlight={highlight}
         variant="title"
-        align="left"
+        align="center"
         maxChars={72}
         maxLines={3}
-        baseSize={format === '9:16' ? 86 : 92}
-        minSize={48}
+        baseSize={format === '9:16' ? 124 : 108}
+        minSize={70}
       >
         {mainText}
       </KineticText>
       {subtitle && (
-        <div style={{ marginTop: 22 }}>
+        <div style={{ marginTop: 24 }}>
           <KineticText
             stylePreset={stylePreset}
             variant="muted"
-            align="left"
+            align="center"
             maxChars={84}
             maxLines={2}
-            baseSize={38}
-            minSize={30}
+            baseSize={format === '9:16' ? 44 : 40}
+            minSize={32}
             startDelay={6}
           >
             {subtitle}
@@ -93,13 +93,19 @@ const TornPaperCard: React.FC<{ text: string; format: '9:16' | '16:9' }> = ({ te
   });
   const slideX = interpolate(enter, [0, 1], [-140, 0]);
   const opacity = interpolate(enter, [0, 1], [0, 1]);
-  const fontSize = format === '9:16' ? 104 : 116;
+  const isVertical = format === '9:16';
+  const fontSize = isVertical ? 96 : 112;
 
   return (
     <div
       style={{
+        // Band lives on the PALCO (stage), crossing between chin and caption —
+        // never over the narrator's face.
         position: 'absolute',
-        inset: 0,
+        left: 0,
+        right: 0,
+        top: isVertical ? '57%' : '58%',
+        transform: 'translateY(-50%)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -165,12 +171,18 @@ const CrtGlitchCard: React.FC<{
   const frame = useCurrentFrame();
   const style = getInsertStyle(stylePreset);
   const jitter = CRT_JITTER[Math.floor(frame / 4) % CRT_JITTER.length];
-  const fontSize = format === '9:16' ? 92 : 104;
-  const barHeight = format === '9:16' ? '13%' : '11%';
+  const isVertical = format === '9:16';
+  const fontSize = isVertical ? 104 : 108;
+  const barHeight = isVertical ? '13%' : '11%';
 
+  // Letterbox stays full-frame, but the RGB-split text is centered on the
+  // PALCO (stage band), not on the narrator's face at 50%.
   const layerBase: React.CSSProperties = {
     position: 'absolute',
-    inset: 0,
+    left: 0,
+    right: 0,
+    top: isVertical ? '46%' : '40%',
+    height: isVertical ? '22%' : '30%',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',

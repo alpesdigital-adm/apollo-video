@@ -214,7 +214,10 @@ interface InsertFrameProps {
   format: '9:16' | '16:9';
   stylePreset?: string;
   durationInFrames?: number;
-  zone?: 'top' | 'lower';
+  // 'stage' = the band between chin and caption (y ~46-68%), centered — the
+  // home for statements (Composition Law V3). 'lower' = discreet inferior band
+  // for LowerThird. 'top' = legacy upper third (HookTitle exception only).
+  zone?: 'top' | 'lower' | 'stage';
   align?: 'left' | 'center';
   scrim?: boolean;
 }
@@ -244,53 +247,79 @@ export const InsertFrame: React.FC<InsertFrameProps> = ({
   const opacity = Math.min(intro, outro);
   const isVertical = format === '9:16';
 
-  const scrimStyle: React.CSSProperties =
-    zone === 'lower'
-      ? {
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: isVertical ? '26%' : '10%',
-          height: isVertical ? '26%' : '30%',
-          background:
-            'linear-gradient(0deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0) 100%)',
-        }
-      : {
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: isVertical ? '52%' : '62%',
-          background:
-            'linear-gradient(180deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.3) 46%, rgba(0,0,0,0) 100%)',
-        };
+  let scrimStyle: React.CSSProperties;
+  let contentStyle: React.CSSProperties;
 
-  const contentStyle: React.CSSProperties =
-    zone === 'lower'
-      ? {
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: isVertical ? '30%' : '13%',
-          boxSizing: 'border-box',
-          padding: isVertical ? '0 96px 0 84px' : '0 130px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: align === 'center' ? 'center' : 'flex-start',
-          textAlign: align,
-        }
-      : {
-          position: 'absolute',
-          top: isVertical ? '13%' : '12%',
-          left: 0,
-          right: 0,
-          boxSizing: 'border-box',
-          padding: isVertical ? '0 200px 0 84px' : '0 150px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: align === 'center' ? 'center' : 'flex-start',
-          textAlign: align,
-        };
+  if (zone === 'lower') {
+    scrimStyle = {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: isVertical ? '26%' : '10%',
+      height: isVertical ? '26%' : '30%',
+      background:
+        'linear-gradient(0deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0) 100%)',
+    };
+    contentStyle = {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: isVertical ? '30%' : '13%',
+      boxSizing: 'border-box',
+      padding: isVertical ? '0 96px 0 84px' : '0 130px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: align === 'center' ? 'center' : 'flex-start',
+      textAlign: align,
+    };
+  } else if (zone === 'stage') {
+    // The stage: centered on the midpoint of the y46-68% band. A soft radial
+    // scrim rides with the text block instead of darkening the top of frame.
+    scrimStyle = {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: isVertical ? '38%' : '30%',
+      height: isVertical ? '40%' : '48%',
+      background:
+        'radial-gradient(ellipse 74% 62% at 50% 50%, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.34) 52%, rgba(0,0,0,0) 80%)',
+    };
+    contentStyle = {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: isVertical ? '57%' : '58%',
+      transform: 'translateY(-50%)',
+      boxSizing: 'border-box',
+      padding: isVertical ? '0 78px' : '0 150px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: align === 'center' ? 'center' : 'flex-start',
+      textAlign: align,
+    };
+  } else {
+    scrimStyle = {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: isVertical ? '52%' : '62%',
+      background:
+        'linear-gradient(180deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.3) 46%, rgba(0,0,0,0) 100%)',
+    };
+    contentStyle = {
+      position: 'absolute',
+      top: isVertical ? '13%' : '12%',
+      left: 0,
+      right: 0,
+      boxSizing: 'border-box',
+      padding: isVertical ? '0 200px 0 84px' : '0 150px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: align === 'center' ? 'center' : 'flex-start',
+      textAlign: align,
+    };
+  }
 
   return (
     <AbsoluteFill style={{ opacity, fontFamily: style.typeface }}>

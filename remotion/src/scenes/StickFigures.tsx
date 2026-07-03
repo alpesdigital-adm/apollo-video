@@ -43,48 +43,61 @@ export const StickFigures: React.FC<StickFiguresProps> = ({
   durationInFrames,
 }) => {
   const style = getInsertStyle(stylePreset);
-  const primary = situation || leftCaption || 'Cenario';
-  const secondary = caption || rightCaption || '';
+  const leftText = leftCaption || situation || 'Cenario';
+  const rightText = rightCaption || caption || '';
+  const figSize = format === '9:16' ? 190 : 170;
+
+  const columns = [
+    { color: style.text, text: leftText, accent: false, delay: 0 },
+    { color: style.accent, text: rightText, accent: true, delay: 5 },
+  ].filter((c) => c.text);
 
   return (
     <InsertFrame
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      zone="top"
-      align="left"
+      zone="stage"
+      align="center"
     >
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 26, marginBottom: 28 }}>
-        <StickFigure color={style.text} size={format === '9:16' ? 70 : 78} />
-        <StickFigure color={style.accent} size={format === '9:16' ? 70 : 78} />
-      </div>
-      <KineticText
-        stylePreset={stylePreset}
-        variant="title"
-        align="left"
-        maxChars={62}
-        maxLines={2}
-        baseSize={format === '9:16' ? 56 : 62}
-        minSize={36}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
+          gap: format === '9:16' ? 56 : 80,
+          width: '100%',
+        }}
       >
-        {primary}
-      </KineticText>
-      {secondary && (
-        <div style={{ marginTop: 16 }}>
-          <KineticText
-            stylePreset={stylePreset}
-            variant="muted"
-            align="left"
-            maxChars={84}
-            maxLines={2}
-            baseSize={34}
-            minSize={27}
-            startDelay={5}
+        {columns.map((col, index) => (
+          <div
+            key={index}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              width: '44%',
+            }}
           >
-            {secondary}
-          </KineticText>
-        </div>
-      )}
+            <StickFigure color={col.color} size={figSize} />
+            <div style={{ marginTop: 20 }}>
+              <KineticText
+                stylePreset={stylePreset}
+                highlight={col.accent ? col.text : undefined}
+                variant="title"
+                align="center"
+                maxChars={48}
+                maxLines={3}
+                baseSize={format === '9:16' ? 40 : 42}
+                minSize={30}
+                startDelay={col.delay}
+              >
+                {col.text}
+              </KineticText>
+            </div>
+          </div>
+        ))}
+      </div>
     </InsertFrame>
   );
 };

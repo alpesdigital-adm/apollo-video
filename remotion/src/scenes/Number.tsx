@@ -34,34 +34,35 @@ export const Number: React.FC<NumberProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      zone="top"
-      align="left"
+      zone="stage"
+      align="center"
     >
       <div
         style={{
           transform: `translateY(${(1 - pop) * 20}px) scale(${pop})`,
-          transformOrigin: 'left top',
+          transformOrigin: 'center',
           opacity: pop,
           color: style.accent,
-          fontSize: format === '9:16' ? 240 : 220,
+          fontSize: format === '9:16' ? 300 : 240,
           fontWeight: 800,
           lineHeight: 0.9,
           letterSpacing: '-0.04em',
           textShadow: TEXT_SHADOW,
+          textAlign: 'center',
         }}
       >
         {displayValue}
       </div>
       {label && (
-        <div style={{ marginTop: 18 }}>
+        <div style={{ marginTop: 12 }}>
           <KineticText
             stylePreset={stylePreset}
             variant="title"
-            align="left"
+            align="center"
             maxChars={60}
             maxLines={2}
-            baseSize={format === '9:16' ? 52 : 60}
-            minSize={36}
+            baseSize={format === '9:16' ? 56 : 60}
+            minSize={38}
             startDelay={5}
           >
             {label}

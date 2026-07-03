@@ -33,15 +33,19 @@ export const SplitVertical: React.FC<SplitVerticalProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      zone="top"
-      align="left"
+      zone="stage"
+      align="center"
     >
+      {/* Real vertical split: two halves side by side occupying the whole
+          stage, thin central divider, each side centered. */}
       <div
         style={{
           display: 'flex',
-          flexDirection: vertical ? 'column' : 'row',
-          gap: vertical ? 26 : 40,
+          flexDirection: 'row',
+          alignItems: 'stretch',
+          justifyContent: 'center',
           width: '100%',
+          minHeight: vertical ? 360 : 300,
         }}
       >
         {items.map((item, index) => (
@@ -49,23 +53,34 @@ export const SplitVertical: React.FC<SplitVerticalProps> = ({
             {index === 1 && (
               <div
                 style={{
-                  background: 'rgba(255,255,255,0.28)',
-                  ...(vertical
-                    ? { height: 2, width: '52%', margin: '2px 0' }
-                    : { width: 2, alignSelf: 'stretch' }),
+                  width: 2,
+                  alignSelf: 'stretch',
+                  background: 'rgba(255,255,255,0.30)',
+                  margin: '0 4px',
+                  flexShrink: 0,
                 }}
               />
             )}
-            <div style={{ flex: 1 }}>
-              <div style={{ marginBottom: 10 }}>
+            <div
+              style={{
+                width: '46%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '0 12px',
+                boxSizing: 'border-box',
+              }}
+            >
+              <div style={{ marginBottom: 14 }}>
                 <KineticText
                   stylePreset={stylePreset}
                   variant="muted"
-                  align="left"
+                  align="center"
                   maxChars={22}
                   maxLines={1}
-                  baseSize={vertical ? 28 : 30}
-                  minSize={24}
+                  baseSize={vertical ? 32 : 32}
+                  minSize={26}
                   highlight={item.accent ? item.label : undefined}
                   startDelay={index * 4}
                 >
@@ -76,11 +91,11 @@ export const SplitVertical: React.FC<SplitVerticalProps> = ({
                 stylePreset={stylePreset}
                 highlight={item.accent ? item.content : undefined}
                 variant="title"
-                align="left"
-                maxChars={54}
-                maxLines={vertical ? 2 : 3}
-                baseSize={vertical ? 48 : 52}
-                minSize={34}
+                align="center"
+                maxChars={40}
+                maxLines={3}
+                baseSize={vertical ? 52 : 50}
+                minSize={36}
                 startDelay={index * 4 + 3}
               >
                 {item.content}
