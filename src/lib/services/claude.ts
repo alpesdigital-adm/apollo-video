@@ -662,6 +662,19 @@ export function normalizeTypographicScene(sceneData: any): any | null {
       sceneData.rightText = rightText
       sceneData.leftLabel = coerceString(sceneData.leftLabel) || 'Antes'
       sceneData.rightLabel = coerceString(sceneData.rightLabel) || 'Depois'
+      // Congruência cognitiva (regra do dono): NEGATIVO à esquerda com tom
+      // brando, POSITIVO à direita com destaque (o componente acende a direita).
+      // Se os rótulos vierem invertidos, troca os lados inteiros.
+      const NEG = /^(sem|antes|errado|fraco|velho|nunca|não)\b/i
+      const POS = /^(com|depois|certo|forte|novo|sempre)\b/i
+      const leftPositive =
+        (POS.test(sceneData.leftLabel) && !POS.test(sceneData.rightLabel)) ||
+        (NEG.test(sceneData.rightLabel) && !NEG.test(sceneData.leftLabel))
+      if (leftPositive) {
+        ;[sceneData.leftLabel, sceneData.rightLabel] = [sceneData.rightLabel, sceneData.leftLabel]
+        ;[sceneData.leftText, sceneData.rightText] = [sceneData.rightText, sceneData.leftText]
+        console.warn('[copy] SplitVertical com polaridade invertida — lados trocados (positivo vai à direita)')
+      }
       return sceneData
     }
     case 'Card': {
@@ -1361,7 +1374,7 @@ TIPOS DE CENA DISPONÍVEIS (11 tipos — use o mais adequado ao SIGNIFICADO da f
 - Number: um número, métrica ou percentual FALADO (ex.: "3x", "R$15k", "80%"). value = o número curto; label = o que ele significa.
 - Flow: uma lista de passos ou etapas sequenciais (3 a 5 passos). steps = array de strings curtas.
 - Card: um item de lista / conceito com título + descrição curta.
-- SplitVertical: comparação, antes-e-depois, ou dois lados contrastantes. leftText/rightText + leftLabel/rightLabel.
+- SplitVertical: comparação, antes-e-depois, ou dois lados contrastantes. leftText/rightText + leftLabel/rightLabel. REGRA DE CONGRUÊNCIA (vale para QUALQUER estrutura de comparação, incl. StickFigures): o lado NEGATIVO/antes/errado vai à ESQUERDA (tom neutro) e o POSITIVO/depois/certo à DIREITA (é o lado que recebe a cor de destaque). Nunca inverta.
 - FullScreen: uma frase de impacto, quote ou afirmação forte plotada direto no vídeo. text = a frase; highlight (opcional) = UMA palavra contida em text para destacar na cor de acento.
 - Message: uma pergunta retórica ou mensagem estilo conversa (WhatsApp). sender + message.
 - CTA: a chamada final para ação. text + highlight (highlight DEVE ser uma palavra contida em text). NO MÁXIMO 1 por vídeo, perto do fim.
