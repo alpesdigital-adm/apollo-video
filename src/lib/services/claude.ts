@@ -154,6 +154,7 @@ function sanitizeSceneCopy(sceneData: any): any {
     case 'FullScreen':
       sceneData.text = limitCopy(sceneData.text || sceneData.title, 70)
       sceneData.subtitle = sceneData.subtitle ? limitCopy(sceneData.subtitle, 70) : undefined
+      sceneData.highlight = sceneData.highlight ? limitCopy(sceneData.highlight, 40) : undefined
       delete sceneData.fontSize
       delete sceneData.color
       delete sceneData.bgColor
@@ -251,11 +252,17 @@ function coerceString(...values: unknown[]): string {
 function normalizeTypographicScene(sceneData: any): any | null {
   switch (sceneData.type) {
     case 'FullScreen': {
+      const highlight = coerceString(sceneData.highlight, sceneData.highlightWord)
       const text = coerceString(sceneData.text, sceneData.title, sceneData.subtitle)
       if (!text) {
         return null
       }
       sceneData.text = text
+      // Optional highlight: keep only when it is a word contained in text.
+      sceneData.highlight =
+        highlight && text.toLowerCase().includes(highlight.toLowerCase())
+          ? highlight
+          : undefined
       return sceneData
     }
     case 'LowerThird': {
@@ -395,7 +402,7 @@ TIPOS DE CENA DISPONÍVEIS (11 tipos — use o mais adequado ao SIGNIFICADO da f
 - Flow: uma lista de passos ou etapas sequenciais (3 a 5 passos). steps = array de strings curtas.
 - Card: um item de lista / conceito com título + descrição curta.
 - SplitVertical: comparação, antes-e-depois, ou dois lados contrastantes. leftText/rightText + leftLabel/rightLabel.
-- FullScreen: uma frase de impacto, quote ou afirmação forte em tela cheia. text = a frase.
+- FullScreen: uma frase de impacto, quote ou afirmação forte plotada direto no vídeo. text = a frase; highlight (opcional) = UMA palavra contida em text para destacar na cor de acento.
 - Message: uma pergunta retórica ou mensagem estilo conversa (WhatsApp). sender + message.
 - CTA: a chamada final para ação. text + highlight (highlight DEVE ser uma palavra contida em text). NO MÁXIMO 1 por vídeo, perto do fim.
 - LowerThird: rótulo de contexto sobreposto quando um rosto está visível na fala (nome/cargo). title + subtitle.
@@ -460,7 +467,7 @@ Formato:
     "text": "#HEX cor de texto"
   },
   "scenes": [
-    { "id": "s1", "type": "FullScreen", "startLeg": 0, "durationInSubtitles": 2, "text": "Frase de impacto curta" },
+    { "id": "s1", "type": "FullScreen", "startLeg": 0, "durationInSubtitles": 2, "text": "Frase de impacto curta", "highlight": "impacto" },
     { "id": "s2", "type": "Number", "startLeg": 4, "durationInSubtitles": 2, "value": "3x", "label": "mais vendas" },
     { "id": "s3", "type": "ImageInsert", "startLeg": 8, "durationInSubtitles": 2, "layout": "split-bottom", "narrativeRole": "proof", "visualRole": "evidence", "imagePrompt": "Documentary B-roll still, no text, no letters, no logos", "imageAlt": "descrição interna curta", "sourceText": "trecho exato da fala que este insert apoia" },
     { "id": "s4", "type": "Flow", "startLeg": 12, "durationInSubtitles": 3, "steps": ["Passo um", "Passo dois", "Passo três"] },
@@ -473,7 +480,7 @@ Formato:
 
 Props obrigatórias por tipo:
 - ImageInsert: layout ("full" | "split-bottom" | "top-image-compact"), imagePrompt (SEM texto/letras/logos), narrativeRole, visualRole, imageAlt, sourceText.
-- FullScreen: text. LowerThird: title, subtitle. Split: topText, bottomText.
+- FullScreen: text (+ highlight opcional = palavra contida em text). LowerThird: title, subtitle. Split: topText, bottomText.
 - SplitVertical: leftText, rightText, leftLabel, rightLabel. Card: number, title, description.
 - Message: sender, message. Number: value, label. Flow: steps (array de strings).
 - CTA: text, highlight (highlight = palavra contida em text). StickFigures: situation, caption.

@@ -1,5 +1,5 @@
 import React from 'react';
-import { InsertFrame, Kicker, Panel, SmartText } from '../components/InsertPrimitives';
+import { InsertFrame, KineticText, getInsertStyle } from '../components/InsertPrimitives';
 
 interface LowerThirdProps {
   title: string;
@@ -18,41 +18,55 @@ export const LowerThird: React.FC<LowerThirdProps> = ({
   stylePreset,
   durationInFrames,
 }) => {
+  const style = getInsertStyle(stylePreset);
+
   return (
     <InsertFrame
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      placement="bottom"
-      scrim={false}
+      zone="lower"
+      align="left"
     >
-      <Panel stylePreset={stylePreset} soft maxWidth={format === '9:16' ? 840 : 980}>
-        <Kicker stylePreset={stylePreset}>Contexto</Kicker>
-        <SmartText
-          stylePreset={stylePreset}
-          variant="title"
-          maxChars={54}
-          maxLines={2}
-          baseSize={format === '9:16' ? 54 : 60}
-          minSize={36}
-        >
-          {title}
-        </SmartText>
-        {subtitle && (
-          <div style={{ marginTop: 14 }}>
-            <SmartText
-              stylePreset={stylePreset}
-              variant="muted"
-              maxChars={74}
-              maxLines={2}
-              baseSize={32}
-              minSize={26}
-            >
-              {subtitle}
-            </SmartText>
-          </div>
-        )}
-      </Panel>
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 18 }}>
+        <div
+          style={{
+            width: 6,
+            borderRadius: 999,
+            background: style.accent,
+            flexShrink: 0,
+          }}
+        />
+        <div>
+          <KineticText
+            stylePreset={stylePreset}
+            variant="title"
+            align="left"
+            maxChars={44}
+            maxLines={1}
+            baseSize={format === '9:16' ? 46 : 52}
+            minSize={34}
+          >
+            {title}
+          </KineticText>
+          {subtitle && (
+            <div style={{ marginTop: 8 }}>
+              <KineticText
+                stylePreset={stylePreset}
+                variant="muted"
+                align="left"
+                maxChars={64}
+                maxLines={1}
+                baseSize={30}
+                minSize={24}
+                startDelay={4}
+              >
+                {subtitle}
+              </KineticText>
+            </div>
+          )}
+        </div>
+      </div>
     </InsertFrame>
   );
 };

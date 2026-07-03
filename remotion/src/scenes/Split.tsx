@@ -1,5 +1,5 @@
 import React from 'react';
-import { InsertFrame, Kicker, Panel, SmartText, getInsertStyle } from '../components/InsertPrimitives';
+import { InsertFrame, KineticText } from '../components/InsertPrimitives';
 
 interface SplitProps {
   title: string;
@@ -22,7 +22,6 @@ export const Split: React.FC<SplitProps> = ({
   stylePreset,
   durationInFrames,
 }) => {
-  const style = getInsertStyle(stylePreset);
   const first = topText || title;
   const second = bottomText || content;
 
@@ -31,36 +30,38 @@ export const Split: React.FC<SplitProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      placement="bottom"
-      scrim
+      zone="top"
+      align="left"
     >
-      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 880 : 1180}>
-        <Kicker stylePreset={stylePreset}>Antes de decidir</Kicker>
-        <div style={{ display: 'grid', gap: 18 }}>
-          {[first, second].filter(Boolean).map((text, index) => (
-            <div
-              key={index}
-              style={{
-                borderRadius: Math.max(14, style.radius - 10),
-                border: `1px solid ${index === 0 ? style.border : style.accent}`,
-                background: index === 0 ? 'rgba(255,255,255,0.06)' : style.panelSoft,
-                padding: '26px 30px',
-              }}
-            >
-              <SmartText
-                stylePreset={stylePreset}
-                variant={index === 1 ? 'accent' : 'title'}
-                maxChars={66}
-                maxLines={2}
-                baseSize={format === '9:16' ? 44 : 52}
-                minSize={30}
-              >
-                {text}
-              </SmartText>
-            </div>
-          ))}
+      {first && (
+        <KineticText
+          stylePreset={stylePreset}
+          variant="muted"
+          align="left"
+          maxChars={64}
+          maxLines={2}
+          baseSize={format === '9:16' ? 38 : 42}
+          minSize={30}
+        >
+          {first}
+        </KineticText>
+      )}
+      {second && (
+        <div style={{ marginTop: 18 }}>
+          <KineticText
+            stylePreset={stylePreset}
+            variant="title"
+            align="left"
+            maxChars={62}
+            maxLines={2}
+            baseSize={format === '9:16' ? 60 : 66}
+            minSize={38}
+            startDelay={6}
+          >
+            {second}
+          </KineticText>
         </div>
-      </Panel>
+      )}
     </InsertFrame>
   );
 };

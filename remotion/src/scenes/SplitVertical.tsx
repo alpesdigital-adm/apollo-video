@@ -1,5 +1,5 @@
 import React from 'react';
-import { InsertFrame, Kicker, Panel, SmartText, getInsertStyle } from '../components/InsertPrimitives';
+import { InsertFrame, KineticText } from '../components/InsertPrimitives';
 
 interface SplitVerticalProps {
   leftLabel: string;
@@ -21,70 +21,74 @@ export const SplitVertical: React.FC<SplitVerticalProps> = ({
   stylePreset,
   durationInFrames,
 }) => {
-  const style = getInsertStyle(stylePreset);
   const vertical = format === '9:16';
+
+  const items = [
+    { label: leftLabel || 'Antes', content: leftContent, accent: false },
+    { label: rightLabel || 'Depois', content: rightContent, accent: true },
+  ];
 
   return (
     <InsertFrame
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      placement="bottom"
-      scrim
+      zone="top"
+      align="left"
     >
-      <Panel stylePreset={stylePreset} align="center" maxWidth={vertical ? 900 : 1240}>
-        <Kicker stylePreset={stylePreset}>Comparativo</Kicker>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: vertical ? '1fr' : '1fr 1fr',
-            gap: vertical ? 14 : 22,
-            alignItems: 'stretch',
-          }}
-        >
-          {[
-            { label: leftLabel || 'Cenario', content: leftContent },
-            { label: rightLabel || 'Decisao', content: rightContent },
-          ].map((item, index) => (
-            <div
-              key={index}
-              style={{
-                border: `1px solid ${style.border}`,
-                borderRadius: Math.max(14, style.radius - 8),
-                background: index === 1 ? style.panelSoft : 'rgba(255,255,255,0.06)',
-                padding: vertical ? '20px 24px' : '28px 30px',
-                minHeight: vertical ? 132 : 260,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-              }}
-            >
-              <SmartText
-                stylePreset={stylePreset}
-                variant={index === 1 ? 'accent' : 'muted'}
-                maxChars={28}
-                maxLines={1}
-                baseSize={vertical ? 24 : 28}
-                minSize={22}
-              >
-                {item.label}
-              </SmartText>
-              <div style={{ marginTop: 20 }}>
-                <SmartText
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: vertical ? 'column' : 'row',
+          gap: vertical ? 26 : 40,
+          width: '100%',
+        }}
+      >
+        {items.map((item, index) => (
+          <React.Fragment key={index}>
+            {index === 1 && (
+              <div
+                style={{
+                  background: 'rgba(255,255,255,0.28)',
+                  ...(vertical
+                    ? { height: 2, width: '52%', margin: '2px 0' }
+                    : { width: 2, alignSelf: 'stretch' }),
+                }}
+              />
+            )}
+            <div style={{ flex: 1 }}>
+              <div style={{ marginBottom: 10 }}>
+                <KineticText
                   stylePreset={stylePreset}
-                  variant="title"
-                  maxChars={56}
-                  maxLines={vertical ? 2 : 3}
-                  baseSize={vertical ? 40 : 50}
-                  minSize={34}
+                  variant="muted"
+                  align="left"
+                  maxChars={22}
+                  maxLines={1}
+                  baseSize={vertical ? 28 : 30}
+                  minSize={24}
+                  highlight={item.accent ? item.label : undefined}
+                  startDelay={index * 4}
                 >
-                  {item.content}
-                </SmartText>
+                  {item.label}
+                </KineticText>
               </div>
+              <KineticText
+                stylePreset={stylePreset}
+                highlight={item.accent ? item.content : undefined}
+                variant="title"
+                align="left"
+                maxChars={54}
+                maxLines={vertical ? 2 : 3}
+                baseSize={vertical ? 48 : 52}
+                minSize={34}
+                startDelay={index * 4 + 3}
+              >
+                {item.content}
+              </KineticText>
             </div>
-          ))}
-        </div>
-      </Panel>
+          </React.Fragment>
+        ))}
+      </div>
     </InsertFrame>
   );
 };

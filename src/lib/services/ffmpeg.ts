@@ -75,6 +75,11 @@ export async function normalizeVideo(
     await execFileAsync(ffmpegPath, [
       '-i',
       inputPath,
+      // Downscale para o budget da composição (lado menor <= 1080, aspecto preservado).
+      // Sem isso, fontes 4K atravessam o pipeline inteiro e estouram memória
+      // no autocut, no preview do browser e no cache de frames do Remotion.
+      '-vf',
+      "scale=w='if(gte(ih,iw),min(iw,1080),-2)':h='if(gte(ih,iw),-2,min(ih,1080))':flags=lanczos",
       '-c:v',
       'libx264',
       '-preset',

@@ -1,10 +1,11 @@
 import React from 'react';
-import { AccentRule, InsertFrame, Kicker, Panel, SmartText } from '../components/InsertPrimitives';
+import { InsertFrame, KineticText } from '../components/InsertPrimitives';
 
 interface FullScreenProps {
   title: string;
   subtitle?: string;
   text?: string;
+  highlight?: string;
   format: '9:16' | '16:9';
   palette: any;
   stylePreset?: string;
@@ -15,6 +16,7 @@ export const FullScreen: React.FC<FullScreenProps> = ({
   title,
   subtitle,
   text,
+  highlight,
   format,
   stylePreset,
   durationInFrames,
@@ -26,39 +28,37 @@ export const FullScreen: React.FC<FullScreenProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      placement="bottom"
-      scrim
+      zone="top"
+      align="left"
     >
-      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 880 : 1120}>
-        <Kicker stylePreset={stylePreset}>Ponto-chave</Kicker>
-        <SmartText
-          stylePreset={stylePreset}
-          variant="title"
-          align="center"
-          maxChars={72}
-          maxLines={3}
-          baseSize={format === '9:16' ? 74 : 82}
-          minSize={44}
-        >
-          {mainText}
-        </SmartText>
-        {subtitle && (
-          <>
-            <AccentRule stylePreset={stylePreset} />
-            <SmartText
-              stylePreset={stylePreset}
-              variant="muted"
-              align="center"
-              maxChars={84}
-              maxLines={2}
-              baseSize={38}
-              minSize={30}
-            >
-              {subtitle}
-            </SmartText>
-          </>
-        )}
-      </Panel>
+      <KineticText
+        stylePreset={stylePreset}
+        highlight={highlight}
+        variant="title"
+        align="left"
+        maxChars={72}
+        maxLines={3}
+        baseSize={format === '9:16' ? 86 : 92}
+        minSize={48}
+      >
+        {mainText}
+      </KineticText>
+      {subtitle && (
+        <div style={{ marginTop: 22 }}>
+          <KineticText
+            stylePreset={stylePreset}
+            variant="muted"
+            align="left"
+            maxChars={84}
+            maxLines={2}
+            baseSize={38}
+            minSize={30}
+            startDelay={6}
+          >
+            {subtitle}
+          </KineticText>
+        </div>
+      )}
     </InsertFrame>
   );
 };

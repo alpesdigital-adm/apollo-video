@@ -11,60 +11,36 @@ export type InsertStylePresetId = 'creator-clean' | 'editorial-bold' | 'minimal-
 
 interface InsertStylePreset {
   id: InsertStylePresetId;
-  panel: string;
-  panelSoft: string;
   text: string;
   muted: string;
   accent: string;
   accentText: string;
-  border: string;
-  shadow: string;
-  radius: number;
-  scrim: string;
   typeface: string;
 }
 
 const PRESETS: Record<InsertStylePresetId, InsertStylePreset> = {
   'creator-clean': {
     id: 'creator-clean',
-    panel: 'rgba(8, 10, 18, 0.88)',
-    panelSoft: 'rgba(8, 10, 18, 0.68)',
     text: '#FFFFFF',
-    muted: 'rgba(255, 255, 255, 0.72)',
+    muted: 'rgba(255, 255, 255, 0.82)',
     accent: '#FFB800',
     accentText: '#101014',
-    border: 'rgba(255, 255, 255, 0.18)',
-    shadow: '0 28px 80px rgba(0, 0, 0, 0.42)',
-    radius: 28,
-    scrim: 'linear-gradient(180deg, rgba(0,0,0,0.08), rgba(0,0,0,0.52))',
     typeface: 'Aptos, Segoe UI, Helvetica, Arial, sans-serif',
   },
   'editorial-bold': {
     id: 'editorial-bold',
-    panel: '#F4EFE7',
-    panelSoft: 'rgba(244, 239, 231, 0.88)',
-    text: '#101014',
-    muted: 'rgba(16, 16, 20, 0.68)',
-    accent: '#F2572D',
-    accentText: '#FFFFFF',
-    border: 'rgba(16, 16, 20, 0.16)',
-    shadow: '0 30px 90px rgba(0, 0, 0, 0.38)',
-    radius: 18,
-    scrim: 'linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.48))',
+    text: '#FFFFFF',
+    muted: 'rgba(255, 255, 255, 0.80)',
+    accent: '#FF7A45',
+    accentText: '#101014',
     typeface: 'Georgia, Cambria, Times New Roman, serif',
   },
   'minimal-glass': {
     id: 'minimal-glass',
-    panel: 'rgba(15, 23, 42, 0.58)',
-    panelSoft: 'rgba(15, 23, 42, 0.42)',
     text: '#F8FAFC',
-    muted: 'rgba(248, 250, 252, 0.72)',
+    muted: 'rgba(248, 250, 252, 0.80)',
     accent: '#8DD7CF',
     accentText: '#071012',
-    border: 'rgba(255, 255, 255, 0.22)',
-    shadow: '0 24px 72px rgba(0, 0, 0, 0.34)',
-    radius: 32,
-    scrim: 'linear-gradient(180deg, rgba(2,6,23,0.04), rgba(2,6,23,0.42))',
     typeface: 'Aptos, Segoe UI, Helvetica, Arial, sans-serif',
   },
 };
@@ -73,10 +49,14 @@ export function getInsertStyle(stylePreset?: string): InsertStylePreset {
   return PRESETS[(stylePreset as InsertStylePresetId) || 'creator-clean'] || PRESETS['creator-clean'];
 }
 
+// Layered text shadow keeps type legible over any footage without a solid panel.
+export const TEXT_SHADOW = '0 2px 12px rgba(0,0,0,0.9), 0 0 40px rgba(0,0,0,0.5)';
+export const TEXT_SHADOW_SOFT = '0 2px 10px rgba(0,0,0,0.85), 0 0 26px rgba(0,0,0,0.45)';
+
 function stripDecorativeEmoji(value: string): string {
   return value
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?/gu, '')
-    .replace(/[\uFE0F\u200D]/g, '');
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]️?/gu, '')
+    .replace(/[️‍]/g, '');
 }
 
 export function compactText(value: unknown, maxChars = 80): string {
@@ -127,40 +107,23 @@ export function splitLines(text: string, maxLines = 3): string[] {
   return lines.slice(0, maxLines);
 }
 
-export function useInsertMotion(durationInFrames?: number) {
-  const frame = useCurrentFrame();
-  const config = useVideoConfig();
-  const duration = Math.max(1, durationInFrames || config.durationInFrames || 1);
-  const opacity = interpolate(
-    frame,
-    [0, 10, Math.max(12, duration - 10), duration],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  );
-  const lift = spring({
-    frame,
-    fps: config.fps,
-    from: 24,
-    to: 0,
-    durationInFrames: 24,
-  });
-  const scale = spring({
-    frame,
-    fps: config.fps,
-    from: 0.96,
-    to: 1,
-    durationInFrames: 24,
-  });
-
-  return { opacity, lift, scale };
+function normalizeToken(value: string): string {
+  return value.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
 }
+
+// ---------------------------------------------------------------------------
+// InsertFrame — no panel, no border. Text is plotted directly on the video
+// inside a safe zone (upper third by default; a discreet lower band for
+// LowerThird) with a localized gradient scrim for legibility only.
+// ---------------------------------------------------------------------------
 
 interface InsertFrameProps {
   children: React.ReactNode;
   format: '9:16' | '16:9';
   stylePreset?: string;
   durationInFrames?: number;
-  placement?: 'center' | 'bottom' | 'top' | 'upper-safe';
+  zone?: 'top' | 'lower';
+  align?: 'left' | 'center';
   scrim?: boolean;
 }
 
@@ -169,172 +132,218 @@ export const InsertFrame: React.FC<InsertFrameProps> = ({
   format,
   stylePreset,
   durationInFrames,
-  placement = 'center',
+  zone = 'top',
+  align = 'left',
   scrim = true,
 }) => {
   const style = getInsertStyle(stylePreset);
-  const { opacity, lift, scale } = useInsertMotion(durationInFrames);
+  const frame = useCurrentFrame();
+  const { fps, durationInFrames: total } = useVideoConfig();
+  const dur = Math.max(1, durationInFrames || total || 1);
+
+  const intro = interpolate(frame, [0, 6], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const outro = interpolate(frame, [dur - 8, dur], [1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const opacity = Math.min(intro, outro);
   const isVertical = format === '9:16';
-  const safePlacement = isVertical && placement === 'bottom' ? 'upper-safe' : placement;
-  const justifyContent =
-    safePlacement === 'bottom' ? 'flex-end' : safePlacement === 'top' || safePlacement === 'upper-safe' ? 'flex-start' : 'center';
-  const alignItems = isVertical && safePlacement === 'upper-safe' ? 'flex-start' : 'center';
-  const padding = isVertical && safePlacement === 'upper-safe'
-    ? '135px 260px 0 82px'
-    : isVertical
-      ? '124px 78px 176px'
-      : '78px 108px';
+
+  const scrimStyle: React.CSSProperties =
+    zone === 'lower'
+      ? {
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: isVertical ? '26%' : '10%',
+          height: isVertical ? '26%' : '30%',
+          background:
+            'linear-gradient(0deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0) 100%)',
+        }
+      : {
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: isVertical ? '52%' : '62%',
+          background:
+            'linear-gradient(180deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.3) 46%, rgba(0,0,0,0) 100%)',
+        };
+
+  const contentStyle: React.CSSProperties =
+    zone === 'lower'
+      ? {
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: isVertical ? '30%' : '13%',
+          boxSizing: 'border-box',
+          padding: isVertical ? '0 96px 0 84px' : '0 130px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: align === 'center' ? 'center' : 'flex-start',
+          textAlign: align,
+        }
+      : {
+          position: 'absolute',
+          top: isVertical ? '13%' : '12%',
+          left: 0,
+          right: 0,
+          boxSizing: 'border-box',
+          padding: isVertical ? '0 200px 0 84px' : '0 150px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: align === 'center' ? 'center' : 'flex-start',
+          textAlign: align,
+        };
 
   return (
-    <AbsoluteFill
-      style={{
-        opacity,
-        background: scrim ? style.scrim : 'transparent',
-        display: 'flex',
-        alignItems,
-        justifyContent,
-        padding,
-        boxSizing: 'border-box',
-        fontFamily: style.typeface,
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          transform: `translateY(${-lift}px) scale(${scale})`,
-        }}
-      >
-        {children}
-      </div>
+    <AbsoluteFill style={{ opacity, fontFamily: style.typeface }}>
+      {scrim && <div style={scrimStyle} />}
+      <div style={contentStyle}>{children}</div>
     </AbsoluteFill>
   );
 };
 
-interface PanelProps {
+// ---------------------------------------------------------------------------
+// KineticText — line-by-line spring entrance, keyword coloring, no container.
+// ---------------------------------------------------------------------------
+
+interface KineticTextProps {
   children: React.ReactNode;
+  highlight?: string;
   stylePreset?: string;
-  soft?: boolean;
-  maxWidth?: number | string;
-  align?: 'left' | 'center';
-}
-
-export const Panel: React.FC<PanelProps> = ({
-  children,
-  stylePreset,
-  soft = false,
-  maxWidth = 900,
-  align = 'left',
-}) => {
-  const style = getInsertStyle(stylePreset);
-
-  return (
-    <div
-      style={{
-        width: '100%',
-        maxWidth,
-        margin: align === 'center' ? '0 auto' : '0',
-        background: soft ? style.panelSoft : style.panel,
-        color: style.text,
-        border: `1px solid ${style.border}`,
-        borderRadius: style.radius,
-        boxShadow: style.shadow,
-        padding: '30px 34px',
-        boxSizing: 'border-box',
-        backdropFilter: 'blur(18px)',
-      }}
-    >
-      {children}
-    </div>
-  );
-};
-
-export const Kicker: React.FC<{ children: React.ReactNode; stylePreset?: string }> = ({
-  children,
-  stylePreset,
-}) => {
-  const style = getInsertStyle(stylePreset);
-  return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '8px 13px',
-        borderRadius: 999,
-        background: style.accent,
-        color: style.accentText,
-        fontSize: 26,
-        fontWeight: 800,
-        letterSpacing: 0,
-        textTransform: 'uppercase',
-        lineHeight: 1,
-        marginBottom: 16,
-      }}
-    >
-      {children}
-    </div>
-  );
-};
-
-interface SmartTextProps {
-  children: React.ReactNode;
-  stylePreset?: string;
-  variant?: 'title' | 'body' | 'muted' | 'accent';
+  variant?: 'title' | 'muted';
   align?: 'left' | 'center';
   maxChars?: number;
   maxLines?: number;
   baseSize?: number;
   minSize?: number;
+  pulse?: boolean;
+  startDelay?: number;
 }
 
-export const SmartText: React.FC<SmartTextProps> = ({
+export const KineticText: React.FC<KineticTextProps> = ({
   children,
+  highlight,
   stylePreset,
-  variant = 'body',
+  variant = 'title',
   align = 'left',
-  maxChars = variant === 'title' ? 72 : 96,
-  maxLines = variant === 'title' ? 3 : 4,
-  baseSize = variant === 'title' ? 66 : 38,
-  minSize = variant === 'title' ? 44 : 32,
+  maxChars,
+  maxLines,
+  baseSize,
+  minSize,
+  pulse = false,
+  startDelay = 0,
 }) => {
   const style = getInsertStyle(stylePreset);
-  const text = compactText(children, maxChars);
-  const lines = splitLines(text, maxLines);
-  const color =
-    variant === 'muted' ? style.muted : variant === 'accent' ? style.accent : style.text;
-  const fontSize = smartFontSize(text, baseSize, minSize);
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+
+  const isTitle = variant === 'title';
+  const resolvedMaxChars = maxChars ?? (isTitle ? 72 : 96);
+  const resolvedMaxLines = maxLines ?? (isTitle ? 3 : 3);
+  const resolvedBase = baseSize ?? (isTitle ? 74 : 40);
+  const resolvedMin = minSize ?? (isTitle ? 44 : 30);
+
+  const clean = compactText(children, resolvedMaxChars);
+  const lines = splitLines(clean, resolvedMaxLines);
+  const fontSize = smartFontSize(clean, resolvedBase, resolvedMin);
+
+  const highlightSet = new Set(
+    String(highlight || '')
+      .split(/\s+/)
+      .map(normalizeToken)
+      .filter(Boolean)
+  );
+
+  const pulseScale = pulse ? 1 + 0.05 * Math.sin((frame / fps) * Math.PI * 3) : 1;
 
   return (
     <div
       style={{
-        color,
-        textAlign: align,
-        fontSize,
-        fontWeight: variant === 'title' ? 850 : 650,
-        lineHeight: variant === 'title' ? 1.06 : 1.22,
-        letterSpacing: 0,
-        textWrap: 'balance' as any,
-        textShadow: variant === 'accent' ? 'none' : '0 2px 18px rgba(0,0,0,0.22)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: align === 'center' ? 'center' : 'flex-start',
+        gap: Math.round(fontSize * (isTitle ? 0.04 : 0.12)),
       }}
     >
-      {lines.map((line, index) => (
-        <div key={index}>{line}</div>
-      ))}
+      {lines.map((line, index) => {
+        const delay = startDelay + index * 4;
+        const progress = spring({
+          frame: frame - delay,
+          fps,
+          from: 0,
+          to: 1,
+          durationInFrames: 20,
+          config: { damping: 200 },
+        });
+        const translateY = (1 - progress) * 26;
+
+        return (
+          <div
+            key={index}
+            style={{
+              transform: `translateY(${translateY}px)`,
+              opacity: progress,
+              fontSize,
+              fontWeight: isTitle ? 800 : 600,
+              lineHeight: isTitle ? 1.04 : 1.16,
+              letterSpacing: isTitle ? '-0.02em' : '-0.01em',
+              color: isTitle ? style.text : style.muted,
+              textShadow: isTitle ? TEXT_SHADOW : TEXT_SHADOW_SOFT,
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '0 0.28em',
+              justifyContent: align === 'center' ? 'center' : 'flex-start',
+              textAlign: align,
+            }}
+          >
+            {line.split(' ').map((word, wordIndex) => {
+              const isHighlight = highlightSet.size > 0 && highlightSet.has(normalizeToken(word));
+              return (
+                <span
+                  key={wordIndex}
+                  style={{
+                    color: isHighlight ? style.accent : undefined,
+                    display: 'inline-block',
+                    transform: isHighlight && pulse ? `scale(${pulseScale})` : undefined,
+                  }}
+                >
+                  {word}
+                </span>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 };
 
-export const AccentRule: React.FC<{ stylePreset?: string }> = ({ stylePreset }) => {
+// Thin accent marker (number or dash) used by list-style scenes instead of cards.
+export const Marker: React.FC<{
+  children?: React.ReactNode;
+  stylePreset?: string;
+  size?: number;
+}> = ({ children, stylePreset, size = 46 }) => {
   const style = getInsertStyle(stylePreset);
   return (
-    <div
+    <span
       style={{
-        width: 72,
-        height: 7,
-        borderRadius: 999,
-        background: style.accent,
-        margin: '20px 0',
+        color: style.accent,
+        fontSize: size,
+        fontWeight: 800,
+        lineHeight: 1,
+        letterSpacing: '-0.02em',
+        textShadow: TEXT_SHADOW,
+        flexShrink: 0,
       }}
-    />
+    >
+      {children ?? '—'}
+    </span>
   );
 };

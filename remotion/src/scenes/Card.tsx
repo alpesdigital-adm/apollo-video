@@ -1,5 +1,5 @@
 import React from 'react';
-import { AccentRule, InsertFrame, Kicker, Panel, SmartText, getInsertStyle } from '../components/InsertPrimitives';
+import { InsertFrame, KineticText, Marker } from '../components/InsertPrimitives';
 
 interface CardProps {
   number: number;
@@ -21,63 +21,50 @@ export const Card: React.FC<CardProps> = ({
   stylePreset,
   durationInFrames,
 }) => {
-  const style = getInsertStyle(stylePreset);
-
   return (
     <InsertFrame
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      placement="bottom"
-      scrim
+      zone="top"
+      align="left"
     >
-      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 820 : 980}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 24 }}>
-          <div
-            style={{
-              width: 78,
-              height: 78,
-              borderRadius: 22,
-              background: style.accent,
-              color: style.accentText,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 36,
-              fontWeight: 900,
-              flexShrink: 0,
-            }}
-          >
-            {icon || number || '•'}
-          </div>
-          <Kicker stylePreset={stylePreset}>Insight</Kicker>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 22 }}>
+        <div style={{ paddingTop: 6 }}>
+          <Marker stylePreset={stylePreset} size={format === '9:16' ? 58 : 66}>
+            {icon || number || '—'}
+          </Marker>
         </div>
-        <SmartText
-          stylePreset={stylePreset}
-          variant="title"
-          maxChars={58}
-          maxLines={2}
-          baseSize={format === '9:16' ? 58 : 66}
-          minSize={36}
-        >
-          {title}
-        </SmartText>
-        {description && (
-          <>
-            <AccentRule stylePreset={stylePreset} />
-            <SmartText
-              stylePreset={stylePreset}
-              variant="muted"
-              maxChars={88}
-              maxLines={3}
-              baseSize={34}
-              minSize={27}
-            >
-              {description}
-            </SmartText>
-          </>
-        )}
-      </Panel>
+        <div style={{ flex: 1 }}>
+          <KineticText
+            stylePreset={stylePreset}
+            variant="title"
+            align="left"
+            maxChars={56}
+            maxLines={2}
+            baseSize={format === '9:16' ? 62 : 68}
+            minSize={40}
+          >
+            {title}
+          </KineticText>
+          {description && (
+            <div style={{ marginTop: 16 }}>
+              <KineticText
+                stylePreset={stylePreset}
+                variant="muted"
+                align="left"
+                maxChars={88}
+                maxLines={3}
+                baseSize={36}
+                minSize={28}
+                startDelay={5}
+              >
+                {description}
+              </KineticText>
+            </div>
+          )}
+        </div>
+      </div>
     </InsertFrame>
   );
 };

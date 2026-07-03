@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { startProjectRender } from '@/lib/services/remotion-render'
+import { startProjectRender, isRenderActive } from '@/lib/services/remotion-render'
+import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
 
 export async function POST(request: NextRequest) {
   let projectId: string | null = null
+  let lockAcquired = false
 
   try {
     const body = await request.json()
@@ -11,6 +13,15 @@ export async function POST(request: NextRequest) {
     if (!projectId) {
       return NextResponse.json({ error: 'projectId required' }, { status: 400 })
     }
+
+    if (isRenderActive(projectId)) {
+      return NextResponse.json({ error: 'Render already running' }, { status: 409 })
+    }
+
+    if (!acquireStepLock('render', projectId)) {
+      return NextResponse.json({ error: 'Render already running' }, { status: 409 })
+    }
+    lockAcquired = true
 
     const renderJob = await startProjectRender(projectId, {
       statusOnStart: 'rendering',
@@ -30,5 +41,9 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     )
+  } finally {
+    if (lockAcquired && projectId) {
+      releaseStepLock('render', projectId)
+    }
   }
 }

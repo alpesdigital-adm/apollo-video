@@ -1,5 +1,5 @@
 import React from 'react';
-import { InsertFrame, Kicker, Panel, SmartText, compactText, getInsertStyle } from '../components/InsertPrimitives';
+import { InsertFrame, KineticText, Marker, compactText } from '../components/InsertPrimitives';
 
 interface FlowStep {
   number: number;
@@ -20,7 +20,6 @@ export const Flow: React.FC<FlowProps> = ({
   stylePreset,
   durationInFrames,
 }) => {
-  const style = getInsertStyle(stylePreset);
   const visibleSteps = (steps || []).slice(0, format === '9:16' ? 4 : 5);
 
   return (
@@ -28,56 +27,34 @@ export const Flow: React.FC<FlowProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      placement="bottom"
-      scrim
+      zone="top"
+      align="left"
     >
-      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 900 : 1120}>
-        <Kicker stylePreset={stylePreset}>Checklist</Kicker>
-        <div style={{ display: 'grid', gap: 16 }}>
-          {visibleSteps.map((step, index) => (
-            <div
-              key={index}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '58px 1fr',
-                gap: 18,
-                alignItems: 'center',
-                border: `1px solid ${style.border}`,
-                borderRadius: Math.max(14, style.radius - 12),
-                background: index === 0 ? style.panelSoft : 'rgba(255,255,255,0.05)',
-                padding: '18px 22px',
-              }}
-            >
-              <div
-                style={{
-                  width: 58,
-                  height: 58,
-                  borderRadius: 18,
-                  background: style.accent,
-                  color: style.accentText,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 28,
-                  fontWeight: 900,
-                }}
-              >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: format === '9:16' ? 26 : 22 }}>
+        {visibleSteps.map((step, index) => (
+          <div key={index} style={{ display: 'flex', alignItems: 'flex-start', gap: 22 }}>
+            <div style={{ paddingTop: 2 }}>
+              <Marker stylePreset={stylePreset} size={format === '9:16' ? 44 : 50}>
                 {step.number || index + 1}
-              </div>
-              <SmartText
+              </Marker>
+            </div>
+            <div style={{ flex: 1 }}>
+              <KineticText
                 stylePreset={stylePreset}
-                variant="body"
+                variant="title"
+                align="left"
                 maxChars={54}
                 maxLines={2}
-                baseSize={format === '9:16' ? 34 : 38}
-                minSize={26}
+                baseSize={format === '9:16' ? 42 : 48}
+                minSize={30}
+                startDelay={index * 5}
               >
                 {compactText(step.text, 54)}
-              </SmartText>
+              </KineticText>
             </div>
-          ))}
-        </div>
-      </Panel>
+          </div>
+        ))}
+      </div>
     </InsertFrame>
   );
 };

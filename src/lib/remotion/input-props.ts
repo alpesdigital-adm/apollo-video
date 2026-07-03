@@ -11,6 +11,7 @@
 
 import type { Scene } from '@/lib/types/scene'
 import type { SubtitleEntry, Transcription } from '@/lib/types/project'
+import { MIN_SCENE_SECONDS } from '@/lib/utils/timing'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,9 +55,6 @@ export const DEFAULT_PALETTE: ColorPalette = {
   background: '#050508',
   text: '#FFFFFF'
 }
-
-// Minimum scene duration: 2.8 s (same value previously used everywhere)
-const MIN_DURATION_SECONDS = 2.8
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -186,7 +184,7 @@ export function prepareRemotionScenes(
   scenes: RemotionSceneInput[],
   fps: number
 ): RemotionSceneInput[] {
-  const minDurationFrames = Math.round(fps * MIN_DURATION_SECONDS)
+  const minDurationFrames = Math.round(fps * MIN_SCENE_SECONDS)
 
   return [...scenes]
     .sort((a, b) => a.fromFrame - b.fromFrame)

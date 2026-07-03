@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { normalizeVideo } from '@/lib/services/ffmpeg'
+import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
 import path from 'path'
 
 export async function POST(request: NextRequest) {
   let projectId: string | null = null
+  let lockAcquired = false
 
   try {
     const body = await request.json()
@@ -26,6 +28,14 @@ export async function POST(request: NextRequest) {
     if (!project.rawVideoPath) {
       return NextResponse.json({ error: 'Raw video path not set' }, { status: 400 })
     }
+
+    if (!acquireStepLock('normalize', projectId)) {
+      return NextResponse.json(
+        { error: 'Normalization already running for this project' },
+        { status: 409 }
+      )
+    }
+    lockAcquired = true
 
     // Update status to normalizing
     await prisma.project.update({
@@ -78,5 +88,9 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     )
+  } finally {
+    if (lockAcquired && projectId) {
+      releaseStepLock('normalize', projectId)
+    }
   }
 }

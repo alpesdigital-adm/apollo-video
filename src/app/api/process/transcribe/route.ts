@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { cutSilencesFromVideo, detectSilences, extractAudio } from '@/lib/services/ffmpeg'
 import { getPreferredTranscriptionAudioExtension, transcribeAudio } from '@/lib/services/whisper'
 import { generateSubtitlesFromTranscription } from '@/lib/utils/silence'
+import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
 import type { Silence } from '@/lib/types/project'
 import path from 'path'
 import fs from 'fs'
@@ -10,6 +11,7 @@ import fs from 'fs'
 export async function POST(request: NextRequest) {
   let tempAudioPath: string | null = null
   let projectId: string | null = null
+  let lockAcquired = false
 
   try {
     const body = await request.json()
@@ -33,6 +35,14 @@ export async function POST(request: NextRequest) {
     if (!project.normalizedPath) {
       return NextResponse.json({ error: 'Normalized video not found' }, { status: 400 })
     }
+
+    if (!acquireStepLock('transcribe', projectId)) {
+      return NextResponse.json(
+        { error: 'Transcription already running for this project' },
+        { status: 409 }
+      )
+    }
+    lockAcquired = true
 
     if (!forceTranscription && project.transcriptionJson && project.subtitlesJson && project.silencesJson) {
       await prisma.project.update({
@@ -58,14 +68,22 @@ export async function POST(request: NextRequest) {
     const audioExtension = getPreferredTranscriptionAudioExtension()
     tempAudioPath = path.join(uploadDir, `${projectId}-audio.${audioExtension}`)
 
+    // Always start from the pristine normalized file: on re-runs, normalizedPath
+    // points at the autocut, and using the same file as ffmpeg input AND output
+    // corrupts the stream (invalid NAL units) and double-cuts the timeline.
+    const pristineNormalizedPath = path.join(uploadDir, `${projectId}-normalized.mp4`)
+    const sourceVideoPath = fs.existsSync(pristineNormalizedPath)
+      ? pristineNormalizedPath
+      : project.normalizedPath
+
     // Extract audio from normalized video
-    await extractAudio(project.normalizedPath, tempAudioPath)
+    await extractAudio(sourceVideoPath, tempAudioPath)
 
     // Transcribe audio using the configured high-quality provider.
     const transcription = await transcribeAudio(tempAudioPath)
 
     let silences: Silence[] = []
-    let cutPath = project.normalizedPath
+    let cutPath = sourceVideoPath
     let cutResult: { cutSilences: Silence[]; outputDuration: number } = {
       cutSilences: [],
       outputDuration:
@@ -83,10 +101,13 @@ export async function POST(request: NextRequest) {
       // Cut the actual media and shift transcript timings to the new edited timeline.
       cutPath = path.join(uploadDir, `${projectId}-autocut.mp4`)
       cutResult = await cutSilencesFromVideo(
-        project.normalizedPath,
+        sourceVideoPath,
         cutPath,
         silences,
-        project.videoDuration || 0
+        Math.max(
+          project.videoDuration || 0,
+          transcription.segments[transcription.segments.length - 1]?.end || 0
+        )
       )
     }
 
@@ -169,5 +190,9 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     )
+  } finally {
+    if (lockAcquired && projectId) {
+      releaseStepLock('transcribe', projectId)
+    }
   }
 }

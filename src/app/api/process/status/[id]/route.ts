@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { isRenderActive } from '@/lib/services/remotion-render'
+
+const ORPHAN_RENDER_THRESHOLD_MS = 3 * 60000
 
 export async function GET(
   request: NextRequest,
@@ -13,7 +16,7 @@ export async function GET(
     }
 
     // Get project from database
-    const project = await prisma.project.findUnique({
+    let project = await prisma.project.findUnique({
       where: { id: projectId },
       include: {
         renderJobs: {
@@ -22,6 +25,46 @@ export async function GET(
         }
       }
     })
+
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    // Lazy reconciliation: cover server restarts where a render process
+    // died without ever reaching the close/error handlers.
+    if (project.status === 'rendering' && !isRenderActive(projectId)) {
+      const latestJob = project.renderJobs[0] || null
+      const isStale =
+        latestJob &&
+        (latestJob.status === 'queued' || latestJob.status === 'rendering') &&
+        Date.now() - latestJob.updatedAt.getTime() > ORPHAN_RENDER_THRESHOLD_MS
+
+      if (isStale) {
+        const message = 'Render órfão — processo não está mais ativo'
+        try {
+          await prisma.renderJob.update({
+            where: { id: latestJob.id },
+            data: { status: 'failed', error: message }
+          })
+          await prisma.project.update({
+            where: { id: projectId },
+            data: { status: 'error', error: message }
+          })
+
+          project = await prisma.project.findUnique({
+            where: { id: projectId },
+            include: {
+              renderJobs: {
+                orderBy: { createdAt: 'desc' },
+                take: 1
+              }
+            }
+          })
+        } catch (reconcileError) {
+          console.error('Failed to reconcile orphaned render:', reconcileError)
+        }
+      }
+    }
 
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })

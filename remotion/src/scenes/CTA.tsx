@@ -1,5 +1,5 @@
 import React from 'react';
-import { AccentRule, InsertFrame, Kicker, Panel, SmartText } from '../components/InsertPrimitives';
+import { InsertFrame, KineticText } from '../components/InsertPrimitives';
 
 interface CTAProps {
   text: string;
@@ -14,7 +14,6 @@ interface CTAProps {
 export const CTA: React.FC<CTAProps> = ({
   text,
   highlightWord,
-  emoji,
   format,
   stylePreset,
   durationInFrames,
@@ -24,39 +23,22 @@ export const CTA: React.FC<CTAProps> = ({
       format={format}
       stylePreset={stylePreset}
       durationInFrames={durationInFrames}
-      placement="bottom"
-      scrim
+      zone="top"
+      align="left"
     >
-      <Panel stylePreset={stylePreset} align="center" maxWidth={format === '9:16' ? 880 : 1120}>
-        <Kicker stylePreset={stylePreset}>Proxima acao</Kicker>
-        <SmartText
-          stylePreset={stylePreset}
-          variant="title"
-          align="center"
-          maxChars={76}
-          maxLines={3}
-          baseSize={format === '9:16' ? 62 : 74}
-          minSize={40}
-        >
-          {text}
-        </SmartText>
-        {(highlightWord || emoji) && (
-          <>
-            <AccentRule stylePreset={stylePreset} />
-            <SmartText
-              stylePreset={stylePreset}
-              variant="accent"
-              align="center"
-              maxChars={54}
-              maxLines={2}
-              baseSize={42}
-              minSize={30}
-            >
-              {[highlightWord, emoji].filter(Boolean).join(' ')}
-            </SmartText>
-          </>
-        )}
-      </Panel>
+      <KineticText
+        stylePreset={stylePreset}
+        highlight={highlightWord}
+        variant="title"
+        align="left"
+        maxChars={64}
+        maxLines={3}
+        baseSize={format === '9:16' ? 78 : 84}
+        minSize={46}
+        pulse
+      >
+        {text}
+      </KineticText>
     </InsertFrame>
   );
 };

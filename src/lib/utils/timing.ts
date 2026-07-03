@@ -119,6 +119,13 @@ export function curateSceneDensity(scenes: Scene[], targetRatio = 0.6): Scene[] 
     .map(([, scene]) => scene)
 }
 
+/**
+ * Absolute floor for a scene's duration (seconds). This is the only hard
+ * minimum enforced when trimming — and only applies when it does not
+ * invade the next scene's (sacred) startFrame.
+ */
+export const MIN_SCENE_SECONDS = 1.2
+
 function estimateSceneReadFrames(scene: Scene, fps: number): number {
   if (scene.type === 'ImageInsert') {
     const layout = (scene as any).layout
@@ -126,12 +133,26 @@ function estimateSceneReadFrames(scene: Scene, fps: number): number {
   }
 
   const text = getSceneTextForReading(scene)
-  const readSeconds = Math.min(5.6, Math.max(2.8, 1.35 + text.length / 24))
+  // Piso de legibilidade 2.0s / teto 7.0s para cenas de texto (timing dirigido pela fala)
+  const readSeconds = Math.min(7.0, Math.max(2.0, 1.35 + text.length / 24))
   return Math.round(readSeconds * fps)
 }
 
 /**
- * Resolve scene timing by computing startFrame and endFrame for all scenes
+ * Resolve scene timing by computing startFrame and endFrame for all scenes.
+ *
+ * Regra de timing (dirigido pela fala):
+ *  - O fim alvo de cada cena é o fim da última legenda coberta
+ *    (startLeg + durationInSubtitles - 1) + margem de ~0.4s, respeitando um
+ *    piso de legibilidade (estimateSceneReadFrames) e um teto de 7.0s.
+ *  - Starts são sagrados: NUNCA são deslocados para resolver colisão.
+ *  - Se a cena N+1 começa antes do fim desejado da cena N, o fim da cena N é
+ *    TRIMADO até o startFrame da N+1 (sem gap obrigatório): endFrame(N) =
+ *    min(endFrame_desejado(N), startFrame(N+1)).
+ *  - Um piso absoluto de MIN_SCENE_SECONDS (1.2s) é aplicado por cima do trim,
+ *    mas só até onde não invadir o start da próxima cena:
+ *    endFrame(N) = max(endFrame_trimado, min(startFrame(N) + MIN_SCENE_SECONDS, startFrame(N+1))).
+ *
  * @param scenes Array of scenes with startLeg and durationInSubtitles
  * @param subtitles Array of subtitle entries
  * @returns Scenes with startFrame and endFrame populated
@@ -149,25 +170,26 @@ export function resolveSceneTiming(
     }))
   }
 
-  const minDurationFrames = Math.max(1, Math.round(fps * 2.8))
-  const maxDurationFrames = Math.max(minDurationFrames, Math.round(fps * 5.6))
-  const gapFrames = Math.max(6, Math.round(fps * 0.35))
+  const minSceneFrames = Math.max(1, Math.round(fps * MIN_SCENE_SECONDS))
+  const ceilingFrames = Math.round(fps * 7.0)
+  const marginFrames = Math.round(fps * 0.4)
   const timelineEndFrame = Math.max(...subtitles.map((subtitle) => subtitle.endFrame))
 
   const timedScenes = scenes
     .map((scene, index) => {
       const startLeg = Math.max(0, Math.min(scene.startLeg, subtitles.length - 1))
-      const durationInSubtitles = Math.max(1, Math.min(scene.durationInSubtitles || 1, 3))
+      const durationInSubtitles = Math.max(1, Math.min(scene.durationInSubtitles || 1, 4))
       const endLeg = Math.max(
         startLeg,
         Math.min(subtitles.length - 1, startLeg + durationInSubtitles - 1)
       )
       const startFrame = convertStartLegToFrame(startLeg, subtitles)
-      const subtitleEndFrame = subtitles[endLeg]?.endFrame || startFrame + minDurationFrames
+      const subtitleEndFrame = subtitles[endLeg]?.endFrame ?? startFrame
+      const speechEndFrame = subtitleEndFrame + marginFrames
       const readEndFrame = startFrame + estimateSceneReadFrames(scene, fps)
-      const rawEndFrame = Math.min(
-        Math.max(subtitleEndFrame, readEndFrame, startFrame + minDurationFrames),
-        startFrame + maxDurationFrames
+      const desiredEndFrame = Math.min(
+        Math.max(speechEndFrame, readEndFrame),
+        startFrame + ceilingFrames
       )
 
       return {
@@ -175,32 +197,27 @@ export function resolveSceneTiming(
         index,
         startLeg,
         durationInSubtitles,
-        initialStartFrame: startFrame,
-        rawEndFrame
+        startFrame,
+        desiredEndFrame
       }
     })
-    .sort((a, b) => a.initialStartFrame - b.initialStartFrame || a.index - b.index)
-
-  let cursorFrame = 0
+    .sort((a, b) => a.startFrame - b.startFrame || a.index - b.index)
 
   return timedScenes.map((entry, index) => {
-    const startFrame = Math.max(entry.initialStartFrame, cursorFrame)
-    const rawDurationFrames = Math.max(
-      entry.rawEndFrame - entry.initialStartFrame,
-      minDurationFrames
-    )
-    const endLimit = Math.max(startFrame + minDurationFrames, timelineEndFrame + Math.round(fps * 0.25))
-    const endFrame = Math.min(
-      Math.max(startFrame + rawDurationFrames, startFrame + minDurationFrames),
-      endLimit
-    )
-    cursorFrame = endFrame + gapFrames
+    const next = timedScenes[index + 1]
+    const nextStartFrame = next
+      ? next.startFrame
+      : Math.max(timelineEndFrame + marginFrames, entry.startFrame + minSceneFrames)
+
+    const trimmedEndFrame = Math.min(entry.desiredEndFrame, nextStartFrame)
+    const softFloorEndFrame = Math.min(entry.startFrame + minSceneFrames, nextStartFrame)
+    const endFrame = Math.max(trimmedEndFrame, softFloorEndFrame)
 
     return {
       ...entry.scene,
       startLeg: entry.startLeg,
       durationInSubtitles: entry.durationInSubtitles,
-      startFrame,
+      startFrame: entry.startFrame,
       endFrame
     }
   })

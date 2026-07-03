@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { prisma } from '@/lib/db'
@@ -17,6 +17,53 @@ import {
 interface StartProjectRenderOptions {
   clearExistingRender?: boolean
   statusOnStart?: 'rendering'
+}
+
+interface ActiveRenderEntry {
+  child: ChildProcess
+  jobId: string
+  startedAt: number
+  lastProgressWrite: number
+}
+
+const activeRenders = new Map<string, ActiveRenderEntry>()
+
+const RENDER_TIMEOUT_MS = Number(process.env.RENDER_TIMEOUT_MS) || 30 * 60000
+
+export function isRenderActive(projectId: string): boolean {
+  return activeRenders.has(projectId)
+}
+
+function killProcessTree(child: ChildProcess): void {
+  if (!child.pid) return
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
+  } else {
+    child.kill('SIGKILL')
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function parseRenderProgress(chunk: string): number | null {
+  const frameMatch = chunk.match(/(\d+)\s*\/\s*(\d+)/)
+  if (frameMatch) {
+    const current = Number(frameMatch[1])
+    const total = Number(frameMatch[2])
+    if (total > 0 && Number.isFinite(current)) {
+      return clamp(Math.round((current / total) * 100), 1, 99)
+    }
+  }
+  const percentMatch = chunk.match(/(\d+)\s*%/)
+  if (percentMatch) {
+    const pct = Number(percentMatch[1])
+    if (Number.isFinite(pct)) {
+      return clamp(Math.round(pct), 1, 99)
+    }
+  }
+  return null
 }
 
 function getAppBaseUrl(): string {
@@ -197,16 +244,45 @@ export async function startProjectRender(
     { cwd: remotionCwd, windowsHide: true }
   )
 
-  remotionProcess.stdout?.on('data', async (data) => {
-    console.log(`Render output: ${data}`)
-    try {
-      await prisma.renderJob.update({
-        where: { id: renderJob.id },
-        data: { status: 'rendering', progress: 50 }
-      })
-    } catch (error) {
-      console.error('Failed to update render progress:', error)
+  const renderEntry: ActiveRenderEntry = {
+    child: remotionProcess,
+    jobId: renderJob.id,
+    startedAt: Date.now(),
+    lastProgressWrite: 0
+  }
+  activeRenders.set(projectId, renderEntry)
+
+  let timedOut = false
+  let lastProgressValue = 0
+
+  const timeoutHandle = setTimeout(() => {
+    timedOut = true
+    console.error(`Render timeout for project ${projectId} after ${RENDER_TIMEOUT_MS}ms, killing process tree`)
+    killProcessTree(remotionProcess)
+  }, RENDER_TIMEOUT_MS)
+
+  remotionProcess.stdout?.on('data', (data) => {
+    const chunk = String(data)
+    const pct = parseRenderProgress(chunk)
+    if (pct === null) return
+
+    const now = Date.now()
+    if (pct <= lastProgressValue || now - renderEntry.lastProgressWrite < 1000) {
+      return
     }
+
+    lastProgressValue = pct
+    renderEntry.lastProgressWrite = now
+    console.log(`Render progress for project ${projectId}: ${pct}%`)
+
+    prisma.renderJob
+      .update({
+        where: { id: renderJob.id },
+        data: { status: 'rendering', progress: pct }
+      })
+      .catch((error) => {
+        console.error('Failed to update render progress:', error)
+      })
   })
 
   let stderr = ''
@@ -215,9 +291,29 @@ export async function startProjectRender(
     console.error(`Render output: ${data}`)
   })
 
-  remotionProcess.on('close', async (code) => {
+  remotionProcess.on('error', async (error) => {
+    clearTimeout(timeoutHandle)
+    activeRenders.delete(projectId)
+    const message = `Render process failed to start: ${error instanceof Error ? error.message : String(error)}`
     try {
-      if (code === 0) {
+      await prisma.renderJob.update({
+        where: { id: renderJob.id },
+        data: { status: 'failed', error: message }
+      })
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { status: 'error', error: message }
+      })
+    } catch (dbError) {
+      console.error('Failed to update render job status after spawn error:', dbError)
+    }
+  })
+
+  remotionProcess.on('close', async (code) => {
+    clearTimeout(timeoutHandle)
+    activeRenders.delete(projectId)
+    try {
+      if (code === 0 && !timedOut) {
         await prisma.renderJob.update({
           where: { id: renderJob.id },
           data: { status: 'completed', progress: 100, outputPath }
@@ -228,7 +324,9 @@ export async function startProjectRender(
           data: { status: 'complete', renderedVideoPath: outputPath, error: null }
         })
       } else {
-        const message = `Render process exited with code ${code}${stderr ? `: ${stderr.slice(-1000)}` : ''}`
+        const message = timedOut
+          ? `Render timeout after ${RENDER_TIMEOUT_MS}ms`
+          : `Render process exited with code ${code}${stderr ? `: ${stderr.slice(-1000)}` : ''}`
         await prisma.renderJob.update({
           where: { id: renderJob.id },
           data: {

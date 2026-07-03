@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { analyzeContent } from '@/lib/services/claude'
 import { generateImageInsertAssets } from '@/lib/services/image-generation'
 import { narrativeEngine } from '@/lib/engines/narrative-engine'
+import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
 import { curateSceneDensity, resolveSceneTiming } from '@/lib/utils/timing'
 import type { Silence, SubtitleEntry, Transcription } from '@/lib/types/project'
 import type { Scene } from '@/lib/types/scene'
@@ -37,6 +38,7 @@ function applyCloseUpCompactLayoutRule(scenes: Scene[], useCompactLayout: boolea
 
 export async function POST(request: NextRequest) {
   let projectId: string | null = null
+  let lockAcquired = false
 
   try {
     const body = await request.json()
@@ -62,6 +64,14 @@ export async function POST(request: NextRequest) {
     if (!project.normalizedPath) {
       return NextResponse.json({ error: 'Processed video not found' }, { status: 400 })
     }
+
+    if (!acquireStepLock('analyze', projectId)) {
+      return NextResponse.json(
+        { error: 'Analysis already running for this project' },
+        { status: 409 }
+      )
+    }
+    lockAcquired = true
 
     // Parse transcription and subtitles
     const transcription: Transcription = JSON.parse(project.transcriptionJson)
@@ -166,5 +176,9 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     )
+  } finally {
+    if (lockAcquired && projectId) {
+      releaseStepLock('analyze', projectId)
+    }
   }
 }
