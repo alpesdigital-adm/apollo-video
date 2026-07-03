@@ -75,6 +75,14 @@ export function generateSubtitlesFromTranscription(
 ): SubtitleEntry[] {
   const subtitles: SubtitleEntry[] = []
 
+  // Small buffer (seconds) added after the true end of the last spoken word so
+  // rounding/interpolation never clips the final word's visibility/highlight.
+  const END_SAFETY_PADDING = 0.05
+  // "Hang time": keep the subtitle visible a bit longer after speech ends so it
+  // doesn't vanish abruptly during a breath/pause. Capped by the next subtitle's
+  // (adjusted) start time so consecutive subtitles never overlap.
+  const HANG_TIME_SECONDS = 0.6
+
   // Sort silences by start time for easier processing
   const sortedSilences = [...silences].sort((a, b) => a.startTime - b.startTime)
 
@@ -103,7 +111,27 @@ export function generateSubtitlesFromTranscription(
 
     // Adjust times for silence cuts
     const adjustedStartTime = adjustTimeForSilences(segment.start)
-    const adjustedEndTime = adjustTimeForSilences(segment.end)
+
+    // Whisper's segment.end does not always reach the end of the last word —
+    // word-level timestamps can run slightly past it. If we anchor the
+    // subtitle's visible window on segment.end alone, the final word can be
+    // cut off before it ever renders/highlights. Anchor on whichever is later.
+    const lastWord = segment.words.length > 0 ? segment.words[segment.words.length - 1] : null
+    const rawEndTime = lastWord ? Math.max(segment.end, lastWord.end) : segment.end
+
+    // Adjust the combined end as a single value (rather than adjusting
+    // segment.end and each word's end independently) so the subtitle's end and
+    // the last word's end always move together across a silence-cut boundary —
+    // otherwise they can diverge by up to a whole removed silence's duration.
+    const speechEndTime = adjustTimeForSilences(rawEndTime) + END_SAFETY_PADDING
+
+    // Hang time: extend the visible window after speech ends, capped by the
+    // next subtitle's (adjusted) start so consecutive subtitles never overlap.
+    const nextSegment = transcription.segments[i + 1]
+    const nextStartTime = nextSegment ? adjustTimeForSilences(nextSegment.start) : null
+    const adjustedEndTime = nextStartTime !== null
+      ? Math.min(speechEndTime + HANG_TIME_SECONDS, Math.max(speechEndTime, nextStartTime))
+      : speechEndTime + HANG_TIME_SECONDS
 
     // Convert to frames
     const startFrame = Math.round(adjustedStartTime * fps)

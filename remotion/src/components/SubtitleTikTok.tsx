@@ -65,7 +65,21 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   }
 
   const accentColor = palette?.accent ?? DEFAULT_ACCENT;
-  const duration = subtitle.endTime - subtitle.startTime;
+
+  // --- Determine active chunk and its timed words ---
+  const timedWords = normalizeTimedWords(subtitle.words);
+  const hasWordTimings = timedWords.length > 0;
+
+  // Defense-in-depth: the subtitle's own endTime is expected to already cover
+  // the last word (see generateSubtitlesFromTranscription in silence.ts), but
+  // guard against stale/short endTime data so the final word's visibility
+  // never gets clipped by the fade-out window below.
+  const lastWordEnd = hasWordTimings
+    ? timedWords[timedWords.length - 1].end
+    : subtitle.endTime;
+  const effectiveEndTime = Math.max(subtitle.endTime, lastWordEnd + 0.05);
+
+  const duration = effectiveEndTime - subtitle.startTime;
   const timeInSubtitle = currentTime - subtitle.startTime;
 
   const opacity = interpolate(
@@ -74,10 +88,6 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
     [0, 1, 1, 0],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   );
-
-  // --- Determine active chunk and its timed words ---
-  const timedWords = normalizeTimedWords(subtitle.words);
-  const hasWordTimings = timedWords.length > 0;
 
   const phrase = getCurrentSubtitlePhrase(subtitle, currentTime, timeInSubtitle, duration);
 

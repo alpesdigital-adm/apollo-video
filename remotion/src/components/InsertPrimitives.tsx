@@ -53,6 +53,11 @@ export function getInsertStyle(stylePreset?: string): InsertStylePreset {
 export const TEXT_SHADOW = '0 2px 12px rgba(0,0,0,0.9), 0 0 40px rgba(0,0,0,0.5)';
 export const TEXT_SHADOW_SOFT = '0 2px 10px rgba(0,0,0,0.85), 0 0 26px rgba(0,0,0,0.45)';
 
+// Approximate text column width (px) inside InsertFrame's safe zone. Used to
+// estimate how many characters fit per line at the legible font floor, so we
+// can trim words instead of shrinking the font below readability.
+const KINETIC_CONTENT_WIDTH = 780;
+
 function stripDecorativeEmoji(value: string): string {
   return value
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]️?/gu, '')
@@ -246,12 +251,22 @@ export const KineticText: React.FC<KineticTextProps> = ({
   const isTitle = variant === 'title';
   const resolvedMaxChars = maxChars ?? (isTitle ? 72 : 96);
   const resolvedMaxLines = maxLines ?? (isTitle ? 3 : 3);
+  // Legible floor: the font never drops below a readable size for 9:16.
+  // When the text is too long to fit at that floor, we reduce the WORDS shown
+  // (truncate at a word boundary with an ellipsis) rather than shrink the font
+  // into illegibility.
+  const legibleFloor = isTitle ? 54 : 30;
   const resolvedBase = baseSize ?? (isTitle ? 74 : 40);
-  const resolvedMin = minSize ?? (isTitle ? 44 : 30);
+  const resolvedMin = Math.max(legibleFloor, minSize ?? legibleFloor);
 
   const clean = compactText(children, resolvedMaxChars);
-  const lines = splitLines(clean, resolvedMaxLines);
   const fontSize = smartFontSize(clean, resolvedBase, resolvedMin);
+  // Cap the character budget to what fits legibly across maxLines at the floored
+  // font size; anything beyond gets truncated at a word boundary (with a "...").
+  const charsPerLine = Math.max(8, Math.floor(KINETIC_CONTENT_WIDTH / (fontSize * 0.56)));
+  const capacity = charsPerLine * resolvedMaxLines;
+  const fitted = clean.length > capacity ? compactText(clean, capacity) : clean;
+  const lines = splitLines(fitted, resolvedMaxLines);
 
   const highlightSet = new Set(
     String(highlight || '')

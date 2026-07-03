@@ -149,11 +149,26 @@ function limitCopy(value: unknown, maxChars: number): string {
   return `${slice.slice(0, lastSpace > 20 ? lastSpace : maxChars - 1).trim()}...`
 }
 
+/**
+ * Hard word cap for text plotted directly over the video (FullScreen, CTA,
+ * Split, StickFigures captions). Truncates at a word boundary so a headline can
+ * never become an illegible wall of text — this GUARANTEES the 6/5-word ceiling
+ * even if the model ignores the prompt. Never lets a main field exceed its cap.
+ */
+function limitWords(value: unknown, maxWords: number): string {
+  const words = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+  return words.slice(0, Math.max(1, maxWords)).join(' ')
+}
+
 function sanitizeSceneCopy(sceneData: any): any {
   switch (sceneData.type) {
     case 'FullScreen':
-      sceneData.text = limitCopy(sceneData.text || sceneData.title, 70)
-      sceneData.subtitle = sceneData.subtitle ? limitCopy(sceneData.subtitle, 70) : undefined
+      sceneData.text = limitWords(limitCopy(sceneData.text || sceneData.title, 70), 6)
+      sceneData.subtitle = sceneData.subtitle ? limitCopy(limitWords(sceneData.subtitle, 5), 70) : undefined
       sceneData.highlight = sceneData.highlight ? limitCopy(sceneData.highlight, 40) : undefined
       delete sceneData.fontSize
       delete sceneData.color
@@ -257,10 +272,12 @@ function normalizeTypographicScene(sceneData: any): any | null {
       if (!text) {
         return null
       }
-      sceneData.text = text
-      // Optional highlight: keep only when it is a word contained in text.
+      // Hard 6-word ceiling for text plotted over the video.
+      const capped = limitWords(text, 6)
+      sceneData.text = capped
+      // Optional highlight: keep only when it is a word contained in the capped text.
       sceneData.highlight =
-        highlight && text.toLowerCase().includes(highlight.toLowerCase())
+        highlight && capped.toLowerCase().includes(highlight.toLowerCase())
           ? highlight
           : undefined
       return sceneData
@@ -272,7 +289,8 @@ function normalizeTypographicScene(sceneData: any): any | null {
         return null
       }
       sceneData.title = title || subtitle
-      sceneData.subtitle = subtitle
+      // Secondary caption over video: max 5 words, optional.
+      sceneData.subtitle = limitWords(subtitle, 5)
       return sceneData
     }
     case 'Split': {
@@ -281,8 +299,9 @@ function normalizeTypographicScene(sceneData: any): any | null {
       if (!topText && !bottomText) {
         return null
       }
-      sceneData.topText = topText
-      sceneData.bottomText = bottomText
+      // topText = secondary context (max 5); bottomText = main line (max 6).
+      sceneData.topText = limitWords(topText, 5)
+      sceneData.bottomText = limitWords(bottomText, 6)
       return sceneData
     }
     case 'SplitVertical': {
@@ -349,13 +368,15 @@ function normalizeTypographicScene(sceneData: any): any | null {
       if (!text) {
         return null
       }
-      sceneData.text = text
-      // highlight must be a substring of text; fall back to the last word.
+      // Hard 6-word ceiling for the CTA line plotted over the video.
+      const capped = limitWords(text, 6)
+      sceneData.text = capped
+      // highlight must be a substring of the capped text; fall back to the last word.
       const highlight = coerceString(sceneData.highlight, sceneData.highlightWord)
       sceneData.highlight =
-        highlight && text.toLowerCase().includes(highlight.toLowerCase())
+        highlight && capped.toLowerCase().includes(highlight.toLowerCase())
           ? highlight
-          : text.trim().split(/\s+/).slice(-1)[0] || text
+          : capped.trim().split(/\s+/).slice(-1)[0] || capped
       return sceneData
     }
     case 'StickFigures': {
@@ -364,8 +385,9 @@ function normalizeTypographicScene(sceneData: any): any | null {
       if (!situation && !caption) {
         return null
       }
-      sceneData.situation = situation || caption
-      sceneData.caption = caption || situation
+      // Captions plotted over video: situation main (max 6), caption secondary (max 5).
+      sceneData.situation = limitWords(situation || caption, 6)
+      sceneData.caption = limitWords(caption || situation, 5)
       return sceneData
     }
     default:
@@ -417,17 +439,27 @@ REGRAS DE SELEÇÃO SEMÂNTICA:
 - Sempre use startLeg como índice inteiro 0-based da timeline de legendas numeradas.
 - durationInSubtitles entre 1 e 3.
 
+ESTRUTURA EM 3 ATOS (use os ÍNDICES das legendas numeradas + timestamps para posicionar as cenas):
+- HOOK (primeiros ~15s de fala): densidade ALTA de estímulo visual — algo NOVO na tela nos checkpoints ~2s, ~7s e ~15s (inserts curtos, trocas rápidas). Cenas do hook mais curtas (durationInSubtitles 1-2). A PRIMEIRA cena deve reforçar a promessa/tensão CENTRAL do vídeo, não um aquecimento genérico.
+- CORPO (miolo): ritmo mais sereno, foco em retenção — inserts espaçados (aprox. 1 a cada ~10-15s), com ImageInsert (b-roll) predominante e pontuações tipográficas apenas nos momentos-chave.
+- FINAL + CTA (últimos ~15-20s de fala): OBRIGATÓRIO terminar com uma cena CTA de texto grande, ALINHADA ao que o narrador realmente pede no áudio — extraia o pedido REAL da transcrição (seguir / comentar / clicar no link) e transforme nisso o CTA, com convite para seguir. NÃO invente handle/@; deixe o CTA genérico (ex.: "Segue pra parte 2"). Use os índices de legenda finais para posicionar essa cena.
+
+REGRA DURA DE TEXTO SOBRE VÍDEO (teto de palavras — inviolável):
+- Cenas cujo texto é plotado DIRETO sobre o vídeo (FullScreen, CTA, Split, e as captions de StickFigures) têm TETO no texto principal: NO MÁXIMO 6 palavras. Texto longo vira fonte minúscula ilegível — proibido.
+- Texto secundário (subtitle / caption / topText de contexto): NO MÁXIMO 5 palavras E é OPCIONAL — prefira OMITIR. Só inclua se agregar de verdade.
+- Se a ideia precisa de mais palavras que isso, NÃO despeje texto longo sobre o vídeo: escolha OUTRO formato — Card ou Flow (quebram em linhas curtas, poucas palavras por linha) ou ImageInsert (deixa a fala/legenda carregar o texto). Nunca force uma frase longa numa cena tipográfica de tela.
+
 REGRAS DE COPY (pt-br, texto punchy — fragmentos, NUNCA frases longas):
-- FullScreen: text com no máximo 7 palavras.
-- Card: title com no máximo 5 palavras; description com no máximo 12 palavras.
+- FullScreen: text com no máximo 6 palavras; sem subtítulo longo (se usar subtitle, no máximo 5 palavras, opcional).
+- Card: title com no máximo 5 palavras; description com no máximo 12 palavras (Card comporta mais texto porque quebra em linhas curtas).
 - Number: value curto (ex.: "3x", "R$15k", "80%"); label com no máximo 6 palavras.
 - CTA: text com no máximo 6 palavras E highlight presente dentro de text (uma palavra do próprio text).
 - Flow: 3-5 passos, cada passo com no máximo 5 palavras.
-- SplitVertical: leftLabel/rightLabel curtos (1-3 palavras); leftText/rightText curtos.
+- SplitVertical: leftLabel/rightLabel curtos (1-3 palavras); leftText/rightText no máximo 6 palavras cada.
 - Message: sender curto; message curta.
-- LowerThird: title = nome/rótulo; subtitle = contexto curto.
-- Split: topText = contexto curto; bottomText = fala curta.
-- StickFigures: situation + caption curtos.
+- LowerThird: title = nome/rótulo; subtitle = contexto no máximo 5 palavras.
+- Split: topText = contexto no máximo 5 palavras (opcional); bottomText = fala no máximo 6 palavras.
+- StickFigures: situation no máximo 6 palavras; caption no máximo 5 palavras (opcional).
 - SEM emoji em qualquer campo (exceção: Message pode usar emoji, opcional).
 
 ImageInsert (quando usado):
