@@ -42,7 +42,22 @@ export const HookTitle: React.FC<HookTitleProps> = ({ text, format, visibility =
   const fontSize = isVertical ? 46 : 40;
 
   return (
-    <AbsoluteFill style={{ pointerEvents: 'none' }}>
+    <AbsoluteFill style={{ pointerEvents: 'none', zIndex: 100 }}>
+      {/* Legibility scrim: a discreet dark gradient over the top ~22% so the
+          headline stays readable over bright media (b-roll / inserts). Fades in
+          and out together with the title (same progress * visibility). */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: '22%',
+          background:
+            'linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 100%)',
+          opacity: progress * visibility,
+        }}
+      />
       <div
         style={{
           position: 'absolute',

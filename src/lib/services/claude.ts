@@ -253,6 +253,56 @@ function limitWords(value: unknown, maxWords: number): string {
   return words.slice(0, Math.max(1, maxWords)).join(' ')
 }
 
+/**
+ * Content tokens of a string, accent-folded and lowercased, stopwords/short
+ * words dropped. Used to detect a hookTitle that merely restates a scene.
+ */
+function contentTokens(value: unknown): Set<string> {
+  return new Set(
+    String(value || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2)
+  )
+}
+
+const HOOK_SCENE_TEXT_KEYS = [
+  'text',
+  'title',
+  'subtitle',
+  'highlight',
+  'sourceText',
+  'imageAlt',
+  'message',
+  'headline'
+]
+
+/**
+ * True when `hookTitle` is essentially the same promise as some scene's copy:
+ * >70% of the headline's content tokens already appear in that scene's text.
+ * A persistent manchete that duplicates the opening title-card is noise, so the
+ * caller discards it. Empty/degenerate headlines never match.
+ */
+function hookTitleDuplicatesScene(hookTitle: string, scenes: any[]): boolean {
+  const hookTokens = contentTokens(hookTitle)
+  if (hookTokens.size === 0) return false
+  return (scenes || []).some((scene) => {
+    const sceneText = HOOK_SCENE_TEXT_KEYS.map((k) => scene?.[k])
+      .filter((v) => typeof v === 'string')
+      .join(' ')
+    const sceneTokens = contentTokens(sceneText)
+    if (sceneTokens.size === 0) return false
+    let shared = 0
+    for (const t of hookTokens) {
+      if (sceneTokens.has(t)) shared += 1
+    }
+    return shared / hookTokens.size > 0.7
+  })
+}
+
 export function sanitizeSceneCopy(sceneData: any): any {
   switch (sceneData.type) {
     case 'FullScreen':
@@ -794,6 +844,7 @@ TÁTICAS DE EDIÇÃO PONTUAIS (opcionais — ÊNFASE rara, nunca padrão; valore
 TÍTULO-HOOK PERSISTENTE (hookTitle — OPCIONAL, no nível raiz do JSON, não é uma cena):
 - Uma manchete-promessa curta (NO MÁXIMO 10 palavras) que fica FIXA no topo do vídeo inteiro, reforçando a promessa central. Estilo específico e numérico quando possível (ex.: "Como vendi 185 ingressos em 3h53min", "O erro que custou R$40 mil").
 - Extraia a promessa REAL da transcrição; NÃO invente números que o áudio não sustenta. Se o vídeo não tem uma promessa-manchete clara, OMITA o campo (não force).
+- A manchete NÃO pode repetir nem parafrasear o texto de NENHUMA cena — em especial a cena de ABERTURA (title-card do hook). Ela é uma promessa COMPLEMENTAR, um ângulo diferente do que as cenas já dizem; nunca o mesmo enunciado. Se a única manchete que você consegue é ~igual ao texto de alguma cena, retorne hookTitle null (OMITA) — melhor sem manchete do que duplicada.
 
 Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysisTone}.${buildBrandColorPromptSection(brandColors)}${buildAssetCatalogSection(assetCatalog)}
 
@@ -1015,11 +1066,19 @@ Garanta que o JSON seja válido e completo.`
     const { palette, colorGroup } = resolvePaletteWithBrandColors(analysisData, brandColors)
 
     // Optional persistent hook headline (≤10 words). Omitted when the model
-    // returns nothing usable — old behavior (no headline) is preserved.
-    const hookTitle =
+    // returns nothing usable — old behavior (no headline) is preserved. A
+    // headline that merely restates a scene (esp. the opening title-card) is
+    // discarded: the manchete must be a COMPLEMENTARY promise, not a duplicate.
+    let hookTitle =
       typeof analysisData.hookTitle === 'string' && analysisData.hookTitle.trim()
         ? limitWords(analysisData.hookTitle, 10)
         : undefined
+    if (hookTitle && hookTitleDuplicatesScene(hookTitle, validatedScenes)) {
+      console.warn(
+        `[analyze] hookTitle descartado por duplicar o texto de uma cena: "${hookTitle}"`
+      )
+      hookTitle = undefined
+    }
 
     return {
       narrativeFormat: analysisData.narrativeFormat || 'Professional video content',

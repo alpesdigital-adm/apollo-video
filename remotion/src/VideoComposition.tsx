@@ -174,19 +174,29 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         ? 'center 32%'
         : 'center 25%';
 
-  // HookTitle visibility: the persistent top headline must get out of the way
-  // whenever a full-canvas scene/overlay owns the frame — ImageInsert (any
-  // layout), AssetCard, a FullScreen variant (torn-paper/crt-glitch), or a
-  // non-fullscreen layout segment (split-50/blur-bg/tweet-card) — since those
-  // either paint over the top-8% zone or replace the base video entirely. It
-  // stays up over talking-head footage and light text scenes (plain
-  // FullScreen, LowerThird, Number, CTA, etc).
-  const isFrameObstructed = (f: number): boolean => {
+  // HookTitle visibility: EXCLUSIVITY-OF-HEADLINE rule. Two headlines on screen at
+  // once (the persistent top manchete + a typographic scene's own big text) is
+  // noise, so the manchete fades out ONLY while a HEADLINE scene owns the frame —
+  // any scene that already plots large text on the canvas: FullScreen (any
+  // variant), CTA, Card, SplitVertical, Number, Flow, Message, StickFigures, or a
+  // tweet-card layout segment (which is a big text card). It STAYS VISIBLE — on
+  // top, legible — over media/footage: talking-head base video, ImageInsert (all
+  // layouts, incl. the split-image track), AssetCard, and the split-50 / blur-bg
+  // layout segments (media, not competing text). Rule of thumb: big text on
+  // screen → manchete out; media/video → manchete stays.
+  const HEADLINE_SCENE_TYPES = new Set([
+    'fullscreen',
+    'cta',
+    'card',
+    'split-vertical',
+    'number',
+    'flow',
+    'message',
+    'stick-figures',
+  ]);
+  const isHeadlineActiveAt = (f: number): boolean => {
     const segmentAtFrame = findActiveLayoutSegment(layoutSegments, f);
-    if (segmentAtFrame && segmentAtFrame.layout !== 'fullscreen') {
-      return true;
-    }
-    if (isSplitImageActiveAt(f)) {
+    if (segmentAtFrame && segmentAtFrame.layout === 'tweet-card') {
       return true;
     }
     return scenes.some((scene) => {
@@ -198,24 +208,17 @@ export const VideoComposition: React.FC<CompositionProps> = ({
       if (f < startFrame || f >= endFrame) {
         return false;
       }
-      if (scene.type === 'image-insert' || scene.type === 'asset-card') {
-        return true;
-      }
-      if (scene.type === 'fullscreen') {
-        const variant = (scene.props as any)?.variant;
-        return variant === 'torn-paper' || variant === 'crt-glitch';
-      }
-      return false;
+      return HEADLINE_SCENE_TYPES.has(scene.type);
     });
   };
 
   const HOOK_FADE_FRAMES = 6;
   let hookVisibility = 1;
-  if (isFrameObstructed(frame)) {
+  if (isHeadlineActiveAt(frame)) {
     let framesSinceObstructed = 0;
     while (
       framesSinceObstructed < HOOK_FADE_FRAMES &&
-      isFrameObstructed(frame - framesSinceObstructed - 1)
+      isHeadlineActiveAt(frame - framesSinceObstructed - 1)
     ) {
       framesSinceObstructed += 1;
     }
@@ -226,7 +229,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   } else {
     let framesSinceClear = HOOK_FADE_FRAMES;
     for (let i = 1; i <= HOOK_FADE_FRAMES; i += 1) {
-      if (isFrameObstructed(frame - i)) {
+      if (isHeadlineActiveAt(frame - i)) {
         framesSinceClear = i - 1;
         break;
       }
