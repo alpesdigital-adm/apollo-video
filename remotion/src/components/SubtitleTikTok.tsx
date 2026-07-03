@@ -441,7 +441,7 @@ const KaraokeWordSpan: React.FC<KaraokeWordSpanProps> = ({
         fps,
         config: { damping: 14, stiffness: 200, mass: 0.6 },
         from: 1.0,
-        to: 1.12,
+        to: 1.06,
         durationInFrames: 6,
       });
       scale = pop;
@@ -463,8 +463,10 @@ const KaraokeWordSpan: React.FC<KaraokeWordSpanProps> = ({
         display: 'inline-block',
         transform: `scale(${scale})`,
         transformOrigin: 'center bottom',
-        // Space after word (except last in line)
-        marginRight: isLast ? 0 : '0.22em',
+        // O scale da palavra ativa NÃO ocupa layout — ela invade visualmente o
+        // vão dos vizinhos. Vão dimensionado para sobrar espaço mesmo no pico
+        // do pop (provado por still: 0.26em ainda colava com scale 1.1).
+        paddingRight: isLast ? 0 : '0.34em',
       }}
     >
       {word}
@@ -503,7 +505,7 @@ const TwoWordSpan: React.FC<TwoWordSpanProps> = ({
         fps,
         config: { damping: 14, stiffness: 200, mass: 0.6 },
         from: 1.0,
-        to: 1.1,
+        to: 1.06,
         durationInFrames: 6,
       });
     } else if (isFuture) {
@@ -522,6 +524,8 @@ const TwoWordSpan: React.FC<TwoWordSpanProps> = ({
         display: 'inline-block',
         transform: `scale(${scale})`,
         transformOrigin: 'center',
+        // Par de palavras precisa de vão explícito (inline-block não herda espaço).
+        paddingRight: '0.3em',
       }}
     >
       {word}
@@ -567,7 +571,7 @@ const PresetWordSpan: React.FC<PresetWordSpanProps> = ({
           fps,
           config: { damping: 14, stiffness: 200, mass: 0.6 },
           from: 1.0,
-          to: 1.12,
+          to: 1.06,
           durationInFrames: 6,
         });
       }
