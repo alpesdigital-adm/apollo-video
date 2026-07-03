@@ -4,6 +4,13 @@ import { AbsoluteFill, spring, useCurrentFrame, useVideoConfig } from 'remotion'
 interface HookTitleProps {
   text?: string;
   format: '9:16' | '16:9';
+  // 0-1 multiplier applied on top of the entrance-spring opacity. VideoComposition
+  // drives this down to 0 (with a short ease, not a hard cut) while a full-canvas
+  // scene/overlay is active (ImageInsert, AssetCard, FullScreen variant, or a
+  // non-fullscreen layout segment) so the persistent headline never collides with
+  // it, then eases back to 1 over talking-head / light text scenes. Defaults to 1
+  // so existing callers without the prop are unaffected.
+  visibility?: number;
 }
 
 /**
@@ -13,7 +20,7 @@ interface HookTitleProps {
  * sitting in the ~8-16% top zone. Renders nothing when no hookTitle is set, so
  * old projects are completely unaffected.
  */
-export const HookTitle: React.FC<HookTitleProps> = ({ text, format }) => {
+export const HookTitle: React.FC<HookTitleProps> = ({ text, format, visibility = 1 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -46,7 +53,7 @@ export const HookTitle: React.FC<HookTitleProps> = ({ text, format }) => {
           padding: isVertical ? '0 90px' : '0 160px',
           display: 'flex',
           justifyContent: 'center',
-          opacity: progress,
+          opacity: progress * visibility,
           transform: `translateY(${translateY}px)`,
         }}
       >

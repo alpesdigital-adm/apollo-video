@@ -162,11 +162,9 @@ export const VideoComposition: React.FC<CompositionProps> = ({
       frame < endFrame
     );
   }) || splitImageScenes[0];
-  const isSplitImageActive =
-    splitTrackStart !== null &&
-    splitTrackEnd !== null &&
-    frame >= splitTrackStart &&
-    frame < splitTrackEnd;
+  const isSplitImageActiveAt = (f: number): boolean =>
+    splitTrackStart !== null && splitTrackEnd !== null && f >= splitTrackStart && f < splitTrackEnd;
+  const isSplitImageActive = isSplitImageActiveAt(frame);
   const activeSplitLayout = isSplitImageActive ? activeSplitImage?.props?.layout : undefined;
   const isTopImageCompact = activeSplitLayout === 'top-image-compact';
   const splitVideoObjectPosition =
@@ -175,6 +173,69 @@ export const VideoComposition: React.FC<CompositionProps> = ({
       : isTopImageCompact
         ? 'center 32%'
         : 'center 25%';
+
+  // HookTitle visibility: the persistent top headline must get out of the way
+  // whenever a full-canvas scene/overlay owns the frame — ImageInsert (any
+  // layout), AssetCard, a FullScreen variant (torn-paper/crt-glitch), or a
+  // non-fullscreen layout segment (split-50/blur-bg/tweet-card) — since those
+  // either paint over the top-8% zone or replace the base video entirely. It
+  // stays up over talking-head footage and light text scenes (plain
+  // FullScreen, LowerThird, Number, CTA, etc).
+  const isFrameObstructed = (f: number): boolean => {
+    const segmentAtFrame = findActiveLayoutSegment(layoutSegments, f);
+    if (segmentAtFrame && segmentAtFrame.layout !== 'fullscreen') {
+      return true;
+    }
+    if (isSplitImageActiveAt(f)) {
+      return true;
+    }
+    return scenes.some((scene) => {
+      if (isSplitImageScene(scene) || generatedSegment(scene)) {
+        return false;
+      }
+      const startFrame = scene.fromFrame ?? Math.round(scene.from * config.fps);
+      const endFrame = scene.toFrame ?? Math.round(scene.to * config.fps);
+      if (f < startFrame || f >= endFrame) {
+        return false;
+      }
+      if (scene.type === 'image-insert' || scene.type === 'asset-card') {
+        return true;
+      }
+      if (scene.type === 'fullscreen') {
+        const variant = (scene.props as any)?.variant;
+        return variant === 'torn-paper' || variant === 'crt-glitch';
+      }
+      return false;
+    });
+  };
+
+  const HOOK_FADE_FRAMES = 6;
+  let hookVisibility = 1;
+  if (isFrameObstructed(frame)) {
+    let framesSinceObstructed = 0;
+    while (
+      framesSinceObstructed < HOOK_FADE_FRAMES &&
+      isFrameObstructed(frame - framesSinceObstructed - 1)
+    ) {
+      framesSinceObstructed += 1;
+    }
+    hookVisibility = interpolate(framesSinceObstructed, [0, HOOK_FADE_FRAMES], [1, 0], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp',
+    });
+  } else {
+    let framesSinceClear = HOOK_FADE_FRAMES;
+    for (let i = 1; i <= HOOK_FADE_FRAMES; i += 1) {
+      if (isFrameObstructed(frame - i)) {
+        framesSinceClear = i - 1;
+        break;
+      }
+    }
+    hookVisibility = interpolate(framesSinceClear, [0, HOOK_FADE_FRAMES], [0, 1], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp',
+    });
+  }
 
   // Background music: fade in over the first 0.5s and fade out over the
   // last 1.5s of the whole timeline. Absent when no `audio.music` was
@@ -288,8 +349,9 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         subtitleStyle={subtitleStyle}
       />
 
-      {/* Persistent hook headline (top) — renders nothing when unset */}
-      <HookTitle text={hookTitle} format={format} />
+      {/* Persistent hook headline (top) — renders nothing when unset; hides
+          with a short fade over full-canvas scenes/overlays (see hookVisibility) */}
+      <HookTitle text={hookTitle} format={format} visibility={hookVisibility} />
     </AbsoluteFill>
   );
 };

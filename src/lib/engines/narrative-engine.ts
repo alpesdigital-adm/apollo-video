@@ -262,12 +262,22 @@ function normalizeSegmentEffects(value: unknown): LayoutSegmentEffects | undefin
  * Derive the segment layout track from scenes carrying `segmentLayout`.
  * Each such scene becomes one segment covering its [startFrame, endFrame)
  * window. Scenes without `segmentLayout` stay fullscreen (not materialized).
- * Since scenes never overlap, the derived segments never overlap either.
+ * Since scenes never overlap, the derived segments never overlap either —
+ * EXCEPT that the minimum-duration clamp below (used to avoid an
+ * unreadable flash for very short cutaways) can extend toFrame past the
+ * scene's own endFrame. Without capping that extension at the next scene's
+ * startFrame, a short segment can bleed into the following scene's window
+ * (e.g. an adjacent ImageInsert split-bottom scene), leaving a stale
+ * `split-50` segment active there — which flips SubtitleOverlay into
+ * two-word-center mode on top of unrelated footage. Scenes are sorted here
+ * so the "next scene" lookup is correct regardless of input order.
  */
 function buildLayoutSegments(scenes: Scene[], fps: number): LayoutSegment[] {
   const segments: LayoutSegment[] = []
+  const sorted = [...scenes].sort((a, b) => (a.startFrame ?? 0) - (b.startFrame ?? 0))
 
-  for (const scene of scenes) {
+  for (let i = 0; i < sorted.length; i += 1) {
+    const scene = sorted[i]
     const rawLayout = (scene as any).segmentLayout
     const effects = normalizeSegmentEffects((scene as any).segmentEffects)
     const hasLayout =
@@ -282,7 +292,15 @@ function buildLayoutSegments(scenes: Scene[], fps: number): LayoutSegment[] {
 
     const layout: LayoutSegment['layout'] = hasLayout ? rawLayout : 'fullscreen'
     const fromFrame = scene.startFrame ?? 0
-    const toFrame = Math.max(scene.endFrame ?? 0, fromFrame + Math.max(1, Math.round(fps * 0.5)))
+    const minToFrame = fromFrame + Math.max(1, Math.round(fps * 0.5))
+    const nextStartFrame = sorted[i + 1]?.startFrame
+    const rawToFrame = Math.max(scene.endFrame ?? 0, minToFrame)
+    // Never let the minimum-duration extension cross into the next scene's
+    // window — cap it there, mirroring prepareRemotionScenes' own clamp.
+    const toFrame =
+      typeof nextStartFrame === 'number'
+        ? Math.min(rawToFrame, Math.max(nextStartFrame, fromFrame + 1))
+        : rawToFrame
     const props: Record<string, unknown> = {}
 
     if (layout === 'tweet-card') {
