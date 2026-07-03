@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   AbsoluteFill,
   Audio,
@@ -174,16 +174,28 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         ? 'center 32%'
         : 'center 25%';
 
-  // HookTitle visibility: EXCLUSIVITY-OF-HEADLINE rule. Two headlines on screen at
-  // once (the persistent top manchete + a typographic scene's own big text) is
-  // noise, so the manchete fades out ONLY while a HEADLINE scene owns the frame —
-  // any scene that already plots large text on the canvas: FullScreen (any
-  // variant), CTA, Card, SplitVertical, Number, Flow, Message, StickFigures, or a
-  // tweet-card layout segment (which is a big text card). It STAYS VISIBLE — on
-  // top, legible — over media/footage: talking-head base video, ImageInsert (all
-  // layouts, incl. the split-image track), AssetCard, and the split-50 / blur-bg
-  // layout segments (media, not competing text). Rule of thumb: big text on
-  // screen → manchete out; media/video → manchete stays.
+  // HookTitle visibility: EXCLUSIVITY-OF-HEADLINE rule + COMMITTED ENTRANCE rule.
+  //
+  // Exclusivity (unchanged in spirit): two headlines on screen at once (the
+  // persistent top manchete + a typographic scene's own big text) is noise, so
+  // the manchete hides while a HEADLINE scene owns the frame — any scene that
+  // already plots large text on the canvas: FullScreen (any variant), CTA, Card,
+  // SplitVertical, Number, Flow, Message, StickFigures, or a tweet-card layout
+  // segment (a big text card). It stays visible — on top, legible — over
+  // media/footage: talking-head base video, ImageInsert (all layouts, incl. the
+  // split-image track), AssetCard, and the split-50 / blur-bg layout segments.
+  //
+  // Committed entrance: the manchete used to spring in at frame 0 regardless of
+  // what was on screen, so when a title-card opened the video (e.g. a torn-paper
+  // scene starting a few frames in) it flashed for a fraction of a second and
+  // then vanished — a blink, not a decision. Instead we precompute the headline
+  // occupancy timeline once (not per frame) and derive the FREE WINDOWS (its
+  // complement). Only free windows with real runway (MIN_RUNWAY_SECONDS) are
+  // "qualified" — the manchete's entranceFrame is the start of the first
+  // qualified window, and it is only ever visible inside a qualified window.
+  // Sub-MIN_OCCUPATION_SECONDS headline blips are dropped before computing free
+  // windows, so a very short typographic flash doesn't chop up an otherwise long
+  // runway or trigger a hide/show cycle — the manchete rides through it.
   const HEADLINE_SCENE_TYPES = new Set([
     'fullscreen',
     'cta',
@@ -194,50 +206,104 @@ export const VideoComposition: React.FC<CompositionProps> = ({
     'message',
     'stick-figures',
   ]);
-  const isHeadlineActiveAt = (f: number): boolean => {
-    const segmentAtFrame = findActiveLayoutSegment(layoutSegments, f);
-    if (segmentAtFrame && segmentAtFrame.layout === 'tweet-card') {
-      return true;
-    }
-    return scenes.some((scene) => {
-      if (isSplitImageScene(scene) || generatedSegment(scene)) {
-        return false;
-      }
+
+  // A free window shorter than this isn't worth a debut: the manchete would
+  // have to blink in and out again almost immediately, which is the exact bug
+  // being fixed here.
+  const MIN_RUNWAY_SECONDS = 2.5;
+  // A headline occupation shorter than this is a blip, not a real takeover of
+  // the frame — the manchete crosses through it without hiding.
+  const MIN_OCCUPATION_SECONDS = 0.5;
+
+  const { entranceFrame, qualifiedWindows } = useMemo(() => {
+    const minOccupationFrames = Math.round(MIN_OCCUPATION_SECONDS * config.fps);
+    const minRunwayFrames = Math.round(MIN_RUNWAY_SECONDS * config.fps);
+
+    // 1) Raw intervals where a HEADLINE scene or tweet-card segment owns the
+    // frame — same membership criteria as the old per-frame check, but built
+    // once as [from, to) ranges instead of scanned on every frame.
+    const raw: Array<{ from: number; to: number }> = [];
+    scenes.forEach((scene) => {
+      if (isSplitImageScene(scene) || generatedSegment(scene)) return;
+      if (!HEADLINE_SCENE_TYPES.has(scene.type)) return;
       const startFrame = scene.fromFrame ?? Math.round(scene.from * config.fps);
       const endFrame = scene.toFrame ?? Math.round(scene.to * config.fps);
-      if (f < startFrame || f >= endFrame) {
-        return false;
-      }
-      return HEADLINE_SCENE_TYPES.has(scene.type);
+      if (endFrame > startFrame) raw.push({ from: startFrame, to: endFrame });
     });
-  };
+    (layoutSegments ?? []).forEach((seg) => {
+      if (seg.layout === 'tweet-card' && seg.toFrame > seg.fromFrame) {
+        raw.push({ from: seg.fromFrame, to: seg.toFrame });
+      }
+    });
+    raw.sort((a, b) => a.from - b.from);
+
+    const merged: Array<{ from: number; to: number }> = [];
+    raw.forEach((interval) => {
+      const last = merged[merged.length - 1];
+      if (last && interval.from <= last.to) {
+        last.to = Math.max(last.to, interval.to);
+      } else {
+        merged.push({ from: interval.from, to: interval.to });
+      }
+    });
+
+    // 2) Drop blips shorter than MIN_OCCUPATION_SECONDS — they don't count as
+    // "occupied" for window purposes, so they get absorbed into free space.
+    const significant = merged.filter((iv) => iv.to - iv.from >= minOccupationFrames);
+
+    // 3) Free windows = complement of the significant occupied intervals
+    // across the whole timeline.
+    const free: Array<{ from: number; to: number }> = [];
+    let cursor = 0;
+    significant.forEach((iv) => {
+      if (iv.from > cursor) free.push({ from: cursor, to: iv.from });
+      cursor = Math.max(cursor, iv.to);
+    });
+    if (cursor < config.durationInFrames) {
+      free.push({ from: cursor, to: config.durationInFrames });
+    }
+
+    // 4) Only windows with real runway qualify — this is where the manchete is
+    // allowed to exist at all.
+    const qualified = free.filter((w) => w.to - w.from >= minRunwayFrames);
+
+    return {
+      entranceFrame: qualified.length > 0 ? qualified[0].from : Infinity,
+      qualifiedWindows: qualified,
+    };
+  }, [scenes, layoutSegments, config.fps, config.durationInFrames]);
+
+  const isQualifiedFreeAt = (f: number): boolean =>
+    qualifiedWindows.some((w) => f >= w.from && f < w.to);
 
   const HOOK_FADE_FRAMES = 6;
-  let hookVisibility = 1;
-  if (isHeadlineActiveAt(frame)) {
-    let framesSinceObstructed = 0;
-    while (
-      framesSinceObstructed < HOOK_FADE_FRAMES &&
-      isHeadlineActiveAt(frame - framesSinceObstructed - 1)
-    ) {
-      framesSinceObstructed += 1;
-    }
-    hookVisibility = interpolate(framesSinceObstructed, [0, HOOK_FADE_FRAMES], [1, 0], {
-      extrapolateLeft: 'clamp',
-      extrapolateRight: 'clamp',
-    });
-  } else {
-    let framesSinceClear = HOOK_FADE_FRAMES;
-    for (let i = 1; i <= HOOK_FADE_FRAMES; i += 1) {
-      if (isHeadlineActiveAt(frame - i)) {
-        framesSinceClear = i - 1;
-        break;
+  let hookVisibility = 0;
+  if (frame >= entranceFrame) {
+    if (isQualifiedFreeAt(frame)) {
+      let framesSinceClear = HOOK_FADE_FRAMES;
+      for (let i = 1; i <= HOOK_FADE_FRAMES; i += 1) {
+        if (!isQualifiedFreeAt(frame - i)) {
+          framesSinceClear = i - 1;
+          break;
+        }
       }
+      hookVisibility = interpolate(framesSinceClear, [0, HOOK_FADE_FRAMES], [0, 1], {
+        extrapolateLeft: 'clamp',
+        extrapolateRight: 'clamp',
+      });
+    } else {
+      let framesSinceObstructed = 0;
+      while (
+        framesSinceObstructed < HOOK_FADE_FRAMES &&
+        !isQualifiedFreeAt(frame - framesSinceObstructed - 1)
+      ) {
+        framesSinceObstructed += 1;
+      }
+      hookVisibility = interpolate(framesSinceObstructed, [0, HOOK_FADE_FRAMES], [1, 0], {
+        extrapolateLeft: 'clamp',
+        extrapolateRight: 'clamp',
+      });
     }
-    hookVisibility = interpolate(framesSinceClear, [0, HOOK_FADE_FRAMES], [0, 1], {
-      extrapolateLeft: 'clamp',
-      extrapolateRight: 'clamp',
-    });
   }
 
   // Background music: fade in over the first 0.5s and fade out over the
@@ -354,7 +420,12 @@ export const VideoComposition: React.FC<CompositionProps> = ({
 
       {/* Persistent hook headline (top) — renders nothing when unset; hides
           with a short fade over full-canvas scenes/overlays (see hookVisibility) */}
-      <HookTitle text={hookTitle} format={format} visibility={hookVisibility} />
+      <HookTitle
+        text={hookTitle}
+        format={format}
+        visibility={hookVisibility}
+        entranceFrame={entranceFrame}
+      />
     </AbsoluteFill>
   );
 };

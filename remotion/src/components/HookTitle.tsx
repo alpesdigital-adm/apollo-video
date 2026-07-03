@@ -11,6 +11,12 @@ interface HookTitleProps {
   // it, then eases back to 1 over talking-head / light text scenes. Defaults to 1
   // so existing callers without the prop are unaffected.
   visibility?: number;
+  // Frame at which the manchete is allowed to make its entrance — the start of
+  // the first headline-free window with enough runway (see
+  // MIN_RUNWAY_SECONDS in VideoComposition). The entrance spring runs from
+  // this frame instead of frame 0, so the title never flashes on before the
+  // video actually has room for it. Defaults to 0 for existing callers.
+  entranceFrame?: number;
 }
 
 /**
@@ -20,7 +26,12 @@ interface HookTitleProps {
  * sitting in the ~8-16% top zone. Renders nothing when no hookTitle is set, so
  * old projects are completely unaffected.
  */
-export const HookTitle: React.FC<HookTitleProps> = ({ text, format, visibility = 1 }) => {
+export const HookTitle: React.FC<HookTitleProps> = ({
+  text,
+  format,
+  visibility = 1,
+  entranceFrame = 0,
+}) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -30,7 +41,7 @@ export const HookTitle: React.FC<HookTitleProps> = ({ text, format, visibility =
   }
 
   const progress = spring({
-    frame,
+    frame: Math.max(0, frame - entranceFrame),
     fps,
     from: 0,
     to: 1,
