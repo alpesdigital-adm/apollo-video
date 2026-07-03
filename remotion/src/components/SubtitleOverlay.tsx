@@ -1,23 +1,27 @@
 import React from 'react';
-import { SubtitleEntry, ColorPalette } from '../lib/types';
+import { SubtitleEntry, ColorPalette, LayoutSegment } from '../lib/types';
 import { SubtitleTikTok } from './SubtitleTikTok';
 import { SubtitleStandard } from './SubtitleStandard';
+import { findActiveLayoutSegment } from './LayoutSegmentLayer';
 import { useCurrentFrame, useVideoConfig } from 'remotion';
 
 interface SubtitleOverlayProps {
   subtitles: SubtitleEntry[];
   format: '9:16' | '16:9';
   palette: ColorPalette;
+  layoutSegments?: LayoutSegment[];
 }
 
 export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   subtitles,
   format,
   palette,
+  layoutSegments,
 }) => {
   const frame = useCurrentFrame();
   const config = useVideoConfig();
   const currentTime = frame / config.fps;
+  const activeSegment = findActiveLayoutSegment(layoutSegments, frame);
 
   const currentSubtitle = subtitles.find(
     (sub) => {
@@ -39,6 +43,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
         subtitle={currentSubtitle}
         palette={palette}
         isVisible={!!currentSubtitle}
+        mode={activeSegment?.layout === 'split-50' ? 'two-word-center' : 'default'}
       />
     );
   }

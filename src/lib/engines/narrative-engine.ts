@@ -6,7 +6,9 @@ import type {
   EditOverlay,
   EditPlan,
   EditRange,
-  EditSource
+  EditSource,
+  LayoutSegment,
+  LayoutSegmentEffects
 } from '../types/edl'
 import type { Scene } from '../types/scene'
 import { framesToSeconds, secondsToFrames } from '../utils/timing'
@@ -133,6 +135,67 @@ function sceneToLineageUnit(scene: Scene, fps: number): CreativeLineageUnit {
   }
 }
 
+function normalizeSegmentEffects(value: unknown): LayoutSegmentEffects | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  const effects: LayoutSegmentEffects = {}
+  if (raw.zoom === 'in' || raw.zoom === 'out') effects.zoom = raw.zoom
+  if (raw.bw === true) effects.bw = true
+  return effects.zoom || effects.bw ? effects : undefined
+}
+
+/**
+ * Derive the segment layout track from scenes carrying `segmentLayout`.
+ * Each such scene becomes one segment covering its [startFrame, endFrame)
+ * window. Scenes without `segmentLayout` stay fullscreen (not materialized).
+ * Since scenes never overlap, the derived segments never overlap either.
+ */
+function buildLayoutSegments(scenes: Scene[], fps: number): LayoutSegment[] {
+  const segments: LayoutSegment[] = []
+
+  for (const scene of scenes) {
+    const rawLayout = (scene as any).segmentLayout
+    const effects = normalizeSegmentEffects((scene as any).segmentEffects)
+    const hasLayout =
+      rawLayout === 'split-50' || rawLayout === 'blur-bg' || rawLayout === 'tweet-card'
+
+    // A scene contributes a segment when it either repositions the base video
+    // (segmentLayout) OR only tints/zooms it (segmentEffects on a fullscreen
+    // base). Scenes with neither stay implicitly fullscreen (not materialized).
+    if (!hasLayout && !effects) {
+      continue
+    }
+
+    const layout: LayoutSegment['layout'] = hasLayout ? rawLayout : 'fullscreen'
+    const fromFrame = scene.startFrame ?? 0
+    const toFrame = Math.max(scene.endFrame ?? 0, fromFrame + Math.max(1, Math.round(fps * 0.5)))
+    const props: Record<string, unknown> = {}
+
+    if (layout === 'tweet-card') {
+      props.text =
+        (scene as any).text ||
+        (scene as any).sourceText ||
+        (scene as any).imageAlt ||
+        (scene as any).title ||
+        ''
+    } else if (scene.type === 'ImageInsert') {
+      // split-50 / blur-bg: media comes from the ImageInsert asset.
+      props.mediaSrc = (scene as any).imageSrc || (scene as any).imagePath || ''
+    }
+
+    segments.push({
+      id: `seg-${scene.id}`,
+      fromFrame,
+      toFrame,
+      layout,
+      ...(effects ? { effects } : {}),
+      props
+    })
+  }
+
+  return segments.sort((a, b) => a.fromFrame - b.fromFrame)
+}
+
 function buildCreativeLineage(context: VideoEngineContext, durationFrames: number): CreativeLineage {
   return {
     projectId: context.projectId,
@@ -224,6 +287,7 @@ export const narrativeEngine: VideoEngine = {
         canUseMusicDrivenCuts: false
       },
       lineage: buildCreativeLineage(context, durationFrames),
+      layoutSegments: buildLayoutSegments(context.scenes, context.fps),
       notes: [
         'Engine optimized for narrated videos with speech-timed subtitles and scene overlays.',
         'Future visual engines should implement the same EditPlan contract and can replace ranges/overlays/audio without changing the renderer.'

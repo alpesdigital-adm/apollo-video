@@ -36,6 +36,22 @@ export interface CreatorProfile {
   avatarUrl: string | null;
 }
 
+export type SegmentLayoutKind = 'fullscreen' | 'split-50' | 'blur-bg' | 'tweet-card';
+
+export interface LayoutSegmentEffects {
+  zoom?: 'in' | 'out';
+  bw?: boolean;
+}
+
+export interface LayoutSegment {
+  id: string;
+  fromFrame: number;
+  toFrame: number;
+  layout: SegmentLayoutKind;
+  effects?: LayoutSegmentEffects;
+  props?: Record<string, any>;
+}
+
 export interface CompositionProps extends Record<string, unknown> {
   scenes: Scene[];
   subtitles: SubtitleEntry[];
@@ -44,4 +60,5 @@ export interface CompositionProps extends Record<string, unknown> {
   stylePreset?: string;
   palette: ColorPalette;
   creator?: CreatorProfile;
+  layoutSegments?: LayoutSegment[];
 }

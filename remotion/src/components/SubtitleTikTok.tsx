@@ -14,6 +14,9 @@ interface SubtitleTikTokProps {
   subtitle: SubtitleEntry;
   palette: ColorPalette;
   isVisible: boolean;
+  // 'two-word-center' is used during split-50 segments: at most two words at a
+  // time, large and centered on the 50/50 seam, karaoke highlight preserved.
+  mode?: 'default' | 'two-word-center';
 }
 
 // Returns the frame at which the given timed word starts, relative to the
@@ -55,6 +58,7 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   subtitle,
   palette,
   isVisible,
+  mode = 'default',
 }) => {
   const frame = useCurrentFrame();
   const config = useVideoConfig();
@@ -88,6 +92,45 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
     [0, 1, 1, 0],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   );
+
+  // --- two-word-center mode (split-50 seam) ---
+  if (mode === 'two-word-center') {
+    const pair = getTwoWordPair(subtitle, timedWords, currentTime, timeInSubtitle, duration);
+    return (
+      <AbsoluteFill style={{ opacity }}>
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            display: 'flex',
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: '0 0.3em',
+            padding: '0 60px',
+            textAlign: 'center',
+            fontFamily: 'Aptos, Segoe UI, Helvetica, Arial, sans-serif',
+            textShadow: '0 6px 22px rgba(0,0,0,0.95), 0 2px 4px rgba(0,0,0,0.9)',
+          }}
+        >
+          {pair.map((kw, i) => (
+            <TwoWordSpan
+              key={i}
+              word={kw.word}
+              timedWord={kw.timedWord}
+              currentTime={currentTime}
+              frame={frame}
+              fps={config.fps}
+              accentColor={accentColor}
+            />
+          ))}
+        </div>
+      </AbsoluteFill>
+    );
+  }
 
   const phrase = getCurrentSubtitlePhrase(subtitle, currentTime, timeInSubtitle, duration);
 
@@ -261,6 +304,108 @@ const KaraokeWordSpan: React.FC<KaraokeWordSpanProps> = ({
     </span>
   );
 };
+
+interface TwoWordSpanProps {
+  word: string;
+  timedWord: SubtitleWord | null;
+  currentTime: number;
+  frame: number;
+  fps: number;
+  accentColor: string;
+}
+
+const TwoWordSpan: React.FC<TwoWordSpanProps> = ({
+  word,
+  timedWord,
+  currentTime,
+  frame,
+  fps,
+  accentColor,
+}) => {
+  let color = '#FFFFFF';
+  let scale = 1;
+
+  if (timedWord !== null) {
+    const isActive = currentTime >= timedWord.start && currentTime < timedWord.end;
+    const isFuture = currentTime < timedWord.start;
+    if (isActive) {
+      color = accentColor;
+      const framesSinceStart = frame - wordStartFrame(timedWord, fps);
+      scale = spring({
+        frame: Math.max(0, framesSinceStart),
+        fps,
+        config: { damping: 14, stiffness: 200, mass: 0.6 },
+        from: 1.0,
+        to: 1.1,
+        durationInFrames: 6,
+      });
+    } else if (isFuture) {
+      color = 'rgba(255,255,255,0.75)';
+    }
+  }
+
+  return (
+    <span
+      style={{
+        color,
+        fontSize: 92,
+        fontWeight: 800,
+        lineHeight: 1.02,
+        letterSpacing: '-0.02em',
+        display: 'inline-block',
+        transform: `scale(${scale})`,
+        transformOrigin: 'center',
+      }}
+    >
+      {word}
+    </span>
+  );
+};
+
+// Return at most two words for the current instant. Uses word-level timings
+// (fixed consecutive pairs, picking the pair whose window contains the time)
+// when available; otherwise splits the phrase into pairs distributed evenly
+// across the subtitle's duration.
+function getTwoWordPair(
+  subtitle: SubtitleEntry,
+  timedWords: SubtitleWord[],
+  currentTime: number,
+  timeInSubtitle: number,
+  duration: number
+): KaraokeWord[] {
+  if (timedWords.length > 0) {
+    const pairs: SubtitleWord[][] = [];
+    for (let i = 0; i < timedWords.length; i += 2) {
+      pairs.push(timedWords.slice(i, i + 2));
+    }
+    const active =
+      pairs.find((p) => {
+        const start = p[0].start;
+        const end = p[p.length - 1].end;
+        return currentTime >= start - 0.04 && currentTime < end + 0.08;
+      }) ??
+      pairs
+        .map((p) => ({
+          p,
+          dist: Math.abs(currentTime - (p[0].start + p[p.length - 1].end) / 2),
+        }))
+        .sort((a, b) => a.dist - b.dist)[0]?.p ??
+      [];
+    return active.map((tw) => ({ word: tw.word, timedWord: tw }));
+  }
+
+  const words = normalizeText(subtitle.text).split(' ').filter(Boolean);
+  if (words.length === 0) {
+    return [];
+  }
+  const pairs: string[][] = [];
+  for (let i = 0; i < words.length; i += 2) {
+    pairs.push(words.slice(i, i + 2));
+  }
+  const fraction = duration > 0 ? Math.max(0, Math.min(0.999, timeInSubtitle / duration)) : 0;
+  const index = Math.min(pairs.length - 1, Math.floor(fraction * pairs.length));
+  return pairs[index].map((word) => ({ word, timedWord: null }));
+}
 
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();

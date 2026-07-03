@@ -68,6 +68,22 @@ export interface EditPlanPorts {
   canUseMusicDrivenCuts: boolean
 }
 
+export type SegmentLayoutKind = 'fullscreen' | 'split-50' | 'blur-bg' | 'tweet-card'
+
+export interface LayoutSegmentEffects {
+  zoom?: 'in' | 'out'
+  bw?: boolean
+}
+
+export interface LayoutSegment {
+  id: string
+  fromFrame: number
+  toFrame: number
+  layout: SegmentLayoutKind
+  effects?: LayoutSegmentEffects
+  props?: Record<string, unknown>
+}
+
 export interface CreativeLineageUnit {
   id: string
   kind: 'source-video' | 'subtitle-window' | 'generated-image' | 'overlay'
@@ -116,4 +132,7 @@ export interface EditPlan {
   ports: EditPlanPorts
   lineage: CreativeLineage
   notes: string[]
+  // Optional segment layout track. Absent (or empty) = the base video is
+  // fullscreen for the whole timeline (backwards-compatible with v1 plans).
+  layoutSegments?: LayoutSegment[]
 }

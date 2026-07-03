@@ -32,6 +32,15 @@ export interface RemotionCreator {
   avatarUrl: string | null
 }
 
+export interface RemotionLayoutSegment {
+  id: string
+  fromFrame: number
+  toFrame: number
+  layout: 'fullscreen' | 'split-50' | 'blur-bg' | 'tweet-card'
+  effects?: { zoom?: 'in' | 'out'; bw?: boolean }
+  props?: Record<string, any>
+}
+
 export interface RemotionInputProps {
   scenes: RemotionSceneInput[]
   subtitles: SubtitleEntry[]
@@ -41,6 +50,7 @@ export interface RemotionInputProps {
   format: '9:16' | '16:9'
   stylePreset?: string
   creator?: RemotionCreator
+  layoutSegments?: RemotionLayoutSegment[]
 }
 
 export interface ColorPalette {
@@ -237,6 +247,60 @@ export function resolveCreatorForProps(
     handle: profile.handle,
     avatarUrl: resolveImageSrc(profile.avatarPath || undefined, baseUrl) || null
   }
+}
+
+const VALID_SEGMENT_LAYOUTS = ['fullscreen', 'split-50', 'blur-bg', 'tweet-card'] as const
+
+/**
+ * Resolve the plan's `layoutSegments` into RemotionLayoutSegment props.
+ * Resolves each segment's `props.mediaSrc` through the same base-URL rule as
+ * ImageInsert (absolute for the render, relative for the browser player).
+ * Returns [] for old plans without the field (→ everything stays fullscreen).
+ */
+export function resolveLayoutSegments(
+  plan: { layoutSegments?: unknown } | null | undefined,
+  opts: ToRemotionSceneOptions = {}
+): RemotionLayoutSegment[] {
+  const segments = plan?.layoutSegments
+  if (!Array.isArray(segments)) return []
+
+  return segments
+    .map((raw: any): RemotionLayoutSegment | null => {
+      if (!raw || typeof raw !== 'object') return null
+      const layout = raw.layout
+      if (!VALID_SEGMENT_LAYOUTS.includes(layout)) return null
+
+      const fromFrame = Number(raw.fromFrame)
+      const toFrame = Number(raw.toFrame)
+      if (!Number.isFinite(fromFrame) || !Number.isFinite(toFrame) || toFrame <= fromFrame) {
+        return null
+      }
+
+      const props: Record<string, any> = { ...(raw.props || {}) }
+      if (typeof props.mediaSrc === 'string') {
+        props.mediaSrc = resolveImageSrc(props.mediaSrc, opts.baseUrl)
+      }
+
+      const effects =
+        raw.effects && typeof raw.effects === 'object'
+          ? {
+              ...(raw.effects.zoom === 'in' || raw.effects.zoom === 'out'
+                ? { zoom: raw.effects.zoom }
+                : {}),
+              ...(raw.effects.bw === true ? { bw: true } : {})
+            }
+          : undefined
+
+      return {
+        id: String(raw.id ?? `${fromFrame}-${toFrame}`),
+        fromFrame,
+        toFrame,
+        layout,
+        ...(effects && (effects.zoom || effects.bw) ? { effects } : {}),
+        props
+      }
+    })
+    .filter((seg): seg is RemotionLayoutSegment => seg !== null)
 }
 
 /**

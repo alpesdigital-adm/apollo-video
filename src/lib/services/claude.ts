@@ -859,7 +859,8 @@ function summarizeSceneForPrompt(scene: Scene): string {
     'text', 'highlight', 'title', 'subtitle', 'topText', 'bottomText',
     'leftLabel', 'rightLabel', 'leftText', 'rightText', 'number', 'description',
     'sender', 'message', 'value', 'label', 'steps', 'situation', 'caption',
-    'layout', 'imagePrompt', 'imageAlt', 'sourceText', 'narrativeRole', 'visualRole'
+    'layout', 'imagePrompt', 'imageAlt', 'sourceText', 'narrativeRole', 'visualRole',
+    'segmentLayout'
   ]
   const parts: string[] = []
   for (const field of fields) {
@@ -915,7 +916,7 @@ A instrução pode mirar: o VÍDEO TODO, UMA cena específica, UM trecho (refere
 TIPOS DE CENA VÁLIDOS: FullScreen, LowerThird, Split, SplitVertical, Card, Message, Number, Flow, CTA, StickFigures, ImageInsert.
 
 OPERAÇÕES DISPONÍVEIS (retorne no máximo ~10 no total):
-- {"op":"update_scene","sceneId":"<id existente>","changes":{<apenas props válidas do tipo da cena>}} — altera texto/props de uma cena existente.
+- {"op":"update_scene","sceneId":"<id existente>","changes":{<apenas props válidas do tipo da cena>}} — altera texto/props de uma cena existente. TAMBÉM aceita LAYOUT DE SEGMENTO: "segmentLayout" ("split-50" | "blur-bg" | "tweet-card" | null para voltar a tela cheia) reposiciona o vídeo base durante a janela da cena; "segmentEffects" ({"zoom":"in"|"out","bw":true}) aplica efeito no vídeo base (combinável com qualquer layout, ou sozinho para efeito em tela cheia).
 - {"op":"delete_scene","sceneId":"<id existente>"} — remove uma cena.
 - {"op":"add_scene","scene":{"type":"<tipo>","startLeg":<int>,"durationInSubtitles":<1-3>, <props do tipo>}} — cria cena nova. startLeg e durationInSubtitles são OBRIGATÓRIOS.
 - {"op":"update_palette","changes":{"accent":"#RRGGBB", ...}} — muda cores GLOBAIS. Chaves válidas: primary, secondary, accent, background, text. Valores HEX (#RGB ou #RRGGBB).
@@ -926,6 +927,7 @@ REGRAS DE INTERPRETAÇÃO:
 - Só use update_scene/add_scene/delete_scene quando a instrução for realmente sobre conteúdo/estrutura de cena(s).
 - Respeite os TETOS de copy: textos plotados sobre o vídeo (FullScreen, CTA, Split, StickFigures) no máximo 6 palavras; textos secundários no máximo 5. Prefira fragmentos curtos.
 - Em ImageInsert, imagePrompt não pode conter texto/letras/logos. Para regenerar a imagem de um insert, mude imagePrompt no update_scene.
+- LAYOUT DE SEGMENTO: "coloca a cena 3 em split-50" → update_scene com segmentLayout:"split-50" na cena. "deixa o trecho 0:30-0:45 preto e branco com zoom in" → mapeie o trecho para a(s) cena(s) por tempo (via legendas) e aplique segmentEffects:{"bw":true,"zoom":"in"} em cada uma. "volta a cena X pra tela cheia" → segmentLayout:null. split-50/blur-bg funcionam melhor em cenas ImageInsert (usam a imagem); tweet-card usa o texto da cena.
 - NUNCA invente ids de cena — use apenas os ids listados. Para add_scene, NÃO forneça id (o código gera).
 - Se a instrução for impossível ou não fizer sentido, devolva operations vazio e explique no summary.
 

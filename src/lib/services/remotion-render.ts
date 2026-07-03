@@ -11,6 +11,7 @@ import {
   prepareRemotionScenes,
   normalizeSubtitleWords,
   resolveCreatorForProps,
+  resolveLayoutSegments,
   type RemotionInputProps,
   type RemotionSceneInput
 } from '@/lib/remotion/input-props'
@@ -145,7 +146,8 @@ export async function startProjectRender(
     videoSrc: `${getAppBaseUrl()}/api/video/${project.id}?source=primary`,
     format: project.format as '9:16' | '16:9',
     stylePreset: project.stylePreset || 'creator-clean',
-    creator: resolveCreatorForProps(readCreatorProfile(), getAppBaseUrl())
+    creator: resolveCreatorForProps(readCreatorProfile(), getAppBaseUrl()),
+    layoutSegments: resolveLayoutSegments(editPlan, { baseUrl: getAppBaseUrl() })
   }
 
   const outputDir = path.join(process.cwd(), 'public', 'renders')

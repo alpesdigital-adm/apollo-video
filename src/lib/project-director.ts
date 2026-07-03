@@ -39,6 +39,35 @@ function isValidHex(value: unknown): value is string {
   return typeof value === 'string' && HEX_RE.test(value.trim())
 }
 
+const SEGMENT_LAYOUTS = ['split-50', 'blur-bg', 'tweet-card']
+
+/**
+ * Normaliza os campos de segmento (segmentLayout / segmentEffects) de uma cena.
+ * Aceita apenas valores válidos; `null`/`''`/inválido remove o campo — assim o
+ * diretor pode tirar uma cena de split/blur/tweet passando segmentLayout=null.
+ */
+function normalizeSegmentFields(sceneData: any): void {
+  if (SEGMENT_LAYOUTS.includes(sceneData.segmentLayout)) {
+    // mantém
+  } else {
+    delete sceneData.segmentLayout
+  }
+
+  const eff = sceneData.segmentEffects
+  if (eff && typeof eff === 'object') {
+    const out: { zoom?: 'in' | 'out'; bw?: boolean } = {}
+    if (eff.zoom === 'in' || eff.zoom === 'out') out.zoom = eff.zoom
+    if (eff.bw === true) out.bw = true
+    if (out.zoom || out.bw) {
+      sceneData.segmentEffects = out
+    } else {
+      delete sceneData.segmentEffects
+    }
+  } else {
+    delete sceneData.segmentEffects
+  }
+}
+
 /**
  * Valida e normaliza os dados de UMA cena (nova ou atualizada) exatamente como
  * o fluxo de analyze faz. Retorna null quando a cena é inviável (deve ser
@@ -68,6 +97,9 @@ function validateSceneData(sceneData: any, subtitles: SubtitleEntry[]): Scene | 
   // Frames são recomputados por resolveSceneTiming.
   delete sceneData.startFrame
   delete sceneData.endFrame
+
+  // Layout de segmento (opcional): whitelist + valores válidos. null/'' remove.
+  normalizeSegmentFields(sceneData)
 
   if (sceneData.type === 'ImageInsert') {
     sceneData.narrativeRole = normalizeNarrativeRole(

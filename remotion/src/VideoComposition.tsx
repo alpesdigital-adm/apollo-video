@@ -19,6 +19,10 @@ import { Flow } from './scenes/Flow';
 import { CTA } from './scenes/CTA';
 import { StickFigures } from './scenes/StickFigures';
 import { ImageInsert, ImageInsertTrack } from './scenes/ImageInsert';
+import {
+  LayoutSegmentRenderer,
+  findActiveLayoutSegment,
+} from './components/LayoutSegmentLayer';
 
 interface SceneComponentProps {
   format: '9:16' | '16:9';
@@ -92,11 +96,28 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   palette,
   stylePreset,
   creator,
+  layoutSegments,
 }) => {
   const config = useVideoConfig();
   const frame = useCurrentFrame();
+
+  // Segment layout track. A scene carrying `segmentLayout` produces a segment
+  // over its window; the fromFrame equals the scene's startFrame, so we suppress
+  // that scene's own overlay (the segment renderer takes over the visual) and
+  // exclude it from the legacy split-image track to avoid duplicated media.
+  const activeSegment = findActiveLayoutSegment(layoutSegments, frame);
+  const segmentFromFrames = new Set(
+    (layoutSegments ?? [])
+      .filter((seg) => seg.layout !== 'fullscreen')
+      .map((seg) => seg.fromFrame)
+  );
+  const generatedSegment = (scene: Scene): boolean => {
+    const startFrame = scene.fromFrame ?? Math.round(scene.from * config.fps);
+    return segmentFromFrames.has(startFrame);
+  };
+
   const splitImageScenes = scenes
-    .filter(isSplitImageScene)
+    .filter((scene) => isSplitImageScene(scene) && !generatedSegment(scene))
     .sort((a, b) => {
       const aStart = a.fromFrame ?? Math.round(a.from * config.fps);
       const bStart = b.fromFrame ?? Math.round(b.from * config.fps);
@@ -138,26 +159,36 @@ export const VideoComposition: React.FC<CompositionProps> = ({
 
   return (
     <AbsoluteFill style={{ backgroundColor: palette.background }}>
-      {/* Background Video */}
-      {videoSrc && (
-        <OffthreadVideo
-          src={videoSrc}
-          style={{
-            position: 'absolute',
-            top: isTopImageCompact ? '30%' : 0,
-            left: 0,
-            width: '100%',
-            height: isTopImageCompact ? '70%' : isSplitImageActive ? '50%' : '100%',
-            objectFit: 'cover',
-            objectPosition: isSplitImageActive ? splitVideoObjectPosition : 'center center',
-            backgroundColor: palette.background,
-          }}
+      {/* Background Video — a layout segment takes over its own window */}
+      {activeSegment ? (
+        <LayoutSegmentRenderer
+          segment={activeSegment}
+          videoSrc={videoSrc}
+          palette={palette}
+          format={format}
+          creator={creator}
         />
+      ) : (
+        videoSrc && (
+          <OffthreadVideo
+            src={videoSrc}
+            style={{
+              position: 'absolute',
+              top: isTopImageCompact ? '30%' : 0,
+              left: 0,
+              width: '100%',
+              height: isTopImageCompact ? '70%' : isSplitImageActive ? '50%' : '100%',
+              objectFit: 'cover',
+              objectPosition: isSplitImageActive ? splitVideoObjectPosition : 'center center',
+              backgroundColor: palette.background,
+            }}
+          />
+        )
       )}
 
       {/* Scene Layers */}
       {scenes.map((scene, index) => {
-        if (isSplitImageScene(scene)) {
+        if (isSplitImageScene(scene) || generatedSegment(scene)) {
           return null;
         }
 
@@ -190,6 +221,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         subtitles={subtitles}
         format={format}
         palette={palette}
+        layoutSegments={layoutSegments}
       />
     </AbsoluteFill>
   );

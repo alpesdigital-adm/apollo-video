@@ -31,6 +31,13 @@ export type VisualRole =
   | 'context'
   | 'decision'
 
+export type SegmentSceneLayout = 'split-50' | 'blur-bg' | 'tweet-card'
+
+export interface SegmentSceneEffects {
+  zoom?: 'in' | 'out'
+  bw?: boolean
+}
+
 export interface BaseScene {
   id: string
   type: SceneType
@@ -38,6 +45,10 @@ export interface BaseScene {
   durationInSubtitles: number
   startFrame?: number
   endFrame?: number
+  // Optional segment layout: when set, this scene's timeline window
+  // repositions the base video (split/blur/tweet) instead of staying fullscreen.
+  segmentLayout?: SegmentSceneLayout
+  segmentEffects?: SegmentSceneEffects
 }
 
 export interface FullScreenScene extends BaseScene {

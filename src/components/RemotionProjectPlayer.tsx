@@ -9,6 +9,7 @@ import {
   toRemotionScene,
   prepareRemotionScenes,
   normalizeSubtitleWords,
+  resolveLayoutSegments,
   type RemotionCreator,
   type RemotionSceneInput
 } from '@/lib/remotion/input-props'
@@ -23,6 +24,7 @@ interface RemotionProjectPlayerProps {
   transcription: Transcription | null
   stylePreset: string
   palette: any
+  editPlan?: { layoutSegments?: unknown } | null
 }
 
 export function RemotionProjectPlayer({
@@ -34,7 +36,8 @@ export function RemotionProjectPlayer({
   subtitles,
   transcription,
   stylePreset,
-  palette
+  palette,
+  editPlan
 }: RemotionProjectPlayerProps) {
   const compositionWidth = format === '9:16' ? 1080 : 1920
   const compositionHeight = format === '9:16' ? 1920 : 1080
@@ -70,7 +73,8 @@ export function RemotionProjectPlayer({
     videoSrc: `/api/video/${projectId}?source=primary`,
     format,
     stylePreset,
-    creator
+    creator,
+    layoutSegments: resolveLayoutSegments(editPlan)
   }
 
   return (

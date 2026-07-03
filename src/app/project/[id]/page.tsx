@@ -19,6 +19,7 @@ interface ProjectData {
     durationFrames: number
     cuts: unknown[]
     overlays: unknown[]
+    layoutSegments?: unknown[]
     lineage?: {
       units: Array<{
         id: string
@@ -465,6 +466,7 @@ export default function EditorPage() {
                         text: '#FFFFFF'
                       }
                     }
+                    editPlan={project.editPlan}
                   />
                 </div>
               )}
