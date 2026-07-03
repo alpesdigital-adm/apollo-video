@@ -103,6 +103,9 @@ export default function EditorPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [refineError, setRefineError] = useState<string | null>(null)
+  const [redoMenuOpen, setRedoMenuOpen] = useState(false)
+  const [redoBusy, setRedoBusy] = useState<'reopen' | 'analyze' | 'transcribe' | null>(null)
+  const [redoError, setRedoError] = useState<string | null>(null)
   const [directorResult, setDirectorResult] = useState<{
     summary: string
     applied: string[]
@@ -349,6 +352,83 @@ export default function EditorPage() {
     }
   }
 
+  async function handleReopenForReview() {
+    setRedoError(null)
+    const confirmed = window.confirm(
+      'Voltar para a etapa de revisão? O MP4 renderizado continua disponível até você renderizar de novo.'
+    )
+    if (!confirmed) return
+
+    setRedoBusy('reopen')
+    try {
+      const response = await fetch(`/api/projects/${projectId}/reopen`, { method: 'POST' })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.error || 'Falha ao voltar para revisão')
+      }
+      await loadProject()
+    } catch (err) {
+      setRedoError(err instanceof Error ? err.message : 'Falha ao voltar para revisão')
+    } finally {
+      setRedoBusy(null)
+      setRedoMenuOpen(false)
+    }
+  }
+
+  async function handleRedoAnalysis() {
+    setRedoError(null)
+    const confirmed = window.confirm(
+      '⚠ A IA vai gerar um NOVO rascunho de cenas — suas edições manuais de batidas/cenas atuais serão PERDIDAS. Continuar?'
+    )
+    if (!confirmed) return
+
+    setRedoBusy('analyze')
+    try {
+      const response = await fetch('/api/process/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId })
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.error || 'Falha ao refazer a análise')
+      }
+      await loadProject()
+    } catch (err) {
+      setRedoError(err instanceof Error ? err.message : 'Falha ao refazer a análise')
+    } finally {
+      setRedoBusy(null)
+      setRedoMenuOpen(false)
+    }
+  }
+
+  async function handleRedoTranscription() {
+    setRedoError(null)
+    const confirmed = window.confirm(
+      '⚠ Refaz legendas E análise do zero (usa Whisper de novo, ~2-5 min). Edições manuais serão perdidas. Continuar?'
+    )
+    if (!confirmed) return
+
+    setRedoBusy('transcribe')
+    try {
+      const response = await fetch('/api/process/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, force: true })
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.error || 'Falha ao refazer a transcrição')
+      }
+      await loadProject()
+    } catch (err) {
+      setRedoError(err instanceof Error ? err.message : 'Falha ao refazer a transcrição')
+    } finally {
+      setRedoBusy(null)
+      setRedoMenuOpen(false)
+    }
+  }
+
   async function handleDeleteProject() {
     if (!project) return
 
@@ -476,18 +556,81 @@ export default function EditorPage() {
               </span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={handleDeleteProject}
-            disabled={isDeleting}
-            className="text-xs text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-50"
-          >
-            {isDeleting ? 'Excluindo...' : '🗑 Excluir projeto'}
-          </button>
+          <div className="flex items-center gap-4">
+            {(project.status === 'ready' ||
+              project.status === 'complete' ||
+              project.status === 'error') && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setRedoMenuOpen((open) => !open)}
+                  disabled={redoBusy !== null}
+                  className="text-xs text-zinc-500 hover:text-amber-400 transition-colors disabled:opacity-50"
+                >
+                  {redoBusy ? 'Processando...' : '↩ Refazer etapa'}
+                </button>
+
+                {redoMenuOpen && (
+                  <div className="absolute right-0 top-7 z-20 w-72 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl py-1">
+                    <button
+                      type="button"
+                      onClick={handleReopenForReview}
+                      disabled={
+                        redoBusy !== null ||
+                        (project.status !== 'complete' && project.status !== 'error')
+                      }
+                      className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent"
+                    >
+                      <span className="block font-medium">Voltar para revisão</span>
+                      <span className="block text-[10px] text-zinc-500 mt-0.5">
+                        Volta para a etapa de edição, mantendo o último MP4 renderizado
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRedoAnalysis}
+                      disabled={redoBusy !== null}
+                      className="w-full text-left px-3 py-2 text-xs text-amber-300 hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent"
+                    >
+                      <span className="block font-medium">Refazer análise (IA recria as cenas)</span>
+                      <span className="block text-[10px] text-zinc-500 mt-0.5">
+                        Gera um novo rascunho de cenas — perde edições manuais de batidas
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRedoTranscription}
+                      disabled={redoBusy !== null}
+                      className="w-full text-left px-3 py-2 text-xs text-red-300 hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent"
+                    >
+                      <span className="block font-medium">Refazer transcrição (legendas do zero)</span>
+                      <span className="block text-[10px] text-zinc-500 mt-0.5">
+                        Refaz legendas e análise do zero (~2-5 min) — perde edições manuais
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleDeleteProject}
+              disabled={isDeleting}
+              className="text-xs text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-50"
+            >
+              {isDeleting ? 'Excluindo...' : '🗑 Excluir projeto'}
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
+        {redoError && (
+          <div className="mb-6 p-4 rounded-lg bg-red-500/10 border border-red-500/50 text-sm text-red-400">
+            {redoError}
+          </div>
+        )}
+
         {deleteError && (
           <div className="mb-6 p-4 rounded-lg bg-red-500/10 border border-red-500/50 text-sm text-red-400">
             {deleteError}
