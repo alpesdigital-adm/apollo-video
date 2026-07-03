@@ -1213,6 +1213,8 @@ export async function directProject(
 
 A instrução pode mirar: o VÍDEO TODO, UMA cena específica, UM trecho (referenciado pelas legendas), ou a PALETA de cores. Interprete o ESCOPO a partir do texto.
 
+VOCABULÁRIO DE BATIDAS: o usuário trabalha num painel de "batidas" — batida N = legenda de índice N na timeline numerada abaixo (0-based). "põe um tweet-card nas batidas 12-14" = cena com startLeg:12 e durationInSubtitles:3; "remove a cena da batida 7" = delete_scene da cena cujo intervalo [startLeg, startLeg+durationInSubtitles-1] cobre o índice 7; "estende a cena da batida 4 até a 6" = update_scene ajustando durationInSubtitles. Sempre traduza batidas para startLeg/durationInSubtitles exatos.
+
 TIPOS DE CENA VÁLIDOS: FullScreen, LowerThird, Split, SplitVertical, Card, Message, Number, Flow, CTA, StickFigures, ImageInsert${assetCatalog && assetCatalog.length > 0 ? ', AssetCard' : ''}.
 
 OPERAÇÕES DISPONÍVEIS (retorne no máximo ~10 no total):
