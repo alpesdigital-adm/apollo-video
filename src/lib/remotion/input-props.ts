@@ -201,7 +201,16 @@ export function toRemotionScene(
       adaptedProps.imageSrc || adaptedProps.imagePath,
       opts.baseUrl
     )
-    if (!adaptedProps.imageSrc) return null
+    // Pacote 3: an animated/stock clip. Resolved with the same base-URL rule as
+    // the still; when present the scene renders as video instead of the image.
+    const resolvedVideo = resolveImageSrc(adaptedProps.videoSrc, opts.baseUrl)
+    if (resolvedVideo) {
+      adaptedProps.videoSrc = resolvedVideo
+    } else {
+      delete adaptedProps.videoSrc
+    }
+    // A stock scene can have a video with no still — keep it as long as some media exists.
+    if (!adaptedProps.imageSrc && !adaptedProps.videoSrc) return null
     adaptedProps.layout = normalizeImageInsertLayout(adaptedProps.layout)
   }
 

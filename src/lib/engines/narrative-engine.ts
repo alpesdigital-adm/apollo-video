@@ -290,8 +290,13 @@ function buildLayoutSegments(scenes: Scene[], fps: number): LayoutSegment[] {
         (scene as any).title ||
         ''
     } else if (scene.type === 'ImageInsert') {
-      // split-50 / blur-bg: media comes from the ImageInsert asset.
-      props.mediaSrc = (scene as any).imageSrc || (scene as any).imagePath || ''
+      // split-50 / blur-bg: media comes from the ImageInsert asset. Prefer the
+      // animated/stock clip (Pacote 3) when present, else the still.
+      props.mediaSrc =
+        (scene as any).videoSrc ||
+        (scene as any).imageSrc ||
+        (scene as any).imagePath ||
+        ''
     }
 
     segments.push({

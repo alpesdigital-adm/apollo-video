@@ -129,6 +129,14 @@ export interface ImageInsertScene extends BaseScene {
   imagePath?: string
   imageAlt?: string
   sourceText?: string
+  // B-roll motion (Pacote 3): when true, animate the still via image-to-video.
+  motion?: boolean
+  // Where the media comes from: 'generate' (AI still, default) or 'stock' (Pexels).
+  source?: 'generate' | 'stock'
+  // Short English search query used when source === 'stock'.
+  stockQuery?: string
+  // Resolved animated/stock clip path (e.g. /generated-videos/... or /stock/...).
+  videoSrc?: string
 }
 
 export type Scene =

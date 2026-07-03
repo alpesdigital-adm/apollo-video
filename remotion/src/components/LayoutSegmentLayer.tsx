@@ -39,6 +39,11 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+// Pacote 3: a segment's mediaSrc may be an animated/stock .mp4 instead of a still.
+function isVideoSrc(src: string): boolean {
+  return /\.mp4($|\?)/i.test(src);
+}
+
 // Base-video transform + filter derived from the segment effects (zoom / bw).
 function useBaseVideoEffect(segment: LayoutSegment): {
   transform: string;
@@ -146,19 +151,31 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
             backgroundColor: palette.background,
           }}
         >
-          {mediaSrc && (
-            <Img
-              src={mediaSrc}
-              alt=""
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                transform: kenBurns.transform,
-                filter: 'saturate(1.05) contrast(1.03)',
-              }}
-            />
-          )}
+          {mediaSrc &&
+            (isVideoSrc(mediaSrc) ? (
+              <OffthreadVideo
+                src={mediaSrc}
+                muted
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  filter: 'saturate(1.05) contrast(1.03)',
+                }}
+              />
+            ) : (
+              <Img
+                src={mediaSrc}
+                alt=""
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  transform: kenBurns.transform,
+                  filter: 'saturate(1.05) contrast(1.03)',
+                }}
+              />
+            ))}
         </div>
 
         {/* Bottom half — base video, framed on the face (center-top) */}
@@ -229,17 +246,31 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
           <AbsoluteFill
             style={{ alignItems: 'center', justifyContent: 'center' }}
           >
-            <Img
-              src={mediaSrc}
-              alt=""
-              style={{
-                width: '78%',
-                maxHeight: '72%',
-                objectFit: 'cover',
-                borderRadius: 28,
-                boxShadow: '0 30px 80px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.5)',
-              }}
-            />
+            {isVideoSrc(mediaSrc) ? (
+              <OffthreadVideo
+                src={mediaSrc}
+                muted
+                style={{
+                  width: '78%',
+                  maxHeight: '72%',
+                  objectFit: 'cover',
+                  borderRadius: 28,
+                  boxShadow: '0 30px 80px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.5)',
+                }}
+              />
+            ) : (
+              <Img
+                src={mediaSrc}
+                alt=""
+                style={{
+                  width: '78%',
+                  maxHeight: '72%',
+                  objectFit: 'cover',
+                  borderRadius: 28,
+                  boxShadow: '0 30px 80px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.5)',
+                }}
+              />
+            )}
           </AbsoluteFill>
         )}
       </AbsoluteFill>

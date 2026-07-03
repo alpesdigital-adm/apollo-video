@@ -300,6 +300,7 @@ export function sanitizeSceneCopy(sceneData: any): any {
       sceneData.imagePrompt = limitCopy(sceneData.imagePrompt || sceneData.prompt || sceneData.description, 700)
       sceneData.imageAlt = limitCopy(sceneData.imageAlt || sceneData.imagePrompt, 120)
       sceneData.sourceText = limitCopy(sceneData.sourceText || sceneData.spokenText || sceneData.imageAlt, 220)
+      normalizeImageInsertMedia(sceneData)
       delete sceneData.text
       delete sceneData.title
       delete sceneData.subtitle
@@ -318,6 +319,30 @@ export function sanitizeSceneCopy(sceneData: any): any {
   }
 
   return sceneData
+}
+
+/**
+ * Whitelist the Pacote 3 media fields on an ImageInsert scene (mutates in place):
+ *  - motion: boolean flag (only true/false survives)
+ *  - source: 'generate' | 'stock' (default 'generate')
+ *  - stockQuery: short English query, ≤ 6 words, only kept for source === 'stock'
+ */
+function normalizeImageInsertMedia(sceneData: any): void {
+  sceneData.motion = sceneData.motion === true
+
+  sceneData.source = sceneData.source === 'stock' ? 'stock' : 'generate'
+
+  if (sceneData.source === 'stock' && typeof sceneData.stockQuery === 'string') {
+    const words = sceneData.stockQuery.trim().split(/\s+/).filter(Boolean).slice(0, 6)
+    if (words.length > 0) {
+      sceneData.stockQuery = words.join(' ')
+    } else {
+      delete sceneData.stockQuery
+      sceneData.source = 'generate'
+    }
+  } else {
+    delete sceneData.stockQuery
+  }
 }
 
 function coerceString(...values: unknown[]): string {
@@ -643,6 +668,8 @@ ImageInsert (quando usado):
 - Prefira layout "split-bottom" para a maioria dos inserts (o apresentador continua presente). Use "top-image-compact" quando o vídeo original for um close-up selfie. Use "full" só para uma virada de capítulo com visual não-humano.
 - narrativeRole: "hook", "context", "proof", "process", "objection", "decision" ou "cta" (metadado editorial). visualRole: "evidence", "contrast", "process", "context" ou "decision".
 - Evite visuais genéricos de stock/IA (estradas vazias, barras de busca brilhando, nós de rede abstratos, mãos perfeitas digitando, interfaces falsas, diagramas isométricos, metáforas surreais, sorrisos plásticos).
+- motion (opcional, boolean): marque motion:true APENAS nos 1-3 inserts de MAIOR impacto do vídeo (prioridade ao hook). Movimento é ÊNFASE, não padrão — a grande maioria dos inserts fica sem motion (still). Nunca marque mais que 3.
+- source (opcional): "generate" (padrão) para visuais específicos/estilizados que você descreve no imagePrompt; "stock" para conceitos GENÉRICOS e concretos (dinheiro, cidade, escritório, pessoas caminhando, trânsito). Quando source:"stock", inclua stockQuery: termo curto de busca em INGLÊS (no máximo 6 palavras, ex: "person walking city street").
 
 LAYOUTS DE SEGMENTO E EFEITOS (opcionais — você atribui por conta própria; são PONTUAÇÃO, não papel de parede):
 Por padrão TODA cena é fullscreen (vídeo base cheio + a cena por cima). Um "layout de segmento" reposiciona o vídeo base durante a janela daquela cena; um "efeito" mexe no próprio vídeo base. São campos OPCIONAIS por cena — omita quando não agregam.
@@ -970,6 +997,7 @@ function summarizeSceneForPrompt(scene: Scene): string {
     'leftLabel', 'rightLabel', 'leftText', 'rightText', 'number', 'description',
     'sender', 'message', 'value', 'label', 'steps', 'situation', 'caption',
     'layout', 'imagePrompt', 'imageAlt', 'sourceText', 'narrativeRole', 'visualRole',
+    'motion', 'source', 'stockQuery',
     'segmentLayout'
   ]
   const parts: string[] = []

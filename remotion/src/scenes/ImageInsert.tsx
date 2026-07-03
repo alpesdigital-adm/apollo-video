@@ -2,6 +2,7 @@ import React from 'react';
 import {
   AbsoluteFill,
   Img,
+  OffthreadVideo,
   interpolate,
   useCurrentFrame,
   useVideoConfig,
@@ -12,6 +13,10 @@ interface ImageInsertProps {
   imageSrc?: string;
   imagePath?: string;
   imageAlt?: string;
+  // Pacote 3: animated b-roll clip (WaveSpeed i2v) or stock (Pexels) mp4.
+  // When present, replaces the still — video already carries its own motion,
+  // so Ken Burns is skipped.
+  videoSrc?: string;
   layout?: 'full' | 'split-bottom' | 'top-image-compact';
   visualRole?: 'evidence' | 'contrast' | 'process' | 'context' | 'decision';
   durationInFrames?: number;
@@ -21,12 +26,14 @@ interface ImageInsertProps {
 export const ImageInsert: React.FC<ImageInsertProps> = ({
   imageSrc,
   imagePath,
+  videoSrc,
   layout = 'full',
   durationInFrames = 90,
   palette,
 }) => {
   const frame = useCurrentFrame();
-  const src = imageSrc || imagePath || '';
+  const src = videoSrc || imageSrc || imagePath || '';
+  const isVideo = Boolean(videoSrc);
   const motion = getImageMotion(src, layout, frame, durationInFrames);
   const opacity = interpolate(
     frame,
@@ -57,17 +64,30 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
             opacity,
           }}
         >
-          <Img
-            src={src}
-            alt=""
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              transform: `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`,
-              filter: 'saturate(1.04) contrast(1.03)',
-            }}
-          />
+          {isVideo ? (
+            <OffthreadVideo
+              src={src}
+              muted
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                filter: 'saturate(1.04) contrast(1.03)',
+              }}
+            />
+          ) : (
+            <Img
+              src={src}
+              alt=""
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                transform: `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`,
+                filter: 'saturate(1.04) contrast(1.03)',
+              }}
+            />
+          )}
           <div
             style={{
               position: 'absolute',
@@ -104,17 +124,30 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
         opacity,
       }}
     >
-      <Img
-        src={src}
-        alt=""
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          transform: `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`,
-          filter: 'saturate(1.03) contrast(1.02)',
-        }}
-      />
+      {isVideo ? (
+        <OffthreadVideo
+          src={src}
+          muted
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            filter: 'saturate(1.03) contrast(1.02)',
+          }}
+        />
+      ) : (
+        <Img
+          src={src}
+          alt=""
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            transform: `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`,
+            filter: 'saturate(1.03) contrast(1.02)',
+          }}
+        />
+      )}
       <div
         style={{
           position: 'absolute',

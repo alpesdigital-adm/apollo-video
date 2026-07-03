@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { analyzeContent } from '@/lib/services/claude'
 import { generateImageInsertAssets } from '@/lib/services/image-generation'
+import { generateMotionForScenes } from '@/lib/services/video-generation'
+import { applyStockVideos } from '@/lib/services/stock-video'
 import { narrativeEngine } from '@/lib/engines/narrative-engine'
 import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
 import { curateSceneDensity, resolveSceneTiming } from '@/lib/utils/timing'
@@ -128,6 +130,15 @@ export async function POST(request: NextRequest) {
       transcriptionText: transcription.text,
       existingScenes
     })
+    // Pacote 3 — b-roll de vídeo: stock (Pexels) primeiro, depois anima os stills
+    // marcados com motion (WaveSpeed i2v). Ambos são opcionais e degradam para o
+    // still sem nunca quebrar o analyze.
+    const scenesWithStock = await applyStockVideos({ scenes: scenesWithAssets })
+    const scenesWithMotion = await generateMotionForScenes({
+      projectId,
+      scenes: scenesWithStock,
+      format
+    })
     const editPlan = narrativeEngine.createPlan({
       projectId,
       format,
@@ -143,7 +154,7 @@ export async function POST(request: NextRequest) {
       transcription,
       subtitles,
       silences,
-      scenes: scenesWithAssets,
+      scenes: scenesWithMotion,
       hookTitle: analysisResult.hookTitle
     })
 
@@ -151,7 +162,7 @@ export async function POST(request: NextRequest) {
     await prisma.project.update({
       where: { id: projectId },
       data: {
-        scenesJson: JSON.stringify(scenesWithAssets),
+        scenesJson: JSON.stringify(scenesWithMotion),
         paletteJson: JSON.stringify(analysisResult.palette),
         narrativeFormat: analysisResult.narrativeFormat,
         engineKind: narrativeEngine.kind,
@@ -164,7 +175,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      scenes: scenesWithAssets,
+      scenes: scenesWithMotion,
       palette: analysisResult.palette,
       narrativeFormat: analysisResult.narrativeFormat,
       engine: editPlan.engine,
