@@ -43,6 +43,7 @@ renders/
 /public/generated-videos/
 /public/stock/
 /public/assets/
+/public/thumbs/
 /tmp/
 /maquina-de-criativos.zip
 /.claude/

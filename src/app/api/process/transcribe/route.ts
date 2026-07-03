@@ -172,6 +172,17 @@ export async function POST(request: NextRequest) {
       tempAudioPath = null
     }
 
+    // Beat thumbnails were generated against the previous subtitlesJson —
+    // drop them so the next /beats call regenerates against the new timeline.
+    try {
+      const thumbsDir = path.join(process.cwd(), 'public', 'thumbs', projectId)
+      if (fs.existsSync(thumbsDir)) {
+        fs.rmSync(thumbsDir, { recursive: true, force: true })
+      }
+    } catch (thumbsError) {
+      console.warn(`Failed to clear stale beat thumbs for project ${projectId}:`, thumbsError)
+    }
+
     return NextResponse.json({
       success: true,
       transcription,

@@ -314,6 +314,32 @@ export async function cutSilencesFromVideo(
   return { cutSilences, outputDuration: outputInfo.duration }
 }
 
+export async function extractThumbnail(
+  videoPath: string,
+  atSeconds: number,
+  outputPath: string,
+  width: number = 180
+): Promise<void> {
+  try {
+    await execFileAsync(ffmpegPath, [
+      '-ss',
+      Math.max(0, atSeconds).toFixed(3),
+      '-i',
+      videoPath,
+      '-frames:v',
+      '1',
+      '-vf',
+      `scale=${width}:-2`,
+      '-q:v',
+      '5',
+      '-y',
+      outputPath
+    ])
+  } catch (error) {
+    throw new Error(`Failed to extract thumbnail: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 export async function getVideoInfo(videoPath: string): Promise<VideoInfo> {
   try {
     const { stdout } = await execFileAsync(ffprobePath, [
