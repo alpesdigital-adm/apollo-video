@@ -98,6 +98,117 @@ function buildNarrativeAudioEvents(cuts: EditCut[], fps: number): EditAudioEvent
   })
 }
 
+const TYPOGRAPHIC_SCENE_TYPES = new Set(['FullScreen', 'Card', 'Number', 'SplitVertical', 'CTA'])
+const SFX_MIN_GAP_SECONDS = 0.5
+const WHOOSH_VOLUME = 0.5
+const IMPACT_VOLUME = 0.6
+const RISER_VOLUME = 0.45
+
+interface SfxCandidate {
+  fromFrame: number
+  toFrame: number
+  kind: 'whoosh' | 'impact' | 'riser'
+  volume: number
+}
+
+/**
+ * Candidate SFX triggers, one per visual event: whoosh on ImageInsert scenes
+ * and repositioning layout segments (split-50/blur-bg/tweet-card), impact on
+ * typographic scenes, and a single riser under the hook headline's entrance.
+ * Not yet de-duplicated — see dedupeSfxCandidates.
+ */
+function buildSfxCandidates(
+  scenes: Scene[],
+  layoutSegments: LayoutSegment[],
+  hookTitle: string | undefined,
+  fps: number
+): SfxCandidate[] {
+  const candidates: SfxCandidate[] = []
+  const whooshFrames = Math.max(1, Math.round(fps * 0.5))
+  const impactFrames = Math.max(1, Math.round(fps * 0.4))
+
+  if (hookTitle) {
+    const riserFrames = Math.round(fps * 1.6)
+    candidates.push({ fromFrame: 0, toFrame: riserFrames, kind: 'riser', volume: RISER_VOLUME })
+  }
+
+  for (const scene of scenes) {
+    const startFrame = scene.startFrame ?? 0
+    if (scene.type === 'ImageInsert') {
+      candidates.push({
+        fromFrame: startFrame,
+        toFrame: startFrame + whooshFrames,
+        kind: 'whoosh',
+        volume: WHOOSH_VOLUME
+      })
+    } else if (TYPOGRAPHIC_SCENE_TYPES.has(scene.type)) {
+      candidates.push({
+        fromFrame: startFrame,
+        toFrame: startFrame + impactFrames,
+        kind: 'impact',
+        volume: IMPACT_VOLUME
+      })
+    }
+  }
+
+  for (const segment of layoutSegments) {
+    if (segment.layout === 'split-50' || segment.layout === 'blur-bg' || segment.layout === 'tweet-card') {
+      candidates.push({
+        fromFrame: segment.fromFrame,
+        toFrame: segment.fromFrame + whooshFrames,
+        kind: 'whoosh',
+        volume: WHOOSH_VOLUME
+      })
+    }
+  }
+
+  return candidates
+}
+
+/**
+ * Anti-machine-gun rule: sort candidates by fromFrame and drop any candidate
+ * landing within SFX_MIN_GAP_SECONDS of the last KEPT one (first one wins —
+ * this also naturally collapses an ImageInsert scene that also produced a
+ * layoutSegment at the same frame down to a single whoosh).
+ */
+function dedupeSfxCandidates(candidates: SfxCandidate[], fps: number): SfxCandidate[] {
+  const minGapFrames = Math.max(1, Math.round(fps * SFX_MIN_GAP_SECONDS))
+  const sorted = [...candidates].sort((a, b) => a.fromFrame - b.fromFrame)
+  const kept: SfxCandidate[] = []
+
+  for (const candidate of sorted) {
+    const last = kept[kept.length - 1]
+    if (last && candidate.fromFrame - last.fromFrame < minGapFrames) {
+      continue
+    }
+    kept.push(candidate)
+  }
+
+  return kept
+}
+
+function buildSfxAudioEvents(
+  scenes: Scene[],
+  layoutSegments: LayoutSegment[],
+  hookTitle: string | undefined,
+  fps: number
+): EditAudioEvent[] {
+  const candidates = dedupeSfxCandidates(
+    buildSfxCandidates(scenes, layoutSegments, hookTitle, fps),
+    fps
+  )
+
+  return candidates.map((candidate, index) => ({
+    id: `sfx-${index + 1}-${candidate.kind}`,
+    type: 'sfx',
+    from: framesToSeconds(candidate.fromFrame, fps),
+    to: framesToSeconds(candidate.toFrame, fps),
+    fromFrame: candidate.fromFrame,
+    toFrame: candidate.toFrame,
+    props: { kind: candidate.kind, volume: candidate.volume }
+  }))
+}
+
 function sceneToLineageUnit(scene: Scene, fps: number): CreativeLineageUnit {
   const startFrame = scene.startFrame || 0
   const endFrame = Math.max(scene.endFrame || 0, startFrame + fps)
@@ -261,6 +372,12 @@ export const narrativeEngine: VideoEngine = {
       }
     ]
 
+    const layoutSegments = buildLayoutSegments(context.scenes, context.fps)
+    const hookTitle =
+      typeof context.hookTitle === 'string' && context.hookTitle.trim()
+        ? context.hookTitle.trim()
+        : undefined
+
     const plan: EditPlan = {
       version: 1,
       engine: {
@@ -279,7 +396,10 @@ export const narrativeEngine: VideoEngine = {
       cuts,
       subtitles: context.subtitles,
       overlays: context.scenes.map((scene) => sceneToOverlay(scene, context.fps)),
-      audio: buildNarrativeAudioEvents(cuts, context.fps),
+      audio: [
+        ...buildNarrativeAudioEvents(cuts, context.fps),
+        ...buildSfxAudioEvents(context.scenes, layoutSegments, hookTitle, context.fps)
+      ],
       ports: {
         acceptsNarration: true,
         acceptsVisualMontage: false,
@@ -287,10 +407,8 @@ export const narrativeEngine: VideoEngine = {
         canUseMusicDrivenCuts: false
       },
       lineage: buildCreativeLineage(context, durationFrames),
-      layoutSegments: buildLayoutSegments(context.scenes, context.fps),
-      ...(typeof context.hookTitle === 'string' && context.hookTitle.trim()
-        ? { hookTitle: context.hookTitle.trim() }
-        : {}),
+      layoutSegments,
+      ...(hookTitle ? { hookTitle } : {}),
       notes: [
         'Engine optimized for narrated videos with speech-timed subtitles and scene overlays.',
         'Future visual engines should implement the same EditPlan contract and can replace ranges/overlays/audio without changing the renderer.'

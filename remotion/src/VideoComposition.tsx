@@ -1,8 +1,10 @@
 import React from 'react';
 import {
   AbsoluteFill,
+  Audio,
   Sequence,
   OffthreadVideo,
+  interpolate,
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
@@ -100,6 +102,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   hookTitle,
   creator,
   layoutSegments,
+  audio,
 }) => {
   const config = useVideoConfig();
   const frame = useCurrentFrame();
@@ -160,6 +163,28 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         ? 'center 32%'
         : 'center 25%';
 
+  // Background music: fade in over the first 0.5s and fade out over the
+  // last 1.5s of the whole timeline. Absent when no `audio.music` was
+  // resolved (empty public/audio/music = silence, not an error).
+  const musicVolumeAt = (frame: number): number => {
+    if (!audio?.music) return 0;
+    const baseVolume = audio.music.volume;
+    const fadeInFrames = Math.round(config.fps * 0.5);
+    const fadeOutFrames = Math.round(config.fps * 1.5);
+    const fadeInVolume = interpolate(frame, [0, fadeInFrames], [0, baseVolume], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp',
+    });
+    const fadeOutStart = Math.max(0, config.durationInFrames - fadeOutFrames);
+    const fadeOutVolume = interpolate(
+      frame,
+      [fadeOutStart, config.durationInFrames],
+      [baseVolume, 0],
+      { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
+    );
+    return Math.min(fadeInVolume, fadeOutVolume);
+  };
+
   return (
     <AbsoluteFill style={{ backgroundColor: palette.background }}>
       {/* Background Video — a layout segment takes over its own window */}
@@ -218,6 +243,16 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         }))}
         palette={palette}
       />
+
+      {/* SFX Layer — one Audio per event, gated by the segment it announces */}
+      {audio?.events?.map((event, index) => (
+        <Sequence key={`sfx-${index}-${event.kind}`} from={event.fromFrame}>
+          <Audio src={event.src} volume={event.volume} />
+        </Sequence>
+      ))}
+
+      {/* Background music track — looped, fades in/out at the timeline edges */}
+      {audio?.music && <Audio src={audio.music.src} loop volume={musicVolumeAt} />}
 
       {/* Subtitle Layer */}
       <SubtitleOverlay

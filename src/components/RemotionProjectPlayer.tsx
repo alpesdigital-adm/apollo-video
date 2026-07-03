@@ -10,6 +10,8 @@ import {
   prepareRemotionScenes,
   normalizeSubtitleWords,
   resolveLayoutSegments,
+  resolveAudioSfxEvents,
+  type AudioInputProps,
   type RemotionCreator,
   type RemotionSceneInput,
   type SubtitleStyle
@@ -25,7 +27,8 @@ interface RemotionProjectPlayerProps {
   transcription: Transcription | null
   stylePreset: string
   palette: any
-  editPlan?: { layoutSegments?: unknown; hookTitle?: unknown } | null
+  editPlan?: { layoutSegments?: unknown; hookTitle?: unknown; audio?: unknown } | null
+  musicPick?: { src: string; volume: number } | null
 }
 
 export function RemotionProjectPlayer({
@@ -38,7 +41,8 @@ export function RemotionProjectPlayer({
   transcription,
   stylePreset,
   palette,
-  editPlan
+  editPlan,
+  musicPick
 }: RemotionProjectPlayerProps) {
   const compositionWidth = format === '9:16' ? 1080 : 1920
   const compositionHeight = format === '9:16' ? 1920 : 1080
@@ -75,6 +79,12 @@ export function RemotionProjectPlayer({
       ? (editPlan.hookTitle as string)
       : undefined
 
+  const sfxEvents = resolveAudioSfxEvents(editPlan)
+  const audio: AudioInputProps | undefined =
+    sfxEvents.length > 0 || musicPick
+      ? { events: sfxEvents, ...(musicPick ? { music: musicPick } : {}) }
+      : undefined
+
   const inputProps = {
     scenes: prepareRemotionScenes(
       scenes
@@ -91,7 +101,8 @@ export function RemotionProjectPlayer({
     subtitleStyle,
     ...(hookTitle ? { hookTitle } : {}),
     creator,
-    layoutSegments: resolveLayoutSegments(editPlan)
+    layoutSegments: resolveLayoutSegments(editPlan),
+    ...(audio ? { audio } : {})
   }
 
   return (

@@ -12,11 +12,14 @@ import {
   normalizeSubtitleWords,
   resolveCreatorForProps,
   resolveLayoutSegments,
+  resolveAudioSfxEvents,
   type RemotionInputProps,
-  type RemotionSceneInput
+  type RemotionSceneInput,
+  type AudioInputProps
 } from '@/lib/remotion/input-props'
 import { readCreatorProfile } from '@/lib/creator-profile'
 import { readStylePrefs } from '@/lib/style-prefs'
+import { pickMusicForProject, sfxAssetExists } from '@/lib/audio-assets'
 
 interface StartProjectRenderOptions {
   clearExistingRender?: boolean
@@ -140,23 +143,35 @@ export async function startProjectRender(
       ? (editPlan as any).hookTitle
       : undefined
 
+  const appBaseUrl = getAppBaseUrl()
+  const sfxEvents = resolveAudioSfxEvents(editPlan, { baseUrl: appBaseUrl, assetExists: sfxAssetExists })
+  const musicPick = pickMusicForProject(projectId)
+  const audio: AudioInputProps | undefined =
+    sfxEvents.length > 0 || musicPick
+      ? {
+          events: sfxEvents,
+          ...(musicPick ? { music: { src: `${appBaseUrl}${musicPick.src}`, volume: musicPick.volume } } : {})
+        }
+      : undefined
+
   const inputProps: RemotionInputProps = {
     scenes: prepareRemotionScenes(
       scenes
-        .map((scene) => toRemotionScene(scene, fps, { baseUrl: getAppBaseUrl() }))
+        .map((scene) => toRemotionScene(scene, fps, { baseUrl: appBaseUrl }))
         .filter((scene): scene is RemotionSceneInput => Boolean(scene)),
       fps
     ),
     subtitles: normalizeSubtitleWords(subtitles),
     transcription,
     palette,
-    videoSrc: `${getAppBaseUrl()}/api/video/${project.id}?source=primary`,
+    videoSrc: `${appBaseUrl}/api/video/${project.id}?source=primary`,
     format: project.format as '9:16' | '16:9',
     stylePreset: project.stylePreset || 'creator-clean',
     subtitleStyle,
     ...(hookTitle ? { hookTitle } : {}),
-    creator: resolveCreatorForProps(readCreatorProfile(), getAppBaseUrl()),
-    layoutSegments: resolveLayoutSegments(editPlan, { baseUrl: getAppBaseUrl() })
+    creator: resolveCreatorForProps(readCreatorProfile(), appBaseUrl),
+    layoutSegments: resolveLayoutSegments(editPlan, { baseUrl: appBaseUrl }),
+    ...(audio ? { audio } : {})
   }
 
   const outputDir = path.join(process.cwd(), 'public', 'renders')

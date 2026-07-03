@@ -61,6 +61,23 @@ export interface LayoutSegment {
   props?: Record<string, any>;
 }
 
+export interface AudioSfxEvent {
+  kind: string;
+  src: string;
+  fromFrame: number;
+  volume: number;
+}
+
+export interface AudioMusic {
+  src: string;
+  volume: number;
+}
+
+export interface AudioProps {
+  events: AudioSfxEvent[];
+  music?: AudioMusic;
+}
+
 export interface CompositionProps extends Record<string, unknown> {
   scenes: Scene[];
   subtitles: SubtitleEntry[];
@@ -74,4 +91,5 @@ export interface CompositionProps extends Record<string, unknown> {
   palette: ColorPalette;
   creator?: CreatorProfile;
   layoutSegments?: LayoutSegment[];
+  audio?: AudioProps;
 }

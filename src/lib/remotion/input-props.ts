@@ -41,6 +41,23 @@ export interface RemotionLayoutSegment {
   props?: Record<string, any>
 }
 
+export interface AudioSfxEventInput {
+  kind: string
+  src: string
+  fromFrame: number
+  volume: number
+}
+
+export interface AudioMusicInput {
+  src: string
+  volume: number
+}
+
+export interface AudioInputProps {
+  events: AudioSfxEventInput[]
+  music?: AudioMusicInput
+}
+
 export type SubtitleStyle =
   | 'kinetic'
   | 'karaoke-box'
@@ -60,6 +77,7 @@ export interface RemotionInputProps {
   hookTitle?: string
   creator?: RemotionCreator
   layoutSegments?: RemotionLayoutSegment[]
+  audio?: AudioInputProps
 }
 
 export interface ColorPalette {
@@ -310,6 +328,54 @@ export function resolveLayoutSegments(
       }
     })
     .filter((seg): seg is RemotionLayoutSegment => seg !== null)
+}
+
+export interface ResolveAudioSfxOptions extends ToRemotionSceneOptions {
+  /**
+   * Server-only existence check (fs.existsSync-backed) for the resolved SFX
+   * asset. When provided, events whose asset file is missing are dropped.
+   * Omitted in the browser/player context, where fs isn't available — the
+   * plan is already the source of truth for which kinds were emitted.
+   */
+  assetExists?: (kind: string) => boolean
+}
+
+const DEFAULT_SFX_VOLUME = 0.5
+
+/**
+ * Resolve the plan's `audio` track into playable SFX events: only entries
+ * with type === 'sfx' are kept, each mapped to /audio/sfx/<kind>.wav
+ * (absolute when `baseUrl` is given, relative otherwise — same convention as
+ * resolveImageSrc / resolveLayoutSegments). Pure by default (no fs) — pass
+ * `assetExists` from the server-only audio-assets.ts to additionally filter
+ * out events whose asset file doesn't exist.
+ */
+export function resolveAudioSfxEvents(
+  plan: { audio?: unknown } | null | undefined,
+  opts: ResolveAudioSfxOptions = {}
+): AudioSfxEventInput[] {
+  const events = plan?.audio
+  if (!Array.isArray(events)) return []
+
+  return events
+    .map((raw: any): AudioSfxEventInput | null => {
+      if (!raw || typeof raw !== 'object' || raw.type !== 'sfx') return null
+      const kind = raw.props && typeof raw.props.kind === 'string' ? raw.props.kind : null
+      const fromFrame = Number(raw.fromFrame)
+      if (!kind || !Number.isFinite(fromFrame)) return null
+      if (opts.assetExists && !opts.assetExists(kind)) return null
+
+      const volume =
+        raw.props && typeof raw.props.volume === 'number' ? raw.props.volume : DEFAULT_SFX_VOLUME
+
+      return {
+        kind,
+        src: resolveImageSrc(`/audio/sfx/${kind}.wav`, opts.baseUrl),
+        fromFrame,
+        volume
+      }
+    })
+    .filter((event): event is AudioSfxEventInput => event !== null)
 }
 
 /**

@@ -20,6 +20,7 @@ interface ProjectData {
     cuts: unknown[]
     overlays: unknown[]
     layoutSegments?: unknown[]
+    audio?: unknown[]
     lineage?: {
       units: Array<{
         id: string
@@ -37,6 +38,7 @@ interface ProjectData {
   } | null
   videoDuration: number
   videoFps?: number
+  musicPick?: { src: string; volume: number } | null
   renderedVideoPath?: string | null
   hasRefineSnapshot?: boolean
   scenes: Scene[]
@@ -508,6 +510,7 @@ export default function EditorPage() {
                       }
                     }
                     editPlan={project.editPlan}
+                    musicPick={project.musicPick}
                   />
                 </div>
               )}

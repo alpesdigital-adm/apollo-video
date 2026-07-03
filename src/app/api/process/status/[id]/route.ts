@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { isRenderActive } from '@/lib/services/remotion-render'
 import { hasSnapshot } from '@/lib/project-director'
+import { pickMusicForProject } from '@/lib/audio-assets'
 
 const ORPHAN_RENDER_THRESHOLD_MS = 3 * 60000
 
@@ -93,6 +94,7 @@ export async function GET(
       silences: project.silencesJson ? JSON.parse(project.silencesJson) : [],
       scenes: project.scenesJson ? JSON.parse(project.scenesJson) : [],
       palette: project.paletteJson ? JSON.parse(project.paletteJson) : null,
+      musicPick: pickMusicForProject(projectId),
       hasRefineSnapshot: hasSnapshot(projectId),
       renderedVideoPath: project.renderedVideoPath,
       createdAt: project.createdAt,
