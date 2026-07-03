@@ -43,6 +43,7 @@ renders/
 /tmp/
 /maquina-de-criativos.zip
 /.claude/
+/data/
 
 # IDE
 .vscode/

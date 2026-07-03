@@ -10,9 +10,11 @@ import {
   toRemotionScene,
   prepareRemotionScenes,
   normalizeSubtitleWords,
+  resolveCreatorForProps,
   type RemotionInputProps,
   type RemotionSceneInput
 } from '@/lib/remotion/input-props'
+import { readCreatorProfile } from '@/lib/creator-profile'
 
 interface StartProjectRenderOptions {
   clearExistingRender?: boolean
@@ -142,7 +144,8 @@ export async function startProjectRender(
     palette,
     videoSrc: `${getAppBaseUrl()}/api/video/${project.id}?source=primary`,
     format: project.format as '9:16' | '16:9',
-    stylePreset: project.stylePreset || 'creator-clean'
+    stylePreset: project.stylePreset || 'creator-clean',
+    creator: resolveCreatorForProps(readCreatorProfile(), getAppBaseUrl())
   }
 
   const outputDir = path.join(process.cwd(), 'public', 'renders')

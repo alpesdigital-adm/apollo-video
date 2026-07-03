@@ -26,6 +26,12 @@ export interface RemotionSceneInput {
   props: Record<string, any>
 }
 
+export interface RemotionCreator {
+  name: string
+  handle: string
+  avatarUrl: string | null
+}
+
 export interface RemotionInputProps {
   scenes: RemotionSceneInput[]
   subtitles: SubtitleEntry[]
@@ -34,6 +40,7 @@ export interface RemotionInputProps {
   videoSrc: string
   format: '9:16' | '16:9'
   stylePreset?: string
+  creator?: RemotionCreator
 }
 
 export interface ColorPalette {
@@ -197,6 +204,30 @@ export function prepareRemotionScenes(
         // fromFrame and from are intentionally unchanged
       }
     })
+}
+
+export interface CreatorProfileLike {
+  name: string
+  handle: string
+  avatarPath: string | null
+}
+
+/**
+ * Resolve a stored creator profile into RemotionCreator props, applying an
+ * absolute base URL to the avatar path when rendering server-side (same
+ * pattern as resolveImageSrc / ImageInsert).
+ */
+export function resolveCreatorForProps(
+  profile: CreatorProfileLike | null | undefined,
+  baseUrl?: string
+): RemotionCreator | undefined {
+  if (!profile || !profile.name || !profile.handle) return undefined
+
+  return {
+    name: profile.name,
+    handle: profile.handle,
+    avatarUrl: resolveImageSrc(profile.avatarPath || undefined, baseUrl) || null
+  }
 }
 
 /**

@@ -137,19 +137,28 @@ export default function Dashboard() {
       {/* Header */}
       <header className="border-b border-zinc-800 bg-black/40 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 py-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
-              <svg
-                className="w-6 h-6 text-white"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path d="M2 6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM4 9h12m-6 4v2m-4-2v2m8-2v2" />
-              </svg>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
+                <svg
+                  className="w-6 h-6 text-white"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path d="M2 6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM4 9h12m-6 4v2m-4-2v2m8-2v2" />
+                </svg>
+              </div>
+              <h1 className="text-3xl font-bold">
+                Video Editor <span className="text-amber-400">IA</span>
+              </h1>
             </div>
-            <h1 className="text-3xl font-bold">
-              Video Editor <span className="text-amber-400">IA</span>
-            </h1>
+            <a
+              href="/settings"
+              className="text-sm text-zinc-400 hover:text-amber-400 transition-colors"
+              title="Configurações"
+            >
+              ⚙ Configurações
+            </a>
           </div>
         </div>
       </header>

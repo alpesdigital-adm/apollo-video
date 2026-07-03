@@ -30,6 +30,12 @@ export interface SubtitleEntry {
   words?: Array<string | SubtitleWord>;
 }
 
+export interface CreatorProfile {
+  name: string;
+  handle: string;
+  avatarUrl: string | null;
+}
+
 export interface CompositionProps extends Record<string, unknown> {
   scenes: Scene[];
   subtitles: SubtitleEntry[];
@@ -37,4 +43,5 @@ export interface CompositionProps extends Record<string, unknown> {
   format: '9:16' | '16:9';
   stylePreset?: string;
   palette: ColorPalette;
+  creator?: CreatorProfile;
 }

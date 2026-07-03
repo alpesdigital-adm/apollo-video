@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Player } from '@remotion/player'
 import { VideoComposition } from '../../remotion/src/VideoComposition'
 import type { Scene } from '@/lib/types/scene'
@@ -8,6 +9,7 @@ import {
   toRemotionScene,
   prepareRemotionScenes,
   normalizeSubtitleWords,
+  type RemotionCreator,
   type RemotionSceneInput
 } from '@/lib/remotion/input-props'
 
@@ -37,6 +39,24 @@ export function RemotionProjectPlayer({
   const compositionWidth = format === '9:16' ? 1080 : 1920
   const compositionHeight = format === '9:16' ? 1920 : 1080
   const activeFps = fps || 30
+  const [creator, setCreator] = useState<RemotionCreator | undefined>(undefined)
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetch('/api/settings/profile')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelled || !data || !data.name || !data.handle) return
+        setCreator({ name: data.name, handle: data.handle, avatarUrl: data.avatarUrl || null })
+      })
+      .catch((error) => console.error('Failed to load creator profile:', error))
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const inputProps = {
     scenes: prepareRemotionScenes(
       scenes
@@ -49,7 +69,8 @@ export function RemotionProjectPlayer({
     palette,
     videoSrc: `/api/video/${projectId}?source=primary`,
     format,
-    stylePreset
+    stylePreset,
+    creator
   }
 
   return (

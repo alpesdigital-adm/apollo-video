@@ -6,7 +6,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
-import { CompositionProps, Scene } from './lib/types';
+import { CompositionProps, CreatorProfile, Scene } from './lib/types';
 import { SubtitleOverlay } from './components/SubtitleOverlay';
 import { FullScreen } from './scenes/FullScreen';
 import { LowerThird } from './scenes/LowerThird';
@@ -31,7 +31,8 @@ const renderSceneComponent = (
   format: '9:16' | '16:9',
   palette: any,
   stylePreset?: string,
-  durationInFrames?: number
+  durationInFrames?: number,
+  creator?: CreatorProfile
 ): React.ReactNode => {
   const props: SceneComponentProps = {
     format,
@@ -60,7 +61,7 @@ const renderSceneComponent = (
     case 'flow':
       return <Flow {...sceneProps} />;
     case 'cta':
-      return <CTA {...sceneProps} />;
+      return <CTA {...sceneProps} creator={creator} />;
     case 'stick-figures':
       return <StickFigures {...sceneProps} />;
     case 'image-insert':
@@ -90,6 +91,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   format,
   palette,
   stylePreset,
+  creator,
 }) => {
   const config = useVideoConfig();
   const frame = useCurrentFrame();
@@ -169,7 +171,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
             from={startFrame}
             durationInFrames={duration}
           >
-            {renderSceneComponent(scene, format, palette, stylePreset, duration)}
+            {renderSceneComponent(scene, format, palette, stylePreset, duration, creator)}
           </Sequence>
         );
       })}
