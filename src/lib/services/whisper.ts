@@ -425,6 +425,84 @@ async function transcribeWithGroq(audioPath: string): Promise<Transcription> {
   }
 }
 
+/**
+ * Valid short (1-2 letter) Portuguese tokens. Anything else 1-2 letters long is
+ * suspect: we observed a Whisper response arrive with words clipped at their
+ * first accented byte (própria→"pr", presença→"presen", não→"n", Você→"Voc",
+ * opinião→"opini") while neighbouring segments were intact. That corruption
+ * originates in the provider payload (both `segment.text` and each
+ * `segment.words[].word` carried the same truncated tokens) — our parse path
+ * never slices bytes — so we detect it after assembly and retry defensively.
+ */
+const PT_VALID_SHORT_TOKENS = new Set([
+  'e', 'é', 'o', 'a', 'os', 'as', 'um', 'de', 'do', 'da', 'em', 'no', 'na',
+  'se', 'eu', 'já', 'vê', 'dá', 'pé', 'só', 'tô',
+  // extra unambiguous short words / units to reduce false positives
+  'à', 'ao', 'ou', 'há', 'às', 'me', 'te', 'tu', 'lá', 'cá', 'fé', 'ré', 'pó',
+  'km', 'kg', 'ml', 'mg', 'cm', 'tv', 'pc', 'ex', 'ok'
+])
+
+export interface MojibakeTruncationFlag {
+  id: number
+  text: string
+  suspectTokens: string[]
+}
+
+/**
+ * Heuristic detector for accent-boundary truncation ("mojibake truncation") in
+ * an assembled transcription. For each segment we count alphabetic tokens whose
+ * letter-length is 1-2 and which are not valid short PT-BR words. Two or more of
+ * those in the SAME segment (e.g. "…a pr presen … para n incomodar…") is a
+ * strong signal the segment was clipped at non-ASCII boundaries. Provider-
+ * independent: works on whatever `transcribeWithGroq`/`transcribeWithOpenAI`
+ * produced.
+ */
+export function detectMojibakeTruncation(
+  segments: TranscriptionSegment[]
+): MojibakeTruncationFlag[] {
+  const flags: MojibakeTruncationFlag[] = []
+
+  segments.forEach((segment, index) => {
+    const tokens = String(segment?.text || '')
+      .split(/\s+/)
+      .map((token) => token.replace(/[^\p{L}\p{N}]/gu, ''))
+      .filter(Boolean)
+
+    const suspects = tokens.filter((token) => {
+      if (/\p{N}/u.test(token)) return false
+      const letters = token.replace(/[^\p{L}]/gu, '')
+      if (letters.length === 0 || letters.length > 2) return false
+      return !PT_VALID_SHORT_TOKENS.has(token.toLowerCase())
+    })
+
+    if (suspects.length >= 2) {
+      flags.push({
+        id: Number(segment?.id ?? index),
+        text: String(segment?.text || ''),
+        suspectTokens: suspects
+      })
+    }
+  })
+
+  return flags
+}
+
+async function runTranscriptionProvider(
+  provider: TranscriptionProvider,
+  audioPath: string
+): Promise<Transcription> {
+  return provider === 'groq'
+    ? transcribeWithGroq(audioPath)
+    : transcribeWithOpenAI(audioPath)
+}
+
+function getConfiguredProviders(): TranscriptionProvider[] {
+  const providers: TranscriptionProvider[] = []
+  if (getGroqApiKey()) providers.push('groq')
+  if (getOpenAIApiKey()) providers.push('openai')
+  return providers
+}
+
 function getProviderPreference(): TranscriptionProviderPreference {
   const raw = String(getEnvValue('TRANSCRIBE_PROVIDER') || 'auto').toLowerCase()
 
@@ -458,6 +536,73 @@ export function getPreferredTranscriptionAudioExtension(): 'flac' | 'wav' {
   return getGroqApiKey() ? 'flac' : 'wav'
 }
 
+/**
+ * Defensive check: if the assembled transcription shows accent-boundary
+ * truncation, warn in detail and retry ONCE with the alternate provider. If the
+ * retry is clean, use it; otherwise keep the original transcription (with a
+ * warning) so the pipeline still proceeds.
+ */
+async function guardAgainstMojibakeTruncation(
+  provider: TranscriptionProvider,
+  audioPath: string,
+  transcription: Transcription
+): Promise<Transcription> {
+  const flags = detectMojibakeTruncation(transcription.segments)
+  if (flags.length === 0) {
+    return transcription
+  }
+
+  console.warn(
+    `[whisper] Possible mojibake/accent-boundary truncation detected in ${provider} transcription ` +
+      `(${flags.length} segment(s) flagged). Details: ` +
+      JSON.stringify(
+        flags.map((flag) => ({
+          id: flag.id,
+          suspectTokens: flag.suspectTokens,
+          text: flag.text
+        }))
+      )
+  )
+
+  const alternate = getConfiguredProviders().find((candidate) => candidate !== provider)
+  if (!alternate) {
+    console.warn(
+      `[whisper] No alternate transcription provider configured; keeping ${provider} result despite truncation.`
+    )
+    return transcription
+  }
+
+  console.warn(`[whisper] Retrying transcription once with alternate provider "${alternate}".`)
+  try {
+    const retry = await runTranscriptionProvider(alternate, audioPath)
+    if (!retry.text.trim()) {
+      console.warn(
+        `[whisper] Alternate provider "${alternate}" returned empty transcription; keeping ${provider} result.`
+      )
+      return transcription
+    }
+
+    const retryFlags = detectMojibakeTruncation(retry.segments)
+    if (retryFlags.length === 0) {
+      console.warn(`[whisper] Alternate provider "${alternate}" returned clean transcription; using it.`)
+      return retry
+    }
+
+    console.warn(
+      `[whisper] Alternate provider "${alternate}" also shows truncation ` +
+        `(${retryFlags.length} segment(s)); keeping original ${provider} result.`
+    )
+    return transcription
+  } catch (error) {
+    console.warn(
+      `[whisper] Alternate provider "${alternate}" retry failed (${
+        error instanceof Error ? error.message : String(error)
+      }); keeping ${provider} result.`
+    )
+    return transcription
+  }
+}
+
 export async function transcribeAudio(audioPath: string): Promise<Transcription> {
   try {
     if (!fs.existsSync(audioPath)) {
@@ -472,15 +617,13 @@ export async function transcribeAudio(audioPath: string): Promise<Transcription>
     const errors: string[] = []
     for (const provider of providers) {
       try {
-        const transcription = provider === 'groq'
-          ? await transcribeWithGroq(audioPath)
-          : await transcribeWithOpenAI(audioPath)
+        const transcription = await runTranscriptionProvider(provider, audioPath)
 
         if (!transcription.text.trim()) {
           throw new Error(`${provider} returned an empty transcription`)
         }
 
-        return transcription
+        return await guardAgainstMojibakeTruncation(provider, audioPath, transcription)
       } catch (error) {
         const message = provider === 'groq'
           ? formatTranscriptionProviderError('groq', getGroqTranscribeModel(), error)
