@@ -31,6 +31,8 @@ interface RemotionProjectPlayerProps {
   musicPick?: { src: string; volume: number } | null
   // Optional: parent gets a handle to seek the player to a frame (beat panel).
   seekRef?: React.MutableRefObject<{ seekTo: (frame: number) => void } | null>
+  // Optional: notified (throttled) with the current playback frame, for the beat panel highlight.
+  onFrameUpdate?: (frame: number) => void
 }
 
 export function RemotionProjectPlayer({
@@ -45,7 +47,8 @@ export function RemotionProjectPlayer({
   palette,
   editPlan,
   musicPick,
-  seekRef
+  seekRef,
+  onFrameUpdate
 }: RemotionProjectPlayerProps) {
   const compositionWidth = format === '9:16' ? 1080 : 1920
   const compositionHeight = format === '9:16' ? 1920 : 1080
@@ -66,6 +69,34 @@ export function RemotionProjectPlayer({
       seekRef.current = null
     }
   }, [seekRef])
+
+  // Keep a live ref to the callback so the listener effect below doesn't need to
+  // re-subscribe every time the parent passes a new function identity.
+  const onFrameUpdateRef = useRef(onFrameUpdate)
+  useEffect(() => {
+    onFrameUpdateRef.current = onFrameUpdate
+  }, [onFrameUpdate])
+
+  // Emit the current playback frame (throttled to ~4x/second) for the beat panel highlight.
+  useEffect(() => {
+    const player = playerRef.current
+    if (!player) return
+
+    const THROTTLE_MS = 250
+    let lastEmit = 0
+
+    const handleFrameUpdate = (event: { detail: { frame: number } }) => {
+      const now = Date.now()
+      if (now - lastEmit < THROTTLE_MS) return
+      lastEmit = now
+      onFrameUpdateRef.current?.(event.detail.frame)
+    }
+
+    player.addEventListener('frameupdate', handleFrameUpdate)
+    return () => {
+      player.removeEventListener('frameupdate', handleFrameUpdate)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false

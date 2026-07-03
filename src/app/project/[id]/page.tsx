@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { RemotionProjectPlayer } from '@/components/RemotionProjectPlayer'
 import type { Scene } from '@/lib/types/scene'
@@ -120,6 +120,42 @@ export default function EditorPage() {
   const [openMenu, setOpenMenu] = useState<number | null>(null)
   const [activeBeat, setActiveBeat] = useState<number | null>(null)
   const seekRef = useRef<{ seekTo: (frame: number) => void } | null>(null)
+
+  // --- Playhead → beat highlight ---
+  const [currentBeatIndex, setCurrentBeatIndex] = useState<number | null>(null)
+  const beatsRef = useRef<BeatItem[]>(beats)
+  const beatItemRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+  const isBeatsPanelHovered = useRef(false)
+
+  useEffect(() => {
+    beatsRef.current = beats
+  }, [beats])
+
+  // Derives which beat contains the current frame ([startFrame, endFrame)); if the frame
+  // falls between beats, keeps the last beat that already started. Throttled upstream by
+  // the player (~4x/second), so this only re-renders when the resolved beat actually changes.
+  const handleFrameUpdate = useCallback((frame: number) => {
+    const list = beatsRef.current
+    let matchIndex: number | null = null
+    for (const beat of list) {
+      if (frame >= beat.startFrame && frame < beat.endFrame) {
+        matchIndex = beat.index
+        break
+      }
+      if (beat.startFrame <= frame) {
+        matchIndex = beat.index
+      }
+    }
+    setCurrentBeatIndex((prev) => (prev === matchIndex ? prev : matchIndex))
+  }, [])
+
+  // Auto-scroll the beats panel to follow playback, unless the user's mouse is over it.
+  useEffect(() => {
+    if (currentBeatIndex === null) return
+    if (isBeatsPanelHovered.current) return
+    const el = beatItemRefs.current.get(currentBeatIndex)
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [currentBeatIndex])
 
   // Load project
   useEffect(() => {
@@ -747,6 +783,7 @@ export default function EditorPage() {
                     editPlan={project.editPlan}
                     musicPick={project.musicPick}
                     seekRef={seekRef}
+                    onFrameUpdate={handleFrameUpdate}
                   />
                 </div>
               )}
@@ -794,11 +831,20 @@ export default function EditorPage() {
                   </div>
                 )}
 
-                <div className="max-h-[32rem] overflow-y-auto space-y-2 pr-2">
+                <div
+                  className="max-h-[32rem] overflow-y-auto space-y-2 pr-2"
+                  onMouseEnter={() => {
+                    isBeatsPanelHovered.current = true
+                  }}
+                  onMouseLeave={() => {
+                    isBeatsPanelHovered.current = false
+                  }}
+                >
                   {beats.length > 0 ? (
                     beats.map((beat) => {
                       const isContinuation = Boolean(beat.sceneId) && !beat.isSpanStart
                       const busy = beatBusy === beat.index
+                      const isPlaying = currentBeatIndex === beat.index
                       const spanSize = beat.sceneSpan
                         ? beat.sceneSpan.to - beat.sceneSpan.from + 1
                         : 0
@@ -806,11 +852,23 @@ export default function EditorPage() {
                       return (
                         <div
                           key={beat.index}
+                          ref={(el) => {
+                            if (el) beatItemRefs.current.set(beat.index, el)
+                            else beatItemRefs.current.delete(beat.index)
+                          }}
                           className={`relative rounded-lg border transition-all ${
                             activeBeat === beat.index
                               ? 'border-amber-400 bg-amber-400/10'
-                              : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
-                          } ${isContinuation ? 'border-l-2 border-l-amber-500/60 ml-3' : ''}`}
+                              : isPlaying
+                                ? 'border-zinc-700 bg-amber-400/5'
+                                : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
+                          } ${
+                            isPlaying
+                              ? 'border-l-4 border-l-amber-400'
+                              : isContinuation
+                                ? 'border-l-2 border-l-amber-500/60 ml-3'
+                                : ''
+                          }`}
                         >
                           <div
                             role="button"
@@ -841,9 +899,15 @@ export default function EditorPage() {
                             {/* Content */}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
-                                <span className="text-[11px] font-mono text-zinc-500">
-                                  #{beat.index + 1}
-                                </span>
+                                {isPlaying ? (
+                                  <span className="text-[11px] font-mono text-amber-400 animate-pulse">
+                                    ▶
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] font-mono text-zinc-500">
+                                    #{beat.index + 1}
+                                  </span>
+                                )}
                                 {isContinuation ? (
                                   <span className="text-[10px] text-amber-400/80">↳ continuação</span>
                                 ) : beat.sceneType ? (
