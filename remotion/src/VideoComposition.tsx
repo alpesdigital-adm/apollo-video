@@ -110,10 +110,21 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   punchIns,
   audio,
   gradePreset,
+  coldOpen,
 }) => {
   const config = useVideoConfig();
   const frame = useCurrentFrame();
   const grade = getGrade(gradePreset);
+
+  // COLD OPEN (Fase 3): `len` frames of teaser prepended at [0, len). All other
+  // layers (scenes/subtitles/segments/punchIns) already arrive shifted by `len`
+  // via the props resolvers; here we only (a) render the teaser + its audio, and
+  // (b) offset the CONTINUOUS narrator footage source so timeline frame `len`
+  // maps to source frame 0. `bgOffset` wraps the normal background in a Sequence
+  // that resets the video source; `localizeSegment` rebases the active segment's
+  // frames into that Sequence's local coordinates so its animations stay correct.
+  const coLen = coldOpen && coldOpen.len > 0 ? coldOpen.len : 0;
+  const inTeaser = coLen > 0 && frame < coLen;
 
   // Jump-cut punch-in: alternating scale on the base video between silence cuts.
   // Only applied on the plain base-video layer (below) — an active layout segment
@@ -259,7 +270,12 @@ export const VideoComposition: React.FC<CompositionProps> = ({
     const sceneMerged = mergeIntervals(sceneRaw);
     const tweetMerged = mergeIntervals(tweetRaw);
     // União (cenas + tweet) governa a exclusividade da manchete, como antes.
-    const merged = mergeIntervals([...sceneRaw, ...tweetRaw]);
+    // COLD OPEN: o intervalo [0, len) do teaser conta como OCUPADO — a manchete
+    // nunca aparece durante a abertura (mas isso NÃO desloca a legenda: só entra
+    // no cálculo da janela livre, não em sceneIntervals/tweetIntervals).
+    const coldOpenRaw: Array<{ from: number; to: number }> =
+      coLen > 0 ? [{ from: 0, to: coLen }] : [];
+    const merged = mergeIntervals([...sceneRaw, ...tweetRaw, ...coldOpenRaw]);
 
     // 2) Drop blips shorter than MIN_OCCUPATION_SECONDS — they don't count as
     // "occupied" for window purposes, so they get absorbed into free space.
@@ -290,7 +306,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
       // ESCONDE, nunca desloca para cima do header do card.
       tweetIntervals: tweetMerged,
     };
-  }, [scenes, layoutSegments, config.fps, config.durationInFrames]);
+  }, [scenes, layoutSegments, config.fps, config.durationInFrames, coLen]);
 
   const isQualifiedFreeAt = (f: number): boolean =>
     qualifiedWindows.some((w) => f >= w.from && f < w.to);
@@ -404,56 +420,138 @@ export const VideoComposition: React.FC<CompositionProps> = ({
           opacity 0) but always mounted, so its audio is extracted continuously
           and stays perfectly aligned with frame 0 like the old base layer did. */}
       {videoSrc && (
-        <OffthreadVideo
-          src={videoSrc}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: 1,
-            height: 1,
-            opacity: 0,
-            pointerEvents: 'none',
-          }}
-        />
+        coldOpen ? (
+          // COLD OPEN: the single audible narrator source becomes TWO sequences —
+          // [0, len) playing the source from `fromFrame` (the teaser's audio) and
+          // [len, ∞) playing from source 0 (the normal flow). Never two audible at
+          // the same frame; hard cut ("corte seco") on the seam.
+          <>
+            <Sequence durationInFrames={coLen}>
+              <OffthreadVideo
+                src={videoSrc}
+                startFrom={coldOpen.fromFrame}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: 1,
+                  height: 1,
+                  opacity: 0,
+                  pointerEvents: 'none',
+                }}
+              />
+            </Sequence>
+            <Sequence from={coLen}>
+              <OffthreadVideo
+                src={videoSrc}
+                startFrom={0}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: 1,
+                  height: 1,
+                  opacity: 0,
+                  pointerEvents: 'none',
+                }}
+              />
+            </Sequence>
+          </>
+        ) : (
+          <OffthreadVideo
+            src={videoSrc}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: 1,
+              height: 1,
+              opacity: 0,
+              pointerEvents: 'none',
+            }}
+          />
+        )
       )}
 
-      {/* Background Video — a layout segment takes over its own window */}
-      {activeSegment ? (
-        <LayoutSegmentRenderer
-          segment={activeSegment}
-          videoSrc={videoSrc}
-          palette={palette}
-          format={format}
-          creator={creator}
-          gradePreset={gradePreset}
-        />
-      ) : (
-        videoSrc && (
-          <>
+      {/* COLD OPEN teaser — subtle: constant 1.04 punch-in, normal grade, NO B&W.
+          Covers [0, len); the normal background below is a Sequence from={coLen}. */}
+      {coldOpen && videoSrc && (
+        <Sequence from={0} durationInFrames={coLen}>
+          <AbsoluteFill style={{ backgroundColor: palette.background, overflow: 'hidden' }}>
             <OffthreadVideo
               src={videoSrc}
               muted
+              startFrom={coldOpen.fromFrame}
               style={{
                 position: 'absolute',
-                top: isTopImageCompact ? '30%' : 0,
-                left: 0,
+                inset: 0,
                 width: '100%',
-                height: isTopImageCompact ? '70%' : isSplitImageActive ? '50%' : '100%',
+                height: '100%',
                 objectFit: 'cover',
-                objectPosition: isSplitImageActive ? splitVideoObjectPosition : 'center center',
-                transform: punchScale !== 1 ? `scale(${punchScale})` : undefined,
+                objectPosition: 'center center',
+                transform: 'scale(1.04)',
                 transformOrigin: 'center 35%',
                 filter: composeFilter(grade.filter),
                 backgroundColor: palette.background,
               }}
             />
             {getGradeOverlayLayers(grade).map((layer) => (
-              <div key={layer.key} style={layer.style} />
+              <div key={`teaser-${layer.key}`} style={layer.style} />
             ))}
-          </>
-        )
+          </AbsoluteFill>
+        </Sequence>
       )}
+
+      {/* Background Video (normal flow) — wrapped in a Sequence from={coLen} so the
+          CONTINUOUS narrator source resets to frame 0 at `len` (no-op when coLen
+          === 0). The active layout segment is rebased into the Sequence's local
+          frame coordinates so its own animations (entrance/zoom) stay correct. */}
+      <Sequence from={coLen}>
+        {activeSegment ? (
+          <LayoutSegmentRenderer
+            segment={
+              coLen > 0
+                ? {
+                    ...activeSegment,
+                    fromFrame: activeSegment.fromFrame - coLen,
+                    toFrame: activeSegment.toFrame - coLen,
+                  }
+                : activeSegment
+            }
+            videoSrc={videoSrc}
+            palette={palette}
+            format={format}
+            creator={creator}
+            gradePreset={gradePreset}
+          />
+        ) : (
+          videoSrc && (
+            <>
+              <OffthreadVideo
+                src={videoSrc}
+                muted
+                startFrom={0}
+                style={{
+                  position: 'absolute',
+                  top: isTopImageCompact ? '30%' : 0,
+                  left: 0,
+                  width: '100%',
+                  height: isTopImageCompact ? '70%' : isSplitImageActive ? '50%' : '100%',
+                  objectFit: 'cover',
+                  objectPosition: isSplitImageActive ? splitVideoObjectPosition : 'center center',
+                  transform: punchScale !== 1 ? `scale(${punchScale})` : undefined,
+                  transformOrigin: 'center 35%',
+                  filter: composeFilter(grade.filter),
+                  backgroundColor: palette.background,
+                }}
+              />
+              {getGradeOverlayLayers(grade).map((layer) => (
+                <div key={layer.key} style={layer.style} />
+              ))}
+            </>
+          )
+        )}
+      </Sequence>
 
       {/* Scene Layers */}
       {scenes.map((scene, index) => {

@@ -141,6 +141,10 @@ export interface ApplyOperationsResult {
   // Present only when an update_hook_title op ran. A string sets the headline;
   // null explicitly removes it. Undefined = no change (caller keeps existing).
   hookTitle?: string | null
+  // Present only when an update_cold_open op ran. A number = the beat/leg whose
+  // speech becomes the cold open; null = remove it. Undefined = no change. The
+  // caller resolves the leg into a frame window (needs fps + durationFrames).
+  coldOpenStartLeg?: number | null
 }
 
 /**
@@ -160,6 +164,7 @@ export function applyDirectorOperations(
   const applied: string[] = []
   const skipped: string[] = []
   let hookTitleChange: { value: string | null } | undefined
+  let coldOpenChange: { value: number | null } | undefined
 
   const ops = Array.isArray(operations) ? operations.slice(0, 10) : []
 
@@ -293,6 +298,23 @@ export function applyDirectorOperations(
         break
       }
 
+      case 'update_cold_open': {
+        const raw = (op as any).startLeg
+        if (raw === null) {
+          coldOpenChange = { value: null }
+          applied.push('Abertura (cold open) removida')
+          break
+        }
+        const leg = Math.floor(Number(raw))
+        if (!Number.isFinite(leg) || leg < 0 || leg > Math.max(0, subtitles.length - 1)) {
+          skipped.push('Abertura: batida inválida — ignorada')
+          break
+        }
+        coldOpenChange = { value: leg }
+        applied.push(`Abertura definida na batida ${leg}`)
+        break
+      }
+
       default:
         skipped.push(`Operação desconhecida: ${(op as any).op}`)
     }
@@ -303,7 +325,8 @@ export function applyDirectorOperations(
     palette: workingPalette,
     applied,
     skipped,
-    ...(hookTitleChange ? { hookTitle: hookTitleChange.value } : {})
+    ...(hookTitleChange ? { hookTitle: hookTitleChange.value } : {}),
+    ...(coldOpenChange ? { coldOpenStartLeg: coldOpenChange.value } : {})
   }
 }
 

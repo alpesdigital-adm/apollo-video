@@ -7,6 +7,7 @@ import { getAssetCatalog, resolveAssetsInScenes } from '@/lib/asset-library'
 import { narrativeEngine } from '@/lib/engines/narrative-engine'
 import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
 import { resolveSceneTiming } from '@/lib/utils/timing'
+import { computeColdOpenWindow, type ColdOpenWindow } from '@/lib/cold-open'
 import type { Silence, SubtitleEntry, Transcription } from '@/lib/types/project'
 import type { Scene, ColorPalette } from '@/lib/types/scene'
 
@@ -99,6 +100,19 @@ export async function POST(request: NextRequest) {
       hookTitle = applyResult.hookTitle === null ? undefined : applyResult.hookTitle ?? undefined
     }
 
+    // Cold open (Fase 3): preserva a janela existente salvo se o diretor mudou.
+    // Um update_cold_open traz um startLeg (batida) que resolvemos para a janela
+    // de frames aqui (com fps + durationFrames); null remove.
+    let coldOpen: ColdOpenWindow | undefined =
+      existingPlan && existingPlan.coldOpen && typeof existingPlan.coldOpen === 'object'
+        ? existingPlan.coldOpen
+        : undefined
+    let coldOpenLegPending: number | null | undefined
+    if (Object.prototype.hasOwnProperty.call(applyResult, 'coldOpenStartLeg')) {
+      coldOpenLegPending = applyResult.coldOpenStartLeg
+      if (coldOpenLegPending === null) coldOpen = undefined
+    }
+
     // Nada aplicável: responde sem persistir nem criar snapshot.
     if (applied.length === 0) {
       return NextResponse.json({
@@ -131,6 +145,25 @@ export async function POST(request: NextRequest) {
       existingScenes: scenes
     })
 
+    // Resolve um update_cold_open (batida → janela de frames) contra as cenas já
+    // atualizadas, para que o span acompanhe a nova estrutura.
+    if (typeof coldOpenLegPending === 'number') {
+      const durationFrames = Math.max(
+        1,
+        (existingPlan && typeof existingPlan.durationFrames === 'number'
+          ? existingPlan.durationFrames
+          : 0) || Math.ceil((project.videoDuration || 0) * fps)
+      )
+      const window = computeColdOpenWindow(
+        coldOpenLegPending,
+        subtitles,
+        scenesWithAssets,
+        fps,
+        durationFrames
+      )
+      if (window) coldOpen = window
+    }
+
     // 6. Regenerar o editPlan (mesmo fluxo do analyze).
     const editPlan = narrativeEngine.createPlan({
       projectId,
@@ -148,7 +181,8 @@ export async function POST(request: NextRequest) {
       subtitles,
       silences,
       scenes: scenesWithAssets,
-      hookTitle
+      hookTitle,
+      ...(coldOpen ? { coldOpen } : {})
     })
 
     // 7. Persistir e invalidar o vídeo renderizado.

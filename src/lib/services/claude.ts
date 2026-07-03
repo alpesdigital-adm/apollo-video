@@ -1766,6 +1766,7 @@ export type DirectorOperation =
   | { op: 'update_palette'; changes: Record<string, string> }
   | { op: 'update_subtitle_style'; style: string }
   | { op: 'update_hook_title'; text: string | null }
+  | { op: 'update_cold_open'; startLeg: number | null }
 
 export interface DirectorResult {
   summary: string
@@ -1846,6 +1847,7 @@ OPERAÇÕES DISPONÍVEIS (retorne no máximo ~10 no total):
 - {"op":"update_palette","changes":{"accent":"#RRGGBB", ...}} — muda cores GLOBAIS. Chaves válidas: primary, secondary, accent, background, text. Valores HEX (#RGB ou #RRGGBB).
 - {"op":"update_subtitle_style","style":"<estilo>"} — muda o ESTILO GLOBAL das legendas (preferência salva para todos os vídeos). Valores válidos: "kinetic" (padrão, sem caixa), "karaoke-box" (caixa preta, destaque amarelo), "karaoke-pill" (pill escuro, progressão), "caps-stroke" (maiúsculas com contorno), "clean-color" (minúsculas, destaque na cor de acento). Use quando o usuário pedir para mudar o visual/formato das legendas.
 - {"op":"update_hook_title","text":"<manchete>"|null} — define ou remove o TÍTULO-HOOK persistente no topo do vídeo (manchete-promessa ≤10 palavras). text:null remove o título. Use quando o usuário pedir uma manchete/chamada fixa no topo, ou pedir para removê-la.
+- {"op":"update_cold_open","startLeg":<int>|null} — define ou remove a ABERTURA (cold open): replica um trecho de fala impactante do MEIO do vídeo NO INÍCIO, como gancho. startLeg = índice da batida/legenda cuja fala vira a abertura (a janela = span da cena que cobre a batida, senão a própria batida, sempre clampada para 3-8s). startLeg:null REMOVE a abertura. Use quando o usuário pedir para "usar a fala X como gancho/abertura no começo", "colocar um cold open", ou "tirar a abertura".
 
 REGRAS DE INTERPRETAÇÃO:
 - ESCOPO GLOBAL: quando o usuário disser "vídeo todo", "em todo lugar", "sempre", ou não especificar uma cena, aplique globalmente.

@@ -149,4 +149,9 @@ export interface EditPlan {
   // Optional jump-cut punch-in track (alternating base-video scale between
   // silence cuts). Absent/empty = base video keeps a steady scale.
   punchIns?: PlanPunchIn[]
+  // COLD OPEN (Fase 3): janela na timeline FONTE (frames do vídeo base sem
+  // deslocamento) replicada como gancho ANTES do vídeo normal. Duração 3-8s. O
+  // offset da montagem acontece só nos inputProps (ver src/lib/cold-open.ts +
+  // resolveColdOpen). Ausente = sem abertura (compatível com planos v1).
+  coldOpen?: { fromFrame: number; toFrame: number }
 }

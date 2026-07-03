@@ -14,6 +14,7 @@ import type {
 import type { Scene } from '../types/scene'
 import type { SubtitleEntry } from '../types/project'
 import { readStylePrefs } from '../style-prefs'
+import { clampColdOpenWindow } from '../cold-open'
 import { framesToSeconds, secondsToFrames } from '../utils/timing'
 import type { VideoEngine, VideoEngineContext } from './video-engine'
 import { assertEnginePlan } from './video-engine'
@@ -472,6 +473,15 @@ export const narrativeEngine: VideoEngine = {
       typeof context.hookTitle === 'string' && context.hookTitle.trim()
         ? context.hookTitle.trim()
         : undefined
+    // COLD OPEN: preserva/normaliza a janela (3-8s, dentro de [0, durationFrames]).
+    const coldOpen = context.coldOpen
+      ? clampColdOpenWindow(
+          context.coldOpen.fromFrame,
+          context.coldOpen.toFrame,
+          context.fps,
+          durationFrames
+        )
+      : null
 
     const plan: EditPlan = {
       version: 1,
@@ -503,6 +513,7 @@ export const narrativeEngine: VideoEngine = {
       layoutSegments,
       ...(hookTitle ? { hookTitle } : {}),
       ...(punchIns.length > 0 ? { punchIns } : {}),
+      ...(coldOpen ? { coldOpen } : {}),
       notes: [
         'Engine optimized for narrated videos with speech-timed subtitles and scene overlays.',
         'Future visual engines should implement the same EditPlan contract and can replace ranges/overlays/audio without changing the renderer.'

@@ -12,6 +12,7 @@
 import type { Scene } from '@/lib/types/scene'
 import type { SubtitleEntry, Transcription } from '@/lib/types/project'
 import { MIN_SCENE_SECONDS } from '@/lib/utils/timing'
+import { clampColdOpenWindow } from '@/lib/cold-open'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +46,14 @@ export interface RemotionPunchIn {
   fromFrame: number
   toFrame: number
   scale: number
+}
+
+// COLD OPEN (Fase 3): janela FONTE resolvida + comprimento (frames) do teaser
+// que é prependido no início. Todas as outras camadas são deslocadas por `len`.
+export interface RemotionColdOpen {
+  fromFrame: number
+  toFrame: number
+  len: number
 }
 
 export interface AudioSfxEventInput {
@@ -89,6 +98,9 @@ export interface RemotionInputProps {
   layoutSegments?: RemotionLayoutSegment[]
   punchIns?: RemotionPunchIn[]
   audio?: AudioInputProps
+  // COLD OPEN: presente quando o plano tem `coldOpen`. A composição renderiza um
+  // teaser em [0, len) e o fluxo normal a partir de len (já deslocado nas props).
+  coldOpen?: RemotionColdOpen
 }
 
 export interface ColorPalette {
@@ -399,6 +411,169 @@ export function resolvePunchIns(
       return { fromFrame, toFrame, scale }
     })
     .filter((entry): entry is RemotionPunchIn => entry !== null)
+}
+
+// ---------------------------------------------------------------------------
+// COLD OPEN (Fase 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve `plan.coldOpen` into { fromFrame, toFrame, len } (3-8s clamped), or
+ * null when absent/invalid. `durationFrames` is the SOURCE timeline length
+ * (plan.durationFrames — WITHOUT the cold-open offset) so the clamp stays inside
+ * the real footage.
+ */
+export function resolveColdOpen(
+  plan: { coldOpen?: unknown } | null | undefined,
+  fps: number,
+  durationFrames?: number
+): RemotionColdOpen | null {
+  const co = (plan as any)?.coldOpen
+  if (!co || typeof co !== 'object') return null
+  const window = clampColdOpenWindow(co.fromFrame, co.toFrame, fps, durationFrames)
+  if (!window) return null
+  return {
+    fromFrame: window.fromFrame,
+    toFrame: window.toFrame,
+    len: window.toFrame - window.fromFrame
+  }
+}
+
+/** Shift resolved scenes forward by `len` frames (from/to seconds + frames). */
+export function offsetScenesForColdOpen(
+  scenes: RemotionSceneInput[],
+  len: number,
+  fps: number
+): RemotionSceneInput[] {
+  if (len <= 0) return scenes
+  const secOff = len / fps
+  return scenes.map((scene) => ({
+    ...scene,
+    from: scene.from + secOff,
+    to: scene.to + secOff,
+    fromFrame: scene.fromFrame + len,
+    toFrame: scene.toFrame + len
+  }))
+}
+
+/** Shift layout segments forward by `len` frames. */
+export function offsetLayoutSegmentsForColdOpen(
+  segments: RemotionLayoutSegment[],
+  len: number
+): RemotionLayoutSegment[] {
+  if (len <= 0) return segments
+  return segments.map((seg) => ({
+    ...seg,
+    fromFrame: seg.fromFrame + len,
+    toFrame: seg.toFrame + len
+  }))
+}
+
+/** Shift punch-ins forward by `len` frames. */
+export function offsetPunchInsForColdOpen(
+  punchIns: RemotionPunchIn[],
+  len: number
+): RemotionPunchIn[] {
+  if (len <= 0) return punchIns
+  return punchIns.map((p) => ({
+    ...p,
+    fromFrame: p.fromFrame + len,
+    toFrame: p.toFrame + len
+  }))
+}
+
+function shiftWords(words: SubtitleEntry['words'], secOff: number): SubtitleEntry['words'] {
+  if (!Array.isArray(words)) return words
+  return words.map((word: any) => {
+    if (typeof word === 'string') return word
+    return {
+      ...word,
+      start: Number(word.start) + secOff,
+      end: Number(word.end) + secOff
+    }
+  }) as SubtitleEntry['words']
+}
+
+function remapWords(
+  words: SubtitleEntry['words'],
+  secFrom: number,
+  maxSec: number
+): SubtitleEntry['words'] {
+  if (!Array.isArray(words)) return words
+  return words.map((word: any) => {
+    if (typeof word === 'string') return word
+    return {
+      ...word,
+      start: Math.max(0, Math.min(maxSec, Number(word.start) - secFrom)),
+      end: Math.max(0, Math.min(maxSec, Number(word.end) - secFrom))
+    }
+  }) as SubtitleEntry['words']
+}
+
+function subtitleStartFrame(sub: SubtitleEntry, fps: number): number {
+  return typeof (sub as any).startFrame === 'number'
+    ? (sub as any).startFrame
+    : Math.round(sub.startTime * fps)
+}
+function subtitleEndFrame(sub: SubtitleEntry, fps: number): number {
+  return typeof (sub as any).endFrame === 'number'
+    ? (sub as any).endFrame
+    : Math.round(sub.endTime * fps)
+}
+
+/**
+ * Build the cold-open subtitle track:
+ *  - EVERY subtitle shifted forward by `len` (times + frames + word times), and
+ *  - PREPENDED remapped copies of the subtitles intersecting the cold-open window
+ *    [fromFrame, fromFrame+len): times/frames minus fromFrame (clamped to [0,len)),
+ *    words remapped the same way, `anchor` preserved.
+ * The prepended copies come first so SubtitleOverlay's `.find` picks them during
+ * the teaser; the shifted track starts at `len`, so there is no frame overlap.
+ */
+export function buildColdOpenSubtitles(
+  subtitles: SubtitleEntry[],
+  coldOpen: RemotionColdOpen,
+  fps: number
+): SubtitleEntry[] {
+  const { fromFrame, len } = coldOpen
+  const toFrame = fromFrame + len
+  const secOff = len / fps
+  const secFrom = fromFrame / fps
+  const maxSec = len / fps
+
+  const shifted = subtitles.map((sub) => ({
+    ...sub,
+    startTime: sub.startTime + secOff,
+    endTime: sub.endTime + secOff,
+    ...(typeof (sub as any).startFrame === 'number'
+      ? { startFrame: (sub as any).startFrame + len }
+      : {}),
+    ...(typeof (sub as any).endFrame === 'number'
+      ? { endFrame: (sub as any).endFrame + len }
+      : {}),
+    words: shiftWords(sub.words, secOff)
+  })) as SubtitleEntry[]
+
+  const remapped: SubtitleEntry[] = []
+  for (const sub of subtitles) {
+    const sF = subtitleStartFrame(sub, fps)
+    const eF = subtitleEndFrame(sub, fps)
+    if (eF > fromFrame && sF < toFrame) {
+      const startFrame = Math.max(0, Math.min(len, sF - fromFrame))
+      const endFrame = Math.max(0, Math.min(len, eF - fromFrame))
+      if (endFrame <= startFrame) continue
+      remapped.push({
+        ...sub,
+        startTime: Math.max(0, Math.min(maxSec, sub.startTime - secFrom)),
+        endTime: Math.max(0, Math.min(maxSec, sub.endTime - secFrom)),
+        startFrame,
+        endFrame,
+        words: remapWords(sub.words, secFrom, maxSec)
+      } as SubtitleEntry)
+    }
+  }
+
+  return [...remapped, ...shifted]
 }
 
 export interface ResolveAudioSfxOptions extends ToRemotionSceneOptions {

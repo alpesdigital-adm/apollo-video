@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { RemotionProjectPlayer } from '@/components/RemotionProjectPlayer'
+import { resolveColdOpen } from '@/lib/remotion/input-props'
 import type { Scene } from '@/lib/types/scene'
 import type { SubtitleEntry } from '@/lib/types/project'
 import type { ProjectStatus } from '@/lib/types/project'
@@ -21,6 +22,7 @@ interface ProjectData {
     overlays: unknown[]
     layoutSegments?: unknown[]
     audio?: unknown[]
+    coldOpen?: { fromFrame: number; toFrame: number } | null
     lineage?: {
       units: Array<{
         id: string
@@ -383,6 +385,30 @@ export default function EditorPage() {
       await fetchBeats()
     } catch (err) {
       setBeatsError(err instanceof Error ? err.message : 'Falha ao ajustar a batida')
+    } finally {
+      setBeatBusy(null)
+    }
+  }
+
+  // COLD OPEN (Fase 3): usa/remove a batida como abertura (gancho no início).
+  async function handleColdOpen(beatIndex: number, active: boolean) {
+    setBeatsError(null)
+    setOpenMenu(null)
+    setBeatBusy(beatIndex)
+    try {
+      const response = await fetch(`/api/projects/${projectId}/cold-open`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(active ? { remove: true } : { beatIndex })
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.error || 'Falha ao ajustar a abertura')
+      }
+      await loadProject()
+      await fetchBeats()
+    } catch (err) {
+      setBeatsError(err instanceof Error ? err.message : 'Falha ao ajustar a abertura')
     } finally {
       setBeatBusy(null)
     }
@@ -763,10 +789,19 @@ export default function EditorPage() {
                     projectId={project.id}
                     format={project.format}
                     fps={project.videoFps || 30}
-                    durationFrames={
-                      project.editPlan?.durationFrames ||
-                      Math.ceil((project.videoDuration || 1) * (project.videoFps || 30))
-                    }
+                    durationFrames={(() => {
+                      const activeFps = project.videoFps || 30
+                      const base =
+                        project.editPlan?.durationFrames ||
+                        Math.ceil((project.videoDuration || 1) * activeFps)
+                      // Cold open alonga a timeline em `len` frames (teaser no início).
+                      const co = resolveColdOpen(
+                        project.editPlan,
+                        activeFps,
+                        project.editPlan?.durationFrames
+                      )
+                      return base + (co?.len || 0)
+                    })()}
                     scenes={project.scenes || []}
                     subtitles={project.subtitles || []}
                     transcription={project.transcription}
@@ -848,6 +883,15 @@ export default function EditorPage() {
                       const spanSize = beat.sceneSpan
                         ? beat.sceneSpan.to - beat.sceneSpan.from + 1
                         : 0
+                      // COLD OPEN: janela na timeline FONTE (frames). Marca as
+                      // batidas que caem dentro da janela replicada como abertura.
+                      const coldOpen = project.editPlan?.coldOpen || null
+                      const hasColdOpen = Boolean(coldOpen)
+                      const isColdOpenSource = Boolean(
+                        coldOpen &&
+                          beat.endFrame > coldOpen.fromFrame &&
+                          beat.startFrame < coldOpen.toFrame
+                      )
 
                       return (
                         <div
@@ -921,6 +965,11 @@ export default function EditorPage() {
                                 ) : (
                                   <span className="text-[11px] text-zinc-600">∅ sem cena</span>
                                 )}
+                                {isColdOpenSource && (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[10px] font-semibold text-sky-300">
+                                    🎬 abertura
+                                  </span>
+                                )}
                               </div>
                               <p className="text-xs text-zinc-300 line-clamp-2">{beat.text}</p>
                             </div>
@@ -972,7 +1021,24 @@ export default function EditorPage() {
 
                           {/* Dropdown de modelo */}
                           {openMenu === beat.index && (
-                            <div className="absolute right-2 top-11 z-20 w-48 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl py-1">
+                            <div className="absolute right-2 top-11 z-20 w-56 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl py-1">
+                              <button
+                                type="button"
+                                onClick={() => handleColdOpen(beat.index, false)}
+                                className="w-full text-left px-3 py-1.5 text-xs text-sky-300 hover:bg-sky-500/10"
+                              >
+                                🎬 Usar como abertura
+                              </button>
+                              {hasColdOpen && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleColdOpen(beat.index, true)}
+                                  className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                                >
+                                  Remover abertura
+                                </button>
+                              )}
+                              <div className="my-1 border-t border-zinc-800" />
                               {beat.sceneId && (
                                 <button
                                   type="button"

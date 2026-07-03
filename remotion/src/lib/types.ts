@@ -110,4 +110,8 @@ export interface CompositionProps extends Record<string, unknown> {
   // Pacote 5: jump-cut punch-in track applied to the base video.
   punchIns?: PunchIn[];
   audio?: AudioProps;
+  // COLD OPEN (Fase 3): quando presente, a composição renderiza um teaser do
+  // trecho FONTE [fromFrame, toFrame) em [0, len) e o fluxo normal a partir de
+  // len (as demais camadas já chegam deslocadas por len nas props).
+  coldOpen?: { fromFrame: number; toFrame: number; len: number };
 }

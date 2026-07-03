@@ -11,6 +11,11 @@ import {
   normalizeSubtitleWords,
   resolveLayoutSegments,
   resolvePunchIns,
+  resolveColdOpen,
+  offsetScenesForColdOpen,
+  offsetLayoutSegmentsForColdOpen,
+  offsetPunchInsForColdOpen,
+  buildColdOpenSubtitles,
   type AudioInputProps,
   type RemotionCreator,
   type RemotionSceneInput,
@@ -28,7 +33,14 @@ interface RemotionProjectPlayerProps {
   transcription: Transcription | null
   stylePreset: string
   palette: any
-  editPlan?: { layoutSegments?: unknown; hookTitle?: unknown; punchIns?: unknown; audio?: unknown } | null
+  editPlan?: {
+    layoutSegments?: unknown
+    hookTitle?: unknown
+    punchIns?: unknown
+    audio?: unknown
+    coldOpen?: unknown
+    durationFrames?: unknown
+  } | null
   musicPick?: { src: string; volume: number } | null
   // Optional: parent gets a handle to seek the player to a frame (beat panel).
   seekRef?: React.MutableRefObject<{ seekTo: (frame: number) => void } | null>
@@ -139,14 +151,34 @@ export function RemotionProjectPlayer({
     ? { events: [], music: musicPick }
     : undefined
 
+  // COLD OPEN (Fase 3): clamp usa a duração FONTE do plano (durationFrames), NÃO
+  // a duração já alongada passada ao Player abaixo.
+  const baseDurationFrames =
+    editPlan && typeof editPlan.durationFrames === 'number'
+      ? editPlan.durationFrames
+      : undefined
+  const coldOpen = resolveColdOpen(editPlan, activeFps, baseDurationFrames)
+
+  let scenesProps = prepareRemotionScenes(
+    scenes
+      .map((scene) => toRemotionScene(scene, activeFps))
+      .filter((scene): scene is RemotionSceneInput => Boolean(scene)),
+    activeFps
+  )
+  let subtitlesProps = subtitles
+  let layoutSegmentsProps = resolveLayoutSegments(editPlan)
+  let punchInsProps = resolvePunchIns(editPlan)
+
+  if (coldOpen) {
+    scenesProps = offsetScenesForColdOpen(scenesProps, coldOpen.len, activeFps)
+    subtitlesProps = buildColdOpenSubtitles(subtitles, coldOpen, activeFps)
+    layoutSegmentsProps = offsetLayoutSegmentsForColdOpen(layoutSegmentsProps, coldOpen.len)
+    punchInsProps = offsetPunchInsForColdOpen(punchInsProps, coldOpen.len)
+  }
+
   const inputProps = {
-    scenes: prepareRemotionScenes(
-      scenes
-        .map((scene) => toRemotionScene(scene, activeFps))
-        .filter((scene): scene is RemotionSceneInput => Boolean(scene)),
-      activeFps
-    ),
-    subtitles: normalizeSubtitleWords(subtitles),
+    scenes: scenesProps,
+    subtitles: normalizeSubtitleWords(subtitlesProps),
     transcription: transcription || { text: '', language: 'pt', segments: [] },
     palette,
     videoSrc: `/api/video/${projectId}?source=preview`,
@@ -156,9 +188,10 @@ export function RemotionProjectPlayer({
     gradePreset,
     ...(hookTitle ? { hookTitle } : {}),
     creator,
-    layoutSegments: resolveLayoutSegments(editPlan),
-    punchIns: resolvePunchIns(editPlan),
-    ...(audio ? { audio } : {})
+    layoutSegments: layoutSegmentsProps,
+    punchIns: punchInsProps,
+    ...(audio ? { audio } : {}),
+    ...(coldOpen ? { coldOpen } : {})
   }
 
   return (

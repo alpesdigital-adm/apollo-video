@@ -20,6 +20,8 @@ export interface VideoEngineContext {
   scenes: Scene[]
   // Optional persistent hook headline written straight into the plan.
   hookTitle?: string
+  // COLD OPEN (Fase 3): janela na timeline FONTE preservada/normalizada no plano.
+  coldOpen?: { fromFrame: number; toFrame: number }
 }
 
 export interface VideoEngine {

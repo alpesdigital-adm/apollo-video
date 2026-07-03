@@ -236,6 +236,11 @@ export async function POST(
       existingPlan && typeof existingPlan.hookTitle === 'string' && existingPlan.hookTitle.trim()
         ? existingPlan.hookTitle
         : undefined
+    // Cold open (Fase 3): preserva a janela através da regeneração do plano.
+    const coldOpen =
+      existingPlan && existingPlan.coldOpen && typeof existingPlan.coldOpen === 'object'
+        ? existingPlan.coldOpen
+        : undefined
 
     // Snapshot BEFORE persisting (single-level undo, shared with refine).
     await saveSnapshot(projectId, {
@@ -272,7 +277,8 @@ export async function POST(
       subtitles,
       silences,
       scenes: scenesWithAssets,
-      hookTitle
+      hookTitle,
+      ...(coldOpen ? { coldOpen } : {})
     })
 
     await prisma.project.update({

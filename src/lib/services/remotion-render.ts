@@ -13,6 +13,11 @@ import {
   resolveCreatorForProps,
   resolveLayoutSegments,
   resolvePunchIns,
+  resolveColdOpen,
+  offsetScenesForColdOpen,
+  offsetLayoutSegmentsForColdOpen,
+  offsetPunchInsForColdOpen,
+  buildColdOpenSubtitles,
   type RemotionInputProps,
   type RemotionSceneInput,
   type AudioInputProps
@@ -157,14 +162,33 @@ export async function startProjectRender(
     ? { events: [], music: { src: `${appBaseUrl}${musicPick.src}`, volume: musicPick.volume } }
     : undefined
 
+  // COLD OPEN (Fase 3): janela FONTE (3-8s) clampada contra a duração do plano.
+  const baseDurationFrames = Math.max(
+    1,
+    editPlan?.durationFrames || Math.ceil((project.videoDuration || 1) * fps)
+  )
+  const coldOpen = resolveColdOpen(editPlan, fps, baseDurationFrames)
+
+  let scenesProps = prepareRemotionScenes(
+    scenes
+      .map((scene) => toRemotionScene(scene, fps, { baseUrl: appBaseUrl }))
+      .filter((scene): scene is RemotionSceneInput => Boolean(scene)),
+    fps
+  )
+  let subtitlesProps = subtitles
+  let layoutSegmentsProps = resolveLayoutSegments(editPlan, { baseUrl: appBaseUrl })
+  let punchInsProps = resolvePunchIns(editPlan)
+
+  if (coldOpen) {
+    scenesProps = offsetScenesForColdOpen(scenesProps, coldOpen.len, fps)
+    subtitlesProps = buildColdOpenSubtitles(subtitles, coldOpen, fps)
+    layoutSegmentsProps = offsetLayoutSegmentsForColdOpen(layoutSegmentsProps, coldOpen.len)
+    punchInsProps = offsetPunchInsForColdOpen(punchInsProps, coldOpen.len)
+  }
+
   const inputProps: RemotionInputProps = {
-    scenes: prepareRemotionScenes(
-      scenes
-        .map((scene) => toRemotionScene(scene, fps, { baseUrl: appBaseUrl }))
-        .filter((scene): scene is RemotionSceneInput => Boolean(scene)),
-      fps
-    ),
-    subtitles: normalizeSubtitleWords(subtitles),
+    scenes: scenesProps,
+    subtitles: normalizeSubtitleWords(subtitlesProps),
     transcription,
     palette,
     videoSrc: `${appBaseUrl}/api/video/${project.id}?source=primary`,
@@ -174,9 +198,10 @@ export async function startProjectRender(
     gradePreset,
     ...(hookTitle ? { hookTitle } : {}),
     creator: resolveCreatorForProps(readCreatorProfile(), appBaseUrl),
-    layoutSegments: resolveLayoutSegments(editPlan, { baseUrl: appBaseUrl }),
-    punchIns: resolvePunchIns(editPlan),
-    ...(audio ? { audio } : {})
+    layoutSegments: layoutSegmentsProps,
+    punchIns: punchInsProps,
+    ...(audio ? { audio } : {}),
+    ...(coldOpen ? { coldOpen } : {})
   }
 
   const outputDir = path.join(process.cwd(), 'public', 'renders')
@@ -189,10 +214,8 @@ export async function startProjectRender(
   await writeFile(propsPath, JSON.stringify(inputProps), 'utf8')
 
   const compositionId = project.format === '16:9' ? 'horizontal' : 'vertical'
-  const durationFrames = Math.max(
-    1,
-    editPlan?.durationFrames || Math.ceil((project.videoDuration || 1) * fps)
-  )
+  // Cold open lengthens the timeline by `len` frames (prepended teaser).
+  const durationFrames = baseDurationFrames + (coldOpen ? coldOpen.len : 0)
   await writeFile(
     manifestPath,
     JSON.stringify(
