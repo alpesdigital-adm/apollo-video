@@ -303,7 +303,7 @@ function hookTitleDuplicatesScene(hookTitle: string, scenes: any[]): boolean {
   })
 }
 
-export function sanitizeSceneCopy(sceneData: any): any {
+export function sanitizeSceneCopy(sceneData: any, options?: { stripStutter?: boolean }): any {
   switch (sceneData.type) {
     case 'FullScreen':
       sceneData.text = limitWords(limitCopy(sceneData.text || sceneData.title, 70), 6)
@@ -376,7 +376,7 @@ export function sanitizeSceneCopy(sceneData: any): any {
       sceneData.imagePrompt = limitCopy(sceneData.imagePrompt || sceneData.prompt || sceneData.description, 700)
       sceneData.imageAlt = limitCopy(sceneData.imageAlt || sceneData.imagePrompt, 120)
       sceneData.sourceText = limitCopy(sceneData.sourceText || sceneData.spokenText || sceneData.imageAlt, 220)
-      normalizeImageInsertMedia(sceneData)
+      normalizeImageInsertMedia(sceneData, options)
       delete sceneData.text
       delete sceneData.title
       delete sceneData.subtitle
@@ -402,12 +402,18 @@ export function sanitizeSceneCopy(sceneData: any): any {
  *  - motion: boolean flag (only true/false survives)
  *  - source: 'generate' | 'stock' (default 'generate')
  *  - stockQuery: short English query, ≤ 6 words, only kept for source === 'stock'
+ *
+ * `stripStutter` removes any stutter flag unconditionally — stutter é tática
+ * manual (diretor); a IA não a usa sozinha, pulos secos reprovados em produção.
+ * Passado true pelo caminho do analyzeContent; refineScene e o diretor mantêm
+ * o comportamento antigo (aceitam stutter:true vindo do modelo/instrução).
  */
-function normalizeImageInsertMedia(sceneData: any): void {
+function normalizeImageInsertMedia(sceneData: any, options?: { stripStutter?: boolean }): void {
   sceneData.motion = sceneData.motion === true
 
-  // Pacote 5: stutter cluster flag — keep only when explicitly true.
-  if (sceneData.stutter === true) {
+  // Pacote 5: stutter cluster flag — keep only when explicitly true, unless
+  // the caller (analyze) forces it off.
+  if (sceneData.stutter === true && !options?.stripStutter) {
     sceneData.stutter = true
   } else {
     delete sceneData.stutter
@@ -837,7 +843,6 @@ Por padrão TODA cena é fullscreen (vídeo base cheio + a cena por cima). Um "l
 - COMO RETORNAR: adicione "segmentLayout" e/ou "segmentEffects" na própria cena. Ex. de insert com layout: { ..., "type": "ImageInsert", "segmentLayout": "split-50" }. Ex. de cena só de efeito: { ..., "type": "FullScreen", "text": "Isso muda tudo", "highlight": "tudo", "segmentEffects": { "zoom": "in" } }. Ex. de citação: { ..., "type": "FullScreen", "text": "Ninguém te contou isso antes", "segmentLayout": "tweet-card" }. Valores fora dessas listas são ignorados.
 
 TÁTICAS DE EDIÇÃO PONTUAIS (opcionais — ÊNFASE rara, nunca padrão; valores inválidos são ignorados):
-- stutter (SÓ em ImageInsert, boolean): "stutter": true dá 5 micro-saltos rápidos na mídia no primeiro ~1,6s da cena (efeito de "trava"/repetição). NO MÁXIMO 1 por vídeo, no insert de PROVA/IMPACTO do hook. Funciona com imagem e vídeo.
 - transitionIn (qualquer tipo de cena): "transitionIn": "flash" estoura um flash branco-quente na ENTRADA da cena. Use no gancho e/ou na virada principal. NO MÁXIMO 1-2 por vídeo.
 - variant (SÓ em FullScreen, title-card de ABERTURA/hook): "variant": "torn-paper" (faixa vermelha rasgada, urgência/notícia) ou "variant": "crt-glitch" (glitch RGB + scanlines, tech/erro). Use no title-card de abertura quando o tom pedir impacto; sem variant = kinético padrão. NO MÁXIMO 1 por vídeo.
 
@@ -1011,7 +1016,8 @@ Garanta que o JSON seja válido e completo.`
           if (!sceneData.sourceText) {
             sceneData.sourceText = subtitles[sceneData.startLeg]?.text || ''
           }
-          return sanitizeSceneCopy(sceneData) as Scene
+          // analyzeContent: stutter é tática manual do diretor, nunca da IA.
+          return sanitizeSceneCopy(sceneData, { stripStutter: true }) as Scene
         }
 
         // Typographic scene: validate/coerce required props, discard if impossible.
@@ -1020,7 +1026,7 @@ Garanta que o JSON seja válido e completo.`
           console.warn(`Discarding ${sceneData.type} scene missing required content`)
           return null
         }
-        return sanitizeSceneCopy(normalized) as Scene
+        return sanitizeSceneCopy(normalized, { stripStutter: true }) as Scene
       })
       .filter((scene: Scene | null): scene is Scene => scene !== null)
 

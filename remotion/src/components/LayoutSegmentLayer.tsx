@@ -9,6 +9,7 @@ import {
   useVideoConfig,
 } from 'remotion';
 import { CreatorProfile, LayoutSegment, ColorPalette } from '../lib/types';
+import { getImageMotion } from '../scenes/ImageInsert';
 
 /**
  * Find the segment active at `frame`. Segments never overlap (they derive from
@@ -74,17 +75,18 @@ function useBaseVideoEffect(segment: LayoutSegment): {
   return { transform: `scale(${scale})`, filterParts };
 }
 
-// Lightweight Ken Burns for the split-50 top image (same spirit as ImageInsert).
-function useKenBurns(segment: LayoutSegment): { transform: string } {
+// Same gentle motion regime as ImageInsert (1%/5~10s, no per-layout tuning),
+// applied to whichever media slot the segment carries (split-50 top image or
+// blur-bg centered card) — image or video alike.
+function useSegmentMediaMotion(segment: LayoutSegment, mediaSrc: string): { transform: string } {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   const dur = Math.max(1, segment.toFrame - segment.fromFrame);
-  const p = clamp01((frame - segment.fromFrame) / dur);
-  const scale = interpolate(p, [0, 1], [1.04, 1.1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  });
-  const x = interpolate(p, [0, 1], [-10, 10]);
-  return { transform: `translate3d(${x}px, 0, 0) scale(${scale})` };
+  const localFrame = Math.max(0, frame - segment.fromFrame);
+  const motion = getImageMotion(mediaSrc, localFrame, dur, fps);
+  return {
+    transform: `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`,
+  };
 }
 
 interface LayoutSegmentRendererProps {
@@ -107,9 +109,9 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
   creator,
 }) => {
   const { transform, filterParts } = useBaseVideoEffect(segment);
-  const kenBurns = useKenBurns(segment);
   const mediaSrc =
     typeof segment.props?.mediaSrc === 'string' ? (segment.props.mediaSrc as string) : '';
+  const mediaMotion = useSegmentMediaMotion(segment, mediaSrc);
   const baseFilter = filterParts.length ? filterParts.join(' ') : undefined;
 
   if (segment.layout === 'fullscreen') {
@@ -160,6 +162,7 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
+                  transform: mediaMotion.transform,
                   filter: 'saturate(1.05) contrast(1.03)',
                 }}
               />
@@ -171,7 +174,7 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
-                  transform: kenBurns.transform,
+                  transform: mediaMotion.transform,
                   filter: 'saturate(1.05) contrast(1.03)',
                 }}
               />
@@ -255,6 +258,7 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
                   maxHeight: '72%',
                   objectFit: 'cover',
                   borderRadius: 28,
+                  transform: mediaMotion.transform,
                   boxShadow: '0 30px 80px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.5)',
                 }}
               />
@@ -267,6 +271,7 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
                   maxHeight: '72%',
                   objectFit: 'cover',
                   borderRadius: 28,
+                  transform: mediaMotion.transform,
                   boxShadow: '0 30px 80px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.5)',
                 }}
               />

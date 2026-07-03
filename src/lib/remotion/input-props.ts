@@ -221,6 +221,12 @@ export function toRemotionScene(
     }
     // A stock scene can have a video with no still — keep it as long as some media exists.
     if (!adaptedProps.imageSrc && !adaptedProps.videoSrc) return null
+    // Stutter só faz sentido em mídia EM MOVIMENTO: numa imagem parada os 5
+    // saltos viram tremedeira (reprovado em produção). Se o clipe de motion
+    // não materializou (fallback para still), o stutter cai junto.
+    if (!adaptedProps.videoSrc) {
+      delete adaptedProps.stutter
+    }
     adaptedProps.layout = normalizeImageInsertLayout(adaptedProps.layout)
   }
   if (type === 'AssetCard') {

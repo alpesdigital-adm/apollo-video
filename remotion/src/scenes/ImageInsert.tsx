@@ -14,8 +14,8 @@ interface ImageInsertProps {
   imagePath?: string;
   imageAlt?: string;
   // Pacote 3: animated b-roll clip (WaveSpeed i2v) or stock (Pexels) mp4.
-  // When present, replaces the still — video already carries its own motion,
-  // so Ken Burns is skipped.
+  // When present, replaces the still. Gets the same gentle motion transform
+  // as stills — 1%/8s doesn't fight the clip's own internal movement.
   videoSrc?: string;
   layout?: 'full' | 'split-bottom' | 'top-image-compact';
   visualRole?: 'evidence' | 'contrast' | 'process' | 'context' | 'decision';
@@ -38,11 +38,14 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
   const { fps } = useVideoConfig();
   const src = videoSrc || imageSrc || imagePath || '';
   const isVideo = Boolean(videoSrc);
-  const motion = getImageMotion(src, layout, frame, durationInFrames);
-  // When stutter is on, a deterministic micro-jump transform overrides Ken Burns
-  // (for stills) and drives the otherwise-static video, then settles to scale(1).
+  const motion = getImageMotion(src, frame, durationInFrames, fps);
+  // When stutter is on, a deterministic micro-jump transform overrides the
+  // gentle motion (for stills) and drives the otherwise-static video, then
+  // settles to scale(1).
   const stutterTransform = stutter ? getStutterTransform(frame, fps) : null;
-  const imageTransform =
+  // Vídeo também respira: o mesmo transform suave é aplicado ao container do
+  // OffthreadVideo — 1%/8s não briga com o movimento interno do clipe.
+  const mediaTransform =
     stutterTransform ?? `translate3d(${motion.x}px, ${motion.y}px, 0) scale(${motion.scale})`;
   const opacity = interpolate(
     frame,
@@ -81,7 +84,7 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
                 width: '100%',
                 height: '100%',
                 objectFit: 'cover',
-                transform: stutterTransform ?? undefined,
+                transform: mediaTransform,
                 filter: 'saturate(1.04) contrast(1.03)',
               }}
             />
@@ -93,7 +96,7 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
                 width: '100%',
                 height: '100%',
                 objectFit: 'cover',
-                transform: imageTransform,
+                transform: mediaTransform,
                 filter: 'saturate(1.04) contrast(1.03)',
               }}
             />
@@ -142,7 +145,7 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            transform: stutterTransform ?? undefined,
+            transform: mediaTransform,
             filter: 'saturate(1.03) contrast(1.02)',
           }}
         />
@@ -154,7 +157,7 @@ export const ImageInsert: React.FC<ImageInsertProps> = ({
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            transform: imageTransform,
+            transform: mediaTransform,
             filter: 'saturate(1.03) contrast(1.02)',
           }}
         />
@@ -268,7 +271,7 @@ export const ImageInsertTrack: React.FC<ImageInsertTrackProps> = ({
 
           const localFrame = Math.max(0, frame - imageStart);
           const localDuration = Math.max(1, imageEnd - imageStart);
-          const motion = getImageMotion(src, layout, localFrame, localDuration);
+          const motion = getImageMotion(src, localFrame, localDuration, config.fps);
           const stutterTransform = scene.props.stutter
             ? getStutterTransform(localFrame, config.fps)
             : null;
@@ -390,33 +393,50 @@ function hashString(value: string): number {
   return hash;
 }
 
-function getImageMotion(
+// Regra do dono (2026-07): movimento em mídia (imagem OU vídeo) tem que ser
+// SUAVE — algo como 1% de zoom a cada 5~10s, nunca pulos secos sem propósito.
+// Taxa fixa aplicada em TODOS os pontos que chamam esta função (ImageInsert
+// full/split/compact, o track, e os slots de LayoutSegmentLayer) — nenhuma
+// variação por layout, só pela duração real da cena.
+const MOTION_SCALE_RATE_PER_SEC = 0.0015; // 0.15%/s → ~1% em 7s
+const MOTION_SCALE_TOTAL_MIN = 0.006; // piso 0.6% (cenas bem curtas)
+const MOTION_SCALE_TOTAL_MAX = 0.02; // teto 2.0% (cenas longas)
+const MOTION_PAN_RATE_PER_SEC = 1; // ≤1px/s de deslocamento total
+const MOTION_PAN_TOTAL_MAX = 10; // px
+// Overscan CONSTANTE (não anima) só para o pequeno pan nunca revelar a borda
+// da mídia ajustada com object-fit: cover.
+const MOTION_BASE_OVERSCAN = 1.015;
+
+export function getImageMotion(
   src: string,
-  layout: 'full' | 'split-bottom' | 'top-image-compact',
   frame: number,
-  durationInFrames: number
+  durationInFrames: number,
+  fps: number
 ): { scale: number; x: number; y: number } {
+  const durationInSeconds = Math.max(0.1, durationInFrames / Math.max(1, fps));
   const progress = Math.max(0, Math.min(1, frame / Math.max(1, durationInFrames)));
   const hash = hashString(src);
   const direction = hash % 2 === 0 ? 1 : -1;
   const verticalDirection = hash % 3 === 0 ? 1 : -1;
   const zoomIn = hash % 5 !== 0;
-  const isCompact = layout === 'top-image-compact';
-  const isSplit = layout === 'split-bottom' || isCompact;
-  const zoomRange = isCompact ? 0.024 : isSplit ? 0.032 : 0.045;
-  const baseScale = isCompact ? 1.026 : isSplit ? 1.035 : 1.045;
-  const startScale = zoomIn ? baseScale : baseScale + zoomRange;
-  const endScale = zoomIn ? baseScale + zoomRange : baseScale;
+
+  const scaleTotal = Math.max(
+    MOTION_SCALE_TOTAL_MIN,
+    Math.min(MOTION_SCALE_TOTAL_MAX, durationInSeconds * MOTION_SCALE_RATE_PER_SEC)
+  );
+  const startScale = MOTION_BASE_OVERSCAN * (zoomIn ? 1 : 1 + scaleTotal);
+  const endScale = MOTION_BASE_OVERSCAN * (zoomIn ? 1 + scaleTotal : 1);
   const scale = interpolate(
     progress,
     [0, 1],
     [startScale, endScale],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   );
-  const panX = isCompact ? 8 : isSplit ? 12 : 18;
-  const panY = isCompact ? 5 : isSplit ? 8 : 14;
-  const x = interpolate(progress, [0, 1], [-panX * direction, panX * direction]);
-  const y = interpolate(progress, [0, 1], [-panY * verticalDirection, panY * verticalDirection]);
+
+  const panTotal = Math.min(MOTION_PAN_TOTAL_MAX, durationInSeconds * MOTION_PAN_RATE_PER_SEC);
+  const panAmplitude = panTotal / 2;
+  const x = interpolate(progress, [0, 1], [-panAmplitude * direction, panAmplitude * direction]);
+  const y = interpolate(progress, [0, 1], [-panAmplitude * verticalDirection, panAmplitude * verticalDirection]);
 
   return { scale, x, y };
 }
