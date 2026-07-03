@@ -14,7 +14,8 @@ import {
   type AudioInputProps,
   type RemotionCreator,
   type RemotionSceneInput,
-  type SubtitleStyle
+  type SubtitleStyle,
+  type GradePreset
 } from '@/lib/remotion/input-props'
 
 interface RemotionProjectPlayerProps {
@@ -55,6 +56,7 @@ export function RemotionProjectPlayer({
   const activeFps = fps || 30
   const [creator, setCreator] = useState<RemotionCreator | undefined>(undefined)
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>('kinetic')
+  const [gradePreset, setGradePreset] = useState<GradePreset>('natural')
   const playerRef = useRef<PlayerRef>(null)
 
   // Expose a minimal seek handle to the parent (used by the beat panel).
@@ -112,8 +114,13 @@ export function RemotionProjectPlayer({
     fetch('/api/settings/style')
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
-        if (cancelled || !data || typeof data.subtitleStyle !== 'string') return
-        setSubtitleStyle(data.subtitleStyle as SubtitleStyle)
+        if (cancelled || !data) return
+        if (typeof data.subtitleStyle === 'string') {
+          setSubtitleStyle(data.subtitleStyle as SubtitleStyle)
+        }
+        if (typeof data.gradePreset === 'string') {
+          setGradePreset(data.gradePreset as GradePreset)
+        }
       })
       .catch((error) => console.error('Failed to load subtitle style:', error))
 
@@ -146,6 +153,7 @@ export function RemotionProjectPlayer({
     format,
     stylePreset,
     subtitleStyle,
+    gradePreset,
     ...(hookTitle ? { hookTitle } : {}),
     creator,
     layoutSegments: resolveLayoutSegments(editPlan),

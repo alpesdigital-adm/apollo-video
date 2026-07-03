@@ -8,7 +8,8 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
-import { CreatorProfile, LayoutSegment, ColorPalette } from '../lib/types';
+import { CreatorProfile, LayoutSegment, ColorPalette, GradePreset } from '../lib/types';
+import { getGrade, getGradeOverlayLayers, composeFilter, Grade } from '../lib/grade';
 import { getImageMotion } from '../scenes/ImageInsert';
 
 /**
@@ -95,6 +96,7 @@ interface LayoutSegmentRendererProps {
   palette: ColorPalette;
   format: '9:16' | '16:9';
   creator?: CreatorProfile;
+  gradePreset?: GradePreset;
 }
 
 /**
@@ -107,12 +109,16 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
   palette,
   format,
   creator,
+  gradePreset,
 }) => {
   const { transform, filterParts } = useBaseVideoEffect(segment);
   const mediaSrc =
     typeof segment.props?.mediaSrc === 'string' ? (segment.props.mediaSrc as string) : '';
   const mediaMotion = useSegmentMediaMotion(segment, mediaSrc);
+  // bw (grayscale) takes precedence by being summed into the filter, not
+  // replacing the grade — see grade.ts composeFilter.
   const baseFilter = filterParts.length ? filterParts.join(' ') : undefined;
+  const grade = getGrade(gradePreset);
 
   if (segment.layout === 'fullscreen') {
     // Effect-only segment: base video full-canvas with zoom / grayscale applied.
@@ -129,11 +135,14 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
               objectFit: 'cover',
               transform,
               transformOrigin: 'center 35%',
-              filter: baseFilter,
+              filter: composeFilter(grade.filter, baseFilter),
               backgroundColor: palette.background,
             }}
           />
         )}
+        {getGradeOverlayLayers(grade).map((layer) => (
+          <div key={layer.key} style={layer.style} />
+        ))}
       </AbsoluteFill>
     );
   }
@@ -203,10 +212,15 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
                 objectPosition: 'center 25%',
                 transform,
                 transformOrigin: 'center 35%',
-                filter: baseFilter,
+                filter: composeFilter(grade.filter, baseFilter),
               }}
             />
           )}
+          {/* Grade overlay scoped to the base-video half only — the top-half
+              media keeps its own tempero, untouched by the narrator's grade. */}
+          {getGradeOverlayLayers(grade).map((layer) => (
+            <div key={layer.key} style={layer.style} />
+          ))}
         </div>
 
         {/* Seam divider */}
@@ -241,10 +255,15 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
               objectFit: 'cover',
               transform,
               transformOrigin: 'center 35%',
-              filter: ['blur(40px)', 'brightness(0.55)', ...filterParts].join(' '),
+              filter: composeFilter('blur(40px)', 'brightness(0.55)', grade.filter, baseFilter),
             }}
           />
         )}
+        {/* Grade overlay behind the centered media card — the card keeps its
+            own tempero, untouched by the narrator's grade. */}
+        {getGradeOverlayLayers(grade).map((layer) => (
+          <div key={layer.key} style={layer.style} />
+        ))}
         {mediaSrc && (
           <AbsoluteFill
             style={{ alignItems: 'center', justifyContent: 'center' }}
@@ -292,6 +311,7 @@ export const LayoutSegmentRenderer: React.FC<LayoutSegmentRendererProps> = ({
       creator={creator}
       baseTransform={transform}
       baseFilterParts={filterParts}
+      grade={grade}
     />
   );
 };
@@ -304,6 +324,7 @@ interface TweetCardProps {
   creator?: CreatorProfile;
   baseTransform: string;
   baseFilterParts: string[];
+  grade: Grade;
 }
 
 const TweetCard: React.FC<TweetCardProps> = ({
@@ -313,6 +334,7 @@ const TweetCard: React.FC<TweetCardProps> = ({
   creator,
   baseTransform,
   baseFilterParts,
+  grade,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -347,10 +369,14 @@ const TweetCard: React.FC<TweetCardProps> = ({
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            filter: ['blur(40px)', 'brightness(0.5)'].join(' '),
+            filter: composeFilter('blur(40px)', 'brightness(0.5)', grade.filter, baseFilterParts.join(' ')),
           }}
         />
       )}
+      {/* Grade overlay behind the card — the card itself keeps its own look. */}
+      {getGradeOverlayLayers(grade).map((layer) => (
+        <div key={layer.key} style={layer.style} />
+      ))}
 
       <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center' }}>
         <div
@@ -428,7 +454,7 @@ const TweetCard: React.FC<TweetCardProps> = ({
                   objectFit: 'cover',
                   transform: baseTransform,
                   transformOrigin: 'center 35%',
-                  filter: baseFilterParts.length ? baseFilterParts.join(' ') : undefined,
+                  filter: composeFilter(grade.filter, baseFilterParts.join(' ')),
                 }}
               />
             )}

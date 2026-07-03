@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isValidSubtitleStyle, readStylePrefs, writeStylePrefs } from '@/lib/style-prefs'
+import {
+  isValidSubtitleStyle,
+  isValidGradePreset,
+  readStylePrefs,
+  writeStylePrefs
+} from '@/lib/style-prefs'
 
 export async function GET() {
   return NextResponse.json(readStylePrefs())
@@ -25,6 +30,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'jumpCutPunchIns inválido' }, { status: 400 })
       }
       prefs.jumpCutPunchIns = body.jumpCutPunchIns
+    }
+
+    if (body?.gradePreset !== undefined) {
+      if (!isValidGradePreset(body.gradePreset)) {
+        return NextResponse.json({ error: 'gradePreset inválido' }, { status: 400 })
+      }
+      prefs.gradePreset = body.gradePreset
     }
 
     writeStylePrefs(prefs)

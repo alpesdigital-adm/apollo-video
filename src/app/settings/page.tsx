@@ -63,6 +63,36 @@ const SUBTITLE_STYLE_OPTIONS: { id: SubtitleStyle; label: string; description: s
   }
 ]
 
+type GradePreset = 'natural' | 'cinema' | 'quente' | 'frio' | 'off'
+
+const GRADE_PRESET_OPTIONS: { id: GradePreset; label: string; description: string }[] = [
+  {
+    id: 'natural',
+    label: 'Natural (padrão)',
+    description: 'Contraste e saturação sutis + leve vinheta. Corrige o cru sem parecer filtro.'
+  },
+  {
+    id: 'cinema',
+    label: 'Cinema',
+    description: 'Contraste um pouco mais firme com um split-tone discreto (teal/laranja).'
+  },
+  {
+    id: 'quente',
+    label: 'Quente',
+    description: 'Leve sépia e saturação para um tom mais quente e acolhedor.'
+  },
+  {
+    id: 'frio',
+    label: 'Frio',
+    description: 'Saturação reduzida e um toque azulado, tom mais sóbrio.'
+  },
+  {
+    id: 'off',
+    label: 'Desligado',
+    description: 'Sem correção — vídeo base exatamente como veio da câmera.'
+  }
+]
+
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 const MAX_COLOR_GROUPS = 8
 const DEFAULT_NEW_GROUP_ACCENT = '#FF6B35'
@@ -106,6 +136,7 @@ export default function SettingsPage() {
 
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>('kinetic')
   const [jumpCutPunchIns, setJumpCutPunchIns] = useState(true)
+  const [gradePreset, setGradePreset] = useState<GradePreset>('natural')
   const [styleLoading, setStyleLoading] = useState(true)
   const [styleSaveState, setStyleSaveState] = useState<SaveState>('idle')
 
@@ -305,6 +336,12 @@ export default function SettingsPage() {
         if (typeof data?.jumpCutPunchIns === 'boolean') {
           setJumpCutPunchIns(data.jumpCutPunchIns)
         }
+        if (
+          typeof data?.gradePreset === 'string' &&
+          GRADE_PRESET_OPTIONS.some((opt) => opt.id === data.gradePreset)
+        ) {
+          setGradePreset(data.gradePreset as GradePreset)
+        }
       }
     } catch (error) {
       console.error('Failed to load subtitle style:', error)
@@ -331,6 +368,28 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Failed to save subtitle style:', error)
       setSubtitleStyle(previous)
+      setStyleSaveState('error')
+    }
+  }
+
+  async function saveGradePreset(next: GradePreset) {
+    const previous = gradePreset
+    setGradePreset(next)
+    try {
+      setStyleSaveState('saving')
+      const response = await fetch('/api/settings/style', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gradePreset: next })
+      })
+      if (!response.ok) {
+        throw new Error('Falha ao salvar correção de cor')
+      }
+      setStyleSaveState('saved')
+      setTimeout(() => setStyleSaveState('idle'), 2000)
+    } catch (error) {
+      console.error('Failed to save grade preset:', error)
+      setGradePreset(previous)
       setStyleSaveState('error')
     }
   }
@@ -721,6 +780,51 @@ export default function SettingsPage() {
             )}
             {styleSaveState === 'error' && (
               <p className="text-sm text-red-400 mt-4">Falha ao salvar o estilo de legenda</p>
+            )}
+          </div>
+        )}
+
+        <h2 className="text-2xl font-bold mt-14 mb-2">
+          Correção de <span className="text-amber-400">cor</span>
+        </h2>
+        <p className="text-zinc-500 mb-6">
+          Aplica uma correção de cor ao vídeo base (o narrador) para tirar o aspecto cru da
+          câmera. Vale para o preview e para os próximos renders.
+        </p>
+
+        {styleLoading ? (
+          <div className="rounded-2xl bg-zinc-900/50 border border-zinc-800 p-8 animate-pulse h-64" />
+        ) : (
+          <div className="rounded-2xl bg-zinc-900/50 border border-zinc-800 p-8">
+            <div className="space-y-2">
+              {GRADE_PRESET_OPTIONS.map((option) => (
+                <label
+                  key={option.id}
+                  className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-colors ${
+                    gradePreset === option.id
+                      ? 'border-amber-400 bg-amber-400/5'
+                      : 'border-zinc-800 hover:border-zinc-700'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="gradePreset"
+                    checked={gradePreset === option.id}
+                    onChange={() => saveGradePreset(option.id)}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="block text-sm text-white">{option.label}</span>
+                    <span className="block text-xs text-zinc-500 mt-0.5">{option.description}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {styleSaveState === 'saved' && (
+              <p className="text-sm text-amber-400 mt-4">Correção de cor salva ✓</p>
+            )}
+            {styleSaveState === 'error' && (
+              <p className="text-sm text-red-400 mt-4">Falha ao salvar a correção de cor</p>
             )}
           </div>
         )}

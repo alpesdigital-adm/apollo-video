@@ -45,6 +45,10 @@ export type SubtitleStyle =
   | 'caps-stroke'
   | 'clean-color';
 
+// Base-video color grade preset (decupado das referências). 'natural' é o
+// padrão e substitui o cru sem parecer um filtro pesado de Instagram.
+export type GradePreset = 'natural' | 'cinema' | 'quente' | 'frio' | 'off';
+
 export type SegmentLayoutKind = 'fullscreen' | 'split-50' | 'blur-bg' | 'tweet-card';
 
 export interface LayoutSegmentEffects {
@@ -92,6 +96,8 @@ export interface CompositionProps extends Record<string, unknown> {
   stylePreset?: string;
   // Preset de estilo das legendas (default 'kinetic' = comportamento atual).
   subtitleStyle?: SubtitleStyle;
+  // Preset de correção de cor do vídeo base do narrador (default 'natural').
+  gradePreset?: GradePreset;
   // Título-hook persistente no topo do vídeo inteiro (opcional).
   hookTitle?: string;
   palette: ColorPalette;

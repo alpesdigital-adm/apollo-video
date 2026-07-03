@@ -71,6 +71,9 @@ export type SubtitleStyle =
   | 'caps-stroke'
   | 'clean-color'
 
+// Mirrors remotion/src/lib/grade.ts's GradePreset. 'natural' is the default.
+export type GradePreset = 'natural' | 'cinema' | 'quente' | 'frio' | 'off'
+
 export interface RemotionInputProps {
   scenes: RemotionSceneInput[]
   subtitles: SubtitleEntry[]
@@ -80,6 +83,7 @@ export interface RemotionInputProps {
   format: '9:16' | '16:9'
   stylePreset?: string
   subtitleStyle?: SubtitleStyle
+  gradePreset?: GradePreset
   hookTitle?: string
   creator?: RemotionCreator
   layoutSegments?: RemotionLayoutSegment[]

@@ -21,19 +21,32 @@ export const SUBTITLE_STYLES: SubtitleStyle[] = [
   'clean-color'
 ]
 
+// Base-video color grade preset. 'natural' is the DEFAULT — the raw footage
+// looks flat/undergraded without it, so an absent preference means 'natural',
+// not 'off'. Mirrors remotion/src/lib/grade.ts's GradePreset.
+export type GradePreset = 'natural' | 'cinema' | 'quente' | 'frio' | 'off'
+
+export const GRADE_PRESETS: GradePreset[] = ['natural', 'cinema', 'quente', 'frio', 'off']
+
 export interface StylePrefs {
   subtitleStyle: SubtitleStyle
   // Pacote 5: alternating punch-in scale between silence cuts (disguises jump cuts).
   jumpCutPunchIns: boolean
+  gradePreset: GradePreset
 }
 
 const DEFAULT_PREFS: StylePrefs = {
   subtitleStyle: 'kinetic',
-  jumpCutPunchIns: true
+  jumpCutPunchIns: true,
+  gradePreset: 'natural'
 }
 
 export function isValidSubtitleStyle(value: unknown): value is SubtitleStyle {
   return typeof value === 'string' && (SUBTITLE_STYLES as string[]).includes(value)
+}
+
+export function isValidGradePreset(value: unknown): value is GradePreset {
+  return typeof value === 'string' && (GRADE_PRESETS as string[]).includes(value)
 }
 
 function getDataDir(): string {
@@ -60,7 +73,10 @@ export function readStylePrefs(): StylePrefs {
       jumpCutPunchIns:
         typeof parsed?.jumpCutPunchIns === 'boolean'
           ? parsed.jumpCutPunchIns
-          : DEFAULT_PREFS.jumpCutPunchIns
+          : DEFAULT_PREFS.jumpCutPunchIns,
+      gradePreset: isValidGradePreset(parsed?.gradePreset)
+        ? parsed.gradePreset
+        : DEFAULT_PREFS.gradePreset
     }
   } catch (error) {
     console.error('Failed to read style prefs:', error)

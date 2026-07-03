@@ -142,7 +142,9 @@ export async function startProjectRender(
 
   const fps = project.videoFps || FPS
 
-  const subtitleStyle = readStylePrefs().subtitleStyle
+  const stylePrefs = readStylePrefs()
+  const subtitleStyle = stylePrefs.subtitleStyle
+  const gradePreset = stylePrefs.gradePreset
   const hookTitle =
     editPlan && typeof (editPlan as any).hookTitle === 'string' && (editPlan as any).hookTitle.trim()
       ? (editPlan as any).hookTitle
@@ -169,6 +171,7 @@ export async function startProjectRender(
     format: project.format as '9:16' | '16:9',
     stylePreset: project.stylePreset || 'creator-clean',
     subtitleStyle,
+    gradePreset,
     ...(hookTitle ? { hookTitle } : {}),
     creator: resolveCreatorForProps(readCreatorProfile(), appBaseUrl),
     layoutSegments: resolveLayoutSegments(editPlan, { baseUrl: appBaseUrl }),

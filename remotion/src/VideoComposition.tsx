@@ -9,6 +9,7 @@ import {
   useVideoConfig,
 } from 'remotion';
 import { CompositionProps, CreatorProfile, Scene } from './lib/types';
+import { getGrade, getGradeOverlayLayers, composeFilter } from './lib/grade';
 import { SubtitleOverlay } from './components/SubtitleOverlay';
 import { HookTitle } from './components/HookTitle';
 import { FullScreen } from './scenes/FullScreen';
@@ -108,9 +109,11 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   layoutSegments,
   punchIns,
   audio,
+  gradePreset,
 }) => {
   const config = useVideoConfig();
   const frame = useCurrentFrame();
+  const grade = getGrade(gradePreset);
 
   // Jump-cut punch-in: alternating scale on the base video between silence cuts.
   // Only applied on the plain base-video layer (below) — an active layout segment
@@ -338,24 +341,31 @@ export const VideoComposition: React.FC<CompositionProps> = ({
           palette={palette}
           format={format}
           creator={creator}
+          gradePreset={gradePreset}
         />
       ) : (
         videoSrc && (
-          <OffthreadVideo
-            src={videoSrc}
-            style={{
-              position: 'absolute',
-              top: isTopImageCompact ? '30%' : 0,
-              left: 0,
-              width: '100%',
-              height: isTopImageCompact ? '70%' : isSplitImageActive ? '50%' : '100%',
-              objectFit: 'cover',
-              objectPosition: isSplitImageActive ? splitVideoObjectPosition : 'center center',
-              transform: punchScale !== 1 ? `scale(${punchScale})` : undefined,
-              transformOrigin: 'center 35%',
-              backgroundColor: palette.background,
-            }}
-          />
+          <>
+            <OffthreadVideo
+              src={videoSrc}
+              style={{
+                position: 'absolute',
+                top: isTopImageCompact ? '30%' : 0,
+                left: 0,
+                width: '100%',
+                height: isTopImageCompact ? '70%' : isSplitImageActive ? '50%' : '100%',
+                objectFit: 'cover',
+                objectPosition: isSplitImageActive ? splitVideoObjectPosition : 'center center',
+                transform: punchScale !== 1 ? `scale(${punchScale})` : undefined,
+                transformOrigin: 'center 35%',
+                filter: composeFilter(grade.filter),
+                backgroundColor: palette.background,
+              }}
+            />
+            {getGradeOverlayLayers(grade).map((layer) => (
+              <div key={layer.key} style={layer.style} />
+            ))}
+          </>
         )
       )}
 
