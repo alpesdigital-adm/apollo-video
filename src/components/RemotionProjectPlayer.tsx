@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Player } from '@remotion/player'
+import { useEffect, useRef, useState } from 'react'
+import { Player, type PlayerRef } from '@remotion/player'
 import { VideoComposition } from '../../remotion/src/VideoComposition'
 import type { Scene } from '@/lib/types/scene'
 import type { SubtitleEntry, Transcription } from '@/lib/types/project'
@@ -29,6 +29,8 @@ interface RemotionProjectPlayerProps {
   palette: any
   editPlan?: { layoutSegments?: unknown; hookTitle?: unknown; punchIns?: unknown; audio?: unknown } | null
   musicPick?: { src: string; volume: number } | null
+  // Optional: parent gets a handle to seek the player to a frame (beat panel).
+  seekRef?: React.MutableRefObject<{ seekTo: (frame: number) => void } | null>
 }
 
 export function RemotionProjectPlayer({
@@ -42,13 +44,28 @@ export function RemotionProjectPlayer({
   stylePreset,
   palette,
   editPlan,
-  musicPick
+  musicPick,
+  seekRef
 }: RemotionProjectPlayerProps) {
   const compositionWidth = format === '9:16' ? 1080 : 1920
   const compositionHeight = format === '9:16' ? 1920 : 1080
   const activeFps = fps || 30
   const [creator, setCreator] = useState<RemotionCreator | undefined>(undefined)
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>('kinetic')
+  const playerRef = useRef<PlayerRef>(null)
+
+  // Expose a minimal seek handle to the parent (used by the beat panel).
+  useEffect(() => {
+    if (!seekRef) return
+    seekRef.current = {
+      seekTo: (frame: number) => {
+        playerRef.current?.seekTo(Math.max(0, Math.floor(frame)))
+      }
+    }
+    return () => {
+      seekRef.current = null
+    }
+  }, [seekRef])
 
   useEffect(() => {
     let cancelled = false
@@ -107,6 +124,7 @@ export function RemotionProjectPlayer({
 
   return (
     <Player
+      ref={playerRef}
       component={VideoComposition}
       inputProps={inputProps}
       acknowledgeRemotionLicense

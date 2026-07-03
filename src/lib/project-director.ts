@@ -67,11 +67,12 @@ function validateSceneData(
     Math.min(Math.floor(Number(sceneData.startLeg) || 0), Math.max(0, subtitles.length - 1))
   )
 
-  // durationInSubtitles: 1-3 (mesmo contrato do analyze).
+  // durationInSubtitles: 1-8. Analyze emite 1-3; o painel de batidas pode
+  // estender uma cena até 8 batidas (extend/shrink), então o teto é 8 aqui.
   if (typeof sceneData.durationInSubtitles !== 'number' || sceneData.durationInSubtitles < 1) {
     sceneData.durationInSubtitles = 2
   }
-  sceneData.durationInSubtitles = Math.max(1, Math.min(Math.floor(sceneData.durationInSubtitles), 3))
+  sceneData.durationInSubtitles = Math.max(1, Math.min(Math.floor(sceneData.durationInSubtitles), 8))
 
   // Frames são recomputados por resolveSceneTiming.
   delete sceneData.startFrame

@@ -49,6 +49,34 @@ interface ProjectData {
   renderJob?: { id: string; status: string; progress: number; error?: string } | null
 }
 
+interface BeatItem {
+  index: number
+  text: string
+  startTime: number
+  endTime: number
+  startFrame: number
+  endFrame: number
+  sceneId: string | null
+  sceneType: string | null
+  sceneSpan: { from: number; to: number } | null
+  isSpanStart: boolean
+  thumbUrl: string | null
+}
+
+// Scene models the beat panel can assign (order = dropdown order).
+const BEAT_SCENE_TYPES = [
+  'FullScreen',
+  'Card',
+  'Number',
+  'Message',
+  'Flow',
+  'CTA',
+  'SplitVertical',
+  'StickFigures',
+  'ImageInsert',
+  'AssetCard'
+]
+
 const PIPELINE_STEPS = [
   { name: 'Uploaded', status: 'created' },
   { name: 'Normalize', status: 'normalizing' },
@@ -81,6 +109,14 @@ export default function EditorPage() {
     skipped: string[]
   } | null>(null)
   const pipelineInFlight = useRef<ProjectStatus | null>(null)
+
+  // --- Beat panel state ---
+  const [beats, setBeats] = useState<BeatItem[]>([])
+  const [beatsError, setBeatsError] = useState<string | null>(null)
+  const [beatBusy, setBeatBusy] = useState<number | null>(null)
+  const [openMenu, setOpenMenu] = useState<number | null>(null)
+  const [activeBeat, setActiveBeat] = useState<number | null>(null)
+  const seekRef = useRef<{ seekTo: (frame: number) => void } | null>(null)
 
   // Load project
   useEffect(() => {
@@ -254,6 +290,62 @@ export default function EditorPage() {
       setRefineError(err instanceof Error ? err.message : 'Falha ao desfazer')
     } finally {
       setIsUndoing(false)
+    }
+  }
+
+  // Load beats once the pipeline reaches an editable state (and after edits).
+  useEffect(() => {
+    if (project && (project.status === 'ready' || project.status === 'complete')) {
+      fetchBeats()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.status])
+
+  async function fetchBeats() {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/beats`)
+      if (!response.ok) return
+      const data = await response.json()
+      if (Array.isArray(data.beats)) {
+        setBeats(data.beats)
+      }
+    } catch (err) {
+      console.error('Fetch beats error:', err)
+    }
+  }
+
+  function handleBeatClick(beat: BeatItem) {
+    setActiveBeat(beat.index)
+    seekRef.current?.seekTo(beat.startFrame)
+  }
+
+  async function handleBeatAction(
+    action: 'set' | 'remove' | 'extend' | 'shrink',
+    beatIndex: number,
+    sceneType?: string
+  ) {
+    setBeatsError(null)
+    setOpenMenu(null)
+    setBeatBusy(beatIndex)
+    try {
+      const response = await fetch(`/api/projects/${projectId}/beats/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, beatIndex, sceneType })
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.error || 'Falha ao ajustar a batida')
+      }
+      if (Array.isArray(data.beats)) {
+        setBeats(data.beats)
+      }
+      await loadProject()
+      await fetchBeats()
+    } catch (err) {
+      setBeatsError(err instanceof Error ? err.message : 'Falha ao ajustar a batida')
+    } finally {
+      setBeatBusy(null)
     }
   }
 
@@ -511,6 +603,7 @@ export default function EditorPage() {
                     }
                     editPlan={project.editPlan}
                     musicPick={project.musicPick}
+                    seekRef={seekRef}
                   />
                 </div>
               )}
@@ -544,84 +637,163 @@ export default function EditorPage() {
               )}
             </div>
 
-            {/* Right: Scene Editor */}
+            {/* Right: Painel de Batidas */}
             <div className="col-span-7">
               <div className="space-y-4">
-                <h3 className="font-bold text-lg">Scenes</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-lg">Batidas</h3>
+                  <span className="text-xs text-zinc-500">{beats.length} batidas</span>
+                </div>
 
-                <div className="max-h-96 overflow-y-auto space-y-3 pr-4">
-                  {project.scenes && project.scenes.length > 0 ? (
-                    project.scenes.map((scene) => (
-                      <div
-                        key={scene.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setSelectedScene(scene)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault()
-                            setSelectedScene(scene)
-                          }
-                        }}
-                        className={`w-full text-left p-4 rounded-lg border transition-all ${
-                          selectedScene?.id === scene.id
-                            ? 'bg-amber-400/10 border-amber-400'
-                            : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-lg">{getSceneTypeIcon(scene.type)}</span>
-                              <span className="font-semibold text-sm">{scene.type}</span>
-                              {(scene as any).narrativeRole && (
-                                <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
-                                  {formatRoleLabel((scene as any).narrativeRole)}
-                                </span>
-                              )}
-                              {(scene as any).visualRole && (
-                                <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-300">
-                                  {formatRoleLabel((scene as any).visualRole)}
-                                </span>
+                {beatsError && (
+                  <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/50 text-sm text-red-400">
+                    {beatsError}
+                  </div>
+                )}
+
+                <div className="max-h-[32rem] overflow-y-auto space-y-2 pr-2">
+                  {beats.length > 0 ? (
+                    beats.map((beat) => {
+                      const isContinuation = Boolean(beat.sceneId) && !beat.isSpanStart
+                      const busy = beatBusy === beat.index
+                      const spanSize = beat.sceneSpan
+                        ? beat.sceneSpan.to - beat.sceneSpan.from + 1
+                        : 0
+
+                      return (
+                        <div
+                          key={beat.index}
+                          className={`relative rounded-lg border transition-all ${
+                            activeBeat === beat.index
+                              ? 'border-amber-400 bg-amber-400/10'
+                              : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
+                          } ${isContinuation ? 'border-l-2 border-l-amber-500/60 ml-3' : ''}`}
+                        >
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => handleBeatClick(beat)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                handleBeatClick(beat)
+                              }
+                            }}
+                            className="flex items-start gap-3 p-2.5 cursor-pointer"
+                          >
+                            {/* Thumbnail */}
+                            <div className="shrink-0 w-[72px] h-[40px] rounded bg-black/60 overflow-hidden border border-zinc-800 flex items-center justify-center">
+                              {beat.thumbUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={beat.thumbUrl}
+                                  alt={`batida ${beat.index + 1}`}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <span className="text-[10px] text-zinc-600">sem thumb</span>
                               )}
                             </div>
-                            <p className="text-xs text-zinc-400 line-clamp-2">
-                              {(scene as any).text ||
-                                (scene as any).imageAlt ||
-                                (scene as any).imagePrompt ||
-                                (scene as any).title ||
-                                (scene as any).message ||
-                                'Scene content'}
-                            </p>
-                          </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              const newScenes = project.scenes.filter(
-                                (s) => s.id !== scene.id
-                              )
-                              setProject({ ...project, scenes: newScenes })
-                            }}
-                            className="p-1 rounded hover:bg-red-500/20 text-red-400"
-                          >
-                            <svg
-                              className="w-4 h-4"
-                              fill="currentColor"
-                              viewBox="0 0 20 20"
+
+                            {/* Content */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-[11px] font-mono text-zinc-500">
+                                  #{beat.index + 1}
+                                </span>
+                                {isContinuation ? (
+                                  <span className="text-[10px] text-amber-400/80">↳ continuação</span>
+                                ) : beat.sceneType ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+                                    <span>{getSceneTypeIcon(beat.sceneType)}</span>
+                                    <span>{beat.sceneType}</span>
+                                    {spanSize > 1 && (
+                                      <span className="text-amber-400/70">×{spanSize}</span>
+                                    )}
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-zinc-600">∅ sem cena</span>
+                                )}
+                              </div>
+                              <p className="text-xs text-zinc-300 line-clamp-2">{beat.text}</p>
+                            </div>
+
+                            {/* Menu button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setOpenMenu(openMenu === beat.index ? null : beat.index)
+                              }}
+                              disabled={busy}
+                              className="shrink-0 p-1.5 rounded hover:bg-zinc-700/60 text-zinc-400 disabled:opacity-40"
                             >
-                              <path
-                                fillRule="evenodd"
-                                d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                                clipRule="evenodd"
-                              />
-                            </svg>
-                          </button>
+                              {busy ? (
+                                <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-amber-400" />
+                              ) : (
+                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                  <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Extend / shrink controls (only on the span start) */}
+                          {beat.isSpanStart && beat.sceneId && (
+                            <div className="flex items-center gap-2 px-2.5 pb-2.5">
+                              <button
+                                type="button"
+                                onClick={() => handleBeatAction('shrink', beat.index)}
+                                disabled={busy || spanSize <= 1}
+                                className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[11px] disabled:opacity-40"
+                              >
+                                −1 batida
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleBeatAction('extend', beat.index)}
+                                disabled={busy || spanSize >= 8}
+                                className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[11px] disabled:opacity-40"
+                              >
+                                +1 batida
+                              </button>
+                              <span className="text-[10px] text-zinc-600">
+                                {spanSize} batida{spanSize > 1 ? 's' : ''}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Dropdown de modelo */}
+                          {openMenu === beat.index && (
+                            <div className="absolute right-2 top-11 z-20 w-48 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl py-1">
+                              {beat.sceneId && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleBeatAction('remove', beat.index)}
+                                  className="w-full text-left px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
+                                >
+                                  ∅ Remover cena
+                                </button>
+                              )}
+                              {BEAT_SCENE_TYPES.map((type) => (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  onClick={() => handleBeatAction('set', beat.index, type)}
+                                  className="w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                                >
+                                  <span>{getSceneTypeIcon(type)}</span>
+                                  <span>{type}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))
+                      )
+                    })
                   ) : (
                     <div className="text-center py-8 text-zinc-500">
-                      <p>No scenes yet</p>
+                      <p>Carregando batidas...</p>
                     </div>
                   )}
                 </div>
