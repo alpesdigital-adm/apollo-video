@@ -70,6 +70,8 @@ export default function EditorPage() {
   const [isRefining, setIsRefining] = useState(false)
   const [isRendering, setIsRendering] = useState(false)
   const [isUndoing, setIsUndoing] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [refineError, setRefineError] = useState<string | null>(null)
   const [directorResult, setDirectorResult] = useState<{
     summary: string
@@ -253,6 +255,31 @@ export default function EditorPage() {
     }
   }
 
+  async function handleDeleteProject() {
+    if (!project) return
+
+    const confirmed = window.confirm(
+      `Excluir o projeto "${project.name}"? Todos os arquivos de vídeo e mídia associados serão apagados permanentemente. Esta ação não pode ser desfeita.`
+    )
+    if (!confirmed) return
+
+    setDeleteError(null)
+    try {
+      setIsDeleting(true)
+      const response = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.error || 'Falha ao excluir o projeto')
+      }
+      router.push('/')
+    } catch (err) {
+      console.error('Delete project failed:', err)
+      setDeleteError(err instanceof Error ? err.message : 'Falha ao excluir o projeto')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   function getPipelineProgress() {
     const statusIndex = PIPELINE_STEPS.findIndex((s) => s.status === project?.status)
     if (project?.status === 'complete') return PIPELINE_STEPS.length
@@ -355,10 +382,24 @@ export default function EditorPage() {
               </span>
             )}
           </div>
+          <button
+            type="button"
+            onClick={handleDeleteProject}
+            disabled={isDeleting}
+            className="text-xs text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-50"
+          >
+            {isDeleting ? 'Excluindo...' : '🗑 Excluir projeto'}
+          </button>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
+        {deleteError && (
+          <div className="mb-6 p-4 rounded-lg bg-red-500/10 border border-red-500/50 text-sm text-red-400">
+            {deleteError}
+          </div>
+        )}
+
         {/* Pipeline Progress */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">

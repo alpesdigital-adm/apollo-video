@@ -24,6 +24,8 @@ export default function Dashboard() {
   const [dragActive, setDragActive] = useState(false)
   const [selectedStylePreset, setSelectedStylePreset] =
     useState<InsertStylePreset>(DEFAULT_INSERT_STYLE_PRESET)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // Load recent projects
   useEffect(() => {
@@ -108,6 +110,32 @@ export default function Dashboard() {
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
       handleUpload(e.target.files[0])
+    }
+  }
+
+  async function handleDeleteProject(e: React.MouseEvent, project: Project) {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const confirmed = window.confirm(
+      `Excluir o projeto "${project.name}"? Todos os arquivos de vídeo e mídia associados serão apagados permanentemente. Esta ação não pode ser desfeita.`
+    )
+    if (!confirmed) return
+
+    setDeleteError(null)
+    try {
+      setDeletingId(project.id)
+      const response = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.error || 'Falha ao excluir o projeto')
+      }
+      setProjects((prev) => prev.filter((p) => p.id !== project.id))
+    } catch (error) {
+      console.error('Delete project failed:', error)
+      setDeleteError(error instanceof Error ? error.message : 'Falha ao excluir o projeto')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -263,6 +291,12 @@ export default function Dashboard() {
         <div>
           <h2 className="text-2xl font-bold mb-6">Recent Projects</h2>
 
+          {deleteError && (
+            <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/50 text-sm text-red-400">
+              {deleteError}
+            </div>
+          )}
+
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {[...Array(6)].map((_, i) => (
@@ -275,13 +309,41 @@ export default function Dashboard() {
           ) : projects.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {projects.map((project) => (
-                <button
+                <div
                   key={project.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => router.push(`/project/${project.id}`)}
-                  className="group text-left p-6 rounded-xl bg-zinc-900/50 border border-zinc-800 hover:border-amber-400/50 transition-all hover:bg-zinc-900/80"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      router.push(`/project/${project.id}`)
+                    }
+                  }}
+                  className="group relative text-left p-6 rounded-xl bg-zinc-900/50 border border-zinc-800 hover:border-amber-400/50 transition-all hover:bg-zinc-900/80 cursor-pointer"
                 >
+                  <button
+                    type="button"
+                    onClick={(e) => handleDeleteProject(e, project)}
+                    disabled={deletingId === project.id}
+                    title="Excluir projeto"
+                    aria-label={`Excluir projeto ${project.name}`}
+                    className="absolute top-3 right-3 p-2 rounded-lg text-zinc-500 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50"
+                  >
+                    {deletingId === project.id ? (
+                      <span className="inline-block w-4 h-4 animate-spin rounded-full border-b-2 border-red-400" />
+                    ) : (
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path
+                          fillRule="evenodd"
+                          d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    )}
+                  </button>
                   <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1">
+                    <div className="flex-1 pr-6">
                       <h3 className="font-bold text-lg truncate group-hover:text-amber-400 transition-colors">
                         {project.name}
                       </h3>
@@ -307,7 +369,7 @@ export default function Dashboard() {
                       />
                     </svg>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           ) : (
