@@ -203,12 +203,18 @@ export async function detectSilences(
   }
 }
 
+// Margin (seconds) shaved off both edges of a silence before it becomes a
+// cut, so speech immediately adjacent to the silence never gets clipped.
+// Exported so callers computing cut boundaries ahead of time (e.g. retake
+// removal) can account for this shrink instead of being silently undone by it.
+export const AUTOCUT_MARGIN = 0.12
+
 export function selectAutoCutSilences(
   silences: Silence[],
   options: { minDuration?: number; margin?: number } = {}
 ): Silence[] {
   const minDuration = options.minDuration ?? 0.55
-  const margin = options.margin ?? 0.12
+  const margin = options.margin ?? AUTOCUT_MARGIN
 
   return silences
     .filter((silence) => silence.duration >= minDuration + margin * 2)

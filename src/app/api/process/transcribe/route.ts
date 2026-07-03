@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { cutSilencesFromVideo, detectSilences, extractAudio, generatePreviewProxy } from '@/lib/services/ffmpeg'
 import { getPreferredTranscriptionAudioExtension, transcribeAudio } from '@/lib/services/whisper'
 import { generateSubtitlesFromTranscription } from '@/lib/utils/silence'
+import { expandCutsForRetakes } from '@/lib/retake-removal'
 import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
 import { runSubtitleAnchors } from '@/lib/beat-vision'
 import type { Silence } from '@/lib/types/project'
@@ -98,6 +99,20 @@ export async function POST(request: NextRequest) {
       const silenceThreshold = Number(process.env.AUTO_CUT_SILENCE_DB || -35)
       const silenceDuration = Number(process.env.AUTO_CUT_MIN_SILENCE || 0.55)
       silences = await detectSilences(tempAudioPath, silenceThreshold, silenceDuration)
+
+      // Narrator false starts ("e aí você... e aí você percebe") repeat the same
+      // words across a short pause. Autocut would otherwise only remove the
+      // pause, splicing both spoken attempts together and duplicating words at
+      // the cut. Extend the silence backwards to swallow the aborted attempt
+      // too, using word-level timestamps to find the repetition.
+      const retakes = expandCutsForRetakes(silences, transcription)
+      silences = retakes.silences
+      if (retakes.removed.length > 0) {
+        console.log(
+          `[transcribe] retake-removal: swallowed ${retakes.removed.length} false start(s) for project ${projectId}`,
+          retakes.removed
+        )
+      }
 
       // Cut the actual media and shift transcript timings to the new edited timeline.
       cutPath = path.join(uploadDir, `${projectId}-autocut.mp4`)
