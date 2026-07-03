@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { cutSilencesFromVideo, detectSilences, extractAudio } from '@/lib/services/ffmpeg'
+import { cutSilencesFromVideo, detectSilences, extractAudio, generatePreviewProxy } from '@/lib/services/ffmpeg'
 import { getPreferredTranscriptionAudioExtension, transcribeAudio } from '@/lib/services/whisper'
 import { generateSubtitlesFromTranscription } from '@/lib/utils/silence'
 import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
@@ -142,6 +142,29 @@ export async function POST(request: NextRequest) {
         status: 'analyzing'
       }
     })
+
+    // Best-effort: generate a lightweight preview proxy for the browser player
+    // when the working (autocut) file is large. Never blocks or fails the route.
+    if (!skipAutoCut && cutPath !== sourceVideoPath) {
+      try {
+        const previewMinBytes = Number(process.env.PREVIEW_PROXY_MIN_MB || 150) * 1024 * 1024
+        if (fs.statSync(cutPath).size > previewMinBytes) {
+          const proxyPath = path.join(uploadDir, `${projectId}-proxy.mp4`)
+          const proxyTmpPath = path.join(uploadDir, `${projectId}-proxy.tmp.mp4`)
+
+          generatePreviewProxy(cutPath, proxyTmpPath)
+            .then(() => {
+              fs.renameSync(proxyTmpPath, proxyPath)
+              console.log(`Preview proxy generated for project ${projectId}`)
+            })
+            .catch((proxyError) => {
+              console.warn(`Preview proxy generation failed for project ${projectId}:`, proxyError)
+            })
+        }
+      } catch (statError) {
+        console.warn(`Preview proxy check failed for project ${projectId}:`, statError)
+      }
+    }
 
     // Clean up temp audio file
     if (fs.existsSync(tempAudioPath)) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { createReadStream, statSync } from 'fs'
 import { existsSync } from 'fs'
+import path from 'path'
 
 export async function GET(
   request: NextRequest,
@@ -24,12 +25,21 @@ export async function GET(
     }
 
     const source = request.nextUrl.searchParams.get('source')
-    const videoPath =
-      source === 'raw'
-        ? project.rawVideoPath
-        : source === 'primary'
-          ? project.normalizedPath || project.rawVideoPath
-          : project.renderedVideoPath || project.normalizedPath || project.rawVideoPath
+
+    let videoPath: string | null
+    if (source === 'preview') {
+      const uploadDir = path.join(process.cwd(), 'public', 'uploads')
+      const proxyPath = path.join(uploadDir, `${videoId}-proxy.mp4`)
+      videoPath = existsSync(proxyPath)
+        ? proxyPath
+        : project.normalizedPath || project.rawVideoPath
+    } else if (source === 'raw') {
+      videoPath = project.rawVideoPath
+    } else if (source === 'primary') {
+      videoPath = project.normalizedPath || project.rawVideoPath
+    } else {
+      videoPath = project.renderedVideoPath || project.normalizedPath || project.rawVideoPath
+    }
 
     if (!videoPath || !existsSync(videoPath)) {
       return NextResponse.json({ error: 'Video file not found' }, { status: 404 })

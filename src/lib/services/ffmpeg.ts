@@ -108,6 +108,43 @@ export async function normalizeVideo(
   }
 }
 
+export async function generatePreviewProxy(
+  inputPath: string,
+  outputPath: string
+): Promise<void> {
+  try {
+    await execFileAsync(ffmpegPath, [
+      '-i',
+      inputPath,
+      // Downscale para um proxy leve de preview (lado menor <= 720, aspecto
+      // preservado). O render continua usando o arquivo de trabalho 1080p;
+      // isto é só para o player do navegador não sufocar com arquivos pesados.
+      '-vf',
+      "scale=w='if(gte(ih,iw),min(iw,720),-2)':h='if(gte(ih,iw),-2,min(ih,720))':flags=lanczos",
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-crf',
+      '30',
+      '-r',
+      '30',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '96k',
+      '-movflags',
+      '+faststart',
+      '-y',
+      outputPath
+    ])
+  } catch (error) {
+    throw new Error(`Failed to generate preview proxy: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 function getAudioEncodeArgs(outputPath: string): string[] {
   const extension = path.extname(outputPath).toLowerCase()
 

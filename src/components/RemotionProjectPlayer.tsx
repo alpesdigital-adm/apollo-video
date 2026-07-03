@@ -70,7 +70,7 @@ export function RemotionProjectPlayer({
     subtitles: normalizeSubtitleWords(subtitles),
     transcription: transcription || { text: '', language: 'pt', segments: [] },
     palette,
-    videoSrc: `/api/video/${projectId}?source=primary`,
+    videoSrc: `/api/video/${projectId}?source=preview`,
     format,
     stylePreset,
     creator,
