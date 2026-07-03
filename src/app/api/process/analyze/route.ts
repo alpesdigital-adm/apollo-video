@@ -5,6 +5,8 @@ import { generateImageInsertAssets } from '@/lib/services/image-generation'
 import { narrativeEngine } from '@/lib/engines/narrative-engine'
 import { acquireStepLock, releaseStepLock } from '@/lib/pipeline-lock'
 import { curateSceneDensity, resolveSceneTiming } from '@/lib/utils/timing'
+import { pickBrandGroup, readBrandColors } from '@/lib/brand-colors'
+import type { AnalyzeContentBrandColors } from '@/lib/services/claude'
 import type { Silence, SubtitleEntry, Transcription } from '@/lib/types/project'
 import type { Scene } from '@/lib/types/scene'
 
@@ -87,12 +89,28 @@ export async function POST(request: NextRequest) {
         ? body.closeUpTalkingHead
         : shouldUseCloseUpCompactLayout(project, format)
 
+    // Resolve brand color groups configured in /settings. Round-robin mode
+    // picks the group in code (advancing the rotation); ai-pick mode hands
+    // the groups to Claude and lets it choose one. No groups configured ->
+    // behavior is unchanged (Claude invents the palette).
+    const brandColorsConfig = readBrandColors()
+    let brandColors: AnalyzeContentBrandColors | undefined
+    if (brandColorsConfig.groups.length > 0) {
+      if (brandColorsConfig.mode === 'round-robin') {
+        const forced = pickBrandGroup(brandColorsConfig, true)
+        brandColors = forced ? { groups: brandColorsConfig.groups, forced } : undefined
+      } else {
+        brandColors = { groups: brandColorsConfig.groups }
+      }
+    }
+
     // Call Claude API to analyze content and generate scenes
     const analysisResult = await analyzeContent(
       transcription.text,
       format,
       subtitles,
-      stylePreset
+      stylePreset,
+      brandColors
     )
 
     // Resolve scene timing - convert startLeg to actual frame numbers
@@ -149,7 +167,8 @@ export async function POST(request: NextRequest) {
       palette: analysisResult.palette,
       narrativeFormat: analysisResult.narrativeFormat,
       engine: editPlan.engine,
-      editPlan
+      editPlan,
+      ...(analysisResult.colorGroup ? { colorGroup: analysisResult.colorGroup } : {})
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Analysis failed'

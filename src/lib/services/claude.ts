@@ -8,6 +8,12 @@ import path from 'path'
 import { getInsertStylePresetMeta } from '../style-presets'
 import type { Transcription, SubtitleEntry, VideoFormat } from '../types/project'
 import type { Scene, AnalysisResult, NarrativeRole, SceneType, ColorPalette } from '../types/scene'
+import type { BrandColorGroup } from '../brand-colors'
+
+export interface AnalyzeContentBrandColors {
+  groups: BrandColorGroup[]
+  forced?: BrandColorGroup
+}
 
 function readEnvFileValue(filePath: string, key: string): string | null {
   if (!fs.existsSync(filePath)) {
@@ -396,17 +402,119 @@ export function normalizeTypographicScene(sceneData: any): any | null {
 }
 
 /**
+ * Build the prompt fragment that instructs Claude how to handle the color
+ * palette when the user has configured brand color groups in /settings.
+ * Returns '' when no brand colors are configured (palette stays AI-invented,
+ * preserving the previous behavior).
+ */
+function buildBrandColorPromptSection(brandColors?: AnalyzeContentBrandColors): string {
+  if (!brandColors) return ''
+
+  if (brandColors.forced) {
+    const g = brandColors.forced
+    return `
+
+GRUPO DE CORES DA MARCA (OBRIGATÓRIO — o usuário já definiu, NÃO invente uma paleta diferente):
+Use exatamente o grupo "${g.name}": accent=${g.accent}${g.primary ? `, primary=${g.primary}` : ''}${g.background ? `, background=${g.background}` : ''}${g.text ? `, text=${g.text}` : ''}.
+No JSON de resposta, o campo "accent" da paleta DEVE ser exatamente ${g.accent}.
+${g.primary ? `O campo "primary" DEVE ser exatamente ${g.primary}.` : 'Escolha "primary" em harmonia com o accent acima.'}
+${g.background ? `O campo "background" DEVE ser exatamente ${g.background}.` : 'Escolha "background" com bom contraste para o accent e para o texto.'}
+${g.text ? `O campo "text" DEVE ser exatamente ${g.text}.` : 'Escolha "text" com alto contraste sobre o background.'}`
+  }
+
+  if (brandColors.groups.length > 0) {
+    const list = brandColors.groups
+      .map((g) => {
+        const parts = [`accent=${g.accent}`]
+        if (g.primary) parts.push(`primary=${g.primary}`)
+        if (g.background) parts.push(`background=${g.background}`)
+        if (g.text) parts.push(`text=${g.text}`)
+        return `- "${g.name}": ${parts.join(', ')}`
+      })
+      .join('\n')
+    return `
+
+GRUPOS DE CORES DA MARCA (o usuário já cadastrou estes grupos — ESCOLHA OBRIGATORIAMENTE UM deles, NÃO invente uma paleta nova):
+${list}
+Escolha o grupo que combina melhor com o tom/conteúdo deste vídeo específico. No JSON de resposta, inclua um campo adicional "chosenColorGroup" com o NOME EXATO do grupo escolhido (ex.: "chosenColorGroup": "${brandColors.groups[0].name}").
+O campo "accent" da paleta retornada DEVE ser exatamente o accent do grupo escolhido. Para primary/background/text: quando o grupo define o valor, use-o exatamente; quando não define, complete com harmonia e bom contraste.`
+  }
+
+  return ''
+}
+
+/**
+ * Resolve the final palette, applying a forced or AI-chosen brand color group
+ * on top of whatever Claude returned. Guarantees the accent (and any other
+ * fixed fields) of a configured group is never overridden by model drift.
+ */
+function resolvePaletteWithBrandColors(
+  analysisData: any,
+  brandColors?: AnalyzeContentBrandColors
+): { palette: ColorPalette; colorGroup?: string } {
+  const rawPalette = analysisData?.palette
+  const basePalette: ColorPalette = {
+    primary: typeof rawPalette?.primary === 'string' ? rawPalette.primary : '#0066FF',
+    secondary: typeof rawPalette?.secondary === 'string' ? rawPalette.secondary : '#0052CC',
+    accent: typeof rawPalette?.accent === 'string' ? rawPalette.accent : '#FF6B35',
+    background: typeof rawPalette?.background === 'string' ? rawPalette.background : '#FFFFFF',
+    text: typeof rawPalette?.text === 'string' ? rawPalette.text : '#000000'
+  }
+
+  if (!brandColors) {
+    return { palette: basePalette }
+  }
+
+  const applyGroup = (group: BrandColorGroup): { palette: ColorPalette; colorGroup?: string } => ({
+    palette: {
+      ...basePalette,
+      accent: group.accent,
+      primary: group.primary || basePalette.primary,
+      background: group.background || basePalette.background,
+      text: group.text || basePalette.text
+    },
+    colorGroup: group.name
+  })
+
+  if (brandColors.forced) {
+    return applyGroup(brandColors.forced)
+  }
+
+  if (brandColors.groups.length > 0) {
+    const chosenValue = typeof analysisData?.chosenColorGroup === 'string' ? analysisData.chosenColorGroup.trim() : ''
+    const chosenLower = chosenValue.toLowerCase()
+    const matched =
+      brandColors.groups.find((g) => g.name.trim().toLowerCase() === chosenLower) ||
+      brandColors.groups.find((g) => g.id === chosenValue) ||
+      brandColors.groups.find(
+        (g) => g.accent.toLowerCase() === String(rawPalette?.accent || '').toLowerCase()
+      )
+
+    // If Claude failed to identify a valid group, default to the first one —
+    // never fall back to an AI-invented palette when groups are configured.
+    return applyGroup(matched || brandColors.groups[0])
+  }
+
+  return { palette: basePalette }
+}
+
+/**
  * Analyze transcription to generate video scene structure
  * Uses Claude to determine narrative format, color palette, and scene breakdown
  * @param transcriptionText The transcribed text content
  * @param format Video format ('9:16' for vertical, '16:9' for horizontal)
+ * @param brandColors Optional brand color groups from /settings. When provided
+ *   with `forced`, that group's colors are used as-is (round-robin mode). When
+ *   provided with only `groups`, Claude picks one (ai-pick mode). When omitted,
+ *   the palette is fully AI-invented (previous behavior).
  * @returns AnalysisResult with narrative format, palette, and scenes
  */
 export async function analyzeContent(
   transcriptionText: string,
   format: VideoFormat,
   subtitles: SubtitleEntry[],
-  stylePreset: string = 'creator-clean'
+  stylePreset: string = 'creator-clean',
+  brandColors?: AnalyzeContentBrandColors
 ): Promise<AnalysisResult> {
   try {
     // For simplicity in the initial analysis, we'll work with the text
@@ -468,7 +576,7 @@ ImageInsert (quando usado):
 - narrativeRole: "hook", "context", "proof", "process", "objection", "decision" ou "cta" (metadado editorial). visualRole: "evidence", "contrast", "process", "context" ou "decision".
 - Evite visuais genéricos de stock/IA (estradas vazias, barras de busca brilhando, nós de rede abstratos, mãos perfeitas digitando, interfaces falsas, diagramas isométricos, metáforas surreais, sorrisos plásticos).
 
-Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysisTone}.`
+Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysisTone}.${buildBrandColorPromptSection(brandColors)}`
 
     const numberedSubtitles = subtitles
       .map((subtitle, index) => `${index}: [${subtitle.startTime.toFixed(2)}s] ${subtitle.text}`)
@@ -485,7 +593,7 @@ ${transcriptionText}
 Numbered subtitle timeline:
 ${numberedSubtitles}
 
-Responda com um objeto JSON contendo narrativeFormat, palette e scenes.
+Responda com um objeto JSON contendo narrativeFormat, palette e scenes${brandColors && brandColors.groups.length > 0 && !brandColors.forced ? ' (e chosenColorGroup — obrigatório neste caso, ver instruções de grupos de cores da marca acima)' : ''}.
 Cada cena carrega SEMPRE: id, type, startLeg (índice inteiro 0-based da legenda), durationInSubtitles (1-3) e as props do seu tipo.
 
 Formato:
@@ -617,16 +725,13 @@ Garanta que o JSON seja válido e completo.`
       })
       .filter((scene: Scene | null): scene is Scene => scene !== null)
 
+    const { palette, colorGroup } = resolvePaletteWithBrandColors(analysisData, brandColors)
+
     return {
       narrativeFormat: analysisData.narrativeFormat || 'Professional video content',
-      palette: analysisData.palette || {
-        primary: '#0066FF',
-        secondary: '#0052CC',
-        accent: '#FF6B35',
-        background: '#FFFFFF',
-        text: '#000000'
-      },
-      scenes: validatedScenes
+      palette,
+      scenes: validatedScenes,
+      ...(colorGroup ? { colorGroup } : {})
     }
   } catch (error) {
     throw new Error(`Content analysis failed: ${error instanceof Error ? error.message : String(error)}`)

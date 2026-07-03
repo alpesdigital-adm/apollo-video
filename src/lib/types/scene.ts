@@ -143,4 +143,5 @@ export interface AnalysisResult {
   narrativeFormat: string
   palette: ColorPalette
   scenes: Scene[]
+  colorGroup?: string
 }
