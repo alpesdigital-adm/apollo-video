@@ -86,29 +86,116 @@ export function smartFontSize(text: string, base: number, min: number): number {
   return Math.max(min, base - 24);
 }
 
-export function splitLines(text: string, maxLines = 3): string[] {
+function greedyWrapAtWidth(words: string[], maxWidth: number): string[] {
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (current && next.length > maxWidth) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = next;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function hasOrphanLine(lines: string[]): boolean {
+  return lines.length > 1 && lines.some((line) => !line.includes(' '));
+}
+
+/**
+ * Splits `words` into `lineCount` contiguous, as-even-as-possible groups by
+ * WORD COUNT (not character length) — 5 words over 2 lines is [3, 2], never a
+ * lopsided [4, 1]. This is what keeps a short trailing word from ever being
+ * stranded alone when a more even split is possible.
+ */
+function evenWordGroups(words: string[], lineCount: number): string[][] {
+  const n = words.length;
+  const base = Math.floor(n / lineCount);
+  const extra = n % lineCount;
+  const groups: string[][] = [];
+  let idx = 0;
+  for (let i = 0; i < lineCount; i++) {
+    const size = base + (i < extra ? 1 : 0);
+    if (size === 0) continue;
+    groups.push(words.slice(idx, idx + size));
+    idx += size;
+  }
+  return groups;
+}
+
+/**
+ * Wrap `text` into at most `maxLines` lines. Primary strategy: the fewest
+ * lines whose EVEN word-count split (3+2, not 1+1+3) fits the caller's
+ * legible column width (`maxWidth`) — this is what keeps "5 words" reading
+ * as 3+2 instead of a greedy left-to-right wrap that strands a lone short
+ * word. Falls back to a width-minimizing greedy wrap (widened past `maxWidth`
+ * if needed) only when no even split fits, e.g. one very long word — and
+ * even then copy is never dropped, only wrapped wide. Typography/sizing is
+ * untouched; this only changes how a fitted string is broken into lines.
+ */
+export function splitLines(text: string, maxLines = 3, maxWidth?: number): string[] {
   const cleaned = compactText(text, maxLines === 1 ? 42 : 96);
   const existingLines = cleaned.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   if (existingLines.length > 1) {
     return existingLines.slice(0, maxLines);
   }
 
-  const words = cleaned.split(' ');
-  const lines: string[] = [];
-  let line = '';
-  const target = Math.ceil(cleaned.length / maxLines);
+  const words = cleaned.split(' ').filter(Boolean);
+  if (words.length <= 1) {
+    return words;
+  }
 
-  for (const word of words) {
-    const next = line ? `${line} ${word}` : word;
-    if (next.length > target && line && lines.length < maxLines - 1) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = next;
+  const totalLen = cleaned.length;
+  const cap = Math.max(1, maxWidth ?? Math.ceil(totalLen / maxLines));
+
+  // Prefer the fewest lines whose even word-count split fits the column.
+  const upperLineCount = Math.min(maxLines, words.length);
+  for (let lineCount = 1; lineCount <= upperLineCount; lineCount++) {
+    const candidate = evenWordGroups(words, lineCount).map((g) => g.join(' '));
+    if (candidate.every((line) => line.length <= cap)) {
+      return candidate;
     }
   }
 
-  if (line) lines.push(line);
+  // No even split fits the column (e.g. one very long word): fall back to a
+  // width-minimizing greedy wrap. Copy is never dropped: if even `cap` can't
+  // fit everything within maxLines, widen the search ceiling all the way to
+  // totalLen rather than silently truncating trailing lines.
+  const maxWordLen = Math.max(...words.map((w) => w.length));
+  const widthCeiling = greedyWrapAtWidth(words, cap).length <= maxLines ? cap : totalLen;
+
+  let lo = Math.min(maxWordLen, widthCeiling);
+  let hi = widthCeiling;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (greedyWrapAtWidth(words, mid).length <= maxLines) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+
+  let lines = greedyWrapAtWidth(words, lo);
+
+  // Widen a few steps (never past `widthCeiling`) to merge away a lone
+  // single-word line — unavoidable only for a single very long word or when
+  // there simply aren't enough words to redistribute.
+  let guard = 0;
+  while (hasOrphanLine(lines) && lo < widthCeiling && guard < 20) {
+    lo += 1;
+    const wrapped = greedyWrapAtWidth(words, lo);
+    if (wrapped.length > maxLines) break;
+    lines = wrapped;
+    guard += 1;
+  }
+
+  // Safety net: widthCeiling guarantees `lines.length <= maxLines` already,
+  // so this slice is a no-op in practice — kept defensive, never a source of
+  // silent word loss (unlike the old cap-only version).
   return lines.slice(0, maxLines);
 }
 
@@ -266,7 +353,7 @@ export const KineticText: React.FC<KineticTextProps> = ({
   const charsPerLine = Math.max(8, Math.floor(KINETIC_CONTENT_WIDTH / (fontSize * 0.56)));
   const capacity = charsPerLine * resolvedMaxLines;
   const fitted = clean.length > capacity ? compactText(clean, capacity) : clean;
-  const lines = splitLines(fitted, resolvedMaxLines);
+  const lines = splitLines(fitted, resolvedMaxLines, charsPerLine);
 
   const highlightSet = new Set(
     String(highlight || '')

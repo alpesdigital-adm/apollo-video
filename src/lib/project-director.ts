@@ -16,6 +16,7 @@ import { mkdir, readFile, writeFile, unlink } from 'fs/promises'
 import path from 'path'
 import {
   VALID_SCENE_TYPES,
+  cleanCopyText,
   normalizeNarrativeRole,
   normalizeSceneTactics,
   normalizeSegmentFields,
@@ -284,8 +285,9 @@ export function applyDirectorOperations(
           skipped.push('Título-hook inválido — ignorado')
           break
         }
-        // Cap at 10 words to match the analyze contract.
-        const capped = raw.replace(/\s+/g, ' ').trim().split(' ').slice(0, 10).join(' ')
+        // Cap at 10 words to match the analyze contract; strip AI-dash and
+        // emoji noise the same way every other copy field does.
+        const capped = cleanCopyText(raw).split(' ').slice(0, 10).join(' ')
         hookTitleChange = { value: capped }
         applied.push('Título-hook atualizado')
         break

@@ -27,6 +27,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Acquire the lock BEFORE reading project state. Fetching the row first and
+    // acquiring the lock after means a request that starts while another
+    // refine/beats-assign call is still in flight (both share the 'refine' lock
+    // key) captures a stale snapshot — and since acquiring the lock does NOT
+    // re-fetch, this request later persists its regenerated editPlan built from
+    // that stale snapshot, clobbering whatever the concurrent call just saved
+    // (e.g. reverting a hookTitle the user had just set to an older value).
+    if (!acquireStepLock('refine', projectId)) {
+      return NextResponse.json(
+        { error: 'Já existe uma edição em curso para este projeto' },
+        { status: 409 }
+      )
+    }
+    lockAcquired = true
+
     const project = await prisma.project.findUnique({ where: { id: projectId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
@@ -37,14 +52,6 @@ export async function POST(request: NextRequest) {
     if (!project.normalizedPath) {
       return NextResponse.json({ error: 'Vídeo processado não encontrado' }, { status: 400 })
     }
-
-    if (!acquireStepLock('refine', projectId)) {
-      return NextResponse.json(
-        { error: 'Já existe uma edição em curso para este projeto' },
-        { status: 409 }
-      )
-    }
-    lockAcquired = true
 
     const scenes: Scene[] = JSON.parse(project.scenesJson)
     const subtitles: SubtitleEntry[] = project.subtitlesJson ? JSON.parse(project.subtitlesJson) : []

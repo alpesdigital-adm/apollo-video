@@ -112,6 +112,20 @@ export async function POST(
       return NextResponse.json({ error: 'beatIndex inválido' }, { status: 400 })
     }
 
+    // Acquire the lock BEFORE reading project state (shared 'refine' lock key
+    // with /api/projects/refine — see the comment there). Fetching the row
+    // first and locking after leaves a window where this request's snapshot
+    // (incl. editPlanJson/hookTitle) can predate a concurrent refine/beats-
+    // assign call that already committed, so this request would later persist
+    // a regenerated editPlan built from stale data and clobber that update.
+    if (!acquireStepLock('refine', projectId)) {
+      return NextResponse.json(
+        { error: 'Já existe uma edição em curso para este projeto' },
+        { status: 409 }
+      )
+    }
+    lockAcquired = true
+
     const project = await prisma.project.findUnique({ where: { id: projectId } })
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
@@ -205,15 +219,7 @@ export async function POST(
       })
     }
 
-    // --- Apply through the SAME path as refine --------------------------------
-    if (!acquireStepLock('refine', projectId)) {
-      return NextResponse.json(
-        { error: 'Já existe uma edição em curso para este projeto' },
-        { status: 409 }
-      )
-    }
-    lockAcquired = true
-
+    // --- Apply through the SAME path as refine (lock already held above) ------
     const applyResult = applyDirectorOperations(operations, scenes, palette, subtitles, validAssetIds)
     const { scenes: updatedScenes, palette: updatedPalette, applied, skipped } = applyResult
 

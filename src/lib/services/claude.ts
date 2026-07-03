@@ -222,12 +222,38 @@ export function normalizeSceneTactics(sceneData: any): void {
   }
 }
 
-function limitCopy(value: unknown, maxChars: number): string {
-  const text = String(value || '')
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?/gu, '')
-    .replace(/[\uFE0F\u200D]/g, '')
+/**
+ * Em/en-dash read as AI-generated copy (regra do dono, inegociavel). Any dash
+ * used as sentence punctuation becomes a comma; runs of resulting double
+ * commas/spacing collapse back to something clean. Applied to every copy
+ * field (and hookTitle) so no visible text ever carries a travessao.
+ */
+function stripAiDashes(text: string): string {
+  return text
+    .replace(/\s*[\u2014\u2013]\s*/g, ', ')
+    .replace(/,\s*,+/g, ',')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+/**
+ * Shared cleanup for every copy field: strips decorative emoji, collapses
+ * whitespace, and normalizes em/en-dashes to commas. Both limitCopy (char-cap)
+ * and enforceWordBudget (word-cap, complete-or-discard) build on this so the
+ * dash rule and emoji stripping apply everywhere copy flows through either.
+ */
+export function cleanCopyText(value: unknown): string {
+  return stripAiDashes(
+    String(value || '')
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?/gu, '')
+      .replace(/[\uFE0F\u200D]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  )
+}
+
+function limitCopy(value: unknown, maxChars: number): string {
+  const text = cleanCopyText(value)
 
   if (text.length <= maxChars) {
     return text
@@ -239,18 +265,20 @@ function limitCopy(value: unknown, maxChars: number): string {
 }
 
 /**
- * Hard word cap for text plotted directly over the video (FullScreen, CTA,
- * Split, StickFigures captions). Truncates at a word boundary so a headline can
- * never become an illegible wall of text — this GUARANTEES the 6/5-word ceiling
- * even if the model ignores the prompt. Never lets a main field exceed its cap.
+ * Complete-or-discard word budget for copy plotted directly over the video
+ * (FullScreen, CTA, Split, StickFigures captions, etc). Copy is NEVER
+ * truncated mechanically: a string of at most `hardMax` words (default
+ * target+3, a small tolerance so a finished thought can land) passes through
+ * INTACT, even above `target`. Anything longer returns null so the caller
+ * drops the field (optional copy) or discards the whole scene/operation
+ * (main copy), never chopping a sentence mid-thought.
  */
-function limitWords(value: unknown, maxWords: number): string {
-  const words = String(value || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter(Boolean)
-  return words.slice(0, Math.max(1, maxWords)).join(' ')
+function enforceWordBudget(value: unknown, target: number, hardMax: number = target + 3): string | null {
+  const text = cleanCopyText(value)
+  if (!text) return null
+  const words = text.split(' ').filter(Boolean)
+  if (words.length > hardMax) return null
+  return text
 }
 
 /**
@@ -306,8 +334,9 @@ function hookTitleDuplicatesScene(hookTitle: string, scenes: any[]): boolean {
 export function sanitizeSceneCopy(sceneData: any, options?: { stripStutter?: boolean }): any {
   switch (sceneData.type) {
     case 'FullScreen':
-      sceneData.text = limitWords(limitCopy(sceneData.text || sceneData.title, 70), 6)
-      sceneData.subtitle = sceneData.subtitle ? limitCopy(limitWords(sceneData.subtitle, 5), 70) : undefined
+      // text/subtitle already went through enforceWordBudget in
+      // normalizeTypographicScene (complete-or-discard) — no re-truncation
+      // here, that would defeat the guarantee.
       sceneData.highlight = sceneData.highlight ? limitCopy(sceneData.highlight, 40) : undefined
       delete sceneData.fontSize
       delete sceneData.color
@@ -315,11 +344,11 @@ export function sanitizeSceneCopy(sceneData: any, options?: { stripStutter?: boo
       break
     case 'LowerThird':
       sceneData.title = limitCopy(sceneData.title, 42)
-      sceneData.subtitle = limitCopy(sceneData.subtitle, 70)
+      // subtitle already word-budgeted upstream; no re-cap here.
       break
     case 'Split':
-      sceneData.topText = limitCopy(sceneData.topText || sceneData.title, 54)
-      sceneData.bottomText = limitCopy(sceneData.bottomText || sceneData.content, 54)
+      // topText/bottomText already went through enforceWordBudget in
+      // normalizeTypographicScene (complete-or-discard) — no re-truncation.
       break
     case 'SplitVertical':
       sceneData.leftLabel = limitCopy(sceneData.leftLabel, 24)
@@ -345,14 +374,16 @@ export function sanitizeSceneCopy(sceneData: any, options?: { stripStutter?: boo
         : []
       break
     case 'CTA':
-      sceneData.text = limitCopy(sceneData.text, 72)
-      sceneData.highlight = limitCopy(sceneData.highlight, 54)
-      // Optional yellow action box label: hard 5-word ceiling, drop when empty.
+      // text/highlight already went through enforceWordBudget in
+      // normalizeTypographicScene (complete-or-discard) — no re-truncation.
+      // Optional yellow action box label: word-budgeted (5/8), dropped when it
+      // overshoots rather than chopped.
       if (sceneData.boxText) {
-        const box = limitWords(limitCopy(sceneData.boxText, 40), 5)
+        const box = enforceWordBudget(sceneData.boxText, 5, 8)
         if (box) {
           sceneData.boxText = box
         } else {
+          console.warn(`CTA scene: dropping boxText exceeding word budget: "${sceneData.boxText}"`)
           delete sceneData.boxText
         }
       } else {
@@ -360,8 +391,8 @@ export function sanitizeSceneCopy(sceneData: any, options?: { stripStutter?: boo
       }
       break
     case 'StickFigures':
-      sceneData.situation = limitCopy(sceneData.situation, 64)
-      sceneData.caption = limitCopy(sceneData.caption, 84)
+      // situation/caption already went through enforceWordBudget in
+      // normalizeTypographicScene (complete-or-discard) — no re-truncation.
       break
     case 'ImageInsert':
       sceneData.layout = ['split-bottom', 'top-image-compact'].includes(sceneData.layout)
@@ -450,13 +481,29 @@ export function sanitizeAssetCardScene(sceneData: any, validAssetIds?: Set<strin
     ? sceneData.style
     : 'credibility'
 
-  const name = limitCopy(limitWords(sceneData.name, 6), 48)
-  if (name) sceneData.name = name
-  else delete sceneData.name
+  if (sceneData.name) {
+    const name = enforceWordBudget(sceneData.name, 6, 9)
+    if (name) {
+      sceneData.name = name
+    } else {
+      console.warn(`AssetCard scene: dropping name exceeding word budget: "${sceneData.name}"`)
+      delete sceneData.name
+    }
+  } else {
+    delete sceneData.name
+  }
 
-  const caption = limitCopy(limitWords(sceneData.caption, 8), 60)
-  if (caption) sceneData.caption = caption
-  else delete sceneData.caption
+  if (sceneData.caption) {
+    const caption = enforceWordBudget(sceneData.caption, 8, 11)
+    if (caption) {
+      sceneData.caption = caption
+    } else {
+      console.warn(`AssetCard scene: dropping caption exceeding word budget: "${sceneData.caption}"`)
+      delete sceneData.caption
+    }
+  } else {
+    delete sceneData.caption
+  }
 
   // Strip any typographic field the model may have leaked onto the card.
   for (const field of [
@@ -524,36 +571,85 @@ export function normalizeTypographicScene(sceneData: any): any | null {
       if (!text) {
         return null
       }
-      // Hard 6-word ceiling for text plotted over the video.
-      const capped = limitWords(text, 6)
-      sceneData.text = capped
-      // Optional highlight: keep only when it is a word contained in the capped text.
+      // Main copy plotted over the video: complete-or-discard, 6-word target,
+      // 9-word hard ceiling. Never truncated mechanically.
+      const budgeted = enforceWordBudget(text, 6, 9)
+      if (!budgeted) {
+        console.warn(`Discarding FullScreen scene: text exceeds word budget: "${text}"`)
+        return null
+      }
+      sceneData.text = budgeted
+      // Optional secondary subtitle: drop (don't chop) when it overshoots.
+      const subtitleRaw = coerceString(sceneData.subtitle)
+      if (subtitleRaw) {
+        const subtitleBudgeted = enforceWordBudget(subtitleRaw, 5, 8)
+        if (subtitleBudgeted) {
+          sceneData.subtitle = subtitleBudgeted
+        } else {
+          console.warn(`FullScreen scene: dropping subtitle exceeding word budget: "${subtitleRaw}"`)
+          sceneData.subtitle = undefined
+        }
+      } else {
+        sceneData.subtitle = undefined
+      }
+      // Optional highlight: keep only when it is a word contained in the budgeted text.
       sceneData.highlight =
-        highlight && capped.toLowerCase().includes(highlight.toLowerCase())
+        highlight && budgeted.toLowerCase().includes(highlight.toLowerCase())
           ? highlight
           : undefined
       return sceneData
     }
     case 'LowerThird': {
       const title = coerceString(sceneData.title, sceneData.text)
-      const subtitle = coerceString(sceneData.subtitle, sceneData.description, sceneData.label)
-      if (!title && !subtitle) {
+      const subtitleRaw = coerceString(sceneData.subtitle, sceneData.description, sceneData.label)
+      if (!title && !subtitleRaw) {
         return null
       }
-      sceneData.title = title || subtitle
-      // Secondary caption over video: max 5 words, optional.
-      sceneData.subtitle = limitWords(subtitle, 5)
+      sceneData.title = title || subtitleRaw
+      // Secondary caption over video: word-budgeted (5/8), optional, dropped
+      // (not chopped) when it overshoots.
+      if (subtitleRaw) {
+        const subtitleBudgeted = enforceWordBudget(subtitleRaw, 5, 8)
+        if (subtitleBudgeted) {
+          sceneData.subtitle = subtitleBudgeted
+        } else {
+          console.warn(`LowerThird scene: dropping subtitle exceeding word budget: "${subtitleRaw}"`)
+          sceneData.subtitle = ''
+        }
+      } else {
+        sceneData.subtitle = ''
+      }
       return sceneData
     }
     case 'Split': {
-      const topText = coerceString(sceneData.topText, sceneData.title)
-      const bottomText = coerceString(sceneData.bottomText, sceneData.content, sceneData.description)
-      if (!topText && !bottomText) {
+      const topTextRaw = coerceString(sceneData.topText, sceneData.title)
+      const bottomTextRaw = coerceString(sceneData.bottomText, sceneData.content, sceneData.description)
+      if (!topTextRaw && !bottomTextRaw) {
         return null
       }
-      // topText = secondary context (max 5); bottomText = main line (max 6).
-      sceneData.topText = limitWords(topText, 5)
-      sceneData.bottomText = limitWords(bottomText, 6)
+      // bottomText = main line plotted over the video (fala): complete-or-discard,
+      // 6-word target, 9-word hard ceiling.
+      let bottomBudgeted = ''
+      if (bottomTextRaw) {
+        const budgeted = enforceWordBudget(bottomTextRaw, 6, 9)
+        if (!budgeted) {
+          console.warn(`Discarding Split scene: bottomText exceeds word budget: "${bottomTextRaw}"`)
+          return null
+        }
+        bottomBudgeted = budgeted
+      }
+      // topText = secondary context, optional, dropped (not chopped) when it overshoots.
+      let topBudgeted = ''
+      if (topTextRaw) {
+        const budgeted = enforceWordBudget(topTextRaw, 5, 8)
+        if (budgeted) {
+          topBudgeted = budgeted
+        } else {
+          console.warn(`Split scene: dropping topText exceeding word budget: "${topTextRaw}"`)
+        }
+      }
+      sceneData.topText = topBudgeted
+      sceneData.bottomText = bottomBudgeted
       return sceneData
     }
     case 'SplitVertical': {
@@ -620,26 +716,44 @@ export function normalizeTypographicScene(sceneData: any): any | null {
       if (!text) {
         return null
       }
-      // Hard 6-word ceiling for the CTA line plotted over the video.
-      const capped = limitWords(text, 6)
-      sceneData.text = capped
-      // highlight must be a substring of the capped text; fall back to the last word.
+      // Main CTA line plotted over the video: complete-or-discard, 6-word
+      // target, 9-word hard ceiling. Never truncated mechanically.
+      const budgeted = enforceWordBudget(text, 6, 9)
+      if (!budgeted) {
+        console.warn(`Discarding CTA scene: text exceeds word budget: "${text}"`)
+        return null
+      }
+      sceneData.text = budgeted
+      // highlight must be a substring of the budgeted text; fall back to the last word.
       const highlight = coerceString(sceneData.highlight, sceneData.highlightWord)
       sceneData.highlight =
-        highlight && capped.toLowerCase().includes(highlight.toLowerCase())
+        highlight && budgeted.toLowerCase().includes(highlight.toLowerCase())
           ? highlight
-          : capped.trim().split(/\s+/).slice(-1)[0] || capped
+          : budgeted.trim().split(/\s+/).slice(-1)[0] || budgeted
       return sceneData
     }
     case 'StickFigures': {
-      const situation = coerceString(sceneData.situation, sceneData.leftCaption, sceneData.text)
-      const caption = coerceString(sceneData.caption, sceneData.rightCaption, sceneData.description)
-      if (!situation && !caption) {
+      const situationRaw = coerceString(sceneData.situation, sceneData.leftCaption, sceneData.text)
+      const captionRaw = coerceString(sceneData.caption, sceneData.rightCaption, sceneData.description)
+      if (!situationRaw && !captionRaw) {
         return null
       }
-      // Captions plotted over video: situation main (max 6), caption secondary (max 5).
-      sceneData.situation = limitWords(situation || caption, 6)
-      sceneData.caption = limitWords(caption || situation, 5)
+      // situation = main copy plotted over video: complete-or-discard, 6-word
+      // target, 9-word hard ceiling.
+      const mainRaw = situationRaw || captionRaw
+      const situationBudgeted = enforceWordBudget(mainRaw, 6, 9)
+      if (!situationBudgeted) {
+        console.warn(`Discarding StickFigures scene: situation exceeds word budget: "${mainRaw}"`)
+        return null
+      }
+      sceneData.situation = situationBudgeted
+      // caption = secondary, optional, dropped (not chopped) when it overshoots.
+      const secondaryRaw = captionRaw || situationRaw
+      const captionBudgeted = secondaryRaw ? enforceWordBudget(secondaryRaw, 5, 8) : null
+      if (secondaryRaw && !captionBudgeted) {
+        console.warn(`StickFigures scene: dropping caption exceeding word budget: "${secondaryRaw}"`)
+      }
+      sceneData.caption = captionBudgeted || ''
       return sceneData
     }
     default:
@@ -804,6 +918,7 @@ REGRA DURA DE TEXTO SOBRE VÍDEO (teto de palavras — inviolável):
 - Cenas cujo texto é plotado DIRETO sobre o vídeo (FullScreen, CTA, Split, e as captions de StickFigures) têm TETO no texto principal: NO MÁXIMO 6 palavras. Texto longo vira fonte minúscula ilegível — proibido.
 - Texto secundário (subtitle / caption / topText de contexto): NO MÁXIMO 5 palavras E é OPCIONAL — prefira OMITIR. Só inclua se agregar de verdade.
 - Se a ideia precisa de mais palavras que isso, NÃO despeje texto longo sobre o vídeo: escolha OUTRO formato — Card ou Flow (quebram em linhas curtas, poucas palavras por linha) ou ImageInsert (deixa a fala/legenda carregar o texto). Nunca force uma frase longa numa cena tipográfica de tela.
+- Se o texto não couber no limite, REESCREVA mais curto e completo: texto acima do limite é DESCARTADO INTEIRO pelo código, nunca cortado. Frase interrompida no meio é o pior erro possível.
 
 REGRAS DE COPY (pt-br, texto punchy — fragmentos, NUNCA frases longas):
 - FullScreen: text com no máximo 6 palavras; sem subtítulo longo (se usar subtitle, no máximo 5 palavras, opcional).
@@ -851,7 +966,7 @@ TÍTULO-HOOK PERSISTENTE (hookTitle — OPCIONAL, no nível raiz do JSON, não �
 - Extraia a promessa REAL da transcrição; NÃO invente números que o áudio não sustenta. Se o vídeo não tem uma promessa-manchete clara, OMITA o campo (não force).
 - A manchete NÃO pode repetir nem parafrasear o texto de NENHUMA cena — em especial a cena de ABERTURA (title-card do hook). Ela é uma promessa COMPLEMENTAR, um ângulo diferente do que as cenas já dizem; nunca o mesmo enunciado. Se a única manchete que você consegue é ~igual ao texto de alguma cena, retorne hookTitle null (OMITA) — melhor sem manchete do que duplicada.
 
-IDIOMA DE TODA COPY (manchete, cenas, CTA — regra do dono, inegociável): português BRASILEIRO FALADO, "tupiniquim", que uma criança de 10 anos entende de primeira. Teste: você leria isso em voz alta num anúncio sem soar estranho? PROIBIDO anglicismo e tradução literal do inglês — construções como "por como", "de como", "o quanto", "focado em performar" são INACEITÁVEIS. Também são proibidas expressões que ninguém fala no Brasil mesmo parecendo português (ex. reprovado real: "Falou fraco?") — se um brasileiro não diria isso numa mesa de bar, não escreva. Prefira frases curtas, verbos diretos, palavras do dia a dia ("pra" em vez de "para" quando soar mais natural).
+IDIOMA DE TODA COPY (manchete, cenas, CTA — regra do dono, inegociável): português BRASILEIRO FALADO, "tupiniquim", que uma criança de 10 anos entende de primeira. Teste: você leria isso em voz alta num anúncio sem soar estranho? PROIBIDO anglicismo e tradução literal do inglês — construções como "por como", "de como", "o quanto", "focado em performar" são INACEITÁVEIS. Também são proibidas expressões que ninguém fala no Brasil mesmo parecendo português (ex. reprovado real: "Falou fraco?") — se um brasileiro não diria isso numa mesa de bar, não escreva. Prefira frases curtas, verbos diretos, palavras do dia a dia ("pra" em vez de "para" quando soar mais natural). PROIBIDO travessão (—) em qualquer campo de copy (texto de cena, manchete, highlight etc.): travessão denuncia texto de IA. Use vírgula (preferência) ou dois-pontos quando precisar separar ideias.
 
 Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysisTone}.${buildBrandColorPromptSection(brandColors)}${buildAssetCatalogSection(assetCatalog)}
 
@@ -1081,7 +1196,7 @@ Garanta que o JSON seja válido e completo.`
     // ou vem completa dentro do limite, ou é descartada.
     let hookTitle =
       typeof analysisData.hookTitle === 'string' && analysisData.hookTitle.trim()
-        ? analysisData.hookTitle.trim()
+        ? cleanCopyText(analysisData.hookTitle)
         : undefined
     if (hookTitle && hookTitle.split(/\s+/).length > 12) {
       console.warn(`[analyze] hookTitle descartado por exceder 12 palavras: "${hookTitle}"`)
@@ -1318,7 +1433,8 @@ REGRAS DE INTERPRETAÇÃO:
 - ESCOPO GLOBAL: quando o usuário disser "vídeo todo", "em todo lugar", "sempre", ou não especificar uma cena, aplique globalmente.
 - COR: mudanças de COR (ex.: "trocar laranja por dourado", "deixar o destaque azul") são QUASE SEMPRE update_palette — NÃO tente mudar cor cena a cena. A cor de acento/destaque dos inserts e textos vem da paleta (campo accent). Se o usuário fala em "laranja"/"dourado" nos inserts e no vídeo todo, isso é update_palette em accent (e talvez primary/secondary conforme o tom pedido).
 - Só use update_scene/add_scene/delete_scene quando a instrução for realmente sobre conteúdo/estrutura de cena(s).
-- Respeite os TETOS de copy: textos plotados sobre o vídeo (FullScreen, CTA, Split, StickFigures) no máximo 6 palavras; textos secundários no máximo 5. Prefira fragmentos curtos.
+- Respeite os TETOS de copy: textos plotados sobre o vídeo (FullScreen, CTA, Split, StickFigures) no máximo 6 palavras; textos secundários no máximo 5. Prefira fragmentos curtos. Se o texto não couber, REESCREVA mais curto e completo: texto acima do limite é DESCARTADO INTEIRO pelo código (a operação inteira é rejeitada), nunca cortado. Frase interrompida no meio é o pior erro possível.
+- PROIBIDO travessão (—) em qualquer campo de copy (texto de cena, manchete/hookTitle, highlight etc.): travessão denuncia texto de IA. Use vírgula (preferência) ou dois-pontos.
 - Em ImageInsert, imagePrompt não pode conter texto/letras/logos. Para regenerar a imagem de um insert, mude imagePrompt no update_scene.
 - LAYOUT DE SEGMENTO: "coloca a cena 3 em split-50" → update_scene com segmentLayout:"split-50" na cena. "deixa o trecho 0:30-0:45 preto e branco com zoom in" → mapeie o trecho para a(s) cena(s) por tempo (via legendas) e aplique segmentEffects:{"bw":true,"zoom":"in"} em cada uma. "volta a cena X pra tela cheia" → segmentLayout:null. split-50/blur-bg funcionam melhor em cenas ImageInsert (usam a imagem); tweet-card usa o texto da cena.
 - NUNCA invente ids de cena — use apenas os ids listados. Para add_scene, NÃO forneça id (o código gera).
