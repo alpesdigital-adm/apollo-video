@@ -6,7 +6,7 @@ import {
   interpolate,
   spring,
 } from 'remotion';
-import { SubtitleEntry, ColorPalette, SubtitleWord } from '../lib/types';
+import { SubtitleEntry, ColorPalette, SubtitleWord, SubtitleStyle } from '../lib/types';
 
 const DEFAULT_ACCENT = '#FFB800';
 
@@ -17,7 +17,88 @@ interface SubtitleTikTokProps {
   // 'two-word-center' is used during split-50 segments: at most two words at a
   // time, large and centered on the 50/50 seam, karaoke highlight preserved.
   mode?: 'default' | 'two-word-center';
+  // Subtitle preset. 'kinetic' (default) = comportamento original intocado.
+  subtitleStyle?: SubtitleStyle;
 }
+
+// Per-preset spec for the parametrized subtitle presets (everything except the
+// original 'kinetic' path, which is left untouched below). chunkSize = quantas
+// palavras por vez (re-chunk word-level); container = caixa/pill/none; cores por
+// estado (ativa/dita/futura); pop = spring na palavra ativa; stroke = contorno
+// preto grosso; '@accent' resolve para palette.accent em runtime.
+interface SubtitlePresetSpec {
+  chunkSize: number;
+  container: 'none' | 'box' | 'pill';
+  activeColor: string;
+  pastColor: string;
+  futureColor: string;
+  pop: boolean;
+  stroke: boolean;
+  dropShadow: boolean;
+  uppercase: boolean;
+  lowercase: boolean;
+  fontSize: number;
+  fontWeight: number;
+}
+
+const PRESET_SPECS: Record<Exclude<SubtitleStyle, 'kinetic'>, SubtitlePresetSpec> = {
+  'karaoke-box': {
+    chunkSize: 3,
+    container: 'box',
+    activeColor: '#FFD400',
+    pastColor: '#FFFFFF',
+    futureColor: '#FFFFFF',
+    pop: true,
+    stroke: false,
+    dropShadow: false,
+    uppercase: false,
+    lowercase: false,
+    fontSize: 58,
+    fontWeight: 800,
+  },
+  'karaoke-pill': {
+    chunkSize: 5,
+    container: 'pill',
+    activeColor: '#FFFFFF',
+    pastColor: '#FFFFFF',
+    futureColor: 'rgba(255,255,255,0.45)',
+    pop: false,
+    stroke: false,
+    dropShadow: false,
+    uppercase: false,
+    lowercase: false,
+    fontSize: 52,
+    fontWeight: 700,
+  },
+  'caps-stroke': {
+    chunkSize: 3,
+    container: 'none',
+    activeColor: '#FFD400',
+    pastColor: '#FFFFFF',
+    futureColor: '#FFFFFF',
+    pop: true,
+    stroke: true,
+    dropShadow: false,
+    uppercase: true,
+    lowercase: false,
+    fontSize: 66,
+    fontWeight: 800,
+  },
+  'clean-color': {
+    chunkSize: 2,
+    container: 'none',
+    activeColor: '@accent',
+    pastColor: '#FFFFFF',
+    futureColor: '#FFFFFF',
+    pop: false,
+    stroke: false,
+    dropShadow: true,
+    uppercase: false,
+    lowercase: true,
+    fontSize: 62,
+    fontWeight: 800,
+  },
+};
 
 // Returns the frame at which the given timed word starts, relative to the
 // composition timeline (not relative to the subtitle).
@@ -59,6 +140,7 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   palette,
   isVisible,
   mode = 'default',
+  subtitleStyle = 'kinetic',
 }) => {
   const frame = useCurrentFrame();
   const config = useVideoConfig();
@@ -127,6 +209,76 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
               accentColor={accentColor}
             />
           ))}
+        </div>
+      </AbsoluteFill>
+    );
+  }
+
+  // --- Parametrized presets (everything except 'kinetic') ---
+  // two-word-center (split-50 seam) always takes precedence above; below the
+  // seam, when a non-default preset is selected we re-chunk by word count and
+  // render the chosen box/pill/stroke/color style. 'kinetic' falls through to
+  // the original path untouched.
+  if (subtitleStyle !== 'kinetic') {
+    const spec = PRESET_SPECS[subtitleStyle];
+    const chunk = getChunkWords(
+      subtitle,
+      timedWords,
+      currentTime,
+      timeInSubtitle,
+      duration,
+      spec.chunkSize
+    );
+    const resolvedActive = spec.activeColor === '@accent' ? accentColor : spec.activeColor;
+
+    const containerStyle: React.CSSProperties = {
+      display: 'inline-flex',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      alignItems: 'baseline',
+      maxWidth: '82%',
+      gap: '0 0.28em',
+      textAlign: 'center',
+      fontFamily: 'Aptos, Segoe UI, Helvetica, Arial, sans-serif',
+      lineHeight: 1.1,
+    };
+    if (spec.container === 'box') {
+      containerStyle.background = 'rgba(0,0,0,0.8)';
+      containerStyle.borderRadius = 12;
+      containerStyle.padding = '10px 22px';
+    } else if (spec.container === 'pill') {
+      containerStyle.background = 'rgba(10,10,14,0.82)';
+      containerStyle.borderRadius = 9999;
+      containerStyle.padding = '14px 34px';
+    }
+
+    return (
+      <AbsoluteFill style={{ opacity }}>
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 560,
+            display: 'flex',
+            justifyContent: 'center',
+            padding: '0 60px',
+          }}
+        >
+          <div style={containerStyle}>
+            {chunk.map((kw, i) => (
+              <PresetWordSpan
+                key={i}
+                word={kw.word}
+                timedWord={kw.timedWord}
+                currentTime={currentTime}
+                frame={frame}
+                fps={config.fps}
+                spec={spec}
+                activeColor={resolvedActive}
+              />
+            ))}
+          </div>
         </div>
       </AbsoluteFill>
     );
@@ -361,6 +513,127 @@ const TwoWordSpan: React.FC<TwoWordSpanProps> = ({
     </span>
   );
 };
+
+interface PresetWordSpanProps {
+  word: string;
+  timedWord: SubtitleWord | null;
+  currentTime: number;
+  frame: number;
+  fps: number;
+  spec: SubtitlePresetSpec;
+  activeColor: string;
+}
+
+// One word inside a parametrized preset chunk. Color/progression is driven by
+// the preset spec: active word = activeColor, already-spoken = pastColor,
+// upcoming = futureColor; optional spring pop; optional thick black stroke
+// (paint-order stroke so the fill isn't eaten) for caps-stroke.
+const PresetWordSpan: React.FC<PresetWordSpanProps> = ({
+  word,
+  timedWord,
+  currentTime,
+  frame,
+  fps,
+  spec,
+  activeColor,
+}) => {
+  let color = spec.pastColor;
+  let scale = 1;
+
+  if (timedWord !== null) {
+    const isActive = currentTime >= timedWord.start && currentTime < timedWord.end;
+    const isFuture = currentTime < timedWord.start;
+    if (isActive) {
+      color = activeColor;
+      if (spec.pop) {
+        const framesSinceStart = frame - wordStartFrame(timedWord, fps);
+        scale = spring({
+          frame: Math.max(0, framesSinceStart),
+          fps,
+          config: { damping: 14, stiffness: 200, mass: 0.6 },
+          from: 1.0,
+          to: 1.12,
+          durationInFrames: 6,
+        });
+      }
+    } else if (isFuture) {
+      color = spec.futureColor;
+    } else {
+      color = spec.pastColor;
+    }
+  }
+
+  const style: React.CSSProperties = {
+    color,
+    fontSize: spec.fontSize,
+    fontWeight: spec.fontWeight,
+    letterSpacing: '-0.01em',
+    display: 'inline-block',
+    transform: `scale(${scale})`,
+    transformOrigin: 'center bottom',
+  };
+  if (spec.uppercase) style.textTransform = 'uppercase';
+  if (spec.lowercase) style.textTransform = 'lowercase';
+  if (spec.stroke) {
+    style.WebkitTextStroke = '8px #000000';
+    style.paintOrder = 'stroke fill';
+    style.textShadow = '0 3px 10px rgba(0,0,0,0.55)';
+  } else if (spec.dropShadow) {
+    style.textShadow = '0 4px 16px rgba(0,0,0,0.7), 0 1px 3px rgba(0,0,0,0.85)';
+  } else if (spec.container === 'none') {
+    style.textShadow = '0 4px 14px rgba(0,0,0,0.85)';
+  }
+
+  return <span style={style}>{word}</span>;
+};
+
+// Return the active chunk of `size` words for the current instant. Uses
+// word-level timings (fixed consecutive groups, picking the group whose window
+// contains the time) when available; otherwise splits the plain text into
+// groups distributed evenly across the subtitle's duration (no per-word
+// highlight in that degraded case). Shared base for all parametrized presets.
+function getChunkWords(
+  subtitle: SubtitleEntry,
+  timedWords: SubtitleWord[],
+  currentTime: number,
+  timeInSubtitle: number,
+  duration: number,
+  size: number
+): KaraokeWord[] {
+  const groupSize = Math.max(1, size);
+  if (timedWords.length > 0) {
+    const groups: SubtitleWord[][] = [];
+    for (let i = 0; i < timedWords.length; i += groupSize) {
+      groups.push(timedWords.slice(i, i + groupSize));
+    }
+    const active =
+      groups.find((g) => {
+        const start = g[0].start;
+        const end = g[g.length - 1].end;
+        return currentTime >= start - 0.04 && currentTime < end + 0.08;
+      }) ??
+      groups
+        .map((g) => ({
+          g,
+          dist: Math.abs(currentTime - (g[0].start + g[g.length - 1].end) / 2),
+        }))
+        .sort((a, b) => a.dist - b.dist)[0]?.g ??
+      [];
+    return active.map((tw) => ({ word: tw.word, timedWord: tw }));
+  }
+
+  const words = normalizeText(subtitle.text).split(' ').filter(Boolean);
+  if (words.length === 0) {
+    return [];
+  }
+  const groups: string[][] = [];
+  for (let i = 0; i < words.length; i += groupSize) {
+    groups.push(words.slice(i, i + groupSize));
+  }
+  const fraction = duration > 0 ? Math.max(0, Math.min(0.999, timeInSubtitle / duration)) : 0;
+  const index = Math.min(groups.length - 1, Math.floor(fraction * groups.length));
+  return groups[index].map((word) => ({ word, timedWord: null }));
+}
 
 // Return at most two words for the current instant. Uses word-level timings
 // (fixed consecutive pairs, picking the pair whose window contains the time)

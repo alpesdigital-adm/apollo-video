@@ -271,6 +271,17 @@ export function sanitizeSceneCopy(sceneData: any): any {
     case 'CTA':
       sceneData.text = limitCopy(sceneData.text, 72)
       sceneData.highlight = limitCopy(sceneData.highlight, 54)
+      // Optional yellow action box label: hard 5-word ceiling, drop when empty.
+      if (sceneData.boxText) {
+        const box = limitWords(limitCopy(sceneData.boxText, 40), 5)
+        if (box) {
+          sceneData.boxText = box
+        } else {
+          delete sceneData.boxText
+        }
+      } else {
+        delete sceneData.boxText
+      }
       break
     case 'StickFigures':
       sceneData.situation = limitCopy(sceneData.situation, 64)
@@ -618,7 +629,7 @@ REGRAS DE COPY (pt-br, texto punchy — fragmentos, NUNCA frases longas):
 - FullScreen: text com no máximo 6 palavras; sem subtítulo longo (se usar subtitle, no máximo 5 palavras, opcional).
 - Card: title com no máximo 5 palavras; description com no máximo 12 palavras (Card comporta mais texto porque quebra em linhas curtas).
 - Number: value curto (ex.: "3x", "R$15k", "80%"); label com no máximo 6 palavras.
-- CTA: text com no máximo 6 palavras E highlight presente dentro de text (uma palavra do próprio text).
+- CTA: text com no máximo 6 palavras E highlight presente dentro de text (uma palavra do próprio text). OPCIONAL boxText (no máximo 5 palavras): rótulo curto de uma caixa amarela de ação que aparece no fim, ALINHADO à ação REAL pedida no áudio (ex.: "Toque em Saiba Mais", "Comenta EU QUERO"). Só inclua boxText quando o áudio pede uma ação concreta clicável/tocável.
 - Flow: 3-5 passos, cada passo com no máximo 5 palavras.
 - SplitVertical: leftLabel/rightLabel curtos (1-3 palavras); leftText/rightText no máximo 6 palavras cada.
 - Message: sender curto; message curta.
@@ -649,6 +660,10 @@ Por padrão TODA cena é fullscreen (vídeo base cheio + a cena por cima). Um "l
 - VARIEDADE (regras duras): no MÁXIMO 3-4 segmentos de layout no vídeo inteiro; NUNCA o mesmo layout duas vezes seguidas; entre dois segmentos volte ao fullscreen (o padrão); tweet-card no máximo 1 por vídeo. Layout é PONTUAÇÃO — a maioria das cenas fica fullscreen.
 - COMO RETORNAR: adicione "segmentLayout" e/ou "segmentEffects" na própria cena. Ex. de insert com layout: { ..., "type": "ImageInsert", "segmentLayout": "split-50" }. Ex. de cena só de efeito: { ..., "type": "FullScreen", "text": "Isso muda tudo", "highlight": "tudo", "segmentEffects": { "zoom": "in" } }. Ex. de citação: { ..., "type": "FullScreen", "text": "Ninguém te contou isso antes", "segmentLayout": "tweet-card" }. Valores fora dessas listas são ignorados.
 
+TÍTULO-HOOK PERSISTENTE (hookTitle — OPCIONAL, no nível raiz do JSON, não é uma cena):
+- Uma manchete-promessa curta (NO MÁXIMO 10 palavras) que fica FIXA no topo do vídeo inteiro, reforçando a promessa central. Estilo específico e numérico quando possível (ex.: "Como vendi 185 ingressos em 3h53min", "O erro que custou R$40 mil").
+- Extraia a promessa REAL da transcrição; NÃO invente números que o áudio não sustenta. Se o vídeo não tem uma promessa-manchete clara, OMITA o campo (não force).
+
 Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysisTone}.${buildBrandColorPromptSection(brandColors)}`
 
     const numberedSubtitles = subtitles
@@ -672,6 +687,7 @@ Cada cena carrega SEMPRE: id, type, startLeg (índice inteiro 0-based da legenda
 Formato:
 {
   "narrativeFormat": "Descrição em 1-2 frases da abordagem narrativa geral",
+  "hookTitle": "Manchete-promessa ≤10 palavras (OPCIONAL — omita se não houver)",
   "palette": {
     "primary": "#HEX cor principal da marca",
     "secondary": "#HEX cor secundária",
@@ -687,7 +703,7 @@ Formato:
     { "id": "s5", "type": "SplitVertical", "startLeg": 16, "durationInSubtitles": 2, "leftLabel": "Antes", "rightLabel": "Depois", "leftText": "situação ruim", "rightText": "situação boa" },
     { "id": "s6", "type": "Card", "startLeg": 20, "durationInSubtitles": 2, "number": 1, "title": "Título curto", "description": "Descrição breve do ponto" },
     { "id": "s7", "type": "Message", "startLeg": 24, "durationInSubtitles": 2, "sender": "Cliente", "message": "Pergunta ou fala curta" },
-    { "id": "s8", "type": "CTA", "startLeg": 28, "durationInSubtitles": 2, "text": "Comece agora mesmo", "highlight": "agora" }
+    { "id": "s8", "type": "CTA", "startLeg": 28, "durationInSubtitles": 2, "text": "Comece agora mesmo", "highlight": "agora", "boxText": "Toque em Saiba Mais" }
   ]
 }
 
@@ -811,11 +827,19 @@ Garanta que o JSON seja válido e completo.`
 
     const { palette, colorGroup } = resolvePaletteWithBrandColors(analysisData, brandColors)
 
+    // Optional persistent hook headline (≤10 words). Omitted when the model
+    // returns nothing usable — old behavior (no headline) is preserved.
+    const hookTitle =
+      typeof analysisData.hookTitle === 'string' && analysisData.hookTitle.trim()
+        ? limitWords(analysisData.hookTitle, 10)
+        : undefined
+
     return {
       narrativeFormat: analysisData.narrativeFormat || 'Professional video content',
       palette,
       scenes: validatedScenes,
-      ...(colorGroup ? { colorGroup } : {})
+      ...(colorGroup ? { colorGroup } : {}),
+      ...(hookTitle ? { hookTitle } : {})
     }
   } catch (error) {
     throw new Error(`Content analysis failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -931,6 +955,8 @@ export type DirectorOperation =
   | { op: 'delete_scene'; sceneId: string }
   | { op: 'add_scene'; scene: Record<string, unknown> }
   | { op: 'update_palette'; changes: Record<string, string> }
+  | { op: 'update_subtitle_style'; style: string }
+  | { op: 'update_hook_title'; text: string | null }
 
 export interface DirectorResult {
   summary: string
@@ -1004,6 +1030,8 @@ OPERAÇÕES DISPONÍVEIS (retorne no máximo ~10 no total):
 - {"op":"delete_scene","sceneId":"<id existente>"} — remove uma cena.
 - {"op":"add_scene","scene":{"type":"<tipo>","startLeg":<int>,"durationInSubtitles":<1-3>, <props do tipo>}} — cria cena nova. startLeg e durationInSubtitles são OBRIGATÓRIOS.
 - {"op":"update_palette","changes":{"accent":"#RRGGBB", ...}} — muda cores GLOBAIS. Chaves válidas: primary, secondary, accent, background, text. Valores HEX (#RGB ou #RRGGBB).
+- {"op":"update_subtitle_style","style":"<estilo>"} — muda o ESTILO GLOBAL das legendas (preferência salva para todos os vídeos). Valores válidos: "kinetic" (padrão, sem caixa), "karaoke-box" (caixa preta, destaque amarelo), "karaoke-pill" (pill escuro, progressão), "caps-stroke" (maiúsculas com contorno), "clean-color" (minúsculas, destaque na cor de acento). Use quando o usuário pedir para mudar o visual/formato das legendas.
+- {"op":"update_hook_title","text":"<manchete>"|null} — define ou remove o TÍTULO-HOOK persistente no topo do vídeo (manchete-promessa ≤10 palavras). text:null remove o título. Use quando o usuário pedir uma manchete/chamada fixa no topo, ou pedir para removê-la.
 
 REGRAS DE INTERPRETAÇÃO:
 - ESCOPO GLOBAL: quando o usuário disser "vídeo todo", "em todo lugar", "sempre", ou não especificar uma cena, aplique globalmente.

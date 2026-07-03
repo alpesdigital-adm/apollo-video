@@ -18,6 +18,8 @@ export interface VideoEngineContext {
   subtitles: SubtitleEntry[]
   silences: Silence[]
   scenes: Scene[]
+  // Optional persistent hook headline written straight into the plan.
+  hookTitle?: string
 }
 
 export interface VideoEngine {

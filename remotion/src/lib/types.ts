@@ -36,6 +36,15 @@ export interface CreatorProfile {
   avatarUrl: string | null;
 }
 
+// Subtitle preset styles (decupados das referências). 'kinetic' é o padrão e
+// preserva o comportamento atual (sem caixa, highlight no accent, pop).
+export type SubtitleStyle =
+  | 'kinetic'
+  | 'karaoke-box'
+  | 'karaoke-pill'
+  | 'caps-stroke'
+  | 'clean-color';
+
 export type SegmentLayoutKind = 'fullscreen' | 'split-50' | 'blur-bg' | 'tweet-card';
 
 export interface LayoutSegmentEffects {
@@ -58,6 +67,10 @@ export interface CompositionProps extends Record<string, unknown> {
   videoSrc: string;
   format: '9:16' | '16:9';
   stylePreset?: string;
+  // Preset de estilo das legendas (default 'kinetic' = comportamento atual).
+  subtitleStyle?: SubtitleStyle;
+  // Título-hook persistente no topo do vídeo inteiro (opcional).
+  hookTitle?: string;
   palette: ColorPalette;
   creator?: CreatorProfile;
   layoutSegments?: LayoutSegment[];

@@ -110,6 +110,8 @@ export interface CTAScene extends BaseScene {
   type: 'CTA'
   text: string
   highlight: string
+  // Optional short action label (≤5 palavras) para a caixa amarela final.
+  boxText?: string
 }
 
 export interface StickFiguresScene extends BaseScene {
@@ -155,4 +157,6 @@ export interface AnalysisResult {
   palette: ColorPalette
   scenes: Scene[]
   colorGroup?: string
+  // Título-hook persistente (manchete-promessa ≤10 palavras) no topo do vídeo.
+  hookTitle?: string
 }

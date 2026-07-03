@@ -41,6 +41,13 @@ export interface RemotionLayoutSegment {
   props?: Record<string, any>
 }
 
+export type SubtitleStyle =
+  | 'kinetic'
+  | 'karaoke-box'
+  | 'karaoke-pill'
+  | 'caps-stroke'
+  | 'clean-color'
+
 export interface RemotionInputProps {
   scenes: RemotionSceneInput[]
   subtitles: SubtitleEntry[]
@@ -49,6 +56,8 @@ export interface RemotionInputProps {
   videoSrc: string
   format: '9:16' | '16:9'
   stylePreset?: string
+  subtitleStyle?: SubtitleStyle
+  hookTitle?: string
   creator?: RemotionCreator
   layoutSegments?: RemotionLayoutSegment[]
 }

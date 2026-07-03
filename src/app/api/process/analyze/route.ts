@@ -143,7 +143,8 @@ export async function POST(request: NextRequest) {
       transcription,
       subtitles,
       silences,
-      scenes: scenesWithAssets
+      scenes: scenesWithAssets,
+      hookTitle: analysisResult.hookTitle
     })
 
     // Update project with analysis results

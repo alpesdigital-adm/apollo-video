@@ -11,7 +11,8 @@ import {
   normalizeSubtitleWords,
   resolveLayoutSegments,
   type RemotionCreator,
-  type RemotionSceneInput
+  type RemotionSceneInput,
+  type SubtitleStyle
 } from '@/lib/remotion/input-props'
 
 interface RemotionProjectPlayerProps {
@@ -24,7 +25,7 @@ interface RemotionProjectPlayerProps {
   transcription: Transcription | null
   stylePreset: string
   palette: any
-  editPlan?: { layoutSegments?: unknown } | null
+  editPlan?: { layoutSegments?: unknown; hookTitle?: unknown } | null
 }
 
 export function RemotionProjectPlayer({
@@ -43,6 +44,7 @@ export function RemotionProjectPlayer({
   const compositionHeight = format === '9:16' ? 1920 : 1080
   const activeFps = fps || 30
   const [creator, setCreator] = useState<RemotionCreator | undefined>(undefined)
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>('kinetic')
 
   useEffect(() => {
     let cancelled = false
@@ -55,10 +57,23 @@ export function RemotionProjectPlayer({
       })
       .catch((error) => console.error('Failed to load creator profile:', error))
 
+    fetch('/api/settings/style')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelled || !data || typeof data.subtitleStyle !== 'string') return
+        setSubtitleStyle(data.subtitleStyle as SubtitleStyle)
+      })
+      .catch((error) => console.error('Failed to load subtitle style:', error))
+
     return () => {
       cancelled = true
     }
   }, [])
+
+  const hookTitle =
+    editPlan && typeof editPlan.hookTitle === 'string' && editPlan.hookTitle.trim()
+      ? (editPlan.hookTitle as string)
+      : undefined
 
   const inputProps = {
     scenes: prepareRemotionScenes(
@@ -73,6 +88,8 @@ export function RemotionProjectPlayer({
     videoSrc: `/api/video/${projectId}?source=preview`,
     format,
     stylePreset,
+    subtitleStyle,
+    ...(hookTitle ? { hookTitle } : {}),
     creator,
     layoutSegments: resolveLayoutSegments(editPlan)
   }

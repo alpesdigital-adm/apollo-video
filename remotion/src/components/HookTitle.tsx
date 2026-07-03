@@ -1,0 +1,75 @@
+import React from 'react';
+import { AbsoluteFill, spring, useCurrentFrame, useVideoConfig } from 'remotion';
+
+interface HookTitleProps {
+  text?: string;
+  format: '9:16' | '16:9';
+}
+
+/**
+ * Persistent hook headline (referência v3): a fixed promise-headline pinned to
+ * the top of the video for the ENTIRE duration. Enters with a spring in the
+ * first ~15 frames, then holds. Two lines max, white bold with a strong shadow,
+ * sitting in the ~8-16% top zone. Renders nothing when no hookTitle is set, so
+ * old projects are completely unaffected.
+ */
+export const HookTitle: React.FC<HookTitleProps> = ({ text, format }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!clean) {
+    return null;
+  }
+
+  const progress = spring({
+    frame,
+    fps,
+    from: 0,
+    to: 1,
+    durationInFrames: 15,
+    config: { damping: 200 },
+  });
+  const translateY = (1 - progress) * -24;
+  const isVertical = format === '9:16';
+  const fontSize = isVertical ? 46 : 40;
+
+  return (
+    <AbsoluteFill style={{ pointerEvents: 'none' }}>
+      <div
+        style={{
+          position: 'absolute',
+          top: '8%',
+          left: 0,
+          right: 0,
+          boxSizing: 'border-box',
+          padding: isVertical ? '0 90px' : '0 160px',
+          display: 'flex',
+          justifyContent: 'center',
+          opacity: progress,
+          transform: `translateY(${translateY}px)`,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'Aptos, Segoe UI, Helvetica, Arial, sans-serif',
+            fontSize,
+            fontWeight: 800,
+            lineHeight: 1.1,
+            letterSpacing: '-0.02em',
+            color: '#FFFFFF',
+            textAlign: 'center',
+            textShadow: '0 4px 18px rgba(0,0,0,0.95), 0 2px 4px rgba(0,0,0,0.9)',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            maxWidth: '92%',
+          }}
+        >
+          {clean}
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+};

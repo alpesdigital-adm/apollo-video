@@ -16,6 +16,7 @@ import {
   type RemotionSceneInput
 } from '@/lib/remotion/input-props'
 import { readCreatorProfile } from '@/lib/creator-profile'
+import { readStylePrefs } from '@/lib/style-prefs'
 
 interface StartProjectRenderOptions {
   clearExistingRender?: boolean
@@ -133,6 +134,12 @@ export async function startProjectRender(
 
   const fps = project.videoFps || FPS
 
+  const subtitleStyle = readStylePrefs().subtitleStyle
+  const hookTitle =
+    editPlan && typeof (editPlan as any).hookTitle === 'string' && (editPlan as any).hookTitle.trim()
+      ? (editPlan as any).hookTitle
+      : undefined
+
   const inputProps: RemotionInputProps = {
     scenes: prepareRemotionScenes(
       scenes
@@ -146,6 +153,8 @@ export async function startProjectRender(
     videoSrc: `${getAppBaseUrl()}/api/video/${project.id}?source=primary`,
     format: project.format as '9:16' | '16:9',
     stylePreset: project.stylePreset || 'creator-clean',
+    subtitleStyle,
+    ...(hookTitle ? { hookTitle } : {}),
     creator: resolveCreatorForProps(readCreatorProfile(), getAppBaseUrl()),
     layoutSegments: resolveLayoutSegments(editPlan, { baseUrl: getAppBaseUrl() })
   }

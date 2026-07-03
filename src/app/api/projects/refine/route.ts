@@ -61,8 +61,18 @@ export async function POST(request: NextRequest) {
     const direction = await directProject(instruction, scenes, subtitles, palette, sceneId)
 
     // 2. Validar e aplicar as operações (código).
-    const { scenes: updatedScenes, palette: updatedPalette, applied, skipped } =
-      applyDirectorOperations(direction.operations, scenes, palette, subtitles)
+    const applyResult = applyDirectorOperations(direction.operations, scenes, palette, subtitles)
+    const { scenes: updatedScenes, palette: updatedPalette, applied, skipped } = applyResult
+
+    // Título-hook: preserva o existente (editPlan) salvo se o diretor mudou.
+    const existingPlan = project.editPlanJson ? JSON.parse(project.editPlanJson) : null
+    let hookTitle: string | undefined =
+      existingPlan && typeof existingPlan.hookTitle === 'string' && existingPlan.hookTitle.trim()
+        ? existingPlan.hookTitle
+        : undefined
+    if (Object.prototype.hasOwnProperty.call(applyResult, 'hookTitle')) {
+      hookTitle = applyResult.hookTitle === null ? undefined : applyResult.hookTitle ?? undefined
+    }
 
     // Nada aplicável: responde sem persistir nem criar snapshot.
     if (applied.length === 0) {
@@ -111,7 +121,8 @@ export async function POST(request: NextRequest) {
       transcription: transcription || ({ text: '', words: [], segments: [] } as unknown as Transcription),
       subtitles,
       silences,
-      scenes: scenesWithAssets
+      scenes: scenesWithAssets,
+      hookTitle
     })
 
     // 7. Persistir e invalidar o vídeo renderizado.

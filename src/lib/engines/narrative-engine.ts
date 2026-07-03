@@ -288,6 +288,9 @@ export const narrativeEngine: VideoEngine = {
       },
       lineage: buildCreativeLineage(context, durationFrames),
       layoutSegments: buildLayoutSegments(context.scenes, context.fps),
+      ...(typeof context.hookTitle === 'string' && context.hookTitle.trim()
+        ? { hookTitle: context.hookTitle.trim() }
+        : {}),
       notes: [
         'Engine optimized for narrated videos with speech-timed subtitles and scene overlays.',
         'Future visual engines should implement the same EditPlan contract and can replace ranges/overlays/audio without changing the renderer.'

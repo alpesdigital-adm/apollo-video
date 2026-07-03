@@ -8,6 +8,7 @@ import {
 } from 'remotion';
 import { CompositionProps, CreatorProfile, Scene } from './lib/types';
 import { SubtitleOverlay } from './components/SubtitleOverlay';
+import { HookTitle } from './components/HookTitle';
 import { FullScreen } from './scenes/FullScreen';
 import { LowerThird } from './scenes/LowerThird';
 import { Split } from './scenes/Split';
@@ -95,6 +96,8 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   format,
   palette,
   stylePreset,
+  subtitleStyle,
+  hookTitle,
   creator,
   layoutSegments,
 }) => {
@@ -222,7 +225,11 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         format={format}
         palette={palette}
         layoutSegments={layoutSegments}
+        subtitleStyle={subtitleStyle}
       />
+
+      {/* Persistent hook headline (top) — renders nothing when unset */}
+      <HookTitle text={hookTitle} format={format} />
     </AbsoluteFill>
   );
 };

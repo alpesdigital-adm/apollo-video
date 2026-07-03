@@ -135,4 +135,7 @@ export interface EditPlan {
   // Optional segment layout track. Absent (or empty) = the base video is
   // fullscreen for the whole timeline (backwards-compatible with v1 plans).
   layoutSegments?: LayoutSegment[]
+  // Optional persistent hook headline pinned to the top of the whole video.
+  // Absent = no headline (backwards-compatible with v1 plans).
+  hookTitle?: string
 }

@@ -24,6 +24,7 @@ import {
 import type { DirectorOperation } from './services/claude'
 import type { Scene, ColorPalette } from './types/scene'
 import type { SubtitleEntry } from './types/project'
+import { isValidSubtitleStyle, readStylePrefs, writeStylePrefs } from './style-prefs'
 
 const PALETTE_KEYS: (keyof ColorPalette)[] = ['primary', 'secondary', 'accent', 'background', 'text']
 const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
@@ -113,6 +114,9 @@ export interface ApplyOperationsResult {
   palette: ColorPalette
   applied: string[]
   skipped: string[]
+  // Present only when an update_hook_title op ran. A string sets the headline;
+  // null explicitly removes it. Undefined = no change (caller keeps existing).
+  hookTitle?: string | null
 }
 
 /**
@@ -130,6 +134,7 @@ export function applyDirectorOperations(
   const workingPalette: ColorPalette = { ...(palette || DEFAULT_PALETTE) }
   const applied: string[] = []
   const skipped: string[] = []
+  let hookTitleChange: { value: string | null } | undefined
 
   const ops = Array.isArray(operations) ? operations.slice(0, 10) : []
 
@@ -228,12 +233,52 @@ export function applyDirectorOperations(
         break
       }
 
+      case 'update_subtitle_style': {
+        const style = (op as any).style
+        if (!isValidSubtitleStyle(style)) {
+          skipped.push(`Estilo de legenda inválido: ${String(style)}`)
+          break
+        }
+        // Global preference (data/style-prefs.json), same file-backed pattern as
+        // brand colors. Applies to every video's render and the live player.
+        const current = readStylePrefs()
+        if (current.subtitleStyle !== style) {
+          writeStylePrefs({ ...current, subtitleStyle: style })
+        }
+        applied.push(`Estilo de legenda alterado para "${style}"`)
+        break
+      }
+
+      case 'update_hook_title': {
+        const raw = (op as any).text
+        if (raw === null) {
+          hookTitleChange = { value: null }
+          applied.push('Título-hook removido')
+          break
+        }
+        if (typeof raw !== 'string' || !raw.trim()) {
+          skipped.push('Título-hook inválido — ignorado')
+          break
+        }
+        // Cap at 10 words to match the analyze contract.
+        const capped = raw.replace(/\s+/g, ' ').trim().split(' ').slice(0, 10).join(' ')
+        hookTitleChange = { value: capped }
+        applied.push('Título-hook atualizado')
+        break
+      }
+
       default:
         skipped.push(`Operação desconhecida: ${(op as any).op}`)
     }
   }
 
-  return { scenes: workingScenes, palette: workingPalette, applied, skipped }
+  return {
+    scenes: workingScenes,
+    palette: workingPalette,
+    applied,
+    skipped,
+    ...(hookTitleChange ? { hookTitle: hookTitleChange.value } : {})
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -28,6 +28,41 @@ interface BrandColorsResponse {
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
+type SubtitleStyle =
+  | 'kinetic'
+  | 'karaoke-box'
+  | 'karaoke-pill'
+  | 'caps-stroke'
+  | 'clean-color'
+
+const SUBTITLE_STYLE_OPTIONS: { id: SubtitleStyle; label: string; description: string }[] = [
+  {
+    id: 'kinetic',
+    label: 'Kinético (padrão)',
+    description: 'Sem caixa, palavra ativa na cor de destaque com leve pop. O estilo original.'
+  },
+  {
+    id: 'karaoke-box',
+    label: 'Caixa karaokê',
+    description: 'Caixa preta arredondada, 2-3 palavras, palavra ativa em amarelo, texto branco.'
+  },
+  {
+    id: 'karaoke-pill',
+    label: 'Pill karaokê',
+    description: 'Pill escuro, 4-6 palavras, sem pop — palavras futuras esmaecidas, ativa em branco.'
+  },
+  {
+    id: 'caps-stroke',
+    label: 'Maiúsculas com contorno',
+    description: 'TUDO MAIÚSCULO, 2-4 palavras, contorno preto grosso, destaque amarelo.'
+  },
+  {
+    id: 'clean-color',
+    label: 'Limpo colorido',
+    description: 'Minúsculas, 1-3 palavras, sem caixa, sombra suave, destaque na cor de acento.'
+  }
+]
+
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 const MAX_COLOR_GROUPS = 8
 const DEFAULT_NEW_GROUP_ACCENT = '#FF6B35'
@@ -69,9 +104,14 @@ export default function SettingsPage() {
   const [colorsSaveState, setColorsSaveState] = useState<SaveState>('idle')
   const [colorsErrorMessage, setColorsErrorMessage] = useState<string | null>(null)
 
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>('kinetic')
+  const [styleLoading, setStyleLoading] = useState(true)
+  const [styleSaveState, setStyleSaveState] = useState<SaveState>('idle')
+
   useEffect(() => {
     loadProfile()
     loadBrandColors()
+    loadSubtitleStyle()
   }, [])
 
   async function loadProfile() {
@@ -246,6 +286,48 @@ export default function SettingsPage() {
       console.error('Failed to save brand colors:', error)
       setColorsErrorMessage(error instanceof Error ? error.message : 'Falha ao salvar cores da marca')
       setColorsSaveState('error')
+    }
+  }
+
+  async function loadSubtitleStyle() {
+    try {
+      setStyleLoading(true)
+      const response = await fetch('/api/settings/style')
+      if (response.ok) {
+        const data = await response.json()
+        if (
+          typeof data?.subtitleStyle === 'string' &&
+          SUBTITLE_STYLE_OPTIONS.some((opt) => opt.id === data.subtitleStyle)
+        ) {
+          setSubtitleStyle(data.subtitleStyle as SubtitleStyle)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load subtitle style:', error)
+    } finally {
+      setStyleLoading(false)
+    }
+  }
+
+  async function saveSubtitleStyle(next: SubtitleStyle) {
+    const previous = subtitleStyle
+    setSubtitleStyle(next)
+    try {
+      setStyleSaveState('saving')
+      const response = await fetch('/api/settings/style', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subtitleStyle: next })
+      })
+      if (!response.ok) {
+        throw new Error('Falha ao salvar estilo de legenda')
+      }
+      setStyleSaveState('saved')
+      setTimeout(() => setStyleSaveState('idle'), 2000)
+    } catch (error) {
+      console.error('Failed to save subtitle style:', error)
+      setSubtitleStyle(previous)
+      setStyleSaveState('error')
     }
   }
 
@@ -553,6 +635,51 @@ export default function SettingsPage() {
               {colorsSaveState === 'saved' && 'Salvo ✓'}
               {(colorsSaveState === 'idle' || colorsSaveState === 'error') && 'Salvar cores'}
             </button>
+          </div>
+        )}
+
+        <h2 className="text-2xl font-bold mt-14 mb-2">
+          Estilo de <span className="text-amber-400">legenda</span>
+        </h2>
+        <p className="text-zinc-500 mb-6">
+          Escolha como as legendas aparecem nos seus vídeos. A escolha é salva na hora e vale
+          para os próximos renders.
+        </p>
+
+        {styleLoading ? (
+          <div className="rounded-2xl bg-zinc-900/50 border border-zinc-800 p-8 animate-pulse h-64" />
+        ) : (
+          <div className="rounded-2xl bg-zinc-900/50 border border-zinc-800 p-8">
+            <div className="space-y-2">
+              {SUBTITLE_STYLE_OPTIONS.map((option) => (
+                <label
+                  key={option.id}
+                  className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-colors ${
+                    subtitleStyle === option.id
+                      ? 'border-amber-400 bg-amber-400/5'
+                      : 'border-zinc-800 hover:border-zinc-700'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="subtitleStyle"
+                    checked={subtitleStyle === option.id}
+                    onChange={() => saveSubtitleStyle(option.id)}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="block text-sm text-white">{option.label}</span>
+                    <span className="block text-xs text-zinc-500 mt-0.5">{option.description}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {styleSaveState === 'saved' && (
+              <p className="text-sm text-amber-400 mt-4">Estilo salvo ✓</p>
+            )}
+            {styleSaveState === 'error' && (
+              <p className="text-sm text-red-400 mt-4">Falha ao salvar o estilo de legenda</p>
+            )}
           </div>
         )}
       </main>
