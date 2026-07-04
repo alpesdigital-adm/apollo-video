@@ -181,11 +181,20 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   const effectiveEndTime = Math.max(subtitle.endTime, lastWordEnd + 0.05);
 
   const duration = effectiveEndTime - subtitle.startTime;
+  if (duration <= 0.05) {
+    // Lasca de legenda (ex.: cópia recortada na borda do cold open). Além de
+    // inexibível, o range fixo [0, 0.1, duração-0.1, duração] ficava
+    // NÃO-monotônico com duração < 0.2s e o interpolate lançava
+    // "inputRange must be strictly monotonically increasing" — matava o
+    // vídeo no fim do hook (bug real de produção, stack capturado).
+    return null;
+  }
   const timeInSubtitle = currentTime - subtitle.startTime;
-
+  // Fade proporcional: garante 0 < fade < duração-fade para QUALQUER duração.
+  const fade = Math.min(0.1, duration / 3);
   const opacity = interpolate(
     timeInSubtitle,
-    [0, 0.1, duration - 0.1, duration],
+    [0, fade, duration - fade, duration],
     [0, 1, 1, 0],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   );

@@ -561,7 +561,10 @@ export function buildColdOpenSubtitles(
     if (eF > fromFrame && sF < toFrame) {
       const startFrame = Math.max(0, Math.min(len, sF - fromFrame))
       const endFrame = Math.max(0, Math.min(len, eF - fromFrame))
-      if (endFrame <= startFrame) continue
+      // Descarta lascas: cópia recortada a <0.35s na borda da janela é
+      // ilegível e (antes do guard no componente) gerava range não-monotônico
+      // no interpolate do fade — exceção que matava o vídeo no fim do hook.
+      if (endFrame - startFrame < Math.round(fps * 0.35)) continue
       remapped.push({
         ...sub,
         startTime: Math.max(0, Math.min(maxSec, sub.startTime - secFrom)),
