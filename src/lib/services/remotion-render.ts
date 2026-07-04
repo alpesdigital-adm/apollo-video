@@ -49,7 +49,11 @@ interface ActiveRenderEntry {
 const g = globalThis as any
 const activeRenders: Map<string, ActiveRenderEntry> = (g.__apolloActiveRenders ??= new Map())
 
-const RENDER_TIMEOUT_MS = Number(process.env.RENDER_TIMEOUT_MS) || 30 * 60000
+// Teto ABSOLUTO de segurança (backstop raro). O corte de verdade é o watchdog
+// de INATIVIDADE: um render lento-mas-vivo nunca morre por relógio (caso real:
+// vídeo de 3m15s morto a 76% aos 30min porque outro render dividia a CPU).
+const RENDER_TIMEOUT_MS = Number(process.env.RENDER_TIMEOUT_MS) || 3 * 60 * 60000
+const RENDER_STALL_TIMEOUT_MS = Number(process.env.RENDER_STALL_TIMEOUT_MS) || 10 * 60000
 
 export function isRenderActive(projectId: string): boolean {
   return activeRenders.has(projectId)
@@ -105,6 +109,18 @@ export async function startProjectRender(
 
   if (!project) {
     throw new Error('Project not found')
+  }
+
+  // UM render por vez no processo inteiro: dois renders simultâneos dividem a
+  // CPU e os dois rastejam (caso real: segundo render entrou junto e o primeiro
+  // morreu a 76% no teto de tempo). propsOnly não spawna nada, então passa.
+  if (!options.propsOnly && activeRenders.size > 0) {
+    const busy = [...activeRenders.keys()][0]
+    throw new Error(
+      busy === projectId
+        ? 'Este projeto já está renderizando.'
+        : `Já tem um render em andamento (projeto ${busy.slice(0, 8)}…). Espere ele terminar e clique de novo.`
+    )
   }
 
   if (
@@ -324,17 +340,29 @@ export async function startProjectRender(
   activeRenders.set(projectId, renderEntry)
 
   let timedOut = false
+  let timeoutReason = ''
   let lastProgressValue = 0
+  let lastActivityAt = Date.now()
 
-  const timeoutHandle = setTimeout(() => {
+  const watchdog = setInterval(() => {
+    const now = Date.now()
+    if (now - renderEntry.startedAt >= RENDER_TIMEOUT_MS) {
+      timeoutReason = `Render passou do teto absoluto de ${Math.round(RENDER_TIMEOUT_MS / 60000)}min`
+    } else if (now - lastActivityAt >= RENDER_STALL_TIMEOUT_MS) {
+      timeoutReason = `Render travado: ${Math.round(RENDER_STALL_TIMEOUT_MS / 60000)}min sem sinal de vida (parou em ${lastProgressValue}%)`
+    } else {
+      return
+    }
     timedOut = true
-    console.error(`Render timeout for project ${projectId} after ${RENDER_TIMEOUT_MS}ms, killing process tree`)
+    clearInterval(watchdog)
+    console.error(`${timeoutReason} — matando a árvore de processos (projeto ${projectId})`)
     killProcessTree(remotionProcess)
-  }, RENDER_TIMEOUT_MS)
+  }, 30000)
 
   remotionProcess.stdout?.on('data', (data) => {
     const chunk = String(data)
     const now = Date.now()
+    lastActivityAt = now
     const pct = parseRenderProgress(chunk)
 
     // Progress update: only when it advances by ≥1 point (throttled to 1s).
@@ -374,12 +402,13 @@ export async function startProjectRender(
 
   let stderr = ''
   remotionProcess.stderr?.on('data', (data) => {
+    lastActivityAt = Date.now()
     stderr += String(data)
     console.error(`Render output: ${data}`)
   })
 
   remotionProcess.on('error', async (error) => {
-    clearTimeout(timeoutHandle)
+    clearInterval(watchdog)
     activeRenders.delete(projectId)
     const message = `Render process failed to start: ${error instanceof Error ? error.message : String(error)}`
     try {
@@ -397,7 +426,7 @@ export async function startProjectRender(
   })
 
   remotionProcess.on('close', async (code) => {
-    clearTimeout(timeoutHandle)
+    clearInterval(watchdog)
     activeRenders.delete(projectId)
     try {
       if (code === 0 && !timedOut) {
@@ -412,7 +441,7 @@ export async function startProjectRender(
         })
       } else {
         const message = timedOut
-          ? `Render timeout after ${RENDER_TIMEOUT_MS}ms`
+          ? timeoutReason
           : `Render process exited with code ${code}${stderr ? `: ${stderr.slice(-1000)}` : ''}`
         await prisma.renderJob.update({
           where: { id: renderJob.id },
