@@ -29,6 +29,10 @@ import { pickMusicForProject } from '@/lib/audio-assets'
 interface StartProjectRenderOptions {
   clearExistingRender?: boolean
   statusOnStart?: 'rendering'
+  // Modo diagnóstico: monta e grava APENAS o JSON de inputProps do estado
+  // atual — sem RenderJob, sem manifest, sem spawn, sem tocar no status.
+  // (O padrão antigo de "disparar render e matar" marcava o projeto com erro.)
+  propsOnly?: boolean
 }
 
 interface ActiveRenderEntry {
@@ -126,13 +130,15 @@ export async function startProjectRender(
         text: '#FFFFFF'
       }
 
-  const renderJob = await prisma.renderJob.create({
-    data: {
-      projectId,
-      status: 'queued',
-      progress: 0
-    }
-  })
+  const renderJob = options.propsOnly
+    ? null
+    : await prisma.renderJob.create({
+        data: {
+          projectId,
+          status: 'queued',
+          progress: 0
+        }
+      })
 
   if (options.statusOnStart) {
     await prisma.project.update({
@@ -210,12 +216,20 @@ export async function startProjectRender(
   const manifestPath = getRenderManifestPath(outputPath)
   const propsDir = path.join(process.cwd(), 'tmp', 'remotion-props')
   await mkdir(propsDir, { recursive: true })
-  const propsPath = path.join(propsDir, `${projectId}-${renderJob.id}.json`)
+  const propsPath = path.join(
+    propsDir,
+    `${projectId}-${renderJob ? renderJob.id : 'diagnostic'}.json`
+  )
   await writeFile(propsPath, JSON.stringify(inputProps), 'utf8')
 
   const compositionId = project.format === '16:9' ? 'horizontal' : 'vertical'
   // Cold open lengthens the timeline by `len` frames (prepended teaser).
   const durationFrames = baseDurationFrames + (coldOpen ? coldOpen.len : 0)
+
+  if (!renderJob) {
+    // propsOnly: nada foi criado além do arquivo de props.
+    return { jobId: null, outputPath: null, durationFrames, propsPath }
+  }
   await writeFile(
     manifestPath,
     JSON.stringify(
