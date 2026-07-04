@@ -612,11 +612,6 @@ export default function EditorPage() {
                 {project.engineKind === 'narrative' ? 'Narrative Engine' : 'Visual Engine'}
               </span>
             )}
-            {project.stylePreset && (
-              <span className="text-sm text-zinc-300 px-3 py-1 rounded-full bg-zinc-800 border border-zinc-700">
-                {project.stylePreset}
-              </span>
-            )}
           </div>
           <div className="flex items-center gap-4">
             {(project.status === 'ready' ||

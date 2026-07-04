@@ -2,14 +2,12 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { INSERT_STYLE_PRESETS, DEFAULT_INSERT_STYLE_PRESET } from '@/lib/style-presets'
-import type { VideoFormat, ProjectStatus, InsertStylePreset } from '@/lib/types/project'
+import type { VideoFormat, ProjectStatus } from '@/lib/types/project'
 
 interface Project {
   id: string
   name: string
   format: VideoFormat
-  stylePreset?: InsertStylePreset
   status: ProjectStatus
   createdAt: string
   updatedAt: string
@@ -22,8 +20,6 @@ export default function Dashboard() {
   const [uploading, setUploading] = useState(false)
   const [uploadMessage, setUploadMessage] = useState<string | null>(null)
   const [dragActive, setDragActive] = useState(false)
-  const [selectedStylePreset, setSelectedStylePreset] =
-    useState<InsertStylePreset>(DEFAULT_INSERT_STYLE_PRESET)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
@@ -58,7 +54,6 @@ export default function Dashboard() {
       setUploadMessage('Uploading and reading video metadata...')
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('stylePreset', selectedStylePreset)
 
       const response = await fetch('/api/upload', {
         method: 'POST',
@@ -204,48 +199,6 @@ export default function Dashboard() {
       <main className="max-w-6xl mx-auto px-6 py-12">
         {/* Upload Zone */}
         <div className="mb-12">
-          <div className="mb-6">
-            <div className="flex items-end justify-between gap-4 mb-3">
-              <div>
-                <h2 className="text-lg font-bold">Estilo dos inserts</h2>
-                <p className="text-sm text-zinc-500">
-                  O preset escolhido guia todos os textos, cards e overlays do video.
-                </p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {INSERT_STYLE_PRESETS.map((preset) => {
-                const isSelected = selectedStylePreset === preset.id
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => setSelectedStylePreset(preset.id)}
-                    className={`text-left rounded-xl border p-4 transition-all ${
-                      isSelected
-                        ? 'border-amber-400 bg-amber-400/10 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]'
-                        : 'border-zinc-800 bg-zinc-900/40 hover:border-zinc-600'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3 mb-2">
-                      <span className="font-semibold">{preset.name}</span>
-                      <span
-                        className={`h-4 w-4 rounded-full border ${
-                          isSelected
-                            ? 'border-amber-300 bg-amber-400'
-                            : 'border-zinc-600 bg-zinc-900'
-                        }`}
-                      />
-                    </div>
-                    <p className="text-sm text-zinc-500 leading-snug">
-                      {preset.description}
-                    </p>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
           <label
             onDragEnter={handleDrag}
             onDragLeave={handleDrag}

@@ -5,7 +5,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import fs from 'fs'
 import path from 'path'
-import { getInsertStylePresetMeta } from '../style-presets'
 import type { Transcription, SubtitleEntry, VideoFormat } from '../types/project'
 import type { Scene, AnalysisResult, NarrativeRole, SceneType, ColorPalette } from '../types/scene'
 import type { BrandColorGroup } from '../brand-colors'
@@ -1330,7 +1329,6 @@ export async function analyzeContent(
     // and generate a basic scene structure
     // In a full implementation, this would parse segments more carefully
 
-    const styleMeta = getInsertStylePresetMeta(stylePreset)
     const validAssetIds = new Set((assetCatalog || []).map((a) => a.id))
 
     // MODO MÍNIMO — sem NENHUMA chamada de cena: só corte + legendas. O dono edita
@@ -1432,7 +1430,7 @@ TÍTULO-HOOK PERSISTENTE (hookTitle — OPCIONAL, no nível raiz do JSON, não �
 
 IDIOMA DE TODA COPY (manchete, cenas, CTA — regra do dono, inegociável): português BRASILEIRO FALADO, "tupiniquim", que uma criança de 10 anos entende de primeira. Teste: você leria isso em voz alta num anúncio sem soar estranho? PROIBIDO anglicismo e tradução literal do inglês — construções como "por como", "de como", "o quanto", "focado em performar" são INACEITÁVEIS. Também são proibidas expressões que ninguém fala no Brasil mesmo parecendo português (ex. reprovado real: "Falou fraco?") — se um brasileiro não diria isso numa mesa de bar, não escreva. Prefira frases curtas, verbos diretos, palavras do dia a dia ("pra" em vez de "para" quando soar mais natural). PROIBIDO travessão (—) em qualquer campo de copy (texto de cena, manchete, highlight etc.): travessão denuncia texto de IA. Use vírgula (preferência) ou dois-pontos quando precisar separar ideias.
 
-Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysisTone}.${buildBrandColorPromptSection(brandColors)}${buildAssetCatalogSection(assetCatalog)}
+${buildBrandColorPromptSection(brandColors)}${buildAssetCatalogSection(assetCatalog)}
 
 REGRAS DE RITMO — OBRIGATÓRIAS, VERIFICADAS POR CÓDIGO (estas prevalecem sobre qualquer flexibilidade acima):
 - B-ROLL É O ESQUELETO VISUAL: vídeos com mais de ~45s de fala DEVEM ter NO MÍNIMO 40% das cenas do tipo ImageInsert. Sem b-roll suficiente o vídeo vira uma parede de tipografia — reprovado.
@@ -1449,7 +1447,6 @@ COTAS POR BLOCO (no pedido do usuário abaixo vêm os BLOCOS da passada de rotei
     const userPrompt = `Analyze this video transcription and create a detailed scene breakdown:
 
 FORMAT: ${format}
-VISUAL STYLE: ${styleMeta.name}
 
 Full transcription text:
 ${transcriptionText}

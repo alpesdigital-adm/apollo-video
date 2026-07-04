@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getVideoInfo } from '@/lib/services/ffmpeg'
-import { normalizeInsertStylePreset } from '@/lib/style-presets'
 import { writeFile, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
@@ -11,7 +10,9 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File
-    const stylePreset = normalizeInsertStylePreset(formData.get('stylePreset'))
+    // Seletor de preset removido do produto: o visual é dirigido pelas cores da
+    // marca, presets de legenda, grade e leis de direção. Fica o padrão fixo.
+    const stylePreset = 'creator-clean'
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
