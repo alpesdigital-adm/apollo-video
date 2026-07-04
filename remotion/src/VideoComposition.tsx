@@ -155,29 +155,23 @@ export const VideoComposition: React.FC<CompositionProps> = ({
       const bStart = b.fromFrame ?? Math.round(b.from * config.fps);
       return aStart - bStart;
     });
-  const splitTrackStart = splitImageScenes[0]
-    ? splitImageScenes[0].fromFrame ?? Math.round(splitImageScenes[0].from * config.fps)
-    : null;
-  const splitTrackEnd = splitImageScenes.length > 0
-    ? Math.max(
-        ...splitImageScenes.map((scene) => scene.toFrame ?? Math.round(scene.to * config.fps))
-      )
-    : null;
-  const activeSplitImage = splitImageScenes.find((scene) => {
-    const startFrame = scene.fromFrame ?? Math.round(scene.from * config.fps);
-    const nextScene = splitImageScenes[splitImageScenes.indexOf(scene) + 1];
-    const endFrame = nextScene
-      ? nextScene.fromFrame ?? Math.round(nextScene.from * config.fps)
-      : splitTrackEnd ?? scene.toFrame ?? Math.round(scene.to * config.fps);
-
-    return (
-      frame >= startFrame &&
-      frame < endFrame
-    );
-  }) || splitImageScenes[0];
-  const isSplitImageActiveAt = (f: number): boolean =>
-    splitTrackStart !== null && splitTrackEnd !== null && f >= splitTrackStart && f < splitTrackEnd;
-  const isSplitImageActive = isSplitImageActiveAt(frame);
+  // Janelas por cena com o MESMO chain-gap de 1.5s do ImageInsertTrack. O track
+  // antigo ia do 1º split ao ÚLTIMO (um único intervalo contínuo): nos vãos entre
+  // inserts distantes a imagem já tinha saído (chain-gap do overlay) mas o vídeo-
+  // base continuava rebaixado a 70% — minutos de faixa navy VAZIA no topo (visto
+  // em still real: "caixa azul sem imagem"). As duas contas têm que ser gêmeas.
+  const splitChainGapFrames = Math.round(config.fps * 1.5);
+  const splitWindows = splitImageScenes.map((scene, index) => {
+    const start = scene.fromFrame ?? Math.round(scene.from * config.fps);
+    const ownEnd = scene.toFrame ?? Math.round(scene.to * config.fps);
+    const next = splitImageScenes[index + 1];
+    const nextStart = next ? next.fromFrame ?? Math.round(next.from * config.fps) : null;
+    const chainedIntoNext = nextStart !== null && nextStart - ownEnd <= splitChainGapFrames;
+    return { scene, start, end: chainedIntoNext && nextStart !== null ? nextStart : ownEnd };
+  });
+  const activeSplitWindow = splitWindows.find((w) => frame >= w.start && frame < w.end);
+  const isSplitImageActive = Boolean(activeSplitWindow);
+  const activeSplitImage = activeSplitWindow?.scene;
   const activeSplitLayout = isSplitImageActive ? activeSplitImage?.props?.layout : undefined;
   const isTopImageCompact = activeSplitLayout === 'top-image-compact';
   const splitVideoObjectPosition =
