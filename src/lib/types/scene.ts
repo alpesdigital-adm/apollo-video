@@ -50,8 +50,6 @@ export interface BaseScene {
   // repositions the base video (split/blur/tweet) instead of staying fullscreen.
   segmentLayout?: SegmentSceneLayout
   segmentEffects?: SegmentSceneEffects
-  // Pacote 5: flash transition on this scene's entrance (any scene type).
-  transitionIn?: 'flash'
 }
 
 export interface FullScreenScene extends BaseScene {

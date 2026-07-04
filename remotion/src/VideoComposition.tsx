@@ -28,7 +28,6 @@ import {
   LayoutSegmentRenderer,
   findActiveLayoutSegment,
 } from './components/LayoutSegmentLayer';
-import { FlashTransition } from './components/FlashTransition';
 
 interface SceneComponentProps {
   format: '9:16' | '16:9';
@@ -582,16 +581,6 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         }))}
         palette={palette}
       />
-
-      {/* Flash transitions — white-hot burst centered on a scene's entrance */}
-      {scenes.map((scene, index) =>
-        scene.props?.transitionIn === 'flash' ? (
-          <FlashTransition
-            key={`flash-${index}`}
-            startFrame={scene.fromFrame ?? Math.round(scene.from * config.fps)}
-          />
-        ) : null
-      )}
 
       {/* SFX Layer — one Audio per event, gated by the segment it announces */}
       {audio?.events?.map((event, index) => (

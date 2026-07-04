@@ -81,7 +81,7 @@ function validateSceneData(
 
   // Layout de segmento (opcional): whitelist + valores válidos. null/'' remove.
   normalizeSegmentFields(sceneData)
-  // Táticas de edição pontuais (Pacote 5): transitionIn (flash) + variant (FullScreen).
+  // Táticas de edição pontuais: variant (FullScreen); transitionIn é banido aqui.
   normalizeSceneTactics(sceneData)
 
   if (sceneData.type === 'AssetCard') {

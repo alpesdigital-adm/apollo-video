@@ -203,15 +203,14 @@ export function enforceAnalyzeSegmentConstraints(sceneData: any): void {
 /**
  * Pacote 5 — whitelist the two per-scene edit tactics that apply across the
  * pipeline and the director:
- *  - transitionIn: só 'flash' sobrevive (qualquer tipo de cena);
+ *  - transitionIn: BANIDO (o flash branco lia como "piscada" — decisão do
+ *    dono, 2026-07-03); nenhum valor sobrevive;
  *  - variant: só 'torn-paper' | 'crt-glitch' e SOMENTE em FullScreen (title-card).
  * (o stutter do ImageInsert é tratado em normalizeImageInsertMedia). Valores
  * inválidos são removidos silenciosamente. Mutação in-place.
  */
 export function normalizeSceneTactics(sceneData: any): void {
-  if (sceneData.transitionIn !== 'flash') {
-    delete sceneData.transitionIn
-  }
+  delete sceneData.transitionIn
 
   if (sceneData.type === 'FullScreen') {
     if (sceneData.variant !== 'torn-paper' && sceneData.variant !== 'crt-glitch') {
@@ -997,7 +996,7 @@ function buildBlocksDirectiveSection(blocks: NarrativeBlock[]): string {
   const lines = blocks.map((b, i) => {
     const cotas: string[] = []
     if (b.papel === 'gancho') {
-      cotas.push('abra com um title-card FullScreen (variant torn-paper OU crt-glitch) + transitionIn:"flash", e inclua um ImageInsert com motion:true')
+      cotas.push('abra com um title-card FullScreen (variant torn-paper OU crt-glitch), e inclua um ImageInsert com motion:true')
     }
     if (b.papel === 'prova' || b.papel === 'historia') {
       cotas.push('inclua um ImageInsert com segmentLayout:"split-50" e imagePrompt ESPECÍFICO do que é dito aqui (PROIBIDO b-roll genérico de escritório/pessoas/estrada)')
@@ -1139,9 +1138,7 @@ const DEFICIT_LABELS: Record<string, string> = {
   bw:
     'NENHUMA cena em preto e branco apesar de haver bloco de DOR/PROBLEMA. Aplique segmentEffects:{"bw":true} numa cena do trecho de dor (update_scene).',
   motion:
-    'MENOS de 2 ImageInserts com motion:true. Marque motion:true (update_scene) nos 2 inserts de maior impacto (priorize o gancho).',
-  flash:
-    'NENHUMA cena com transitionIn:"flash". Marque transitionIn:"flash" (update_scene) na PRIMEIRA cena tipográfica do gancho.'
+    'MENOS de 2 ImageInserts com motion:true. Marque motion:true (update_scene) nos 2 inserts de maior impacto (priorize o gancho).'
 }
 
 /**
@@ -1165,8 +1162,6 @@ function computeAnalysisDeficits(scenes: Scene[], blocks: NarrativeBlock[], spok
   if (blocks.some((b) => b.dorOuProblema) && bwCount === 0) deficits.push('bw')
   const motionCount = scenes.filter((s) => (s as any).motion === true).length
   if (motionCount < 2 && imageInserts.length > 0) deficits.push('motion')
-  const flashCount = scenes.filter((s) => (s as any).transitionIn === 'flash').length
-  if (flashCount === 0) deficits.push('flash')
   return deficits
 }
 
@@ -1192,7 +1187,7 @@ async function runRepairPass(
   const systemPrompt = `Você é o diretor de cena consertando LACUNAS pontuais numa análise de vídeo já pronta. NÃO refaça o resto: devolva só as operações mínimas para suprir os itens faltantes. Máximo UMA operação por lacuna.
 Regras: use SOMENTE ids de cena que existem na lista; imagePrompt SEM texto/letras/logos e ESPECÍFICO da fala do bloco; respeite os tetos de copy (texto sobre vídeo ≤ 6 palavras); PROIBIDO travessão. split-50/blur-bg só em ImageInsert; tweet-card com text ≤ 20 palavras.
 Responda SOMENTE com JSON, sem markdown:
-{ "operations": [ {"op":"add_scene","scene":{"type":"...","startLeg":<int>,"durationInSubtitles":<1-3>, ...props}}, {"op":"update_scene","sceneId":"<id existente>","changes":{ ...props ou segmentLayout/segmentEffects/motion/transitionIn/variant }} ] }`
+{ "operations": [ {"op":"add_scene","scene":{"type":"...","startLeg":<int>,"durationInSubtitles":<1-3>, ...props}}, {"op":"update_scene","sceneId":"<id existente>","changes":{ ...props ou segmentLayout/segmentEffects/motion/variant }} ] }`
 
   const userPrompt = `LACUNAS a suprir:
 ${problems}
@@ -1302,17 +1297,6 @@ function applyDeterministicPromotions(
       ins.motion = true
       promotions.push(`motion→${ins.id}`)
       need--
-    }
-  }
-  if (deficits.includes('flash')) {
-    const target =
-      out.find((s) => inHookBlock(s) && s.type !== 'ImageInsert' && s.type !== 'AssetCard') ||
-      out.find((s) => s.type !== 'ImageInsert' && s.type !== 'AssetCard') ||
-      out[0]
-    if (target) {
-      target.transitionIn = 'flash'
-      normalizeSceneSegments(target)
-      if (target.transitionIn === 'flash') promotions.push(`flash→${target.id}`)
     }
   }
   return { scenes: out as Scene[], promotions }
@@ -1439,7 +1423,6 @@ Por padrão TODA cena é fullscreen (vídeo base cheio + a cena por cima). Um "l
 - COMO RETORNAR: adicione "segmentLayout" e/ou "segmentEffects" na própria cena. Ex. de insert com layout: { ..., "type": "ImageInsert", "segmentLayout": "split-50" }. Ex. de cena só de efeito: { ..., "type": "FullScreen", "text": "Isso muda tudo", "highlight": "tudo", "segmentEffects": { "zoom": "in" } }. Ex. de citação: { ..., "type": "FullScreen", "text": "Ninguém te contou isso antes", "segmentLayout": "tweet-card" }. Valores fora dessas listas são ignorados.
 
 TÁTICAS DE EDIÇÃO PONTUAIS (opcionais — ÊNFASE rara, nunca padrão; valores inválidos são ignorados):
-- transitionIn (qualquer tipo de cena): "transitionIn": "flash" estoura um flash branco-quente na ENTRADA da cena. Use no gancho e/ou na virada principal. NO MÁXIMO 1-2 por vídeo.
 - variant (SÓ em FullScreen, title-card de ABERTURA/hook): "variant": "torn-paper" (faixa vermelha rasgada, urgência/notícia) ou "variant": "crt-glitch" (glitch RGB + scanlines, tech/erro). Use no title-card de abertura quando o tom pedir impacto; sem variant = kinético padrão. NO MÁXIMO 1 por vídeo.
 
 TÍTULO-HOOK PERSISTENTE (hookTitle — OPCIONAL, no nível raiz do JSON, não é uma cena):
@@ -1454,9 +1437,8 @@ Estilo visual selecionado: ${styleMeta.name}. Siga este tom: ${styleMeta.analysi
 REGRAS DE RITMO — OBRIGATÓRIAS, VERIFICADAS POR CÓDIGO (estas prevalecem sobre qualquer flexibilidade acima):
 - B-ROLL É O ESQUELETO VISUAL: vídeos com mais de ~45s de fala DEVEM ter NO MÍNIMO 40% das cenas do tipo ImageInsert. Sem b-roll suficiente o vídeo vira uma parede de tipografia — reprovado.
 - vídeos com mais de ~60s de fala DEVEM conter PELO MENOS 1 cena com segmentLayout (split-50 preferido para b-roll longo, ou blur-bg/tweet-card). Um vídeo longo sem nenhuma troca de layout é reprovado.
-- EXATAMENTE 1 cena com "transitionIn": "flash" — e ela deve ser a PRIMEIRA cena tipográfica do hook (a abertura estoura em flash branco-quente). Não espalhe flash por várias cenas.
 - "motion": true nos 2 inserts de MAIOR impacto do vídeo (sempre priorize o hook). Movimento é ênfase — exatamente nos 2 mais fortes, não em todos.
-Estas quatro regras são conferidas por código após sua resposta; cumpra-as ao montar as cenas.
+Estas três regras são conferidas por código após sua resposta; cumpra-as ao montar as cenas.
 
 COTAS POR BLOCO (no pedido do usuário abaixo vêm os BLOCOS da passada de roteiro com COTAS OBRIGATÓRIAS): trate cada COTA como uma exigência dura — o gancho ganha title-card+flash+b-roll com motion; prova/história ganham split-50 com b-roll ESPECÍFICO; citação forte vira tweet-card; bloco de dor ganha preto e branco; bloco longo ganha ImageInsert concreto. O que faltar será consertado por código, então é melhor você já entregar. PROIBIDO b-roll genérico (escritório/pessoas caminhando/estrada vazia): todo imagePrompt deve citar o contexto CONCRETO da fala do bloco.`
 
@@ -1782,7 +1764,7 @@ function summarizeSceneForPrompt(scene: Scene): string {
     'layout', 'imagePrompt', 'imageAlt', 'sourceText', 'narrativeRole', 'visualRole',
     'motion', 'source', 'stockQuery', 'stutter',
     'assetId', 'style', 'name', 'caption',
-    'segmentLayout', 'transitionIn', 'variant'
+    'segmentLayout', 'variant'
   ]
   const parts: string[] = []
   for (const field of fields) {
@@ -1841,7 +1823,7 @@ VOCABULÁRIO DE BATIDAS: o usuário trabalha num painel de "batidas" — batida 
 TIPOS DE CENA VÁLIDOS: FullScreen, LowerThird, Split, SplitVertical, Card, Message, Number, Flow, CTA, StickFigures, ImageInsert${assetCatalog && assetCatalog.length > 0 ? ', AssetCard' : ''}.
 
 OPERAÇÕES DISPONÍVEIS (retorne no máximo ~10 no total):
-- {"op":"update_scene","sceneId":"<id existente>","changes":{<apenas props válidas do tipo da cena>}} — altera texto/props de uma cena existente. TAMBÉM aceita LAYOUT DE SEGMENTO: "segmentLayout" ("split-50" | "blur-bg" | "tweet-card" | null para voltar a tela cheia) reposiciona o vídeo base durante a janela da cena; "segmentEffects" ({"zoom":"in"|"out","bw":true}) aplica efeito no vídeo base (combinável com qualquer layout, ou sozinho para efeito em tela cheia). E TÁTICAS DE EDIÇÃO PONTUAIS (ênfase rara): "stutter":true (SÓ ImageInsert — 5 micro-saltos no 1º ~1,6s, máx 1/vídeo no hook), "transitionIn":"flash" (flash branco na entrada, qualquer cena, máx 1-2/vídeo), "variant":"torn-paper"|"crt-glitch" (SÓ FullScreen — title-card estilizado de abertura). Passe o valor null/ausente para remover uma tática.
+- {"op":"update_scene","sceneId":"<id existente>","changes":{<apenas props válidas do tipo da cena>}} — altera texto/props de uma cena existente. TAMBÉM aceita LAYOUT DE SEGMENTO: "segmentLayout" ("split-50" | "blur-bg" | "tweet-card" | null para voltar a tela cheia) reposiciona o vídeo base durante a janela da cena; "segmentEffects" ({"zoom":"in"|"out","bw":true}) aplica efeito no vídeo base (combinável com qualquer layout, ou sozinho para efeito em tela cheia). E TÁTICAS DE EDIÇÃO PONTUAIS (ênfase rara): "stutter":true (SÓ ImageInsert — 5 micro-saltos no 1º ~1,6s, máx 1/vídeo no hook), "variant":"torn-paper"|"crt-glitch" (SÓ FullScreen — title-card estilizado de abertura). Passe o valor null/ausente para remover uma tática.
 - {"op":"delete_scene","sceneId":"<id existente>"} — remove uma cena.
 - {"op":"add_scene","scene":{"type":"<tipo>","startLeg":<int>,"durationInSubtitles":<1-3>, <props do tipo>}} — cria cena nova. startLeg e durationInSubtitles são OBRIGATÓRIOS.
 - {"op":"update_palette","changes":{"accent":"#RRGGBB", ...}} — muda cores GLOBAIS. Chaves válidas: primary, secondary, accent, background, text. Valores HEX (#RGB ou #RRGGBB).
