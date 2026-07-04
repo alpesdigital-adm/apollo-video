@@ -91,12 +91,15 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     const anchorTop = currentSubtitle.anchor === 'top' ? 1 : 0;
     const tf = Math.max(0, Math.min(1, Math.max(topFactor, anchorTop)));
     const visible = 1 - hf;
-    // Positional crossfade: render the bottom copy (fading out) and the top copy
-    // (fading in) as separate nodes so the subtitle appears to move between the
-    // two anchors without sliding. Only one is meaningfully visible at rest.
+    // Troca SEQUENCIAL de posição: a cópia de baixo apaga POR COMPLETO antes de
+    // a de cima acender (e vice-versa). O crossfade anterior renderizava as duas
+    // cópias legíveis ao mesmo tempo por ~8 frames em toda troca — lia como
+    // "legenda duplicada" (visto em still real na emenda do cold open).
+    const bottomOpacity = tf < 0.5 ? (1 - tf * 2) * visible : 0;
+    const topOpacity = tf >= 0.5 ? (tf - 0.5) * 2 * visible : 0;
     return (
       <>
-        {tf < 1 && (
+        {bottomOpacity > 0.01 && (
           <SubtitleTikTok
             subtitle={currentSubtitle}
             palette={palette}
@@ -104,10 +107,10 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
             mode="default"
             subtitleStyle={subtitleStyle}
             placement="bottom"
-            placementOpacity={(1 - tf) * visible}
+            placementOpacity={bottomOpacity}
           />
         )}
-        {tf > 0 && (
+        {topOpacity > 0.01 && (
           <SubtitleTikTok
             subtitle={currentSubtitle}
             palette={palette}
@@ -115,7 +118,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
             mode="default"
             subtitleStyle={subtitleStyle}
             placement="top"
-            placementOpacity={tf * visible}
+            placementOpacity={topOpacity}
           />
         )}
       </>
