@@ -25,6 +25,13 @@ As specs estão em estado **implementation-grade draft**: já definem contratos,
 - [Editor e revisão](./assets/apollo-v2-editor-reference.png)
 - [Dashboard do workspace](./assets/apollo-v2-workspace-reference.png)
 
+## Decisões de arquitetura
+
+- [Índice de ADRs](./adr/README.md)
+- [ADR-001 — Estrutura modular da v2](./adr/ADR-001-v2-modular-architecture.md)
+- [ADR-006 — Commands, versões e concorrência](./adr/ADR-006-command-version-model.md)
+- [ADR-013 — API pública e automação](./adr/ADR-013-public-api-automation.md)
+
 ## Ordem recomendada de leitura
 
 1. PRD, seções 1–6: visão, problema e princípios.

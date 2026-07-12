@@ -6,6 +6,8 @@
     "dev": "next dev -p 3333",
     "build": "next build",
     "start": "next start -p 3333",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
     "remotion:dev": "cd remotion && npx remotion studio src/index.ts",
     "remotion:render": "cd remotion && npx remotion render src/index.ts",
     "db:push": "npx prisma db push",

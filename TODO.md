@@ -101,8 +101,8 @@
 
 - [ ] Inventariar módulos, dependências e acoplamentos da v1.
 - [ ] Comparar monorepo, modular monolith e serviços separados para domínio, workers e renderer.
-- [ ] Definir fronteiras de packages, imports permitidos e ownership.
-- [ ] Registrar estratégia de migração seletiva sem preservar rotas monolíticas.
+- [x] Definir fronteiras de packages, imports permitidos e ownership. Evidência: `ADR-001` e boundary `src/v2`.
+- [x] Registrar estratégia de migração seletiva sem preservar rotas monolíticas. Evidência: `ADR-001`.
 
 #### ADR-002 — Banco, vector search e migrations
 
@@ -184,7 +184,7 @@
 #### ADR-013 — API pública, autenticação externa, webhooks e MCP
 
 - [ ] Decidir OAuth 2.1, signed service keys ou ambos e definir rotação/revogação.
-- [ ] Definir source of truth de OpenAPI, capability registry, SDKs e tool schemas.
+- [x] Definir source of truth de OpenAPI, capability registry, SDKs e tool schemas. Evidência: `ADR-013`.
 - [ ] Definir versionamento, depreciação, sunset e retenção de schemas/events.
 - [ ] Definir entrega/assinatura/replay de webhooks e ordenação por resource.
 - [ ] Definir confirmação de ações caras/destrutivas e transporte do MCP oficial.
@@ -327,9 +327,9 @@
 ### F0.019 — OutputSpec [FR-161]
 
 - [ ] Implementar aspect ratio, width, height, fps, safe areas, codec e delivery constraints.
-- [ ] Validar combinações incompatíveis e defaults por destino.
+- [x] Validar combinações incompatíveis e defaults por destino. Evidência: `output-spec.ts` e testes dos cinco presets.
 - [ ] Versionar `OutputSpec` dentro de cada ProjectVersion.
-- [ ] Criar schema fixtures para os cinco formatos obrigatórios.
+- [x] Criar schema fixtures para os cinco formatos obrigatórios. Evidência: `OUTPUT_PRESETS` e `domain-contracts.test.mjs`.
 
 ### F0.020 — Plano canônico e variantes [FR-162]
 
@@ -439,7 +439,7 @@
 
 ### F0.034 — Paridade API-first [FR-240]
 
-- [ ] Criar `PublicCapability` registry com exposure, scopes, schema, custo e confirmação.
+- [x] Criar `PublicCapability` registry com exposure, scopes, schema, custo e confirmação. Evidência: `capability-registry.ts`.
 - [ ] Associar cada ação operável da UI a um `capabilityId`.
 - [ ] Fazer UI e API chamarem o mesmo application service/Command handler.
 - [ ] Criar allowlist explícita para internals que não podem ser publicados.
@@ -2075,6 +2075,34 @@ Para cada decisão:
 | Non-goals | 12/12 |
 | Riscos | 11/11 |
 | Fases do roadmap | 6/6 |
-| Microtarefas/checks abertos | 1.226 |
+| Microtarefas/checks abertos | 1.220 |
 
 Esta contagem valida presença e fase, não conclusão. Quando o PRD mudar, atualizar este quadro e executar novamente a comparação de IDs com a matriz de rastreabilidade.
+
+---
+
+## 18. Registro de execução
+
+### Slice F0-001 — Chassi de domínio e API-first
+
+**Status:** concluído em 12 de julho de 2026.
+
+Entregas:
+
+- ADR-001, ADR-006 e ADR-013 registrados;
+- boundary modular `src/v2` iniciado;
+- `OutputSpec` para os cinco formatos com invariantes de canvas e safe area;
+- `ProjectVersion` imutável e snapshot refs;
+- `EditCommand` com actor, scope, idempotency key e verificação de base version/hash;
+- serialização canônica e hash SHA-256 de versão;
+- `PublicCapability` registry com scopes, custo, confirmação e parity validator;
+- endpoints `GET /v1/health` e `GET /v1/capabilities`;
+- scripts `typecheck` e `test` sem dependências novas.
+
+Evidências:
+
+- `npm run typecheck`: aprovado;
+- `npm test`: 11 testes aprovados;
+- `npm run build`: aprovado em Next.js 14.2.21;
+- smoke HTTP dos dois endpoints: aprovado;
+- nenhuma versão fixa da v1 foi alterada.
