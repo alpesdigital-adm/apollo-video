@@ -14,10 +14,8 @@ import type { Scene } from '@/lib/types/scene'
  * plans that were persisted before the fix existed. Invalidates the rendered
  * video so the next render picks up the fresh plan.
  */
-export async function POST(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function POST(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const projectId = params.id
     if (!projectId) {

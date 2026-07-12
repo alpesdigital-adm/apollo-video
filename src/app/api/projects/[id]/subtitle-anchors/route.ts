@@ -8,10 +8,8 @@ import { runSubtitleAnchors } from '@/lib/beat-vision'
  * Mesmo fluxo que o fire-and-forget do transcribe, exposto para projetos que já
  * têm legendas/thumbs.
  */
-export async function POST(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function POST(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const projectId = params.id
 
   try {

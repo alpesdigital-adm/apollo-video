@@ -5,10 +5,8 @@ import { startProjectRender } from '@/lib/services/remotion-render'
 // RenderJob, sem spawnar o Remotion e sem tocar no status — para renderizar
 // stills de verificação. (O padrão antigo de disparar um render e matá-lo
 // deixava o projeto marcado com "Render process exited with code 1".)
-export async function POST(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function POST(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const result = await startProjectRender(params.id, { propsOnly: true })
     return NextResponse.json({

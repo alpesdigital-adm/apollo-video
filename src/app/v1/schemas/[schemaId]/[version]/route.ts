@@ -7,10 +7,11 @@ import { publicSchemaDocument } from '@/v2/public-api/schema-examples'
 export const dynamic = 'force-dynamic'
 
 interface RouteContext {
-  params: { schemaId: string; version: string }
+  params: Promise<{ schemaId: string; version: string }>
 }
 
-export function GET(request: NextRequest, { params }: RouteContext) {
+export async function GET(request: NextRequest, props: RouteContext) {
+  const params = await props.params;
   const requestId = resolveRequestId(request)
   try {
     const definition = getPublicSchemaByRoute(params.schemaId, params.version)

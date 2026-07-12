@@ -9,10 +9,8 @@ import type { SubtitleEntry } from '@/lib/types/project'
 import type { Scene } from '@/lib/types/scene'
 import { FPS } from '@/lib/types/timing'
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const projectId = params.id
 
   try {

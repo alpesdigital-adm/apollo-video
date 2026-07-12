@@ -440,8 +440,8 @@
 - [ ] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution.
 - [ ] Validar que `SourceAsset`, `TimelineSegment`, `OutputSpec`, adapter e `EditCommand` são compatíveis com as specs 02, 03 e 06.
 - [ ] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008.
-- [ ] Atualizar Next.js/React para uma linha suportada sem quebrar App Router, Remotion ou os contratos `/v1`; audit atual sinaliza advisory crítico no Next.js 14.2.21.
-- [ ] Corrigir advisories não-major de `uuid`, `postcss` e `form-data` e manter `npm audit` registrado no CI.
+- [x] Atualizar Next.js/React para uma linha suportada sem quebrar App Router, Remotion ou os contratos `/v1`. Evidência: Next 16.2.10, React 19.2.7, codemod async params e validação completa.
+- [x] Corrigir advisories não-major de `uuid`, `postcss` e `form-data`. Evidência: versões corrigidas/override PostCSS e `npm audit` com zero vulnerabilidades.
 - [ ] Configurar S3-compatible storage.
 - [x] Impedir SQLite como domínio final fora de protótipos locais. Evidência: `resolveV2PersistenceMode` exige Postgres em produção e não possui fallback silencioso.
 - [ ] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais.
@@ -2085,7 +2085,7 @@ Para cada decisão:
 | Non-goals | 12/12 |
 | Riscos | 11/11 |
 | Fases do roadmap | 6/6 |
-| Microtarefas/checks abertos | 1.211 |
+| Microtarefas/checks abertos | 1.209 |
 
 Esta contagem valida presença e fase, não conclusão. Quando o PRD mudar, atualizar este quadro e executar novamente a comparação de IDs com a matriz de rastreabilidade.
 
@@ -2262,7 +2262,7 @@ Pendências deliberadas:
 
 ### Slice F0-006 — Examples e compatibilidade do contrato `/v1`
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `93a4197`.
 
 Entregas:
 
@@ -2293,3 +2293,37 @@ Pendências deliberadas:
 - headers `Deprecation`/`Sunset` e migration guide;
 - política para mudanças compatíveis dentro da mesma major sem tornar o gate excessivamente conservador;
 - geração de SDK e MCP a partir do OpenAPI.
+
+### Slice F0-007 — Upgrade seguro de Next.js e React
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- migração incremental validada de Next 14.2.21 → 15.5.20 → 16.2.10;
+- React/React DOM 18.3.1 → 19.2.7 e types React 19 atualizados;
+- codemod oficial `next-async-request-api` aplicado em 15 route handlers;
+- `params` de pages/routes dinâmicas agora é assíncrono conforme o App Router atual;
+- `serverComponentsExternalPackages` migrado para `serverExternalPackages`;
+- `outputFileTracingRoot` explícito elimina inferência incorreta causada por lockfile externo;
+- dev/build usam `--webpack` explicitamente enquanto Remotion e FFmpeg dependem dos aliases/externals atuais;
+- requisito de runtime registrado como Node.js 20.9+;
+- `uuid` atualizado para 11.1.1, PostCSS para 8.5.18 e `form-data` transitivo corrigido;
+- override global de PostCSS elimina a cópia vulnerável aninhada pelo Next;
+- TypeScript config atualizado para JSX automático e types de rotas do Next 16.
+
+Evidências:
+
+- `npm audit --audit-level=low`: zero vulnerabilidades;
+- 32 testes unitários aprovados;
+- typecheck e contract compatibility gate aprovados;
+- build Next 16.2.10 com Webpack aprovado;
+- integração Prisma/Postgres aprovada;
+- integração HTTP production aprovou projects, clients, credentials, OpenAPI e schemas;
+- smoke do servidor de desenvolvimento: home, health e OpenAPI responderam 200.
+
+Pendências deliberadas:
+
+- migrar aliases/externals de Remotion/FFmpeg para Turbopack antes de remover `--webpack`;
+- adicionar `npm audit` como gate formal de CI;
+- atualizar TypeScript/Prisma e demais libs somente em slices próprios, com seus testes de migração.

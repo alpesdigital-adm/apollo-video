@@ -21,10 +21,11 @@ import { presentApiClient, presentApiCredential, presentSuccess } from '@/v2/pub
 export const dynamic = 'force-dynamic'
 
 interface RouteContext {
-  params: { workspaceId: string }
+  params: Promise<{ workspaceId: string }>
 }
 
-export async function GET(request: NextRequest, { params }: RouteContext) {
+export async function GET(request: NextRequest, props: RouteContext) {
+  const params = await props.params;
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)
@@ -42,7 +43,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   }
 }
 
-export async function POST(request: NextRequest, { params }: RouteContext) {
+export async function POST(request: NextRequest, props: RouteContext) {
+  const params = await props.params;
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)

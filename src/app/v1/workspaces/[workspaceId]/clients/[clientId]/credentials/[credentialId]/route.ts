@@ -14,10 +14,11 @@ import { presentApiCredential, presentSuccess } from '@/v2/public-api/presenters
 export const dynamic = 'force-dynamic'
 
 interface RouteContext {
-  params: { workspaceId: string; clientId: string; credentialId: string }
+  params: Promise<{ workspaceId: string; clientId: string; credentialId: string }>
 }
 
-export async function DELETE(request: NextRequest, { params }: RouteContext) {
+export async function DELETE(request: NextRequest, props: RouteContext) {
+  const params = await props.params;
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)

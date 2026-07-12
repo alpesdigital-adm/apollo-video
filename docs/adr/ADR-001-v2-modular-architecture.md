@@ -37,3 +37,12 @@ renderer ◄── RenderInput materializado
 - Workers podem ser separados depois sem mudar o domínio.
 - Haverá convivência temporária entre v1 e v2 no mesmo repositório.
 - Imports entre fronteiras deverão ser fiscalizados por testes/lint em etapa posterior.
+
+## Runtime baseline da Fundação
+
+- Next.js 16.2.10 e React/React DOM 19.2.7.
+- Node.js 20.9+; desenvolvimento atual validado também em Node 24.
+- Dynamic route `params` é assíncrono em pages e route handlers.
+- Builds usam Webpack explicitamente enquanto os aliases de Remotion e o external de `fluent-ffmpeg` não forem migrados para Turbopack.
+- `serverExternalPackages` mantém `fluent-ffmpeg` fora do bundle de Server Components.
+- Dependências públicas devem manter `npm audit` sem vulnerabilidades antes de exposição do produto.

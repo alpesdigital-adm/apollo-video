@@ -3,10 +3,8 @@ import { existsSync, unlinkSync } from 'fs'
 import path from 'path'
 import { deleteAsset, getAssetById, getAssetsDir, updateAsset } from '@/lib/asset-library'
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const body = await request.json().catch(() => ({}))
     const patch: { label?: string; tags?: string[] | string } = {}
@@ -27,10 +25,8 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const asset = getAssetById(params.id)
     if (!asset) {

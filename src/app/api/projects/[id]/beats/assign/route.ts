@@ -34,7 +34,7 @@ const ASSIGNABLE_TYPES = new Set([
 ])
 
 function words(text: string): string[] {
-  return (text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+  return (text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
 }
 
 function truncWords(text: string, n: number): string {
@@ -92,10 +92,8 @@ function buildSceneDraft(type: string, text: string, firstAssetId?: string): Rec
   }
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const projectId = params.id
   let lockAcquired = false
 

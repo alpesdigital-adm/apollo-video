@@ -17,10 +17,11 @@ import { presentApiClient, presentApiCredential, presentSuccess } from '@/v2/pub
 export const dynamic = 'force-dynamic'
 
 interface RouteContext {
-  params: { workspaceId: string; clientId: string }
+  params: Promise<{ workspaceId: string; clientId: string }>
 }
 
-export async function POST(request: NextRequest, { params }: RouteContext) {
+export async function POST(request: NextRequest, props: RouteContext) {
+  const params = await props.params;
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)

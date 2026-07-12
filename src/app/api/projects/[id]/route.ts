@@ -3,10 +3,8 @@ import { prisma } from '@/lib/db'
 import { deleteProjectFiles } from '@/lib/project-files'
 import { isRenderActive } from '@/lib/services/remotion-render'
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const projectId = params.id
 
   try {
