@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const prismaCli = fileURLToPath(new URL('../node_modules/prisma/build/index.js', import.meta.url))
 const schemaPath = 'prisma/v2/schema.prisma'
-const migrationPath = 'prisma/v2/migrations/20260712210000_init/migration.sql'
+const migrationsPath = 'prisma/v2/migrations'
 const environment = {
   ...process.env,
   V2_DATABASE_URL:
@@ -42,7 +42,11 @@ const generated = runPrisma(
   ['migrate', 'diff', '--from-empty', '--to-schema-datamodel', schemaPath, '--script'],
   true,
 )
-const committed = readFileSync(migrationPath, 'utf8')
+const committed = readdirSync(migrationsPath, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .sort((left, right) => left.name.localeCompare(right.name))
+  .map((entry) => readFileSync(`${migrationsPath}/${entry.name}/migration.sql`, 'utf8'))
+  .join('\n')
 
 assertSetContains(
   names(committed, /CREATE TABLE "([^"]+)"/g),
@@ -64,6 +68,9 @@ const requiredChecks = [
   'workspaces_status_check',
   'api_clients_status_check',
   'api_clients_environment_check',
+  'api_credentials_status_check',
+  'api_credentials_hash_check',
+  'api_credentials_revocation_check',
   'projects_status_check',
   'projects_creator_type_check',
   'project_snapshots_kind_check',

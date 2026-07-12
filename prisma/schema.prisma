@@ -84,9 +84,32 @@ model V2ApiClient {
   lastUsedAt  DateTime?
 
   workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  credentials V2ApiCredential[]
 
+  @@unique([id, workspaceId])
   @@index([workspaceId, status])
   @@map("v2_api_clients")
+}
+
+model V2ApiCredential {
+  id          String    @id
+  workspaceId String
+  clientId    String
+  status      String    @default("active")
+  secretSalt  String
+  secretHash  String
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+
+  client V2ApiClient @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, clientId])
+  @@index([clientId, status])
+  @@index([workspaceId, status])
+  @@index([expiresAt])
+  @@map("v2_api_credentials")
 }
 
 model V2Project {

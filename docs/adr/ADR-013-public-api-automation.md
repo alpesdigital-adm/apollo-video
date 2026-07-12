@@ -1,6 +1,6 @@
 # ADR-013 — API pública, automação e MCP
 
-> **Status:** Accepted para o chassi; autenticação de produção será refinada antes de credenciais reais
+> **Status:** Accepted; autenticação de service account fechada no ADR-010
 >
 > **Data:** 12 de julho de 2026
 
@@ -22,7 +22,7 @@ Toda capacidade operável deve ser acessível por ferramentas e agentes externos
 
 ## Autenticação
 
-O domínio dependerá de `AuthenticatedExternalActor`. O primeiro mecanismo de produção será fechado antes de endpoints com dados: service-account credentials revogáveis são o baseline; OAuth 2.1 permanece previsto para delegação e integrações multiusuário.
+O domínio depende de `AuthenticatedExternalActor`. O ADR-010 escolhe credenciais opacas e revogáveis de service account como primeiro mecanismo de produção, com múltiplas credenciais por client e rotação expand-contract. OAuth 2.1 permanece previsto para delegação e integrações multiusuário.
 
 ## Consequências
 

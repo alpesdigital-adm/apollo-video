@@ -13,4 +13,5 @@ Estados usados:
 - [ADR-001 — Estrutura modular da v2](./ADR-001-v2-modular-architecture.md)
 - [ADR-002 — Banco, persistência v2 e migrations](./ADR-002-database-and-migrations.md)
 - [ADR-006 — Commands, versões e concorrência](./ADR-006-command-version-model.md)
+- [ADR-010 — Segurança, credenciais, rights e consent](./ADR-010-security-credentials-rights-consent.md)
 - [ADR-013 — API pública e automação](./ADR-013-public-api-automation.md)

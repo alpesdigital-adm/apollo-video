@@ -16,32 +16,39 @@ function hashSecret(secret: string, salt: string): Buffer {
   return scryptSync(secret, salt, HASH_BYTES)
 }
 
-export function issueApiCredential(clientId: string): IssuedApiCredential {
+export function issueApiCredential(clientId: string, credentialId: string): IssuedApiCredential {
   const secret = randomBytes(32).toString('base64url')
   const secretSalt = randomBytes(16).toString('base64url')
   const secretHash = hashSecret(secret, secretSalt).toString('hex')
 
   return {
-    token: `${TOKEN_PREFIX}.${clientId}.${secret}`,
+    token: `${TOKEN_PREFIX}.${clientId}.${credentialId}.${secret}`,
+    credentialId,
     secretSalt,
     secretHash,
   }
 }
 
 export function parseApiCredential(token: string): ParsedApiCredential {
-  const [prefix, clientId, secret, ...extra] = token.split('.')
+  const parts = token.split('.')
+  const [prefix, clientId] = parts
+  const legacy = parts.length === 3
+  const credentialId = legacy ? clientId : parts[2]
+  const secret = legacy ? parts[2] : parts[3]
   if (
     prefix !== TOKEN_PREFIX ||
     !clientId ||
+    !credentialId ||
     !secret ||
-    extra.length > 0 ||
+    (parts.length !== 3 && parts.length !== 4) ||
     !/^[A-Za-z0-9_-]{3,80}$/.test(clientId) ||
+    !/^[A-Za-z0-9_-]{3,80}$/.test(credentialId) ||
     secret.length < 32
   ) {
     throw new DomainError('AUTH_INVALID', 'Invalid API credential')
   }
 
-  return { clientId, secret }
+  return { clientId, credentialId, secret }
 }
 
 export async function verifyApiCredential(

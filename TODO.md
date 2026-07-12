@@ -187,7 +187,7 @@
 
 #### ADR-013 — API pública, autenticação externa, webhooks e MCP
 
-- [ ] Decidir OAuth 2.1, signed service keys ou ambos e definir rotação/revogação.
+- [x] Decidir mecanismo inicial e definir rotação/revogação. Evidência: ADR-010/013 escolhem credentials opacas de service account, múltiplas credenciais e OAuth 2.1 futuro.
 - [x] Definir source of truth de OpenAPI, capability registry, SDKs e tool schemas. Evidência: `ADR-013`.
 - [ ] Definir versionamento, depreciação, sunset e retenção de schemas/events.
 - [ ] Definir entrega/assinatura/replay de webhooks e ordenação por resource.
@@ -466,11 +466,11 @@
 
 - [ ] Modelar `ApiClient`, `ServiceAccount`, credential ref, scope grants e environments.
 - [x] Implementar emissão/validação de token conforme ADR-013. Evidência: service-account token com `scrypt` e comparação constante.
-- [ ] Criar secrets exibidos uma vez, armazenados por referência e rotacionáveis.
+- [x] Criar secrets exibidos uma vez, armazenados por referência e rotacionáveis. Evidência: `ApiCredential`, token one-shot, hashes `scrypt` e endpoints de rotação/revogação.
 - [x] Implementar deny-by-default e matriz `<resource>:<action>` server-side. Evidência: `authenticate-api-client.ts` e scopes dos endpoints.
 - [ ] Vincular client, workspace e delegated user ao audit context.
 - [ ] Implementar suspend, revoke e kill switch por client/workspace.
-- [ ] Criar security E2E de scope, cross-workspace, expiry, rotation e revocation.
+- [x] Criar security E2E de scope, cross-workspace, expiry, rotation e revocation. Evidência: `public-project-api.integration.mjs` cobre capability filtering, 403/404, overlap zero, token antigo e revogado.
 
 ### F0.037 — Operações assíncronas [FR-243]
 
@@ -2082,7 +2082,7 @@ Para cada decisão:
 | Non-goals | 12/12 |
 | Riscos | 11/11 |
 | Fases do roadmap | 6/6 |
-| Microtarefas/checks abertos | 1.214 |
+| Microtarefas/checks abertos | 1.211 |
 
 Esta contagem valida presença e fase, não conclusão. Quando o PRD mudar, atualizar este quadro e executar novamente a comparação de IDs com a matriz de rastreabilidade.
 
@@ -2184,3 +2184,41 @@ Pendências deliberadas para slices posteriores:
 - integrar migration check e testes Postgres ao CI;
 - decidir pgvector e a política de retenção operacional;
 - provisionar object storage e workflow durável.
+
+### Slice F0-004 — Administração e rotação de credenciais externas
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- ADR-010 fecha credential opaca de service account como baseline e OAuth 2.1 como extensão futura;
+- `ApiClient` separado de múltiplas `ApiCredential`, sem bearer secret recuperável;
+- migration expand-contract cria `api_credentials`, backfill dos hashes legados e FKs compostas de workspace;
+- tokens novos identificam client e credential; parser mantém compatibilidade com o formato legado;
+- autenticação verifica client, workspace, environment, credential status, expiry e hash antes de resolver resources;
+- criação administrativa idempotente de clients com concessão limitada aos scopes do próprio administrador;
+- rotação idempotente com overlap explícito de 0 a 86.400 segundos;
+- revogação imediata e idempotente de credential, impedindo que a request revogue a própria credencial corrente;
+- `GET/POST /v1/workspaces/{workspaceId}/clients`;
+- `POST /v1/workspaces/{workspaceId}/clients/{clientId}/credentials`;
+- `DELETE /v1/workspaces/{workspaceId}/clients/{clientId}/credentials/{credentialId}`;
+- quatro capabilities administrativas publicadas e filtradas por `clients:admin`;
+- bootstrap operacional para o primeiro workspace/client administrativo.
+
+Evidências:
+
+- migration aplicada no Postgres dedicado e schema SQLite-prototype sincronizado;
+- migration check: 7 tabelas, 17 índices declarados e 11 chaves estrangeiras;
+- 25 testes unitários aprovados;
+- typecheck e build Next.js aprovados;
+- integração Prisma transacional aprovada;
+- integração HTTP production aprovada para criação/replay one-shot, capability filtering, bloqueio de autoelevação, cross-workspace 404, rotação, expiry e revogação;
+- idempotency responses inspecionadas sem token ou secret persistido.
+
+Pendências deliberadas:
+
+- status/suspend/revoke e kill switch no nível de client/workspace;
+- atualização administrativa de scopes com ETag e proteção contra self-mutation;
+- audit log persistido, rate limits, quotas e anomaly detection;
+- remoção das colunas legadas de hash em migration contract após a janela de compatibilidade;
+- OAuth 2.1 quando houver delegação de usuário.

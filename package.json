@@ -17,6 +17,7 @@
     "db:v2:generate": "node scripts/generate-prisma-clients.mjs",
     "db:v2:validate": "node scripts/verify-v2-migration.mjs",
     "db:v2:migrate:deploy": "npx prisma migrate deploy --schema prisma/v2/schema.prisma",
+    "db:v2:bootstrap": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env scripts/bootstrap-v2-workspace.mjs",
     "postinstall": "node scripts/generate-prisma-clients.mjs"
   },
   "dependencies": {

@@ -15,17 +15,17 @@ class InMemoryApiClientRepository {
     this.lastUsed = new Map()
   }
 
-  async findCredentialById(clientId) {
-    return this.credentials.get(clientId) ?? null
+  async findCredentialById(clientId, credentialId) {
+    return this.credentials.get(`${clientId}:${credentialId}`) ?? null
   }
 
   async createCredential(credential) {
-    this.credentials.set(credential.client.id, credential)
-    return credential.client
+    this.credentials.set(`${credential.client.id}:${credential.credential.id}`, credential)
+    return { client: credential.client, credential: credential.credential }
   }
 
-  async touchLastUsed(clientId, usedAt) {
-    this.lastUsed.set(clientId, usedAt)
+  async touchLastUsed(clientId, credentialId, usedAt) {
+    this.lastUsed.set(`${clientId}:${credentialId}`, usedAt)
   }
 }
 
@@ -50,10 +50,14 @@ async function createFixture() {
 
 test('issued API secret verifies and is only returned as an opaque token', async () => {
   const { repository, issued } = await createFixture()
-  const stored = await repository.findCredentialById(issued.client.id)
+  const stored = await repository.findCredentialById(
+    issued.client.id,
+    issued.credential.id,
+  )
   const parsed = nodeApiCredentialCrypto.parse(issued.token)
 
   assert.equal(parsed.clientId, issued.client.id)
+  assert.equal(parsed.credentialId, issued.credential.id)
   assert.notEqual(stored.secretHash, parsed.secret)
   assert.equal(
     await nodeApiCredentialCrypto.verify(parsed.secret, stored.secretSalt, stored.secretHash),
@@ -74,7 +78,10 @@ test('authentication returns workspace-scoped actor and updates last use', async
   assert.equal(actor.clientId, issued.client.id)
   assert.equal(actor.workspaceId, 'workspace-1')
   assert.equal(actor.scopes.has('projects:write'), true)
-  assert.equal(repository.lastUsed.get(issued.client.id), '2026-07-12T15:00:00.000Z')
+  assert.equal(
+    repository.lastUsed.get(`${issued.client.id}:${issued.credential.id}`),
+    '2026-07-12T15:00:00.000Z',
+  )
 })
 
 test('invalid token, wrong environment and missing scope are denied', async () => {

@@ -79,7 +79,7 @@ test('authenticated public API creates, replays and lists projects', async () =>
       workspaceId,
       name: 'Public API Test Client',
       environment: apiEnvironment,
-      scopes: ['projects:read', 'projects:write'],
+      scopes: ['clients:admin', 'projects:read', 'projects:write'],
     })
 
     const port = await getFreePort()
@@ -119,8 +119,145 @@ test('authenticated public API creates, replays and lists projects', async () =>
         'apollo.capabilities.list',
         'apollo.projects.list',
         'apollo.projects.create',
+        'apollo.clients.list',
+        'apollo.clients.create',
+        'apollo.clients.credentials.rotate',
+        'apollo.clients.credentials.revoke',
       ],
     )
+
+    const createChildRequest = () =>
+      fetch(`${baseUrl}/v1/workspaces/${workspaceId}/clients`, {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'public-create-child-client-1',
+        },
+        body: JSON.stringify({
+          name: 'Read-only external agent',
+          environment: apiEnvironment,
+          scopes: ['projects:read'],
+        }),
+      })
+    const childCreatedResponse = await createChildRequest()
+    const childCreated = await childCreatedResponse.json()
+    assert.equal(childCreatedResponse.status, 201)
+    assert.equal(childCreated.data.secretAvailable, true)
+    assert.equal(typeof childCreated.data.token, 'string')
+    assert.equal(childCreated.data.replayed, false)
+
+    const childReplayResponse = await createChildRequest()
+    const childReplay = await childReplayResponse.json()
+    assert.equal(childReplayResponse.status, 200)
+    assert.equal(childReplay.data.replayed, true)
+    assert.equal(childReplay.data.secretAvailable, false)
+    assert.equal('token' in childReplay.data, false)
+    assert.equal(childReplay.data.client.id, childCreated.data.client.id)
+
+    const childAuthorization = `Bearer ${childCreated.data.token}`
+    const childCapabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`, {
+      headers: { authorization: childAuthorization },
+    })
+    const childCapabilities = await childCapabilitiesResponse.json()
+    assert.equal(childCapabilitiesResponse.status, 200)
+    assert.deepEqual(
+      childCapabilities.data.capabilities.map((capability) => capability.id),
+      ['apollo.health.read', 'apollo.capabilities.list', 'apollo.projects.list'],
+    )
+
+    const childEscalationResponse = await fetch(
+      `${baseUrl}/v1/workspaces/${workspaceId}/clients`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: childAuthorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'child-escalation-attempt',
+        },
+        body: JSON.stringify({
+          name: 'Escalated client',
+          environment: apiEnvironment,
+          scopes: ['clients:admin'],
+        }),
+      },
+    )
+    assert.equal(childEscalationResponse.status, 403)
+
+    const crossWorkspaceResponse = await fetch(
+      `${baseUrl}/v1/workspaces/another-workspace/clients`,
+      { headers: { authorization } },
+    )
+    assert.equal(crossWorkspaceResponse.status, 404)
+
+    const rotateRequest = () =>
+      fetch(
+        `${baseUrl}/v1/workspaces/${workspaceId}/clients/${childCreated.data.client.id}/credentials`,
+        {
+          method: 'POST',
+          headers: {
+            authorization,
+            'content-type': 'application/json',
+            'idempotency-key': 'rotate-child-client-1',
+          },
+          body: JSON.stringify({ overlapSeconds: 0 }),
+        },
+      )
+    const rotatedResponse = await rotateRequest()
+    const rotated = await rotatedResponse.json()
+    assert.equal(rotatedResponse.status, 201)
+    assert.equal(rotated.data.secretAvailable, true)
+    assert.equal(typeof rotated.data.token, 'string')
+
+    const expiredOldTokenResponse = await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization: childAuthorization },
+    })
+    assert.equal(expiredOldTokenResponse.status, 401)
+
+    const rotatedAuthorization = `Bearer ${rotated.data.token}`
+    const rotatedTokenResponse = await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization: rotatedAuthorization },
+    })
+    assert.equal(rotatedTokenResponse.status, 200)
+
+    const rotateReplayResponse = await rotateRequest()
+    const rotateReplay = await rotateReplayResponse.json()
+    assert.equal(rotateReplayResponse.status, 200)
+    assert.equal(rotateReplay.data.secretAvailable, false)
+    assert.equal('token' in rotateReplay.data, false)
+    assert.equal(rotateReplay.data.credential.id, rotated.data.credential.id)
+
+    const selfRevokeResponse = await fetch(
+      `${baseUrl}/v1/workspaces/${workspaceId}/clients/${apiClientId}/credentials/${issued.credential.id}`,
+      { method: 'DELETE', headers: { authorization } },
+    )
+    assert.equal(selfRevokeResponse.status, 409)
+
+    const revokeResponse = await fetch(
+      `${baseUrl}/v1/workspaces/${workspaceId}/clients/${childCreated.data.client.id}/credentials/${rotated.data.credential.id}`,
+      { method: 'DELETE', headers: { authorization } },
+    )
+    const revoked = await revokeResponse.json()
+    assert.equal(revokeResponse.status, 200)
+    assert.equal(revoked.data.credential.status, 'revoked')
+
+    const revokedTokenResponse = await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization: rotatedAuthorization },
+    })
+    assert.equal(revokedTokenResponse.status, 401)
+
+    const storedAdminResponses = await client.v2IdempotencyRecord.findMany({
+      where: {
+        workspaceId,
+        key: { in: ['public-create-child-client-1', 'rotate-child-client-1'] },
+      },
+      select: { responseJson: true },
+    })
+    assert.equal(storedAdminResponses.length, 2)
+    for (const record of storedAdminResponses) {
+      assert.equal(record.responseJson.includes('apollo_v2.'), false)
+      assert.equal(record.responseJson.includes('secret'), false)
+    }
 
     const createRequest = () =>
       fetch(`${baseUrl}/v1/projects`, {

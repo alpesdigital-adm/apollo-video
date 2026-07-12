@@ -1,10 +1,12 @@
 import type { ApiEnvironment } from '../domain/api-client.ts'
+import { isApiCredentialUsable } from '../domain/api-credential.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { ApiClientRepository } from './ports/api-client-repository.ts'
 import type { ApiCredentialCrypto } from './ports/api-credential-crypto.ts'
 
 export interface AuthenticatedExternalActor {
   clientId: string
+  credentialId: string
   workspaceId: string
   environment: ApiEnvironment
   scopes: ReadonlySet<string>
@@ -28,11 +30,15 @@ export function authenticateApiClientService(
     const parsed = dependencies.credentialCrypto.parse(
       authorizationHeader.slice('Bearer '.length).trim(),
     )
-    const stored = await dependencies.repository.findCredentialById(parsed.clientId)
+    const stored = await dependencies.repository.findCredentialById(
+      parsed.clientId,
+      parsed.credentialId,
+    )
 
     if (
       !stored ||
       stored.client.status !== 'active' ||
+      !isApiCredentialUsable(stored.credential, dependencies.clock()) ||
       stored.client.environment !== dependencies.environment ||
       !(await dependencies.credentialCrypto.verify(
         parsed.secret,
@@ -45,11 +51,13 @@ export function authenticateApiClientService(
 
     await dependencies.repository.touchLastUsed(
       stored.client.id,
+      stored.credential.id,
       dependencies.clock().toISOString(),
     )
 
     return Object.freeze({
       clientId: stored.client.id,
+      credentialId: stored.credential.id,
       workspaceId: stored.client.workspaceId,
       environment: stored.client.environment,
       scopes: new Set(stored.client.scopes),

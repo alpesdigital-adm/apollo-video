@@ -1,6 +1,7 @@
 import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
 
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
+import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
 import type { ProjectCreationRepository } from '../application/ports/project-creation-repository.ts'
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
@@ -24,6 +25,10 @@ function resolveV2Client(): SqlitePrismaClient {
 }
 
 export function createApiClientRepository(): ApiClientRepository {
+  return new PrismaApiClientRepository(resolveV2Client())
+}
+
+export function createApiClientAdministrationRepository(): ApiClientAdministrationRepository {
   return new PrismaApiClientRepository(resolveV2Client())
 }
 
