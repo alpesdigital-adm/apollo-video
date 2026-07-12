@@ -6,9 +6,9 @@ import { execFile } from 'child_process'
 import { existsSync } from 'fs'
 import path from 'path'
 import { promisify } from 'util'
-import type { Silence } from '../types/project'
-import { FPS } from '../types/timing'
-import { parseSilenceDetection } from '../utils/silence'
+import type { Silence } from '../types/project.ts'
+import { FPS } from '../types/timing.ts'
+import { parseSilenceDetection } from '../utils/silence.ts'
 
 const execFileAsync = promisify(execFile)
 

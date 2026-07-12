@@ -2,8 +2,8 @@
  * Silence detection and subtitle generation utilities
  */
 
-import type { Silence, Transcription, SubtitleEntry, TranscriptionWord } from '../types/project'
-import { FPS } from '../types/timing'
+import type { Silence, Transcription, SubtitleEntry, TranscriptionWord } from '../types/project.ts'
+import { FPS } from '../types/timing.ts'
 
 /**
  * Parse FFmpeg silencedetect output and return Silence objects

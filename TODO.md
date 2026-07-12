@@ -1893,7 +1893,7 @@
 
 - [ ] Criar inventário de Remotion scenes/primitives e dependências ocultas.
 - [ ] Criar golden renders dos estilos de legenda atuais.
-- [ ] Criar fixtures dos fluxos FFmpeg normalize/cut/proxy.
+- [x] Criar fixtures dos fluxos FFmpeg normalize/cut/proxy. Evidência: `tests/media/ffmpeg-service.integration.mjs` cobre também probe, áudio, silêncio e thumbnail.
 - [ ] Caracterizar Whisper/word timings, silence e retake removal.
 - [ ] Caracterizar timing frame-first, cold open, beat thumbnails e anchor vision.
 - [ ] Caracterizar render watchdog, locks, progress e `propsOnly`.
@@ -2309,7 +2309,7 @@ Entregas:
 - `params` de pages/routes dinâmicas agora é assíncrono conforme o App Router atual;
 - `serverComponentsExternalPackages` migrado para `serverExternalPackages`;
 - `outputFileTracingRoot` explícito elimina inferência incorreta causada por lockfile externo;
-- dev/build usam `--webpack` explicitamente enquanto Remotion e FFmpeg dependem dos aliases/externals atuais;
+- dev/build usam `--webpack` explicitamente enquanto Remotion depende dos aliases atuais;
 - requisito de runtime registrado como Node.js 20.9+;
 - `uuid` atualizado para 11.1.1, PostCSS para 8.5.18 e `form-data` transitivo corrigido;
 - override global de PostCSS elimina a cópia vulnerável aninhada pelo Next;
@@ -2327,12 +2327,12 @@ Evidências:
 
 Pendências deliberadas:
 
-- migrar aliases/externals de Remotion/FFmpeg para Turbopack antes de remover `--webpack`;
+- migrar os aliases de Remotion para Turbopack antes de remover `--webpack`;
 - atualizar TypeScript/Prisma e demais libs somente em slices próprios, com seus testes de migração.
 
 ### Slice F0-008 — Gate de qualidade e segurança no CI
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `3fb94db`.
 
 Entregas:
 
@@ -2362,7 +2362,7 @@ Evidências locais:
 
 Risco identificado:
 
-- `npm ci` alerta que `fluent-ffmpeg@2.1.3` não possui mais suporte; a substituição por um adapter mantido ou por chamadas diretas ao FFmpeg deve ocorrer antes de promover o media worker a produção.
+- `npm ci` alertou que `fluent-ffmpeg@2.1.3` não possuía mais suporte; risco eliminado no F0-009 pela remoção do wrapper e caracterização do adapter direto.
 
 Pendências deliberadas:
 
@@ -2370,3 +2370,51 @@ Pendências deliberadas:
 - golden depende de fixture e render determinísticos;
 - E2E depende da primeira jornada vertical completa;
 - configurar a proteção da branch no GitHub para exigir o check `quality` é uma ação administrativa após a publicação do workflow.
+
+### Slice F0-009 — Remoção do wrapper FFmpeg sem suporte
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- `fluent-ffmpeg` e `@types/fluent-ffmpeg` removidos das dependências e do lockfile;
+- configuração especial de externalização removida do Next.js;
+- processamento preservado pelo adapter direto existente baseado em `execFile` e arrays de argumentos;
+- resolução explícita por `FFMPEG_PATH`/`FFPROBE_PATH`, binários empacotados e fallback final ao `PATH` documentada no ADR;
+- fixture audiovisual determinística com três segundos, áudio–silêncio–áudio e resolução 320×240;
+- integração caracteriza probe, normalize, proxy, extração de áudio, detecção/corte de silêncio e thumbnail;
+- integração de mídia adicionada ao gate do GitHub Actions;
+- Remotion/CLI/Player/Renderer alinhados em 4.0.489 e React 19.2.7 após o primeiro runner revelar dependências ausentes e vulneráveis;
+- lockfile do subprojeto instalado, cacheado, auditado e empacotado separadamente no CI;
+- README corrigido: instalação global de FFmpeg não é obrigatória.
+
+Critérios de segurança e compatibilidade:
+
+- nenhum comando passa por shell ou concatena input em command string;
+- paths e filtros são argumentos separados de `execFile`;
+- o teste usa somente binários locais e arquivos temporários, sem rede ou providers;
+- arquivos temporários são removidos mesmo quando a asserção falha.
+
+Evidências locais:
+
+- `npm ci` aprovado sem o aviso de depreciação de `fluent-ffmpeg`;
+- `npm audit --audit-level=low`: zero vulnerabilidades;
+- `npm audit --prefix remotion --audit-level=low`: zero vulnerabilidades;
+- integração FFmpeg aprovada em Windows usando os binários empacotados;
+- bundle do Remotion 4.0.489 aprovado com React 19;
+- 32 testes, typecheck, contratos, migration check e build Next 16 aprovados;
+- integrações Prisma/Postgres e API pública aprovadas;
+- nenhum import, pacote ou configuração restante referencia `fluent-ffmpeg`.
+
+Incidente do primeiro runner:
+
+- o run `29213379388` do commit `3fb94db` falhou corretamente no typecheck porque `remotion/node_modules` não existia no runner limpo;
+- a investigação revelou oito advisories no lockfile Remotion antigo, incluindo dois high;
+- o gate local foi corrigido para instalar e auditar os dois lockfiles antes do typecheck e para empacotar o renderer explicitamente;
+- a correção só poderá ser confirmada no runner hospedado depois da publicação deste slice.
+
+Pendências deliberadas:
+
+- extrair recipes versionadas e execução idempotente pertence ao media worker v2;
+- adicionar timeout, cancelamento e limites de stdout/stderr ao executor antes de aceitar jobs não confiáveis;
+- fixar e registrar versões-alvo de FFmpeg/ffprobe em ADR próprio antes do primeiro ambiente de produção.

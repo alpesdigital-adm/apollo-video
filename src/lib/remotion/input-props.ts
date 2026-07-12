@@ -18,8 +18,25 @@ import { clampColdOpenWindow } from '@/lib/cold-open'
 // Types
 // ---------------------------------------------------------------------------
 
+export const REMOTION_SCENE_TYPES = [
+  'fullscreen',
+  'lower-third',
+  'split',
+  'split-vertical',
+  'card',
+  'message',
+  'number',
+  'flow',
+  'cta',
+  'stick-figures',
+  'image-insert',
+  'asset-card'
+] as const
+
+export type RemotionSceneType = (typeof REMOTION_SCENE_TYPES)[number]
+
 export interface RemotionSceneInput {
-  type: string
+  type: RemotionSceneType
   from: number
   to: number
   fromFrame: number
@@ -131,7 +148,7 @@ function normalizeImageInsertLayout(value: unknown): 'full' | 'split-bottom' | '
   return value === 'split-bottom' || value === 'top-image-compact' ? value : 'full'
 }
 
-const TYPE_MAP: Record<string, string> = {
+const TYPE_MAP: Record<string, RemotionSceneType> = {
   FullScreen: 'fullscreen',
   LowerThird: 'lower-third',
   Split: 'split',
