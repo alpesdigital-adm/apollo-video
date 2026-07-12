@@ -411,7 +411,10 @@
 - [ ] Provisionar object storage em desenvolvimento isolado.
 - [ ] Provisionar workflow durável em desenvolvimento isolado.
 - [ ] Criar seeds mínimos para workspace, projeto, source e OutputSpec.
-- [ ] Configurar lint, typecheck, unit, integration, golden e E2E no CI.
+- [x] Configurar audit, typecheck, unit, migration check, contract gate, build e integrações Postgres/API no CI. Evidência: `.github/workflows/ci.yml`.
+- [ ] Configurar lint no CI após selecionar regras e corrigir o baseline da v1.
+- [ ] Configurar golden tests no CI após existir fixture/render determinístico.
+- [ ] Configurar E2E no CI após existir jornada vertical F0 executável.
 - [ ] Criar telemetria comum com trace, job, workspace e project IDs.
 - [ ] Fazer upload de fixture, normalizar, criar plano estático e renderizar proxy.
 - [ ] Reconstruir o proxy usando apenas banco, object storage e manifest.
@@ -2296,7 +2299,7 @@ Pendências deliberadas:
 
 ### Slice F0-007 — Upgrade seguro de Next.js e React
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `c350181`.
 
 Entregas:
 
@@ -2325,5 +2328,45 @@ Evidências:
 Pendências deliberadas:
 
 - migrar aliases/externals de Remotion/FFmpeg para Turbopack antes de remover `--webpack`;
-- adicionar `npm audit` como gate formal de CI;
 - atualizar TypeScript/Prisma e demais libs somente em slices próprios, com seus testes de migração.
+
+### Slice F0-008 — Gate de qualidade e segurança no CI
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- workflow GitHub Actions para pushes em `main` e pull requests;
+- permissões mínimas `contents: read` e cancelamento de execuções obsoletas da mesma referência;
+- actions oficiais fixadas por commit SHA, com indicação da major usada;
+- Node.js 22 e instalação determinística via `npm ci`/`package-lock.json`;
+- `npm audit --audit-level=low` como gate bloqueante e comando local `security:audit`;
+- typecheck, testes unitários, contratos públicos e migration/schema check;
+- Postgres 16 efêmero com health check e migration deploy real;
+- build de produção seguido pelas integrações Prisma e API pública;
+- documentação do gate e runtime recomendado no README.
+
+Critério de falha:
+
+- qualquer comando retorna status diferente de zero e bloqueia o job;
+- nenhuma credencial externa é necessária: banco e credenciais de integração são efêmeros;
+- o job possui timeout de 20 minutos e não publica artifacts nem recebe permissão de escrita.
+
+Evidências locais:
+
+- reinstalação limpa com `npm ci` aprovada;
+- YAML válido e workflow aprovado pelo `actionlint` 1.7.12;
+- `npm audit --audit-level=low`: zero vulnerabilidades;
+- 32 testes, typecheck, contratos e migration check aprovados;
+- migration deploy real, build Next 16 e integrações Prisma/API aprovados.
+
+Risco identificado:
+
+- `npm ci` alerta que `fluent-ffmpeg@2.1.3` não possui mais suporte; a substituição por um adapter mantido ou por chamadas diretas ao FFmpeg deve ocorrer antes de promover o media worker a produção.
+
+Pendências deliberadas:
+
+- lint depende da seleção de regras e correção do baseline legado;
+- golden depende de fixture e render determinísticos;
+- E2E depende da primeira jornada vertical completa;
+- configurar a proteção da branch no GitHub para exigir o check `quality` é uma ação administrativa após a publicação do workflow.

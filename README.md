@@ -4,7 +4,7 @@ Editor de vídeo local que automatiza a edição usando IA. Recebe vídeo bruto,
 
 ## Stack
 
-- **Next.js 14** — Interface e API
+- **Next.js 16 + React 19** — Interface e API
 - **Remotion 4.0.434** — Renderização programática de vídeo
 - **Whisper API** (OpenAI) — Transcrição com timestamps
 - **Claude API** (Anthropic) — Análise de conteúdo e cenas
@@ -21,7 +21,7 @@ Upload → Normalização → Transcrição → Análise IA → Revisão → Ren
 
 ### Pré-requisitos
 
-- Node.js v20+
+- Node.js 22 recomendado (mínimo 20.9)
 - FFmpeg instalado globalmente
 - Chaves API: OpenAI + Anthropic
 
@@ -51,6 +51,22 @@ npm run remotion:dev     # Remotion na porta 3001
 ```
 
 Acesse: http://localhost:3333
+
+## Validação contínua
+
+O workflow de CI roda em pushes para `main` e em pull requests. Ele usa instalação
+determinística pelo `package-lock.json` e bloqueia a integração quando falham:
+
+- auditoria de dependências a partir de severidade baixa;
+- typecheck, testes unitários e contratos públicos;
+- validação e aplicação das migrations em Postgres 16;
+- build de produção e testes de integração Prisma/API.
+
+Para executar a auditoria localmente:
+
+```bash
+npm run security:audit
+```
 
 ## Formatos
 

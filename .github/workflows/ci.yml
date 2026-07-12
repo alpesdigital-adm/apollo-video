@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality and security
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      CI: true
+      APOLLO_API_ENVIRONMENT: production
+      APOLLO_V2_PERSISTENCE: postgres
+      V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: apollo_v2
+          POSTGRES_USER: apollo
+          POSTGRES_PASSWORD: apollo-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U apollo -d apollo_v2"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Prepare integration environment
+        run: touch .env
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Audit dependencies
+        run: npm run security:audit
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run unit and contract tests
+        run: npm test
+
+      - name: Validate public API contracts
+        run: npm run api:v1:validate
+
+      - name: Validate database schema and migrations
+        run: npm run db:v2:validate
+
+      - name: Apply database migrations
+        run: npm run db:v2:migrate:deploy
+
+      - name: Build production application
+        run: npm run build
+
+      - name: Run Prisma integration tests
+        run: npm run test:integration:prisma
+
+      - name: Run public API integration tests
+        run: npm run test:integration:api
