@@ -91,8 +91,11 @@ const credentialMutationDataSchema = {
   allOf: [
     {
       if: { properties: { secretAvailable: { const: true } }, required: ['secretAvailable'] },
-      then: { required: ['token'] },
-      else: { not: { required: ['token'] } },
+      then: {
+        required: ['token'],
+        properties: { token: { type: 'string', pattern: '^apollo_v2\\.' } },
+      },
+      else: { properties: { token: false } },
     },
   ],
 }

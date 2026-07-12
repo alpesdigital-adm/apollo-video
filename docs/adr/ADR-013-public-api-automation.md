@@ -38,3 +38,6 @@ O domínio depende de `AuthenticatedExternalActor`. O ADR-010 escolhe credenciai
 - OpenAPI 3.1 é derivado do registry e publicado em `GET /v1/openapi.json`.
 - Schemas individuais são publicados em `GET /v1/schemas/{schemaId}/{version}`.
 - `api:v1:validate` compara capabilities, schemas e operações; o `prebuild` falha diante de refs ou operações ausentes.
+- Examples publicados são validados por Ajv Draft 2020-12, incluindo `date-time`.
+- Um baseline versionado impede remover capabilities ou alterar schemas existentes sob o mesmo ref sem revisão explícita.
+- Novas capabilities e novos schema refs são aditivos; atualizar o baseline exige comando separado e diff revisável.

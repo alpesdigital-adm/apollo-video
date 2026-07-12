@@ -1,0 +1,1341 @@
+{
+  "schemaVersion": 1,
+  "apiMajor": "v1",
+  "capabilities": {
+    "apollo.capabilities.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "optional",
+      "requiredScopes": [],
+      "outputSchemaRef": "apollo://schemas/capability-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/capabilities"
+      },
+      "toolName": "apollo.capabilities.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.clients.create": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-api-client-request/v1",
+      "outputSchemaRef": "apollo://schemas/api-client-created/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/clients"
+      },
+      "toolName": "apollo.clients.create",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.clients.credentials.revoke": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/api-credential-revoked/v1",
+      "endpoint": {
+        "method": "DELETE",
+        "path": "/v1/workspaces/{workspaceId}/clients/{clientId}/credentials/{credentialId}"
+      },
+      "toolName": "apollo.clients.credentials.revoke",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
+    "apollo.clients.credentials.rotate": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/rotate-api-credential-request/v1",
+      "outputSchemaRef": "apollo://schemas/api-credential-created/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/clients/{clientId}/credentials"
+      },
+      "toolName": "apollo.clients.credentials.rotate",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": false,
+      "responseMediaType": "application/json"
+    },
+    "apollo.clients.list": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/api-client-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/clients"
+      },
+      "toolName": "apollo.clients.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum number of API clients to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.contracts.openapi.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "none",
+      "requiredScopes": [],
+      "outputSchemaRef": "apollo://schemas/openapi-document/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/openapi.json"
+      },
+      "toolName": "apollo.contracts.openapi.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.contracts.schemas.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "none",
+      "requiredScopes": [],
+      "outputSchemaRef": "apollo://schemas/json-schema-document/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/schemas/{schemaId}/{version}"
+      },
+      "toolName": "apollo.contracts.schemas.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/schema+json"
+    },
+    "apollo.health.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "none",
+      "requiredScopes": [],
+      "outputSchemaRef": "apollo://schemas/health-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/health"
+      },
+      "toolName": "apollo.health.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-project-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-created/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects"
+      },
+      "toolName": "apollo.projects.create",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/project-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects"
+      },
+      "toolName": "apollo.projects.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum number of projects to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    }
+  },
+  "schemas": {
+    "apollo://schemas/api-client-created/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "client",
+            "credential",
+            "secretAvailable",
+            "replayed"
+          ],
+          "properties": {
+            "client": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "name",
+                "status",
+                "environment",
+                "scopes",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 120
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "environment": {
+                  "enum": [
+                    "sandbox",
+                    "production"
+                  ]
+                },
+                "scopes": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z-]+:[a-z-]+$"
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastUsedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "credential": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "clientId",
+                "status",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "clientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "revoked"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastUsedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "token": {
+              "type": "string",
+              "pattern": "^apollo_v2\\."
+            },
+            "secretAvailable": {
+              "type": "boolean"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "secretAvailable": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "secretAvailable"
+                ]
+              },
+              "then": {
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "pattern": "^apollo_v2\\."
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "token": false
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/api-client-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "clients"
+          ],
+          "properties": {
+            "clients": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "workspaceId",
+                  "name",
+                  "status",
+                  "environment",
+                  "scopes",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "suspended",
+                      "revoked"
+                    ]
+                  },
+                  "environment": {
+                    "enum": [
+                      "sandbox",
+                      "production"
+                    ]
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z-]+:[a-z-]+$"
+                    }
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "lastUsedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/api-credential-created/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "client",
+            "credential",
+            "secretAvailable",
+            "replayed"
+          ],
+          "properties": {
+            "client": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "name",
+                "status",
+                "environment",
+                "scopes",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 120
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "environment": {
+                  "enum": [
+                    "sandbox",
+                    "production"
+                  ]
+                },
+                "scopes": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z-]+:[a-z-]+$"
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastUsedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "credential": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "clientId",
+                "status",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "clientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "revoked"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastUsedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "token": {
+              "type": "string",
+              "pattern": "^apollo_v2\\."
+            },
+            "secretAvailable": {
+              "type": "boolean"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "secretAvailable": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "secretAvailable"
+                ]
+              },
+              "then": {
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "pattern": "^apollo_v2\\."
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "token": false
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/api-credential-revoked/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "credential"
+          ],
+          "properties": {
+            "credential": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "clientId",
+                "status",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "clientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "revoked"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastUsedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/capability-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "capabilities"
+          ],
+          "properties": {
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "version",
+                  "title",
+                  "description",
+                  "operationKind",
+                  "authMode",
+                  "requiredScopes",
+                  "outputSchemaRef",
+                  "endpoint",
+                  "toolName",
+                  "supportsDryRun",
+                  "costClass",
+                  "confirmation",
+                  "successStatuses",
+                  "idempotency",
+                  "responseMediaType"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^apollo\\."
+                  },
+                  "version": {
+                    "type": "string",
+                    "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "operationKind": {
+                    "enum": [
+                      "query",
+                      "command",
+                      "preflight",
+                      "job"
+                    ]
+                  },
+                  "authMode": {
+                    "enum": [
+                      "none",
+                      "optional",
+                      "required"
+                    ]
+                  },
+                  "requiredScopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  },
+                  "inputSchemaRef": {
+                    "type": "string"
+                  },
+                  "outputSchemaRef": {
+                    "type": "string"
+                  },
+                  "endpoint": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "method",
+                      "path"
+                    ],
+                    "properties": {
+                      "method": {
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PATCH",
+                          "DELETE"
+                        ]
+                      },
+                      "path": {
+                        "type": "string",
+                        "pattern": "^/v1/"
+                      }
+                    }
+                  },
+                  "toolName": {
+                    "type": "string"
+                  },
+                  "supportsDryRun": {
+                    "type": "boolean"
+                  },
+                  "costClass": {
+                    "enum": [
+                      "free",
+                      "low",
+                      "medium",
+                      "high",
+                      "variable"
+                    ]
+                  },
+                  "confirmation": {
+                    "enum": [
+                      "none",
+                      "preflight-token",
+                      "human-approval"
+                    ]
+                  },
+                  "successStatuses": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "uniqueItems": true
+                  },
+                  "idempotency": {
+                    "enum": [
+                      "not-applicable",
+                      "required",
+                      "natural"
+                    ]
+                  },
+                  "queryParameters": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "requestBodyRequired": {
+                    "type": "boolean"
+                  },
+                  "responseMediaType": {
+                    "enum": [
+                      "application/json",
+                      "application/schema+json"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/create-api-client-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "scopes"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "environment": {
+          "enum": [
+            "sandbox",
+            "production"
+          ]
+        },
+        "scopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z-]+:[a-z-]+$"
+          }
+        }
+      }
+    },
+    "apollo://schemas/create-project-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        }
+      }
+    },
+    "apollo://schemas/error-envelope/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "category",
+            "retryable",
+            "requestId"
+          ],
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "category": {
+              "enum": [
+                "auth",
+                "conflict",
+                "validation",
+                "internal"
+              ]
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "details": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/health-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "service",
+            "status"
+          ],
+          "properties": {
+            "service": {
+              "const": "apollo-video"
+            },
+            "status": {
+              "const": "ok"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/json-schema-document/v1": {
+      "type": "object",
+      "required": [
+        "$schema",
+        "$id",
+        "title"
+      ],
+      "properties": {
+        "$schema": {
+          "const": "https://json-schema.org/draft/2020-12/schema"
+        },
+        "$id": {
+          "type": "string",
+          "pattern": "^apollo://schemas/"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "apollo://schemas/openapi-document/v1": {
+      "type": "object",
+      "required": [
+        "openapi",
+        "info",
+        "paths",
+        "components"
+      ],
+      "properties": {
+        "openapi": {
+          "const": "3.1.0"
+        },
+        "info": {
+          "type": "object"
+        },
+        "paths": {
+          "type": "object"
+        },
+        "components": {
+          "type": "object"
+        }
+      }
+    },
+    "apollo://schemas/project-created/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "version",
+            "replayed"
+          ],
+          "properties": {
+            "project": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "name",
+                "status",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 120
+                },
+                "status": {
+                  "type": "string"
+                },
+                "currentVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "version": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "sequence",
+                "baseHash",
+                "snapshotRefs",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "baseHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "snapshotRefs": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "editPlan",
+                    "policies"
+                  ],
+                  "properties": {
+                    "editPlan": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "policies": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projects"
+          ],
+          "properties": {
+            "projects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "workspaceId",
+                  "name",
+                  "status",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "currentVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/rotate-api-credential-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "overlapSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400,
+          "default": 900
+        }
+      }
+    }
+  }
+}

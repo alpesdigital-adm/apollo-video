@@ -59,3 +59,5 @@ Mudança de requisito deve atualizar no mesmo commit:
 - `GET /v1/openapi.json` publica o OpenAPI 3.1 gerado.
 - `GET /v1/schemas/{schemaId}/{version}` publica os JSON Schemas versionados.
 - `npm run build` executa a verificação de contrato automaticamente antes de compilar.
+- `npm run api:v1:baseline:update` atualiza o baseline somente após uma mudança de contrato aprovada.
+- O gate valida todos os examples e rejeita breaking changes silenciosos no `/v1`.

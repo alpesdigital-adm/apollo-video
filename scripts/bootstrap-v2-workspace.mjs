@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { PrismaClient } from '@apollo/prisma-v2-client'
+import { PrismaClient } from '../generated/prisma-v2/index.js'
 
 import { createApiClientService } from '../src/v2/application/create-api-client.ts'
 import { createWorkspace } from '../src/v2/domain/workspace.ts'

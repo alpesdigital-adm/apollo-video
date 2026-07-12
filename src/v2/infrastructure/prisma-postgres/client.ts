@@ -1,4 +1,4 @@
-import { PrismaClient } from '@apollo/prisma-v2-client'
+import { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import { DomainError } from '../../domain/errors.ts'
 

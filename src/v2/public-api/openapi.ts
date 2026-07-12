@@ -6,6 +6,7 @@ import {
   publicSchemaPath,
   type PublicSchemaDefinition,
 } from './schema-registry.ts'
+import { publicSchemaDocument } from './schema-examples.ts'
 
 function componentName(definition: PublicSchemaDefinition): string {
   const name = definition.id
@@ -96,7 +97,7 @@ export function createOpenApiDocument(
   }
 
   const schemas = Object.fromEntries(
-    PUBLIC_SCHEMAS.map((definition) => [componentName(definition), definition.schema]),
+    PUBLIC_SCHEMAS.map((definition) => [componentName(definition), publicSchemaDocument(definition)]),
   )
   const paths: Record<string, Record<string, unknown>> = {}
   for (const capability of capabilities) {

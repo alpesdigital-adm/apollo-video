@@ -440,6 +440,8 @@
 - [ ] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution.
 - [ ] Validar que `SourceAsset`, `TimelineSegment`, `OutputSpec`, adapter e `EditCommand` são compatíveis com as specs 02, 03 e 06.
 - [ ] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008.
+- [ ] Atualizar Next.js/React para uma linha suportada sem quebrar App Router, Remotion ou os contratos `/v1`; audit atual sinaliza advisory crítico no Next.js 14.2.21.
+- [ ] Corrigir advisories não-major de `uuid`, `postcss` e `form-data` e manter `npm audit` registrado no CI.
 - [ ] Configurar S3-compatible storage.
 - [x] Impedir SQLite como domínio final fora de protótipos locais. Evidência: `resolveV2PersistenceMode` exige Postgres em produção e não possui fallback silencioso.
 - [ ] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais.
@@ -458,8 +460,9 @@
 - [ ] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros.
 - [x] Criar source of truth para OpenAPI, JSON Schemas e capability discovery. Evidência: `schema-registry.ts`, `openapi.ts`, endpoints `/v1/openapi.json` e `/v1/schemas/{id}/{version}`.
 - [x] Implementar error envelope e catálogo de códigos estáveis. Evidência: `public-api/errors.ts` e testes HTTP.
-- [ ] Publicar examples validados e documentação por build.
-- [ ] Implementar breaking-change detector e headers de depreciação/sunset.
+- [x] Publicar examples validados e documentação por build. Evidência: 16 examples validados por Ajv Draft 2020-12 e publicados nos schemas/OpenAPI.
+- [x] Implementar breaking-change detector contra baseline versionado. Evidência: `contract-snapshot.ts` e `contracts/v1/public-contract-baseline.json`.
+- [ ] Implementar headers de depreciação/sunset e migration guide associado.
 - [x] Criar contract test para cada operation pública. Evidência: `public-project-api.integration.mjs`.
 
 ### F0.036 — Clients, autenticação e escopos [FR-242]
@@ -2082,7 +2085,7 @@ Para cada decisão:
 | Non-goals | 12/12 |
 | Riscos | 11/11 |
 | Fases do roadmap | 6/6 |
-| Microtarefas/checks abertos | 1.210 |
+| Microtarefas/checks abertos | 1.211 |
 
 Esta contagem valida presença e fase, não conclusão. Quando o PRD mudar, atualizar este quadro e executar novamente a comparação de IDs com a matriz de rastreabilidade.
 
@@ -2155,7 +2158,7 @@ Pendências deliberadas:
 Entregas:
 
 - schema Postgres independente em `prisma/v2/schema.prisma`;
-- client Prisma v2 gerado separadamente em `@apollo/prisma-v2-client`;
+- client Prisma v2 gerado separadamente em `generated/prisma-v2`, fora de `node_modules` para sobreviver a reinstalações;
 - migration inicial versionada, com FKs compostas que impedem cruzamento de workspace;
 - checks SQL para status, ambientes, JSON, sequências e hashes SHA-256;
 - scripts de geração, validação e `migrate deploy`;
@@ -2225,7 +2228,7 @@ Pendências deliberadas:
 
 ### Slice F0-005 — Contrato público executável
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `59ebf56`.
 
 Entregas:
 
@@ -2256,3 +2259,37 @@ Pendências deliberadas:
 - detector de breaking changes contra a última versão publicada;
 - headers de depreciação/sunset e migration guide;
 - geração de SDKs e adapter MCP a partir do contrato.
+
+### Slice F0-006 — Examples e compatibilidade do contrato `/v1`
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- Ajv 8 Draft 2020-12 e `ajv-formats` fixados para validação real dos contratos;
+- 16 examples cobrindo os 14 schemas públicos, incluindo criação e replay sem reexibir secret;
+- examples publicados em cada JSON Schema e propagados aos components do OpenAPI;
+- baseline versionado de capabilities e schemas estruturais do `/v1`;
+- mudanças aditivas são permitidas; remoção/alteração de capability existente ou schema sob o mesmo ref bloqueia o build;
+- comando explícito `api:v1:baseline:update` para mudanças aprovadas e revisáveis;
+- três testes dedicados ao detector de compatibilidade;
+- client Prisma v2 movido de `node_modules` para `generated/prisma-v2`, evitando remoção por reinstalações npm.
+
+Evidências:
+
+- contract gate: 10 capabilities, 14 schemas, 16 examples, 8 paths e baseline intacto;
+- 32 testes unitários aprovados;
+- typecheck, migration check e build Next.js aprovados;
+- integração HTTP production aprovou examples publicados e todo o lifecycle existente;
+- instalação de dependência deixou de remover o client Prisma v2.
+
+Risco identificado:
+
+- `npm audit` encontrou quatro grupos de advisories preexistentes: Next.js 14.2.21 concentra o grupo crítico; `form-data`, `postcss` e `uuid` possuem correções menores disponíveis. O app não está em produção, mas o upgrade é gate antes de exposição pública.
+
+Pendências deliberadas:
+
+- upgrade controlado de Next.js/React e correções menores do audit;
+- headers `Deprecation`/`Sunset` e migration guide;
+- política para mudanças compatíveis dentro da mesma major sem tornar o gate excessivamente conservador;
+- geração de SDK e MCP a partir do OpenAPI.

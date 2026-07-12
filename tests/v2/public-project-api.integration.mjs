@@ -33,7 +33,7 @@ async function waitForServer(baseUrl, child) {
 test('authenticated public API creates, replays and lists projects', async () => {
   const clientPackage =
     process.env.APOLLO_V2_PERSISTENCE === 'postgres'
-      ? '@apollo/prisma-v2-client'
+      ? '../../generated/prisma-v2/index.js'
       : '@prisma/client'
   const { PrismaClient } = await import(clientPackage)
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
@@ -121,6 +121,7 @@ test('authenticated public API creates, replays and lists projects', async () =>
     assert.match(schemaResponse.headers.get('content-type'), /^application\/schema\+json/)
     assert.equal(schema.$id, 'apollo://schemas/create-project-request/v1')
     assert.deepEqual(schema.required, ['name'])
+    assert.deepEqual(schema.examples, [{ name: 'Anúncio de descoberta' }])
 
     const missingSchemaResponse = await fetch(`${baseUrl}/v1/schemas/missing/v1`)
     assert.equal(missingSchemaResponse.status, 404)

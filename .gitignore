@@ -33,6 +33,7 @@ yarn-error.log*
 # prisma
 /prisma/dev.db
 /prisma/dev.db-journal
+/generated/
 
 # project specific
 uploads/

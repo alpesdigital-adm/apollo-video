@@ -4,7 +4,7 @@ import test from 'node:test'
 test('Prisma adapter atomically creates and replays a v2 project', async () => {
   const clientPackage =
     process.env.APOLLO_V2_PERSISTENCE === 'postgres'
-      ? '@apollo/prisma-v2-client'
+      ? '../../generated/prisma-v2/index.js'
       : '@prisma/client'
   const { PrismaClient } = await import(clientPackage)
   const { createProjectService } = await import('../../src/v2/application/create-project.ts')
