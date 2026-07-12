@@ -99,6 +99,32 @@ test('authenticated public API creates, replays and lists projects', async () =>
     )
     await waitForServer(baseUrl, server)
 
+    const healthResponse = await fetch(`${baseUrl}/v1/health`)
+    assert.equal(healthResponse.status, 200)
+    assert.equal(healthResponse.headers.get('apollo-api-version'), 'v1')
+    assert.ok(healthResponse.headers.get('apollo-request-id'))
+
+    const openApiResponse = await fetch(`${baseUrl}/v1/openapi.json`)
+    const openApi = await openApiResponse.json()
+    assert.equal(openApiResponse.status, 200)
+    assert.equal(openApi.openapi, '3.1.0')
+    assert.equal(
+      openApi.paths['/v1/workspaces/{workspaceId}/clients'].post["x-apollo-capability-id"],
+      'apollo.clients.create',
+    )
+
+    const schemaResponse = await fetch(
+      `${baseUrl}/v1/schemas/create-project-request/v1`,
+    )
+    const schema = await schemaResponse.json()
+    assert.equal(schemaResponse.status, 200)
+    assert.match(schemaResponse.headers.get('content-type'), /^application\/schema\+json/)
+    assert.equal(schema.$id, 'apollo://schemas/create-project-request/v1')
+    assert.deepEqual(schema.required, ['name'])
+
+    const missingSchemaResponse = await fetch(`${baseUrl}/v1/schemas/missing/v1`)
+    assert.equal(missingSchemaResponse.status, 404)
+
     const unauthorized = await fetch(`${baseUrl}/v1/projects`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': 'unauthorized' },
@@ -118,6 +144,8 @@ test('authenticated public API creates, replays and lists projects', async () =>
         'apollo.health.read',
         'apollo.capabilities.list',
         'apollo.projects.list',
+        'apollo.contracts.openapi.read',
+        'apollo.contracts.schemas.read',
         'apollo.projects.create',
         'apollo.clients.list',
         'apollo.clients.create',
@@ -163,7 +191,13 @@ test('authenticated public API creates, replays and lists projects', async () =>
     assert.equal(childCapabilitiesResponse.status, 200)
     assert.deepEqual(
       childCapabilities.data.capabilities.map((capability) => capability.id),
-      ['apollo.health.read', 'apollo.capabilities.list', 'apollo.projects.list'],
+      [
+        'apollo.health.read',
+        'apollo.capabilities.list',
+        'apollo.projects.list',
+        'apollo.contracts.openapi.read',
+        'apollo.contracts.schemas.read',
+      ],
     )
 
     const childEscalationResponse = await fetch(

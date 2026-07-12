@@ -5,11 +5,13 @@
   "scripts": {
     "dev": "next dev -p 3333",
     "build": "next build",
+    "prebuild": "npm run api:v1:validate",
     "start": "next start -p 3333",
     "typecheck": "tsc --noEmit",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test",
     "test:integration:prisma": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-project-repository.integration.mjs",
     "test:integration:api": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/public-project-api.integration.mjs",
+    "api:v1:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-public-contracts.mjs",
     "remotion:dev": "cd remotion && npx remotion studio src/index.ts",
     "remotion:render": "cd remotion && npx remotion render src/index.ts",
     "db:push": "npx prisma db push",

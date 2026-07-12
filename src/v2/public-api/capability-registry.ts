@@ -5,6 +5,21 @@ export type CapabilityOperationKind = 'query' | 'command' | 'preflight' | 'job'
 export type CapabilityCostClass = 'free' | 'low' | 'medium' | 'high' | 'variable'
 export type CapabilityConfirmation = 'none' | 'preflight-token' | 'human-approval'
 export type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE'
+export type CapabilityAuthMode = 'none' | 'optional' | 'required'
+export type CapabilityIdempotency = 'not-applicable' | 'required' | 'natural'
+export type CapabilitySuccessStatus = 200 | 201 | 202 | 204
+
+export interface CapabilityQueryParameter {
+  name: string
+  description: string
+  required: boolean
+  schema: Readonly<{
+    type: 'string' | 'integer' | 'boolean'
+    minimum?: number
+    maximum?: number
+    default?: string | number | boolean
+  }>
+}
 
 export interface PublicCapability {
   id: string
@@ -13,6 +28,7 @@ export interface PublicCapability {
   description: string
   exposure: CapabilityExposure
   operationKind: CapabilityOperationKind
+  authMode: CapabilityAuthMode
   requiredScopes: readonly string[]
   inputSchemaRef?: string
   outputSchemaRef: string
@@ -21,6 +37,11 @@ export interface PublicCapability {
   supportsDryRun: boolean
   costClass: CapabilityCostClass
   confirmation: CapabilityConfirmation
+  successStatuses: readonly CapabilitySuccessStatus[]
+  idempotency: CapabilityIdempotency
+  queryParameters?: readonly CapabilityQueryParameter[]
+  requestBodyRequired?: boolean
+  responseMediaType?: 'application/json' | 'application/schema+json'
 }
 
 export interface UiActionDescriptor {
@@ -58,6 +79,42 @@ function validateCapability(capability: PublicCapability): void {
     new Set(capability.requiredScopes).size === capability.requiredScopes.length,
     'INVALID_CAPABILITY',
     'Capability scopes cannot contain duplicates',
+    { capabilityId: capability.id },
+  )
+  assertDomain(
+    capability.authMode === 'required' || capability.requiredScopes.length === 0,
+    'INVALID_CAPABILITY',
+    'Capabilities with scopes must require authentication',
+    { capabilityId: capability.id },
+  )
+  assertDomain(
+    capability.operationKind === 'query'
+      ? capability.idempotency === 'not-applicable'
+      : capability.idempotency !== 'not-applicable',
+    'INVALID_CAPABILITY',
+    'Capability idempotency must match its operation kind',
+    { capabilityId: capability.id, idempotency: capability.idempotency },
+  )
+  assertDomain(
+    capability.successStatuses.length > 0 &&
+      new Set(capability.successStatuses).size === capability.successStatuses.length,
+    'INVALID_CAPABILITY',
+    'Capability success statuses must be non-empty and unique',
+    { capabilityId: capability.id },
+  )
+  const queryParameterNames = new Set(
+    capability.queryParameters?.map((parameter) => parameter.name) ?? [],
+  )
+  assertDomain(
+    queryParameterNames.size === (capability.queryParameters?.length ?? 0),
+    'INVALID_CAPABILITY',
+    'Capability query parameter names must be unique',
+    { capabilityId: capability.id },
+  )
+  assertDomain(
+    capability.inputSchemaRef || capability.requestBodyRequired === undefined,
+    'INVALID_CAPABILITY',
+    'requestBodyRequired is only valid when an input schema exists',
     { capabilityId: capability.id },
   )
 
@@ -138,7 +195,18 @@ export function defineCapabilityRegistry(
     return Object.freeze({
       ...capability,
       requiredScopes: Object.freeze([...capability.requiredScopes]),
+      successStatuses: Object.freeze([...capability.successStatuses]),
       endpoint: capability.endpoint ? Object.freeze({ ...capability.endpoint }) : undefined,
+      queryParameters: capability.queryParameters
+        ? Object.freeze(
+            capability.queryParameters.map((parameter) =>
+              Object.freeze({
+                ...parameter,
+                schema: Object.freeze({ ...parameter.schema }),
+              }),
+            ),
+          )
+        : undefined,
     })
   })
 
@@ -194,6 +262,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     description: 'Returns a non-sensitive liveness response for the Apollo public API.',
     exposure: 'public',
     operationKind: 'query',
+    authMode: 'none',
     requiredScopes: [],
     outputSchemaRef: 'apollo://schemas/health-response/v1',
     endpoint: { method: 'GET', path: '/v1/health' },
@@ -201,6 +270,8 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false,
     costClass: 'free',
     confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
   },
   {
     id: 'apollo.capabilities.list',
@@ -209,6 +280,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     description: 'Lists public capabilities available to the current external actor.',
     exposure: 'public',
     operationKind: 'query',
+    authMode: 'optional',
     requiredScopes: [],
     outputSchemaRef: 'apollo://schemas/capability-list/v1',
     endpoint: { method: 'GET', path: '/v1/capabilities' },
@@ -216,6 +288,8 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false,
     costClass: 'free',
     confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
   },
   {
     id: 'apollo.projects.list',
@@ -224,6 +298,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     description: 'Lists projects that belong to the authenticated workspace.',
     exposure: 'public',
     operationKind: 'query',
+    authMode: 'required',
     requiredScopes: ['projects:read'],
     outputSchemaRef: 'apollo://schemas/project-list/v1',
     endpoint: { method: 'GET', path: '/v1/projects' },
@@ -231,6 +306,53 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false,
     costClass: 'free',
     confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      {
+        name: 'limit',
+        description: 'Maximum number of projects to return.',
+        required: false,
+        schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+      },
+    ],
+  },
+  {
+    id: 'apollo.contracts.openapi.read',
+    version: '1.0.0',
+    title: 'Read OpenAPI document',
+    description: 'Returns the generated OpenAPI 3.1 contract for public capabilities.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'none',
+    requiredScopes: [],
+    outputSchemaRef: 'apollo://schemas/openapi-document/v1',
+    endpoint: { method: 'GET', path: '/v1/openapi.json' },
+    toolName: 'apollo.contracts.openapi.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.contracts.schemas.read',
+    version: '1.0.0',
+    title: 'Read JSON Schema',
+    description: 'Returns a versioned JSON Schema referenced by a public capability.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'none',
+    requiredScopes: [],
+    outputSchemaRef: 'apollo://schemas/json-schema-document/v1',
+    endpoint: { method: 'GET', path: '/v1/schemas/{schemaId}/{version}' },
+    toolName: 'apollo.contracts.schemas.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    responseMediaType: 'application/schema+json',
   },
   {
     id: 'apollo.projects.create',
@@ -239,6 +361,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     description: 'Creates a draft project and its immutable initial version.',
     exposure: 'public',
     operationKind: 'command',
+    authMode: 'required',
     requiredScopes: ['projects:write'],
     inputSchemaRef: 'apollo://schemas/create-project-request/v1',
     outputSchemaRef: 'apollo://schemas/project-created/v1',
@@ -247,6 +370,8 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false,
     costClass: 'free',
     confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'required',
   },
   {
     id: 'apollo.clients.list',
@@ -255,6 +380,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     description: 'Lists API clients belonging to the authenticated workspace.',
     exposure: 'workspace-admin',
     operationKind: 'query',
+    authMode: 'required',
     requiredScopes: ['clients:admin'],
     outputSchemaRef: 'apollo://schemas/api-client-list/v1',
     endpoint: { method: 'GET', path: '/v1/workspaces/{workspaceId}/clients' },
@@ -262,6 +388,16 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false,
     costClass: 'free',
     confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      {
+        name: 'limit',
+        description: 'Maximum number of API clients to return.',
+        required: false,
+        schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+      },
+    ],
   },
   {
     id: 'apollo.clients.create',
@@ -270,6 +406,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     description: 'Creates a workspace API client and returns its first credential once.',
     exposure: 'workspace-admin',
     operationKind: 'command',
+    authMode: 'required',
     requiredScopes: ['clients:admin'],
     inputSchemaRef: 'apollo://schemas/create-api-client-request/v1',
     outputSchemaRef: 'apollo://schemas/api-client-created/v1',
@@ -278,6 +415,8 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false,
     costClass: 'free',
     confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'required',
   },
   {
     id: 'apollo.clients.credentials.rotate',
@@ -286,6 +425,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     description: 'Creates a new credential and limits the overlap of older credentials.',
     exposure: 'workspace-admin',
     operationKind: 'command',
+    authMode: 'required',
     requiredScopes: ['clients:admin'],
     inputSchemaRef: 'apollo://schemas/rotate-api-credential-request/v1',
     outputSchemaRef: 'apollo://schemas/api-credential-created/v1',
@@ -297,6 +437,9 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false,
     costClass: 'free',
     confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'required',
+    requestBodyRequired: false,
   },
   {
     id: 'apollo.clients.credentials.revoke',
@@ -305,6 +448,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     description: 'Immediately revokes one API credential without exposing its secret.',
     exposure: 'workspace-admin',
     operationKind: 'command',
+    authMode: 'required',
     requiredScopes: ['clients:admin'],
     outputSchemaRef: 'apollo://schemas/api-credential-revoked/v1',
     endpoint: {
@@ -315,5 +459,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false,
     costClass: 'free',
     confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'natural',
   },
 ])

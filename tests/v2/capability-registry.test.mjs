@@ -18,7 +18,12 @@ test('foundation registry exposes health and discovery without scopes', () => {
 
   assert.deepEqual(
     visible.map((capability) => capability.id),
-    ['apollo.health.read', 'apollo.capabilities.list'],
+    [
+      'apollo.health.read',
+      'apollo.capabilities.list',
+      'apollo.contracts.openapi.read',
+      'apollo.contracts.schemas.read',
+    ],
   )
   assert.ok(visible.every((capability) => Object.isFrozen(capability)))
 })
@@ -31,6 +36,7 @@ test('scope filtering is deny-by-default', () => {
       description: 'Reads workspace projects.',
       exposure: 'public',
       operationKind: 'query',
+      authMode: 'required',
       requiredScopes: ['projects:read'],
       outputSchemaRef: 'apollo://schemas/project-list/v1',
       endpoint: { method: 'GET', path: '/v1/projects' },
@@ -38,6 +44,8 @@ test('scope filtering is deny-by-default', () => {
       supportsDryRun: false,
       costClass: 'free',
       confirmation: 'none',
+      successStatuses: [200],
+      idempotency: 'not-applicable',
     },
   ])
 

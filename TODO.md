@@ -456,7 +456,7 @@
 ### F0.035 — Contrato público e descoberta [FR-241]
 
 - [ ] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros.
-- [ ] Criar source of truth para OpenAPI, JSON Schemas e capability discovery.
+- [x] Criar source of truth para OpenAPI, JSON Schemas e capability discovery. Evidência: `schema-registry.ts`, `openapi.ts`, endpoints `/v1/openapi.json` e `/v1/schemas/{id}/{version}`.
 - [x] Implementar error envelope e catálogo de códigos estáveis. Evidência: `public-api/errors.ts` e testes HTTP.
 - [ ] Publicar examples validados e documentação por build.
 - [ ] Implementar breaking-change detector e headers de depreciação/sunset.
@@ -2082,7 +2082,7 @@ Para cada decisão:
 | Non-goals | 12/12 |
 | Riscos | 11/11 |
 | Fases do roadmap | 6/6 |
-| Microtarefas/checks abertos | 1.211 |
+| Microtarefas/checks abertos | 1.210 |
 
 Esta contagem valida presença e fase, não conclusão. Quando o PRD mudar, atualizar este quadro e executar novamente a comparação de IDs com a matriz de rastreabilidade.
 
@@ -2187,7 +2187,7 @@ Pendências deliberadas para slices posteriores:
 
 ### Slice F0-004 — Administração e rotação de credenciais externas
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `cb59a19`.
 
 Entregas:
 
@@ -2222,3 +2222,37 @@ Pendências deliberadas:
 - audit log persistido, rate limits, quotas e anomaly detection;
 - remoção das colunas legadas de hash em migration contract após a janela de compatibilidade;
 - OAuth 2.1 quando houver delegação de usuário.
+
+### Slice F0-005 — Contrato público executável
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- `PublicCapability` agora declara auth mode, status de sucesso, idempotência, query parameters, request body e media type;
+- registry versionado com 14 JSON Schemas Draft 2020-12;
+- OpenAPI 3.1 gerado das mesmas capabilities e schemas usados pela API;
+- path parameters, query parameters, bearer auth opcional/obrigatório e `Idempotency-Key` derivados do contrato;
+- múltiplos status de sucesso documentam criação e replay idempotente;
+- `GET /v1/openapi.json` publica o contrato completo;
+- `GET /v1/schemas/{schemaId}/{version}` publica cada schema com media type próprio;
+- capabilities públicas para descoberta do OpenAPI e dos schemas;
+- `api:v1:validate` verifica refs, operações, status e serialização;
+- `prebuild` bloqueia o build se capabilities, schemas e OpenAPI divergirem;
+- health passou a devolver request ID pelo mesmo header comum da Public API.
+
+Evidências:
+
+- contract verification: 10 capabilities, 14 schemas e 8 paths;
+- 29 testes unitários aprovados;
+- typecheck e build Next.js aprovados;
+- integração HTTP production aprovou OpenAPI, JSON Schema, media type, schema 404 e headers comuns;
+- lifecycle de projects, clients e credentials continuou aprovado após a expansão do contrato.
+
+Pendências deliberadas:
+
+- exemplos completos validados contra cada schema;
+- cursor pagination e catálogo formal de filtros/sorts;
+- detector de breaking changes contra a última versão publicada;
+- headers de depreciação/sunset e migration guide;
+- geração de SDKs e adapter MCP a partir do contrato.

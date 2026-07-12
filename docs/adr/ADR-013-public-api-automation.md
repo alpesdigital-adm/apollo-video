@@ -30,3 +30,11 @@ O domínio depende de `AuthenticatedExternalActor`. O ADR-010 escolhe credenciai
 - Paridade UI/API será verificada por capability ID e contract test.
 - Banco, filas, storage keys, prompts privados e payloads crus de providers não são recursos públicos.
 - Health/capabilities iniciais não autorizam mutações nem revelam configuração sensível.
+
+## Estado implementado na Fundação
+
+- `PublicCapability` contém metadata de autenticação, status de sucesso, idempotência, parâmetros e media type.
+- JSON Schemas Draft 2020-12 formam um registry versionado; todo input/output ref de capability deve resolver nele.
+- OpenAPI 3.1 é derivado do registry e publicado em `GET /v1/openapi.json`.
+- Schemas individuais são publicados em `GET /v1/schemas/{schemaId}/{version}`.
+- `api:v1:validate` compara capabilities, schemas e operações; o `prebuild` falha diante de refs ou operações ausentes.

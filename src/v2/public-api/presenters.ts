@@ -24,6 +24,7 @@ export function presentCapability(capability: PublicCapability) {
     title: capability.title,
     description: capability.description,
     operationKind: capability.operationKind,
+    authMode: capability.authMode,
     requiredScopes: [...capability.requiredScopes],
     inputSchemaRef: capability.inputSchemaRef,
     outputSchemaRef: capability.outputSchemaRef,
@@ -32,6 +33,16 @@ export function presentCapability(capability: PublicCapability) {
     supportsDryRun: capability.supportsDryRun,
     costClass: capability.costClass,
     confirmation: capability.confirmation,
+    successStatuses: [...capability.successStatuses],
+    idempotency: capability.idempotency,
+    queryParameters: capability.queryParameters?.map((parameter) => ({
+      ...parameter,
+      schema: { ...parameter.schema },
+    })),
+    requestBodyRequired: capability.inputSchemaRef
+      ? capability.requestBodyRequired ?? true
+      : undefined,
+    responseMediaType: capability.responseMediaType ?? 'application/json',
   }
 }
 

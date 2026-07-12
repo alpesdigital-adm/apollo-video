@@ -52,3 +52,10 @@ Mudança de requisito deve atualizar no mesmo commit:
 - spec derivada afetada;
 - matriz de rastreabilidade;
 - critérios de aceite ou test plan correspondente.
+
+## Contrato público executável
+
+- `npm run api:v1:validate` verifica a paridade entre capabilities, JSON Schemas e OpenAPI.
+- `GET /v1/openapi.json` publica o OpenAPI 3.1 gerado.
+- `GET /v1/schemas/{schemaId}/{version}` publica os JSON Schemas versionados.
+- `npm run build` executa a verificação de contrato automaticamente antes de compilar.
