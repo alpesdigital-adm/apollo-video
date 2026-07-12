@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/@apollo/prisma-v2-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("V2_DATABASE_URL")
+}
+
+model V2Workspace {
+  id        String   @id @db.VarChar(128)
+  slug      String   @unique @db.VarChar(63)
+  name      String   @db.VarChar(120)
+  status    String   @default("active") @db.VarChar(32)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  projects           V2Project[]
+  snapshots          V2ProjectSnapshot[]
+  apiClients         V2ApiClient[]
+  idempotencyRecords V2IdempotencyRecord[]
+
+  @@map("workspaces")
+}
+
+model V2ApiClient {
+  id          String    @id @db.VarChar(80)
+  workspaceId String    @db.VarChar(128)
+  name        String    @db.VarChar(120)
+  status      String    @default("active") @db.VarChar(32)
+  environment String    @default("sandbox") @db.VarChar(32)
+  scopesJson  String    @db.Text
+  secretSalt  String    @db.VarChar(128)
+  secretHash  String    @db.VarChar(128)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+  lastUsedAt  DateTime? @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@map("api_clients")
+}
+
+model V2Project {
+  id               String   @id @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  name             String   @db.VarChar(120)
+  status           String   @default("draft") @db.VarChar(32)
+  currentVersionId String?  @db.VarChar(128)
+  createdByType    String   @db.VarChar(32)
+  createdById      String   @db.VarChar(128)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
+
+  workspace      V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  versions       V2ProjectVersion[]  @relation("ProjectVersions")
+  snapshots      V2ProjectSnapshot[]
+  currentVersion V2ProjectVersion?   @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([workspaceId, status])
+  @@map("projects")
+}
+
+model V2ProjectSnapshot {
+  id            String   @id @db.VarChar(128)
+  workspaceId   String   @db.VarChar(128)
+  projectId     String   @db.VarChar(128)
+  kind          String   @db.VarChar(32)
+  schemaVersion Int
+  contentJson   String   @db.Text
+  contentHash   String   @db.Char(64)
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace        V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  editPlanVersions V2ProjectVersion[] @relation("EditPlanSnapshot")
+  policyVersions   V2ProjectVersion[] @relation("PoliciesSnapshot")
+
+  @@unique([projectId, kind, contentHash])
+  @@index([workspaceId, kind])
+  @@map("project_snapshots")
+}
+
+model V2ProjectVersion {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  sequence           Int
+  parentVersionId    String?  @db.VarChar(128)
+  editPlanSnapshotId String   @db.VarChar(128)
+  policiesSnapshotId String   @db.VarChar(128)
+  baseHash           String   @db.Char(64)
+  createdBy          String   @db.VarChar(128)
+  commandId          String?  @db.VarChar(128)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+
+  project            V2Project          @relation("ProjectVersions", fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  currentForProjects V2Project[]        @relation("CurrentProjectVersion")
+  parent             V2ProjectVersion?  @relation("VersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  children           V2ProjectVersion[] @relation("VersionParent")
+  editPlanSnapshot   V2ProjectSnapshot  @relation("EditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
+  policiesSnapshot   V2ProjectSnapshot  @relation("PoliciesSnapshot", fields: [policiesSnapshotId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, sequence])
+  @@unique([id, workspaceId])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("project_versions")
+}
+
+model V2IdempotencyRecord {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  clientId           String   @db.VarChar(80)
+  key                String   @db.VarChar(128)
+  requestFingerprint String   @db.Char(64)
+  status             String   @db.VarChar(32)
+  responseStatus     Int?
+  responseJson       String?  @db.Text
+  expiresAt          DateTime @db.Timestamptz(3)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime @updatedAt @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, clientId, key])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}

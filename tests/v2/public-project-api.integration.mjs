@@ -1,0 +1,170 @@
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import net from 'node:net'
+import test from 'node:test'
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      const port = typeof address === 'object' && address ? address.port : 0
+      server.close((error) => (error ? reject(error) : resolve(port)))
+    })
+  })
+}
+
+async function waitForServer(baseUrl, child) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (child.exitCode !== null) throw new Error(`Next server exited with ${child.exitCode}`)
+    try {
+      const response = await fetch(`${baseUrl}/v1/health`)
+      if (response.ok) return
+    } catch {
+      // Server is still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error('Next server did not become ready')
+}
+
+test('authenticated public API creates, replays and lists projects', async () => {
+  const clientPackage =
+    process.env.APOLLO_V2_PERSISTENCE === 'postgres'
+      ? '@apollo/prisma-v2-client'
+      : '@prisma/client'
+  const { PrismaClient } = await import(clientPackage)
+  const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
+  const { PrismaApiClientRepository } = await import(
+    '../../src/v2/infrastructure/prisma/api-client-repository.ts'
+  )
+  const { PrismaWorkspaceRepository } = await import(
+    '../../src/v2/infrastructure/prisma/workspace-repository.ts'
+  )
+  const { nodeApiCredentialCrypto } = await import(
+    '../../src/v2/infrastructure/security/api-credential.ts'
+  )
+
+  const client = new PrismaClient()
+  const apiEnvironment =
+    process.env.APOLLO_V2_PERSISTENCE === 'postgres' ? 'production' : 'sandbox'
+  const workspaceId = 'public-api-workspace-v2'
+  const apiClientId = 'public-api-client-v2'
+  let server
+
+  try {
+    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
+    await client.v2Project.deleteMany({ where: { workspaceId } })
+    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
+    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+
+    await new PrismaWorkspaceRepository(client).create(
+      createWorkspace({
+        id: workspaceId,
+        slug: 'public-api-workspace-v2',
+        name: 'Public API Workspace V2',
+        status: 'active',
+        createdAt: '2026-07-12T16:00:00.000Z',
+      }),
+    )
+    const issued = await createApiClientService({
+      repository: new PrismaApiClientRepository(client),
+      credentialCrypto: nodeApiCredentialCrypto,
+      clock: () => new Date('2026-07-12T16:01:00.000Z'),
+    })({
+      id: apiClientId,
+      workspaceId,
+      name: 'Public API Test Client',
+      environment: apiEnvironment,
+      scopes: ['projects:read', 'projects:write'],
+    })
+
+    const port = await getFreePort()
+    const baseUrl = `http://127.0.0.1:${port}`
+    server = spawn(
+      process.execPath,
+      ['node_modules/next/dist/bin/next', 'start', '-p', String(port)],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          NODE_ENV: 'production',
+          APOLLO_API_ENVIRONMENT: apiEnvironment,
+        },
+        stdio: 'ignore',
+      },
+    )
+    await waitForServer(baseUrl, server)
+
+    const unauthorized = await fetch(`${baseUrl}/v1/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'unauthorized' },
+      body: JSON.stringify({ name: 'Should not exist' }),
+    })
+    assert.equal(unauthorized.status, 401)
+
+    const authorization = `Bearer ${issued.token}`
+    const capabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`, {
+      headers: { authorization },
+    })
+    assert.equal(capabilitiesResponse.status, 200)
+    const capabilities = await capabilitiesResponse.json()
+    assert.deepEqual(
+      capabilities.data.capabilities.map((capability) => capability.id),
+      [
+        'apollo.health.read',
+        'apollo.capabilities.list',
+        'apollo.projects.list',
+        'apollo.projects.create',
+      ],
+    )
+
+    const createRequest = () =>
+      fetch(`${baseUrl}/v1/projects`, {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'public-create-project-1',
+          'apollo-request-id': 'public-api-test-1',
+        },
+        body: JSON.stringify({ name: 'Projeto criado externamente' }),
+      })
+    const createdResponse = await createRequest()
+    const created = await createdResponse.json()
+    assert.equal(createdResponse.status, 201)
+    assert.equal(created.data.replayed, false)
+    assert.equal(created.data.project.name, 'Projeto criado externamente')
+    assert.equal(created.data.version.sequence, 1)
+
+    const replayResponse = await createRequest()
+    const replay = await replayResponse.json()
+    assert.equal(replayResponse.status, 200)
+    assert.equal(replay.data.replayed, true)
+    assert.equal(replay.data.project.id, created.data.project.id)
+
+    const listResponse = await fetch(`${baseUrl}/v1/projects?limit=20`, {
+      headers: { authorization },
+    })
+    const list = await listResponse.json()
+    assert.equal(listResponse.status, 200)
+    assert.equal(list.data.projects.length, 1)
+    assert.equal(list.data.projects[0].id, created.data.project.id)
+  } finally {
+    if (server && server.exitCode === null) {
+      server.kill()
+      await Promise.race([
+        once(server, 'exit'),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ])
+    }
+    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
+    await client.v2Project.deleteMany({ where: { workspaceId } })
+    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
+    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+    await client.$disconnect()
+  }
+})

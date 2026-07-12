@@ -29,6 +29,7 @@ As specs estão em estado **implementation-grade draft**: já definem contratos,
 
 - [Índice de ADRs](./adr/README.md)
 - [ADR-001 — Estrutura modular da v2](./adr/ADR-001-v2-modular-architecture.md)
+- [ADR-002 — Banco, persistência v2 e migrations](./adr/ADR-002-database-and-migrations.md)
 - [ADR-006 — Commands, versões e concorrência](./adr/ADR-006-command-version-model.md)
 - [ADR-013 — API pública e automação](./adr/ADR-013-public-api-automation.md)
 

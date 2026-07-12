@@ -1,0 +1,164 @@
+import { assertDomain } from '../domain/errors.ts'
+import type { CommandActor } from '../domain/edit-command.ts'
+import { createProject, normalizeProjectName } from '../domain/project.ts'
+import { createProjectSnapshot } from '../domain/project-snapshot.ts'
+import { createProjectVersion } from '../domain/project-version.ts'
+import type {
+  ProjectCreationRepository,
+  ProjectCreationResult,
+} from './ports/project-creation-repository.ts'
+import { calculateVersionHash, stableSerialize } from './version-hash.ts'
+
+export type ProjectEntityKind =
+  | 'project'
+  | 'project-version'
+  | 'project-snapshot'
+  | 'idempotency-record'
+
+export interface CreateProjectRequest {
+  workspaceId: string
+  name: string
+  actor: CommandActor
+  idempotency: {
+    clientId: string
+    key: string
+    ttlSeconds?: number
+  }
+}
+
+export interface CreateProjectDependencies {
+  repository: ProjectCreationRepository
+  clock: () => Date
+  createId: (kind: ProjectEntityKind) => string
+}
+
+const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
+
+export function createProjectService(dependencies: CreateProjectDependencies) {
+  return async function execute(request: CreateProjectRequest): Promise<ProjectCreationResult> {
+    const workspaceId = request.workspaceId.trim()
+    const clientId = request.idempotency.clientId.trim()
+    const idempotencyKey = request.idempotency.key.trim()
+    const name = normalizeProjectName(request.name)
+    const ttlSeconds = request.idempotency.ttlSeconds ?? DEFAULT_IDEMPOTENCY_TTL_SECONDS
+
+    assertDomain(workspaceId.length > 0, 'INVALID_PROJECT', 'workspaceId is required')
+    assertDomain(clientId.length > 0, 'INVALID_ARGUMENT', 'idempotency clientId is required')
+    assertDomain(idempotencyKey.length > 0, 'INVALID_ARGUMENT', 'idempotency key is required')
+    assertDomain(idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'idempotency key is too long')
+    assertDomain(
+      Number.isInteger(ttlSeconds) && ttlSeconds >= 60 && ttlSeconds <= 7 * 24 * 60 * 60,
+      'INVALID_ARGUMENT',
+      'idempotency ttlSeconds must be between 60 seconds and 7 days',
+    )
+
+    const now = dependencies.clock()
+    const createdAt = now.toISOString()
+    const projectId = dependencies.createId('project')
+    const versionId = dependencies.createId('project-version')
+    const editPlanSnapshotId = dependencies.createId('project-snapshot')
+    const policiesSnapshotId = dependencies.createId('project-snapshot')
+
+    const editPlanContent = {
+      schemaVersion: 2,
+      state: 'uncompiled',
+      id: `edit-plan-${versionId}`,
+      projectVersionId: versionId,
+      storyPlanId: null,
+      fps: 30,
+      durationFrames: 0,
+      sources: [],
+      videoTracks: [],
+      overlayTracks: [],
+      subtitleTracks: [],
+      audioTracks: [],
+      effectTracks: [],
+      markers: [],
+      protectedElements: [],
+      localeVariantRefs: [],
+      formatVariantRefs: [],
+      lineageRefs: [],
+      createdAt,
+    }
+    const policiesContent = {
+      schemaVersion: 1,
+      workspaceId,
+      state: 'unconfigured',
+      brandKitMode: 'inherit',
+      guardrails: [],
+      createdAt,
+    }
+
+    const editPlanJson = stableSerialize(editPlanContent)
+    const policiesJson = stableSerialize(policiesContent)
+    const editPlanHash = calculateVersionHash(editPlanContent)
+    const policiesHash = calculateVersionHash(policiesContent)
+    const versionHash = calculateVersionHash({
+      projectId,
+      sequence: 1,
+      name,
+      editPlanHash,
+      policiesHash,
+    })
+
+    const project = createProject({
+      id: projectId,
+      workspaceId,
+      name,
+      status: 'draft',
+      currentVersionId: versionId,
+      createdBy: request.actor,
+      createdAt,
+    })
+    const snapshots = [
+      createProjectSnapshot({
+        id: editPlanSnapshotId,
+        workspaceId,
+        projectId,
+        kind: 'edit-plan',
+        contentSchemaVersion: 2,
+        contentJson: editPlanJson,
+        contentHash: editPlanHash,
+        createdAt,
+      }),
+      createProjectSnapshot({
+        id: policiesSnapshotId,
+        workspaceId,
+        projectId,
+        kind: 'policies',
+        contentSchemaVersion: 1,
+        contentJson: policiesJson,
+        contentHash: policiesHash,
+        createdAt,
+      }),
+    ] as const
+    const version = createProjectVersion({
+      id: versionId,
+      workspaceId,
+      projectId,
+      sequence: 1,
+      snapshotRefs: {
+        editPlan: editPlanSnapshotId,
+        policies: policiesSnapshotId,
+      },
+      baseHash: versionHash,
+      createdBy: request.actor.id,
+      createdAt,
+    })
+    const requestFingerprint = calculateVersionHash({ name })
+
+    return dependencies.repository.createOrReplay({
+      project,
+      version,
+      snapshots,
+      idempotency: {
+        id: dependencies.createId('idempotency-record'),
+        workspaceId,
+        clientId,
+        key: idempotencyKey,
+        requestFingerprint,
+        expiresAt: new Date(now.getTime() + ttlSeconds * 1000).toISOString(),
+      },
+    })
+  }
+}

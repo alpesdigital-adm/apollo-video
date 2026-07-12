@@ -107,8 +107,12 @@
 #### ADR-002 — Banco, vector search e migrations
 
 - [ ] Comparar Postgres/pgvector e alternativas compatíveis com os filtros da Media Library.
-- [ ] Definir migration tool, política de rollback e teste em snapshot de produção futura.
-- [ ] Definir isolamento por workspace, índices, retenção e versionamento de embeddings.
+- [x] Definir Prisma Migrate como ferramenta e versionar a migration inicial Postgres. Evidência: `prisma/v2/migrations` e `db:v2:validate`.
+- [x] Definir política de rollback/restore e expand-contract. Evidência: ADR-002.
+- [x] Ensaiar migration inicial em Postgres 16 dedicado e vazio antes do primeiro ambiente compartilhado. Evidência: `migrate deploy` + integration tests do slice F0-003.
+- [x] Implementar isolamento estrutural por workspace, índices e FKs compostas. Evidência: schema/migration v2.
+- [ ] Definir retention policy das tabelas e registros operacionais.
+- [ ] Definir pgvector, índices e versionamento de embeddings no schema Postgres.
 - [ ] Registrar decisão com estimativa de custo e limites operacionais.
 
 #### ADR-003 — Object storage e content addressing
@@ -403,7 +407,9 @@
 
 ### F0.030 — Infraestrutura e smoke vertical
 
-- [ ] Provisionar Postgres, object storage e workflow em desenvolvimento isolado.
+- [x] Provisionar Postgres dedicado em desenvolvimento isolado. Evidência: Postgres 16 com volume próprio, porta restrita ao loopback e migration v2 aplicada.
+- [ ] Provisionar object storage em desenvolvimento isolado.
+- [ ] Provisionar workflow durável em desenvolvimento isolado.
 - [ ] Criar seeds mínimos para workspace, projeto, source e OutputSpec.
 - [ ] Configurar lint, typecheck, unit, integration, golden e E2E no CI.
 - [ ] Criar telemetria comum com trace, job, workspace e project IDs.
@@ -434,7 +440,8 @@
 - [ ] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution.
 - [ ] Validar que `SourceAsset`, `TimelineSegment`, `OutputSpec`, adapter e `EditCommand` são compatíveis com as specs 02, 03 e 06.
 - [ ] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008.
-- [ ] Configurar S3-compatible storage e impedir SQLite como domínio final fora de protótipos locais.
+- [ ] Configurar S3-compatible storage.
+- [x] Impedir SQLite como domínio final fora de protótipos locais. Evidência: `resolveV2PersistenceMode` exige Postgres em produção e não possui fallback silencioso.
 - [ ] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais.
 
 ### F0.034 — Paridade API-first [FR-240]
@@ -450,17 +457,17 @@
 
 - [ ] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros.
 - [ ] Criar source of truth para OpenAPI, JSON Schemas e capability discovery.
-- [ ] Implementar error envelope e catálogo de códigos estáveis.
+- [x] Implementar error envelope e catálogo de códigos estáveis. Evidência: `public-api/errors.ts` e testes HTTP.
 - [ ] Publicar examples validados e documentação por build.
 - [ ] Implementar breaking-change detector e headers de depreciação/sunset.
-- [ ] Criar contract test para cada operation pública.
+- [x] Criar contract test para cada operation pública. Evidência: `public-project-api.integration.mjs`.
 
 ### F0.036 — Clients, autenticação e escopos [FR-242]
 
 - [ ] Modelar `ApiClient`, `ServiceAccount`, credential ref, scope grants e environments.
-- [ ] Implementar emissão/validação de token conforme ADR-013.
+- [x] Implementar emissão/validação de token conforme ADR-013. Evidência: service-account token com `scrypt` e comparação constante.
 - [ ] Criar secrets exibidos uma vez, armazenados por referência e rotacionáveis.
-- [ ] Implementar deny-by-default e matriz `<resource>:<action>` server-side.
+- [x] Implementar deny-by-default e matriz `<resource>:<action>` server-side. Evidência: `authenticate-api-client.ts` e scopes dos endpoints.
 - [ ] Vincular client, workspace e delegated user ao audit context.
 - [ ] Implementar suspend, revoke e kill switch por client/workspace.
 - [ ] Criar security E2E de scope, cross-workspace, expiry, rotation e revocation.
@@ -486,9 +493,9 @@
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
 
-- [ ] Implementar ledger por workspace/client/key com request fingerprint.
-- [ ] Retornar response/operation original em repetição idêntica.
-- [ ] Rejeitar mesma key com payload diferente.
+- [x] Implementar ledger por workspace/client/key com request fingerprint. Evidência: `V2IdempotencyRecord` e repository Prisma.
+- [x] Retornar response/operation original em repetição idêntica. Evidência: testes unitário, Prisma e HTTP.
+- [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
 - [ ] Criar property tests de requests simultâneas e timeout após commit.
@@ -2075,7 +2082,7 @@ Para cada decisão:
 | Non-goals | 12/12 |
 | Riscos | 11/11 |
 | Fases do roadmap | 6/6 |
-| Microtarefas/checks abertos | 1.220 |
+| Microtarefas/checks abertos | 1.214 |
 
 Esta contagem valida presença e fase, não conclusão. Quando o PRD mudar, atualizar este quadro e executar novamente a comparação de IDs com a matriz de rastreabilidade.
 
@@ -2106,3 +2113,74 @@ Evidências:
 - `npm run build`: aprovado em Next.js 14.2.21;
 - smoke HTTP dos dois endpoints: aprovado;
 - nenhuma versão fixa da v1 foi alterada.
+
+### Slice F0-002 — Persistência e criação externa de projetos
+
+**Status:** concluído em 12 de julho de 2026.
+
+Entregas:
+
+- ADR-002 registrado: Postgres como alvo e SQLite limitado ao protótipo local;
+- aggregates `Workspace`, `Project`, `ProjectSnapshot`, `ProjectVersion` e `ApiClient`;
+- tabelas Prisma v2 isoladas para workspace, projeto, snapshots, versões, clients e idempotência;
+- repository ports independentes de Prisma;
+- criação atômica de projeto, dois snapshots e versão inicial;
+- replay idempotente sem duplicar projeto, versão ou snapshots;
+- service-account token opaco, secret aleatório, hash `scrypt` e comparação constante;
+- autenticação por environment, status e scopes `projects:read`/`projects:write`;
+- `GET /v1/projects` e `POST /v1/projects`;
+- capability discovery autenticada e filtrada por escopos;
+- error envelope público sem vazamento de detalhes internos.
+
+Evidências:
+
+- Prisma schema format/validate/generate/db push: aprovados;
+- `npm run typecheck`: aprovado;
+- `npm test`: 19 testes aprovados;
+- integração Prisma transacional e idempotente: aprovada;
+- `npm run build`: aprovado;
+- integração HTTP autenticada: 401 sem token, 201 na criação, 200 no replay e listagem isolada aprovada;
+- registros de integração removidos ao final dos testes.
+
+Pendências deliberadas:
+
+- administração de workspaces/clients e rotação de secret;
+- OpenAPI/JSON Schemas gerados;
+- cursor pagination, rate limits, audit log e webhooks.
+
+### Slice F0-003 — Chassi Postgres e migrations
+
+**Status:** concluído em 12 de julho de 2026.
+
+Entregas:
+
+- schema Postgres independente em `prisma/v2/schema.prisma`;
+- client Prisma v2 gerado separadamente em `@apollo/prisma-v2-client`;
+- migration inicial versionada, com FKs compostas que impedem cruzamento de workspace;
+- checks SQL para status, ambientes, JSON, sequências e hashes SHA-256;
+- scripts de geração, validação e `migrate deploy`;
+- verificador que compara migration commitada com o SQL produzido pelo Prisma;
+- política de rollback/restore e expand-contract no ADR-002;
+- configuração local/produção documentada;
+- guard que impede API de produção usar SQLite silenciosamente;
+- Postgres 16 dedicado na VPS, com banco, role e volume exclusivos do Apollo;
+- porta publicada somente no loopback da VPS e acesso de desenvolvimento por túnel SSH;
+- repositories selecionados por factory, usando Postgres em produção e mantendo SQLite apenas como protótipo explícito.
+
+Evidências:
+
+- schema Prisma Postgres formatado e validado;
+- migration check: 6 tabelas, 12 índices e 10 chaves estrangeiras;
+- migration inicial aplicada com sucesso no banco dedicado vazio;
+- inspeção do schema real: 6 tabelas de domínio, 18 índices físicos e 33 constraints;
+- 22 testes unitários aprovados;
+- integração Prisma transacional/idempotente aprovada contra Postgres real;
+- build Next.js aprovado;
+- integração HTTP em modo de produção aprovada contra Postgres real: 401 sem token, 201 na criação, 200 no replay e listagem isolada por workspace.
+
+Pendências deliberadas para slices posteriores:
+
+- automatizar backup e teste de restauração antes de persistir dados insubstituíveis;
+- integrar migration check e testes Postgres ao CI;
+- decidir pgvector e a política de retenção operacional;
+- provisionar object storage e workflow durável.

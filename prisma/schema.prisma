@@ -11,43 +11,168 @@ datasource db {
 }
 
 model Project {
-  id                  String       @id @default(cuid())
-  name                String
-  format              String       @default("9:16")
-  status              String       @default("created")
-  rawVideoPath        String?
-  normalizedPath      String?
-  renderedVideoPath   String?
-  videoDuration       Float?
-  videoWidth          Int?
-  videoHeight         Int?
-  videoFps            Int?
-  transcriptionJson   String?
-  subtitlesJson       String?
-  silencesJson        String?
-  engineKind          String       @default("narrative")
-  stylePreset         String       @default("creator-clean")
-  editPlanJson        String?
-  scenesJson          String?
-  paletteJson         String?
-  narrativeFormat     String?
-  error               String?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  id                String   @id @default(cuid())
+  name              String
+  format            String   @default("9:16")
+  status            String   @default("created")
+  rawVideoPath      String?
+  normalizedPath    String?
+  renderedVideoPath String?
+  videoDuration     Float?
+  videoWidth        Int?
+  videoHeight       Int?
+  videoFps          Int?
+  transcriptionJson String?
+  subtitlesJson     String?
+  silencesJson      String?
+  engineKind        String   @default("narrative")
+  stylePreset       String   @default("creator-clean")
+  editPlanJson      String?
+  scenesJson        String?
+  paletteJson       String?
+  narrativeFormat   String?
+  error             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  renderJobs          RenderJob[]
+  renderJobs RenderJob[]
 }
 
 model RenderJob {
-  id        String   @id @default(cuid())
-  projectId String
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  status    String   @default("queued")
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status     String   @default("queued")
   outputPath String?
-  error     String?
-  progress  Float    @default(0)
+  error      String?
+  progress   Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// Apollo v2 foundation models. These names stay isolated from the legacy v1
+// aggregate while the new domain is introduced incrementally.
+model V2Workspace {
+  id        String   @id
+  slug      String   @unique
+  name      String
+  status    String   @default("active")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([projectId])
+  projects           V2Project[]
+  snapshots          V2ProjectSnapshot[]
+  apiClients         V2ApiClient[]
+  idempotencyRecords V2IdempotencyRecord[]
+
+  @@map("v2_workspaces")
+}
+
+model V2ApiClient {
+  id          String    @id
+  workspaceId String
+  name        String
+  status      String    @default("active")
+  environment String    @default("sandbox")
+  scopesJson  String
+  secretSalt  String
+  secretHash  String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastUsedAt  DateTime?
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@map("v2_api_clients")
+}
+
+model V2Project {
+  id               String   @id
+  workspaceId      String
+  name             String
+  status           String   @default("draft")
+  currentVersionId String?
+  createdByType    String
+  createdById      String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  workspace      V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  versions       V2ProjectVersion[]  @relation("V2ProjectVersions")
+  snapshots      V2ProjectSnapshot[]
+  currentVersion V2ProjectVersion?   @relation("V2CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status])
+  @@map("v2_projects")
+}
+
+model V2ProjectSnapshot {
+  id            String   @id
+  workspaceId   String
+  projectId     String
+  kind          String
+  schemaVersion Int
+  contentJson   String
+  contentHash   String
+  createdAt     DateTime @default(now())
+
+  workspace        V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  editPlanVersions V2ProjectVersion[] @relation("V2EditPlanSnapshot")
+  policyVersions   V2ProjectVersion[] @relation("V2PoliciesSnapshot")
+
+  @@unique([projectId, kind, contentHash])
+  @@index([workspaceId, kind])
+  @@map("v2_project_snapshots")
+}
+
+model V2ProjectVersion {
+  id                 String   @id
+  workspaceId        String
+  projectId          String
+  sequence           Int
+  parentVersionId    String?
+  editPlanSnapshotId String
+  policiesSnapshotId String
+  baseHash           String
+  createdBy          String
+  commandId          String?
+  createdAt          DateTime @default(now())
+
+  project            V2Project          @relation("V2ProjectVersions", fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  currentForProjects V2Project[]        @relation("V2CurrentProjectVersion")
+  parent             V2ProjectVersion?  @relation("V2VersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  children           V2ProjectVersion[] @relation("V2VersionParent")
+  editPlanSnapshot   V2ProjectSnapshot  @relation("V2EditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
+  policiesSnapshot   V2ProjectSnapshot  @relation("V2PoliciesSnapshot", fields: [policiesSnapshotId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, sequence])
+  @@unique([id, workspaceId])
+  @@index([workspaceId, createdAt])
+  @@map("v2_project_versions")
+}
+
+model V2IdempotencyRecord {
+  id                 String   @id
+  workspaceId        String
+  clientId           String
+  key                String
+  requestFingerprint String
+  status             String
+  responseStatus     Int?
+  responseJson       String?
+  expiresAt          DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, clientId, key])
+  @@index([expiresAt])
+  @@map("v2_idempotency_records")
 }

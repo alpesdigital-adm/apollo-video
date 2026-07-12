@@ -7,12 +7,17 @@
     "build": "next build",
     "start": "next start -p 3333",
     "typecheck": "tsc --noEmit",
-    "test": "node --test",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test",
+    "test:integration:prisma": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-project-repository.integration.mjs",
+    "test:integration:api": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/public-project-api.integration.mjs",
     "remotion:dev": "cd remotion && npx remotion studio src/index.ts",
     "remotion:render": "cd remotion && npx remotion render src/index.ts",
     "db:push": "npx prisma db push",
     "db:studio": "npx prisma studio",
-    "postinstall": "npx prisma generate"
+    "db:v2:generate": "node scripts/generate-prisma-clients.mjs",
+    "db:v2:validate": "node scripts/verify-v2-migration.mjs",
+    "db:v2:migrate:deploy": "npx prisma migrate deploy --schema prisma/v2/schema.prisma",
+    "postinstall": "node scripts/generate-prisma-clients.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.39.0",
