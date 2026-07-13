@@ -9,6 +9,10 @@ import {
 } from '../../src/v2/domain/output-spec.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import {
+  assertMediaArtifactManifest,
+  createMediaArtifactManifest,
+} from '../../src/v2/domain/media-artifact.ts'
+import {
   assertCommandMatchesVersion,
   createEditCommand,
   validateEditScope,
@@ -142,4 +146,76 @@ test('version hashing is deterministic for object key order', () => {
   assert.equal(stableSerialize(left), stableSerialize(right))
   assert.equal(calculateVersionHash(left), calculateVersionHash(right))
   assert.notEqual(calculateVersionHash(left), calculateVersionHash({ ...right, z: 2 }))
+})
+
+test('media artifact manifest is deterministic and excludes raw recipe parameters', () => {
+  const base = {
+    artifactKey: 'workspaces/ws-1/artifacts/normalized.mp4',
+    artifactSha256: 'a'.repeat(64),
+    byteSize: 1234,
+    mediaType: 'video',
+    container: 'mp4',
+    sources: [
+      {
+        artifactKey: 'workspaces/ws-1/masters/source.mp4',
+        sha256: 'b'.repeat(64),
+        role: 'primary',
+      },
+    ],
+    probe: { width: 1080, height: 1920, duration: 30, fps: 30 },
+  }
+  const left = createMediaArtifactManifest({
+    ...base,
+    recipe: {
+      id: 'normalize-video',
+      version: 'v1',
+      parameters: { crf: 23, scale: { height: 1920, width: 1080 }, privatePrompt: 'secret' },
+    },
+  })
+  const right = createMediaArtifactManifest({
+    ...base,
+    recipe: {
+      id: 'normalize-video',
+      version: 'v1',
+      parameters: { privatePrompt: 'secret', scale: { width: 1080, height: 1920 }, crf: 23 },
+    },
+  })
+
+  assert.deepEqual(left, right)
+  assert.doesNotThrow(() => assertMediaArtifactManifest(left))
+  assert.equal(left.schemaVersion, 'media-artifact-manifest/v1')
+  assert.equal(left.manifestHash.length, 64)
+  assert.equal(JSON.stringify(left).includes('secret'), false)
+  assert.notEqual(
+    left.manifestHash,
+    createMediaArtifactManifest({
+      ...base,
+      recipe: { id: 'normalize-video', version: 'v1', parameters: { crf: 24 } },
+    }).manifestHash,
+  )
+  expectDomainError(
+    () =>
+      assertMediaArtifactManifest({
+        ...left,
+        artifact: { ...left.artifact, byteSize: left.artifact.byteSize + 1 },
+      }),
+    'INVALID_MEDIA_ARTIFACT',
+  )
+})
+
+test('media artifact manifest rejects absolute and traversal keys', () => {
+  const input = {
+    artifactSha256: 'a'.repeat(64),
+    byteSize: 1,
+    mediaType: 'video',
+    container: 'mp4',
+    recipe: { id: 'normalize-video', version: 'v1', parameters: {} },
+  }
+
+  for (const artifactKey of ['/tmp/output.mp4', 'C:\\output.mp4', '../output.mp4']) {
+    expectDomainError(
+      () => createMediaArtifactManifest({ ...input, artifactKey }),
+      'INVALID_MEDIA_ARTIFACT',
+    )
+  }
 })

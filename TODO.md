@@ -395,6 +395,7 @@
 
 - [ ] Definir `RenderInput` autocontido e schema versionado.
 - [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render.
+- [x] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
 - [ ] Salvar manifest com checksums, plan hash e renderer version.
 - [ ] Reexecutar golden render somente a partir do manifest salvo.
 
@@ -2457,7 +2458,7 @@ Confirmação hospedada:
 
 ### Slice F0-011 — Staging e promoção segura de derivados
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `a4b6375`, com hotfix de portabilidade `71a49bc`.
 
 Entregas:
 
@@ -2487,3 +2488,45 @@ Pendências deliberadas:
 - object storage exigirá multipart staging e promoção por chave/manifest, não rename de filesystem;
 - lineage, checksum e registro transacional do artifact serão adicionados no adapter v2;
 - política de garbage collection tratará partials órfãos deixados por encerramento abrupto do processo inteiro.
+
+Confirmação hospedada e incidente:
+
+- o primeiro run `29215297396` revelou que FFmpeg no Linux pode tratar `SIGTERM` e retornar código próprio antes de `execFile` marcar `killed`;
+- o hotfix substituiu inferência de timeout por timer controlado e `AbortController` combinado com o signal do chamador;
+- o run `29215376497` aprovou todos os 19 passos no Linux, incluindo timeout, cancelamento, staging e promoção.
+
+### Slice F0-012 — Checksum e manifest portátil de artifact
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- canonicalização/hash compartilhados foram movidos para o domínio sem quebrar os imports existentes de versionamento;
+- contrato `media-artifact-manifest/v1` independente de filesystem, banco e object storage;
+- artifact registra canonical key, SHA-256, byte size, media type e container;
+- recipe registra ID, versão e somente o hash canônico dos parâmetros;
+- sources registram canonical key, SHA-256 e papel, suportando múltiplas origens;
+- probe opcional registra width, height, duration e fps;
+- `manifestHash` cobre deterministicamente todo o corpo e detecta adulteração;
+- inspector local calcula SHA-256 por streaming, sem carregar vídeos inteiros em memória;
+- writer local serializa canonicamente, grava em partial irmão e promove por rename;
+- keys absolutas, Windows paths e traversal `..` são rejeitados pelo domínio;
+- paths locais, timestamps voláteis e parâmetros brutos não entram no manifest.
+
+Evidências:
+
+- parâmetros com ordem de chaves diferente produzem manifest idêntico;
+- alteração de parâmetro muda `parametersHash` e `manifestHash`;
+- alteração de um byte do artifact muda SHA-256 e `manifestHash`;
+- prompt privado usado como parâmetro não aparece no JSON persistido;
+- diretório temporário absoluto não aparece no JSON persistido;
+- manifest adulterado é rejeitado antes da escrita;
+- manifest escrito atomicamente é relido e equivale ao objeto validado;
+- suíte unitária passou de 32 para 34 testes e a integração usa um vídeo real normalizado.
+
+Pendências deliberadas:
+
+- persistir Artifact/Manifest e lineage transacionalmente no Postgres pertence ao próximo slice;
+- canonical key final dependerá da decisão de object storage e namespace por workspace;
+- timestamps de criação pertencem ao registro persistido/evento, não à identidade determinística;
+- manifests compostos de render incluirão plan hash, renderer version, fonts, LUTs e todos os inputs materializados.

@@ -86,6 +86,14 @@ diretório do destino. Apenas arquivos não vazios e, quando aplicável, validad
 por ffprobe são promovidos por `rename`; falhas preservam o derivado anterior e
 removem o parcial.
 
+## Manifest de artifact v2
+
+Derivados podem ser inspecionados pelo adapter v2 para gerar um manifest
+`media-artifact-manifest/v1` com SHA-256 streaming, tamanho, tipo/container,
+recipe/version, hash dos parâmetros, fontes e probe. O manifest usa somente
+chaves portáteis relativas, não persiste paths locais nem parâmetros brutos e
+possui hash próprio para detectar adulteração.
+
 ## Formatos
 
 - **Vertical (9:16)** — Shorts, Reels, TikTok

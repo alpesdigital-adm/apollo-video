@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { copyFile, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { appendFile, copyFile, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -17,6 +17,11 @@ import {
   MediaProcessError,
   normalizeVideo,
 } from '../../src/lib/services/ffmpeg.ts'
+import {
+  calculateFileSha256,
+  inspectLocalMediaArtifact,
+  writeLocalMediaArtifactManifest,
+} from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
 
 const execFileAsync = promisify(execFile)
 const executableSuffix = process.platform === 'win32' ? '.exe' : ''
@@ -87,6 +92,8 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
   const cancelledPath = path.join(directory, 'cancelled.mp4')
   const timedOutPath = path.join(directory, 'timed-out.mp4')
   const preservedPath = path.join(directory, 'preserved.mp4')
+  const mutatedPath = path.join(directory, 'mutated.mp4')
+  const manifestPath = path.join(directory, 'normalized.artifact.json')
 
   await createFixture(sourcePath)
 
@@ -159,6 +166,51 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
   assert.equal(normalized.height, 240)
   assert.equal(normalized.fps, 30)
   assert.notDeepEqual(await readFile(normalizedPath), normalizedBeforePromotion)
+
+  const sourceSha256 = await calculateFileSha256(sourcePath)
+  const manifestInput = {
+    filePath: normalizedPath,
+    artifactKey: 'workspaces/test/artifacts/normalized.mp4',
+    mediaType: 'video',
+    container: 'mp4',
+    recipe: {
+      id: 'normalize-video',
+      version: 'v1',
+      parameters: { crf: 23, privatePrompt: 'must-not-be-persisted' },
+    },
+    sources: [
+      {
+        artifactKey: 'workspaces/test/masters/source.mp4',
+        sha256: sourceSha256,
+        role: 'primary',
+      },
+    ],
+    probe: normalized,
+  }
+  const manifest = await inspectLocalMediaArtifact(manifestInput)
+  const reorderedManifest = await inspectLocalMediaArtifact({
+    ...manifestInput,
+    recipe: {
+      ...manifestInput.recipe,
+      parameters: { privatePrompt: 'must-not-be-persisted', crf: 23 },
+    },
+  })
+  assert.deepEqual(manifest, reorderedManifest)
+
+  await writeLocalMediaArtifactManifest(manifestPath, manifest)
+  const serializedManifest = await readFile(manifestPath, 'utf8')
+  assert.deepEqual(JSON.parse(serializedManifest), manifest)
+  assert.equal(serializedManifest.includes(directory), false)
+  assert.equal(serializedManifest.includes('must-not-be-persisted'), false)
+
+  await copyFile(normalizedPath, mutatedPath)
+  await appendFile(mutatedPath, Buffer.from([0]))
+  const mutatedManifest = await inspectLocalMediaArtifact({
+    ...manifestInput,
+    filePath: mutatedPath,
+  })
+  assert.notEqual(mutatedManifest.artifact.sha256, manifest.artifact.sha256)
+  assert.notEqual(mutatedManifest.manifestHash, manifest.manifestHash)
 
   await generatePreviewProxy(sourcePath, proxyPath)
   const proxy = await getVideoInfo(proxyPath)
