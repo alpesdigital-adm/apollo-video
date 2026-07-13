@@ -438,8 +438,9 @@ export class PrismaMediaArtifactRepository
     }
     const manifestJson = stableSerialize(bundle.manifest)
 
-    try {
-      return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
         const workspace = await transaction.v2Workspace.findUnique({
           where: { id: bundle.workspaceId },
           select: { id: true, status: true },
@@ -613,22 +614,29 @@ export class PrismaMediaArtifactRepository
         }
 
         return { artifactId: artifact.id, manifestId: storedManifest.id, replayed: false }
-      })
-    } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        const replay = await findReplay(
-          this.client,
-          bundle,
-          manifestJson,
-          this.recipeParameterCipher,
-        )
-        if (replay) return replay
-        throw new DomainError(
-          'PERSISTENCE_CONFLICT',
-          'Artifact persistence collided with a different immutable record',
-        )
+        })
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          const replay = await findReplay(
+            this.client,
+            bundle,
+            manifestJson,
+            this.recipeParameterCipher,
+          )
+          if (replay) return replay
+          if (attempt === 0) continue
+          throw new DomainError(
+            'PERSISTENCE_CONFLICT',
+            'Artifact persistence collided with a different immutable record',
+          )
+        }
+        throw error
       }
-      throw error
     }
+
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Artifact persistence could not resolve a concurrent collision',
+    )
   }
 }
