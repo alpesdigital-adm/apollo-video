@@ -1904,6 +1904,7 @@
 
 - [ ] Extrair apenas primitives Remotion que aceitem `RenderInput` v2 sem ler banco/config global.
 - [ ] Extrair pipeline FFmpeg atrás de recipes e jobs idempotentes.
+- [x] Endurecer executor FFmpeg/ffprobe legado com timeout, cancelamento, limite de saída e erros tipados. Evidência: `MediaProcessError` e `tests/media/ffmpeg-service.integration.mjs`.
 - [ ] Extrair transcription/timing atrás de adapter versionado.
 - [ ] Extrair componentes de legenda atrás de `SubtitleStylePreset`.
 - [ ] Extrair watchdog/progress para workflow base sem status ad hoc.
@@ -2373,7 +2374,7 @@ Pendências deliberadas:
 
 ### Slice F0-009 — Remoção do wrapper FFmpeg sem suporte
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `3b35732`.
 
 Entregas:
 
@@ -2411,10 +2412,40 @@ Incidente do primeiro runner:
 - o run `29213379388` do commit `3fb94db` falhou corretamente no typecheck porque `remotion/node_modules` não existia no runner limpo;
 - a investigação revelou oito advisories no lockfile Remotion antigo, incluindo dois high;
 - o gate local foi corrigido para instalar e auditar os dois lockfiles antes do typecheck e para empacotar o renderer explicitamente;
-- a correção só poderá ser confirmada no runner hospedado depois da publicação deste slice.
+- a correção foi confirmada no runner hospedado `29214156774`: todos os 19 passos concluíram com sucesso.
 
 Pendências deliberadas:
 
 - extrair recipes versionadas e execução idempotente pertence ao media worker v2;
-- adicionar timeout, cancelamento e limites de stdout/stderr ao executor antes de aceitar jobs não confiáveis;
 - fixar e registrar versões-alvo de FFmpeg/ffprobe em ADR próprio antes do primeiro ambiente de produção.
+
+### Slice F0-010 — Executor seguro para processos de mídia
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- executor único para FFmpeg e ffprobe preservando `execFile` com `shell: false`;
+- opções compatíveis e opcionais de `AbortSignal`, timeout e limite de buffer em todas as operações públicas do adapter;
+- timeout default de 30 minutos para FFmpeg e 60 segundos para ffprobe, configuráveis por ambiente e limitados a 6 horas;
+- limite default de 8 MiB por stream, configurável e limitado a 64 MiB;
+- FFmpeg recebe `-nostdin`, `-nostats`, `-hide_banner` e log level mínimo por operação;
+- erros tipados `MediaProcessError` com códigos separados para cancelamento, timeout, excesso de saída e falha operacional;
+- mensagens estáveis não incluem command line, argumentos ou paths; somente a cauda limitada de stderr fica disponível para diagnóstico interno;
+- chamadas existentes permanecem válidas porque o novo argumento de opções é opcional.
+
+Evidências:
+
+- integração real cobre cancelamento antes do spawn e durante encode ativo;
+- timeout de ffprobe encerra o processo e retorna `MEDIA_PROCESS_TIMEOUT`;
+- excesso de stderr retorna `MEDIA_PROCESS_OUTPUT_LIMIT` sem crescimento irrestrito;
+- input inexistente retorna `MEDIA_PROCESS_FAILED` com stderr limitado a quatro mil caracteres;
+- fluxo nominal continua cobrindo probe, normalize, proxy, áudio, silêncio/corte e thumbnail;
+- teste de mídia passou três vezes consecutivas para reduzir risco de flakiness temporal.
+
+Pendências deliberadas:
+
+- cancelamento persistente entre processos/restarts pertence ao workflow durável e ao estado canônico de job;
+- cleanup e lineage de outputs parciais devem ser definidos nas recipes idempotentes do media worker;
+- cada recipe terá SLA próprio em vez de depender apenas do teto global;
+- o presenter público deverá mapear códigos internos para erros estáveis sem expor stderr.

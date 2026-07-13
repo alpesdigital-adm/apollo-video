@@ -13,6 +13,7 @@ import {
   extractThumbnail,
   generatePreviewProxy,
   getVideoInfo,
+  MediaProcessError,
   normalizeVideo,
 } from '../../src/lib/services/ffmpeg.ts'
 
@@ -61,6 +62,10 @@ async function createFixture(outputPath) {
   ])
 }
 
+function hasMediaFailureCode(code) {
+  return (error) => error instanceof MediaProcessError && error.code === code
+}
+
 test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 120_000 }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'apollo-ffmpeg-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
@@ -71,6 +76,7 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
   const audioPath = path.join(directory, 'audio.wav')
   const thumbnailPath = path.join(directory, 'thumbnail.jpg')
   const cutPath = path.join(directory, 'cut.mp4')
+  const cancelledPath = path.join(directory, 'cancelled.mp4')
 
   await createFixture(sourcePath)
 
@@ -81,6 +87,38 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
     fps: 30,
   })
   assert.ok(source.duration >= 2.9 && source.duration <= 3.1)
+
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(
+    () => getVideoInfo(sourcePath, { signal: controller.signal }),
+    hasMediaFailureCode('MEDIA_PROCESS_CANCELLED'),
+  )
+  const activeController = new AbortController()
+  const activeCancellation = normalizeVideo(sourcePath, cancelledPath, {
+    signal: activeController.signal,
+  })
+  const cancelTimer = setTimeout(() => activeController.abort(), 10)
+  try {
+    await assert.rejects(
+      activeCancellation,
+      hasMediaFailureCode('MEDIA_PROCESS_CANCELLED'),
+    )
+  } finally {
+    clearTimeout(cancelTimer)
+  }
+  await assert.rejects(
+    () => getVideoInfo(sourcePath, { timeoutMs: 1 }),
+    hasMediaFailureCode('MEDIA_PROCESS_TIMEOUT'),
+  )
+  await assert.rejects(
+    () => getVideoInfo(path.join(directory, 'missing.mp4')),
+    (error) =>
+      error instanceof MediaProcessError &&
+      error.code === 'MEDIA_PROCESS_FAILED' &&
+      error.stderrTail.length > 0 &&
+      error.stderrTail.length <= 4_000,
+  )
 
   const normalized = await normalizeVideo(sourcePath, normalizedPath)
   assert.equal(normalized.width, 320)
@@ -93,6 +131,10 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
   assert.equal(proxy.height, 240)
 
   await extractAudio(sourcePath, audioPath)
+  await assert.rejects(
+    () => detectSilences(audioPath, -35, 0.5, { maxBufferBytes: 64 }),
+    hasMediaFailureCode('MEDIA_PROCESS_OUTPUT_LIMIT'),
+  )
   const silences = await detectSilences(audioPath, -35, 0.5)
   const middleSilence = silences.find(
     (silence) => silence.startTime <= 1.2 && silence.endTime >= 1.8,

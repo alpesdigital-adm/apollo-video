@@ -47,4 +47,6 @@ renderer ◄── RenderInput materializado
 - Builds usam Webpack explicitamente enquanto os aliases de Remotion não forem migrados para Turbopack.
 - O adapter FFmpeg invoca `ffmpeg`/`ffprobe` com `execFile` e arrays de argumentos, sem shell ou wrapper abandonado.
 - `FFMPEG_PATH`/`FFPROBE_PATH` têm precedência; os binários empacotados são fallback e o `PATH` do worker é a última opção.
+- Todo processo de mídia usa timeout finito, `AbortSignal`, `maxBuffer`, `shell: false`, `-nostdin` e saída sem progresso interativo.
+- Falhas de processo são classificadas como cancelamento, timeout, limite de saída ou erro operacional; argumentos e paths não entram na mensagem pública.
 - Dependências públicas devem manter `npm audit` sem vulnerabilidades antes de exposição do produto.

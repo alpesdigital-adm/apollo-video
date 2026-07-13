@@ -68,6 +68,19 @@ Para executar a auditoria localmente:
 npm run security:audit
 ```
 
+## Limites dos processos de mídia
+
+As chamadas a FFmpeg e ffprobe possuem cancelamento por `AbortSignal`, limite de
+saída e timeout. Os defaults podem ser ajustados pelo ambiente:
+
+- `FFMPEG_TIMEOUT_MS`: 30 minutos;
+- `FFPROBE_TIMEOUT_MS`: 60 segundos;
+- `MEDIA_PROCESS_MAX_BUFFER_BYTES`: 8 MiB por stream.
+
+Timeouts são limitados a 6 horas e buffers a 64 MiB. O executor não usa shell,
+desabilita leitura interativa e retorna códigos distintos para cancelamento,
+timeout, excesso de saída e falha do processo.
+
 ## Formatos
 
 - **Vertical (9:16)** — Shorts, Reels, TikTok

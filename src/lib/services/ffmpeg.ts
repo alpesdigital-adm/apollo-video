@@ -12,6 +12,169 @@ import { parseSilenceDetection } from '../utils/silence.ts'
 
 const execFileAsync = promisify(execFile)
 
+const DEFAULT_FFMPEG_TIMEOUT_MS = 30 * 60_000
+const DEFAULT_FFPROBE_TIMEOUT_MS = 60_000
+const MAX_MEDIA_TIMEOUT_MS = 6 * 60 * 60_000
+const DEFAULT_MEDIA_MAX_BUFFER_BYTES = 8 * 1024 * 1024
+const MAX_MEDIA_BUFFER_BYTES = 64 * 1024 * 1024
+const ERROR_OUTPUT_TAIL_LENGTH = 4_000
+
+type MediaTool = 'ffmpeg' | 'ffprobe'
+
+export type MediaProcessFailureCode =
+  | 'MEDIA_PROCESS_CANCELLED'
+  | 'MEDIA_PROCESS_TIMEOUT'
+  | 'MEDIA_PROCESS_OUTPUT_LIMIT'
+  | 'MEDIA_PROCESS_FAILED'
+
+export interface MediaExecutionOptions {
+  signal?: AbortSignal
+  timeoutMs?: number
+  maxBufferBytes?: number
+}
+
+interface MediaProcessFailure extends Error {
+  code?: string | number
+  killed?: boolean
+  signal?: string
+  stderr?: string | Buffer
+}
+
+export class MediaProcessError extends Error {
+  readonly code: MediaProcessFailureCode
+  readonly tool: MediaTool
+  readonly stderrTail: string
+
+  constructor(
+    code: MediaProcessFailureCode,
+    tool: MediaTool,
+    message: string,
+    options: { cause?: unknown; stderrTail?: string } = {}
+  ) {
+    super(message, { cause: options.cause })
+    this.name = 'MediaProcessError'
+    this.code = code
+    this.tool = tool
+    this.stderrTail = options.stderrTail ?? ''
+  }
+}
+
+function boundedInteger(
+  value: number | string | undefined,
+  fallback: number,
+  maximum: number
+): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.min(maximum, Math.max(1, Math.floor(parsed)))
+}
+
+function defaultTimeoutMs(tool: MediaTool): number {
+  return tool === 'ffmpeg'
+    ? boundedInteger(process.env.FFMPEG_TIMEOUT_MS, DEFAULT_FFMPEG_TIMEOUT_MS, MAX_MEDIA_TIMEOUT_MS)
+    : boundedInteger(process.env.FFPROBE_TIMEOUT_MS, DEFAULT_FFPROBE_TIMEOUT_MS, MAX_MEDIA_TIMEOUT_MS)
+}
+
+function failureCode(error: MediaProcessFailure): MediaProcessFailureCode {
+  if (
+    error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ||
+    error.message.toLowerCase().includes('maxbuffer')
+  ) {
+    return 'MEDIA_PROCESS_OUTPUT_LIMIT'
+  }
+  if (error.name === 'AbortError' || error.code === 'ABORT_ERR') {
+    return 'MEDIA_PROCESS_CANCELLED'
+  }
+  if (error.code === 'ETIMEDOUT' || (error.killed && Boolean(error.signal))) {
+    return 'MEDIA_PROCESS_TIMEOUT'
+  }
+  return 'MEDIA_PROCESS_FAILED'
+}
+
+function failureMessage(
+  code: MediaProcessFailureCode,
+  tool: MediaTool,
+  timeoutMs: number,
+  maxBufferBytes: number
+): string {
+  if (code === 'MEDIA_PROCESS_CANCELLED') return `${tool} execution was cancelled`
+  if (code === 'MEDIA_PROCESS_TIMEOUT') return `${tool} exceeded the ${timeoutMs}ms timeout`
+  if (code === 'MEDIA_PROCESS_OUTPUT_LIMIT') {
+    return `${tool} exceeded the ${maxBufferBytes}-byte output limit`
+  }
+  return `${tool} execution failed`
+}
+
+async function executeMediaProcess(
+  tool: MediaTool,
+  executable: string,
+  args: string[],
+  options: MediaExecutionOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  const timeoutMs = boundedInteger(options.timeoutMs, defaultTimeoutMs(tool), MAX_MEDIA_TIMEOUT_MS)
+  const maxBufferBytes = boundedInteger(
+    options.maxBufferBytes,
+    boundedInteger(
+      process.env.MEDIA_PROCESS_MAX_BUFFER_BYTES,
+      DEFAULT_MEDIA_MAX_BUFFER_BYTES,
+      MAX_MEDIA_BUFFER_BYTES
+    ),
+    MAX_MEDIA_BUFFER_BYTES
+  )
+
+  if (options.signal?.aborted) {
+    throw new MediaProcessError('MEDIA_PROCESS_CANCELLED', tool, `${tool} execution was cancelled`)
+  }
+
+  try {
+    return (await execFileAsync(executable, args, {
+      encoding: 'utf8',
+      windowsHide: true,
+      shell: false,
+      timeout: timeoutMs,
+      maxBuffer: maxBufferBytes,
+      signal: options.signal
+    })) as { stdout: string; stderr: string }
+  } catch (error) {
+    const failure = error as MediaProcessFailure
+    const code = failureCode(failure)
+    const stderrTail = String(failure.stderr ?? '').slice(-ERROR_OUTPUT_TAIL_LENGTH)
+    throw new MediaProcessError(
+      code,
+      tool,
+      failureMessage(code, tool, timeoutMs, maxBufferBytes),
+      { cause: error, stderrTail }
+    )
+  }
+}
+
+function runFfmpeg(
+  args: string[],
+  options: MediaExecutionOptions = {},
+  logLevel: 'error' | 'info' = 'error'
+): Promise<{ stdout: string; stderr: string }> {
+  return executeMediaProcess(
+    'ffmpeg',
+    ffmpegPath,
+    ['-hide_banner', '-nostdin', '-nostats', '-loglevel', logLevel, ...args],
+    options
+  )
+}
+
+function runFfprobe(
+  args: string[],
+  options: MediaExecutionOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  return executeMediaProcess('ffprobe', ffprobePath, args, options)
+}
+
+function rethrowMediaError(context: string, error: unknown): never {
+  if (error instanceof MediaProcessError) throw error
+  throw new Error(`${context}: ${error instanceof Error ? error.message : String(error)}`, {
+    cause: error
+  })
+}
+
 function resolveExecutablePath(
   envName: string,
   candidates: string[],
@@ -69,10 +232,11 @@ export interface AutoCutResult {
 
 export async function normalizeVideo(
   inputPath: string,
-  outputPath: string
+  outputPath: string,
+  options: MediaExecutionOptions = {}
 ): Promise<VideoInfo> {
   try {
-    await execFileAsync(ffmpegPath, [
+    await runFfmpeg([
       '-i',
       inputPath,
       // Downscale para o budget da composição (lado menor <= 1080, aspecto preservado).
@@ -100,20 +264,21 @@ export async function normalizeVideo(
       '128k',
       '-y',
       outputPath
-    ])
+    ], options)
 
-    return getVideoInfo(outputPath)
+    return getVideoInfo(outputPath, options)
   } catch (error) {
-    throw new Error(`Failed to normalize video: ${error instanceof Error ? error.message : String(error)}`)
+    rethrowMediaError('Failed to normalize video', error)
   }
 }
 
 export async function generatePreviewProxy(
   inputPath: string,
-  outputPath: string
+  outputPath: string,
+  options: MediaExecutionOptions = {}
 ): Promise<void> {
   try {
-    await execFileAsync(ffmpegPath, [
+    await runFfmpeg([
       '-i',
       inputPath,
       // Downscale para um proxy leve de preview (lado menor <= 720, aspecto
@@ -139,9 +304,9 @@ export async function generatePreviewProxy(
       '+faststart',
       '-y',
       outputPath
-    ])
+    ], options)
   } catch (error) {
-    throw new Error(`Failed to generate preview proxy: ${error instanceof Error ? error.message : String(error)}`)
+    rethrowMediaError('Failed to generate preview proxy', error)
   }
 }
 
@@ -155,9 +320,13 @@ function getAudioEncodeArgs(outputPath: string): string[] {
   return ['-acodec', 'pcm_s16le']
 }
 
-export async function extractAudio(videoPath: string, outputPath: string): Promise<void> {
+export async function extractAudio(
+  videoPath: string,
+  outputPath: string,
+  options: MediaExecutionOptions = {}
+): Promise<void> {
   try {
-    await execFileAsync(ffmpegPath, [
+    await runFfmpeg([
       '-i',
       videoPath,
       '-vn',
@@ -168,38 +337,31 @@ export async function extractAudio(videoPath: string, outputPath: string): Promi
       ...getAudioEncodeArgs(outputPath),
       '-y',
       outputPath
-    ])
+    ], options)
   } catch (error) {
-    throw new Error(`Failed to extract audio: ${error instanceof Error ? error.message : String(error)}`)
+    rethrowMediaError('Failed to extract audio', error)
   }
 }
 
 export async function detectSilences(
   audioPath: string,
   threshold: number = -35,
-  duration: number = 0.55
+  duration: number = 0.55,
+  options: MediaExecutionOptions = {}
 ): Promise<Silence[]> {
   try {
-    let stderr = ''
-
-    try {
-      const result = await execFileAsync(ffmpegPath, [
-        '-i',
-        audioPath,
-        '-af',
-        `silencedetect=n=${threshold}dB:d=${duration}`,
-        '-f',
-        'null',
-        '-'
-      ])
-      stderr = result.stderr || ''
-    } catch (error) {
-      stderr = error instanceof Error && 'stderr' in error ? String((error as any).stderr || '') : ''
-    }
-
+    const { stderr } = await runFfmpeg([
+      '-i',
+      audioPath,
+      '-af',
+      `silencedetect=n=${threshold}dB:d=${duration}`,
+      '-f',
+      'null',
+      '-'
+    ], options, 'info')
     return parseSilenceDetection(stderr, FPS)
   } catch (error) {
-    throw new Error(`Failed to detect silences: ${error instanceof Error ? error.message : String(error)}`)
+    rethrowMediaError('Failed to detect silences', error)
   }
 }
 
@@ -238,18 +400,19 @@ export async function cutSilencesFromVideo(
   inputPath: string,
   outputPath: string,
   silences: Silence[],
-  sourceDuration: number
+  sourceDuration: number,
+  options: MediaExecutionOptions = {}
 ): Promise<AutoCutResult> {
   const cutSilences = selectAutoCutSilences(silences)
   const sameInputOutput = path.resolve(inputPath) === path.resolve(outputPath)
 
   if (sameInputOutput) {
-    const outputInfo = await getVideoInfo(outputPath)
+    const outputInfo = await getVideoInfo(outputPath, options)
     return { cutSilences, outputDuration: outputInfo.duration || sourceDuration }
   }
 
   if (cutSilences.length === 0) {
-    await execFileAsync(ffmpegPath, ['-i', inputPath, '-c', 'copy', '-y', outputPath])
+    await runFfmpeg(['-i', inputPath, '-c', 'copy', '-y', outputPath], options)
     return { cutSilences: [], outputDuration: sourceDuration }
   }
 
@@ -287,7 +450,7 @@ export async function cutSilencesFromVideo(
 
   filters.push(`${concatInputs.join('')}concat=n=${ranges.length}:v=1:a=1[outv][outa]`)
 
-  await execFileAsync(ffmpegPath, [
+  await runFfmpeg([
     '-i',
     inputPath,
     '-filter_complex',
@@ -314,9 +477,9 @@ export async function cutSilencesFromVideo(
     '128k',
     '-y',
     outputPath
-  ])
+  ], options)
 
-  const outputInfo = await getVideoInfo(outputPath)
+  const outputInfo = await getVideoInfo(outputPath, options)
   return { cutSilences, outputDuration: outputInfo.duration }
 }
 
@@ -324,10 +487,11 @@ export async function extractThumbnail(
   videoPath: string,
   atSeconds: number,
   outputPath: string,
-  width: number = 180
+  width: number = 180,
+  options: MediaExecutionOptions = {}
 ): Promise<void> {
   try {
-    await execFileAsync(ffmpegPath, [
+    await runFfmpeg([
       '-ss',
       Math.max(0, atSeconds).toFixed(3),
       '-i',
@@ -340,15 +504,18 @@ export async function extractThumbnail(
       '5',
       '-y',
       outputPath
-    ])
+    ], options)
   } catch (error) {
-    throw new Error(`Failed to extract thumbnail: ${error instanceof Error ? error.message : String(error)}`)
+    rethrowMediaError('Failed to extract thumbnail', error)
   }
 }
 
-export async function getVideoInfo(videoPath: string): Promise<VideoInfo> {
+export async function getVideoInfo(
+  videoPath: string,
+  options: MediaExecutionOptions = {}
+): Promise<VideoInfo> {
   try {
-    const { stdout } = await execFileAsync(ffprobePath, [
+    const { stdout } = await runFfprobe([
       '-v',
       'error',
       '-select_streams',
@@ -358,7 +525,7 @@ export async function getVideoInfo(videoPath: string): Promise<VideoInfo> {
       '-of',
       'json',
       videoPath
-    ])
+    ], options)
 
     const data = JSON.parse(stdout)
     const stream = data.streams?.[0]
@@ -386,6 +553,6 @@ export async function getVideoInfo(videoPath: string): Promise<VideoInfo> {
       fps: Math.round(fps)
     }
   } catch (error) {
-    throw new Error(`Failed to get video info: ${error instanceof Error ? error.message : String(error)}`)
+    rethrowMediaError('Failed to get video info', error)
   }
 }
