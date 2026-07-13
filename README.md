@@ -81,6 +81,11 @@ Timeouts são limitados a 6 horas e buffers a 64 MiB. O executor não usa shell,
 desabilita leitura interativa e retorna códigos distintos para cancelamento,
 timeout, excesso de saída e falha do processo.
 
+Arquivos derivados são escritos primeiro como parciais ocultos no mesmo
+diretório do destino. Apenas arquivos não vazios e, quando aplicável, validados
+por ffprobe são promovidos por `rename`; falhas preservam o derivado anterior e
+removem o parcial.
+
 ## Formatos
 
 - **Vertical (9:16)** — Shorts, Reels, TikTok

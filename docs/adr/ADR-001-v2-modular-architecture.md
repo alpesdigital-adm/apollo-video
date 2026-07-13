@@ -49,4 +49,6 @@ renderer ◄── RenderInput materializado
 - `FFMPEG_PATH`/`FFPROBE_PATH` têm precedência; os binários empacotados são fallback e o `PATH` do worker é a última opção.
 - Todo processo de mídia usa timeout finito, `AbortSignal`, `maxBuffer`, `shell: false`, `-nostdin` e saída sem progresso interativo.
 - Falhas de processo são classificadas como cancelamento, timeout, limite de saída ou erro operacional; argumentos e paths não entram na mensagem pública.
+- Outputs FFmpeg são materializados em arquivo parcial irmão, validados e promovidos por rename no mesmo filesystem; o path final nunca aponta para encode incompleto.
+- Falha, timeout ou cancelamento preservam o derivado anterior e tentam remover o parcial; falha de cleanup/promoção possui erro tipado próprio.
 - Dependências públicas devem manter `npm audit` sem vulnerabilidades antes de exposição do produto.

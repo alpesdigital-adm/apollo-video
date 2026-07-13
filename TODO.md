@@ -1905,6 +1905,7 @@
 - [ ] Extrair apenas primitives Remotion que aceitem `RenderInput` v2 sem ler banco/config global.
 - [ ] Extrair pipeline FFmpeg atrás de recipes e jobs idempotentes.
 - [x] Endurecer executor FFmpeg/ffprobe legado com timeout, cancelamento, limite de saída e erros tipados. Evidência: `MediaProcessError` e `tests/media/ffmpeg-service.integration.mjs`.
+- [x] Impedir promoção de outputs FFmpeg parciais e preservar o derivado anterior em falha/cancelamento. Evidência: staging irmão, validação, rename e testes de rollback local.
 - [ ] Extrair transcription/timing atrás de adapter versionado.
 - [ ] Extrair componentes de legenda atrás de `SubtitleStylePreset`.
 - [ ] Extrair watchdog/progress para workflow base sem status ad hoc.
@@ -2421,7 +2422,7 @@ Pendências deliberadas:
 
 ### Slice F0-010 — Executor seguro para processos de mídia
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `a63e1d5`.
 
 Entregas:
 
@@ -2449,3 +2450,40 @@ Pendências deliberadas:
 - cleanup e lineage de outputs parciais devem ser definidos nas recipes idempotentes do media worker;
 - cada recipe terá SLA próprio em vez de depender apenas do teto global;
 - o presenter público deverá mapear códigos internos para erros estáveis sem expor stderr.
+
+Confirmação hospedada:
+
+- o run `29214662544` executou com sucesso os 19 passos no Linux, incluindo todos os cenários do executor de mídia.
+
+### Slice F0-011 — Staging e promoção segura de derivados
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- toda operação FFmpeg que escreve arquivo usa staging oculto no mesmo diretório e filesystem do destino;
+- o nome parcial preserva a extensão final para manter inferência correta de container/codec;
+- outputs precisam existir, ser arquivo e possuir tamanho maior que zero antes da promoção;
+- vídeo normalizado, proxy e autocut também passam por ffprobe antes da promoção;
+- promoção usa rename local após toda validação, substituindo o derivado anterior somente no commit final;
+- normalize, proxy, áudio e thumbnail rejeitam input/output no mesmo path;
+- `MediaOutputError` diferencia conflito, output inválido, falha de promoção e falha de cleanup;
+- cancelamento observado depois do encode e antes do commit também impede a promoção;
+- todas as assinaturas públicas anteriores continuam compatíveis.
+
+Evidências:
+
+- cancelamento durante encode não cria o path final;
+- timeout durante normalize não cria o path final;
+- falha com input ausente preserva byte a byte o derivado anterior;
+- tentativa input=output preserva byte a byte a fonte;
+- sucesso substitui um destino existente somente depois de gerar e validar o novo vídeo;
+- ao final de todos os cenários, não resta arquivo com marcador `.partial`;
+- fluxo nominal de normalize, proxy, áudio, silêncio/corte e thumbnail continua aprovado.
+
+Pendências deliberadas:
+
+- concorrência entre dois jobs para o mesmo output será impedida por idempotency key/lease no workflow durável;
+- object storage exigirá multipart staging e promoção por chave/manifest, não rename de filesystem;
+- lineage, checksum e registro transacional do artifact serão adicionados no adapter v2;
+- política de garbage collection tratará partials órfãos deixados por encerramento abrupto do processo inteiro.

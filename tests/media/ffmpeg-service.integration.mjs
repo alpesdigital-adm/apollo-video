@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -13,6 +13,7 @@ import {
   extractThumbnail,
   generatePreviewProxy,
   getVideoInfo,
+  MediaOutputError,
   MediaProcessError,
   normalizeVideo,
 } from '../../src/lib/services/ffmpeg.ts'
@@ -66,6 +67,13 @@ function hasMediaFailureCode(code) {
   return (error) => error instanceof MediaProcessError && error.code === code
 }
 
+async function assertMissing(filePath) {
+  await assert.rejects(
+    () => stat(filePath),
+    (error) => error?.code === 'ENOENT',
+  )
+}
+
 test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 120_000 }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'apollo-ffmpeg-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
@@ -77,6 +85,8 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
   const thumbnailPath = path.join(directory, 'thumbnail.jpg')
   const cutPath = path.join(directory, 'cut.mp4')
   const cancelledPath = path.join(directory, 'cancelled.mp4')
+  const timedOutPath = path.join(directory, 'timed-out.mp4')
+  const preservedPath = path.join(directory, 'preserved.mp4')
 
   await createFixture(sourcePath)
 
@@ -107,10 +117,16 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
   } finally {
     clearTimeout(cancelTimer)
   }
+  await assertMissing(cancelledPath)
   await assert.rejects(
     () => getVideoInfo(sourcePath, { timeoutMs: 1 }),
     hasMediaFailureCode('MEDIA_PROCESS_TIMEOUT'),
   )
+  await assert.rejects(
+    () => normalizeVideo(sourcePath, timedOutPath, { timeoutMs: 1 }),
+    hasMediaFailureCode('MEDIA_PROCESS_TIMEOUT'),
+  )
+  await assertMissing(timedOutPath)
   await assert.rejects(
     () => getVideoInfo(path.join(directory, 'missing.mp4')),
     (error) =>
@@ -120,10 +136,29 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
       error.stderrTail.length <= 4_000,
   )
 
+  const sourceBeforeConflict = await readFile(sourcePath)
+  await assert.rejects(
+    () => normalizeVideo(sourcePath, sourcePath),
+    (error) =>
+      error instanceof MediaOutputError && error.code === 'MEDIA_OUTPUT_CONFLICT',
+  )
+  assert.deepEqual(await readFile(sourcePath), sourceBeforeConflict)
+
+  await copyFile(sourcePath, preservedPath)
+  const preservedBeforeFailure = await readFile(preservedPath)
+  await assert.rejects(
+    () => normalizeVideo(path.join(directory, 'missing-input.mp4'), preservedPath),
+    hasMediaFailureCode('MEDIA_PROCESS_FAILED'),
+  )
+  assert.deepEqual(await readFile(preservedPath), preservedBeforeFailure)
+
+  await copyFile(sourcePath, normalizedPath)
+  const normalizedBeforePromotion = await readFile(normalizedPath)
   const normalized = await normalizeVideo(sourcePath, normalizedPath)
   assert.equal(normalized.width, 320)
   assert.equal(normalized.height, 240)
   assert.equal(normalized.fps, 30)
+  assert.notDeepEqual(await readFile(normalizedPath), normalizedBeforePromotion)
 
   await generatePreviewProxy(sourcePath, proxyPath)
   const proxy = await getVideoInfo(proxyPath)
@@ -147,4 +182,7 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
 
   await extractThumbnail(sourcePath, 1.5, thumbnailPath, 180)
   assert.ok((await stat(thumbnailPath)).size > 0)
+
+  const partials = (await readdir(directory)).filter((entry) => entry.includes('.partial'))
+  assert.deepEqual(partials, [])
 })

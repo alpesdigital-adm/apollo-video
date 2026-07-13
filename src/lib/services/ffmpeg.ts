@@ -3,7 +3,9 @@
  */
 
 import { execFile } from 'child_process'
+import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
+import { rename, rm, stat } from 'fs/promises'
 import path from 'path'
 import { promisify } from 'util'
 import type { Silence } from '../types/project.ts'
@@ -56,6 +58,95 @@ export class MediaProcessError extends Error {
     this.code = code
     this.tool = tool
     this.stderrTail = options.stderrTail ?? ''
+  }
+}
+
+export type MediaOutputFailureCode =
+  | 'MEDIA_OUTPUT_CONFLICT'
+  | 'MEDIA_OUTPUT_INVALID'
+  | 'MEDIA_OUTPUT_PROMOTION_FAILED'
+  | 'MEDIA_OUTPUT_CLEANUP_FAILED'
+
+export class MediaOutputError extends Error {
+  readonly code: MediaOutputFailureCode
+
+  constructor(code: MediaOutputFailureCode, message: string, options: { cause?: unknown } = {}) {
+    super(message, { cause: options.cause })
+    this.name = 'MediaOutputError'
+    this.code = code
+  }
+}
+
+function assertDistinctMediaPaths(inputPath: string, outputPath: string): void {
+  if (path.resolve(inputPath) === path.resolve(outputPath)) {
+    throw new MediaOutputError(
+      'MEDIA_OUTPUT_CONFLICT',
+      'Media input and output paths must be different'
+    )
+  }
+}
+
+function stagedMediaPath(outputPath: string): string {
+  const parsed = path.parse(outputPath)
+  return path.join(
+    parsed.dir,
+    `.${parsed.name}.${randomUUID()}.partial${parsed.ext}`
+  )
+}
+
+async function validateStagedOutput(stagedPath: string): Promise<void> {
+  try {
+    const metadata = await stat(stagedPath)
+    if (!metadata.isFile() || metadata.size <= 0) {
+      throw new Error('staged output is empty')
+    }
+  } catch (error) {
+    throw new MediaOutputError(
+      'MEDIA_OUTPUT_INVALID',
+      'Media process did not produce a valid output file',
+      { cause: error }
+    )
+  }
+}
+
+async function materializeMediaOutput<T>(
+  outputPath: string,
+  writeStagedOutput: (stagedPath: string) => Promise<T>,
+  signal?: AbortSignal
+): Promise<T> {
+  const stagedPath = stagedMediaPath(outputPath)
+
+  try {
+    const result = await writeStagedOutput(stagedPath)
+    await validateStagedOutput(stagedPath)
+    if (signal?.aborted) {
+      throw new MediaProcessError(
+        'MEDIA_PROCESS_CANCELLED',
+        'ffmpeg',
+        'ffmpeg execution was cancelled'
+      )
+    }
+    try {
+      await rename(stagedPath, outputPath)
+    } catch (error) {
+      throw new MediaOutputError(
+        'MEDIA_OUTPUT_PROMOTION_FAILED',
+        'Media output could not be promoted',
+        { cause: error }
+      )
+    }
+    return result
+  } catch (error) {
+    try {
+      await rm(stagedPath, { force: true })
+    } catch (cleanupError) {
+      throw new MediaOutputError(
+        'MEDIA_OUTPUT_CLEANUP_FAILED',
+        'Partial media output could not be removed',
+        { cause: { operationError: error, cleanupError } }
+      )
+    }
+    throw error
   }
 }
 
@@ -169,7 +260,7 @@ function runFfprobe(
 }
 
 function rethrowMediaError(context: string, error: unknown): never {
-  if (error instanceof MediaProcessError) throw error
+  if (error instanceof MediaProcessError || error instanceof MediaOutputError) throw error
   throw new Error(`${context}: ${error instanceof Error ? error.message : String(error)}`, {
     cause: error
   })
@@ -235,38 +326,41 @@ export async function normalizeVideo(
   outputPath: string,
   options: MediaExecutionOptions = {}
 ): Promise<VideoInfo> {
+  assertDistinctMediaPaths(inputPath, outputPath)
   try {
-    await runFfmpeg([
-      '-i',
-      inputPath,
-      // Downscale para o budget da composição (lado menor <= 1080, aspecto preservado).
-      // Sem isso, fontes 4K atravessam o pipeline inteiro e estouram memória
-      // no autocut, no preview do browser e no cache de frames do Remotion.
-      '-vf',
-      "scale=w='if(gte(ih,iw),min(iw,1080),-2)':h='if(gte(ih,iw),-2,min(ih,1080))':flags=lanczos",
-      '-c:v',
-      'libx264',
-      '-preset',
-      'fast',
-      '-crf',
-      '23',
-      '-r',
-      '30',
-      '-g',
-      '30',
-      '-keyint_min',
-      '30',
-      '-pix_fmt',
-      'yuv420p',
-      '-c:a',
-      'aac',
-      '-b:a',
-      '128k',
-      '-y',
-      outputPath
-    ], options)
+    return await materializeMediaOutput(outputPath, async (stagedPath) => {
+      await runFfmpeg([
+        '-i',
+        inputPath,
+        // Downscale para o budget da composição (lado menor <= 1080, aspecto preservado).
+        // Sem isso, fontes 4K atravessam o pipeline inteiro e estouram memória
+        // no autocut, no preview do browser e no cache de frames do Remotion.
+        '-vf',
+        "scale=w='if(gte(ih,iw),min(iw,1080),-2)':h='if(gte(ih,iw),-2,min(ih,1080))':flags=lanczos",
+        '-c:v',
+        'libx264',
+        '-preset',
+        'fast',
+        '-crf',
+        '23',
+        '-r',
+        '30',
+        '-g',
+        '30',
+        '-keyint_min',
+        '30',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
+        '-y',
+        stagedPath
+      ], options)
 
-    return getVideoInfo(outputPath, options)
+      return getVideoInfo(stagedPath, options)
+    }, options.signal)
   } catch (error) {
     rethrowMediaError('Failed to normalize video', error)
   }
@@ -277,34 +371,38 @@ export async function generatePreviewProxy(
   outputPath: string,
   options: MediaExecutionOptions = {}
 ): Promise<void> {
+  assertDistinctMediaPaths(inputPath, outputPath)
   try {
-    await runFfmpeg([
-      '-i',
-      inputPath,
-      // Downscale para um proxy leve de preview (lado menor <= 720, aspecto
-      // preservado). O render continua usando o arquivo de trabalho 1080p;
-      // isto é só para o player do navegador não sufocar com arquivos pesados.
-      '-vf',
-      "scale=w='if(gte(ih,iw),min(iw,720),-2)':h='if(gte(ih,iw),-2,min(ih,720))':flags=lanczos",
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-crf',
-      '30',
-      '-r',
-      '30',
-      '-pix_fmt',
-      'yuv420p',
-      '-c:a',
-      'aac',
-      '-b:a',
-      '96k',
-      '-movflags',
-      '+faststart',
-      '-y',
-      outputPath
-    ], options)
+    await materializeMediaOutput(outputPath, async (stagedPath) => {
+      await runFfmpeg([
+        '-i',
+        inputPath,
+        // Downscale para um proxy leve de preview (lado menor <= 720, aspecto
+        // preservado). O render continua usando o arquivo de trabalho 1080p;
+        // isto é só para o player do navegador não sufocar com arquivos pesados.
+        '-vf',
+        "scale=w='if(gte(ih,iw),min(iw,720),-2)':h='if(gte(ih,iw),-2,min(ih,720))':flags=lanczos",
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-crf',
+        '30',
+        '-r',
+        '30',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '96k',
+        '-movflags',
+        '+faststart',
+        '-y',
+        stagedPath
+      ], options)
+      await getVideoInfo(stagedPath, options)
+    }, options.signal)
   } catch (error) {
     rethrowMediaError('Failed to generate preview proxy', error)
   }
@@ -325,19 +423,22 @@ export async function extractAudio(
   outputPath: string,
   options: MediaExecutionOptions = {}
 ): Promise<void> {
+  assertDistinctMediaPaths(videoPath, outputPath)
   try {
-    await runFfmpeg([
-      '-i',
-      videoPath,
-      '-vn',
-      '-ar',
-      '16000',
-      '-ac',
-      '1',
-      ...getAudioEncodeArgs(outputPath),
-      '-y',
-      outputPath
-    ], options)
+    await materializeMediaOutput(outputPath, async (stagedPath) => {
+      await runFfmpeg([
+        '-i',
+        videoPath,
+        '-vn',
+        '-ar',
+        '16000',
+        '-ac',
+        '1',
+        ...getAudioEncodeArgs(stagedPath),
+        '-y',
+        stagedPath
+      ], options)
+    }, options.signal)
   } catch (error) {
     rethrowMediaError('Failed to extract audio', error)
   }
@@ -412,7 +513,11 @@ export async function cutSilencesFromVideo(
   }
 
   if (cutSilences.length === 0) {
-    await runFfmpeg(['-i', inputPath, '-c', 'copy', '-y', outputPath], options)
+    await materializeMediaOutput(
+      outputPath,
+      (stagedPath) => runFfmpeg(['-i', inputPath, '-c', 'copy', '-y', stagedPath], options),
+      options.signal
+    )
     return { cutSilences: [], outputDuration: sourceDuration }
   }
 
@@ -450,36 +555,38 @@ export async function cutSilencesFromVideo(
 
   filters.push(`${concatInputs.join('')}concat=n=${ranges.length}:v=1:a=1[outv][outa]`)
 
-  await runFfmpeg([
-    '-i',
-    inputPath,
-    '-filter_complex',
-    filters.join(';'),
-    '-map',
-    '[outv]',
-    '-map',
-    '[outa]',
-    '-c:v',
-    'libx264',
-    '-preset',
-    'fast',
-    '-crf',
-    '22',
-    '-r',
-    '30',
-    '-g',
-    '30',
-    '-pix_fmt',
-    'yuv420p',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '128k',
-    '-y',
-    outputPath
-  ], options)
+  const outputInfo = await materializeMediaOutput(outputPath, async (stagedPath) => {
+    await runFfmpeg([
+      '-i',
+      inputPath,
+      '-filter_complex',
+      filters.join(';'),
+      '-map',
+      '[outv]',
+      '-map',
+      '[outa]',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'fast',
+      '-crf',
+      '22',
+      '-r',
+      '30',
+      '-g',
+      '30',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
+      '-y',
+      stagedPath
+    ], options)
 
-  const outputInfo = await getVideoInfo(outputPath, options)
+    return getVideoInfo(stagedPath, options)
+  }, options.signal)
   return { cutSilences, outputDuration: outputInfo.duration }
 }
 
@@ -490,21 +597,24 @@ export async function extractThumbnail(
   width: number = 180,
   options: MediaExecutionOptions = {}
 ): Promise<void> {
+  assertDistinctMediaPaths(videoPath, outputPath)
   try {
-    await runFfmpeg([
-      '-ss',
-      Math.max(0, atSeconds).toFixed(3),
-      '-i',
-      videoPath,
-      '-frames:v',
-      '1',
-      '-vf',
-      `scale=${width}:-2`,
-      '-q:v',
-      '5',
-      '-y',
-      outputPath
-    ], options)
+    await materializeMediaOutput(outputPath, async (stagedPath) => {
+      await runFfmpeg([
+        '-ss',
+        Math.max(0, atSeconds).toFixed(3),
+        '-i',
+        videoPath,
+        '-frames:v',
+        '1',
+        '-vf',
+        `scale=${width}:-2`,
+        '-q:v',
+        '5',
+        '-y',
+        stagedPath
+      ], options)
+    }, options.signal)
   } catch (error) {
     rethrowMediaError('Failed to extract thumbnail', error)
   }
