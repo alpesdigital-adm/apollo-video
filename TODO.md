@@ -376,7 +376,7 @@
 - [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
 - [ ] Persistir hashes e versões de tool/model em cada edge.
 - [x] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
-- [ ] Testar reconstrução e diagnóstico de artifact final.
+- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-015: grafo recursivo e diagnóstico público entregues; falta reexecução a partir de parâmetros/providers versionados.
 
 ### F0.026 — Durable jobs [FR-232]
 
@@ -2580,7 +2580,7 @@ Confirmação hospedada:
 
 ### Slice F0-014 — Inspeção pública de Artifact/Manifest/Lineage
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `a51b39c`.
 
 Entregas:
 
@@ -2614,3 +2614,42 @@ Pendências deliberadas:
 - vínculos com ProjectVersion, Job e ProviderCall continuam no grafo F0.025;
 - mudança de status, quarentena, deleção e retenção exigirão commands auditáveis próprios;
 - MCP consumirá esta mesma capability quando o adapter de ferramentas for implementado.
+
+Confirmação hospedada:
+
+- o run `29216850414` aprovou os 20 passos no Linux, incluindo contratos, build e inspeção pública workspace-scoped.
+
+### Slice F0-015 — Diagnóstico recursivo de lineage
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability pública `apollo.artifacts.lineage.diagnose@1.0.0` protegida por `artifacts:read`;
+- endpoint exige artifact e manifest exatos em `/v1/artifacts/{artifactId}/lineage-diagnostics/{manifestId}`;
+- travessia recursiva determinística retorna fontes antes dos derivados;
+- cada nó informa artifact, checksum, status, quantidade de manifests e manifest selecionado;
+- cada edge informa source, target, checksum esperado, role e ordinal;
+- diagnóstico detecta artifact indisponível, manifest ausente, source ausente, checksum divergente e falha de integridade;
+- ciclos de lineage são detectados sem recursão infinita;
+- limites default de 256 nós e profundidade 32 impedem abuso e marcam resultado truncado;
+- um manifest que não pertence ao artifact/workspace retorna 404 sem permitir enumeração;
+- corrupção do artifact raiz continua produzindo conflito 409; corrupção de source vira issue segura no diagnóstico;
+- JSON Schema, exemplo, OpenAPI e baseline foram ampliados de forma aditiva.
+
+Evidências:
+
+- contratos aprovados com 12 capabilities, 16 schemas, 18 exemplos e 10 paths;
+- build registra a rota dinâmica de diagnóstico;
+- teste unitário comprova ordem source-first, grafo saudável e seleção do manifest exato;
+- testes unitários comprovam fonte em quarentena, manifest inexistente, ciclo e truncamento por limite;
+- integração pública comprova autenticação, scope, isolamento entre workspaces e resposta 404;
+- integração Postgres comprova grafo saudável e mudança para unhealthy quando uma source é colocada em quarentena;
+- o diagnóstico não serializa parâmetros brutos, JSON interno ou paths físicos.
+
+Limite explícito desta slice:
+
+- `healthy=true` significa que o lineage materializado e seus manifests estão íntegros e disponíveis;
+- ainda não significa que o artifact pode ser regenerado do zero;
+- a reexecução real depende de persistir parâmetros reproduzíveis, versões/hashes de tools/models, RenderInput e adapters de provider;
+- por isso a microtarefa final de reconstrução em F0.025 permanece aberta.

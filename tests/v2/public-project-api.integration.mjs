@@ -63,6 +63,7 @@ test('authenticated public API manages projects, clients and artifact inspection
   const apiClientId = 'public-api-client-v2'
   const sourceArtifactId = 'public-api-source-artifact-v2'
   const derivedArtifactId = 'public-api-derived-artifact-v2'
+  const derivedManifestId = 'public-api-derived-manifest-v2'
   const otherArtifactId = 'public-api-other-artifact-v2'
   const sha = (character) => character.repeat(64)
   let server
@@ -151,7 +152,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     await artifacts.persistOrReplay({
       workspaceId,
       artifactId: derivedArtifactId,
-      manifestId: 'public-api-derived-manifest-v2',
+      manifestId: derivedManifestId,
       lineageIds: ['public-api-derived-lineage-v2-0'],
       manifest: derivedManifest,
       createdAt: '2026-07-12T16:03:00.000Z',
@@ -206,6 +207,12 @@ test('authenticated public API manages projects, clients and artifact inspection
       openApi.paths['/v1/artifacts/{artifactId}'].get['x-apollo-capability-id'],
       'apollo.artifacts.read',
     )
+    assert.equal(
+      openApi.paths['/v1/artifacts/{artifactId}/lineage-diagnostics/{manifestId}'].get[
+        'x-apollo-capability-id'
+      ],
+      'apollo.artifacts.lineage.diagnose',
+    )
 
     const schemaResponse = await fetch(
       `${baseUrl}/v1/schemas/create-project-request/v1`,
@@ -240,6 +247,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.capabilities.list',
         'apollo.projects.list',
         'apollo.artifacts.read',
+        'apollo.artifacts.lineage.diagnose',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
         'apollo.projects.create',
@@ -301,6 +309,11 @@ test('authenticated public API manages projects, clients and artifact inspection
       { headers: { authorization: childAuthorization } },
     )
     assert.equal(childArtifactResponse.status, 403)
+    const childDiagnosticResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/lineage-diagnostics/${derivedManifestId}`,
+      { headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childDiagnosticResponse.status, 403)
 
     const artifactResponse = await fetch(`${baseUrl}/v1/artifacts/${derivedArtifactId}`, {
       headers: { authorization },
@@ -321,6 +334,59 @@ test('authenticated public API manages projects, clients and artifact inspection
     ])
     assert.equal(JSON.stringify(artifact).includes('manifestJson'), false)
     assert.equal(JSON.stringify(artifact).includes('"parameters":'), false)
+
+    const diagnosticResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/lineage-diagnostics/${derivedManifestId}`,
+      { headers: { authorization } },
+    )
+    const diagnostic = await diagnosticResponse.json()
+    assert.equal(diagnosticResponse.status, 200)
+    assert.equal(diagnostic.data.healthy, true)
+    assert.deepEqual(
+      diagnostic.data.nodes.map((node) => node.artifactId),
+      [sourceArtifactId, derivedArtifactId],
+    )
+    assert.deepEqual(diagnostic.data.edges, [
+      {
+        sourceArtifactId,
+        targetArtifactId: derivedArtifactId,
+        sha256: sha('a'),
+        role: 'primary',
+        ordinal: 0,
+      },
+    ])
+    assert.deepEqual(diagnostic.data.issues, [])
+
+    await client.v2MediaArtifact.update({
+      where: { id: sourceArtifactId },
+      data: { status: 'quarantined' },
+    })
+    const unavailableDiagnosticResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/lineage-diagnostics/${derivedManifestId}`,
+      { headers: { authorization } },
+    )
+    const unavailableDiagnostic = await unavailableDiagnosticResponse.json()
+    assert.equal(unavailableDiagnosticResponse.status, 200)
+    assert.equal(unavailableDiagnostic.data.healthy, false)
+    assert.deepEqual(
+      unavailableDiagnostic.data.issues.map((issue) => issue.code),
+      ['ARTIFACT_UNAVAILABLE'],
+    )
+    await client.v2MediaArtifact.update({
+      where: { id: sourceArtifactId },
+      data: { status: 'available' },
+    })
+
+    const missingManifestDiagnostic = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/lineage-diagnostics/missing-manifest-v2`,
+      { headers: { authorization } },
+    )
+    const hiddenDiagnostic = await fetch(
+      `${baseUrl}/v1/artifacts/${otherArtifactId}/lineage-diagnostics/public-api-other-manifest-v2`,
+      { headers: { authorization } },
+    )
+    assert.equal(missingManifestDiagnostic.status, 404)
+    assert.equal(hiddenDiagnostic.status, 404)
 
     const hiddenArtifactResponse = await fetch(
       `${baseUrl}/v1/artifacts/${otherArtifactId}`,

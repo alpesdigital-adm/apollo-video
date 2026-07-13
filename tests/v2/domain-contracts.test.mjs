@@ -22,6 +22,7 @@ import {
   stableSerialize,
 } from '../../src/v2/application/version-hash.ts'
 import { readMediaArtifactService } from '../../src/v2/application/read-media-artifact.ts'
+import { diagnoseMediaArtifactLineageService } from '../../src/v2/application/diagnose-media-artifact-lineage.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -259,4 +260,127 @@ test('media artifact lookup normalizes ids and hides missing workspace records',
     readArtifact('workspace-1', 'x'),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
+})
+
+test('lineage diagnostic returns a deterministic source-first healthy graph', async () => {
+  const sha = (character) => character.repeat(64)
+  const makeManifest = (id, sources = []) => ({
+    id,
+    schemaVersion: 'media-artifact-manifest/v1',
+    manifestHash: sha(id === 'manifest-source' ? 'c' : 'd'),
+    recipe: {
+      id: sources.length === 0 ? 'ingest-source' : 'normalize-video',
+      version: 'v1',
+      parametersHash: sha('e'),
+    },
+    sources,
+    createdAt: '2026-07-12T20:00:00.000Z',
+  })
+  const source = {
+    id: 'artifact-source',
+    workspaceId: 'workspace-1',
+    artifactKey: 'workspaces/1/raw/source.mov',
+    sha256: sha('a'),
+    byteSize: 100n,
+    mediaType: 'video',
+    container: 'mov',
+    status: 'available',
+    manifests: [makeManifest('manifest-source')],
+    createdAt: '2026-07-12T20:00:00.000Z',
+  }
+  const derived = {
+    ...source,
+    id: 'artifact-derived',
+    artifactKey: 'workspaces/1/derived/final.mp4',
+    sha256: sha('b'),
+    container: 'mp4',
+    manifests: [
+      makeManifest('manifest-derived', [
+        {
+          artifactId: source.id,
+          artifactKey: source.artifactKey,
+          sha256: source.sha256,
+          role: 'primary',
+          ordinal: 0,
+        },
+      ]),
+    ],
+  }
+  const records = new Map([[source.id, source], [derived.id, derived]])
+  const diagnose = diagnoseMediaArtifactLineageService({
+    repository: { async findById(_workspaceId, id) { return records.get(id) ?? null } },
+  })
+
+  const result = await diagnose('workspace-1', derived.id, 'manifest-derived')
+  assert.equal(result.healthy, true)
+  assert.deepEqual(result.nodes.map((node) => node.artifactId), [source.id, derived.id])
+  assert.deepEqual(result.edges, [
+    {
+      sourceArtifactId: source.id,
+      targetArtifactId: derived.id,
+      sha256: source.sha256,
+      role: 'primary',
+      ordinal: 0,
+    },
+  ])
+  assert.deepEqual(result.issues, [])
+
+  records.set(source.id, { ...source, status: 'quarantined' })
+  const unhealthy = await diagnose('workspace-1', derived.id, 'manifest-derived')
+  assert.equal(unhealthy.healthy, false)
+  assert.deepEqual(unhealthy.issues.map((issue) => issue.code), ['ARTIFACT_UNAVAILABLE'])
+  await assert.rejects(
+    diagnose('workspace-1', derived.id, 'missing-manifest'),
+    (error) =>
+      error instanceof DomainError && error.code === 'MEDIA_ARTIFACT_MANIFEST_NOT_FOUND',
+  )
+})
+
+test('lineage diagnostic detects cycles and bounded graph truncation', async () => {
+  const sha = (character) => character.repeat(64)
+  const makeRecord = (id, sourceId) => ({
+    id,
+    workspaceId: 'workspace-1',
+    artifactKey: `workspaces/1/${id}.mp4`,
+    sha256: sha(id === 'artifact-a' ? 'a' : 'b'),
+    byteSize: 100n,
+    mediaType: 'video',
+    container: 'mp4',
+    status: 'available',
+    manifests: [
+      {
+        id: `manifest-${id}`,
+        schemaVersion: 'media-artifact-manifest/v1',
+        manifestHash: sha(id === 'artifact-a' ? 'c' : 'd'),
+        recipe: { id: 'test-recipe', version: 'v1', parametersHash: sha('e') },
+        sources: [
+          {
+            artifactId: sourceId,
+            artifactKey: `workspaces/1/${sourceId}.mp4`,
+            sha256: sha(sourceId === 'artifact-a' ? 'a' : 'b'),
+            role: 'primary',
+            ordinal: 0,
+          },
+        ],
+        createdAt: '2026-07-12T20:00:00.000Z',
+      },
+    ],
+    createdAt: '2026-07-12T20:00:00.000Z',
+  })
+  const artifactA = makeRecord('artifact-a', 'artifact-b')
+  const artifactB = makeRecord('artifact-b', 'artifact-a')
+  const records = new Map([[artifactA.id, artifactA], [artifactB.id, artifactB]])
+  const repository = { async findById(_workspaceId, id) { return records.get(id) ?? null } }
+
+  const cycle = await diagnoseMediaArtifactLineageService({ repository })(
+    'workspace-1', artifactA.id, 'manifest-artifact-a',
+  )
+  assert.equal(cycle.healthy, false)
+  assert.ok(cycle.issues.some((issue) => issue.code === 'LINEAGE_CYCLE'))
+
+  const bounded = await diagnoseMediaArtifactLineageService({ repository, maxNodes: 1 })(
+    'workspace-1', artifactA.id, 'manifest-artifact-a',
+  )
+  assert.equal(bounded.limits.truncated, true)
+  assert.ok(bounded.issues.some((issue) => issue.code === 'GRAPH_LIMIT_EXCEEDED'))
 })

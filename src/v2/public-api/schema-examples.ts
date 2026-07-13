@@ -101,6 +101,63 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/artifact-lineage-diagnostic/v1': [
+      {
+        data: {
+          artifactId,
+          manifestId: 'manifest-example-1',
+          healthy: true,
+          nodes: [
+            {
+              artifactId: 'artifact-source-example-1',
+              artifactKey: 'workspace-example-1/raw/source.mov',
+              sha256: 'a'.repeat(64),
+              status: 'available',
+              manifestCount: 1,
+              selectedManifest: {
+                id: 'manifest-source-example-1',
+                manifestHash: 'e'.repeat(64),
+                schemaVersion: 'media-artifact-manifest/v1',
+                recipe: {
+                  id: 'ingest-source',
+                  version: '1.0.0',
+                  parametersHash: 'f'.repeat(64),
+                },
+              },
+            },
+            {
+              artifactId,
+              artifactKey: 'workspace-example-1/derived/final.mp4',
+              sha256: 'b'.repeat(64),
+              status: 'available',
+              manifestCount: 1,
+              selectedManifest: {
+                id: 'manifest-example-1',
+                manifestHash: 'c'.repeat(64),
+                schemaVersion: 'media-artifact-manifest/v1',
+                recipe: {
+                  id: 'normalize-video',
+                  version: '1.0.0',
+                  parametersHash: 'd'.repeat(64),
+                },
+              },
+            },
+          ],
+          edges: [
+            {
+              sourceArtifactId: 'artifact-source-example-1',
+              targetArtifactId: artifactId,
+              sha256: 'a'.repeat(64),
+              role: 'primary',
+              ordinal: 0,
+            },
+          ],
+          issues: [],
+          limits: { maxNodes: 256, maxDepth: 32, truncated: false },
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/create-project-request/v1': [
       { name: 'Anúncio de descoberta' },
     ],

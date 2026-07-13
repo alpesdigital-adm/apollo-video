@@ -126,6 +126,27 @@ const artifactManifestSchema = {
   },
 }
 
+const lineageDiagnosticManifestSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'manifestHash', 'schemaVersion', 'recipe'],
+  properties: {
+    id: idSchema,
+    manifestHash: sha256Schema,
+    schemaVersion: { type: 'string', minLength: 1, maxLength: 64 },
+    recipe: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'version', 'parametersHash'],
+      properties: {
+        id: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+        version: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+        parametersHash: sha256Schema,
+      },
+    },
+  },
+}
+
 const credentialMutationDataSchema = {
   type: 'object',
   additionalProperties: false,
@@ -289,6 +310,79 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           },
         },
         manifests: { type: 'array', items: artifactManifestSchema },
+      },
+    }),
+  ),
+  defineSchema('artifact-lineage-diagnostic', 1, 'Media artifact lineage diagnostic response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['artifactId', 'manifestId', 'healthy', 'nodes', 'edges', 'issues', 'limits'],
+      properties: {
+        artifactId: idSchema,
+        manifestId: idSchema,
+        healthy: { type: 'boolean' },
+        nodes: {
+          type: 'array',
+          uniqueItems: true,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['artifactId', 'artifactKey', 'sha256', 'status', 'manifestCount'],
+            properties: {
+              artifactId: idSchema,
+              artifactKey: { type: 'string', minLength: 1, maxLength: 512 },
+              sha256: sha256Schema,
+              status: { enum: ['available', 'quarantined', 'deleted'] },
+              manifestCount: { type: 'integer', minimum: 0 },
+              selectedManifest: lineageDiagnosticManifestSchema,
+            },
+          },
+        },
+        edges: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['sourceArtifactId', 'targetArtifactId', 'sha256', 'role', 'ordinal'],
+            properties: {
+              sourceArtifactId: idSchema,
+              targetArtifactId: idSchema,
+              sha256: sha256Schema,
+              role: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+              ordinal: { type: 'integer', minimum: 0 },
+            },
+          },
+        },
+        issues: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['code', 'artifactId', 'message'],
+            properties: {
+              code: {
+                enum: [
+                  'ARTIFACT_UNAVAILABLE', 'MANIFEST_MISSING', 'SOURCE_NOT_FOUND',
+                  'SOURCE_CHECKSUM_MISMATCH', 'SOURCE_INTEGRITY_FAILURE',
+                  'LINEAGE_CYCLE', 'GRAPH_LIMIT_EXCEEDED', 'DEPTH_LIMIT_EXCEEDED',
+                ],
+              },
+              artifactId: idSchema,
+              message: { type: 'string', minLength: 1 },
+            },
+          },
+        },
+        limits: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['maxNodes', 'maxDepth', 'truncated'],
+          properties: {
+            maxNodes: { type: 'integer', minimum: 1 },
+            maxDepth: { type: 'integer', minimum: 0 },
+            truncated: { type: 'boolean' },
+          },
+        },
       },
     }),
   ),

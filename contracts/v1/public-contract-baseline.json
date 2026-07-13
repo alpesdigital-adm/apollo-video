@@ -2,6 +2,29 @@
   "schemaVersion": 1,
   "apiMajor": "v1",
   "capabilities": {
+    "apollo.artifacts.lineage.diagnose": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/artifact-lineage-diagnostic/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/artifacts/{artifactId}/lineage-diagnostics/{manifestId}"
+      },
+      "toolName": "apollo.artifacts.lineage.diagnose",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.artifacts.read": {
       "version": "1.0.0",
       "exposure": "public",
@@ -1005,6 +1028,242 @@
                     "type": "string",
                     "format": "date-time"
                   }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/artifact-lineage-diagnostic/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifactId",
+            "manifestId",
+            "healthy",
+            "nodes",
+            "edges",
+            "issues",
+            "limits"
+          ],
+          "properties": {
+            "artifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "manifestId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "healthy": {
+              "type": "boolean"
+            },
+            "nodes": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "artifactId",
+                  "artifactKey",
+                  "sha256",
+                  "status",
+                  "manifestCount"
+                ],
+                "properties": {
+                  "artifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "artifactKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "status": {
+                    "enum": [
+                      "available",
+                      "quarantined",
+                      "deleted"
+                    ]
+                  },
+                  "manifestCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "selectedManifest": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "manifestHash",
+                      "schemaVersion",
+                      "recipe"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "manifestHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "schemaVersion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "recipe": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "version",
+                          "parametersHash"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                          },
+                          "version": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                          },
+                          "parametersHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sourceArtifactId",
+                  "targetArtifactId",
+                  "sha256",
+                  "role",
+                  "ordinal"
+                ],
+                "properties": {
+                  "sourceArtifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "targetArtifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "role": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                  },
+                  "ordinal": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code",
+                  "artifactId",
+                  "message"
+                ],
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "ARTIFACT_UNAVAILABLE",
+                      "MANIFEST_MISSING",
+                      "SOURCE_NOT_FOUND",
+                      "SOURCE_CHECKSUM_MISMATCH",
+                      "SOURCE_INTEGRITY_FAILURE",
+                      "LINEAGE_CYCLE",
+                      "GRAPH_LIMIT_EXCEEDED",
+                      "DEPTH_LIMIT_EXCEEDED"
+                    ]
+                  },
+                  "artifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "maxNodes",
+                "maxDepth",
+                "truncated"
+              ],
+              "properties": {
+                "maxNodes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxDepth": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "truncated": {
+                  "type": "boolean"
                 }
               }
             }
