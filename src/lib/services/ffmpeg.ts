@@ -217,18 +217,32 @@ async function executeMediaProcess(
     throw new MediaProcessError('MEDIA_PROCESS_CANCELLED', tool, `${tool} execution was cancelled`)
   }
 
+  let timedOut = false
+  const timeoutController = new AbortController()
+  const timeoutHandle = setTimeout(() => {
+    timedOut = true
+    timeoutController.abort()
+  }, timeoutMs)
+  timeoutHandle.unref()
+  const executionSignal = options.signal
+    ? AbortSignal.any([options.signal, timeoutController.signal])
+    : timeoutController.signal
+
   try {
     return (await execFileAsync(executable, args, {
       encoding: 'utf8',
       windowsHide: true,
       shell: false,
-      timeout: timeoutMs,
       maxBuffer: maxBufferBytes,
-      signal: options.signal
+      signal: executionSignal
     })) as { stdout: string; stderr: string }
   } catch (error) {
     const failure = error as MediaProcessFailure
-    const code = failureCode(failure)
+    const code = timedOut
+      ? 'MEDIA_PROCESS_TIMEOUT'
+      : options.signal?.aborted
+        ? 'MEDIA_PROCESS_CANCELLED'
+        : failureCode(failure)
     const stderrTail = String(failure.stderr ?? '').slice(-ERROR_OUTPUT_TAIL_LENGTH)
     throw new MediaProcessError(
       code,
@@ -236,6 +250,8 @@ async function executeMediaProcess(
       failureMessage(code, tool, timeoutMs, maxBufferBytes),
       { cause: error, stderrTail }
     )
+  } finally {
+    clearTimeout(timeoutHandle)
   }
 }
 
