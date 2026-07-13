@@ -5,6 +5,10 @@ import type {
   MediaArtifactPersistenceRepository,
   MediaArtifactPersistenceResult,
 } from '../../application/ports/media-artifact-repository.ts'
+import type {
+  MediaArtifactQueryRepository,
+  MediaArtifactRecord,
+} from '../../application/ports/media-artifact-query-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
@@ -105,11 +109,120 @@ async function findReplay(
   return { artifactId: artifact.id, manifestId: storedManifest.id, replayed: true }
 }
 
-export class PrismaMediaArtifactRepository implements MediaArtifactPersistenceRepository {
+export class PrismaMediaArtifactRepository
+  implements MediaArtifactPersistenceRepository, MediaArtifactQueryRepository
+{
   private readonly client: PrismaClient
 
   constructor(client: PrismaClient) {
     this.client = client
+  }
+
+  async findById(workspaceId: string, artifactId: string): Promise<MediaArtifactRecord | null> {
+    const row = await this.client.v2MediaArtifact.findFirst({
+      where: { id: artifactId, workspaceId },
+      include: {
+        manifests: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          include: {
+            lineageEdges: {
+              orderBy: { ordinal: 'asc' },
+              include: {
+                sourceArtifact: {
+                  select: { id: true, artifactKey: true, sha256: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    if (!row) return null
+    if (!['available', 'quarantined', 'deleted'].includes(row.status)) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Stored media artifact status is invalid',
+        { artifactId: row.id },
+      )
+    }
+
+    const manifests = row.manifests.map((stored) => {
+      let manifest: MediaArtifactManifestV1
+      try {
+        manifest = JSON.parse(stored.manifestJson) as MediaArtifactManifestV1
+        assertMediaArtifactManifest(manifest)
+      } catch {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Stored media artifact manifest failed integrity validation',
+          { manifestId: stored.id },
+        )
+      }
+
+      const artifactMatches =
+        manifest.artifact.artifactKey === row.artifactKey &&
+        manifest.artifact.sha256 === row.sha256 &&
+        BigInt(manifest.artifact.byteSize) === row.byteSize &&
+        manifest.artifact.mediaType === row.mediaType &&
+        manifest.artifact.container === row.container
+      const recipeMatches =
+        manifest.schemaVersion === stored.schemaVersion &&
+        manifest.manifestHash === stored.manifestHash &&
+        manifest.recipe.id === stored.recipeId &&
+        manifest.recipe.version === stored.recipeVersion &&
+        manifest.recipe.parametersHash === stored.parametersHash
+      const lineageMatches =
+        manifest.sources.length === stored.lineageEdges.length &&
+        stored.lineageEdges.every((edge, index) => {
+          const expected = manifest.sources[index]
+          return (
+            edge.ordinal === index &&
+            edge.role === expected.role &&
+            edge.sourceArtifact.artifactKey === expected.artifactKey &&
+            edge.sourceArtifact.sha256 === expected.sha256
+          )
+        })
+      if (!artifactMatches || !recipeMatches || !lineageMatches) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Stored media artifact metadata does not match its immutable manifest',
+          { manifestId: stored.id },
+        )
+      }
+
+      return {
+        id: stored.id,
+        schemaVersion: stored.schemaVersion,
+        manifestHash: stored.manifestHash,
+        recipe: {
+          id: stored.recipeId,
+          version: stored.recipeVersion,
+          parametersHash: stored.parametersHash,
+        },
+        ...(manifest.probe ? { probe: { ...manifest.probe } } : {}),
+        sources: stored.lineageEdges.map((edge) => ({
+          artifactId: edge.sourceArtifact.id,
+          artifactKey: edge.sourceArtifact.artifactKey,
+          sha256: edge.sourceArtifact.sha256,
+          role: edge.role,
+          ordinal: edge.ordinal,
+        })),
+        createdAt: stored.createdAt.toISOString(),
+      }
+    })
+
+    return {
+      id: row.id,
+      workspaceId: row.workspaceId,
+      artifactKey: row.artifactKey,
+      sha256: row.sha256,
+      byteSize: row.byteSize,
+      mediaType: row.mediaType as MediaArtifactRecord['mediaType'],
+      container: row.container,
+      status: row.status as MediaArtifactRecord['status'],
+      manifests,
+      createdAt: row.createdAt.toISOString(),
+    }
   }
 
   async persistOrReplay(

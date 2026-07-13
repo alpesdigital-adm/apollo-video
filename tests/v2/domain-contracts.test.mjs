@@ -21,6 +21,7 @@ import {
   calculateVersionHash,
   stableSerialize,
 } from '../../src/v2/application/version-hash.ts'
+import { readMediaArtifactService } from '../../src/v2/application/read-media-artifact.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -233,5 +234,29 @@ test('media artifact manifest rejects absolute and traversal keys', () => {
         ],
       }),
     'INVALID_MEDIA_ARTIFACT',
+  )
+})
+
+test('media artifact lookup normalizes ids and hides missing workspace records', async () => {
+  const found = { id: 'artifact-found' }
+  const calls = []
+  const readArtifact = readMediaArtifactService({
+    repository: {
+      async findById(workspaceId, artifactId) {
+        calls.push({ workspaceId, artifactId })
+        return artifactId === found.id ? found : null
+      },
+    },
+  })
+
+  assert.equal(await readArtifact('workspace-1', ` ${found.id} `), found)
+  assert.deepEqual(calls, [{ workspaceId: 'workspace-1', artifactId: found.id }])
+  await assert.rejects(
+    readArtifact('workspace-1', 'artifact-hidden-in-another-workspace'),
+    (error) => error instanceof DomainError && error.code === 'MEDIA_ARTIFACT_NOT_FOUND',
+  )
+  await assert.rejects(
+    readArtifact('workspace-1', 'x'),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
 })

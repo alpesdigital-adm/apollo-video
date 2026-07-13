@@ -30,7 +30,7 @@ async function waitForServer(baseUrl, child) {
   throw new Error('Next server did not become ready')
 }
 
-test('authenticated public API creates, replays and lists projects', async () => {
+test('authenticated public API manages projects, clients and artifact inspection', async () => {
   const clientPackage =
     process.env.APOLLO_V2_PERSISTENCE === 'postgres'
       ? '../../generated/prisma-v2/index.js'
@@ -38,8 +38,14 @@ test('authenticated public API creates, replays and lists projects', async () =>
   const { PrismaClient } = await import(clientPackage)
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
+  const { createMediaArtifactManifest } = await import(
+    '../../src/v2/domain/media-artifact.ts'
+  )
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
+  )
+  const { PrismaMediaArtifactRepository } = await import(
+    '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
   )
   const { PrismaWorkspaceRepository } = await import(
     '../../src/v2/infrastructure/prisma/workspace-repository.ts'
@@ -52,20 +58,51 @@ test('authenticated public API creates, replays and lists projects', async () =>
   const apiEnvironment =
     process.env.APOLLO_V2_PERSISTENCE === 'postgres' ? 'production' : 'sandbox'
   const workspaceId = 'public-api-workspace-v2'
+  const otherWorkspaceId = 'public-api-other-workspace-v2'
+  const workspaceIds = [workspaceId, otherWorkspaceId]
   const apiClientId = 'public-api-client-v2'
+  const sourceArtifactId = 'public-api-source-artifact-v2'
+  const derivedArtifactId = 'public-api-derived-artifact-v2'
+  const otherArtifactId = 'public-api-other-artifact-v2'
+  const sha = (character) => character.repeat(64)
   let server
 
-  try {
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+  const cleanup = async () => {
+    await client.v2MediaArtifactLineage.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2MediaArtifactManifest.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2MediaArtifact.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2IdempotencyRecord.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2ApiClient.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2Workspace.deleteMany({ where: { id: { in: workspaceIds } } })
+  }
 
-    await new PrismaWorkspaceRepository(client).create(
+  try {
+    await cleanup()
+
+    const workspaces = new PrismaWorkspaceRepository(client)
+    await workspaces.create(
       createWorkspace({
         id: workspaceId,
         slug: 'public-api-workspace-v2',
         name: 'Public API Workspace V2',
+        status: 'active',
+        createdAt: '2026-07-12T16:00:00.000Z',
+      }),
+    )
+    await workspaces.create(
+      createWorkspace({
+        id: otherWorkspaceId,
+        slug: 'public-api-other-workspace-v2',
+        name: 'Other Public API Workspace V2',
         status: 'active',
         createdAt: '2026-07-12T16:00:00.000Z',
       }),
@@ -79,7 +116,60 @@ test('authenticated public API creates, replays and lists projects', async () =>
       workspaceId,
       name: 'Public API Test Client',
       environment: apiEnvironment,
-      scopes: ['clients:admin', 'projects:read', 'projects:write'],
+      scopes: ['artifacts:read', 'clients:admin', 'projects:read', 'projects:write'],
+    })
+
+    const artifacts = new PrismaMediaArtifactRepository(client)
+    const sourceKey = 'workspaces/public-api/raw/source.mov'
+    const sourceManifest = createMediaArtifactManifest({
+      artifactKey: sourceKey,
+      artifactSha256: sha('a'),
+      byteSize: 4096,
+      mediaType: 'video',
+      container: 'mov',
+      recipe: { id: 'ingest-source', version: 'v1', parameters: {} },
+      probe: { width: 1920, height: 1080, duration: 20, fps: 30 },
+    })
+    await artifacts.persistOrReplay({
+      workspaceId,
+      artifactId: sourceArtifactId,
+      manifestId: 'public-api-source-manifest-v2',
+      lineageIds: [],
+      manifest: sourceManifest,
+      createdAt: '2026-07-12T16:02:00.000Z',
+    })
+    const derivedManifest = createMediaArtifactManifest({
+      artifactKey: 'workspaces/public-api/derived/final.mp4',
+      artifactSha256: sha('b'),
+      byteSize: 8192,
+      mediaType: 'video',
+      container: 'mp4',
+      recipe: { id: 'normalize-video', version: 'v1', parameters: { crf: 23 } },
+      sources: [{ artifactKey: sourceKey, sha256: sha('a'), role: 'primary' }],
+      probe: { width: 1080, height: 1920, duration: 18.5, fps: 30 },
+    })
+    await artifacts.persistOrReplay({
+      workspaceId,
+      artifactId: derivedArtifactId,
+      manifestId: 'public-api-derived-manifest-v2',
+      lineageIds: ['public-api-derived-lineage-v2-0'],
+      manifest: derivedManifest,
+      createdAt: '2026-07-12T16:03:00.000Z',
+    })
+    await artifacts.persistOrReplay({
+      workspaceId: otherWorkspaceId,
+      artifactId: otherArtifactId,
+      manifestId: 'public-api-other-manifest-v2',
+      lineageIds: [],
+      manifest: createMediaArtifactManifest({
+        artifactKey: 'workspaces/other/raw/private.mp4',
+        artifactSha256: sha('c'),
+        byteSize: 1024,
+        mediaType: 'video',
+        container: 'mp4',
+        recipe: { id: 'ingest-source', version: 'v1', parameters: {} },
+      }),
+      createdAt: '2026-07-12T16:03:00.000Z',
     })
 
     const port = await getFreePort()
@@ -111,6 +201,10 @@ test('authenticated public API creates, replays and lists projects', async () =>
     assert.equal(
       openApi.paths['/v1/workspaces/{workspaceId}/clients'].post["x-apollo-capability-id"],
       'apollo.clients.create',
+    )
+    assert.equal(
+      openApi.paths['/v1/artifacts/{artifactId}'].get['x-apollo-capability-id'],
+      'apollo.artifacts.read',
     )
 
     const schemaResponse = await fetch(
@@ -145,6 +239,7 @@ test('authenticated public API creates, replays and lists projects', async () =>
         'apollo.health.read',
         'apollo.capabilities.list',
         'apollo.projects.list',
+        'apollo.artifacts.read',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
         'apollo.projects.create',
@@ -199,6 +294,47 @@ test('authenticated public API creates, replays and lists projects', async () =>
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
       ],
+    )
+
+    const childArtifactResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}`,
+      { headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childArtifactResponse.status, 403)
+
+    const artifactResponse = await fetch(`${baseUrl}/v1/artifacts/${derivedArtifactId}`, {
+      headers: { authorization },
+    })
+    const artifact = await artifactResponse.json()
+    assert.equal(artifactResponse.status, 200)
+    assert.equal(artifact.data.artifact.id, derivedArtifactId)
+    assert.equal(artifact.data.artifact.byteSize, '8192')
+    assert.equal(artifact.data.manifests.length, 1)
+    assert.deepEqual(artifact.data.manifests[0].sources, [
+      {
+        artifactId: sourceArtifactId,
+        artifactKey: sourceKey,
+        sha256: sha('a'),
+        role: 'primary',
+        ordinal: 0,
+      },
+    ])
+    assert.equal(JSON.stringify(artifact).includes('manifestJson'), false)
+    assert.equal(JSON.stringify(artifact).includes('"parameters":'), false)
+
+    const hiddenArtifactResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${otherArtifactId}`,
+      { headers: { authorization } },
+    )
+    const missingArtifactResponse = await fetch(
+      `${baseUrl}/v1/artifacts/missing-artifact-v2`,
+      { headers: { authorization } },
+    )
+    assert.equal(hiddenArtifactResponse.status, 404)
+    assert.equal(missingArtifactResponse.status, 404)
+    assert.deepEqual(
+      (await hiddenArtifactResponse.json()).error.code,
+      (await missingArtifactResponse.json()).error.code,
     )
 
     const childEscalationResponse = await fetch(
@@ -333,10 +469,7 @@ test('authenticated public API creates, replays and lists projects', async () =>
         new Promise((resolve) => setTimeout(resolve, 3000)),
       ])
     }
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2Project.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+    await cleanup()
     await client.$disconnect()
   }
 })

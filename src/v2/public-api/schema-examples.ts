@@ -5,6 +5,7 @@ const projectId = 'project-example-1'
 const workspaceId = 'workspace-example-1'
 const clientId = 'client-example-1'
 const credentialId = 'credential-example-1'
+const artifactId = 'artifact-example-1'
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -52,6 +53,47 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               name: 'Anúncio de descoberta',
               status: 'draft',
               currentVersionId: 'project-version-example-1',
+              createdAt,
+            },
+          ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/artifact-detail/v1': [
+      {
+        data: {
+          artifact: {
+            id: artifactId,
+            workspaceId,
+            artifactKey: 'workspace-example-1/derived/final.mp4',
+            sha256: 'b'.repeat(64),
+            byteSize: '2849012',
+            mediaType: 'video',
+            container: 'mp4',
+            status: 'available',
+            createdAt,
+          },
+          manifests: [
+            {
+              id: 'manifest-example-1',
+              schemaVersion: 'media-artifact-manifest/v1',
+              manifestHash: 'c'.repeat(64),
+              recipe: {
+                id: 'normalize-video',
+                version: '1.0.0',
+                parametersHash: 'd'.repeat(64),
+              },
+              probe: { width: 1080, height: 1920, duration: 32.5, fps: 30 },
+              sources: [
+                {
+                  artifactId: 'artifact-source-example-1',
+                  artifactKey: 'workspace-example-1/raw/source.mov',
+                  sha256: 'a'.repeat(64),
+                  role: 'primary',
+                  ordinal: 0,
+                },
+              ],
               createdAt,
             },
           ],

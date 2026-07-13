@@ -2,12 +2,14 @@ import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
 
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
+import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
 import type { ProjectCreationRepository } from '../application/ports/project-creation-repository.ts'
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
 import { prisma } from '../../lib/db.ts'
 import { resolveV2PersistenceMode } from './persistence-mode.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
+import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
 import { PrismaProjectCreationRepository } from './prisma/project-creation-repository.ts'
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
@@ -30,6 +32,10 @@ export function createApiClientRepository(): ApiClientRepository {
 
 export function createApiClientAdministrationRepository(): ApiClientAdministrationRepository {
   return new PrismaApiClientRepository(resolveV2Client())
+}
+
+export function createMediaArtifactQueryRepository(): MediaArtifactQueryRepository {
+  return new PrismaMediaArtifactRepository(resolveV2Client())
 }
 
 export function createProjectCreationRepository(): ProjectCreationRepository {

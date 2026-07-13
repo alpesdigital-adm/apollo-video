@@ -1,6 +1,7 @@
 import type { PublicCapability } from './capability-registry.ts'
 import type { ApiClient } from '../domain/api-client.ts'
 import type { ApiCredential } from '../domain/api-credential.ts'
+import type { MediaArtifactRecord } from '../application/ports/media-artifact-query-repository.ts'
 
 export const PUBLIC_API_VERSION = 'v1' as const
 
@@ -68,5 +69,30 @@ export function presentApiCredential(credential: ApiCredential) {
     expiresAt: credential.expiresAt,
     lastUsedAt: credential.lastUsedAt,
     revokedAt: credential.revokedAt,
+  }
+}
+
+export function presentMediaArtifact(artifact: MediaArtifactRecord) {
+  return {
+    artifact: {
+      id: artifact.id,
+      workspaceId: artifact.workspaceId,
+      artifactKey: artifact.artifactKey,
+      sha256: artifact.sha256,
+      byteSize: artifact.byteSize.toString(),
+      mediaType: artifact.mediaType,
+      container: artifact.container,
+      status: artifact.status,
+      createdAt: artifact.createdAt,
+    },
+    manifests: artifact.manifests.map((manifest) => ({
+      id: manifest.id,
+      schemaVersion: manifest.schemaVersion,
+      manifestHash: manifest.manifestHash,
+      recipe: { ...manifest.recipe },
+      ...(manifest.probe ? { probe: { ...manifest.probe } } : {}),
+      sources: manifest.sources.map((source) => ({ ...source })),
+      createdAt: manifest.createdAt,
+    })),
   }
 }

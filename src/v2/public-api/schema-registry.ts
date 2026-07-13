@@ -77,6 +77,55 @@ const apiCredentialSchema = {
   },
 }
 
+const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
+
+const artifactSourceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['artifactId', 'artifactKey', 'sha256', 'role', 'ordinal'],
+  properties: {
+    artifactId: idSchema,
+    artifactKey: { type: 'string', minLength: 1, maxLength: 512 },
+    sha256: sha256Schema,
+    role: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+    ordinal: { type: 'integer', minimum: 0 },
+  },
+}
+
+const artifactManifestSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'schemaVersion', 'manifestHash', 'recipe', 'sources', 'createdAt'],
+  properties: {
+    id: idSchema,
+    schemaVersion: { type: 'string', minLength: 1, maxLength: 64 },
+    manifestHash: sha256Schema,
+    recipe: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'version', 'parametersHash'],
+      properties: {
+        id: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+        version: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+        parametersHash: sha256Schema,
+      },
+    },
+    probe: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['width', 'height', 'duration', 'fps'],
+      properties: {
+        width: { type: 'number', exclusiveMinimum: 0 },
+        height: { type: 'number', exclusiveMinimum: 0 },
+        duration: { type: 'number', exclusiveMinimum: 0 },
+        fps: { type: 'number', exclusiveMinimum: 0 },
+      },
+    },
+    sources: { type: 'array', items: artifactSourceSchema },
+    createdAt: dateTimeSchema,
+  },
+}
+
 const credentialMutationDataSchema = {
   type: 'object',
   additionalProperties: false,
@@ -212,6 +261,35 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['projects'],
       properties: { projects: { type: 'array', items: projectSchema } },
+    }),
+  ),
+  defineSchema('artifact-detail', 1, 'Media artifact detail response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['artifact', 'manifests'],
+      properties: {
+        artifact: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'id', 'workspaceId', 'artifactKey', 'sha256', 'byteSize',
+            'mediaType', 'container', 'status', 'createdAt',
+          ],
+          properties: {
+            id: idSchema,
+            workspaceId: idSchema,
+            artifactKey: { type: 'string', minLength: 1, maxLength: 512 },
+            sha256: sha256Schema,
+            byteSize: { type: 'string', pattern: '^[1-9][0-9]*$' },
+            mediaType: { enum: ['video', 'audio', 'image'] },
+            container: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+            status: { enum: ['available', 'quarantined', 'deleted'] },
+            createdAt: dateTimeSchema,
+          },
+        },
+        manifests: { type: 'array', items: artifactManifestSchema },
+      },
     }),
   ),
   defineSchema('create-project-request', 1, 'Create project request', {

@@ -375,7 +375,7 @@
 - [ ] Modelar grafo de artifact → version → plan → sources → jobs/providers.
 - [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
 - [ ] Persistir hashes e versões de tool/model em cada edge.
-- [ ] Criar endpoint de inspeção e incluir resumo no manifest.
+- [x] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
 - [ ] Testar reconstrução e diagnóstico de artifact final.
 
 ### F0.026 — Durable jobs [FR-232]
@@ -2538,7 +2538,7 @@ Confirmação hospedada:
 
 ### Slice F0-013 — Persistência transacional de Artifact/Manifest/Lineage
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `362ddf2`.
 
 Entregas:
 
@@ -2570,6 +2570,47 @@ Evidências:
 Pendências deliberadas:
 
 - ligar artifact a ProjectVersion, Job e ProviderCall expande o grafo F0.025 em slices posteriores;
-- endpoints/query de lineage ainda não são públicos;
+- a inspeção pública de lineage foi entregue no slice F0-014;
 - status `quarantined/deleted` exigirá command auditável, rights check e retention policy;
 - canonical key content-addressed final depende do adapter de object storage.
+
+Confirmação hospedada:
+
+- o run `29216338901` aprovou os 20 passos no Linux, incluindo migration, persistência/replay e integridade de lineage.
+
+### Slice F0-014 — Inspeção pública de Artifact/Manifest/Lineage
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability pública versionada `apollo.artifacts.read@1.0.0` com escopo dedicado `artifacts:read`;
+- endpoint autenticado `GET /v1/artifacts/{artifactId}` sem `workspaceId` controlável pelo cliente;
+- application service e query port independentes do transporte e do provider de persistência;
+- query Prisma filtra simultaneamente por `artifactId` e workspace autenticado;
+- artefato inexistente e artefato de outro workspace retornam o mesmo erro público 404;
+- resposta expõe somente metadata segura, probe, recipe hashes e sources ordenadas;
+- paths físicos, `manifestJson` e parâmetros brutos da recipe não são serializados;
+- `BIGINT byteSize` é publicado como string decimal, sem perda de precisão em JSON;
+- cada leitura revalida hash/corpo do manifest e confere metadata normalizada, recipe e lineage;
+- corrupção ou divergência persistida produz conflito explícito em vez de informação silenciosamente incorreta;
+- JSON Schema `artifact-detail/v1`, exemplo executável, OpenAPI e baseline de compatibilidade foram atualizados.
+
+Evidências:
+
+- contratos aprovados com 11 capabilities, 15 schemas, 17 exemplos e 9 paths;
+- build Next.js registra a rota dinâmica `/v1/artifacts/[artifactId]`;
+- teste ponta a ponta autentica cliente com `artifacts:read` e relê source/derivado persistidos no Postgres;
+- cliente sem o escopo recebe 403;
+- acesso ao artifact de outro workspace e ID inexistente recebem o mesmo código 404;
+- lineage retorna source, checksum, role e ordinal na ordem imutável do manifest;
+- resposta confirma ausência de `manifestJson` e parâmetros brutos;
+- contrato público aditivo foi incorporado ao baseline para impedir remoção ou mudança silenciosa futura.
+
+Pendências deliberadas:
+
+- listagem, busca e paginação de artifacts serão capabilities separadas para não ampliar este contrato por acidente;
+- download exige grants temporários e rights check, portanto não faz parte da inspeção de metadata;
+- vínculos com ProjectVersion, Job e ProviderCall continuam no grafo F0.025;
+- mudança de status, quarentena, deleção e retenção exigirão commands auditáveis próprios;
+- MCP consumirá esta mesma capability quando o adapter de ferramentas for implementado.
