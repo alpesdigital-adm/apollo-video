@@ -373,6 +373,7 @@
 ### F0.025 — Artifact lineage [FR-224]
 
 - [ ] Modelar grafo de artifact → version → plan → sources → jobs/providers.
+- [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
 - [ ] Persistir hashes e versões de tool/model em cada edge.
 - [ ] Criar endpoint de inspeção e incluir resumo no manifest.
 - [ ] Testar reconstrução e diagnóstico de artifact final.
@@ -2497,7 +2498,7 @@ Confirmação hospedada e incidente:
 
 ### Slice F0-012 — Checksum e manifest portátil de artifact
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `02d735d`.
 
 Entregas:
 
@@ -2530,3 +2531,45 @@ Pendências deliberadas:
 - canonical key final dependerá da decisão de object storage e namespace por workspace;
 - timestamps de criação pertencem ao registro persistido/evento, não à identidade determinística;
 - manifests compostos de render incluirão plan hash, renderer version, fonts, LUTs e todos os inputs materializados.
+
+Confirmação hospedada:
+
+- o run `29215758113` aprovou os 19 passos no Linux, incluindo os testes de domínio e integração real do manifest.
+
+### Slice F0-013 — Persistência transacional de Artifact/Manifest/Lineage
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- três tabelas Postgres específicas: `media_artifacts`, `media_artifact_manifests` e `media_artifact_lineage`;
+- schema SQLite de protótipo mantido estruturalmente compatível para os adapters existentes;
+- artifacts armazenam canonical key, SHA-256, byte size `BIGINT`, tipo, container, status e workspace;
+- manifests append-only armazenam schema, manifest/parameters hash, recipe/version e JSON canônico validado;
+- lineage normalizado armazena source artifact, role e ordinal, preservando a ordem do manifest;
+- FKs compostas impedem artifact, manifest ou source de atravessar workspace;
+- checks SQL validam hashes, tamanhos, tipos, status, schema, JSON, roles, ordinals e keys portáteis;
+- repository Prisma grava artifact, manifest e todos os edges na mesma transação;
+- canonical key existente com conteúdo/metadata diferente retorna conflito e nunca sobrescreve;
+- replay por canonical key + manifest hash retorna os IDs vencedores e verifica JSON/lineage persistidos;
+- colisão concorrente `P2002` é convertida em replay seguro ou conflito explícito;
+- source ausente ou checksum divergente aborta e reverte inclusive o artifact de saída criado na transação.
+
+Evidências:
+
+- migration real aplicada em Postgres 16 dedicado;
+- migration check: 10 tabelas, 28 índices e 17 foreign keys;
+- source e derivado com lineage foram persistidos e relidos;
+- repetição idempotente não criou rows adicionais;
+- duas transações concorrentes resultaram em uma criação e um replay;
+- workspace B não conseguiu referenciar source existente apenas no workspace A;
+- checksum divergente da source gerou conflito e rollback integral;
+- canonical key absoluta foi rejeitada pelo constraint do Postgres;
+- teardown confirmou contagens exatas de artifacts, manifests e edges.
+
+Pendências deliberadas:
+
+- ligar artifact a ProjectVersion, Job e ProviderCall expande o grafo F0.025 em slices posteriores;
+- endpoints/query de lineage ainda não são públicos;
+- status `quarantined/deleted` exigirá command auditável, rights check e retention policy;
+- canonical key content-addressed final depende do adapter de object storage.

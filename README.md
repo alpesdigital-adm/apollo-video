@@ -94,6 +94,11 @@ recipe/version, hash dos parâmetros, fontes e probe. O manifest usa somente
 chaves portáteis relativas, não persiste paths locais nem parâmetros brutos e
 possui hash próprio para detectar adulteração.
 
+Artifacts, manifests e relações de origem possuem persistência Postgres v2
+isolada por workspace. A gravação é transacional e idempotente pela combinação
+de canonical key, identidade imutável do conteúdo e `manifestHash`; source
+ausente ou divergente desfaz toda a operação.
+
 ## Formatos
 
 - **Vertical (9:16)** — Shorts, Reels, TikTok

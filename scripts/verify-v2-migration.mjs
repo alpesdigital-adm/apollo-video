@@ -79,6 +79,15 @@ const requiredChecks = [
   'project_versions_hash_check',
   'idempotency_records_status_check',
   'idempotency_records_fingerprint_check',
+  'media_artifacts_hash_check',
+  'media_artifacts_size_check',
+  'media_artifacts_type_check',
+  'media_artifacts_status_check',
+  'media_artifact_manifests_schema_check',
+  'media_artifact_manifests_hash_check',
+  'media_artifact_manifests_parameters_hash_check',
+  'media_artifact_lineage_role_check',
+  'media_artifact_lineage_ordinal_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

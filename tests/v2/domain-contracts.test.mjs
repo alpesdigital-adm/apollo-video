@@ -218,4 +218,20 @@ test('media artifact manifest rejects absolute and traversal keys', () => {
       'INVALID_MEDIA_ARTIFACT',
     )
   }
+
+  expectDomainError(
+    () =>
+      createMediaArtifactManifest({
+        ...input,
+        artifactKey: 'workspaces/ws/artifacts/output.mp4',
+        sources: [
+          {
+            artifactKey: 'workspaces/ws/artifacts/output.mp4',
+            sha256: 'b'.repeat(64),
+            role: 'primary',
+          },
+        ],
+      }),
+    'INVALID_MEDIA_ARTIFACT',
+  )
 })

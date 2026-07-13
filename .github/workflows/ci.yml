@@ -95,5 +95,8 @@ jobs:
       - name: Run Prisma integration tests
         run: npm run test:integration:prisma
 
+      - name: Run media artifact persistence tests
+        run: npm run test:integration:artifacts
+
       - name: Run public API integration tests
         run: npm run test:integration:api

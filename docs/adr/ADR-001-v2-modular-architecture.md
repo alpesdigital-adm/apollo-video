@@ -53,4 +53,7 @@ renderer ◄── RenderInput materializado
 - Falha, timeout ou cancelamento preservam o derivado anterior e tentam remover o parcial; falha de cleanup/promoção possui erro tipado próprio.
 - A identidade portátil de um derivado usa `media-artifact-manifest/v1`: SHA-256 do conteúdo, byte size, canonical artifact key, recipe/version, parameters hash, sources e probe opcional.
 - Manifests não contêm path absoluto, timestamp volátil ou parâmetros brutos; o corpo canônico possui `manifestHash` e o writer rejeita adulteração.
+- Postgres persiste `MediaArtifact`, `MediaArtifactManifest` e edges ordenados de lineage em tabelas próprias, sem blob genérico como source of truth.
+- FKs compostas por workspace impedem lineage cruzado; canonical key é imutável e colisão com checksum/metadata diferente é conflito.
+- Artifact, manifest e lineage são gravados na mesma transação; replay concorrente reutiliza a identidade vencedora sem duplicar rows.
 - Dependências públicas devem manter `npm audit` sem vulnerabilidades antes de exposição do produto.

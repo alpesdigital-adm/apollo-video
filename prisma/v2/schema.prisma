@@ -20,6 +20,9 @@ model V2Workspace {
   snapshots          V2ProjectSnapshot[]
   apiClients         V2ApiClient[]
   idempotencyRecords V2IdempotencyRecord[]
+  mediaArtifacts     V2MediaArtifact[]
+  mediaManifests     V2MediaArtifactManifest[]
+  mediaLineage       V2MediaArtifactLineage[]
 
   @@map("workspaces")
 }
@@ -152,4 +155,68 @@ model V2IdempotencyRecord {
   @@unique([workspaceId, clientId, key])
   @@index([expiresAt])
   @@map("idempotency_records")
+}
+
+model V2MediaArtifact {
+  id          String   @id @db.VarChar(128)
+  workspaceId String   @db.VarChar(128)
+  artifactKey String   @db.VarChar(512)
+  sha256      String   @db.Char(64)
+  byteSize    BigInt
+  mediaType   String   @db.VarChar(16)
+  container   String   @db.VarChar(32)
+  status      String   @default("available") @db.VarChar(32)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace    V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  manifests    V2MediaArtifactManifest[]
+  lineageUses  V2MediaArtifactLineage[]  @relation("MediaLineageSource")
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, artifactKey])
+  @@index([workspaceId, sha256])
+  @@index([workspaceId, mediaType, status])
+  @@map("media_artifacts")
+}
+
+model V2MediaArtifactManifest {
+  id             String   @id @db.VarChar(128)
+  workspaceId    String   @db.VarChar(128)
+  artifactId     String   @db.VarChar(128)
+  schemaVersion  String   @db.VarChar(64)
+  manifestHash   String   @db.Char(64)
+  recipeId       String   @db.VarChar(64)
+  recipeVersion  String   @db.VarChar(64)
+  parametersHash String   @db.Char(64)
+  manifestJson   String   @db.Text
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace    V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact     V2MediaArtifact          @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  lineageEdges V2MediaArtifactLineage[]
+
+  @@unique([id, workspaceId])
+  @@unique([artifactId, manifestHash])
+  @@index([workspaceId, recipeId, recipeVersion])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("media_artifact_manifests")
+}
+
+model V2MediaArtifactLineage {
+  id               String   @id @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  manifestId       String   @db.VarChar(128)
+  sourceArtifactId String   @db.VarChar(128)
+  role             String   @db.VarChar(64)
+  ordinal          Int
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace      V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  manifest       V2MediaArtifactManifest  @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact V2MediaArtifact          @relation("MediaLineageSource", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([manifestId, ordinal])
+  @@unique([manifestId, sourceArtifactId, role])
+  @@index([workspaceId, sourceArtifactId])
+  @@map("media_artifact_lineage")
 }

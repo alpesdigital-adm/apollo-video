@@ -140,6 +140,12 @@ export function createMediaArtifactManifest(
     ...(input.probe ? { probe: validateProbe(input.probe) } : {}),
   }
 
+  assertDomain(
+    body.sources.every((source) => source.artifactKey !== body.artifact.artifactKey),
+    'INVALID_MEDIA_ARTIFACT',
+    'artifact cannot reference itself as a source',
+  )
+
   return {
     ...body,
     manifestHash: calculateCanonicalHash(body),
