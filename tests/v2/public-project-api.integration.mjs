@@ -38,7 +38,10 @@ test('authenticated public API manages projects, clients and artifact inspection
   const { PrismaClient } = await import(clientPackage)
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
-  const { createMediaArtifactManifest, createMediaArtifactManifestV2 } = await import(
+  const {
+    createMediaArtifactManifest,
+    createReplayableMediaArtifactManifest,
+  } = await import(
     '../../src/v2/domain/media-artifact.ts'
   )
   const { PrismaApiClientRepository } = await import(
@@ -52,6 +55,9 @@ test('authenticated public API manages projects, clients and artifact inspection
   )
   const { nodeApiCredentialCrypto } = await import(
     '../../src/v2/infrastructure/security/api-credential.ts'
+  )
+  const { createAesRecipeParameterCipher } = await import(
+    '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
   )
 
   const client = new PrismaClient()
@@ -76,6 +82,9 @@ test('authenticated public API manages projects, clients and artifact inspection
       where: { workspaceId: { in: workspaceIds } },
     })
     await client.v2MediaArtifact.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2RecipeParameterPayload.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
     await client.v2IdempotencyRecord.deleteMany({
@@ -120,7 +129,13 @@ test('authenticated public API manages projects, clients and artifact inspection
       scopes: ['artifacts:read', 'clients:admin', 'projects:read', 'projects:write'],
     })
 
-    const artifacts = new PrismaMediaArtifactRepository(client)
+    const artifacts = new PrismaMediaArtifactRepository(
+      client,
+      createAesRecipeParameterCipher({
+        keyId: 'public-api-recipe-key-v1',
+        key: Buffer.alloc(32, 9),
+      }),
+    )
     const sourceKey = 'workspaces/public-api/raw/source.mov'
     const sourceManifest = createMediaArtifactManifest({
       artifactKey: sourceKey,
@@ -139,13 +154,17 @@ test('authenticated public API manages projects, clients and artifact inspection
       manifest: sourceManifest,
       createdAt: '2026-07-12T16:02:00.000Z',
     })
-    const derivedManifest = createMediaArtifactManifestV2({
+    const derivedReplayable = createReplayableMediaArtifactManifest({
       artifactKey: 'workspaces/public-api/derived/final.mp4',
       artifactSha256: sha('b'),
       byteSize: 8192,
       mediaType: 'video',
       container: 'mp4',
-      recipe: { id: 'normalize-video', version: 'v1', parameters: { crf: 23 } },
+      recipe: {
+        id: 'normalize-video',
+        version: 'v3',
+        parameters: { crf: 23, instruction: 'protected-api-replay-value' },
+      },
       sources: [
         {
           artifactKey: sourceKey,
@@ -169,7 +188,8 @@ test('authenticated public API manages projects, clients and artifact inspection
       artifactId: derivedArtifactId,
       manifestId: derivedManifestId,
       lineageIds: ['public-api-derived-lineage-v2-0'],
-      manifest: derivedManifest,
+      manifest: derivedReplayable.manifest,
+      recipeParameters: derivedReplayable.recipeParameters,
       createdAt: '2026-07-12T16:03:00.000Z',
     })
     await artifacts.persistOrReplay({
@@ -234,6 +254,12 @@ test('authenticated public API manages projects, clients and artifact inspection
       ],
       'apollo.artifacts.provenance.read',
     )
+    assert.equal(
+      openApi.paths['/v1/artifacts/{artifactId}/replay-spec/{manifestId}'].get[
+        'x-apollo-capability-id'
+      ],
+      'apollo.artifacts.replay-spec.read',
+    )
 
     const schemaResponse = await fetch(
       `${baseUrl}/v1/schemas/create-project-request/v1`,
@@ -270,6 +296,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.artifacts.read',
         'apollo.artifacts.lineage.diagnose',
         'apollo.artifacts.provenance.read',
+        'apollo.artifacts.replay-spec.read',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
         'apollo.projects.create',
@@ -341,6 +368,11 @@ test('authenticated public API manages projects, clients and artifact inspection
       { headers: { authorization: childAuthorization } },
     )
     assert.equal(childProvenanceResponse.status, 403)
+    const childReplaySpecResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/replay-spec/${derivedManifestId}`,
+      { headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childReplaySpecResponse.status, 403)
 
     const artifactResponse = await fetch(`${baseUrl}/v1/artifacts/${derivedArtifactId}`, {
       headers: { authorization },
@@ -391,7 +423,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     const provenance = await provenanceResponse.json()
     assert.equal(provenanceResponse.status, 200)
     assert.equal(provenance.data.complete, true)
-    assert.equal(provenance.data.schemaVersion, 'media-artifact-manifest/v2')
+    assert.equal(provenance.data.schemaVersion, 'media-artifact-manifest/v3')
     assert.equal(provenance.data.edges[0].execution.tool.id, 'ffmpeg')
     assert.equal(provenance.data.edges[0].execution.tool.version, '7.1.1')
     assert.equal(provenance.data.edges[0].execution.tool.digest, sha('7'))
@@ -401,6 +433,28 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(provenance.data.edges[0].execution.model.configHash.length, 64)
     assert.equal(JSON.stringify(provenance).includes('must-not-leak'), false)
     assert.equal(JSON.stringify(provenance).includes('privatePrompt'), false)
+
+    const replaySpecResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/replay-spec/${derivedManifestId}`,
+      { headers: { authorization } },
+    )
+    const replaySpec = await replaySpecResponse.json()
+    assert.equal(replaySpecResponse.status, 200)
+    assert.equal(replaySpec.data.available, true)
+    assert.equal(replaySpec.data.schemaVersion, 'media-artifact-manifest/v3')
+    assert.equal(
+      replaySpec.data.recipe.parametersHash,
+      derivedReplayable.recipeParameters.parametersHash,
+    )
+    assert.deepEqual(replaySpec.data.parameters, {
+      ref: derivedReplayable.recipeParameters.ref,
+      canonicalByteSize: derivedReplayable.recipeParameters.canonicalByteSize,
+      protection: { algorithm: 'aes-256-gcm' },
+    })
+    assert.deepEqual(replaySpec.data.issues, [])
+    assert.equal(JSON.stringify(replaySpec).includes('protected-api-replay-value'), false)
+    assert.equal(JSON.stringify(replaySpec).includes('ciphertext'), false)
+    assert.equal(JSON.stringify(replaySpec).includes('keyId'), false)
 
     await client.v2MediaArtifact.update({
       where: { id: sourceArtifactId },
@@ -430,8 +484,18 @@ test('authenticated public API manages projects, clients and artifact inspection
       `${baseUrl}/v1/artifacts/${otherArtifactId}/lineage-diagnostics/public-api-other-manifest-v2`,
       { headers: { authorization } },
     )
+    const missingReplaySpec = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/replay-spec/missing-manifest-v2`,
+      { headers: { authorization } },
+    )
+    const hiddenReplaySpec = await fetch(
+      `${baseUrl}/v1/artifacts/${otherArtifactId}/replay-spec/public-api-other-manifest-v2`,
+      { headers: { authorization } },
+    )
     assert.equal(missingManifestDiagnostic.status, 404)
     assert.equal(hiddenDiagnostic.status, 404)
+    assert.equal(missingReplaySpec.status, 404)
+    assert.equal(hiddenReplaySpec.status, 404)
 
     const hiddenArtifactResponse = await fetch(
       `${baseUrl}/v1/artifacts/${otherArtifactId}`,

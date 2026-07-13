@@ -2,13 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 test('media artifacts persist atomically with workspace-scoped immutable lineage', async () => {
+  const usesPostgres = process.env.APOLLO_V2_PERSISTENCE === 'postgres'
   const clientPackage =
-    process.env.APOLLO_V2_PERSISTENCE === 'postgres'
+    usesPostgres
       ? '../../generated/prisma-v2/index.js'
       : '@prisma/client'
   const { PrismaClient } = await import(clientPackage)
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
-  const { createMediaArtifactManifest, createMediaArtifactManifestV2 } = await import(
+  const {
+    createMediaArtifactManifest,
+    createReplayableMediaArtifactManifest,
+  } = await import(
     '../../src/v2/domain/media-artifact.ts'
   )
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
@@ -17,6 +21,9 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
   )
   const { PrismaWorkspaceRepository } = await import(
     '../../src/v2/infrastructure/prisma/workspace-repository.ts'
+  )
+  const { createAesRecipeParameterCipher } = await import(
+    '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
   )
 
   const client = new PrismaClient()
@@ -42,6 +49,9 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
     await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2RecipeParameterPayload.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2Workspace.deleteMany({ where: { id: { in: workspaceIds } } })
   }
 
@@ -67,7 +77,11 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
       }),
     )
 
-    const repository = new PrismaMediaArtifactRepository(client)
+    const recipeCipher = createAesRecipeParameterCipher({
+      keyId: 'artifact-integration-key-v1',
+      key: Buffer.alloc(32, 7),
+    })
+    const repository = new PrismaMediaArtifactRepository(client, recipeCipher)
     const sourceKey = 'workspaces/a/masters/source.mp4'
     const sourceManifest = createManifest({ artifactKey: sourceKey, artifactSha256: sha('a') })
     const source = await repository.persistOrReplay({
@@ -80,13 +94,17 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
     })
     assert.equal(source.replayed, false)
 
-    const derivedManifest = createMediaArtifactManifestV2({
+    const derivedReplayable = createReplayableMediaArtifactManifest({
       artifactKey: 'workspaces/a/artifacts/normalized.mp4',
       artifactSha256: sha('b'),
       byteSize: 1024,
       mediaType: 'video',
       container: 'mp4',
-      recipe: { id: 'normalize-video', version: 'v2', parameters: { crf: 23 } },
+      recipe: {
+        id: 'normalize-video',
+        version: 'v3',
+        parameters: { crf: 23, instruction: 'protected-recipe-instruction' },
+      },
       sources: [
         {
           artifactKey: sourceKey,
@@ -110,7 +128,8 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
       artifactId: 'artifact-derived-a',
       manifestId: 'manifest-derived-a',
       lineageIds: ['lineage-derived-a-0'],
-      manifest: derivedManifest,
+      manifest: derivedReplayable.manifest,
+      recipeParameters: derivedReplayable.recipeParameters,
       createdAt: '2026-07-13T00:42:00.000Z',
     }
     const first = await repository.persistOrReplay(derivedBundle)
@@ -140,6 +159,103 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
       where: { id: 'manifest-derived-a' },
     })
     assert.equal(storedDerivedManifest.manifestJson.includes('must-not-persist'), false)
+    assert.equal(
+      storedDerivedManifest.manifestJson.includes('protected-recipe-instruction'),
+      false,
+    )
+    assert.equal(
+      storedDerivedManifest.recipeParametersRef,
+      derivedReplayable.recipeParameters.ref,
+    )
+    const storedRecipeParameters = await client.v2RecipeParameterPayload.findUnique({
+      where: {
+        workspaceId_ref: {
+          workspaceId: workspaceA,
+          ref: derivedReplayable.recipeParameters.ref,
+        },
+      },
+    })
+    assert.ok(storedRecipeParameters)
+    assert.equal(
+      JSON.stringify(storedRecipeParameters).includes('protected-recipe-instruction'),
+      false,
+    )
+    assert.equal(
+      await recipeCipher.open(
+        {
+          algorithm: storedRecipeParameters.algorithm,
+          keyId: storedRecipeParameters.keyId,
+          nonce: storedRecipeParameters.nonce,
+          ciphertext: storedRecipeParameters.ciphertext,
+          authTag: storedRecipeParameters.authTag,
+        },
+        `apollo-recipe-parameters/v1:${workspaceA}:${storedRecipeParameters.ref}`,
+      ),
+      derivedReplayable.recipeParameters.canonicalJson,
+    )
+
+    const reusedReplayable = createReplayableMediaArtifactManifest({
+      artifactKey: 'workspaces/a/artifacts/reused-recipe.mp4',
+      artifactSha256: sha('6'),
+      byteSize: 2048,
+      mediaType: 'video',
+      container: 'mp4',
+      recipe: {
+        id: 'normalize-video',
+        version: 'v3',
+        parameters: { instruction: 'protected-recipe-instruction', crf: 23 },
+      },
+      sources: [],
+    })
+    assert.equal(
+      reusedReplayable.recipeParameters.ref,
+      derivedReplayable.recipeParameters.ref,
+    )
+    await repository.persistOrReplay({
+      workspaceId: workspaceA,
+      artifactId: 'artifact-reused-recipe-a',
+      manifestId: 'manifest-reused-recipe-a',
+      lineageIds: [],
+      manifest: reusedReplayable.manifest,
+      recipeParameters: reusedReplayable.recipeParameters,
+      createdAt: '2026-07-13T00:42:30.000Z',
+    })
+    assert.equal(
+      await client.v2RecipeParameterPayload.count({ where: { workspaceId: workspaceA } }),
+      1,
+    )
+    const otherWorkspaceReplayable = createReplayableMediaArtifactManifest({
+      artifactKey: 'workspaces/b/artifacts/same-recipe.mp4',
+      artifactSha256: sha('8'),
+      byteSize: 2048,
+      mediaType: 'video',
+      container: 'mp4',
+      recipe: {
+        id: 'normalize-video',
+        version: 'v3',
+        parameters: { crf: 23, instruction: 'protected-recipe-instruction' },
+      },
+      sources: [],
+    })
+    await repository.persistOrReplay({
+      workspaceId: workspaceB,
+      artifactId: 'artifact-same-recipe-b',
+      manifestId: 'manifest-same-recipe-b',
+      lineageIds: [],
+      manifest: otherWorkspaceReplayable.manifest,
+      recipeParameters: otherWorkspaceReplayable.recipeParameters,
+      createdAt: '2026-07-13T00:42:45.000Z',
+    })
+    assert.equal(
+      otherWorkspaceReplayable.recipeParameters.ref,
+      derivedReplayable.recipeParameters.ref,
+    )
+    assert.equal(
+      await client.v2RecipeParameterPayload.count({
+        where: { ref: derivedReplayable.recipeParameters.ref },
+      }),
+      2,
+    )
 
     await expectDomainCode(
       repository.persistOrReplay({
@@ -199,20 +315,22 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
       0,
     )
 
-    await assert.rejects(
-      client.v2MediaArtifact.create({
-        data: {
-          id: 'artifact-invalid-key',
-          workspaceId: workspaceA,
-          artifactKey: '/absolute/path.mp4',
-          sha256: sha('1'),
-          byteSize: 1n,
-          mediaType: 'video',
-          container: 'mp4',
-          status: 'available',
-        },
-      }),
-    )
+    if (usesPostgres) {
+      await assert.rejects(
+        client.v2MediaArtifact.create({
+          data: {
+            id: 'artifact-invalid-key',
+            workspaceId: workspaceA,
+            artifactKey: '/absolute/path.mp4',
+            sha256: sha('1'),
+            byteSize: 1n,
+            mediaType: 'video',
+            container: 'mp4',
+            status: 'available',
+          },
+        }),
+      )
+    }
 
     const concurrentManifest = createManifest({
       artifactKey: 'workspaces/a/artifacts/concurrent.mp4',
@@ -239,8 +357,65 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
     ])
     assert.deepEqual(concurrent.map((result) => result.replayed).sort(), [false, true])
 
-    assert.equal(await client.v2MediaArtifact.count({ where: { workspaceId: workspaceA } }), 3)
-    assert.equal(await client.v2MediaArtifactManifest.count({ where: { workspaceId: workspaceA } }), 3)
+    const concurrentRecipeA = createReplayableMediaArtifactManifest({
+      artifactKey: 'workspaces/a/artifacts/concurrent-recipe-a.mp4',
+      artifactSha256: sha('2'),
+      byteSize: 2048,
+      mediaType: 'video',
+      container: 'mp4',
+      recipe: {
+        id: 'render-video',
+        version: 'v3',
+        parameters: { quality: 'high', instruction: 'concurrent-protected-value' },
+      },
+      sources: [],
+    })
+    const concurrentRecipeB = createReplayableMediaArtifactManifest({
+      artifactKey: 'workspaces/a/artifacts/concurrent-recipe-b.mp4',
+      artifactSha256: sha('3'),
+      byteSize: 2048,
+      mediaType: 'video',
+      container: 'mp4',
+      recipe: {
+        id: 'render-video',
+        version: 'v3',
+        parameters: { instruction: 'concurrent-protected-value', quality: 'high' },
+      },
+      sources: [],
+    })
+    const concurrentRecipes = await Promise.all([
+      repository.persistOrReplay({
+        workspaceId: workspaceA,
+        artifactId: 'artifact-concurrent-recipe-a',
+        manifestId: 'manifest-concurrent-recipe-a',
+        lineageIds: [],
+        manifest: concurrentRecipeA.manifest,
+        recipeParameters: concurrentRecipeA.recipeParameters,
+        createdAt: '2026-07-13T00:46:00.000Z',
+      }),
+      repository.persistOrReplay({
+        workspaceId: workspaceA,
+        artifactId: 'artifact-concurrent-recipe-b',
+        manifestId: 'manifest-concurrent-recipe-b',
+        lineageIds: [],
+        manifest: concurrentRecipeB.manifest,
+        recipeParameters: concurrentRecipeB.recipeParameters,
+        createdAt: '2026-07-13T00:46:00.000Z',
+      }),
+    ])
+    assert.deepEqual(concurrentRecipes.map((result) => result.replayed), [false, false])
+    assert.equal(
+      await client.v2RecipeParameterPayload.count({
+        where: {
+          workspaceId: workspaceA,
+          parametersHash: concurrentRecipeA.recipeParameters.parametersHash,
+        },
+      }),
+      1,
+    )
+
+    assert.equal(await client.v2MediaArtifact.count({ where: { workspaceId: workspaceA } }), 6)
+    assert.equal(await client.v2MediaArtifactManifest.count({ where: { workspaceId: workspaceA } }), 6)
     assert.equal(await client.v2MediaArtifactLineage.count({ where: { workspaceId: workspaceA } }), 2)
   } finally {
     await cleanup()

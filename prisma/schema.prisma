@@ -69,6 +69,7 @@ model V2Workspace {
   mediaArtifacts     V2MediaArtifact[]
   mediaManifests     V2MediaArtifactManifest[]
   mediaLineage       V2MediaArtifactLineage[]
+  recipeParameters   V2RecipeParameterPayload[]
 
   @@map("v2_workspaces")
 }
@@ -234,18 +235,42 @@ model V2MediaArtifactManifest {
   recipeId       String
   recipeVersion  String
   parametersHash String
+  recipeParametersRef String?
   manifestJson   String
   createdAt      DateTime @default(now())
 
   workspace    V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   artifact     V2MediaArtifact          @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   lineageEdges V2MediaArtifactLineage[]
+  recipeParameters V2RecipeParameterPayload? @relation(fields: [recipeParametersRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
 
   @@unique([id, workspaceId])
   @@unique([artifactId, manifestHash])
   @@index([workspaceId, recipeId, recipeVersion])
   @@index([workspaceId, createdAt])
+  @@index([workspaceId, recipeParametersRef])
   @@map("v2_media_artifact_manifests")
+}
+
+model V2RecipeParameterPayload {
+  ref               String
+  workspaceId       String
+  parametersHash    String
+  canonicalByteSize Int
+  algorithm         String
+  keyId             String
+  nonce             String
+  ciphertext        String
+  authTag           String
+  createdAt         DateTime @default(now())
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  manifests V2MediaArtifactManifest[]
+
+  @@id([workspaceId, ref])
+  @@unique([workspaceId, parametersHash])
+  @@index([workspaceId, createdAt])
+  @@map("v2_recipe_parameter_payloads")
 }
 
 model V2MediaArtifactLineage {

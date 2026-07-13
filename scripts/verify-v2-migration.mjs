@@ -88,6 +88,10 @@ const requiredChecks = [
   'media_artifact_manifests_parameters_hash_check',
   'media_artifact_lineage_role_check',
   'media_artifact_lineage_ordinal_check',
+  'recipe_parameter_payloads_hash_check',
+  'recipe_parameter_payloads_ref_check',
+  'recipe_parameter_payloads_size_check',
+  'recipe_parameter_payloads_cipher_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

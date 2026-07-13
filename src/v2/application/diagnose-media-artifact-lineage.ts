@@ -249,7 +249,11 @@ export function diagnoseMediaArtifactLineageService(
                 id: manifest.id,
                 manifestHash: manifest.manifestHash,
                 schemaVersion: manifest.schemaVersion,
-                recipe: { ...manifest.recipe },
+                recipe: {
+                  id: manifest.recipe.id,
+                  version: manifest.recipe.version,
+                  parametersHash: manifest.recipe.parametersHash,
+                },
               },
             }
           : {}),

@@ -191,6 +191,50 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/artifact-replay-spec/v1': [
+      {
+        data: {
+          artifactId,
+          manifestId: 'manifest-example-3',
+          schemaVersion: 'media-artifact-manifest/v3',
+          manifestHash: '4'.repeat(64),
+          recipe: {
+            id: 'normalize-video',
+            version: 'v3',
+            parametersHash: '5'.repeat(64),
+          },
+          available: true,
+          parameters: {
+            ref: `recipe-parameters/sha256/${'5'.repeat(64)}`,
+            canonicalByteSize: 42,
+            protection: { algorithm: 'aes-256-gcm' },
+          },
+          issues: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          artifactId,
+          manifestId: 'manifest-example-legacy',
+          schemaVersion: 'media-artifact-manifest/v2',
+          manifestHash: '6'.repeat(64),
+          recipe: {
+            id: 'normalize-video',
+            version: 'v2',
+            parametersHash: '7'.repeat(64),
+          },
+          available: false,
+          issues: [
+            {
+              code: 'REPLAY_PARAMETERS_MISSING',
+              message: 'Manifest predates protected replay parameters',
+            },
+          ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/create-project-request/v1': [
       { name: 'Anúncio de descoberta' },
     ],

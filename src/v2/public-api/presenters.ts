@@ -89,7 +89,11 @@ export function presentMediaArtifact(artifact: MediaArtifactRecord) {
       id: manifest.id,
       schemaVersion: manifest.schemaVersion,
       manifestHash: manifest.manifestHash,
-      recipe: { ...manifest.recipe },
+      recipe: {
+        id: manifest.recipe.id,
+        version: manifest.recipe.version,
+        parametersHash: manifest.recipe.parametersHash,
+      },
       ...(manifest.probe ? { probe: { ...manifest.probe } } : {}),
       sources: manifest.sources.map((source) => ({
         artifactId: source.artifactId,

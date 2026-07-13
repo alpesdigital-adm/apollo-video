@@ -21,6 +21,13 @@ export interface MediaArtifactManifestRecord {
     id: string
     version: string
     parametersHash: string
+    parametersRef?: string
+  }
+  recipeParameters?: {
+    ref: string
+    parametersHash: string
+    canonicalByteSize: number
+    algorithm: 'aes-256-gcm'
   }
   probe?: MediaArtifactProbe
   sources: readonly MediaArtifactLineageRecord[]

@@ -376,7 +376,7 @@
 - [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
 - [x] Persistir hashes e versões de tool/model em cada edge. Evidência: manifest v2, colunas normalizadas de execution provenance e API pública por manifest.
 - [x] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
-- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-015: grafo recursivo e diagnóstico público entregues; falta reexecução a partir de parâmetros/providers versionados.
+- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-017: grafo, diagnóstico, provenance e payload de parâmetros protegido já foram entregues; falta ligar RenderInput/plan/providers e executar a reconstrução golden.
 
 ### F0.026 — Durable jobs [FR-232]
 
@@ -2660,7 +2660,7 @@ Confirmação hospedada:
 
 ### Slice F0-016 — Execution provenance versionada por edge
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 13 de julho de 2026 no commit `70f225a`; correção de estabilidade publicada no commit `1a58180`.
 
 Entregas:
 
@@ -2695,6 +2695,9 @@ Incidente encontrado e resolvido:
 - a primeira integração real revelou que o constraint legado aceitava apenas `media-artifact-manifest/v1`;
 - a correção foi feita por migration adicional append-only, sem reescrever a migration já aplicada;
 - após a migration de compatibilidade, o teste Postgres v2 passou integralmente.
+- o primeiro CI publicado (`29289558347`) revelou que uma fixture de idempotência usava relógio fixo e expirava após 24 horas;
+- a fixture passou a usar o relógio corrente, eliminando a bomba-relógio sem alterar a regra de produção;
+- o run `29289717455` aprovou os 20 passos no Linux após a correção.
 
 Pendências deliberadas:
 
@@ -2702,3 +2705,52 @@ Pendências deliberadas:
 - prompts e configurações sensíveis exigirão storage protegido com referência content-addressed e rights check;
 - Job, ProviderCall, ProjectVersion, plan e evaluation ainda precisam entrar no grafo F0.025;
 - a reexecução golden continuará aberta até RenderInput e parâmetros materializados estarem versionados.
+
+Confirmação hospedada:
+
+- o run `29289717455` aprovou os 20 passos no Linux no commit `1a58180`.
+
+### Slice F0-017 — Parâmetros de recipe protegidos e endereçados por conteúdo
+
+**Status:** concluído localmente em 13 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- contrato interno aditivo `media-artifact-manifest/v3`, preservando leitura integral de v1 e v2;
+- cada manifest v3 contém somente `parametersHash` e `parametersRef`, nunca o JSON bruto da recipe;
+- o payload canônico é endereçado por `recipe-parameters/sha256/{hash}` e limitado a 1 MiB;
+- serialização canônica garante que objetos semanticamente iguais gerem o mesmo hash/ref, independentemente da ordem das chaves;
+- payload protegido com AES-256-GCM, nonce aleatório e contexto autenticado que inclui workspace e referência;
+- key ID é validado e permanece apenas no registro interno; chave, plaintext, nonce, auth tag e ciphertext não são publicados;
+- adapter de cifra isolado por port permite substituir KMS/provider sem acoplar domínio ou repository;
+- Postgres e SQLite de protótipo armazenam payload, tamanho, algoritmo, key ID, nonce, ciphertext e auth tag;
+- chave primária composta por workspace + referência permite conteúdo igual em workspaces distintos sem colisão nem compartilhamento indevido;
+- deduplicação por workspace + parameters hash evita cifrar e armazenar novamente o mesmo payload dentro do workspace;
+- manifest, vínculo com payload cifrado, artifact e lineage são persistidos na mesma transação;
+- replay verifica referência, hash, tamanho e, quando a cifra está disponível, autentica e compara o plaintext canônico;
+- leitura do artifact revalida o vínculo v3, mas o contrato `artifact-detail/v1` continua sem expor a referência protegida;
+- capability externa `apollo.artifacts.replay-spec.read@1.0.0` usa o scope `artifacts:read`;
+- endpoint `GET /v1/artifacts/{artifactId}/replay-spec/{manifestId}` publica apenas recipe/hash, disponibilidade, referência, tamanho e algoritmo;
+- manifests v1/v2 respondem `available=false` e `REPLAY_PARAMETERS_MISSING`, sem inventar dados reproduzíveis;
+- não existe endpoint público de descriptografia ou leitura do payload bruto.
+
+Evidências locais:
+
+- domínio comprova determinismo, ausência do segredo no manifest, round-trip cifrado e falha com contexto de outro workspace;
+- integração Prisma comprova ciphertext sem plaintext, autenticação do payload armazenado e replay idempotente;
+- a mesma recipe é deduplicada dentro do workspace e coexistiu de forma isolada em dois workspaces;
+- duas transações concorrentes com outputs diferentes e a mesma recipe criaram ambos os artifacts e somente um payload protegido;
+- API ponta a ponta comprova OpenAPI, capability discovery, scope 403, isolamento 404 e resposta sem plaintext/ciphertext/key ID;
+- migration validada com 11 tabelas, 31 índices e 19 foreign keys;
+- contratos aprovados com 14 capabilities, 18 schemas, 21 exemplos e 12 paths;
+- suíte unitária passou para 41 testes;
+- build Next.js registra a rota dinâmica de replay spec;
+- integrações locais de artifact e API passaram no SQLite de protótipo.
+
+Limites explícitos desta slice:
+
+- a API informa se os parâmetros estão preservados, mas não autoriza sua recuperação;
+- workers futuros receberão acesso interno mínimo via adapter/KMS e rights check, nunca pela API pública;
+- rotação de chave, re-encriptação e auditoria de acesso ao plaintext serão uma slice de segurança separada;
+- reconstrução golden ainda depende de RenderInput, plan, assets materializados e adapters versionados;
+- confirmação Postgres/Linux hospedada ocorrerá após o próximo commit/push, mantendo a cadência incremental.

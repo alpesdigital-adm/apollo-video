@@ -1,5 +1,9 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
+import {
+  createRecipeParameterPayload,
+  type RecipeParameterPayload,
+} from './recipe-parameters.ts'
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const PORTABLE_TOKEN_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
@@ -85,7 +89,22 @@ export interface MediaArtifactManifestV2 extends MediaArtifactManifestBodyV2 {
   manifestHash: string
 }
 
-export type MediaArtifactManifest = MediaArtifactManifestV1 | MediaArtifactManifestV2
+export interface MediaArtifactManifestBodyV3 {
+  schemaVersion: 'media-artifact-manifest/v3'
+  artifact: MediaArtifactManifestBodyV1['artifact']
+  recipe: MediaArtifactManifestBodyV1['recipe'] & { parametersRef: string }
+  sources: MediaArtifactSourceV2[]
+  probe?: MediaArtifactProbe
+}
+
+export interface MediaArtifactManifestV3 extends MediaArtifactManifestBodyV3 {
+  manifestHash: string
+}
+
+export type MediaArtifactManifest =
+  | MediaArtifactManifestV1
+  | MediaArtifactManifestV2
+  | MediaArtifactManifestV3
 
 export interface CreateMediaArtifactManifestInput {
   artifactKey: string
@@ -117,6 +136,11 @@ export interface CreateMediaArtifactSourceV2 extends MediaArtifactSource {
 export interface CreateMediaArtifactManifestV2Input
   extends Omit<CreateMediaArtifactManifestInput, 'sources'> {
   sources?: CreateMediaArtifactSourceV2[]
+}
+
+export interface ReplayableMediaArtifactManifest {
+  manifest: MediaArtifactManifestV3
+  recipeParameters: RecipeParameterPayload
 }
 
 function validatePortableKey(value: string, field: string): string {
@@ -303,6 +327,29 @@ export function createMediaArtifactManifestV2(
   return { ...body, manifestHash: calculateCanonicalHash(body) }
 }
 
+export function createReplayableMediaArtifactManifest(
+  input: CreateMediaArtifactManifestV2Input,
+): ReplayableMediaArtifactManifest {
+  const recipeParameters = createRecipeParameterPayload(input.recipe.parameters)
+  const v2 = createMediaArtifactManifestV2(input)
+  const { manifestHash: _v2Hash, ...v2Body } = v2
+  const manifestBody: MediaArtifactManifestBodyV3 = {
+    ...v2Body,
+    schemaVersion: 'media-artifact-manifest/v3',
+    recipe: {
+      ...v2.recipe,
+      parametersRef: recipeParameters.ref,
+    },
+  }
+  return {
+    manifest: {
+      ...manifestBody,
+      manifestHash: calculateCanonicalHash(manifestBody),
+    },
+    recipeParameters,
+  }
+}
+
 export function assertMediaArtifactManifest(manifest: MediaArtifactManifest): void {
   assertExactKeys(
     manifest,
@@ -311,7 +358,8 @@ export function assertMediaArtifactManifest(manifest: MediaArtifactManifest): vo
   )
   assertDomain(
     manifest.schemaVersion === 'media-artifact-manifest/v1' ||
-      manifest.schemaVersion === 'media-artifact-manifest/v2',
+      manifest.schemaVersion === 'media-artifact-manifest/v2' ||
+      manifest.schemaVersion === 'media-artifact-manifest/v3',
     'INVALID_MEDIA_ARTIFACT',
     'manifest schemaVersion is invalid',
   )
@@ -320,7 +368,13 @@ export function assertMediaArtifactManifest(manifest: MediaArtifactManifest): vo
     ['artifactKey', 'sha256', 'byteSize', 'mediaType', 'container'],
     'artifact',
   )
-  assertExactKeys(manifest.recipe, ['id', 'version', 'parametersHash'], 'recipe')
+  assertExactKeys(
+    manifest.recipe,
+    manifest.schemaVersion === 'media-artifact-manifest/v3'
+      ? ['id', 'version', 'parametersHash', 'parametersRef']
+      : ['id', 'version', 'parametersHash'],
+    'recipe',
+  )
   validatePortableKey(manifest.artifact.artifactKey, 'artifact.artifactKey')
   validateSha256(manifest.artifact.sha256, 'artifact.sha256')
   assertDomain(
@@ -337,6 +391,14 @@ export function assertMediaArtifactManifest(manifest: MediaArtifactManifest): vo
   validateToken(manifest.recipe.id, 'recipe.id')
   validateToken(manifest.recipe.version, 'recipe.version')
   validateSha256(manifest.recipe.parametersHash, 'recipe.parametersHash')
+  if (manifest.schemaVersion === 'media-artifact-manifest/v3') {
+    assertDomain(
+      manifest.recipe.parametersRef ===
+        `recipe-parameters/sha256/${manifest.recipe.parametersHash}`,
+      'INVALID_MEDIA_ARTIFACT',
+      'recipe.parametersRef does not match parametersHash',
+    )
+  }
   for (const source of manifest.sources) {
     assertExactKeys(
       source,

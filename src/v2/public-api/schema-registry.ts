@@ -460,6 +460,86 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('artifact-replay-spec', 1, 'Artifact replay specification response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'artifactId', 'manifestId', 'schemaVersion', 'manifestHash',
+        'recipe', 'available', 'issues',
+      ],
+      properties: {
+        artifactId: idSchema,
+        manifestId: idSchema,
+        schemaVersion: { type: 'string', minLength: 1, maxLength: 64 },
+        manifestHash: sha256Schema,
+        recipe: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'version', 'parametersHash'],
+          properties: {
+            id: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+            version: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+            parametersHash: sha256Schema,
+          },
+        },
+        available: { type: 'boolean' },
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ref', 'canonicalByteSize', 'protection'],
+          properties: {
+            ref: {
+              type: 'string',
+              pattern: '^recipe-parameters/sha256/[a-f0-9]{64}$',
+            },
+            canonicalByteSize: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 1048576,
+            },
+            protection: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['algorithm'],
+              properties: { algorithm: { const: 'aes-256-gcm' } },
+            },
+          },
+        },
+        issues: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['code', 'message'],
+            properties: {
+              code: { const: 'REPLAY_PARAMETERS_MISSING' },
+              message: { type: 'string', minLength: 1 },
+            },
+          },
+        },
+      },
+      allOf: [
+        {
+          if: { properties: { available: { const: true } } },
+          then: {
+            required: ['parameters'],
+            properties: {
+              parameters: { type: 'object' },
+              issues: { type: 'array', maxItems: 0 },
+            },
+          },
+        },
+        {
+          if: { properties: { available: { const: false } } },
+          then: {
+            not: { required: ['parameters'] },
+            properties: { issues: { type: 'array', minItems: 1 } },
+          },
+        },
+      ],
+    }),
+  ),
   defineSchema('create-project-request', 1, 'Create project request', {
     type: 'object',
     additionalProperties: false,

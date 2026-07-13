@@ -12,7 +12,13 @@ import {
   assertMediaArtifactManifest,
   createMediaArtifactManifest,
   createMediaArtifactManifestV2,
+  createReplayableMediaArtifactManifest,
 } from '../../src/v2/domain/media-artifact.ts'
+import {
+  assertRecipeParameterPayload,
+  createRecipeParameterPayload,
+} from '../../src/v2/domain/recipe-parameters.ts'
+import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
 import {
   assertCommandMatchesVersion,
   createEditCommand,
@@ -25,6 +31,7 @@ import {
 import { readMediaArtifactService } from '../../src/v2/application/read-media-artifact.ts'
 import { diagnoseMediaArtifactLineageService } from '../../src/v2/application/diagnose-media-artifact-lineage.ts'
 import { readMediaArtifactProvenanceService } from '../../src/v2/application/read-media-artifact-provenance.ts'
+import { readMediaArtifactReplaySpecService } from '../../src/v2/application/read-media-artifact-replay-spec.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -326,6 +333,128 @@ test('media artifact manifest v2 hashes tool and model provenance without raw co
       }),
     'INVALID_MEDIA_ARTIFACT',
   )
+})
+
+test('manifest v3 references canonical parameters encrypted with authenticated context', async () => {
+  const parameters = { crf: 23, privatePrompt: 'protected-replay-value' }
+  const replayable = createReplayableMediaArtifactManifest({
+    artifactKey: 'workspaces/ws/artifacts/replayable.mp4',
+    artifactSha256: 'a'.repeat(64),
+    byteSize: 4096,
+    mediaType: 'video',
+    container: 'mp4',
+    recipe: { id: 'render-video', version: 'v3', parameters },
+    sources: [
+      {
+        artifactKey: 'workspaces/ws/masters/source.mov',
+        sha256: 'b'.repeat(64),
+        role: 'primary',
+        execution: {
+          tool: { id: 'ffmpeg', version: '7.1.1', digest: 'c'.repeat(64) },
+        },
+      },
+    ],
+  })
+
+  assert.equal(replayable.manifest.schemaVersion, 'media-artifact-manifest/v3')
+  assert.equal(
+    replayable.manifest.recipe.parametersRef,
+    replayable.recipeParameters.ref,
+  )
+  assert.equal(
+    replayable.manifest.recipe.parametersHash,
+    replayable.recipeParameters.parametersHash,
+  )
+  assert.equal(JSON.stringify(replayable.manifest).includes('protected-replay-value'), false)
+  assert.equal(replayable.recipeParameters.canonicalJson.includes('protected-replay-value'), true)
+  assert.doesNotThrow(() => assertRecipeParameterPayload(replayable.recipeParameters))
+  assert.deepEqual(
+    createRecipeParameterPayload({ privatePrompt: 'protected-replay-value', crf: 23 }),
+    replayable.recipeParameters,
+  )
+
+  const cipher = createAesRecipeParameterCipher({
+    keyId: 'test-key-v1',
+    key: Buffer.alloc(32, 7),
+  })
+  const context = `workspace-1:${replayable.recipeParameters.ref}`
+  const sealed = await cipher.seal(replayable.recipeParameters.canonicalJson, context)
+  assert.equal(sealed.algorithm, 'aes-256-gcm')
+  assert.equal(sealed.ciphertext.includes('protected-replay-value'), false)
+  assert.equal(
+    await cipher.open(sealed, context),
+    replayable.recipeParameters.canonicalJson,
+  )
+  await assert.rejects(
+    cipher.open(sealed, `workspace-2:${replayable.recipeParameters.ref}`),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+})
+
+test('artifact replay specification exposes references but never protected parameters', async () => {
+  const parametersHash = 'd'.repeat(64)
+  const parametersRef = `recipe-parameters/sha256/${parametersHash}`
+  const artifact = {
+    id: 'artifact-replayable',
+    manifests: [
+      {
+        id: 'manifest-replayable',
+        schemaVersion: 'media-artifact-manifest/v3',
+        manifestHash: 'e'.repeat(64),
+        recipe: {
+          id: 'render-video',
+          version: 'v3',
+          parametersHash,
+          parametersRef,
+        },
+        recipeParameters: {
+          ref: parametersRef,
+          parametersHash,
+          canonicalByteSize: 81,
+          algorithm: 'aes-256-gcm',
+        },
+        sources: [],
+        createdAt: '2026-07-13T22:30:00.000Z',
+      },
+      {
+        id: 'manifest-legacy',
+        schemaVersion: 'media-artifact-manifest/v2',
+        manifestHash: 'f'.repeat(64),
+        recipe: {
+          id: 'render-video',
+          version: 'v2',
+          parametersHash,
+        },
+        sources: [],
+        createdAt: '2026-07-13T22:29:00.000Z',
+      },
+    ],
+  }
+  const readReplaySpec = readMediaArtifactReplaySpecService({
+    repository: { async findById() { return artifact } },
+  })
+
+  const replayable = await readReplaySpec(
+    'workspace-1',
+    artifact.id,
+    'manifest-replayable',
+  )
+  assert.equal(replayable.available, true)
+  assert.deepEqual(replayable.parameters, {
+    ref: parametersRef,
+    canonicalByteSize: 81,
+    protection: { algorithm: 'aes-256-gcm' },
+  })
+  assert.equal(JSON.stringify(replayable).includes('canonicalJson'), false)
+  assert.equal(JSON.stringify(replayable).includes('ciphertext'), false)
+  assert.equal(JSON.stringify(replayable).includes('keyId'), false)
+
+  const legacy = await readReplaySpec('workspace-1', artifact.id, 'manifest-legacy')
+  assert.equal(legacy.available, false)
+  assert.equal('parameters' in legacy, false)
+  assert.deepEqual(legacy.issues.map((issue) => issue.code), [
+    'REPLAY_PARAMETERS_MISSING',
+  ])
 })
 
 test('media artifact lookup normalizes ids and hides missing workspace records', async () => {

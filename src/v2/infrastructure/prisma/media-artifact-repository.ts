@@ -9,20 +9,29 @@ import type {
   MediaArtifactQueryRepository,
   MediaArtifactRecord,
 } from '../../application/ports/media-artifact-query-repository.ts'
+import type { RecipeParameterCipher } from '../../application/ports/recipe-parameter-cipher.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
   assertMediaArtifactManifest,
   type MediaArtifactManifest,
 } from '../../domain/media-artifact.ts'
+import {
+  assertRecipeParameterPayload,
+  type RecipeParameterPayload,
+} from '../../domain/recipe-parameters.ts'
 
 type PersistenceClient = Pick<
   PrismaClient,
-  'v2MediaArtifact' | 'v2MediaArtifactManifest' | 'v2MediaArtifactLineage'
+  | 'v2MediaArtifact'
+  | 'v2MediaArtifactManifest'
+  | 'v2MediaArtifactLineage'
+  | 'v2RecipeParameterPayload'
 >
 
 function sourceExecution(manifest: MediaArtifactManifest, index: number) {
-  return manifest.schemaVersion === 'media-artifact-manifest/v2'
+  return manifest.schemaVersion === 'media-artifact-manifest/v2' ||
+    manifest.schemaVersion === 'media-artifact-manifest/v3'
     ? manifest.sources[index].execution
     : undefined
 }
@@ -82,6 +91,7 @@ async function findReplay(
   client: PersistenceClient,
   bundle: MediaArtifactPersistenceBundle,
   manifestJson: string,
+  cipher?: RecipeParameterCipher,
 ): Promise<MediaArtifactPersistenceResult | null> {
   const artifact = await client.v2MediaArtifact.findUnique({
     where: {
@@ -111,6 +121,14 @@ async function findReplay(
     )
   }
 
+  await assertStoredRecipeParameters(
+    client,
+    bundle.workspaceId,
+    storedManifest.recipeParametersRef,
+    bundle.recipeParameters,
+    cipher,
+  )
+
   const lineage = await client.v2MediaArtifactLineage.findMany({
     where: { workspaceId: bundle.workspaceId, manifestId: storedManifest.id },
     orderBy: { ordinal: 'asc' },
@@ -139,13 +157,86 @@ async function findReplay(
   return { artifactId: artifact.id, manifestId: storedManifest.id, replayed: true }
 }
 
+function recipeParameterContext(workspaceId: string, ref: string): string {
+  return `apollo-recipe-parameters/v1:${workspaceId}:${ref}`
+}
+
+function storedRecipeParametersMatch(stored: {
+  ref: string
+  parametersHash: string
+  canonicalByteSize: number
+  algorithm: string
+  keyId: string
+  nonce: string
+  ciphertext: string
+  authTag: string
+}): boolean {
+  return (
+    stored.ref === `recipe-parameters/sha256/${stored.parametersHash}` &&
+    stored.canonicalByteSize > 0 &&
+    stored.canonicalByteSize <= 1024 * 1024 &&
+    stored.algorithm === 'aes-256-gcm' &&
+    /^[a-z0-9][a-z0-9._-]{0,63}$/.test(stored.keyId) &&
+    /^[A-Za-z0-9_-]{16}$/.test(stored.nonce) &&
+    stored.ciphertext.length > 0 &&
+    /^[A-Za-z0-9_-]{22}$/.test(stored.authTag)
+  )
+}
+
+async function assertStoredRecipeParameters(
+  client: PersistenceClient,
+  workspaceId: string,
+  storedId: string | null,
+  expected: RecipeParameterPayload | undefined,
+  cipher?: RecipeParameterCipher,
+): Promise<void> {
+  if (!expected) {
+    if (storedId !== null) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Unexpected recipe parameter payload link')
+    }
+    return
+  }
+  if (storedId !== expected.ref) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Recipe parameter payload link is invalid')
+  }
+  const stored = await client.v2RecipeParameterPayload.findUnique({
+    where: { workspaceId_ref: { workspaceId, ref: storedId } },
+  })
+  if (
+    !stored ||
+    stored.workspaceId !== workspaceId ||
+    stored.parametersHash !== expected.parametersHash ||
+    stored.canonicalByteSize !== expected.canonicalByteSize ||
+    !storedRecipeParametersMatch(stored)
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Recipe parameter payload metadata is invalid')
+  }
+  if (cipher) {
+    const plaintext = await cipher.open(
+      {
+        algorithm: stored.algorithm as 'aes-256-gcm',
+        keyId: stored.keyId,
+        nonce: stored.nonce,
+        ciphertext: stored.ciphertext,
+        authTag: stored.authTag,
+      },
+      recipeParameterContext(workspaceId, expected.ref),
+    )
+    if (plaintext !== expected.canonicalJson) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Recipe parameter plaintext is invalid')
+    }
+  }
+}
+
 export class PrismaMediaArtifactRepository
   implements MediaArtifactPersistenceRepository, MediaArtifactQueryRepository
 {
   private readonly client: PrismaClient
+  private readonly recipeParameterCipher?: RecipeParameterCipher
 
-  constructor(client: PrismaClient) {
+  constructor(client: PrismaClient, recipeParameterCipher?: RecipeParameterCipher) {
     this.client = client
+    this.recipeParameterCipher = recipeParameterCipher
   }
 
   async findById(workspaceId: string, artifactId: string): Promise<MediaArtifactRecord | null> {
@@ -155,6 +246,7 @@ export class PrismaMediaArtifactRepository
         manifests: {
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           include: {
+            recipeParameters: true,
             lineageEdges: {
               orderBy: { ordinal: 'asc' },
               include: {
@@ -200,7 +292,12 @@ export class PrismaMediaArtifactRepository
         manifest.manifestHash === stored.manifestHash &&
         manifest.recipe.id === stored.recipeId &&
         manifest.recipe.version === stored.recipeVersion &&
-        manifest.recipe.parametersHash === stored.parametersHash
+        manifest.recipe.parametersHash === stored.parametersHash &&
+        (manifest.schemaVersion === 'media-artifact-manifest/v3'
+          ? manifest.recipe.parametersRef === stored.recipeParametersRef &&
+            stored.recipeParameters?.parametersHash === manifest.recipe.parametersHash &&
+            storedRecipeParametersMatch(stored.recipeParameters)
+          : stored.recipeParametersRef === null && stored.recipeParameters === null)
       const lineageMatches =
         manifest.sources.length === stored.lineageEdges.length &&
         stored.lineageEdges.every((edge, index) => {
@@ -229,7 +326,20 @@ export class PrismaMediaArtifactRepository
           id: stored.recipeId,
           version: stored.recipeVersion,
           parametersHash: stored.parametersHash,
+          ...(stored.recipeParametersRef
+            ? { parametersRef: stored.recipeParametersRef }
+            : {}),
         },
+        ...(stored.recipeParameters
+          ? {
+              recipeParameters: {
+                ref: stored.recipeParameters.ref,
+                parametersHash: stored.recipeParameters.parametersHash,
+                canonicalByteSize: stored.recipeParameters.canonicalByteSize,
+                algorithm: 'aes-256-gcm' as const,
+              },
+            }
+          : {}),
         ...(manifest.probe ? { probe: { ...manifest.probe } } : {}),
         sources: stored.lineageEdges.map((edge) => ({
           artifactId: edge.sourceArtifact.id,
@@ -284,6 +394,35 @@ export class PrismaMediaArtifactRepository
     bundle: MediaArtifactPersistenceBundle,
   ): Promise<MediaArtifactPersistenceResult> {
     assertMediaArtifactManifest(bundle.manifest)
+    if (bundle.manifest.schemaVersion === 'media-artifact-manifest/v3') {
+      if (!bundle.recipeParameters) {
+        throw new DomainError(
+          'INVALID_MEDIA_ARTIFACT',
+          'Manifest v3 requires protected recipe parameters',
+        )
+      }
+      if (!this.recipeParameterCipher) {
+        throw new DomainError(
+          'PERSISTENCE_NOT_CONFIGURED',
+          'Recipe parameter cipher is not configured',
+        )
+      }
+      assertRecipeParameterPayload(bundle.recipeParameters)
+      if (
+        bundle.recipeParameters.ref !== bundle.manifest.recipe.parametersRef ||
+        bundle.recipeParameters.parametersHash !== bundle.manifest.recipe.parametersHash
+      ) {
+        throw new DomainError(
+          'INVALID_MEDIA_ARTIFACT',
+          'Protected recipe parameters do not match manifest v3',
+        )
+      }
+    } else if (bundle.recipeParameters) {
+      throw new DomainError(
+        'INVALID_MEDIA_ARTIFACT',
+        'Legacy manifests cannot link protected recipe parameters',
+      )
+    }
     if (
       bundle.lineageIds.length !== bundle.manifest.sources.length ||
       new Set(bundle.lineageIds).size !== bundle.lineageIds.length
@@ -320,7 +459,12 @@ export class PrismaMediaArtifactRepository
         let artifact = await transaction.v2MediaArtifact.findUnique({ where: artifactWhere })
         if (artifact) {
           assertArtifactIdentity(artifact, bundle.manifest)
-          const replay = await findReplay(transaction, bundle, manifestJson)
+          const replay = await findReplay(
+            transaction,
+            bundle,
+            manifestJson,
+            this.recipeParameterCipher,
+          )
           if (replay) return replay
         } else {
           artifact = await transaction.v2MediaArtifact.create({
@@ -365,6 +509,69 @@ export class PrismaMediaArtifactRepository
           }),
         )
 
+        let recipeParametersRef: string | undefined
+        if (bundle.recipeParameters) {
+          const recipeParameterCipher = this.recipeParameterCipher
+          if (!recipeParameterCipher) {
+            throw new DomainError(
+              'PERSISTENCE_NOT_CONFIGURED',
+              'Recipe parameter cipher is not configured',
+            )
+          }
+          const existing = await transaction.v2RecipeParameterPayload.findUnique({
+            where: {
+              workspaceId_parametersHash: {
+                workspaceId: bundle.workspaceId,
+                parametersHash: bundle.recipeParameters.parametersHash,
+              },
+            },
+          })
+          if (existing) {
+            await assertStoredRecipeParameters(
+              transaction,
+              bundle.workspaceId,
+              existing.ref,
+              bundle.recipeParameters,
+              recipeParameterCipher,
+            )
+            recipeParametersRef = existing.ref
+          } else {
+            const sealed = await recipeParameterCipher.seal(
+              bundle.recipeParameters.canonicalJson,
+              recipeParameterContext(bundle.workspaceId, bundle.recipeParameters.ref),
+            )
+            const created = await transaction.v2RecipeParameterPayload.upsert({
+              where: {
+                workspaceId_parametersHash: {
+                  workspaceId: bundle.workspaceId,
+                  parametersHash: bundle.recipeParameters.parametersHash,
+                },
+              },
+              update: {},
+              create: {
+                ref: bundle.recipeParameters.ref,
+                workspaceId: bundle.workspaceId,
+                parametersHash: bundle.recipeParameters.parametersHash,
+                canonicalByteSize: bundle.recipeParameters.canonicalByteSize,
+                algorithm: sealed.algorithm,
+                keyId: sealed.keyId,
+                nonce: sealed.nonce,
+                ciphertext: sealed.ciphertext,
+                authTag: sealed.authTag,
+                createdAt,
+              },
+            })
+            await assertStoredRecipeParameters(
+              transaction,
+              bundle.workspaceId,
+              created.ref,
+              bundle.recipeParameters,
+              recipeParameterCipher,
+            )
+            recipeParametersRef = created.ref
+          }
+        }
+
         const storedManifest = await transaction.v2MediaArtifactManifest.create({
           data: {
             id: bundle.manifestId,
@@ -375,6 +582,7 @@ export class PrismaMediaArtifactRepository
             recipeId: bundle.manifest.recipe.id,
             recipeVersion: bundle.manifest.recipe.version,
             parametersHash: bundle.manifest.recipe.parametersHash,
+            recipeParametersRef,
             manifestJson,
             createdAt,
           },
@@ -408,7 +616,12 @@ export class PrismaMediaArtifactRepository
       })
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        const replay = await findReplay(this.client, bundle, manifestJson)
+        const replay = await findReplay(
+          this.client,
+          bundle,
+          manifestJson,
+          this.recipeParameterCipher,
+        )
         if (replay) return replay
         throw new DomainError(
           'PERSISTENCE_CONFLICT',

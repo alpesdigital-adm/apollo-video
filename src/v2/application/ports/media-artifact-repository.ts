@@ -1,4 +1,5 @@
 import type { MediaArtifactManifest } from '../../domain/media-artifact.ts'
+import type { RecipeParameterPayload } from '../../domain/recipe-parameters.ts'
 
 export interface MediaArtifactPersistenceBundle {
   workspaceId: string
@@ -6,6 +7,7 @@ export interface MediaArtifactPersistenceBundle {
   manifestId: string
   lineageIds: readonly string[]
   manifest: MediaArtifactManifest
+  recipeParameters?: RecipeParameterPayload
   createdAt: string
 }
 
