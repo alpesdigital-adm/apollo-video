@@ -19,6 +19,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
   const client = new PrismaClient()
   const workspaceId = 'integration-workspace-v2'
   const clientId = 'integration-client-v2'
+  const testNow = new Date()
 
   try {
     await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
@@ -39,7 +40,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     const counters = new Map()
     const createProject = createProjectService({
       repository: new PrismaProjectCreationRepository(client),
-      clock: () => new Date('2026-07-12T14:01:00.000Z'),
+      clock: () => testNow,
       createId: (kind) => {
         const next = (counters.get(kind) ?? 0) + 1
         counters.set(kind, next)
