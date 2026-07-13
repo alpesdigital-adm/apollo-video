@@ -11,6 +11,7 @@ import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import {
   assertMediaArtifactManifest,
   createMediaArtifactManifest,
+  createMediaArtifactManifestV2,
 } from '../../src/v2/domain/media-artifact.ts'
 import {
   assertCommandMatchesVersion,
@@ -23,6 +24,7 @@ import {
 } from '../../src/v2/application/version-hash.ts'
 import { readMediaArtifactService } from '../../src/v2/application/read-media-artifact.ts'
 import { diagnoseMediaArtifactLineageService } from '../../src/v2/application/diagnose-media-artifact-lineage.ts'
+import { readMediaArtifactProvenanceService } from '../../src/v2/application/read-media-artifact-provenance.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -238,6 +240,94 @@ test('media artifact manifest rejects absolute and traversal keys', () => {
   )
 })
 
+test('media artifact manifest v2 hashes tool and model provenance without raw config', () => {
+  const input = {
+    artifactKey: 'workspaces/ws/artifacts/generated.mp4',
+    artifactSha256: 'a'.repeat(64),
+    byteSize: 2048,
+    mediaType: 'video',
+    container: 'mp4',
+    recipe: { id: 'generate-video', version: 'v2', parameters: { duration: 8 } },
+    sources: [
+      {
+        artifactKey: 'workspaces/ws/masters/source.mp4',
+        sha256: 'b'.repeat(64),
+        role: 'primary',
+        execution: {
+          tool: { id: 'heygen-adapter', version: '2.1.0', digest: 'c'.repeat(64) },
+          model: {
+            provider: 'heygen',
+            id: 'avatar-iv',
+            version: '2026.07',
+            config: { privatePrompt: 'do-not-persist', quality: 'high', seed: 42 },
+          },
+        },
+      },
+    ],
+  }
+  const manifest = createMediaArtifactManifestV2(input)
+  const reordered = createMediaArtifactManifestV2({
+    ...input,
+    sources: [
+      {
+        ...input.sources[0],
+        execution: {
+          ...input.sources[0].execution,
+          model: {
+            ...input.sources[0].execution.model,
+            config: { seed: 42, quality: 'high', privatePrompt: 'do-not-persist' },
+          },
+        },
+      },
+    ],
+  })
+
+  assert.equal(manifest.schemaVersion, 'media-artifact-manifest/v2')
+  assert.deepEqual(manifest, reordered)
+  assert.doesNotThrow(() => assertMediaArtifactManifest(manifest))
+  assert.equal(manifest.sources[0].execution.tool.digest, 'c'.repeat(64))
+  assert.equal(manifest.sources[0].execution.model.configHash.length, 64)
+  assert.equal(JSON.stringify(manifest).includes('do-not-persist'), false)
+  assert.equal(JSON.stringify(manifest).includes('privatePrompt'), false)
+  const { manifestHash: _manifestHash, ...body } = manifest
+  const maliciousBody = {
+    ...body,
+    sources: [
+      {
+        ...body.sources[0],
+        execution: {
+          ...body.sources[0].execution,
+          rawConfig: { privatePrompt: 'smuggled-secret' },
+        },
+      },
+    ],
+  }
+  expectDomainError(
+    () =>
+      assertMediaArtifactManifest({
+        ...maliciousBody,
+        manifestHash: calculateVersionHash(maliciousBody),
+      }),
+    'INVALID_MEDIA_ARTIFACT',
+  )
+  expectDomainError(
+    () =>
+      createMediaArtifactManifestV2({
+        ...input,
+        sources: [
+          {
+            ...input.sources[0],
+            execution: {
+              ...input.sources[0].execution,
+              tool: { ...input.sources[0].execution.tool, digest: 'invalid' },
+            },
+          },
+        ],
+      }),
+    'INVALID_MEDIA_ARTIFACT',
+  )
+})
+
 test('media artifact lookup normalizes ids and hides missing workspace records', async () => {
   const found = { id: 'artifact-found' }
   const calls = []
@@ -260,6 +350,53 @@ test('media artifact lookup normalizes ids and hides missing workspace records',
     readArtifact('workspace-1', 'x'),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
+})
+
+test('artifact provenance reports legacy edges instead of inventing execution identity', async () => {
+  const artifact = {
+    id: 'artifact-legacy',
+    workspaceId: 'workspace-1',
+    artifactKey: 'workspaces/1/legacy.mp4',
+    sha256: 'a'.repeat(64),
+    byteSize: 100n,
+    mediaType: 'video',
+    container: 'mp4',
+    status: 'available',
+    manifests: [
+      {
+        id: 'manifest-legacy',
+        schemaVersion: 'media-artifact-manifest/v1',
+        manifestHash: 'b'.repeat(64),
+        recipe: { id: 'normalize-video', version: 'v1', parametersHash: 'c'.repeat(64) },
+        sources: [
+          {
+            artifactId: 'artifact-source',
+            artifactKey: 'workspaces/1/source.mov',
+            sha256: 'd'.repeat(64),
+            role: 'primary',
+            ordinal: 0,
+          },
+        ],
+        createdAt: '2026-07-12T20:00:00.000Z',
+      },
+    ],
+    createdAt: '2026-07-12T20:00:00.000Z',
+  }
+  const readProvenance = readMediaArtifactProvenanceService({
+    repository: { async findById() { return artifact } },
+  })
+
+  const result = await readProvenance('workspace-1', artifact.id, 'manifest-legacy')
+  assert.equal(result.complete, false)
+  assert.equal('execution' in result.edges[0], false)
+  assert.deepEqual(result.issues, [
+    {
+      code: 'EXECUTION_PROVENANCE_MISSING',
+      sourceArtifactId: 'artifact-source',
+      ordinal: 0,
+      message: 'Lineage edge has no versioned execution provenance',
+    },
+  ])
 })
 
 test('lineage diagnostic returns a deterministic source-first healthy graph', async () => {

@@ -1,4 +1,8 @@
-import type { MediaArtifactProbe, MediaArtifactType } from '../../domain/media-artifact.ts'
+import type {
+  MediaArtifactExecutionProvenance,
+  MediaArtifactProbe,
+  MediaArtifactType,
+} from '../../domain/media-artifact.ts'
 
 export interface MediaArtifactLineageRecord {
   artifactId: string
@@ -6,6 +10,7 @@ export interface MediaArtifactLineageRecord {
   sha256: string
   role: string
   ordinal: number
+  execution?: MediaArtifactExecutionProvenance
 }
 
 export interface MediaArtifactManifestRecord {

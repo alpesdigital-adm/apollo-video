@@ -374,7 +374,7 @@
 
 - [ ] Modelar grafo de artifact → version → plan → sources → jobs/providers.
 - [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
-- [ ] Persistir hashes e versões de tool/model em cada edge.
+- [x] Persistir hashes e versões de tool/model em cada edge. Evidência: manifest v2, colunas normalizadas de execution provenance e API pública por manifest.
 - [x] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
 - [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-015: grafo recursivo e diagnóstico público entregues; falta reexecução a partir de parâmetros/providers versionados.
 
@@ -2621,7 +2621,7 @@ Confirmação hospedada:
 
 ### Slice F0-015 — Diagnóstico recursivo de lineage
 
-**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 12 de julho de 2026 no commit `4e52327`.
 
 Entregas:
 
@@ -2653,3 +2653,52 @@ Limite explícito desta slice:
 - ainda não significa que o artifact pode ser regenerado do zero;
 - a reexecução real depende de persistir parâmetros reproduzíveis, versões/hashes de tools/models, RenderInput e adapters de provider;
 - por isso a microtarefa final de reconstrução em F0.025 permanece aberta.
+
+Confirmação hospedada:
+
+- o run `29217265757` aprovou os 20 passos no Linux, incluindo o diagnóstico recursivo público.
+
+### Slice F0-016 — Execution provenance versionada por edge
+
+**Status:** concluído em 12 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- contrato interno aditivo `media-artifact-manifest/v2`, mantendo leitura integral do v1;
+- cada source edge v2 exige tool ID, versão e digest SHA-256;
+- edges gerados por IA também registram provider, model ID, versão e hash canônico da configuração;
+- configuração bruta, prompts, seeds privados e parâmetros do provider não entram no manifest nem na API;
+- model config com ordem de chaves diferente produz o mesmo `configHash` e `manifestHash`;
+- sete colunas normalizadas de provenance foram adicionadas ao lineage no Postgres e SQLite de protótipo;
+- constraints SQL garantem grupos tool/model completos, tokens portáteis e hashes válidos;
+- manifests v1 continuam legíveis e seus edges permanecem explicitamente legacy, sem provenance inventada;
+- replay compara também toda a execution provenance e rejeita divergência imutável;
+- leitura do artifact revalida provenance normalizada contra o manifest v2;
+- presenter `artifact-detail/v1` foi fechado explicitamente para não alterar o contrato anterior;
+- capability `apollo.artifacts.provenance.read@1.0.0` expõe provenance segura por artifact/manifest;
+- endpoint `/v1/artifacts/{artifactId}/provenance/{manifestId}` usa scope `artifacts:read` e isolamento do workspace autenticado;
+- resposta informa `complete=false` e `EXECUTION_PROVENANCE_MISSING` para edges legacy.
+
+Evidências:
+
+- migration aplicada no Postgres 16 sem alterar dados antigos;
+- integração persiste e relê tool ID/version/digest e model provider/ID/version/config hash;
+- JSON persistido e resposta pública não contêm o prompt privado usado na fixture;
+- manifest v2 rejeita digest inválido;
+- teste unitário comprova determinismo do config hash e compatibilidade de manifests v1;
+- integração pública comprova autenticação, scope, OpenAPI e provenance completa;
+- contratos aprovados com 13 capabilities, 17 schemas, 19 exemplos e 11 paths;
+- build registra a nova rota dinâmica de provenance.
+
+Incidente encontrado e resolvido:
+
+- a primeira integração real revelou que o constraint legado aceitava apenas `media-artifact-manifest/v1`;
+- a correção foi feita por migration adicional append-only, sem reescrever a migration já aplicada;
+- após a migration de compatibilidade, o teste Postgres v2 passou integralmente.
+
+Pendências deliberadas:
+
+- provenance informa identidade/hash, mas ainda não persiste o payload reproduzível dos parâmetros;
+- prompts e configurações sensíveis exigirão storage protegido com referência content-addressed e rights check;
+- Job, ProviderCall, ProjectVersion, plan e evaluation ainda precisam entrar no grafo F0.025;
+- a reexecução golden continuará aberta até RenderInput e parâmetros materializados estarem versionados.

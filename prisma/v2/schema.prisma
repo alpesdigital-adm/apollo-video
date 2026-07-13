@@ -209,6 +209,13 @@ model V2MediaArtifactLineage {
   sourceArtifactId String   @db.VarChar(128)
   role             String   @db.VarChar(64)
   ordinal          Int
+  toolId           String?  @db.VarChar(64)
+  toolVersion      String?  @db.VarChar(64)
+  toolDigest       String?  @db.Char(64)
+  modelProvider    String?  @db.VarChar(64)
+  modelId          String?  @db.VarChar(128)
+  modelVersion     String?  @db.VarChar(64)
+  modelConfigHash  String?  @db.Char(64)
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
 
   workspace      V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)

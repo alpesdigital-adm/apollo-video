@@ -13,13 +13,42 @@ import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
   assertMediaArtifactManifest,
-  type MediaArtifactManifestV1,
+  type MediaArtifactManifest,
 } from '../../domain/media-artifact.ts'
 
 type PersistenceClient = Pick<
   PrismaClient,
   'v2MediaArtifact' | 'v2MediaArtifactManifest' | 'v2MediaArtifactLineage'
 >
+
+function sourceExecution(manifest: MediaArtifactManifest, index: number) {
+  return manifest.schemaVersion === 'media-artifact-manifest/v2'
+    ? manifest.sources[index].execution
+    : undefined
+}
+
+function executionMatches(
+  edge: {
+    toolId: string | null
+    toolVersion: string | null
+    toolDigest: string | null
+    modelProvider: string | null
+    modelId: string | null
+    modelVersion: string | null
+    modelConfigHash: string | null
+  },
+  expected: ReturnType<typeof sourceExecution>,
+): boolean {
+  return (
+    edge.toolId === (expected?.tool.id ?? null) &&
+    edge.toolVersion === (expected?.tool.version ?? null) &&
+    edge.toolDigest === (expected?.tool.digest ?? null) &&
+    edge.modelProvider === (expected?.model?.provider ?? null) &&
+    edge.modelId === (expected?.model?.id ?? null) &&
+    edge.modelVersion === (expected?.model?.version ?? null) &&
+    edge.modelConfigHash === (expected?.model?.configHash ?? null)
+  )
+}
 
 function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
   return (
@@ -32,7 +61,7 @@ function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
 
 function assertArtifactIdentity(
   artifact: V2MediaArtifact,
-  manifest: MediaArtifactManifestV1,
+  manifest: MediaArtifactManifest,
 ): void {
   const expected = manifest.artifact
   if (
@@ -95,7 +124,8 @@ async function findReplay(
         edge.ordinal === index &&
         edge.role === expected.role &&
         edge.sourceArtifact.artifactKey === expected.artifactKey &&
-        edge.sourceArtifact.sha256 === expected.sha256
+        edge.sourceArtifact.sha256 === expected.sha256 &&
+        executionMatches(edge, sourceExecution(bundle.manifest, index))
       )
     })
   if (!lineageMatches) {
@@ -147,9 +177,9 @@ export class PrismaMediaArtifactRepository
     }
 
     const manifests = row.manifests.map((stored) => {
-      let manifest: MediaArtifactManifestV1
+      let manifest: MediaArtifactManifest
       try {
-        manifest = JSON.parse(stored.manifestJson) as MediaArtifactManifestV1
+        manifest = JSON.parse(stored.manifestJson) as MediaArtifactManifest
         assertMediaArtifactManifest(manifest)
       } catch {
         throw new DomainError(
@@ -179,7 +209,8 @@ export class PrismaMediaArtifactRepository
             edge.ordinal === index &&
             edge.role === expected.role &&
             edge.sourceArtifact.artifactKey === expected.artifactKey &&
-            edge.sourceArtifact.sha256 === expected.sha256
+            edge.sourceArtifact.sha256 === expected.sha256 &&
+            executionMatches(edge, sourceExecution(manifest, index))
           )
         })
       if (!artifactMatches || !recipeMatches || !lineageMatches) {
@@ -206,6 +237,30 @@ export class PrismaMediaArtifactRepository
           sha256: edge.sourceArtifact.sha256,
           role: edge.role,
           ordinal: edge.ordinal,
+          ...(edge.toolId && edge.toolVersion && edge.toolDigest
+            ? {
+                execution: {
+                  tool: {
+                    id: edge.toolId,
+                    version: edge.toolVersion,
+                    digest: edge.toolDigest,
+                  },
+                  ...(edge.modelProvider &&
+                  edge.modelId &&
+                  edge.modelVersion &&
+                  edge.modelConfigHash
+                    ? {
+                        model: {
+                          provider: edge.modelProvider,
+                          id: edge.modelId,
+                          version: edge.modelVersion,
+                          configHash: edge.modelConfigHash,
+                        },
+                      }
+                    : {}),
+                },
+              }
+            : {}),
         })),
         createdAt: stored.createdAt.toISOString(),
       }
@@ -327,15 +382,25 @@ export class PrismaMediaArtifactRepository
 
         if (sources.length > 0) {
           await transaction.v2MediaArtifactLineage.createMany({
-            data: sources.map((source, index) => ({
-              id: bundle.lineageIds[index],
-              workspaceId: bundle.workspaceId,
-              manifestId: storedManifest.id,
-              sourceArtifactId: source.id,
-              role: bundle.manifest.sources[index].role,
-              ordinal: index,
-              createdAt,
-            })),
+            data: sources.map((source, index) => {
+              const execution = sourceExecution(bundle.manifest, index)
+              return {
+                id: bundle.lineageIds[index],
+                workspaceId: bundle.workspaceId,
+                manifestId: storedManifest.id,
+                sourceArtifactId: source.id,
+                role: bundle.manifest.sources[index].role,
+                ordinal: index,
+                toolId: execution?.tool.id,
+                toolVersion: execution?.tool.version,
+                toolDigest: execution?.tool.digest,
+                modelProvider: execution?.model?.provider,
+                modelId: execution?.model?.id,
+                modelVersion: execution?.model?.version,
+                modelConfigHash: execution?.model?.configHash,
+                createdAt,
+              }
+            }),
           })
         }
 

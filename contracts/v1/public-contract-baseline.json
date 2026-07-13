@@ -25,6 +25,29 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.artifacts.provenance.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/artifact-execution-provenance/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/artifacts/{artifactId}/provenance/{manifestId}"
+      },
+      "toolName": "apollo.artifacts.provenance.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.artifacts.read": {
       "version": "1.0.0",
       "exposure": "public",
@@ -1027,6 +1050,183 @@
                   "createdAt": {
                     "type": "string",
                     "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/artifact-execution-provenance/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifactId",
+            "manifestId",
+            "schemaVersion",
+            "manifestHash",
+            "complete",
+            "edges",
+            "issues"
+          ],
+          "properties": {
+            "artifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "manifestId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "schemaVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "manifestHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sourceArtifactId",
+                  "role",
+                  "ordinal"
+                ],
+                "properties": {
+                  "sourceArtifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "role": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                  },
+                  "ordinal": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "execution": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "tool"
+                    ],
+                    "properties": {
+                      "tool": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "version",
+                          "digest"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                          },
+                          "version": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "model": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "provider",
+                          "id",
+                          "version",
+                          "configHash"
+                        ],
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                          },
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                          },
+                          "version": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                          },
+                          "configHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code",
+                  "sourceArtifactId",
+                  "ordinal",
+                  "message"
+                ],
+                "properties": {
+                  "code": {
+                    "const": "EXECUTION_PROVENANCE_MISSING"
+                  },
+                  "sourceArtifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "ordinal": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 }
               }

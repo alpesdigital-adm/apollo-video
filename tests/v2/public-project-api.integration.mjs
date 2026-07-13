@@ -38,7 +38,7 @@ test('authenticated public API manages projects, clients and artifact inspection
   const { PrismaClient } = await import(clientPackage)
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
-  const { createMediaArtifactManifest } = await import(
+  const { createMediaArtifactManifest, createMediaArtifactManifestV2 } = await import(
     '../../src/v2/domain/media-artifact.ts'
   )
   const { PrismaApiClientRepository } = await import(
@@ -139,14 +139,29 @@ test('authenticated public API manages projects, clients and artifact inspection
       manifest: sourceManifest,
       createdAt: '2026-07-12T16:02:00.000Z',
     })
-    const derivedManifest = createMediaArtifactManifest({
+    const derivedManifest = createMediaArtifactManifestV2({
       artifactKey: 'workspaces/public-api/derived/final.mp4',
       artifactSha256: sha('b'),
       byteSize: 8192,
       mediaType: 'video',
       container: 'mp4',
       recipe: { id: 'normalize-video', version: 'v1', parameters: { crf: 23 } },
-      sources: [{ artifactKey: sourceKey, sha256: sha('a'), role: 'primary' }],
+      sources: [
+        {
+          artifactKey: sourceKey,
+          sha256: sha('a'),
+          role: 'primary',
+          execution: {
+            tool: { id: 'ffmpeg', version: '7.1.1', digest: sha('7') },
+            model: {
+              provider: 'openai',
+              id: 'gpt-5',
+              version: '2026.07',
+              config: { privatePrompt: 'must-not-leak', temperature: 0 },
+            },
+          },
+        },
+      ],
       probe: { width: 1080, height: 1920, duration: 18.5, fps: 30 },
     })
     await artifacts.persistOrReplay({
@@ -213,6 +228,12 @@ test('authenticated public API manages projects, clients and artifact inspection
       ],
       'apollo.artifacts.lineage.diagnose',
     )
+    assert.equal(
+      openApi.paths['/v1/artifacts/{artifactId}/provenance/{manifestId}'].get[
+        'x-apollo-capability-id'
+      ],
+      'apollo.artifacts.provenance.read',
+    )
 
     const schemaResponse = await fetch(
       `${baseUrl}/v1/schemas/create-project-request/v1`,
@@ -248,6 +269,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.projects.list',
         'apollo.artifacts.read',
         'apollo.artifacts.lineage.diagnose',
+        'apollo.artifacts.provenance.read',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
         'apollo.projects.create',
@@ -314,6 +336,11 @@ test('authenticated public API manages projects, clients and artifact inspection
       { headers: { authorization: childAuthorization } },
     )
     assert.equal(childDiagnosticResponse.status, 403)
+    const childProvenanceResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/provenance/${derivedManifestId}`,
+      { headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childProvenanceResponse.status, 403)
 
     const artifactResponse = await fetch(`${baseUrl}/v1/artifacts/${derivedArtifactId}`, {
       headers: { authorization },
@@ -356,6 +383,24 @@ test('authenticated public API manages projects, clients and artifact inspection
       },
     ])
     assert.deepEqual(diagnostic.data.issues, [])
+
+    const provenanceResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/provenance/${derivedManifestId}`,
+      { headers: { authorization } },
+    )
+    const provenance = await provenanceResponse.json()
+    assert.equal(provenanceResponse.status, 200)
+    assert.equal(provenance.data.complete, true)
+    assert.equal(provenance.data.schemaVersion, 'media-artifact-manifest/v2')
+    assert.equal(provenance.data.edges[0].execution.tool.id, 'ffmpeg')
+    assert.equal(provenance.data.edges[0].execution.tool.version, '7.1.1')
+    assert.equal(provenance.data.edges[0].execution.tool.digest, sha('7'))
+    assert.equal(provenance.data.edges[0].execution.model.provider, 'openai')
+    assert.equal(provenance.data.edges[0].execution.model.id, 'gpt-5')
+    assert.equal(provenance.data.edges[0].execution.model.version, '2026.07')
+    assert.equal(provenance.data.edges[0].execution.model.configHash.length, 64)
+    assert.equal(JSON.stringify(provenance).includes('must-not-leak'), false)
+    assert.equal(JSON.stringify(provenance).includes('privatePrompt'), false)
 
     await client.v2MediaArtifact.update({
       where: { id: sourceArtifactId },

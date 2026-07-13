@@ -158,6 +158,39 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/artifact-execution-provenance/v1': [
+      {
+        data: {
+          artifactId,
+          manifestId: 'manifest-example-2',
+          schemaVersion: 'media-artifact-manifest/v2',
+          manifestHash: '1'.repeat(64),
+          complete: true,
+          edges: [
+            {
+              sourceArtifactId: 'artifact-source-example-1',
+              role: 'primary',
+              ordinal: 0,
+              execution: {
+                tool: {
+                  id: 'heygen-adapter',
+                  version: '2.1.0',
+                  digest: '2'.repeat(64),
+                },
+                model: {
+                  provider: 'heygen',
+                  id: 'avatar-iv',
+                  version: '2026.07',
+                  configHash: '3'.repeat(64),
+                },
+              },
+            },
+          ],
+          issues: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/create-project-request/v1': [
       { name: 'Anúncio de descoberta' },
     ],

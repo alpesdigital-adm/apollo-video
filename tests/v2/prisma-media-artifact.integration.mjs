@@ -8,7 +8,7 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
       : '@prisma/client'
   const { PrismaClient } = await import(clientPackage)
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
-  const { createMediaArtifactManifest } = await import(
+  const { createMediaArtifactManifest, createMediaArtifactManifestV2 } = await import(
     '../../src/v2/domain/media-artifact.ts'
   )
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
@@ -80,11 +80,30 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
     })
     assert.equal(source.replayed, false)
 
-    const derivedManifest = createManifest({
+    const derivedManifest = createMediaArtifactManifestV2({
       artifactKey: 'workspaces/a/artifacts/normalized.mp4',
       artifactSha256: sha('b'),
-      parameters: { crf: 23 },
-      sources: [{ artifactKey: sourceKey, sha256: sha('a'), role: 'primary' }],
+      byteSize: 1024,
+      mediaType: 'video',
+      container: 'mp4',
+      recipe: { id: 'normalize-video', version: 'v2', parameters: { crf: 23 } },
+      sources: [
+        {
+          artifactKey: sourceKey,
+          sha256: sha('a'),
+          role: 'primary',
+          execution: {
+            tool: { id: 'ffmpeg', version: '7.1.1', digest: sha('7') },
+            model: {
+              provider: 'openai',
+              id: 'gpt-5',
+              version: '2026.07',
+              config: { privatePrompt: 'must-not-persist', temperature: 0 },
+            },
+          },
+        },
+      ],
+      probe: { width: 320, height: 240, duration: 3, fps: 30 },
     })
     const derivedBundle = {
       workspaceId: workspaceA,
@@ -107,6 +126,20 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
       replayed: false,
     })
     assert.deepEqual(replay, { ...first, replayed: true })
+    const storedProvenance = await client.v2MediaArtifactLineage.findUnique({
+      where: { id: 'lineage-derived-a-0' },
+    })
+    assert.equal(storedProvenance.toolId, 'ffmpeg')
+    assert.equal(storedProvenance.toolVersion, '7.1.1')
+    assert.equal(storedProvenance.toolDigest, sha('7'))
+    assert.equal(storedProvenance.modelProvider, 'openai')
+    assert.equal(storedProvenance.modelId, 'gpt-5')
+    assert.equal(storedProvenance.modelVersion, '2026.07')
+    assert.equal(storedProvenance.modelConfigHash.length, 64)
+    const storedDerivedManifest = await client.v2MediaArtifactManifest.findUnique({
+      where: { id: 'manifest-derived-a' },
+    })
+    assert.equal(storedDerivedManifest.manifestJson.includes('must-not-persist'), false)
 
     await expectDomainCode(
       repository.persistOrReplay({

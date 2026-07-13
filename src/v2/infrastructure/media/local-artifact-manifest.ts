@@ -8,6 +8,7 @@ import {
   assertMediaArtifactManifest,
   createMediaArtifactManifest,
   type CreateMediaArtifactManifestInput,
+  type MediaArtifactManifest,
   type MediaArtifactManifestV1,
 } from '../../domain/media-artifact.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -57,7 +58,7 @@ function stagedManifestPath(manifestPath: string): string {
 
 export async function writeLocalMediaArtifactManifest(
   manifestPath: string,
-  manifest: MediaArtifactManifestV1,
+  manifest: MediaArtifactManifest,
 ): Promise<void> {
   assertMediaArtifactManifest(manifest)
   const stagedPath = stagedManifestPath(manifestPath)

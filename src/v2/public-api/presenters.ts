@@ -91,7 +91,13 @@ export function presentMediaArtifact(artifact: MediaArtifactRecord) {
       manifestHash: manifest.manifestHash,
       recipe: { ...manifest.recipe },
       ...(manifest.probe ? { probe: { ...manifest.probe } } : {}),
-      sources: manifest.sources.map((source) => ({ ...source })),
+      sources: manifest.sources.map((source) => ({
+        artifactId: source.artifactId,
+        artifactKey: source.artifactKey,
+        sha256: source.sha256,
+        role: source.role,
+        ordinal: source.ordinal,
+      })),
       createdAt: manifest.createdAt,
     })),
   }

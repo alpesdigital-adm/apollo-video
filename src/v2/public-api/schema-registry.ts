@@ -147,6 +147,35 @@ const lineageDiagnosticManifestSchema = {
   },
 }
 
+const executionProvenanceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['tool'],
+  properties: {
+    tool: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'version', 'digest'],
+      properties: {
+        id: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+        version: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+        digest: sha256Schema,
+      },
+    },
+    model: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['provider', 'id', 'version', 'configHash'],
+      properties: {
+        provider: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+        id: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+        version: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+        configHash: sha256Schema,
+      },
+    },
+  },
+}
+
 const credentialMutationDataSchema = {
   type: 'object',
   additionalProperties: false,
@@ -381,6 +410,51 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             maxNodes: { type: 'integer', minimum: 1 },
             maxDepth: { type: 'integer', minimum: 0 },
             truncated: { type: 'boolean' },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema('artifact-execution-provenance', 1, 'Artifact execution provenance response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'artifactId', 'manifestId', 'schemaVersion', 'manifestHash',
+        'complete', 'edges', 'issues',
+      ],
+      properties: {
+        artifactId: idSchema,
+        manifestId: idSchema,
+        schemaVersion: { type: 'string', minLength: 1, maxLength: 64 },
+        manifestHash: sha256Schema,
+        complete: { type: 'boolean' },
+        edges: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['sourceArtifactId', 'role', 'ordinal'],
+            properties: {
+              sourceArtifactId: idSchema,
+              role: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+              ordinal: { type: 'integer', minimum: 0 },
+              execution: executionProvenanceSchema,
+            },
+          },
+        },
+        issues: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['code', 'sourceArtifactId', 'ordinal', 'message'],
+            properties: {
+              code: { const: 'EXECUTION_PROVENANCE_MISSING' },
+              sourceArtifactId: idSchema,
+              ordinal: { type: 'integer', minimum: 0 },
+              message: { type: 'string', minLength: 1 },
+            },
           },
         },
       },
