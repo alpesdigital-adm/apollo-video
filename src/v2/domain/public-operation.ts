@@ -601,6 +601,36 @@ export function retryOrFailPublicOperation(
   })
 }
 
+export function cancelPublicOperation(
+  operation: PublicOperation,
+  updatedAtValue: string,
+): Readonly<PublicOperation> {
+  assertPublicOperation(operation)
+  if (isTerminalPublicOperation(operation)) {
+    return freezeOperation({ ...operation })
+  }
+  assertDomain(
+    operation.cancelable &&
+      ['queued', 'running', 'waiting', 'retrying'].includes(operation.status),
+    'INVALID_PUBLIC_OPERATION',
+    'PublicOperation cannot be canceled in its current state',
+  )
+  const completedAt = transitionDate(operation, updatedAtValue)
+  return freezeOperation({
+    ...operation,
+    status: 'canceled',
+    phase: 'canceled',
+    cancelable: false,
+    retryable: false,
+    result: undefined,
+    error: undefined,
+    updatedAt: completedAt,
+    completedAt,
+    nextAttemptAt: undefined,
+    deadLetteredAt: undefined,
+  })
+}
+
 export function isTerminalPublicOperation(operation: PublicOperation): boolean {
   return TERMINAL_STATUSES.has(operation.status)
 }

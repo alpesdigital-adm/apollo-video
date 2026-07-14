@@ -117,6 +117,9 @@ Falhas recuperáveis respeitam uma espera exponencial persistida entre tentativa
 o esgotamento é marcado para tratamento administrativo sem expor dados internos no
 contrato público v1. `APOLLO_V2_WORKER_RETRY_BASE_MS` e
 `APOLLO_V2_WORKER_RETRY_MAX_MS` ajustam a base e o teto da espera.
+Operações podem ser canceladas externamente por
+`POST /v1/operations/{operationId}/cancel` com o scope `operations:cancel`;
+o estado persistido invalida a lease e impede publicação pela tentativa antiga.
 
 ## Formatos
 

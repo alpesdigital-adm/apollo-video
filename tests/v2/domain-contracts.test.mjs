@@ -59,6 +59,7 @@ import { compileApolloVideoRenderProps } from '../../src/v2/application/compile-
 import { renderAuthorizedInputService } from '../../src/v2/application/render-authorized-input.ts'
 import {
   advancePublicOperationPhase,
+  cancelPublicOperation,
   createQueuedPublicOperation,
   rehydratePublicOperation,
   retryOrFailPublicOperation,
@@ -606,6 +607,43 @@ test('PublicOperation attempt transitions reject stale order and exhaust retries
   const succeeded = succeedPublicOperation(persisted, '2026-07-14T12:00:05.000Z')
   assert.equal(succeeded.status, 'succeeded')
   assert.deepEqual(succeeded.result.resource, succeeded.target)
+})
+
+test('PublicOperation cancellation is terminal, idempotent and clears retry scheduling', () => {
+  const queued = createQueuedPublicOperation({
+    id: 'operation-cancel-1',
+    workspaceId: 'workspace-1',
+    clientId: 'client-1',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-cancel-1',
+      manifestId: 'manifest-cancel-1',
+    },
+    createdAt: '2026-07-14T12:00:00.000Z',
+  })
+  const canceledQueued = cancelPublicOperation(queued, '2026-07-14T12:00:01.000Z')
+  assert.equal(canceledQueued.status, 'canceled')
+  assert.equal(canceledQueued.startedAt, undefined)
+  assert.equal(canceledQueued.completedAt, '2026-07-14T12:00:01.000Z')
+  assert.deepEqual(
+    cancelPublicOperation(canceledQueued, '2026-07-14T12:00:02.000Z'),
+    canceledQueued,
+  )
+
+  const running = startPublicOperationAttempt(queued, '2026-07-14T12:00:01.000Z')
+  const retrying = retryOrFailPublicOperation(
+    running,
+    { code: 'render_execution_failed', message: 'Render failed safely', retryable: true },
+    '2026-07-14T12:00:02.000Z',
+    '2026-07-14T12:00:07.000Z',
+  )
+  const canceledRetry = cancelPublicOperation(retrying, '2026-07-14T12:00:03.000Z')
+  assert.equal(canceledRetry.status, 'canceled')
+  assert.equal(canceledRetry.nextAttemptAt, undefined)
+  assert.equal(canceledRetry.retryable, false)
+  assert.equal(canceledRetry.attempt, 1)
+  assert.equal(presentPublicOperation(canceledRetry).status, 'canceled')
 })
 
 test('authorized render enqueue is idempotent, actor-bound and expiry-aware', async () => {

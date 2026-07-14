@@ -18,7 +18,7 @@ O endpoint público de render cria uma `PublicOperation`, mas codificação de m
 - A última renovação e a transição para `persisting` acontecem depois da segunda materialização/revalidação e imediatamente antes do commit do output.
 - O renderer descarta o arquivo parcial quando o gate pré-commit falha.
 - Resultado terminal público referencia somente artifact e manifest. Erros terminais são sanitizados; paths, output keys, stack e detalhes do renderer não são persistidos no contrato público.
-- Falha retryable volta a `retrying` enquanto houver tentativas. O ADR-016 adiciona disponibilidade temporal, backoff exponencial e marcação de esgotamento sem alterar o fencing adotado aqui; cancelamento continua posterior.
+- Falha retryable volta a `retrying` enquanto houver tentativas. O ADR-016 adiciona backoff e marcação de esgotamento; o ADR-017 usa a mesma lease para tornar cancelamento cooperativo sem enfraquecer o fencing.
 
 ## Consequências
 

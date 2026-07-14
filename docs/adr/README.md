@@ -18,3 +18,4 @@ Estados usados:
 - [ADR-014 — Worker durável de render e fencing de lease](./ADR-014-durable-render-worker.md)
 - [ADR-015 — Checkpoint do output materializado](./ADR-015-render-output-checkpoint.md)
 - [ADR-016 — Agendamento durável de retry e esgotamento](./ADR-016-durable-retry-schedule.md)
+- [ADR-017 — Cancelamento cooperativo de PublicOperation](./ADR-017-public-operation-cancellation.md)

@@ -157,6 +157,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'artifacts:render',
         'artifacts:rights',
         'clients:admin',
+        'operations:cancel',
         'operations:read',
         'projects:read',
         'projects:write',
@@ -377,6 +378,12 @@ test('authenticated public API manages projects, clients and artifact inspection
       openApi.paths['/v1/operations/{operationId}'].get['x-apollo-capability-id'],
       'apollo.operations.read',
     )
+    assert.equal(
+      openApi.paths['/v1/operations/{operationId}/cancel'].post[
+        'x-apollo-capability-id'
+      ],
+      'apollo.operations.cancel',
+    )
 
     const schemaResponse = await fetch(
       `${baseUrl}/v1/schemas/create-project-request/v1`,
@@ -422,6 +429,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.render-inputs.preflight',
         'apollo.artifacts.render.enqueue',
         'apollo.operations.read',
+        'apollo.operations.cancel',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
         'apollo.projects.create',
@@ -881,6 +889,35 @@ test('authenticated public API manages projects, clients and artifact inspection
     const operationRead = await operationReadResponse.json()
     assert.equal(operationReadResponse.status, 200)
     assert.deepEqual(operationRead.data.operation, renderOperation.data.operation)
+    const childCancelResponse = await fetch(
+      `${baseUrl}/v1/operations/${renderOperation.data.operation.id}/cancel`,
+      { method: 'POST', headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childCancelResponse.status, 403)
+    const cancelOperationRequest = () => fetch(
+      `${baseUrl}/v1/operations/${renderOperation.data.operation.id}/cancel`,
+      { method: 'POST', headers: { authorization } },
+    )
+    const canceledOperationResponse = await cancelOperationRequest()
+    const canceledOperation = await canceledOperationResponse.json()
+    assert.equal(canceledOperationResponse.status, 200)
+    assert.equal(canceledOperation.data.operation.status, 'canceled')
+    assert.equal(canceledOperation.data.operation.phase, 'canceled')
+    assert.equal(canceledOperation.data.operation.cancelable, false)
+    assert.equal(canceledOperation.data.operation.retryable, false)
+    assert.equal(typeof canceledOperation.data.operation.completedAt, 'string')
+    const canceledReplayResponse = await cancelOperationRequest()
+    const canceledReplay = await canceledReplayResponse.json()
+    assert.equal(canceledReplayResponse.status, 200)
+    assert.deepEqual(canceledReplay.data.operation, canceledOperation.data.operation)
+    const canceledReadResponse = await fetch(
+      `${baseUrl}/v1/operations/${renderOperation.data.operation.id}`,
+      { headers: { authorization } },
+    )
+    assert.deepEqual(
+      (await canceledReadResponse.json()).data.operation,
+      canceledOperation.data.operation,
+    )
     const missingOperationResponse = await fetch(
       `${baseUrl}/v1/operations/missing-operation-id`,
       { headers: { authorization } },
@@ -890,6 +927,11 @@ test('authenticated public API manages projects, clients and artifact inspection
       (await missingOperationResponse.json()).error.code,
       'PUBLIC_OPERATION_NOT_FOUND',
     )
+    const missingCancellationResponse = await fetch(
+      `${baseUrl}/v1/operations/missing-operation-id/cancel`,
+      { method: 'POST', headers: { authorization } },
+    )
+    assert.equal(missingCancellationResponse.status, 404)
     assert.equal(
       await client.v2PublicOperation.count({ where: { workspaceId } }),
       1,

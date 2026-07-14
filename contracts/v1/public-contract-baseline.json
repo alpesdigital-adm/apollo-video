@@ -434,6 +434,29 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.operations.cancel": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "operations:cancel"
+      ],
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/operations/{operationId}/cancel"
+      },
+      "toolName": "apollo.operations.cancel",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
     "apollo.operations.read": {
       "version": "1.0.0",
       "exposure": "public",

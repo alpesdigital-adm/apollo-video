@@ -38,6 +38,11 @@ export interface PublicOperationLeaseCommand {
 
 export interface PublicOperationRepository {
   findById(workspaceId: string, operationId: string): Promise<PublicOperationRecord | null>
+  cancel(input: {
+    workspaceId: string
+    operationId: string
+    canceledAt: string
+  }): Promise<PublicOperationRecord | null>
   findReplay(input: {
     workspaceId: string
     clientId: string

@@ -12,6 +12,8 @@ import { DomainError } from '../../domain/errors.ts'
 import {
   advancePublicOperationPhase,
   assertPublicOperation,
+  cancelPublicOperation,
+  isTerminalPublicOperation,
   rehydratePublicOperation,
   retryOrFailPublicOperation,
   startPublicOperationAttempt,
@@ -310,6 +312,62 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
 
   constructor(client: PrismaClient) {
     this.client = client
+  }
+
+  async cancel(input: {
+    workspaceId: string
+    operationId: string
+    canceledAt: string
+  }): Promise<PublicOperationRecord | null> {
+    if (!ID_PATTERN.test(input.workspaceId) || !ID_PATTERN.test(input.operationId)) {
+      throw new DomainError('INVALID_PUBLIC_OPERATION', 'Cancellation target is invalid')
+    }
+    const canceledAt = parseCommandDate(input.canceledAt, 'canceledAt')
+    return this.client.$transaction(async (transaction) => {
+      const stored = await transaction.v2PublicOperation.findFirst({
+        where: { id: input.operationId, workspaceId: input.workspaceId },
+        include: OPERATION_INCLUDE,
+      })
+      if (!stored) return null
+      const current = hydrateRecord(stored)
+      const canceled = cancelPublicOperation(current.operation, canceledAt.toISOString())
+      if (canceled.status !== 'canceled' || stored.status === 'canceled') return current
+
+      const updated = await transaction.v2PublicOperation.updateMany({
+        where: {
+          id: input.operationId,
+          workspaceId: input.workspaceId,
+          status: { in: ['queued', 'running', 'waiting', 'retrying'] },
+          cancelable: true,
+        },
+        data: {
+          status: canceled.status,
+          phase: canceled.phase,
+          cancelable: false,
+          retryable: false,
+          resultJson: null,
+          errorCode: null,
+          errorMessage: null,
+          errorRetryable: null,
+          completedAt: canceledAt,
+          nextAttemptAt: null,
+          deadLetteredAt: null,
+          updatedAt: canceledAt,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          heartbeatAt: null,
+        },
+      })
+      const persisted = await transaction.v2PublicOperation.findFirst({
+        where: { id: input.operationId, workspaceId: input.workspaceId },
+        include: OPERATION_INCLUDE,
+      })
+      if (!persisted) return null
+      const result = hydrateRecord(persisted)
+      if (updated.count === 1 || result.operation.status === 'canceled') return result
+      if (isTerminalPublicOperation(result.operation)) return result
+      throw new DomainError('PERSISTENCE_CONFLICT', 'PublicOperation cancellation collided')
+    })
   }
 
   private findStoredById(

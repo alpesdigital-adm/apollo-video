@@ -435,6 +435,217 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       scheduledExhausted.operation.completedAt,
     )
 
+    const cancelQueuedOperation = createQueuedPublicOperation({
+      ...operation,
+      id: 'operation-integration-cancel-queued',
+      createdAt: '2026-01-01T15:36:00.000Z',
+    })
+    await repository.createOrReplay({
+      operation: cancelQueuedOperation,
+      context: input.context,
+      idempotencyKey: 'operation-cancel-queued-request',
+      requestFingerprint: sha('6'),
+    })
+    assert.equal(
+      await repository.cancel({
+        workspaceId: 'different-workspace-id',
+        operationId: cancelQueuedOperation.id,
+        canceledAt: '2026-01-01T15:36:01.000Z',
+      }),
+      null,
+    )
+    const canceledQueued = await repository.cancel({
+      workspaceId,
+      operationId: cancelQueuedOperation.id,
+      canceledAt: '2026-01-01T15:36:01.000Z',
+    })
+    assert.equal(canceledQueued.operation.status, 'canceled')
+    assert.equal(canceledQueued.operation.startedAt, undefined)
+    const canceledQueuedReplay = await repository.cancel({
+      workspaceId,
+      operationId: cancelQueuedOperation.id,
+      canceledAt: '2026-01-01T15:36:02.000Z',
+    })
+    assert.equal(canceledQueuedReplay.operation.completedAt, canceledQueued.operation.completedAt)
+
+    const cancelRunningOperation = createQueuedPublicOperation({
+      ...operation,
+      id: 'operation-integration-cancel-running',
+      createdAt: '2026-01-01T15:37:00.000Z',
+    })
+    await repository.createOrReplay({
+      operation: cancelRunningOperation,
+      context: input.context,
+      idempotencyKey: 'operation-cancel-running-request',
+      requestFingerprint: sha('5'),
+    })
+    const cancelRunningClaim = await repository.claimNext({
+      workspaceId,
+      leaseOwner: 'worker-integration-cancel-running',
+      now: '2026-01-01T15:37:01.000Z',
+      leaseUntil: '2026-01-01T15:37:31.000Z',
+    })
+    for (const [phase, timestamp] of [
+      ['rendering', '2026-01-01T15:37:01.100Z'],
+      ['verifying', '2026-01-01T15:37:01.200Z'],
+      ['persisting', '2026-01-01T15:37:01.300Z'],
+    ]) {
+      assert.equal(
+        await repository.advancePhase({
+          operationId: cancelRunningOperation.id,
+          leaseOwner: cancelRunningClaim.lease.owner,
+          attempt: cancelRunningClaim.lease.attempt,
+          phase,
+          now: timestamp,
+        }),
+        true,
+      )
+    }
+    const canceledRunning = await repository.cancel({
+      workspaceId,
+      operationId: cancelRunningOperation.id,
+      canceledAt: '2026-01-01T15:37:02.000Z',
+    })
+    assert.equal(canceledRunning.operation.status, 'canceled')
+    assert.equal(canceledRunning.operation.startedAt, cancelRunningClaim.operation.startedAt)
+    assert.equal(
+      await repository.heartbeat({
+        operationId: cancelRunningOperation.id,
+        leaseOwner: cancelRunningClaim.lease.owner,
+        attempt: cancelRunningClaim.lease.attempt,
+        now: '2026-01-01T15:37:03.000Z',
+        leaseUntil: '2026-01-01T15:37:33.000Z',
+      }),
+      false,
+    )
+    assert.equal(
+      await checkpoints.record({
+        operationId: cancelRunningOperation.id,
+        leaseOwner: cancelRunningClaim.lease.owner,
+        attempt: cancelRunningClaim.lease.attempt,
+        now: '2026-01-01T15:37:03.000Z',
+        outputKey: 'workspaces/operation/renders/canceled-output.mp4',
+        output,
+      }),
+      null,
+    )
+    assert.equal(
+      await repository.advancePhase({
+        operationId: cancelRunningOperation.id,
+        leaseOwner: cancelRunningClaim.lease.owner,
+        attempt: cancelRunningClaim.lease.attempt,
+        phase: 'rendering',
+        now: '2026-01-01T15:37:03.000Z',
+      }),
+      false,
+    )
+    assert.equal(
+      await repository.claimNext({
+        workspaceId,
+        leaseOwner: 'worker-integration-after-cancel',
+        now: '2026-01-01T15:38:00.000Z',
+        leaseUntil: '2026-01-01T15:38:30.000Z',
+      }),
+      null,
+    )
+    const cancelRetryOperation = createQueuedPublicOperation({
+      ...operation,
+      id: 'operation-integration-cancel-retry',
+      createdAt: '2026-01-01T15:38:01.000Z',
+    })
+    await repository.createOrReplay({
+      operation: cancelRetryOperation,
+      context: input.context,
+      idempotencyKey: 'operation-cancel-retry-request',
+      requestFingerprint: sha('4'),
+    })
+    const cancelRetryClaim = await repository.claimNext({
+      workspaceId,
+      leaseOwner: 'worker-integration-cancel-retry',
+      now: '2026-01-01T15:38:02.000Z',
+      leaseUntil: '2026-01-01T15:38:32.000Z',
+    })
+    const retryBeforeCancel = await repository.failOrRetry({
+      operationId: cancelRetryOperation.id,
+      leaseOwner: cancelRetryClaim.lease.owner,
+      attempt: cancelRetryClaim.lease.attempt,
+      now: '2026-01-01T15:38:03.000Z',
+      nextAttemptAt: '2026-01-01T15:39:03.000Z',
+      error: {
+        code: 'render_execution_failed',
+        message: 'Render operation could not be completed',
+        retryable: true,
+      },
+    })
+    assert.equal(retryBeforeCancel.operation.status, 'retrying')
+    const canceledRetry = await repository.cancel({
+      workspaceId,
+      operationId: cancelRetryOperation.id,
+      canceledAt: '2026-01-01T15:38:04.000Z',
+    })
+    assert.equal(canceledRetry.operation.status, 'canceled')
+    assert.equal(canceledRetry.operation.nextAttemptAt, undefined)
+    assert.equal(
+      await repository.claimNext({
+        workspaceId,
+        leaseOwner: 'worker-integration-retry-after-cancel',
+        now: '2026-01-01T15:39:03.000Z',
+        leaseUntil: '2026-01-01T15:39:33.000Z',
+      }),
+      null,
+    )
+
+    if (process.env.APOLLO_V2_PERSISTENCE === 'postgres') {
+      const cancelRaceOperation = createQueuedPublicOperation({
+        ...operation,
+        id: 'operation-integration-cancel-race',
+        createdAt: '2026-01-01T15:39:10.000Z',
+      })
+      await repository.createOrReplay({
+        operation: cancelRaceOperation,
+        context: input.context,
+        idempotencyKey: 'operation-cancel-race-request',
+        requestFingerprint: sha('3'),
+      })
+      const [racedClaim, racedCancel] = await Promise.all([
+        repository.claimNext({
+          workspaceId,
+          leaseOwner: 'worker-integration-cancel-race',
+          now: '2026-01-01T15:39:11.000Z',
+          leaseUntil: '2026-01-01T15:39:41.000Z',
+        }),
+        repository.cancel({
+          workspaceId,
+          operationId: cancelRaceOperation.id,
+          canceledAt: '2026-01-01T15:39:12.000Z',
+        }),
+      ])
+      assert.equal(racedCancel.operation.status, 'canceled')
+      assert.equal(
+        (await repository.findById(workspaceId, cancelRaceOperation.id)).operation.status,
+        'canceled',
+      )
+      if (racedClaim) {
+        assert.equal(
+          await repository.heartbeat({
+            operationId: cancelRaceOperation.id,
+            leaseOwner: racedClaim.lease.owner,
+            attempt: racedClaim.lease.attempt,
+            now: '2026-01-01T15:39:13.000Z',
+            leaseUntil: '2026-01-01T15:39:43.000Z',
+          }),
+          false,
+        )
+      }
+    }
+    const completedReplay = await repository.cancel({
+      workspaceId,
+      operationId,
+      canceledAt: '2026-01-01T15:40:00.000Z',
+    })
+    assert.equal(completedReplay.operation.status, 'succeeded')
+    assert.equal(completedReplay.operation.completedAt, succeeded.operation.completedAt)
+
     await client.v2ArtifactRenderOperation.update({
       where: { operationId },
       data: { outputSha256: sha('b') },

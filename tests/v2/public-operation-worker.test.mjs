@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   advancePublicOperationPhase,
+  cancelPublicOperation,
   createQueuedPublicOperation,
   retryOrFailPublicOperation,
   startPublicOperationAttempt,
@@ -48,6 +49,10 @@ function createOperations() {
 
   return {
     get operation() { return operation },
+    cancel(canceledAt) {
+      operation = cancelPublicOperation(operation, canceledAt)
+      lease = undefined
+    },
     loseLease() { denyHeartbeat = true },
     expireLease() { allowExpiredClaim = true },
     repository: {
@@ -196,6 +201,30 @@ test('lost lease aborts before commit and cannot publish a stale result', async 
   assert.equal(outcome.status, 'lease-lost')
   assert.equal(committed, false)
   assert.equal(operations.operation.status, 'running')
+  assert.equal(checkpoints.checkpoint, null)
+})
+
+test('cancellation invalidates the lease and aborts before output commit', async () => {
+  const operations = createOperations()
+  const checkpoints = createCheckpoints()
+  let committed = false
+  const runNext = runNextPublicOperationService({
+    operations: operations.repository,
+    checkpoints: checkpoints.repository,
+    clock: createClock(),
+    leaseDurationMs: 10_000,
+    heartbeatIntervalMs: 1_000,
+    async render(request) {
+      operations.cancel('2026-07-14T12:00:00.250Z')
+      await request.beforeCommit()
+      committed = true
+      return receipt()
+    },
+  })
+  const outcome = await runNext('worker-canceled-test')
+  assert.equal(outcome.status, 'lease-lost')
+  assert.equal(operations.operation.status, 'canceled')
+  assert.equal(committed, false)
   assert.equal(checkpoints.checkpoint, null)
 })
 

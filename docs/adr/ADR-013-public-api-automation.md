@@ -43,4 +43,4 @@ O domínio depende de `AuthenticatedExternalActor`. O ADR-010 escolhe credenciai
 - Um baseline versionado impede remover capabilities ou alterar schemas existentes sob o mesmo ref sem revisão explícita.
 - Novas capabilities e novos schema refs são aditivos; atualizar o baseline exige comando separado e diff revisável.
 - O primeiro `PublicOperation` durável é `artifact-render`: enqueue idempotente responde `202`, leitura é workspace-scoped e o presenter omite client/workspace internos, authorization ID, RenderInput hash e storage details.
-- A persistência geral da operação e o contexto específico de render usam tabelas distintas. O worker do ADR-014 implementa claim/lease, heartbeat, fencing por attempt e transições terminais; cancel/retry públicos, backoff e dead-letter permanecem incrementos posteriores do mesmo contrato.
+- A persistência geral da operação e o contexto específico de render usam tabelas distintas. O ADR-014 implementa claim/lease e fencing, o ADR-016 agenda retries e o ADR-017 expõe cancelamento workspace-scoped; retry manual e administração de dead-letter permanecem posteriores.
