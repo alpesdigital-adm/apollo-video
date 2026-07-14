@@ -70,6 +70,7 @@ model V2Workspace {
   mediaManifests     V2MediaArtifactManifest[]
   mediaLineage       V2MediaArtifactLineage[]
   recipeParameters   V2RecipeParameterPayload[]
+  renderInputs       V2RenderInputPayload[]
 
   @@map("v2_workspaces")
 }
@@ -87,7 +88,7 @@ model V2ApiClient {
   updatedAt   DateTime  @updatedAt
   lastUsedAt  DateTime?
 
-  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace   V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   credentials V2ApiCredential[]
 
   @@unique([id, workspaceId])
@@ -215,9 +216,9 @@ model V2MediaArtifact {
   status      String   @default("available")
   createdAt   DateTime @default(now())
 
-  workspace   V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  workspace   V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   manifests   V2MediaArtifactManifest[]
-  lineageUses V2MediaArtifactLineage[] @relation("V2MediaLineageSource")
+  lineageUses V2MediaArtifactLineage[]  @relation("V2MediaLineageSource")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -227,28 +228,32 @@ model V2MediaArtifact {
 }
 
 model V2MediaArtifactManifest {
-  id             String   @id
-  workspaceId    String
-  artifactId     String
-  schemaVersion  String
-  manifestHash   String
-  recipeId       String
-  recipeVersion  String
-  parametersHash String
+  id                  String   @id
+  workspaceId         String
+  artifactId          String
+  schemaVersion       String
+  manifestHash        String
+  recipeId            String
+  recipeVersion       String
+  parametersHash      String
   recipeParametersRef String?
-  manifestJson   String
-  createdAt      DateTime @default(now())
+  renderInputRef      String?
+  renderInputHash     String?
+  manifestJson        String
+  createdAt           DateTime @default(now())
 
-  workspace    V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  artifact     V2MediaArtifact          @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  lineageEdges V2MediaArtifactLineage[]
+  workspace        V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact         V2MediaArtifact           @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  lineageEdges     V2MediaArtifactLineage[]
   recipeParameters V2RecipeParameterPayload? @relation(fields: [recipeParametersRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
+  renderInput      V2RenderInputPayload?     @relation(fields: [renderInputRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
 
   @@unique([id, workspaceId])
   @@unique([artifactId, manifestHash])
   @@index([workspaceId, recipeId, recipeVersion])
   @@index([workspaceId, createdAt])
   @@index([workspaceId, recipeParametersRef])
+  @@index([workspaceId, renderInputRef])
   @@map("v2_media_artifact_manifests")
 }
 
@@ -264,13 +269,34 @@ model V2RecipeParameterPayload {
   authTag           String
   createdAt         DateTime @default(now())
 
-  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   manifests V2MediaArtifactManifest[]
 
   @@id([workspaceId, ref])
   @@unique([workspaceId, parametersHash])
   @@index([workspaceId, createdAt])
   @@map("v2_recipe_parameter_payloads")
+}
+
+model V2RenderInputPayload {
+  ref               String
+  workspaceId       String
+  inputHash         String
+  canonicalByteSize Int
+  algorithm         String
+  keyId             String
+  nonce             String
+  ciphertext        String
+  authTag           String
+  createdAt         DateTime @default(now())
+
+  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  manifests V2MediaArtifactManifest[]
+
+  @@id([workspaceId, ref])
+  @@unique([workspaceId, inputHash])
+  @@index([workspaceId, createdAt])
+  @@map("v2_render_input_payloads")
 }
 
 model V2MediaArtifactLineage {

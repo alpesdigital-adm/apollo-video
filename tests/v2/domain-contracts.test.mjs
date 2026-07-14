@@ -12,6 +12,7 @@ import {
   assertMediaArtifactManifest,
   createMediaArtifactManifest,
   createMediaArtifactManifestV2,
+  createReconstructableMediaArtifactManifest,
   createReplayableMediaArtifactManifest,
 } from '../../src/v2/domain/media-artifact.ts'
 import {
@@ -32,12 +33,14 @@ import { readMediaArtifactService } from '../../src/v2/application/read-media-ar
 import { diagnoseMediaArtifactLineageService } from '../../src/v2/application/diagnose-media-artifact-lineage.ts'
 import { readMediaArtifactProvenanceService } from '../../src/v2/application/read-media-artifact-provenance.ts'
 import { readMediaArtifactReplaySpecService } from '../../src/v2/application/read-media-artifact-replay-spec.ts'
+import { readMediaArtifactRenderInputService } from '../../src/v2/application/read-media-artifact-render-input.ts'
 import { materializeRenderInputService } from '../../src/v2/application/materialize-render-input.ts'
 import { preflightRenderInputService } from '../../src/v2/application/preflight-render-input.ts'
 import {
   assertRenderInputSpec,
   createRenderInputSpec,
 } from '../../src/v2/domain/render-input.ts'
+import { assertRenderInputPayload } from '../../src/v2/domain/render-input-payload.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -531,6 +534,101 @@ test('manifest v3 references canonical parameters encrypted with authenticated c
   )
 })
 
+test('manifest v4 links a protected portable RenderInput without exposing its props', () => {
+  const sourceKey = 'workspaces/ws/masters/source.mov'
+  const sourceHash = 'b'.repeat(64)
+  const renderInput = createRenderInputSpec({
+    schemaVersion: 'render-input/v1',
+    renderer: { id: 'remotion', version: '4.0.489', digest: '1'.repeat(64) },
+    composition: {
+      id: 'apollo-video',
+      version: 'v1',
+      propsSchemaRef: 'apollo://render-props/apollo-video/v1',
+    },
+    plan: { id: 'plan-v4', versionId: 'plan-version-v4', hash: '2'.repeat(64) },
+    output: {
+      id: 'preset-9x16',
+      locale: 'pt-BR',
+      aspectRatio: '9:16',
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+      durationInFrames: 900,
+    },
+    assets: [
+      {
+        id: 'asset-source',
+        artifactId: 'artifact-source',
+        artifactKey: sourceKey,
+        kind: 'video',
+        role: 'primary',
+        ordinal: 0,
+        sha256: sourceHash,
+        byteSize: 8192,
+      },
+    ],
+    props: { primaryAssetId: 'asset-source', title: 'protected-render-title' },
+  })
+  const reconstructable = createReconstructableMediaArtifactManifest({
+    artifactKey: 'workspaces/ws/artifacts/reconstructable.mp4',
+    artifactSha256: 'a'.repeat(64),
+    byteSize: 4096,
+    mediaType: 'video',
+    container: 'mp4',
+    recipe: {
+      id: 'render-video',
+      version: 'v4',
+      parameters: { composition: 'apollo-video' },
+    },
+    sources: [
+      {
+        artifactKey: sourceKey,
+        sha256: sourceHash,
+        role: 'primary',
+        execution: {
+          tool: { id: 'remotion', version: '4.0.489', digest: '1'.repeat(64) },
+        },
+      },
+    ],
+    renderInput,
+  })
+
+  assert.equal(reconstructable.manifest.schemaVersion, 'media-artifact-manifest/v4')
+  assert.deepEqual(reconstructable.manifest.renderInput, {
+    ref: reconstructable.renderInput.ref,
+    inputHash: renderInput.inputHash,
+  })
+  assert.equal(JSON.stringify(reconstructable.manifest).includes('protected-render-title'), false)
+  assert.equal(reconstructable.renderInput.canonicalJson.includes('protected-render-title'), true)
+  assert.doesNotThrow(() => assertMediaArtifactManifest(reconstructable.manifest))
+  assert.doesNotThrow(() => assertRenderInputPayload(reconstructable.renderInput))
+
+  expectDomainError(
+    () =>
+      createReconstructableMediaArtifactManifest({
+        artifactKey: 'workspaces/ws/artifacts/invalid.mp4',
+        artifactSha256: 'c'.repeat(64),
+        byteSize: 1,
+        mediaType: 'video',
+        container: 'mp4',
+        recipe: { id: 'render-video', version: 'v4', parameters: {} },
+        sources: [
+          {
+            artifactKey: 'workspaces/ws/masters/missing.mov',
+            sha256: 'd'.repeat(64),
+            role: 'primary',
+            execution: {
+              tool: { id: 'remotion', version: '4.0.489', digest: '1'.repeat(64) },
+            },
+          },
+        ],
+        renderInput,
+      }),
+    'INVALID_MEDIA_ARTIFACT',
+  )
+})
+
 test('artifact replay specification exposes references but never protected parameters', async () => {
   const parametersHash = 'd'.repeat(64)
   const parametersRef = `recipe-parameters/sha256/${parametersHash}`
@@ -595,6 +693,57 @@ test('artifact replay specification exposes references but never protected param
   assert.deepEqual(legacy.issues.map((issue) => issue.code), [
     'REPLAY_PARAMETERS_MISSING',
   ])
+})
+
+test('artifact RenderInput inspection exposes safe metadata but never protected content', async () => {
+  const inputHash = 'a'.repeat(64)
+  const artifact = {
+    id: 'artifact-render-input',
+    manifests: [
+      {
+        id: 'manifest-v4',
+        schemaVersion: 'media-artifact-manifest/v4',
+        manifestHash: 'b'.repeat(64),
+        recipe: { id: 'render-video', version: 'v4', parametersHash: 'c'.repeat(64) },
+        renderInput: {
+          ref: `render-input/sha256/${inputHash}`,
+          inputHash,
+          canonicalByteSize: 2048,
+          algorithm: 'aes-256-gcm',
+        },
+        sources: [],
+        createdAt: '2026-07-14T11:00:00.000Z',
+      },
+      {
+        id: 'manifest-v3',
+        schemaVersion: 'media-artifact-manifest/v3',
+        manifestHash: 'd'.repeat(64),
+        recipe: { id: 'render-video', version: 'v3', parametersHash: 'e'.repeat(64) },
+        sources: [],
+        createdAt: '2026-07-14T10:59:00.000Z',
+      },
+    ],
+  }
+  const readRenderInput = readMediaArtifactRenderInputService({
+    repository: { async findById() { return artifact } },
+  })
+
+  const available = await readRenderInput('workspace-1', artifact.id, 'manifest-v4')
+  assert.equal(available.available, true)
+  assert.deepEqual(available.renderInput, {
+    ref: `render-input/sha256/${inputHash}`,
+    inputHash,
+    canonicalByteSize: 2048,
+    protection: { algorithm: 'aes-256-gcm' },
+  })
+  assert.equal(JSON.stringify(available).includes('canonicalJson'), false)
+  assert.equal(JSON.stringify(available).includes('ciphertext'), false)
+  assert.equal(JSON.stringify(available).includes('keyId'), false)
+
+  const legacy = await readRenderInput('workspace-1', artifact.id, 'manifest-v3')
+  assert.equal(legacy.available, false)
+  assert.equal('renderInput' in legacy, false)
+  assert.deepEqual(legacy.issues.map((issue) => issue.code), ['RENDER_INPUT_MISSING'])
 })
 
 test('media artifact lookup normalizes ids and hides missing workspace records', async () => {

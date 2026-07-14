@@ -397,7 +397,7 @@
 - [x] Definir `RenderInput` autocontido e schema versionado. Evidência: `render-input/v1`, hash canônico, preflight público e testes de materialização sem banco.
 - [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-018: resolver port e verificação de URI/checksum/tamanho entregues; faltam adapters de storage e integração com o job de render.
 - [x] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
-- [ ] Salvar manifest com checksums, plan hash e renderer version.
+- [x] Salvar manifest com checksums, plan hash e renderer version. Evidência: `media-artifact-manifest/v4` vincula por hash um `render-input/v1` protegido que contém checksums ordenados, plan hash e identidade versionada do renderer.
 - [ ] Reexecutar golden render somente a partir do manifest salvo.
 
 ### F0.029 — Estados visíveis [FR-236]
@@ -2763,7 +2763,7 @@ Incidente hospedado e correção:
 
 ### Slice F0-018 — RenderInput portátil, preflight e materialização isolada
 
-**Status:** concluído localmente em 13 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 13 de julho de 2026 no commit `6683bca`.
 
 Entregas:
 
@@ -2806,3 +2806,55 @@ Limites explícitos desta slice:
 - o RenderInput ainda não está persistido/vinculado ao manifest v3;
 - esta slice não inicia render, não gera custo e não acessa plaintext protegido;
 - o próximo passo é persistir o RenderInput protegido no manifest e conectar um smoke render reconstruível.
+
+Confirmação hospedada:
+
+- o run `29324961708` aprovou os 20 passos no Linux, incluindo contratos públicos, build, integrações SQLite/Postgres e auditorias.
+
+### Slice F0-019 — RenderInput protegido vinculado ao manifest v4
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- contrato interno aditivo `media-artifact-manifest/v4`, preservando leitura de v1, v2 e v3;
+- o manifest v4 mantém recipe e RenderInput como dois payloads protegidos independentes e content-addressed;
+- o manifest publica somente `renderInput.ref` e `renderInput.inputHash`, nunca props, lista completa de assets ou JSON canônico;
+- payload canônico `render-input/v1` limitado a 4 MiB e referenciado por `render-input/sha256/{inputHash}`;
+- validação de payload reconfirma schema, hash, serialização canônica, referência e tamanho antes de persistir;
+- cada source do manifest v4 deve existir entre os assets do RenderInput com a mesma canonical key e checksum;
+- Postgres e SQLite de protótipo armazenam o RenderInput com AES-256-GCM, key ID, nonce, ciphertext e auth tag;
+- contexto autenticado da cifra inclui workspace e referência, impedindo transplante silencioso entre tenants;
+- deduplicação por workspace + input hash evita armazenar novamente o mesmo RenderInput no mesmo workspace;
+- chave composta por workspace + referência mantém payloads iguais isolados entre workspaces;
+- manifest, recipe protegida, RenderInput protegido, artifact e lineage são gravados na mesma transação;
+- replay valida referência, hash, tamanho, metadados cifrados e plaintext canônico autenticado quando a cifra está disponível;
+- constraints Postgres exigem recipe protegida em manifests v3/v4, RenderInput protegido em v4 e links nulos nas versões legadas;
+- leitura interna revalida manifest, vínculos protegidos, artifact e lineage antes de produzir metadados seguros;
+- capability externa `apollo.artifacts.render-input.read@1.0.0` usa scope `artifacts:read`;
+- endpoint `GET /v1/artifacts/{artifactId}/render-input/{manifestId}` retorna somente ref, hash, tamanho e algoritmo;
+- manifests v1/v2/v3 retornam `available=false` e `RENDER_INPUT_MISSING`;
+- o presenter geral `artifact-detail/v1` continua sem publicar referências protegidas;
+- JSON Schema, exemplos, OpenAPI e baseline foram ampliados de forma aditiva.
+
+Evidências locais:
+
+- domínio comprova manifest v4 determinístico, payload canônico válido e ausência das props protegidas no manifest;
+- domínio rejeita source do manifest ausente dos assets do RenderInput;
+- integração Prisma comprova ciphertext sem plaintext, round-trip autenticado e vínculo v4 íntegro;
+- replay idempotente e dois manifests distintos reutilizam um único payload no workspace; a consulta interna devolve apenas metadados seguros;
+- API ponta a ponta comprova capability discovery, scope 403, isolamento 404 e resposta legacy explícita;
+- respostas `artifact-detail`, replay spec e RenderInput metadata não contêm props, canonical JSON, ciphertext ou key ID;
+- migration validada com 12 tabelas, 34 índices e 21 foreign keys;
+- contratos aprovados com 16 capabilities, 21 schemas, 25 exemplos e 14 paths;
+- suíte unitária completa passou com 45 testes, incluindo 20 contratos de domínio;
+- build Next.js registra a rota dinâmica de inspeção do RenderInput.
+
+Limites explícitos desta slice:
+
+- não existe endpoint público para descriptografar ou recuperar o JSON canônico;
+- acesso futuro do worker ao plaintext exigirá adapter interno, rights check, auditoria e privilégio mínimo;
+- fonts, LUTs e dados auxiliares já pertencem ao contrato do RenderInput, mas ainda precisam de storage tipado e adapters de materialização;
+- schema semântico das props continua responsabilidade do adapter da composição;
+- esta slice não inicia render e não implementa rotação ou reencriptação de chaves;
+- o golden render permanece aberto até existir worker que recupere o payload protegido, materialize assets e execute o renderer somente a partir do manifest salvo.

@@ -20,6 +20,10 @@ import {
   assertRecipeParameterPayload,
   type RecipeParameterPayload,
 } from '../../domain/recipe-parameters.ts'
+import {
+  assertRenderInputPayload,
+  type RenderInputPayload,
+} from '../../domain/render-input-payload.ts'
 
 type PersistenceClient = Pick<
   PrismaClient,
@@ -27,11 +31,13 @@ type PersistenceClient = Pick<
   | 'v2MediaArtifactManifest'
   | 'v2MediaArtifactLineage'
   | 'v2RecipeParameterPayload'
+  | 'v2RenderInputPayload'
 >
 
 function sourceExecution(manifest: MediaArtifactManifest, index: number) {
   return manifest.schemaVersion === 'media-artifact-manifest/v2' ||
-    manifest.schemaVersion === 'media-artifact-manifest/v3'
+    manifest.schemaVersion === 'media-artifact-manifest/v3' ||
+    manifest.schemaVersion === 'media-artifact-manifest/v4'
     ? manifest.sources[index].execution
     : undefined
 }
@@ -128,6 +134,14 @@ async function findReplay(
     bundle.recipeParameters,
     cipher,
   )
+  await assertStoredRenderInput(
+    client,
+    bundle.workspaceId,
+    storedManifest.renderInputRef,
+    storedManifest.renderInputHash,
+    bundle.renderInput,
+    cipher,
+  )
 
   const lineage = await client.v2MediaArtifactLineage.findMany({
     where: { workspaceId: bundle.workspaceId, manifestId: storedManifest.id },
@@ -159,6 +173,10 @@ async function findReplay(
 
 function recipeParameterContext(workspaceId: string, ref: string): string {
   return `apollo-recipe-parameters/v1:${workspaceId}:${ref}`
+}
+
+function renderInputContext(workspaceId: string, ref: string): string {
+  return `apollo-render-input/v1:${workspaceId}:${ref}`
 }
 
 function storedRecipeParametersMatch(stored: {
@@ -228,6 +246,74 @@ async function assertStoredRecipeParameters(
   }
 }
 
+function storedRenderInputMatches(stored: {
+  ref: string
+  inputHash: string
+  canonicalByteSize: number
+  algorithm: string
+  keyId: string
+  nonce: string
+  ciphertext: string
+  authTag: string
+}): boolean {
+  return (
+    stored.ref === `render-input/sha256/${stored.inputHash}` &&
+    stored.canonicalByteSize > 0 &&
+    stored.canonicalByteSize <= 4 * 1024 * 1024 &&
+    stored.algorithm === 'aes-256-gcm' &&
+    /^[a-z0-9][a-z0-9._-]{0,63}$/.test(stored.keyId) &&
+    /^[A-Za-z0-9_-]{16}$/.test(stored.nonce) &&
+    stored.ciphertext.length > 0 &&
+    /^[A-Za-z0-9_-]{22}$/.test(stored.authTag)
+  )
+}
+
+async function assertStoredRenderInput(
+  client: PersistenceClient,
+  workspaceId: string,
+  storedRef: string | null,
+  storedHash: string | null,
+  expected: RenderInputPayload | undefined,
+  cipher?: RecipeParameterCipher,
+): Promise<void> {
+  if (!expected) {
+    if (storedRef !== null || storedHash !== null) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Unexpected RenderInput payload link')
+    }
+    return
+  }
+  if (storedRef !== expected.ref || storedHash !== expected.inputHash) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'RenderInput payload link is invalid')
+  }
+  const stored = await client.v2RenderInputPayload.findUnique({
+    where: { workspaceId_ref: { workspaceId, ref: storedRef } },
+  })
+  if (
+    !stored ||
+    stored.workspaceId !== workspaceId ||
+    stored.inputHash !== expected.inputHash ||
+    stored.canonicalByteSize !== expected.canonicalByteSize ||
+    !storedRenderInputMatches(stored)
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'RenderInput payload metadata is invalid')
+  }
+  if (cipher) {
+    const plaintext = await cipher.open(
+      {
+        algorithm: stored.algorithm as 'aes-256-gcm',
+        keyId: stored.keyId,
+        nonce: stored.nonce,
+        ciphertext: stored.ciphertext,
+        authTag: stored.authTag,
+      },
+      renderInputContext(workspaceId, expected.ref),
+    )
+    if (plaintext !== expected.canonicalJson) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'RenderInput plaintext is invalid')
+    }
+  }
+}
+
 export class PrismaMediaArtifactRepository
   implements MediaArtifactPersistenceRepository, MediaArtifactQueryRepository
 {
@@ -247,6 +333,7 @@ export class PrismaMediaArtifactRepository
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           include: {
             recipeParameters: true,
+            renderInput: true,
             lineageEdges: {
               orderBy: { ordinal: 'asc' },
               include: {
@@ -287,17 +374,30 @@ export class PrismaMediaArtifactRepository
         BigInt(manifest.artifact.byteSize) === row.byteSize &&
         manifest.artifact.mediaType === row.mediaType &&
         manifest.artifact.container === row.container
-      const recipeMatches =
+      const protectedParametersMatch =
+        manifest.schemaVersion === 'media-artifact-manifest/v3' ||
+        manifest.schemaVersion === 'media-artifact-manifest/v4'
+          ? manifest.recipe.parametersRef === stored.recipeParametersRef &&
+            stored.recipeParameters?.parametersHash === manifest.recipe.parametersHash &&
+            storedRecipeParametersMatch(stored.recipeParameters)
+          : stored.recipeParametersRef === null && stored.recipeParameters === null
+      const renderInputMatches =
+        manifest.schemaVersion === 'media-artifact-manifest/v4'
+          ? manifest.renderInput.ref === stored.renderInputRef &&
+            manifest.renderInput.inputHash === stored.renderInputHash &&
+            stored.renderInput?.inputHash === manifest.renderInput.inputHash &&
+            storedRenderInputMatches(stored.renderInput)
+          : stored.renderInputRef === null &&
+            stored.renderInputHash === null &&
+            stored.renderInput === null
+      const manifestMatches =
         manifest.schemaVersion === stored.schemaVersion &&
         manifest.manifestHash === stored.manifestHash &&
         manifest.recipe.id === stored.recipeId &&
         manifest.recipe.version === stored.recipeVersion &&
         manifest.recipe.parametersHash === stored.parametersHash &&
-        (manifest.schemaVersion === 'media-artifact-manifest/v3'
-          ? manifest.recipe.parametersRef === stored.recipeParametersRef &&
-            stored.recipeParameters?.parametersHash === manifest.recipe.parametersHash &&
-            storedRecipeParametersMatch(stored.recipeParameters)
-          : stored.recipeParametersRef === null && stored.recipeParameters === null)
+        protectedParametersMatch &&
+        renderInputMatches
       const lineageMatches =
         manifest.sources.length === stored.lineageEdges.length &&
         stored.lineageEdges.every((edge, index) => {
@@ -310,7 +410,7 @@ export class PrismaMediaArtifactRepository
             executionMatches(edge, sourceExecution(manifest, index))
           )
         })
-      if (!artifactMatches || !recipeMatches || !lineageMatches) {
+      if (!artifactMatches || !manifestMatches || !lineageMatches) {
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
           'Stored media artifact metadata does not match its immutable manifest',
@@ -336,6 +436,16 @@ export class PrismaMediaArtifactRepository
                 ref: stored.recipeParameters.ref,
                 parametersHash: stored.recipeParameters.parametersHash,
                 canonicalByteSize: stored.recipeParameters.canonicalByteSize,
+                algorithm: 'aes-256-gcm' as const,
+              },
+            }
+          : {}),
+        ...(stored.renderInput
+          ? {
+              renderInput: {
+                ref: stored.renderInput.ref,
+                inputHash: stored.renderInput.inputHash,
+                canonicalByteSize: stored.renderInput.canonicalByteSize,
                 algorithm: 'aes-256-gcm' as const,
               },
             }
@@ -394,17 +504,20 @@ export class PrismaMediaArtifactRepository
     bundle: MediaArtifactPersistenceBundle,
   ): Promise<MediaArtifactPersistenceResult> {
     assertMediaArtifactManifest(bundle.manifest)
-    if (bundle.manifest.schemaVersion === 'media-artifact-manifest/v3') {
+    if (
+      bundle.manifest.schemaVersion === 'media-artifact-manifest/v3' ||
+      bundle.manifest.schemaVersion === 'media-artifact-manifest/v4'
+    ) {
       if (!bundle.recipeParameters) {
         throw new DomainError(
           'INVALID_MEDIA_ARTIFACT',
-          'Manifest v3 requires protected recipe parameters',
+          'Manifest v3 or v4 requires protected recipe parameters',
         )
       }
       if (!this.recipeParameterCipher) {
         throw new DomainError(
           'PERSISTENCE_NOT_CONFIGURED',
-          'Recipe parameter cipher is not configured',
+          'Protected payload cipher is not configured',
         )
       }
       assertRecipeParameterPayload(bundle.recipeParameters)
@@ -414,13 +527,36 @@ export class PrismaMediaArtifactRepository
       ) {
         throw new DomainError(
           'INVALID_MEDIA_ARTIFACT',
-          'Protected recipe parameters do not match manifest v3',
+          'Protected recipe parameters do not match manifest',
         )
       }
-    } else if (bundle.recipeParameters) {
+      if (bundle.manifest.schemaVersion === 'media-artifact-manifest/v4') {
+        if (!bundle.renderInput) {
+          throw new DomainError(
+            'INVALID_MEDIA_ARTIFACT',
+            'Manifest v4 requires a protected RenderInput',
+          )
+        }
+        assertRenderInputPayload(bundle.renderInput)
+        if (
+          bundle.renderInput.ref !== bundle.manifest.renderInput.ref ||
+          bundle.renderInput.inputHash !== bundle.manifest.renderInput.inputHash
+        ) {
+          throw new DomainError(
+            'INVALID_MEDIA_ARTIFACT',
+            'Protected RenderInput does not match manifest v4',
+          )
+        }
+      } else if (bundle.renderInput) {
+        throw new DomainError(
+          'INVALID_MEDIA_ARTIFACT',
+          'Manifest v3 cannot link a protected RenderInput',
+        )
+      }
+    } else if (bundle.recipeParameters || bundle.renderInput) {
       throw new DomainError(
         'INVALID_MEDIA_ARTIFACT',
-        'Legacy manifests cannot link protected recipe parameters',
+        'Legacy manifests cannot link protected payloads',
       )
     }
     if (
@@ -573,6 +709,74 @@ export class PrismaMediaArtifactRepository
           }
         }
 
+        let renderInputRef: string | undefined
+        let renderInputHash: string | undefined
+        if (bundle.renderInput) {
+          const protectedPayloadCipher = this.recipeParameterCipher
+          if (!protectedPayloadCipher) {
+            throw new DomainError(
+              'PERSISTENCE_NOT_CONFIGURED',
+              'Protected payload cipher is not configured',
+            )
+          }
+          const existing = await transaction.v2RenderInputPayload.findUnique({
+            where: {
+              workspaceId_inputHash: {
+                workspaceId: bundle.workspaceId,
+                inputHash: bundle.renderInput.inputHash,
+              },
+            },
+          })
+          if (existing) {
+            await assertStoredRenderInput(
+              transaction,
+              bundle.workspaceId,
+              existing.ref,
+              existing.inputHash,
+              bundle.renderInput,
+              protectedPayloadCipher,
+            )
+            renderInputRef = existing.ref
+            renderInputHash = existing.inputHash
+          } else {
+            const sealed = await protectedPayloadCipher.seal(
+              bundle.renderInput.canonicalJson,
+              renderInputContext(bundle.workspaceId, bundle.renderInput.ref),
+            )
+            const created = await transaction.v2RenderInputPayload.upsert({
+              where: {
+                workspaceId_inputHash: {
+                  workspaceId: bundle.workspaceId,
+                  inputHash: bundle.renderInput.inputHash,
+                },
+              },
+              update: {},
+              create: {
+                ref: bundle.renderInput.ref,
+                workspaceId: bundle.workspaceId,
+                inputHash: bundle.renderInput.inputHash,
+                canonicalByteSize: bundle.renderInput.canonicalByteSize,
+                algorithm: sealed.algorithm,
+                keyId: sealed.keyId,
+                nonce: sealed.nonce,
+                ciphertext: sealed.ciphertext,
+                authTag: sealed.authTag,
+                createdAt,
+              },
+            })
+            await assertStoredRenderInput(
+              transaction,
+              bundle.workspaceId,
+              created.ref,
+              created.inputHash,
+              bundle.renderInput,
+              protectedPayloadCipher,
+            )
+            renderInputRef = created.ref
+            renderInputHash = created.inputHash
+          }
+        }
+
         const storedManifest = await transaction.v2MediaArtifactManifest.create({
           data: {
             id: bundle.manifestId,
@@ -584,6 +788,8 @@ export class PrismaMediaArtifactRepository
             recipeVersion: bundle.manifest.recipe.version,
             parametersHash: bundle.manifest.recipe.parametersHash,
             recipeParametersRef,
+            renderInputRef,
+            renderInputHash,
             manifestJson,
             createdAt,
           },

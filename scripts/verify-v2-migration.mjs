@@ -92,6 +92,12 @@ const requiredChecks = [
   'recipe_parameter_payloads_ref_check',
   'recipe_parameter_payloads_size_check',
   'recipe_parameter_payloads_cipher_check',
+  'render_input_payloads_hash_check',
+  'render_input_payloads_ref_check',
+  'render_input_payloads_size_check',
+  'render_input_payloads_cipher_check',
+  'media_artifact_manifests_render_input_check',
+  'media_artifact_manifests_recipe_parameters_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

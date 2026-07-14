@@ -29,6 +29,12 @@ export interface MediaArtifactManifestRecord {
     canonicalByteSize: number
     algorithm: 'aes-256-gcm'
   }
+  renderInput?: {
+    ref: string
+    inputHash: string
+    canonicalByteSize: number
+    algorithm: 'aes-256-gcm'
+  }
   probe?: MediaArtifactProbe
   sources: readonly MediaArtifactLineageRecord[]
   createdAt: string

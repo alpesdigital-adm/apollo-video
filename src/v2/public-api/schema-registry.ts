@@ -619,6 +619,77 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       ],
     }),
   ),
+  defineSchema('artifact-render-input', 1, 'Artifact RenderInput metadata response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'artifactId', 'manifestId', 'schemaVersion', 'manifestHash',
+        'available', 'issues',
+      ],
+      properties: {
+        artifactId: idSchema,
+        manifestId: idSchema,
+        schemaVersion: { type: 'string', minLength: 1, maxLength: 64 },
+        manifestHash: sha256Schema,
+        available: { type: 'boolean' },
+        renderInput: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ref', 'inputHash', 'canonicalByteSize', 'protection'],
+          properties: {
+            ref: {
+              type: 'string',
+              pattern: '^render-input/sha256/[a-f0-9]{64}$',
+            },
+            inputHash: sha256Schema,
+            canonicalByteSize: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 4194304,
+            },
+            protection: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['algorithm'],
+              properties: { algorithm: { const: 'aes-256-gcm' } },
+            },
+          },
+        },
+        issues: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['code', 'message'],
+            properties: {
+              code: { const: 'RENDER_INPUT_MISSING' },
+              message: { type: 'string', minLength: 1 },
+            },
+          },
+        },
+      },
+      allOf: [
+        {
+          if: { properties: { available: { const: true } } },
+          then: {
+            required: ['renderInput'],
+            properties: {
+              renderInput: { type: 'object' },
+              issues: { type: 'array', maxItems: 0 },
+            },
+          },
+        },
+        {
+          if: { properties: { available: { const: false } } },
+          then: {
+            not: { required: ['renderInput'] },
+            properties: { issues: { type: 'array', minItems: 1 } },
+          },
+        },
+      ],
+    }),
+  ),
   defineSchema('render-input-preflight-request', 1, 'Portable RenderInput preflight request', {
     type: 'object',
     additionalProperties: false,

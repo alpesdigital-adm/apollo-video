@@ -279,6 +279,41 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/artifact-render-input/v1': [
+      {
+        data: {
+          artifactId,
+          manifestId: 'manifest-example-4',
+          schemaVersion: 'media-artifact-manifest/v4',
+          manifestHash: '8'.repeat(64),
+          available: true,
+          renderInput: {
+            ref: `render-input/sha256/${'9'.repeat(64)}`,
+            inputHash: '9'.repeat(64),
+            canonicalByteSize: 2048,
+            protection: { algorithm: 'aes-256-gcm' },
+          },
+          issues: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          artifactId,
+          manifestId: 'manifest-example-legacy',
+          schemaVersion: 'media-artifact-manifest/v3',
+          manifestHash: 'a'.repeat(64),
+          available: false,
+          issues: [
+            {
+              code: 'RENDER_INPUT_MISSING',
+              message: 'Manifest predates protected RenderInput',
+            },
+          ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/render-input-preflight-request/v1': [
       renderInputRequestExample,
     ],

@@ -1,5 +1,6 @@
 import type { MediaArtifactManifest } from '../../domain/media-artifact.ts'
 import type { RecipeParameterPayload } from '../../domain/recipe-parameters.ts'
+import type { RenderInputPayload } from '../../domain/render-input-payload.ts'
 
 export interface MediaArtifactPersistenceBundle {
   workspaceId: string
@@ -8,6 +9,7 @@ export interface MediaArtifactPersistenceBundle {
   lineageIds: readonly string[]
   manifest: MediaArtifactManifest
   recipeParameters?: RecipeParameterPayload
+  renderInput?: RenderInputPayload
   createdAt: string
 }
 

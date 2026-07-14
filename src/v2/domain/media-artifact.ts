@@ -4,6 +4,11 @@ import {
   createRecipeParameterPayload,
   type RecipeParameterPayload,
 } from './recipe-parameters.ts'
+import type { RenderInputSpecV1 } from './render-input.ts'
+import {
+  createRenderInputPayload,
+  type RenderInputPayload,
+} from './render-input-payload.ts'
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const PORTABLE_TOKEN_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
@@ -101,10 +106,27 @@ export interface MediaArtifactManifestV3 extends MediaArtifactManifestBodyV3 {
   manifestHash: string
 }
 
+export interface MediaArtifactManifestBodyV4 {
+  schemaVersion: 'media-artifact-manifest/v4'
+  artifact: MediaArtifactManifestBodyV1['artifact']
+  recipe: MediaArtifactManifestBodyV3['recipe']
+  renderInput: {
+    ref: string
+    inputHash: string
+  }
+  sources: MediaArtifactSourceV2[]
+  probe?: MediaArtifactProbe
+}
+
+export interface MediaArtifactManifestV4 extends MediaArtifactManifestBodyV4 {
+  manifestHash: string
+}
+
 export type MediaArtifactManifest =
   | MediaArtifactManifestV1
   | MediaArtifactManifestV2
   | MediaArtifactManifestV3
+  | MediaArtifactManifestV4
 
 export interface CreateMediaArtifactManifestInput {
   artifactKey: string
@@ -141,6 +163,12 @@ export interface CreateMediaArtifactManifestV2Input
 export interface ReplayableMediaArtifactManifest {
   manifest: MediaArtifactManifestV3
   recipeParameters: RecipeParameterPayload
+}
+
+export interface ReconstructableMediaArtifactManifest {
+  manifest: MediaArtifactManifestV4
+  recipeParameters: RecipeParameterPayload
+  renderInput: RenderInputPayload
 }
 
 function validatePortableKey(value: string, field: string): string {
@@ -350,16 +378,51 @@ export function createReplayableMediaArtifactManifest(
   }
 }
 
+export function createReconstructableMediaArtifactManifest(
+  input: CreateMediaArtifactManifestV2Input & { renderInput: RenderInputSpecV1 },
+): ReconstructableMediaArtifactManifest {
+  const replayable = createReplayableMediaArtifactManifest(input)
+  const renderInput = createRenderInputPayload(input.renderInput)
+  for (const source of replayable.manifest.sources) {
+    assertDomain(
+      input.renderInput.assets.some(
+        (asset) =>
+          asset.artifactKey === source.artifactKey && asset.sha256 === source.sha256,
+      ),
+      'INVALID_MEDIA_ARTIFACT',
+      'Every manifest source must be present in the RenderInput assets',
+    )
+  }
+  const { manifestHash: _v3Hash, ...v3Body } = replayable.manifest
+  const body: MediaArtifactManifestBodyV4 = {
+    ...v3Body,
+    schemaVersion: 'media-artifact-manifest/v4',
+    renderInput: {
+      ref: renderInput.ref,
+      inputHash: renderInput.inputHash,
+    },
+  }
+  return {
+    manifest: { ...body, manifestHash: calculateCanonicalHash(body) },
+    recipeParameters: replayable.recipeParameters,
+    renderInput,
+  }
+}
+
 export function assertMediaArtifactManifest(manifest: MediaArtifactManifest): void {
   assertExactKeys(
     manifest,
-    ['schemaVersion', 'artifact', 'recipe', 'sources', 'probe', 'manifestHash'],
+    [
+      'schemaVersion', 'artifact', 'recipe', 'renderInput',
+      'sources', 'probe', 'manifestHash',
+    ],
     'manifest',
   )
   assertDomain(
     manifest.schemaVersion === 'media-artifact-manifest/v1' ||
       manifest.schemaVersion === 'media-artifact-manifest/v2' ||
-      manifest.schemaVersion === 'media-artifact-manifest/v3',
+      manifest.schemaVersion === 'media-artifact-manifest/v3' ||
+      manifest.schemaVersion === 'media-artifact-manifest/v4',
     'INVALID_MEDIA_ARTIFACT',
     'manifest schemaVersion is invalid',
   )
@@ -370,7 +433,8 @@ export function assertMediaArtifactManifest(manifest: MediaArtifactManifest): vo
   )
   assertExactKeys(
     manifest.recipe,
-    manifest.schemaVersion === 'media-artifact-manifest/v3'
+    manifest.schemaVersion === 'media-artifact-manifest/v3' ||
+      manifest.schemaVersion === 'media-artifact-manifest/v4'
       ? ['id', 'version', 'parametersHash', 'parametersRef']
       : ['id', 'version', 'parametersHash'],
     'recipe',
@@ -391,12 +455,31 @@ export function assertMediaArtifactManifest(manifest: MediaArtifactManifest): vo
   validateToken(manifest.recipe.id, 'recipe.id')
   validateToken(manifest.recipe.version, 'recipe.version')
   validateSha256(manifest.recipe.parametersHash, 'recipe.parametersHash')
-  if (manifest.schemaVersion === 'media-artifact-manifest/v3') {
+  if (
+    manifest.schemaVersion === 'media-artifact-manifest/v3' ||
+    manifest.schemaVersion === 'media-artifact-manifest/v4'
+  ) {
     assertDomain(
       manifest.recipe.parametersRef ===
         `recipe-parameters/sha256/${manifest.recipe.parametersHash}`,
       'INVALID_MEDIA_ARTIFACT',
       'recipe.parametersRef does not match parametersHash',
+    )
+  }
+  if (manifest.schemaVersion === 'media-artifact-manifest/v4') {
+    assertExactKeys(manifest.renderInput, ['ref', 'inputHash'], 'renderInput')
+    validateSha256(manifest.renderInput.inputHash, 'renderInput.inputHash')
+    assertDomain(
+      manifest.renderInput.ref ===
+        `render-input/sha256/${manifest.renderInput.inputHash}`,
+      'INVALID_MEDIA_ARTIFACT',
+      'renderInput.ref does not match inputHash',
+    )
+  } else {
+    assertDomain(
+      !('renderInput' in manifest),
+      'INVALID_MEDIA_ARTIFACT',
+      'Legacy manifests cannot contain a RenderInput reference',
     )
   }
   for (const source of manifest.sources) {
