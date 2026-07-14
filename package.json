@@ -19,6 +19,7 @@
     "test:integration:render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/remotion-renderer.integration.mjs",
     "test:integration:prisma": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-project-repository.integration.mjs",
     "test:integration:operations": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-public-operation.integration.mjs",
+    "test:integration:webhooks": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-webhook-registration.integration.mjs",
     "worker:v2:render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env scripts/run-v2-render-worker.mjs",
     "test:integration:api": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/public-project-api.integration.mjs",
     "api:v1:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-public-contracts.mjs",

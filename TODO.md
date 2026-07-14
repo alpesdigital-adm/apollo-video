@@ -493,7 +493,7 @@
 
 - [x] Definir event envelope versionado, IDs únicos e catálogo inicial. Evidência F0-032: `PublicEvent`, UUID v4, catálogo de 14 tipos, schemas e `GET /v1/events/catalog`; unicidade global durável será fechada pelo outbox.
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
-- [ ] Modelar endpoint, subscription, secret, filter e delivery attempt.
+- [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [ ] Implementar challenge, assinatura, timestamp e anti-replay.
 - [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031: claim com lease/fencing, espera exponencial, checkpoint, descoberta e replay manual estão ativos no render; generalização aos demais jobs, métricas e console agregada continuam abertas.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
@@ -3407,7 +3407,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-033 — Outbox transacional de criação de projeto
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado no commit `81c619d` em 14 de julho de 2026.
 
 Entregas:
 
@@ -3439,4 +3439,42 @@ Limites explícitos desta slice:
 - não existem subscriptions, endpoints receptores, filtros, secrets ou delivery attempts;
 - claim/lease, at-least-once, assinatura, challenge, anti-replay, backoff, dead-letter e replay de eventos continuam abertos;
 - a tabela é infraestrutura interna e não será exposta crua; administração externa virá por capabilities seguras;
+- hosted CI `29369679232` aprovou outbox e rollback no PostgreSQL, 68 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-034 — Modelo durável de subscriptions e deliveries
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- domínios canônicos foram criados para endpoint, signing secret, subscription, filtro, delivery e delivery attempt;
+- endpoint novo fica `pending-verification` e aceita somente URL HTTPS normalizada, porta 443 e hostname DNS não local;
+- credentials, query, fragment, localhost, sufixos locais e IP literal são rejeitados antes da persistência;
+- signing secret é versionado, usa `hmac-sha256` e persiste somente referência opaca e fingerprint, nunca material secreto;
+- filtro usa 1 a 100 tipos exatos do catálogo, resource IDs opcionais, ordenação determinística e hash estável;
+- endpoint, secret inicial e subscription são registrados atomicamente para workspace e client ativos;
+- duplicidade de URL/filtro/key ref ou client ausente reverte todo o registro;
+- delivery é única por subscription/event e delivery attempt possui identidade e ordinal próprios;
+- cinco tabelas novas, relações workspace-scoped, índices de polling/deduplicação e constraints de estado foram adicionados;
+- CI passa a executar a integração dedicada de persistência de webhooks;
+- ADR-023 registra a fronteira entre configuração durável e futura execução de rede.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 71 testes;
+- testes de domínio cobrem normalização, imutabilidade, catálogo exato, URLs inseguras, filtros ambíguos e secret material indevido;
+- integração Prisma comprova registro atômico, isolamento por workspace, referência sem segredo, rollback por duplicidade e client inexistente;
+- migration v2 passa com 23 tabelas, 81 índices e 51 foreign keys;
+- contratos públicos permanecem intactos com 27 capabilities, 33 schemas, 40 examples e 24 paths;
+- typecheck, geração dos clients Prisma e build de produção passam;
+- FFmpeg, bundle/render real do Remotion, auditorias e todas as integrações Prisma/API em SQLite descartável passam.
+
+Limites explícitos desta slice:
+
+- validação de hostname ainda não resolve DNS; challenge e conexão deverão bloquear redes privadas e DNS rebinding a cada uso;
+- não existe provider adapter para provisionar/abrir o secret nem exibição one-shot;
+- endpoint e subscription não são ativados sem o challenge da próxima slice;
+- deliveries ainda não são materializadas a partir do outbox e nenhuma chamada HTTPS é executada;
+- assinatura, timestamp, anti-replay, claim/lease, at-least-once, backoff, dead-letter e replay continuam abertos;
+- API/UI administrativa e presenters seguros continuam no incremento administrativo posterior;
 - hosted CI será registrado após publicação no próximo ciclo.

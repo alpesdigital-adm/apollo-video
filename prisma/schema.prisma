@@ -62,21 +62,26 @@ model V2Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  projects           V2Project[]
-  snapshots          V2ProjectSnapshot[]
-  apiClients         V2ApiClient[]
-  idempotencyRecords V2IdempotencyRecord[]
-  mediaArtifacts     V2MediaArtifact[]
-  mediaManifests     V2MediaArtifactManifest[]
-  mediaLineage       V2MediaArtifactLineage[]
-  recipeParameters   V2RecipeParameterPayload[]
-  renderInputs       V2RenderInputPayload[]
-  rightsSnapshots    V2AssetRightsSnapshot[]
-  materializations   V2MaterializationAuthorization[]
-  assetUseDecisions  V2AssetUseDecision[]
-  publicOperations   V2PublicOperation[]
-  renderOperations   V2ArtifactRenderOperation[]
-  publicEventOutbox  V2PublicEventOutbox[]
+  projects             V2Project[]
+  snapshots            V2ProjectSnapshot[]
+  apiClients           V2ApiClient[]
+  idempotencyRecords   V2IdempotencyRecord[]
+  mediaArtifacts       V2MediaArtifact[]
+  mediaManifests       V2MediaArtifactManifest[]
+  mediaLineage         V2MediaArtifactLineage[]
+  recipeParameters     V2RecipeParameterPayload[]
+  renderInputs         V2RenderInputPayload[]
+  rightsSnapshots      V2AssetRightsSnapshot[]
+  materializations     V2MaterializationAuthorization[]
+  assetUseDecisions    V2AssetUseDecision[]
+  publicOperations     V2PublicOperation[]
+  renderOperations     V2ArtifactRenderOperation[]
+  publicEventOutbox    V2PublicEventOutbox[]
+  webhookEndpoints     V2WebhookEndpoint[]
+  webhookSecrets       V2WebhookSigningSecret[]
+  webhookSubscriptions V2WebhookSubscription[]
+  webhookDeliveries    V2WebhookDelivery[]
+  webhookAttempts      V2WebhookDeliveryAttempt[]
 
   @@map("v2_workspaces")
 }
@@ -94,9 +99,11 @@ model V2ApiClient {
   updatedAt   DateTime  @updatedAt
   lastUsedAt  DateTime?
 
-  workspace   V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  credentials V2ApiCredential[]
-  operations  V2PublicOperation[]
+  workspace                   V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  credentials                 V2ApiCredential[]
+  operations                  V2PublicOperation[]
+  createdWebhookEndpoints     V2WebhookEndpoint[]     @relation("V2WebhookEndpointCreator")
+  createdWebhookSubscriptions V2WebhookSubscription[] @relation("V2WebhookSubscriptionCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -537,11 +544,131 @@ model V2PublicEventOutbox {
   publishedAt   DateTime?
   createdAt     DateTime  @default(now())
 
-  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  workspace         V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  webhookDeliveries V2WebhookDelivery[]
 
   @@unique([id, workspaceId])
   @@index([publishedAt, occurredAt, id])
   @@index([workspaceId, occurredAt, id])
   @@index([workspaceId, resourceType, resourceId, occurredAt])
   @@map("v2_public_event_outbox")
+}
+
+model V2WebhookEndpoint {
+  id                String    @id
+  workspaceId       String
+  url               String
+  status            String    @default("pending-verification")
+  createdByClientId String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  verifiedAt        DateTime?
+  suspendedAt       DateTime?
+  revokedAt         DateTime?
+
+  workspace     V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy     V2ApiClient              @relation("V2WebhookEndpointCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  secrets       V2WebhookSigningSecret[]
+  subscriptions V2WebhookSubscription[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, url])
+  @@index([workspaceId, status, createdAt])
+  @@map("v2_webhook_endpoints")
+}
+
+model V2WebhookSigningSecret {
+  id          String    @id
+  workspaceId String
+  endpointId  String
+  version     Int
+  algorithm   String    @default("hmac-sha256")
+  keyRef      String    @unique
+  fingerprint String
+  status      String    @default("active")
+  createdAt   DateTime  @default(now())
+  retiredAt   DateTime?
+  revokedAt   DateTime?
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  endpoint  V2WebhookEndpoint @relation(fields: [endpointId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([endpointId, version])
+  @@index([workspaceId, status, createdAt])
+  @@map("v2_webhook_signing_secrets")
+}
+
+model V2WebhookSubscription {
+  id                    String    @id
+  workspaceId           String
+  endpointId            String
+  status                String    @default("pending-verification")
+  filterEventTypesJson  String
+  filterResourceIdsJson String?
+  filterHash            String
+  createdByClientId     String
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  pausedAt              DateTime?
+  revokedAt             DateTime?
+
+  workspace  V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  endpoint   V2WebhookEndpoint   @relation(fields: [endpointId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy  V2ApiClient         @relation("V2WebhookSubscriptionCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  deliveries V2WebhookDelivery[]
+
+  @@unique([id, workspaceId])
+  @@unique([endpointId, filterHash])
+  @@index([workspaceId, status, createdAt])
+  @@map("v2_webhook_subscriptions")
+}
+
+model V2WebhookDelivery {
+  id             String    @id
+  workspaceId    String
+  subscriptionId String
+  eventId        String
+  status         String    @default("pending")
+  attemptCount   Int       @default(0)
+  maxAttempts    Int       @default(8)
+  nextAttemptAt  DateTime
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+  deadLetteredAt DateTime?
+
+  workspace    V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  subscription V2WebhookSubscription      @relation(fields: [subscriptionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  event        V2PublicEventOutbox        @relation(fields: [eventId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  attempts     V2WebhookDeliveryAttempt[]
+
+  @@unique([id, workspaceId])
+  @@unique([subscriptionId, eventId])
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([workspaceId, status, createdAt])
+  @@map("v2_webhook_deliveries")
+}
+
+model V2WebhookDeliveryAttempt {
+  id               String    @id
+  workspaceId      String
+  deliveryId       String
+  attemptNumber    Int
+  status           String    @default("scheduled")
+  scheduledAt      DateTime
+  startedAt        DateTime?
+  completedAt      DateTime?
+  responseStatus   Int?
+  responseBodyHash String?
+  errorCode        String?
+  createdAt        DateTime  @default(now())
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  delivery  V2WebhookDelivery @relation(fields: [deliveryId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([deliveryId, attemptNumber])
+  @@index([workspaceId, status, scheduledAt])
+  @@map("v2_webhook_delivery_attempts")
 }
