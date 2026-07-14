@@ -394,8 +394,8 @@
 
 ### F0.028 — Props e manifest [FR-234]
 
-- [ ] Definir `RenderInput` autocontido e schema versionado.
-- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render.
+- [x] Definir `RenderInput` autocontido e schema versionado. Evidência: `render-input/v1`, hash canônico, preflight público e testes de materialização sem banco.
+- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-018: resolver port e verificação de URI/checksum/tamanho entregues; faltam adapters de storage e integração com o job de render.
 - [x] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
 - [ ] Salvar manifest com checksums, plan hash e renderer version.
 - [ ] Reexecutar golden render somente a partir do manifest salvo.
@@ -2712,7 +2712,7 @@ Confirmação hospedada:
 
 ### Slice F0-017 — Parâmetros de recipe protegidos e endereçados por conteúdo
 
-**Status:** concluído localmente em 13 de julho de 2026; ainda não commitado.
+**Status:** publicado em 13 de julho de 2026 no commit `486c05f`; correção concorrente publicada no commit `094c0ee`.
 
 Entregas:
 
@@ -2752,5 +2752,57 @@ Limites explícitos desta slice:
 - a API informa se os parâmetros estão preservados, mas não autoriza sua recuperação;
 - workers futuros receberão acesso interno mínimo via adapter/KMS e rights check, nunca pela API pública;
 - rotação de chave, re-encriptação e auditoria de acesso ao plaintext serão uma slice de segurança separada;
-- reconstrução golden ainda depende de RenderInput, plan, assets materializados e adapters versionados;
-- confirmação Postgres/Linux hospedada ocorrerá após o próximo commit/push, mantendo a cadência incremental.
+- reconstrução golden agora possui o contrato RenderInput, mas ainda depende de ligá-lo ao manifest, materializar assets no worker e executar o renderer.
+
+Incidente hospedado e correção:
+
+- o primeiro run publicado (`29291985359`) aplicou a migration e passou até a integração concorrente de artifacts;
+- o Postgres revelou uma corrida em que duas transações criavam outputs distintos com o mesmo payload novo;
+- a transação perdedora agora relê um possível replay e, quando a colisão pertence apenas ao payload deduplicado, repete uma vez a transação completa;
+- o run `29292143827` aprovou os 20 passos no Linux, incluindo migration, concorrência Postgres e API pública.
+
+### Slice F0-018 — RenderInput portátil, preflight e materialização isolada
+
+**Status:** concluído localmente em 13 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- contrato de domínio fechado `render-input/v1` sem dependência de Next.js, Prisma, storage ou renderer;
+- identidade do renderer inclui ID, versão e digest SHA-256 do bundle/tool;
+- identidade da composição inclui ID, versão, referência explícita ao schema de props e hash canônico das props;
+- vínculo com o plano inclui plan ID, version ID e plan hash;
+- output incorpora `OutputSpec` versionado, safe areas, locale, formato, dimensões, FPS e duração exata em frames;
+- assets são uma lista ordenada com ID lógico, artifact ID, canonical key, kind, role, ordinal, SHA-256 e byte size;
+- kinds iniciais cobrem vídeo, áudio, imagem, fonte, LUT e dados auxiliares;
+- props aceitam somente JSON canônico, rejeitando ciclos, valores não finitos, prototypes especiais e nomes perigosos;
+- props são limitadas a 512 KiB canônicos, assets a 4.096 itens e duração a 12 horas no teto de 120 FPS;
+- `propsHash` e `inputHash` são determinísticos e independentes da ordem das chaves do objeto;
+- referências absolutas, traversal, campos extras e ordinals não contíguos são rejeitados;
+- `RenderInputAssetResolver` materializa cada asset por port explícito, sem acesso implícito ao banco;
+- materialização aceita somente HTTPS ou arquivo local, sem credenciais embutidas, e reconfirma checksum e byte size;
+- URLs assinadas e paths de resolução dos assets existem apenas no objeto materializado em memória e não alteram nem entram no `inputHash`;
+- capability `apollo.render-inputs.preflight@1.0.0` é pública, autenticada e usa `artifacts:read`;
+- endpoint `POST /v1/render-inputs/preflight` possui idempotência natural e limita o body por streaming a 2 MiB;
+- resposta pública informa hash e resumo seguro, sem devolver props, asset keys ou locations;
+- resposta declara `validationScope=portable-envelope` e `materializationRequired=true`, evitando prometer validação das props específicas da composição;
+- request/response possuem JSON Schemas, exemplos, OpenAPI e baseline de compatibilidade próprios.
+
+Evidências locais:
+
+- testes comprovam hash igual para props semanticamente iguais com chaves reordenadas;
+- adulteração de `inputHash` e campo implícito de banco são rejeitados;
+- materialização mantém a identidade portátil e não muta o spec de origem;
+- checksum divergente retornado pelo resolver bloqueia a materialização;
+- API ponta a ponta comprova capability discovery, scope 403, preflight 200 e input inválido 422;
+- resposta ponta a ponta não contém props, canonical key nem URI;
+- suíte unitária passou para 43 testes;
+- contratos aprovados com 15 capabilities, 20 schemas, 23 exemplos e 13 paths;
+- build Next.js registra `/v1/render-inputs/preflight` como rota dinâmica.
+
+Limites explícitos desta slice:
+
+- o preflight valida o envelope portátil e a canonicidade das props, não o schema semântico específico de cada composição;
+- ainda não há adapter de storage que gere URL assinada nem adapter que converta o RenderInput v1 para as props da composição Remotion atual;
+- o RenderInput ainda não está persistido/vinculado ao manifest v3;
+- esta slice não inicia render, não gera custo e não acessa plaintext protegido;
+- o próximo passo é persistir o RenderInput protegido no manifest e conectar um smoke render reconstruível.

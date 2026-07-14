@@ -176,6 +176,85 @@ const executionProvenanceSchema = {
   },
 }
 
+const renderTokenSchema = {
+  type: 'string',
+  pattern: '^[a-z0-9][a-z0-9._-]{0,127}$',
+}
+const renderIdentitySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'version', 'digest'],
+  properties: {
+    id: renderTokenSchema,
+    version: renderTokenSchema,
+    digest: sha256Schema,
+  },
+}
+const renderPlanSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'versionId', 'hash'],
+  properties: {
+    id: renderTokenSchema,
+    versionId: renderTokenSchema,
+    hash: sha256Schema,
+  },
+}
+const renderOutputRequestSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id', 'locale', 'aspectRatio', 'width', 'height', 'fps',
+    'safeArea', 'durationInFrames',
+  ],
+  properties: {
+    id: { type: 'string', minLength: 1, maxLength: 128 },
+    locale: {
+      type: 'string',
+      pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$',
+    },
+    aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+    width: { type: 'integer', minimum: 2, multipleOf: 2 },
+    height: { type: 'integer', minimum: 2, multipleOf: 2 },
+    fps: { type: 'integer', minimum: 1, maximum: 120 },
+    safeArea: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['top', 'right', 'bottom', 'left'],
+      properties: {
+        top: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+        right: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+        bottom: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+        left: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+      },
+    },
+    deliveryProfileId: { type: 'string', minLength: 1, maxLength: 128 },
+    durationInFrames: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 5184000,
+    },
+  },
+}
+const renderInputAssetSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id', 'artifactId', 'artifactKey', 'kind', 'role',
+    'ordinal', 'sha256', 'byteSize',
+  ],
+  properties: {
+    id: renderTokenSchema,
+    artifactId: renderTokenSchema,
+    artifactKey: { type: 'string', minLength: 1, maxLength: 512 },
+    kind: { enum: ['video', 'audio', 'image', 'font', 'lut', 'data'] },
+    role: renderTokenSchema,
+    ordinal: { type: 'integer', minimum: 0, maximum: 4095 },
+    sha256: sha256Schema,
+    byteSize: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+  },
+}
+
 const credentialMutationDataSchema = {
   type: 'object',
   additionalProperties: false,
@@ -538,6 +617,94 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           },
         },
       ],
+    }),
+  ),
+  defineSchema('render-input-preflight-request', 1, 'Portable RenderInput preflight request', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'schemaVersion', 'renderer', 'composition', 'plan',
+      'output', 'assets', 'props',
+    ],
+    properties: {
+      schemaVersion: { const: 'render-input/v1' },
+      renderer: renderIdentitySchema,
+      composition: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'version', 'propsSchemaRef'],
+        properties: {
+          id: renderTokenSchema,
+          version: renderTokenSchema,
+          propsSchemaRef: {
+            type: 'string',
+            pattern: '^apollo://render-props/[a-z0-9][a-z0-9-]*/v[1-9][0-9]*$',
+          },
+        },
+      },
+      plan: renderPlanSchema,
+      output: renderOutputRequestSchema,
+      assets: {
+        type: 'array',
+        maxItems: 4096,
+        items: renderInputAssetSchema,
+      },
+      props: { type: 'object' },
+    },
+  }),
+  defineSchema('render-input-preflight', 1, 'Portable RenderInput preflight response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'schemaVersion', 'validationScope', 'materializationRequired',
+        'inputHash', 'renderer', 'composition',
+        'plan', 'output', 'assetCount', 'totalAssetBytes',
+      ],
+      properties: {
+        schemaVersion: { const: 'render-input/v1' },
+        validationScope: { const: 'portable-envelope' },
+        materializationRequired: { const: true },
+        inputHash: sha256Schema,
+        renderer: renderIdentitySchema,
+        composition: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'version', 'propsSchemaRef', 'propsHash'],
+          properties: {
+            id: renderTokenSchema,
+            version: renderTokenSchema,
+            propsSchemaRef: {
+              type: 'string',
+              pattern: '^apollo://render-props/[a-z0-9][a-z0-9-]*/v[1-9][0-9]*$',
+            },
+            propsHash: sha256Schema,
+          },
+        },
+        plan: renderPlanSchema,
+        output: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'id', 'locale', 'aspectRatio', 'width', 'height',
+            'fps', 'durationInFrames',
+          ],
+          properties: {
+            id: { type: 'string', minLength: 1, maxLength: 128 },
+            locale: {
+              type: 'string',
+              pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$',
+            },
+            aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+            width: { type: 'integer', minimum: 2, multipleOf: 2 },
+            height: { type: 'integer', minimum: 2, multipleOf: 2 },
+            fps: { type: 'integer', minimum: 1, maximum: 120 },
+            durationInFrames: { type: 'integer', minimum: 1, maximum: 5184000 },
+          },
+        },
+        assetCount: { type: 'integer', minimum: 0, maximum: 4096 },
+        totalAssetBytes: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+      },
     }),
   ),
   defineSchema('create-project-request', 1, 'Create project request', {

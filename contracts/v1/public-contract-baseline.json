@@ -350,6 +350,31 @@
         }
       ],
       "responseMediaType": "application/json"
+    },
+    "apollo.render-inputs.preflight": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "preflight",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:read"
+      ],
+      "inputSchemaRef": "apollo://schemas/render-input-preflight-request/v1",
+      "outputSchemaRef": "apollo://schemas/render-input-preflight/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/render-inputs/preflight"
+      },
+      "toolName": "apollo.render-inputs.preflight",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
     }
   },
   "schemas": {
@@ -2212,6 +2237,437 @@
                   }
                 }
               }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/render-input-preflight-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "renderer",
+        "composition",
+        "plan",
+        "output",
+        "assets",
+        "props"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "render-input/v1"
+        },
+        "renderer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "version",
+            "digest"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "composition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "version",
+            "propsSchemaRef"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "propsSchemaRef": {
+              "type": "string",
+              "pattern": "^apollo://render-props/[a-z0-9][a-z0-9-]*/v[1-9][0-9]*$"
+            }
+          }
+        },
+        "plan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "versionId",
+            "hash"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "versionId": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "locale",
+            "aspectRatio",
+            "width",
+            "height",
+            "fps",
+            "safeArea",
+            "durationInFrames"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "locale": {
+              "type": "string",
+              "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+            },
+            "aspectRatio": {
+              "enum": [
+                "9:16",
+                "16:9",
+                "4:5",
+                "1:1",
+                "21:9"
+              ]
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 2,
+              "multipleOf": 2
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 2,
+              "multipleOf": 2
+            },
+            "fps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 120
+            },
+            "safeArea": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "top",
+                "right",
+                "bottom",
+                "left"
+              ],
+              "properties": {
+                "top": {
+                  "type": "number",
+                  "minimum": 0,
+                  "exclusiveMaximum": 0.5
+                },
+                "right": {
+                  "type": "number",
+                  "minimum": 0,
+                  "exclusiveMaximum": 0.5
+                },
+                "bottom": {
+                  "type": "number",
+                  "minimum": 0,
+                  "exclusiveMaximum": 0.5
+                },
+                "left": {
+                  "type": "number",
+                  "minimum": 0,
+                  "exclusiveMaximum": 0.5
+                }
+              }
+            },
+            "deliveryProfileId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "durationInFrames": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5184000
+            }
+          }
+        },
+        "assets": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "artifactId",
+              "artifactKey",
+              "kind",
+              "role",
+              "ordinal",
+              "sha256",
+              "byteSize"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+              },
+              "artifactId": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+              },
+              "artifactKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "kind": {
+                "enum": [
+                  "video",
+                  "audio",
+                  "image",
+                  "font",
+                  "lut",
+                  "data"
+                ]
+              },
+              "role": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+              },
+              "ordinal": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4095
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "byteSize": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        },
+        "props": {
+          "type": "object"
+        }
+      }
+    },
+    "apollo://schemas/render-input-preflight/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "validationScope",
+            "materializationRequired",
+            "inputHash",
+            "renderer",
+            "composition",
+            "plan",
+            "output",
+            "assetCount",
+            "totalAssetBytes"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "render-input/v1"
+            },
+            "validationScope": {
+              "const": "portable-envelope"
+            },
+            "materializationRequired": {
+              "const": true
+            },
+            "inputHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "renderer": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version",
+                "digest"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "composition": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version",
+                "propsSchemaRef",
+                "propsHash"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+                },
+                "propsSchemaRef": {
+                  "type": "string",
+                  "pattern": "^apollo://render-props/[a-z0-9][a-z0-9-]*/v[1-9][0-9]*$"
+                },
+                "propsHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "plan": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "versionId",
+                "hash"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+                },
+                "versionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+                },
+                "hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "output": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "locale",
+                "aspectRatio",
+                "width",
+                "height",
+                "fps",
+                "durationInFrames"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "locale": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+                },
+                "aspectRatio": {
+                  "enum": [
+                    "9:16",
+                    "16:9",
+                    "4:5",
+                    "1:1",
+                    "21:9"
+                  ]
+                },
+                "width": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "multipleOf": 2
+                },
+                "height": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "multipleOf": 2
+                },
+                "fps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 120
+                },
+                "durationInFrames": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5184000
+                }
+              }
+            },
+            "assetCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4096
+            },
+            "totalAssetBytes": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
             }
           }
         },

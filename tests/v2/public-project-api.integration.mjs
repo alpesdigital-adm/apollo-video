@@ -260,6 +260,10 @@ test('authenticated public API manages projects, clients and artifact inspection
       ],
       'apollo.artifacts.replay-spec.read',
     )
+    assert.equal(
+      openApi.paths['/v1/render-inputs/preflight'].post['x-apollo-capability-id'],
+      'apollo.render-inputs.preflight',
+    )
 
     const schemaResponse = await fetch(
       `${baseUrl}/v1/schemas/create-project-request/v1`,
@@ -297,6 +301,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.artifacts.lineage.diagnose',
         'apollo.artifacts.provenance.read',
         'apollo.artifacts.replay-spec.read',
+        'apollo.render-inputs.preflight',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
         'apollo.projects.create',
@@ -373,6 +378,15 @@ test('authenticated public API manages projects, clients and artifact inspection
       { headers: { authorization: childAuthorization } },
     )
     assert.equal(childReplaySpecResponse.status, 403)
+    const childRenderInputResponse = await fetch(`${baseUrl}/v1/render-inputs/preflight`, {
+      method: 'POST',
+      headers: {
+        authorization: childAuthorization,
+        'content-type': 'application/json',
+      },
+      body: '{}',
+    })
+    assert.equal(childRenderInputResponse.status, 403)
 
     const artifactResponse = await fetch(`${baseUrl}/v1/artifacts/${derivedArtifactId}`, {
       headers: { authorization },
@@ -455,6 +469,75 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(JSON.stringify(replaySpec).includes('protected-api-replay-value'), false)
     assert.equal(JSON.stringify(replaySpec).includes('ciphertext'), false)
     assert.equal(JSON.stringify(replaySpec).includes('keyId'), false)
+
+    const renderInputRequest = {
+      schemaVersion: 'render-input/v1',
+      renderer: { id: 'remotion', version: '4.0.489', digest: sha('8') },
+      composition: {
+        id: 'apollo-video',
+        version: 'v1',
+        propsSchemaRef: 'apollo://render-props/apollo-video/v1',
+      },
+      plan: {
+        id: 'plan-public-api',
+        versionId: 'plan-version-public-api',
+        hash: sha('9'),
+      },
+      output: {
+        id: 'preset-9x16',
+        locale: 'pt-BR',
+        aspectRatio: '9:16',
+        width: 1080,
+        height: 1920,
+        fps: 30,
+        safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+        durationInFrames: 600,
+      },
+      assets: [
+        {
+          id: 'asset-primary-video',
+          artifactId: sourceArtifactId,
+          artifactKey: sourceKey,
+          kind: 'video',
+          role: 'primary',
+          ordinal: 0,
+          sha256: sha('a'),
+          byteSize: 4096,
+        },
+      ],
+      props: {
+        primaryVideoAssetId: 'asset-primary-video',
+        title: 'Protected input is not echoed',
+      },
+    }
+    const renderInputResponse = await fetch(`${baseUrl}/v1/render-inputs/preflight`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify(renderInputRequest),
+    })
+    const renderInput = await renderInputResponse.json()
+    assert.equal(renderInputResponse.status, 200)
+    assert.equal(renderInput.data.schemaVersion, 'render-input/v1')
+    assert.equal(renderInput.data.validationScope, 'portable-envelope')
+    assert.equal(renderInput.data.materializationRequired, true)
+    assert.equal(renderInput.data.inputHash.length, 64)
+    assert.equal(renderInput.data.composition.propsHash.length, 64)
+    assert.equal(renderInput.data.assetCount, 1)
+    assert.equal(renderInput.data.totalAssetBytes, '4096')
+    assert.equal(JSON.stringify(renderInput).includes('Protected input is not echoed'), false)
+    assert.equal(JSON.stringify(renderInput).includes(sourceKey), false)
+    assert.equal(JSON.stringify(renderInput).includes('uri'), false)
+
+    const invalidRenderInputResponse = await fetch(`${baseUrl}/v1/render-inputs/preflight`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...renderInputRequest, databaseId: 'must-not-be-accepted' }),
+    })
+    assert.equal(invalidRenderInputResponse.status, 422)
+    assert.equal(
+      (await invalidRenderInputResponse.json()).error.code,
+      'INVALID_RENDER_INPUT',
+    )
 
     await client.v2MediaArtifact.update({
       where: { id: sourceArtifactId },

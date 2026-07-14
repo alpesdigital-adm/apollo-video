@@ -6,6 +6,50 @@ const workspaceId = 'workspace-example-1'
 const clientId = 'client-example-1'
 const credentialId = 'credential-example-1'
 const artifactId = 'artifact-example-1'
+const renderInputRequestExample = {
+  schemaVersion: 'render-input/v1',
+  renderer: {
+    id: 'remotion',
+    version: '4.0.489',
+    digest: '8'.repeat(64),
+  },
+  composition: {
+    id: 'apollo-video',
+    version: 'v1',
+    propsSchemaRef: 'apollo://render-props/apollo-video/v1',
+  },
+  plan: {
+    id: 'plan-example-1',
+    versionId: 'plan-version-example-1',
+    hash: '9'.repeat(64),
+  },
+  output: {
+    id: 'preset-9x16',
+    locale: 'pt-BR',
+    aspectRatio: '9:16',
+    width: 1080,
+    height: 1920,
+    fps: 30,
+    safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+    durationInFrames: 900,
+  },
+  assets: [
+    {
+      id: 'asset-primary-video',
+      artifactId,
+      artifactKey: 'workspace-example-1/masters/source.mp4',
+      kind: 'video',
+      role: 'primary',
+      ordinal: 0,
+      sha256: 'a'.repeat(64),
+      byteSize: 2849012,
+    },
+  ],
+  props: {
+    primaryVideoAssetId: 'asset-primary-video',
+    title: 'Abertura validada',
+  },
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -231,6 +275,37 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               message: 'Manifest predates protected replay parameters',
             },
           ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/render-input-preflight-request/v1': [
+      renderInputRequestExample,
+    ],
+    'apollo://schemas/render-input-preflight/v1': [
+      {
+        data: {
+          schemaVersion: 'render-input/v1',
+          validationScope: 'portable-envelope',
+          materializationRequired: true,
+          inputHash: 'b'.repeat(64),
+          renderer: { ...renderInputRequestExample.renderer },
+          composition: {
+            ...renderInputRequestExample.composition,
+            propsHash: 'c'.repeat(64),
+          },
+          plan: { ...renderInputRequestExample.plan },
+          output: {
+            id: 'preset-9x16',
+            locale: 'pt-BR',
+            aspectRatio: '9:16',
+            width: 1080,
+            height: 1920,
+            fps: 30,
+            durationInFrames: 900,
+          },
+          assetCount: 1,
+          totalAssetBytes: '2849012',
         },
         meta: { apiVersion: 'v1' },
       },

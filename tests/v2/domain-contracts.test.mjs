@@ -32,6 +32,12 @@ import { readMediaArtifactService } from '../../src/v2/application/read-media-ar
 import { diagnoseMediaArtifactLineageService } from '../../src/v2/application/diagnose-media-artifact-lineage.ts'
 import { readMediaArtifactProvenanceService } from '../../src/v2/application/read-media-artifact-provenance.ts'
 import { readMediaArtifactReplaySpecService } from '../../src/v2/application/read-media-artifact-replay-spec.ts'
+import { materializeRenderInputService } from '../../src/v2/application/materialize-render-input.ts'
+import { preflightRenderInputService } from '../../src/v2/application/preflight-render-input.ts'
+import {
+  assertRenderInputSpec,
+  createRenderInputSpec,
+} from '../../src/v2/domain/render-input.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -49,6 +55,140 @@ test('all required output presets satisfy the v2 contract', () => {
     assert.ok(Object.isFrozen(spec))
     assert.ok(Object.isFrozen(spec.safeArea))
   }
+})
+
+test('portable RenderInput hashes exact renderer, plan, output, assets and canonical props', async () => {
+  const createInput = (props) => ({
+    schemaVersion: 'render-input/v1',
+    renderer: {
+      id: 'remotion',
+      version: '4.0.489',
+      digest: '1'.repeat(64),
+    },
+    composition: {
+      id: 'apollo-video',
+      version: 'v1',
+      propsSchemaRef: 'apollo://render-props/apollo-video/v1',
+    },
+    plan: {
+      id: 'plan-1',
+      versionId: 'plan-version-1',
+      hash: '2'.repeat(64),
+    },
+    output: {
+      id: 'preset-9x16',
+      locale: 'pt-BR',
+      aspectRatio: '9:16',
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+      durationInFrames: 900,
+    },
+    assets: [
+      {
+        id: 'asset-primary',
+        artifactId: 'artifact-primary',
+        artifactKey: 'workspaces/1/masters/source.mp4',
+        kind: 'video',
+        role: 'primary',
+        ordinal: 0,
+        sha256: '3'.repeat(64),
+        byteSize: 4096,
+      },
+    ],
+    props,
+  })
+  const first = createRenderInputSpec(
+    createInput({ title: 'Hook', primaryAssetId: 'asset-primary' }),
+  )
+  const reordered = createRenderInputSpec(
+    createInput({ primaryAssetId: 'asset-primary', title: 'Hook' }),
+  )
+
+  assert.equal(first.inputHash, reordered.inputHash)
+  assert.equal(first.composition.propsHash, reordered.composition.propsHash)
+  assert.equal(JSON.stringify(first).includes('file://'), false)
+  assert.doesNotThrow(() => assertRenderInputSpec(first))
+  expectDomainError(
+    () => assertRenderInputSpec({ ...first, inputHash: '4'.repeat(64) }),
+    'INVALID_RENDER_INPUT',
+  )
+  expectDomainError(
+    () => createRenderInputSpec({ ...createInput({}), implicitDatabaseId: 'unsafe' }),
+    'INVALID_RENDER_INPUT',
+  )
+
+  const preflight = await preflightRenderInputService()(createInput({ title: 'Hook' }))
+  assert.equal(preflight.schemaVersion, 'render-input/v1')
+  assert.equal(preflight.validationScope, 'portable-envelope')
+  assert.equal(preflight.materializationRequired, true)
+  assert.equal(preflight.assetCount, 1)
+  assert.equal(preflight.totalAssetBytes, '4096')
+  assert.equal('props' in preflight, false)
+  assert.equal('assets' in preflight, false)
+})
+
+test('RenderInput materialization resolves locations without changing portable identity', async () => {
+  const spec = createRenderInputSpec({
+    schemaVersion: 'render-input/v1',
+    renderer: { id: 'remotion', version: '4.0.489', digest: '5'.repeat(64) },
+    composition: {
+      id: 'apollo-video',
+      version: 'v1',
+      propsSchemaRef: 'apollo://render-props/apollo-video/v1',
+    },
+    plan: { id: 'plan-2', versionId: 'plan-version-2', hash: '6'.repeat(64) },
+    output: {
+      id: 'preset-16x9',
+      locale: 'pt-BR',
+      aspectRatio: '16:9',
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+      durationInFrames: 1800,
+    },
+    assets: [
+      {
+        id: 'font-primary',
+        artifactId: 'artifact-font-primary',
+        artifactKey: 'workspaces/1/fonts/inter.woff2',
+        kind: 'font',
+        role: 'subtitle-font',
+        ordinal: 0,
+        sha256: '7'.repeat(64),
+        byteSize: 2048,
+      },
+    ],
+    props: { fontAssetId: 'font-primary' },
+  })
+  const materialize = materializeRenderInputService({
+    resolver: {
+      async resolve(asset) {
+        return {
+          uri: 'file:///worker/materialized/inter.woff2',
+          sha256: asset.sha256,
+          byteSize: asset.byteSize,
+        }
+      },
+    },
+  })
+  const materialized = await materialize(spec)
+  assert.equal(materialized.inputHash, spec.inputHash)
+  assert.equal(materialized.assets[0].uri, 'file:///worker/materialized/inter.woff2')
+  assert.equal('uri' in spec.assets[0], false)
+
+  await assert.rejects(
+    materializeRenderInputService({
+      resolver: {
+        async resolve(asset) {
+          return { uri: 'https://cdn.example/input', sha256: '8'.repeat(64), byteSize: asset.byteSize }
+        },
+      },
+    })(spec),
+    (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT',
+  )
 })
 test('output dimensions must match the declared ratio', () => {
   expectDomainError(
