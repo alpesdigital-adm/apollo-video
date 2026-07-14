@@ -363,6 +363,7 @@ test('authorized render promotes staged output only after a matching second mate
   let commits = 0
   let discards = 0
   const renderer = {
+    async recover() { return null },
     async stage(input) {
       assert.equal(input.inputHash, receipt.inputHash)
       const stagedReceipt = {
@@ -409,6 +410,8 @@ test('authorized render promotes staged output only after a matching second mate
   assert.equal(commits, 1)
   assert.equal(discards, 0)
   assert.equal(result.output.outputSha256, '7'.repeat(64))
+  assert.equal(result.getOutputKey(), 'workspaces/1/renders/output.mp4')
+  assert.equal(JSON.stringify(result).includes('workspaces/1/renders/output.mp4'), false)
 
   materializations = 0
   commits = 0
@@ -447,6 +450,42 @@ test('authorized render promotes staged output only after a matching second mate
   assert.equal(materializations, 2)
   assert.equal(commits, 0)
   assert.equal(discards, 1)
+
+  materializations = 0
+  let recoveryGates = 0
+  const recovered = await renderAuthorizedInputService({
+    async materialize() {
+      materializations += 1
+      return lease
+    },
+    renderer: {
+      async recover() {
+        return {
+          schemaVersion: 'committed-render-receipt/v1',
+          stageId: 'recovered-render-1',
+          inputHash: receipt.inputHash,
+          outputSha256: '7'.repeat(64),
+          byteSize: 4096,
+          width: 1080,
+          height: 1920,
+          fps: 30,
+          durationInFrames: 60,
+          codec: 'h264',
+          container: 'mp4',
+          committedAt: '2026-07-14T12:02:00.000Z',
+        }
+      },
+      async stage() { throw new Error('recovered output must not render again') },
+    },
+    outputKeyFor: () => 'workspaces/1/renders/output.mp4',
+  })({
+    workspaceId: 'workspace-1',
+    authorizationId: 'authorization-render-1',
+    async beforeCommit() { recoveryGates += 1 },
+  })
+  assert.equal(materializations, 2)
+  assert.equal(recoveryGates, 1)
+  assert.equal(recovered.output.stageId, 'recovered-render-1')
 })
 
 test('PublicOperation queue invariants fail closed and presenter omits execution internals', () => {

@@ -110,7 +110,9 @@ npm run worker:v2:render
 
 O processo exige Postgres e as raízes privadas de artifacts/outputs configuradas.
 Claim, heartbeat e attempt impedem dois workers de concluir a mesma tentativa;
-uma lease expirada pode ser recuperada com segurança por outro processo.
+uma lease expirada pode ser recuperada com segurança por outro processo. O
+status `succeeded` exige checkpoint do hash/probe do output; um arquivo já
+comprometido é verificado e retomado sem nova codificação após restart.
 
 ## Formatos
 

@@ -16,3 +16,4 @@ Estados usados:
 - [ADR-010 — Segurança, credenciais, rights e consent](./ADR-010-security-credentials-rights-consent.md)
 - [ADR-013 — API pública e automação](./ADR-013-public-api-automation.md)
 - [ADR-014 — Worker durável de render e fencing de lease](./ADR-014-durable-render-worker.md)
+- [ADR-015 — Checkpoint do output materializado](./ADR-015-render-output-checkpoint.md)

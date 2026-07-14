@@ -25,7 +25,7 @@ O endpoint público de render cria uma `PublicOperation`, mas codificação de m
 - Reinício do processo não perde a operação; leases vencidas são recuperáveis.
 - Dois workers podem observar o mesmo candidato, mas somente um claim condicional vence.
 - Uma renderização pode consumir trabalho antes de perder a lease, porém não pode promover o partial após o gate rejeitado.
-- O commit físico e a conclusão no banco não formam uma transação distribuída. A output key determinística e a futura persistência de artifact/lineage tratarão recuperação após queda entre esses dois passos.
+- O commit físico e a conclusão no banco não formam uma transação distribuída. O ADR-015 fecha essa janela com output key determinística, inspeção do arquivo comprometido e checkpoint tipado antes de `succeeded`.
 - Operação interna de fila, lease e storage não é exposta como endpoint público.
 
 ## Evidências exigidas

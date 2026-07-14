@@ -491,6 +491,18 @@ model V2ArtifactRenderOperation {
   manifestId      String
   authorizationId String
   inputHash       String
+  outputKey              String?
+  outputSha256           String?
+  outputByteSize         BigInt?
+  outputWidth            Int?
+  outputHeight           Int?
+  outputFps              Float?
+  outputDurationInFrames Int?
+  outputCodec            String?
+  outputContainer        String?
+  outputAttempt          Int?
+  outputCommittedAt      DateTime?
+  outputRecordedAt       DateTime?
 
   workspace     V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   operation     V2PublicOperation              @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)

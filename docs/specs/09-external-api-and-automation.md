@@ -319,6 +319,8 @@ Para `artifact-render`, a implementação durável aplica estas regras adicionai
 
 As fases reais iniciais são `materializing → rendering → persisting`. `verifying` já pertence à state machine e será usado quando probe/quality gates forem separados do renderer. Progresso continua 0/1 até existir medição determinística mais granular.
 
+Uma operação de reconstrução só chega a `succeeded` depois de persistir o checkpoint técnico do output. O checkpoint prova que os bytes comprometidos correspondem ao SHA-256, tamanho, container e probe do artifact/manifest alvo. Se o processo cair depois do commit físico, a key determinística é inspecionada e validada; o encode não é repetido quando a identidade coincide. Storage key, stage ID e receipt técnico são internos e nunca ampliam o `PublicOperation` exposto.
+
 Endpoints:
 
 - `GET /v1/operations/{id}`;

@@ -20,6 +20,7 @@ import { DomainError } from '../domain/errors.ts'
 import { prisma } from '../../lib/db.ts'
 import { resolveV2PersistenceMode } from './persistence-mode.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
+import { PrismaArtifactRenderCheckpointRepository } from './prisma/artifact-render-checkpoint-repository.ts'
 import { PrismaAssetRightsRepository } from './prisma/asset-rights-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
@@ -68,6 +69,10 @@ export function createMediaArtifactQueryRepository(): MediaArtifactQueryReposito
 
 export function createPublicOperationRepository(): PublicOperationRepository {
   return new PrismaPublicOperationRepository(resolveV2Client())
+}
+
+export function createArtifactRenderCheckpointRepository() {
+  return new PrismaArtifactRenderCheckpointRepository(resolveV2Client())
 }
 
 export function createProtectedRenderInputStore(): ProtectedRenderInputStore {
@@ -154,6 +159,7 @@ export function createPublicOperationWorker(
   const configuredHeartbeat = Number(environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
   return runNextPublicOperationService({
     operations: createPublicOperationRepository(),
+    checkpoints: createArtifactRenderCheckpointRepository(),
     render: createAuthorizedRenderExecutor(environment, clock),
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0

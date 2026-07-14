@@ -27,6 +27,7 @@ type StoredOperation = Prisma.V2PublicOperationGetPayload<{
     artifactRender: {
       include: {
         manifest: { select: { artifactId: true } }
+        artifact: { select: { sha256: true; byteSize: true; container: true } }
         authorization: {
           select: {
             artifactId: true
@@ -45,6 +46,7 @@ const OPERATION_INCLUDE = {
   artifactRender: {
     include: {
       manifest: { select: { artifactId: true } },
+      artifact: { select: { sha256: true, byteSize: true, container: true } },
       authorization: {
         select: {
           artifactId: true,
@@ -60,6 +62,29 @@ const OPERATION_INCLUDE = {
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
+const OUTPUT_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,510}\.mp4$/
+
+function checkpointFields(detail: StoredOperation['artifactRender']) {
+  if (!detail) return []
+  return [
+    detail.outputKey,
+    detail.outputSha256,
+    detail.outputByteSize,
+    detail.outputWidth,
+    detail.outputHeight,
+    detail.outputFps,
+    detail.outputDurationInFrames,
+    detail.outputCodec,
+    detail.outputContainer,
+    detail.outputAttempt,
+    detail.outputCommittedAt,
+    detail.outputRecordedAt,
+  ]
+}
+
+function hasCompleteCheckpoint(detail: NonNullable<StoredOperation['artifactRender']>): boolean {
+  return checkpointFields(detail).every((value) => value !== null)
+}
 
 function parseCommandDate(value: string, field: string): Date {
   const date = new Date(value)
@@ -131,6 +156,31 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       'Stored PublicOperation context is invalid',
       { operationId: row.id },
     )
+  }
+  const outputFields = checkpointFields(detail)
+  const hasAnyCheckpoint = outputFields.some((value) => value !== null)
+  if (
+    hasAnyCheckpoint &&
+    (!hasCompleteCheckpoint(detail) ||
+      !OUTPUT_KEY_PATTERN.test(detail.outputKey as string) ||
+      (detail.outputKey as string).length > 512 ||
+      (detail.outputKey as string).includes('//') ||
+      !SHA256_PATTERN.test(detail.outputSha256 as string) ||
+      (detail.outputByteSize as bigint) <= BigInt(0) ||
+      (detail.outputWidth as number) <= 0 ||
+      (detail.outputHeight as number) <= 0 ||
+      (detail.outputFps as number) <= 0 ||
+      (detail.outputDurationInFrames as number) <= 0 ||
+      detail.outputCodec !== 'h264' ||
+      detail.outputContainer !== 'mp4' ||
+      (detail.outputAttempt as number) <= 0 ||
+      (detail.outputRecordedAt as Date).getTime() <
+        (detail.outputCommittedAt as Date).getTime() ||
+      detail.outputSha256 !== detail.artifact.sha256 ||
+      detail.outputByteSize !== detail.artifact.byteSize ||
+      detail.outputContainer !== detail.artifact.container)
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored render checkpoint is invalid')
   }
   const hasCompleteLease =
     row.leaseOwner !== null && row.leaseExpiresAt !== null && row.heartbeatAt !== null
@@ -536,6 +586,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
   private async transitionRunning(
     input: PublicOperationLeaseCommand,
     transition: (operation: PublicOperation) => Readonly<PublicOperation>,
+    requiresCheckpoint = false,
   ): Promise<PublicOperationRecord | null> {
     const now = parseCommandDate(input.now, 'now')
     if (!ID_PATTERN.test(input.leaseOwner)) {
@@ -556,6 +607,15 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         stored.leaseExpiresAt.getTime() <= now.getTime()
       ) {
         return null
+      }
+      if (
+        requiresCheckpoint &&
+        (!stored.artifactRender || !hasCompleteCheckpoint(stored.artifactRender))
+      ) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Render operation cannot succeed before its output checkpoint',
+        )
       }
       const next = transition(record.operation)
       const updated = await transaction.v2PublicOperation.updateMany({
@@ -606,8 +666,10 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
   }
 
   succeed(input: PublicOperationLeaseCommand): Promise<PublicOperationRecord | null> {
-    return this.transitionRunning(input, (operation) =>
-      succeedPublicOperation(operation, input.now),
+    return this.transitionRunning(
+      input,
+      (operation) => succeedPublicOperation(operation, input.now),
+      true,
     )
   }
 

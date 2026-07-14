@@ -236,6 +236,13 @@ test('authorized materialized lease produces and promotes a real Remotion smoke 
   assert.equal(serialized.includes('file:'), false)
   assert.equal(serialized.includes(artifactKey), false)
   assert.equal(serialized.includes(directory), false)
+  const recovered = await render({
+    workspaceId: 'golden-workspace',
+    authorizationId: 'golden-authorization',
+  })
+  assert.equal(recovered.output.outputSha256, receipt.output.outputSha256)
+  assert.match(recovered.output.stageId, /^recovered-/)
+  assert.equal(JSON.stringify(recovered).includes(outputKey), false)
   const outputEntries = await readdir(path.dirname(outputPath))
   assert.deepEqual(outputEntries, ['smoke.mp4'])
 })

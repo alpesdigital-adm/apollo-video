@@ -31,6 +31,7 @@ function createOperations() {
   })
   let lease
   let denyHeartbeat = false
+  let allowExpiredClaim = false
   const context = Object.freeze({
     authorizationId: 'authorization-worker-test',
     inputHash: 'a'.repeat(64),
@@ -45,13 +46,18 @@ function createOperations() {
   return {
     get operation() { return operation },
     loseLease() { denyHeartbeat = true },
+    expireLease() { allowExpiredClaim = true },
     repository: {
       async findById() { return record() },
       async findReplay() { return null },
       async createOrReplay() { throw new Error('not used') },
       async claimNext(input) {
-        if (!['queued', 'retrying'].includes(operation.status)) return null
+        if (
+          !['queued', 'retrying'].includes(operation.status) &&
+          !(operation.status === 'running' && allowExpiredClaim)
+        ) return null
         operation = startPublicOperationAttempt(operation, input.now)
+        allowExpiredClaim = false
         lease = {
           owner: input.leaseOwner,
           attempt: operation.attempt,
@@ -88,7 +94,7 @@ function createOperations() {
 }
 
 function receipt() {
-  return Object.freeze({
+  const safe = Object.freeze({
     schemaVersion: 'authorized-render-receipt/v1',
     authorizationId: 'authorization-worker-test',
     artifactId: 'artifact-worker-test',
@@ -102,13 +108,38 @@ function receipt() {
       committedAt: '2026-07-14T12:00:01.000Z',
     }),
   })
+  return Object.freeze({
+    ...safe,
+    getOutputKey() { return 'workspaces/test/renders/output.mp4' },
+    toJSON() { return safe },
+  })
+}
+
+function createCheckpoints() {
+  let checkpoint = null
+  return {
+    get checkpoint() { return checkpoint },
+    repository: {
+      async findByOperationId() { return checkpoint },
+      async record(input) {
+        checkpoint = {
+          operationId: input.operationId,
+          outputKey: input.outputKey,
+          output: input.output,
+        }
+        return { checkpoint, replayed: false }
+      },
+    },
+  }
 }
 
 test('durable worker fences promotion with heartbeat and persists a safe terminal result', async () => {
   const operations = createOperations()
+  const checkpoints = createCheckpoints()
   let committed = false
   const runNext = runNextPublicOperationService({
     operations: operations.repository,
+    checkpoints: checkpoints.repository,
     clock: createClock(),
     leaseDurationMs: 10_000,
     heartbeatIntervalMs: 1_000,
@@ -125,6 +156,7 @@ test('durable worker fences promotion with heartbeat and persists a safe termina
   })
   assert.equal(committed, true)
   assert.equal(operations.operation.status, 'succeeded')
+  assert.equal(checkpoints.checkpoint.output.outputSha256, 'c'.repeat(64))
   assert.deepEqual(operations.operation.result.resource, operations.operation.target)
   const serialized = JSON.stringify(operations.operation)
   assert.equal(serialized.includes('private/output.mp4'), false)
@@ -133,9 +165,11 @@ test('durable worker fences promotion with heartbeat and persists a safe termina
 
 test('lost lease aborts before commit and cannot publish a stale result', async () => {
   const operations = createOperations()
+  const checkpoints = createCheckpoints()
   let committed = false
   const runNext = runNextPublicOperationService({
     operations: operations.repository,
+    checkpoints: checkpoints.repository,
     clock: createClock(),
     leaseDurationMs: 10_000,
     heartbeatIntervalMs: 1_000,
@@ -150,13 +184,16 @@ test('lost lease aborts before commit and cannot publish a stale result', async 
   assert.equal(outcome.status, 'lease-lost')
   assert.equal(committed, false)
   assert.equal(operations.operation.status, 'running')
+  assert.equal(checkpoints.checkpoint, null)
 })
 
 test('retryable failure is reclaimed after restart and succeeds on the next attempt', async () => {
   const operations = createOperations()
+  const checkpoints = createCheckpoints()
   let renders = 0
   const runNext = runNextPublicOperationService({
     operations: operations.repository,
+    checkpoints: checkpoints.repository,
     clock: createClock(),
     leaseDurationMs: 10_000,
     heartbeatIntervalMs: 1_000,
@@ -172,4 +209,41 @@ test('retryable failure is reclaimed after restart and succeeds on the next atte
   assert.equal((await runNext('worker-restart-two')).status, 'succeeded')
   assert.equal(operations.operation.attempt, 2)
   assert.equal(JSON.stringify(operations.operation).includes('private renderer detail'), false)
+})
+
+test('output committed before checkpoint is recovered by the next fenced attempt', async () => {
+  const operations = createOperations()
+  let checkpointWrites = 0
+  let renders = 0
+  const checkpoints = {
+    async findByOperationId() { return null },
+    async record(input) {
+      checkpointWrites += 1
+      if (checkpointWrites === 1) return null
+      return {
+        checkpoint: { operationId: input.operationId, output: input.output },
+        replayed: false,
+      }
+    },
+  }
+  const runNext = runNextPublicOperationService({
+    operations: operations.repository,
+    checkpoints,
+    clock: createClock(),
+    leaseDurationMs: 10_000,
+    heartbeatIntervalMs: 1_000,
+    async render(request) {
+      renders += 1
+      await request.beforeCommit()
+      return receipt()
+    },
+  })
+
+  assert.equal((await runNext('worker-after-commit-one')).status, 'lease-lost')
+  assert.equal(operations.operation.status, 'running')
+  operations.expireLease()
+  assert.equal((await runNext('worker-after-commit-two')).status, 'succeeded')
+  assert.equal(operations.operation.attempt, 2)
+  assert.equal(checkpointWrites, 2)
+  assert.equal(renders, 2)
 })

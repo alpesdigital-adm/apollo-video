@@ -15,6 +15,11 @@ export interface AuthorizedRenderReceipt {
   output: Readonly<CommittedRenderReceipt>
 }
 
+export interface AuthorizedRenderCompletion extends AuthorizedRenderReceipt {
+  getOutputKey(): string
+  toJSON(): Readonly<AuthorizedRenderReceipt>
+}
+
 type MaterializeAuthorized = (request: {
   workspaceId: string
   authorizationId: string
@@ -35,23 +40,37 @@ export function renderAuthorizedInputService(dependencies: {
     authorizationId: string
     signal?: AbortSignal
     beforeCommit?: () => Promise<void>
-  }): Promise<Readonly<AuthorizedRenderReceipt>> {
+  }): Promise<Readonly<AuthorizedRenderCompletion>> {
     const initialLease = await dependencies.materialize({
       workspaceId: request.workspaceId,
       authorizationId: request.authorizationId,
     })
     const initialReceipt = initialLease.receipt
-    const staged = await dependencies.renderer.stage(initialLease.getRenderInput(), {
-      outputKey: dependencies.outputKeyFor({
-        workspaceId: request.workspaceId,
-        authorizationId: request.authorizationId,
-        artifactId: initialReceipt.artifactId,
-        inputHash: initialReceipt.inputHash,
-      }),
-      ...(request.signal ? { signal: request.signal } : {}),
+    const outputKey = dependencies.outputKeyFor({
+      workspaceId: request.workspaceId,
+      authorizationId: request.authorizationId,
+      artifactId: initialReceipt.artifactId,
+      inputHash: initialReceipt.inputHash,
     })
-
-    try {
+    const complete = (
+      output: Readonly<CommittedRenderReceipt>,
+    ): Readonly<AuthorizedRenderCompletion> => {
+      const safeReceipt: Readonly<AuthorizedRenderReceipt> = Object.freeze({
+        schemaVersion: 'authorized-render-receipt/v1',
+        authorizationId: initialReceipt.authorizationId,
+        artifactId: initialReceipt.artifactId,
+        manifestId: initialReceipt.manifestId,
+        inputHash: initialReceipt.inputHash,
+        revalidationHash: initialReceipt.revalidationHash,
+        output,
+      })
+      return Object.freeze({
+        ...safeReceipt,
+        getOutputKey() { return outputKey },
+        toJSON() { return safeReceipt },
+      })
+    }
+    const revalidate = async () => {
       if (request.signal?.aborted) {
         throw new DomainError('RENDER_EXECUTION_FAILED', 'Render execution was cancelled')
       }
@@ -76,16 +95,24 @@ export function renderAuthorizedInputService(dependencies: {
       if (request.signal?.aborted) {
         throw new DomainError('RENDER_EXECUTION_FAILED', 'Render execution was cancelled')
       }
+    }
+    const recovered = await dependencies.renderer.recover(
+      initialLease.getRenderInput(),
+      { outputKey },
+    )
+    if (recovered) {
+      await revalidate()
+      return complete(recovered)
+    }
+    const staged = await dependencies.renderer.stage(initialLease.getRenderInput(), {
+      outputKey,
+      ...(request.signal ? { signal: request.signal } : {}),
+    })
+
+    try {
+      await revalidate()
       const output = await staged.commit()
-      return Object.freeze({
-        schemaVersion: 'authorized-render-receipt/v1',
-        authorizationId: initialReceipt.authorizationId,
-        artifactId: initialReceipt.artifactId,
-        manifestId: initialReceipt.manifestId,
-        inputHash: initialReceipt.inputHash,
-        revalidationHash: initialReceipt.revalidationHash,
-        output,
-      })
+      return complete(output)
     } catch (error) {
       try {
         await staged.discard()

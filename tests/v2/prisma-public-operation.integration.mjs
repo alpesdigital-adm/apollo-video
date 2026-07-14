@@ -11,8 +11,14 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
   const { createQueuedPublicOperation } = await import(
     '../../src/v2/domain/public-operation.ts'
   )
+  const { createMediaArtifactManifest } = await import(
+    '../../src/v2/domain/media-artifact.ts'
+  )
   const { PrismaPublicOperationRepository } = await import(
     '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
+  )
+  const { PrismaArtifactRenderCheckpointRepository } = await import(
+    '../../src/v2/infrastructure/prisma/artifact-render-checkpoint-repository.ts'
   )
 
   const client = new PrismaClient()
@@ -26,6 +32,16 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
   // Keep fixture dates in the past because Prisma's @updatedAt uses the database
   // execution clock when corruption scenarios update the stored record.
   const now = new Date('2026-01-01T15:30:00.000Z')
+  const artifactKey = 'workspaces/operation/render-target.mp4'
+  const targetManifest = createMediaArtifactManifest({
+    artifactKey,
+    artifactSha256: sha('a'),
+    byteSize: 1024,
+    mediaType: 'video',
+    container: 'mp4',
+    recipe: { id: 'render-video', version: 'v1', parameters: { fixture: true } },
+    probe: { width: 1080, height: 1920, duration: 2, fps: 30 },
+  })
 
   const cleanup = async () => {
     await client.v2ArtifactRenderOperation.deleteMany({ where: { workspaceId } })
@@ -69,7 +85,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       data: {
         id: artifactId,
         workspaceId,
-        artifactKey: 'workspaces/operation/render-target.mp4',
+        artifactKey,
         sha256: sha('a'),
         byteSize: 1024n,
         mediaType: 'video',
@@ -84,11 +100,11 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
         workspaceId,
         artifactId,
         schemaVersion: 'media-artifact-manifest/v1',
-        manifestHash: sha('b'),
+        manifestHash: targetManifest.manifestHash,
         recipeId: 'render-video',
         recipeVersion: 'v1',
-        parametersHash: sha('c'),
-        manifestJson: JSON.stringify({ fixture: 'operation-integration' }),
+        parametersHash: targetManifest.recipe.parametersHash,
+        manifestJson: JSON.stringify(targetManifest),
         createdAt: now,
       },
     })
@@ -114,6 +130,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
 
     const repository = new PrismaPublicOperationRepository(client)
+    const checkpoints = new PrismaArtifactRenderCheckpointRepository(client)
     const operation = createQueuedPublicOperation({
       id: operationId,
       workspaceId,
@@ -243,15 +260,77 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       }),
       null,
     )
-    const succeeded = await repository.succeed({
+    await assert.rejects(
+      repository.succeed({
+        operationId,
+        leaseOwner: recoveryOwner,
+        attempt: 2,
+        now: '2026-01-01T15:31:45.000Z',
+      }),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    const output = {
+      schemaVersion: 'committed-render-receipt/v1',
+      stageId: 'operation-stage-two',
+      inputHash: sha('d'),
+      outputSha256: sha('a'),
+      byteSize: 1024,
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      durationInFrames: 60,
+      codec: 'h264',
+      container: 'mp4',
+      committedAt: '2026-01-01T15:31:44.500Z',
+    }
+    assert.equal(
+      await checkpoints.record({
+        operationId,
+        leaseOwner: firstOwner,
+        attempt: 1,
+        now: '2026-01-01T15:31:45.000Z',
+        outputKey: 'workspaces/operation/renders/output.mp4',
+        output,
+      }),
+      null,
+    )
+    const checkpointed = await checkpoints.record({
       operationId,
       leaseOwner: recoveryOwner,
       attempt: 2,
       now: '2026-01-01T15:31:45.000Z',
+      outputKey: 'workspaces/operation/renders/output.mp4',
+      output,
+    })
+    assert.equal(checkpointed.replayed, false)
+    const checkpointReplay = await checkpoints.record({
+      operationId,
+      leaseOwner: recoveryOwner,
+      attempt: 2,
+      now: '2026-01-01T15:31:45.500Z',
+      outputKey: 'workspaces/operation/renders/output.mp4',
+      output: {
+        ...output,
+        stageId: 'recovered-operation-stage',
+        committedAt: '2026-01-01T15:31:44.750Z',
+      },
+    })
+    assert.equal(checkpointReplay.replayed, true)
+    assert.equal(checkpointReplay.checkpoint.attempt, 2)
+    const succeeded = await repository.succeed({
+      operationId,
+      leaseOwner: recoveryOwner,
+      attempt: 2,
+      now: '2026-01-01T15:31:46.000Z',
     })
     assert.equal(succeeded.operation.status, 'succeeded')
     assert.deepEqual(succeeded.operation.result.resource, operation.target)
     assert.equal(JSON.stringify(succeeded).includes('worker-integration'), false)
+    assert.equal(JSON.stringify(succeeded).includes('workspaces/operation/renders'), false)
+    assert.equal(
+      (await checkpoints.findByOperationId(operationId)).outputKey,
+      'workspaces/operation/renders/output.mp4',
+    )
     const terminalRow = await client.v2PublicOperation.findUnique({ where: { id: operationId } })
     assert.equal(terminalRow.leaseOwner, null)
     assert.equal(terminalRow.leaseExpiresAt, null)
@@ -288,6 +367,23 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(exhausted.operation.status, 'failed')
     assert.equal(exhausted.operation.error.code, 'worker_lease_expired')
     assert.equal(JSON.stringify(exhausted).includes('worker-integration-exhausted'), false)
+
+    await client.v2ArtifactRenderOperation.update({
+      where: { operationId },
+      data: { outputSha256: sha('b') },
+    })
+    await assert.rejects(
+      repository.findById(workspaceId, operationId),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    await assert.rejects(
+      checkpoints.findByOperationId(operationId),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    await client.v2ArtifactRenderOperation.update({
+      where: { operationId },
+      data: { outputSha256: sha('a') },
+    })
 
     await client.v2PublicOperation.update({
       where: { id: operationId },

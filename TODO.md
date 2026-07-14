@@ -376,14 +376,14 @@
 - [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
 - [x] Persistir hashes e versões de tool/model em cada edge. Evidência: manifest v2, colunas normalizadas de execution provenance e API pública por manifest.
 - [x] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
-- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-023: grafo, provenance, recipe e RenderInput protegidos, checkout autenticado, preflight técnico, autorização auditável, materialização efetiva e smoke render real já foram entregues; faltam replay a partir do manifest persistido, persistência do output/lineage e comparação golden.
+- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-026: grafo, provenance, recipe e RenderInput protegidos, autorização, materialização, render real, recuperação do output comprometido e checkpoint conferido contra artifact/manifest foram entregues; faltam jornada real inteiramente a partir da fixture persistida e comparação golden tolerante.
 
 ### F0.026 — Durable jobs [FR-232]
 
 - [ ] Implementar job state machine, heartbeat, attempt e idempotency key. Parcial F0-025: `artifact-render` possui state machine, enqueue idempotente, claim/lease, heartbeat, attempt como fencing token e conclusão CAS; falta generalizar para os demais jobs.
-- [ ] Persistir checkpoints antes e depois de efeitos externos. Parcial F0-025: fases são persistidas e o gate `persisting` ocorre imediatamente antes do commit; falta persistir receipt/output/lineage depois do efeito e fechar a recuperação da janela entre commit e conclusão.
+- [ ] Persistir checkpoints antes e depois de efeitos externos. Parcial F0-026: render persiste fase antes do commit e checkpoint tipado depois, com hash/tamanho/probe/target; faltam checkpoints equivalentes nos demais jobs.
 - [ ] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-025: falha retryable volta a `retrying` até `maxAttempts`; backoff, cancelamento e dead-letter continuam abertos.
-- [ ] Simular restart entre cada checkpoint e verificar retomada segura. Parcial F0-025: regressões cobrem expiração de lease, reclaim com attempt incrementado, worker antigo bloqueado, retry/restart e perda de lease antes do commit; faltam quedas após commit e checkpoints de outros jobs.
+- [ ] Simular restart entre cada checkpoint e verificar retomada segura. Parcial F0-026: regressões cobrem perda antes do commit, queda depois do commit e antes do checkpoint, replay de checkpoint, reclaim e output já existente sem nova codificação; faltam checkpoints dos demais jobs.
 
 ### F0.027 — Partial invalidation [FR-233]
 
@@ -398,7 +398,7 @@
 - [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-023: worker relê autorização/payload/rights, adapter local resolve vídeo/áudio/imagem sob raiz privada, verifica bytes por streaming e entrega somente a lease ao renderer real; faltam storage S3-compatible/signed URLs, fonts, LUTs e data.
 - [x] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
 - [x] Salvar manifest com checksums, plan hash e renderer version. Evidência: `media-artifact-manifest/v4` vincula por hash um `render-input/v1` protegido que contém checksums ordenados, plan hash e identidade versionada do renderer.
-- [ ] Reexecutar golden render somente a partir do manifest salvo. Parcial F0-023: um MP4 real já é produzido exclusivamente pela lease autorizada/materializada, com segunda revalidação e promoção segura; faltam fixture persistida no banco, replay pelo manifest salvo e comparação golden tolerante.
+- [ ] Reexecutar golden render somente a partir do manifest salvo. Parcial F0-026: output real pode ser recuperado pela identidade determinística e o checkpoint só é aceito quando corresponde ao artifact/manifest persistido; falta unir fixture Postgres e Remotion real no mesmo teste golden tolerante.
 
 ### F0.029 — Estados visíveis [FR-236]
 
@@ -486,7 +486,7 @@
 - [ ] Retornar 202+operation ID para ingest, Director, provider, sync, batch, render e export. Parcial F0-024: render autorizado retorna 202 com operation ID; os demais tipos continuam abertos.
 - [ ] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-024: read workspace-scoped por ID foi entregue; list, filtros, cancel e retry continuam abertos.
 - [ ] Expor fase e progresso real ou estado indeterminado honesto. Parcial F0-025: worker persiste `materializing`, `rendering`, `persisting` e terminal; progresso permanece honestamente 0/1, faltando medição granular e uso separado de `verifying`.
-- [ ] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-025: worker grava result por artifact/manifest e erro sanitizado sem path, key, stack ou detalhe privado; custo continua aberto.
+- [ ] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-026: sucesso exige checkpoint durável do output e expõe somente artifact/manifest; storage key, receipt técnico e diagnóstico permanecem internos; custo continua aberto.
 - [ ] Criar resilience tests de restart, stale result, cancel e retry. Parcial F0-025: restart/reclaim, tentativa stale, disputa de claim, heartbeat incorreto, perda de lease pré-commit e retry limitado estão cobertos; cancel e queda após commit continuam abertos.
 
 ### F0.038 — Webhooks e eventos [FR-244]
@@ -3121,7 +3121,7 @@ Confirmação hospedada:
 
 ### Slice F0-025 — Worker durável com lease e fencing
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado em 14 de julho de 2026 no commit `5de6a36`.
 
 Entregas:
 
@@ -3151,8 +3151,45 @@ Regressões e evidências locais:
 Limites explícitos desta slice:
 
 - backoff exponencial, `nextAttemptAt`, cancelamento, retry manual e dead-letter continuam abertos;
-- ainda não existe persistência do output como novo artifact/manifest/lineage nem checkpoint posterior ao commit físico;
+- ainda não existe checkpoint posterior ao commit que prove que os bytes materializados correspondem ao artifact/manifest alvo;
 - queda depois do commit do arquivo e antes do `succeeded` ainda depende da output key determinística; a reconciliação será fechada junto à persistência do output;
 - `verifying` existe no contrato e no repository, mas probe/quality ainda ocorre dentro do renderer e não ganha fase separada;
 - lease/heartbeat são internos e deliberadamente não aparecem na Public API;
+- hosted CI `29340825051` aprovou migrations PostgreSQL, concorrência de claim, 58 testes, contratos, FFmpeg, Remotion real, build, persistência e API.
+
+### Slice F0-026 — Checkpoint durável do output renderizado
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- `artifact_render_operations` ganhou checkpoint tipado do output com storage key interna, SHA-256, byte size, dimensões, fps, frames, codec/container, attempt e datas;
+- constraint PostgreSQL exige ausência total ou checkpoint completo e tecnicamente válido;
+- `PrismaArtifactRenderCheckpointRepository` valida o manifest canônico e reconfirma workspace, target artifact/manifest, input hash, hash/tamanho do artifact, container e probe;
+- gravação exige operação `running/persisting`, owner, attempt e lease válidos no mesmo transaction boundary;
+- worker antigo não consegue registrar output depois de perder o fencing token;
+- replay aceita stage/horário de observação diferentes somente quando a identidade imutável dos bytes permanece exata;
+- `succeeded` agora é recusado enquanto o checkpoint do output não existir;
+- `renderAuthorizedInputService` devolve a storage key somente por getter interno; `toJSON` e o presenter público continuam sem key/path;
+- renderer inspeciona output determinístico já comprometido, recalcula hash/probe e o reutiliza sem nova codificação;
+- output recuperado passa novamente pela materialização, rights revalidation e gate de lease antes de ser aceito;
+- checkpoint permite retomar tanto a queda depois do commit físico quanto a queda depois do registro e antes do status terminal;
+- target adulterado ou checkpoint cujo hash diverge do artifact falha fechado também no SQLite, não apenas nas constraints PostgreSQL.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 59 testes;
+- orchestration cobre recuperação sem chamar `stage` novamente e confirma que a storage key não serializa;
+- worker cobre commit concluído, checkpoint perdido, lease expirada, reclaim e conclusão na tentativa seguinte;
+- smoke Remotion real renderiza uma vez e recupera o mesmo MP4 na segunda execução, sem criar arquivos adicionais;
+- integração Prisma exige checkpoint antes do sucesso, bloqueia tentativa stale, comprova replay e detecta adulteração do output SHA;
+- typecheck, migration validation e integração SQLite descartável passam durante o desenvolvimento.
+
+Limites explícitos desta slice:
+
+- artifact e manifest alvo já existem antes da reconstrução; esta slice registra a materialização efetiva dos bytes, não cria um segundo artifact concorrente;
+- comparação binária cross-platform não é assumida; o endpoint de reconstrução exige identidade com o target persistido e falha se o renderer produzir bytes diferentes;
+- storage S3-compatible e reconciliação/limpeza administrativa de outputs inválidos continuam abertos;
+- ainda falta uma fixture única que combine Postgres persistido, storage real e Remotion em um golden tolerante;
+- cancelamento, backoff, dead-letter, custo e audit/event outbox continuam em incrementos posteriores;
 - hosted CI desta slice será registrado após publicação no próximo ciclo.

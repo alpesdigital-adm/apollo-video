@@ -28,6 +28,10 @@ export interface StagedRender {
 }
 
 export interface RenderInputRenderer {
+  recover(
+    input: MaterializedRenderInputV1,
+    request: { outputKey: string },
+  ): Promise<Readonly<CommittedRenderReceipt> | null>
   stage(
     input: MaterializedRenderInputV1,
     request: { outputKey: string; signal?: AbortSignal },

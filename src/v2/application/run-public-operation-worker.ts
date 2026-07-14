@@ -1,13 +1,14 @@
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
+import type { ArtifactRenderCheckpointRepository } from './ports/artifact-render-checkpoint-repository.ts'
 import { DomainError } from '../domain/errors.ts'
-import type { AuthorizedRenderReceipt } from './render-authorized-input.ts'
+import type { AuthorizedRenderCompletion } from './render-authorized-input.ts'
 
 type RenderAuthorized = (request: {
   workspaceId: string
   authorizationId: string
   signal?: AbortSignal
   beforeCommit?: () => Promise<void>
-}) => Promise<Readonly<AuthorizedRenderReceipt>>
+}) => Promise<Readonly<AuthorizedRenderCompletion>>
 
 export interface PublicOperationWorkerOutcome {
   operationId: string
@@ -36,6 +37,7 @@ function safeFailure(error: unknown) {
 
 export function runNextPublicOperationService(dependencies: {
   operations: PublicOperationRepository
+  checkpoints: ArtifactRenderCheckpointRepository
   render: RenderAuthorized
   clock?: () => Date
   leaseDurationMs?: number
@@ -169,6 +171,17 @@ export function runNextPublicOperationService(dependencies: {
           'PERSISTENCE_CONFLICT',
           'Render receipt does not match the claimed operation',
         )
+      }
+
+      const checkpointed = await dependencies.checkpoints.record({
+        ...command(clock()),
+        outputKey: receipt.getOutputKey(),
+        output: receipt.output,
+      })
+      if (!checkpointed) {
+        leaseLost = true
+        abortController.abort()
+        return Object.freeze({ operationId, status: 'lease-lost' })
       }
 
       stopHeartbeat()

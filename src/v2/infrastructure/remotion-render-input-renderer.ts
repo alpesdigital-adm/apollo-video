@@ -198,6 +198,82 @@ export class RemotionRenderInputRenderer implements RenderInputRenderer {
     }
   }
 
+  async recover(
+    input: MaterializedRenderInputV1,
+    request: { outputKey: string },
+  ): Promise<Readonly<CommittedRenderReceipt> | null> {
+    compileApolloVideoRenderProps(input)
+    const outputKey = portableOutputKey(request.outputKey)
+    let root: string
+    try {
+      root = await realpath(this.outputRoot)
+    } catch {
+      throw new DomainError(
+        'PERSISTENCE_NOT_CONFIGURED',
+        'Render output storage root is unavailable',
+      )
+    }
+    const requestedPath = resolve(root, ...outputKey.split('/'))
+    let canonicalParent: string
+    try {
+      canonicalParent = await realpath(dirname(requestedPath))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+    const finalPath = resolve(canonicalParent, basename(requestedPath))
+    if (!contained(root, finalPath)) {
+      throw new DomainError('RENDER_OUTPUT_CONFLICT', 'Render output escaped its storage root')
+    }
+    let metadata
+    try {
+      metadata = await stat(finalPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+    if (!metadata.isFile() || metadata.size <= 0 || !Number.isSafeInteger(metadata.size)) {
+      throw new DomainError('RENDER_OUTPUT_INVALID', 'Committed render output is invalid')
+    }
+    const probe = await getVideoInfo(finalPath)
+    const expectedDuration = input.output.durationInFrames / input.output.fps
+    if (
+      probe.width !== input.output.width ||
+      probe.height !== input.output.height ||
+      Math.abs(probe.fps - input.output.fps) > 0.01 ||
+      Math.abs(probe.duration - expectedDuration) > Math.max(0.1, 1 / input.output.fps)
+    ) {
+      throw new DomainError(
+        'RENDER_OUTPUT_INVALID',
+        'Committed render output failed technical validation',
+      )
+    }
+    const outputSha256 = await calculateFileSha256(finalPath)
+    const verified = await stat(finalPath)
+    if (
+      verified.size !== metadata.size ||
+      verified.mtimeMs !== metadata.mtimeMs ||
+      verified.dev !== metadata.dev ||
+      verified.ino !== metadata.ino
+    ) {
+      throw new DomainError('RENDER_OUTPUT_INVALID', 'Committed render changed during recovery')
+    }
+    return Object.freeze({
+      schemaVersion: 'committed-render-receipt/v1',
+      stageId: `recovered-${outputSha256.slice(0, 16)}`,
+      inputHash: input.inputHash,
+      outputSha256,
+      byteSize: metadata.size,
+      width: probe.width,
+      height: probe.height,
+      fps: probe.fps,
+      durationInFrames: input.output.durationInFrames,
+      codec: 'h264',
+      container: 'mp4',
+      committedAt: metadata.mtime.toISOString(),
+    })
+  }
+
   async stage(
     input: MaterializedRenderInputV1,
     request: { outputKey: string; signal?: AbortSignal },
