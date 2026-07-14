@@ -9,6 +9,7 @@ class InMemoryProjectCreationRepository {
   constructor(workspaces) {
     this.workspaces = new Map(workspaces.map((workspace) => [workspace.id, workspace]))
     this.records = new Map()
+    this.events = new Map()
     this.lastBundle = undefined
   }
 
@@ -36,6 +37,12 @@ class InMemoryProjectCreationRepository {
     }
 
     this.lastBundle = bundle
+    for (const event of bundle.events) {
+      if (this.events.has(event.id)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Duplicate public event')
+      }
+      this.events.set(event.id, event)
+    }
     const result = { project: bundle.project, version: bundle.version, replayed: false }
     this.records.set(identity, {
       fingerprint: bundle.idempotency.requestFingerprint,
@@ -55,6 +62,7 @@ function createFixture() {
   })
   const repository = new InMemoryProjectCreationRepository([workspace])
   const counters = new Map()
+  let eventCounter = 0
   const service = createProjectService({
     repository,
     clock: () => new Date('2026-07-12T13:01:00.000Z'),
@@ -62,6 +70,10 @@ function createFixture() {
       const next = (counters.get(kind) ?? 0) + 1
       counters.set(kind, next)
       return `${kind}-${next}`
+    },
+    createEventId: () => {
+      eventCounter += 1
+      return `00000000-0000-4000-8000-${String(eventCounter).padStart(12, '0')}`
     },
   })
 
@@ -105,16 +117,29 @@ test('create project persists an initial version and immutable snapshots', async
     result.version.snapshotRefs.editPlan,
     repository.lastBundle.snapshots[0].id,
   )
+  assert.deepEqual(
+    repository.lastBundle.events.map((event) => event.type),
+    ['project.created', 'project.version.created'],
+  )
+  assert.deepEqual(repository.lastBundle.events[0].actor, { clientId: 'client-1' })
+  assert.deepEqual(repository.lastBundle.events[0].resource, {
+    type: 'project',
+    id: result.project.id,
+  })
+  assert.equal(repository.lastBundle.events[1].sequence, 1)
+  assert.equal(repository.lastBundle.events[1].data.projectId, result.project.id)
+  assert.equal(repository.events.size, 2)
 })
 
 test('same idempotency key and payload replays the original result', async () => {
-  const { service } = createFixture()
+  const { repository, service } = createFixture()
   const first = await service(request())
   const replay = await service(request())
 
   assert.equal(replay.replayed, true)
   assert.equal(replay.project.id, first.project.id)
   assert.equal(replay.version.id, first.version.id)
+  assert.equal(repository.events.size, 2)
 })
 
 test('same idempotency key with a different payload is rejected', async () => {

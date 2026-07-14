@@ -30,6 +30,7 @@ model V2Workspace {
   assetUseDecisions  V2AssetUseDecision[]
   publicOperations   V2PublicOperation[]
   renderOperations   V2ArtifactRenderOperation[]
+  publicEventOutbox  V2PublicEventOutbox[]
 
   @@map("workspaces")
 }
@@ -473,4 +474,28 @@ model V2ArtifactRenderOperation {
   @@index([workspaceId, artifactId, manifestId])
   @@index([workspaceId, authorizationId])
   @@map("artifact_render_operations")
+}
+
+model V2PublicEventOutbox {
+  id            String    @id @db.Uuid
+  workspaceId   String    @db.VarChar(128)
+  type          String    @db.VarChar(96)
+  version       String    @db.VarChar(32)
+  occurredAt    DateTime  @db.Timestamptz(3)
+  sequence      Int?
+  actorClientId String?   @db.VarChar(128)
+  actorUserId   String?   @db.VarChar(128)
+  resourceType  String    @db.VarChar(32)
+  resourceId    String    @db.VarChar(128)
+  dataJson      String    @db.Text
+  publishedAt   DateTime? @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@index([publishedAt, occurredAt, id])
+  @@index([workspaceId, occurredAt(sort: Asc), id(sort: Asc)])
+  @@index([workspaceId, resourceType, resourceId, occurredAt(sort: Asc)])
+  @@map("public_event_outbox")
 }

@@ -3,6 +3,10 @@ import type { CommandActor } from '../domain/edit-command.ts'
 import { createProject, normalizeProjectName } from '../domain/project.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
+import {
+  assertUniquePublicEventIds,
+  createPublicEvent,
+} from '../domain/public-event.ts'
 import type {
   ProjectCreationRepository,
   ProjectCreationResult,
@@ -30,6 +34,7 @@ export interface CreateProjectDependencies {
   repository: ProjectCreationRepository
   clock: () => Date
   createId: (kind: ProjectEntityKind) => string
+  createEventId: () => string
 }
 
 const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
@@ -145,12 +150,59 @@ export function createProjectService(dependencies: CreateProjectDependencies) {
       createdBy: request.actor.id,
       createdAt,
     })
+    const eventActor = request.actor.type === 'api-client'
+      ? {
+          clientId: request.actor.id,
+          ...(request.actor.delegatedUserId
+            ? { userId: request.actor.delegatedUserId }
+            : {}),
+        }
+      : request.actor.type === 'system'
+        ? undefined
+        : { userId: request.actor.id }
+    const events = [
+      createPublicEvent({
+        id: dependencies.createEventId(),
+        type: 'project.created',
+        version: '1.0.0',
+        workspaceId,
+        occurredAt: createdAt,
+        ...(eventActor ? { actor: eventActor } : {}),
+        resource: { type: 'project', id: projectId },
+        data: {
+          name,
+          status: project.status,
+          currentVersionId: versionId,
+          createdAt,
+        },
+      }),
+      createPublicEvent({
+        id: dependencies.createEventId(),
+        type: 'project.version.created',
+        version: '1.0.0',
+        workspaceId,
+        occurredAt: createdAt,
+        sequence: version.sequence,
+        ...(eventActor ? { actor: eventActor } : {}),
+        resource: { type: 'project-version', id: versionId },
+        data: {
+          projectId,
+          sequence: version.sequence,
+          parentVersionId: null,
+          baseHash: version.baseHash,
+          snapshotRefs: version.snapshotRefs,
+          createdAt,
+        },
+      }),
+    ] as const
+    assertUniquePublicEventIds(events)
     const requestFingerprint = calculateVersionHash({ name })
 
     return dependencies.repository.createOrReplay({
       project,
       version,
       snapshots,
+      events,
       idempotency: {
         id: dependencies.createId('idempotency-record'),
         workspaceId,

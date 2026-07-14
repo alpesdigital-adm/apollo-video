@@ -82,6 +82,7 @@ export async function POST(request: NextRequest) {
       repository: createProjectCreationRepository(),
       clock: () => new Date(),
       createId: (kind) => `${kind}-${randomUUID()}`,
+      createEventId: randomUUID,
     })
     const result = await createProject({
       workspaceId: actor.workspaceId,

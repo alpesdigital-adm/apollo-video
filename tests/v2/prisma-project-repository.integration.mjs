@@ -22,6 +22,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
   const testNow = new Date()
 
   try {
+    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
@@ -38,13 +39,19 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     )
 
     const counters = new Map()
+    const createEntityId = (kind) => {
+      const next = (counters.get(kind) ?? 0) + 1
+      counters.set(kind, next)
+      return `integration-${kind}-${next}`
+    }
+    let eventCounter = 0
     const createProject = createProjectService({
       repository: new PrismaProjectCreationRepository(client),
       clock: () => testNow,
-      createId: (kind) => {
-        const next = (counters.get(kind) ?? 0) + 1
-        counters.set(kind, next)
-        return `integration-${kind}-${next}`
+      createId: createEntityId,
+      createEventId: () => {
+        eventCounter += 1
+        return `00000000-0000-4000-8000-${String(eventCounter).padStart(12, '0')}`
       },
     })
     const request = {
@@ -64,7 +71,44 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 2)
     assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 1)
+    const outbox = await client.v2PublicEventOutbox.findMany({
+      where: { workspaceId },
+      orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+    })
+    assert.deepEqual(outbox.map((event) => event.type), [
+      'project.created',
+      'project.version.created',
+    ])
+    assert.ok(outbox.every((event) => event.publishedAt === null))
+    assert.equal(outbox[0].resourceId, first.project.id)
+    assert.equal(outbox[1].resourceId, first.version.id)
+    assert.equal(JSON.parse(outbox[1].dataJson).projectId, first.project.id)
+
+    let collisionEventCall = 0
+    const createProjectWithCollision = createProjectService({
+      repository: new PrismaProjectCreationRepository(client),
+      clock: () => new Date(testNow.getTime() + 1_000),
+      createId: createEntityId,
+      createEventId: () => {
+        collisionEventCall += 1
+        return collisionEventCall === 1
+          ? outbox[0].id
+          : '00000000-0000-4000-8000-999999999999'
+      },
+    })
+    await assert.rejects(
+      () => createProjectWithCollision({
+        ...request,
+        name: 'Project that must roll back',
+        idempotency: { ...request.idempotency, key: 'integration-create-project-collision' },
+      }),
+      (error) => error?.code === 'PERSISTENCE_CONFLICT',
+    )
+    assert.equal(await client.v2Project.count({ where: { workspaceId } }), 1)
+    assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 1)
+    assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 2)
   } finally {
+    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })

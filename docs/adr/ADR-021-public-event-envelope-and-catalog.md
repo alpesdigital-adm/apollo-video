@@ -13,7 +13,7 @@ Um catálogo também não pode sugerir que um evento já é emitido. Nesta etapa
 ## Decisão
 
 - O tipo canônico `PublicEvent<T>` contém `id`, `type`, `version`, `workspaceId`, `occurredAt`, `resource` e `data`, além de `sequence` e `actor` opcionais.
-- `id` é UUID v4 em minúsculas. A criação e a validação em memória rejeitam IDs inválidos ou repetidos no mesmo lote. A unicidade global e durável será garantida pela chave única do outbox na próxima etapa.
+- `id` é UUID v4 em minúsculas. A criação e a validação em memória rejeitam IDs inválidos ou repetidos no mesmo lote. O ADR-022 acrescenta unicidade global e durável pela chave primária do outbox nas transições já conectadas.
 - A versão pertence ao tipo do evento, não à versão da API. Todos os tipos iniciais começam em `1.0.0`; mudanças incompatíveis exigem nova versão do evento.
 - `occurredAt` usa UTC canônico no formato produzido por `Date.toISOString()`. `sequence`, quando presente, é inteiro positivo e seguro.
 - `resource.type` é fixado pelo catálogo para cada combinação de tipo e versão. O domínio rejeita eventos cuja referência de recurso não corresponda ao descritor.
@@ -28,7 +28,7 @@ Um catálogo também não pode sugerir que um evento já é emitido. Nesta etapa
 - Produtores futuros devem construir eventos pelo domínio canônico, em vez de montar payloads livres.
 - Consumidores podem preparar handlers antes de existir uma subscription, mas não devem inferir que um tipo já é emitido apenas porque aparece no catálogo.
 - A correspondência entre o catálogo, o enum do schema e a capability pública é protegida por testes de contrato.
-- Ainda não existem outbox, subscription, endpoint receptor, assinatura, tentativa de entrega, retry, dead-letter ou replay de eventos.
+- O ADR-022 conecta a criação de projetos ao outbox. Subscription, dispatcher, endpoint receptor, assinatura, tentativa de entrega, retry, dead-letter e replay de eventos ainda não existem.
 - A semântica at-least-once e a ordem observável só passam a existir quando o outbox durável for implementado.
 
 ## Evidências exigidas

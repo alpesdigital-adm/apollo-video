@@ -136,6 +136,13 @@ const requiredChecks = [
   'artifact_render_operations_hash_check',
   'artifact_render_operations_output_check',
   'public_operations_retry_schedule_check',
+  'public_event_outbox_type_check',
+  'public_event_outbox_version_check',
+  'public_event_outbox_sequence_check',
+  'public_event_outbox_actor_check',
+  'public_event_outbox_resource_check',
+  'public_event_outbox_data_check',
+  'public_event_outbox_dates_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

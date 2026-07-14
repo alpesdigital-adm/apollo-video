@@ -9,6 +9,7 @@ import { prisma } from '../../../lib/db.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProject, type ProjectStatus } from '../../domain/project.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
+import { assertUniquePublicEventIds } from '../../domain/public-event.ts'
 import type {
   ProjectCreationBundle,
   ProjectCreationRepository,
@@ -93,6 +94,16 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
   }
 
   async createOrReplay(bundle: ProjectCreationBundle): Promise<ProjectCreationResult> {
+    assertUniquePublicEventIds(bundle.events)
+    for (const event of bundle.events) {
+      if (event.workspaceId !== bundle.project.workspaceId) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Project event belongs to a different workspace',
+          { eventId: event.id },
+        )
+      }
+    }
     try {
       return await this.client.$transaction(async (transaction) => {
         const key = {
@@ -192,6 +203,21 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
           where: { id: projectRow.id },
           data: { currentVersionId: versionRow.id },
         })
+        await transaction.v2PublicEventOutbox.createMany({
+          data: bundle.events.map((event) => ({
+            id: event.id,
+            workspaceId: event.workspaceId,
+            type: event.type,
+            version: event.version,
+            occurredAt: new Date(event.occurredAt),
+            sequence: event.sequence,
+            actorClientId: event.actor?.clientId,
+            actorUserId: event.actor?.userId,
+            resourceType: event.resource.type,
+            resourceId: event.resource.id,
+            dataJson: JSON.stringify(event.data),
+          })),
+        })
         const response: StoredProjectCreationResponse = {
           projectId: updatedProject.id,
           versionId: versionRow.id,
@@ -232,6 +258,10 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
           ])
           if (projectRow && versionRow) return hydrateResult(projectRow, versionRow, true)
         }
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Project creation could not reserve unique persistence identities',
+        )
       }
       throw error
     }

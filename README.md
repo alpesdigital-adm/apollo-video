@@ -136,9 +136,15 @@ command individual de retry, sem edição direta do banco.
 O envelope versionado e o catálogo inicial de eventos podem ser descobertos em
 `GET /v1/events/catalog`. O catálogo referencia o JSON Schema público do envelope
 e contém somente metadados estáticos, por isso não exige autenticação. A presença
-de um tipo no catálogo não significa que ele já esteja sendo emitido: outbox,
-subscriptions, assinatura e entrega at-least-once serão adicionados nas próximas
-slices de F0.038.
+de um tipo no catálogo não significa que ele já esteja sendo emitido: cada
+transição precisa ser conectada ao outbox, e subscriptions, assinatura e entrega
+at-least-once serão adicionadas nas próximas slices de F0.038.
+
+A criação de projeto já persiste `project.created` e `project.version.created`
+no outbox, atomicamente com o projeto, sua versão inicial e o registro de
+idempotência. Replay da mesma requisição não duplica eventos. As linhas ainda
+permanecem pendentes internamente: dispatcher e entrega externa não fazem parte
+deste incremento.
 
 ## Formatos
 

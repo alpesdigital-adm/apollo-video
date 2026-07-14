@@ -113,6 +113,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2RecipeParameterPayload.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2PublicEventOutbox.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2IdempotencyRecord.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
@@ -1512,6 +1515,18 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(replayResponse.status, 200)
     assert.equal(replay.data.replayed, true)
     assert.equal(replay.data.project.id, created.data.project.id)
+    const projectEvents = await client.v2PublicEventOutbox.findMany({
+      where: {
+        workspaceId,
+        resourceId: { in: [created.data.project.id, created.data.version.id] },
+      },
+    })
+    assert.deepEqual(projectEvents.map((event) => event.type).sort(), [
+      'project.created',
+      'project.version.created',
+    ])
+    assert.ok(projectEvents.every((event) => event.actorClientId === apiClientId))
+    assert.ok(projectEvents.every((event) => event.publishedAt === null))
 
     const listResponse = await fetch(`${baseUrl}/v1/projects?limit=20`, {
       headers: { authorization },

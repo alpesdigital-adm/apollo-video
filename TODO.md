@@ -492,7 +492,7 @@
 ### F0.038 — Webhooks e eventos [FR-244]
 
 - [x] Definir event envelope versionado, IDs únicos e catálogo inicial. Evidência F0-032: `PublicEvent`, UUID v4, catálogo de 14 tipos, schemas e `GET /v1/events/catalog`; unicidade global durável será fechada pelo outbox.
-- [ ] Implementar outbox transacional a partir de domain/workflow transitions.
+- [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [ ] Modelar endpoint, subscription, secret, filter e delivery attempt.
 - [ ] Implementar challenge, assinatura, timestamp e anti-replay.
 - [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031: claim com lease/fencing, espera exponencial, checkpoint, descoberta e replay manual estão ativos no render; generalização aos demais jobs, métricas e console agregada continuam abertas.
@@ -3372,7 +3372,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-032 — Envelope e catálogo inicial de eventos
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado no commit `b9a999c` em 14 de julho de 2026.
 
 Entregas:
 
@@ -3403,4 +3403,40 @@ Limites explícitos desta slice:
 - outbox, subscriptions, endpoints receptores, secrets, filtros e delivery attempts continuam abertos;
 - assinatura, challenge, anti-replay, at-least-once, backoff e replay de eventos continuam abertos;
 - ordem entre eventos não é prometida até existir persistência e semântica operacional para `sequence`;
+- hosted CI `29361121900` aprovou 68 testes, contratos, migration PostgreSQL, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-033 — Outbox transacional de criação de projeto
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- tabela interna `V2PublicEventOutbox` foi adicionada ao protótipo SQLite e ao schema PostgreSQL;
+- UUID v4 do evento é chave primária global e cada linha preserva workspace, tipo, versão, instante, sequence, ator, recurso e data JSON;
+- `publishedAt` nulo representa evento durável ainda não publicado, sem fingir entrega ou subscription;
+- criação de projeto produz `project.created` e `project.version.created` no application service;
+- projeto, versão inicial, snapshots, idempotency record e dois eventos são gravados na mesma transação;
+- replay idempotente retorna o resultado original sem inserir novos eventos;
+- colisão global de event ID é traduzida em conflito de persistência e reverte toda a criação;
+- constraints PostgreSQL limitam tipo, versão, sequence, ator, recurso, payload JSON de 64 KiB e datas;
+- índices preparam polling pendente, inspeção por workspace e busca por recurso;
+- ADR-022 registra a fronteira entre persistência transacional e futura publicação/entrega.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 68 testes e valida os dois envelopes produzidos pela criação;
+- integração Prisma comprova exatamente dois eventos, replay sem duplicação e rollback completo por colisão de ID;
+- jornada HTTP comprova que criação e replay externos deixam apenas os dois eventos pendentes esperados;
+- migration v2 passa com 18 tabelas, 64 índices e 39 foreign keys;
+- contratos públicos permanecem intactos com 27 capabilities, 33 schemas, 40 examples e 24 paths;
+- typecheck e build de produção passam;
+- FFmpeg, bundle/render real do Remotion, auditorias e todas as integrações Prisma/API em SQLite descartável passam.
+
+Limites explícitos desta slice:
+
+- somente criação de projeto e versão inicial estão conectadas; demais domain/workflow transitions continuam abertas;
+- `publishedAt` não é alterado porque ainda não existe dispatcher ou destino durável de publicação;
+- não existem subscriptions, endpoints receptores, filtros, secrets ou delivery attempts;
+- claim/lease, at-least-once, assinatura, challenge, anti-replay, backoff, dead-letter e replay de eventos continuam abertos;
+- a tabela é infraestrutura interna e não será exposta crua; administração externa virá por capabilities seguras;
 - hosted CI será registrado após publicação no próximo ciclo.

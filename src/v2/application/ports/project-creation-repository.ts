@@ -1,6 +1,7 @@
 import type { Project } from '../../domain/project.ts'
 import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { PublicEvent } from '../../domain/public-event.ts'
 
 export interface ProjectCreationIdempotency {
   id: string
@@ -15,6 +16,7 @@ export interface ProjectCreationBundle {
   project: Project
   version: ProjectVersion
   snapshots: readonly ProjectSnapshot[]
+  events: readonly Readonly<PublicEvent>[]
   idempotency: ProjectCreationIdempotency
 }
 

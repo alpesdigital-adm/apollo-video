@@ -76,6 +76,7 @@ model V2Workspace {
   assetUseDecisions  V2AssetUseDecision[]
   publicOperations   V2PublicOperation[]
   renderOperations   V2ArtifactRenderOperation[]
+  publicEventOutbox  V2PublicEventOutbox[]
 
   @@map("v2_workspaces")
 }
@@ -519,4 +520,28 @@ model V2ArtifactRenderOperation {
   @@index([workspaceId, artifactId, manifestId])
   @@index([workspaceId, authorizationId])
   @@map("v2_artifact_render_operations")
+}
+
+model V2PublicEventOutbox {
+  id            String    @id
+  workspaceId   String
+  type          String
+  version       String
+  occurredAt    DateTime
+  sequence      Int?
+  actorClientId String?
+  actorUserId   String?
+  resourceType  String
+  resourceId    String
+  dataJson      String
+  publishedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@index([publishedAt, occurredAt, id])
+  @@index([workspaceId, occurredAt, id])
+  @@index([workspaceId, resourceType, resourceId, occurredAt])
+  @@map("v2_public_event_outbox")
 }
