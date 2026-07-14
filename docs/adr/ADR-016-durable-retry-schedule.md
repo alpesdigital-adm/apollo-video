@@ -18,7 +18,7 @@ Uma falha recuperável não pode devolver a operação imediatamente à fila. Se
 - Ao iniciar nova tentativa, `nextAttemptAt` é limpo atomicamente com o novo fencing token.
 - Falha originalmente recuperável na última tentativa, inclusive lease expirada, termina como `failed` não retentável e recebe `deadLetteredAt` igual a `completedAt`.
 - Falha não recuperável termina sem `deadLetteredAt`; isso preserva a distinção entre rejeição definitiva e esgotamento.
-- `nextAttemptAt` e `deadLetteredAt` permanecem internos nesta versão. Retry manual e listagem ganharam contratos externos próprios nos ADR-018 e ADR-019, sem expor esses checkpoints internos.
+- `nextAttemptAt` e `deadLetteredAt` permanecem internos nesta versão. Retry manual, listagem e descoberta de esgotamento ganharam contratos externos próprios nos ADR-018, ADR-019 e ADR-020, sem expor esses checkpoints internos.
 
 ## Consequências
 
@@ -26,7 +26,7 @@ Uma falha recuperável não pode devolver a operação imediatamente à fila. Se
 - Vários workers continuam disputando somente operações disponíveis, usando o fencing já definido no ADR-014.
 - A política não usa jitter nesta etapa; workloads com grande fan-out poderão adicionar jitter determinístico sem alterar os timestamps já persistidos.
 - `deadLetteredAt` é o checkpoint durável para futura fila administrativa e replay controlado, não uma autorização automática para reexecutar.
-- O ADR-017 entrega cancelamento e o ADR-018 entrega retry manual como commands e scopes próprios. Audit trail agregado e administração de dead-letter continuam separados.
+- O ADR-017 entrega cancelamento, o ADR-018 retry manual e o ADR-020 descoberta de dead-letter. Audit trail, métricas e administração agregada continuam separados.
 
 ## Evidências exigidas
 

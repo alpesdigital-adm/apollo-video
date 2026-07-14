@@ -30,7 +30,7 @@ Criar uma segunda `PublicOperation` exigiria copiar autorização, target e Rend
 - Um checkpoint anterior válido pode ser recuperado sem recodificação, preservando a semântica do ADR-015.
 - Cada nova falha terminal exige um novo command explícito para receber outra tentativa.
 - Limites de orçamento, motivo, ator persistido e audit/event outbox serão adicionados antes de permitir políticas amplas de retry pago.
-- Listagem e filtros seguros foram entregues pelo ADR-019; a console administrativa agregada de dead-letter continua necessária.
+- Listagem, filtros seguros e descoberta de dead-letter foram entregues pelos ADR-019 e ADR-020; métricas e console administrativa agregada continuam necessárias.
 
 ## Evidências exigidas
 

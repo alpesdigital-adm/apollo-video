@@ -382,7 +382,7 @@
 
 - [ ] Implementar job state machine, heartbeat, attempt e idempotency key. Parcial F0-025: `artifact-render` possui state machine, enqueue idempotente, claim/lease, heartbeat, attempt como fencing token e conclusão CAS; falta generalizar para os demais jobs.
 - [ ] Persistir checkpoints antes e depois de efeitos externos. Parcial F0-026: render persiste fase antes do commit e checkpoint tipado depois, com hash/tamanho/probe/target; faltam checkpoints equivalentes nos demais jobs.
-- [ ] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-029: backoff, cancelamento externo, marcação durável de esgotamento e retry manual controlado foram entregues; listagem/administração agregada de dead-letter continua aberta.
+- [ ] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-031: backoff, cancelamento, checkpoint de esgotamento, retry manual e descoberta externa de dead-letter foram entregues para render; métricas/administração agregada e generalização continuam abertas.
 - [ ] Simular restart entre cada checkpoint e verificar retomada segura. Parcial F0-026: regressões cobrem perda antes do commit, queda depois do commit e antes do checkpoint, replay de checkpoint, reclaim e output já existente sem nova codificação; faltam checkpoints dos demais jobs.
 
 ### F0.027 — Partial invalidation [FR-233]
@@ -495,7 +495,7 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions.
 - [ ] Modelar endpoint, subscription, secret, filter e delivery attempt.
 - [ ] Implementar challenge, assinatura, timestamp e anti-replay.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-029: claim com lease/fencing, espera exponencial, checkpoint de esgotamento e replay manual controlado estão ativos no render; generalização aos demais jobs e console agregada continuam abertos.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031: claim com lease/fencing, espera exponencial, checkpoint, descoberta e replay manual estão ativos no render; generalização aos demais jobs, métricas e console agregada continuam abertas.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
 - [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay.
 
@@ -3150,7 +3150,7 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- backoff exponencial, `nextAttemptAt`, cancelamento, retry manual e dead-letter continuam abertos;
+- backoff, cancelamento, retry manual e descoberta de dead-letter foram entregues nos F0-027 a F0-031; métricas e administração agregada continuam abertas;
 - ainda não existe checkpoint posterior ao commit que prove que os bytes materializados correspondem ao artifact/manifest alvo;
 - queda depois do commit do arquivo e antes do `succeeded` ainda depende da output key determinística; a reconciliação será fechada junto à persistência do output;
 - `verifying` existe no contrato e no repository, mas probe/quality ainda ocorre dentro do renderer e não ganha fase separada;
@@ -3223,7 +3223,7 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- `deadLetteredAt` é checkpoint durável; listagem administrativa, replay controlado e retry manual ainda não foram expostos;
+- `deadLetteredAt` é checkpoint durável; retry manual, listagem geral e descoberta de dead-letter foram expostos nos F0-029 a F0-031;
 - cancelamento cooperativo e command público foram entregues no F0-028;
 - a política é aplicada ao worker de render; outros tipos de job deverão reutilizar a mesma semântica;
 - jitter determinístico, quotas, custo por tentativa e alertas operacionais ficam para incrementos posteriores;
@@ -3260,7 +3260,7 @@ Limites explícitos desta slice:
 - cancelamento é cooperativo; renderer/provider que ignora `AbortSignal` pode continuar consumindo até o próximo gate, mas não pode publicar;
 - bytes promovidos na janela entre commit físico e checkpoint não são apagados automaticamente e exigirão reconciliação/retention;
 - ator/motivo persistidos, event outbox, custo consumido e métricas de cancelamento continuam no incremento de audit/cost;
-- retry manual foi entregue no F0-029 e listagem externa no F0-030; administração agregada de dead-letter continua aberta;
+- retry manual foi entregue no F0-029, listagem no F0-030 e descoberta de dead-letter no F0-031; métricas e administração agregada continuam abertas;
 - hosted CI `29350400758` aprovou 63 testes, corrida claim/cancel no PostgreSQL, contratos, API, FFmpeg, Remotion real, build e auditorias.
 
 ### Slice F0-029 — Retry manual e replay controlado
@@ -3294,12 +3294,12 @@ Limites explícitos desta slice:
 - retry reaproveita a autorização original, mas não ignora expiração, revogação ou nova decisão de rights;
 - cada nova falha terminal requer um novo command explícito; não há loop manual implícito;
 - budget, quota, motivo, ator persistido, event outbox e custo por tentativa continuam abertos;
-- listagem e filtros seguros de operações foram entregues no F0-030; console de dead-letter continua aberto;
+- listagem e filtros seguros foram entregues no F0-030 e descoberta de dead-letter no F0-031; métricas e console agregada continuam abertas;
 - hosted CI `29351454953` aprovou 64 testes, retry concorrente no PostgreSQL, contratos, migrations, API, FFmpeg, Remotion real, build e auditorias.
 
 ### Slice F0-030 — Listagem externa e cursor estável de operações
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado em 14 de julho de 2026 no commit `829d2eb`.
 
 Entregas:
 
@@ -3331,5 +3331,41 @@ Limites explícitos desta slice:
 - somente `artifact-render` existe no contrato atual; novos job types ampliarão a allowlist de forma aditiva;
 - `projectId` não é fingido a partir de artifact: depende de associação canônica e indexada entre operação e projeto;
 - intervalos de data, ordenações alternativas e filtros combinados adicionais continuam abertos;
-- console agregado de dead-letter, custo, audit/event outbox e ator/motivo persistidos continuam em incrementos posteriores;
+- descoberta de dead-letter foi entregue no F0-031; métricas agregadas, custo, audit/event outbox e ator/motivo persistidos continuam em incrementos posteriores;
+- hosted CI `29358838402` aprovou 65 testes, paginação no PostgreSQL, migration, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-031 — Descoberta externa de dead-letter
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability aditiva `apollo.operations.dead-letter.list` publica `GET /v1/operations/dead-letter` sem alterar o contrato já publicado da listagem geral;
+- scope `operations:read` permite descobrir somente esgotamentos do workspace autenticado;
+- repository exige `status = failed` e `deadLetteredAt IS NOT NULL`, excluindo falhas definitivas que nunca foram elegíveis a retry automático;
+- response reutiliza `public-operation-list/v1` e não expõe `deadLetteredAt`, schedule, lease, authorization, RenderInput ou storage;
+- `completedAt` permanece como timestamp terminal público e coincide com o checkpoint interno pela invariável de persistência;
+- paginação mantém `createdAt DESC, id DESC`, limite 20/100 e cursor vinculado também ao modo dead-letter;
+- filtros externos são `type` e `targetId`; status, parâmetros desconhecidos/repetidos e cursor incompatível falham com `INVALID_ARGUMENT`;
+- retry individual limpa o checkpoint atomicamente e remove a operação das consultas administrativas posteriores;
+- índice workspace/dead-letter/criação/ID foi adicionado aos schemas e à migration PostgreSQL;
+- ADR-020 registra fronteira de segurança, relação com retry e limites administrativos.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 66 testes;
+- application service cobre imposição de `failed + deadLettered`, cursor e incompatibilidade com modo sem dead-letter;
+- integração Prisma comprova inclusão do esgotamento e exclusão de falhas sem checkpoint;
+- jornada HTTP cobre scope negado, duas páginas, filtros, parâmetros inválidos e ausência de contexto protegido;
+- fluxo E2E lista duas operações esgotadas, executa retry em uma e comprova que somente a outra permanece;
+- contrato público passa com 26 capabilities, 31 schemas, 38 examples e 23 paths;
+- migration v2 passa com 17 tabelas, 60 índices e 38 foreign keys;
+- typecheck, build de produção e integrações SQLite descartáveis de operação/API passam.
+
+Limites explícitos desta slice:
+
+- a listagem informa esgotamento, mas não garante que rights, consent, autorização, quota ou provider ainda permitam nova conclusão;
+- não há retry em lote, replay automático, acknowledgement, purge ou política de retenção nesta etapa;
+- métricas, alertas, custo, ator/motivo persistido e audit/event outbox continuam abertos;
+- somente `artifact-render` participa até a generalização dos demais tipos de job;
 - hosted CI será registrado após publicação no próximo ciclo.

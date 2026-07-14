@@ -384,6 +384,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       ['limit', 'after', 'status', 'type', 'targetId'],
     )
     assert.equal(
+      openApi.paths['/v1/operations/dead-letter'].get['x-apollo-capability-id'],
+      'apollo.operations.dead-letter.list',
+    )
+    assert.deepEqual(
+      openApi.paths['/v1/operations/dead-letter'].get.parameters.map(
+        (parameter) => parameter.name,
+      ),
+      ['limit', 'after', 'type', 'targetId'],
+    )
+    assert.equal(
       openApi.paths['/v1/operations/{operationId}'].get['x-apollo-capability-id'],
       'apollo.operations.read',
     )
@@ -444,6 +454,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.render-inputs.preflight',
         'apollo.artifacts.render.enqueue',
         'apollo.operations.list',
+        'apollo.operations.dead-letter.list',
         'apollo.operations.read',
         'apollo.operations.cancel',
         'apollo.operations.retry',
@@ -1032,6 +1043,115 @@ test('authenticated public API manages projects, clients and artifact inspection
       assert.equal(invalidListResponse.status, 422)
       assert.equal((await invalidListResponse.json()).error.code, 'INVALID_ARGUMENT')
     }
+
+    for (const operationId of [
+      renderOperation.data.operation.id,
+      secondRenderOperation.data.operation.id,
+    ]) {
+      const stored = await client.v2PublicOperation.findUniqueOrThrow({
+        where: { id: operationId },
+      })
+      const startedAt = new Date(stored.createdAt.getTime() + 1)
+      const completedAt = new Date(stored.createdAt.getTime() + 2)
+      await client.v2PublicOperation.update({
+        where: { id: operationId },
+        data: {
+          status: 'failed',
+          phase: 'failed',
+          cancelable: false,
+          retryable: false,
+          attempt: 1,
+          maxAttempts: 1,
+          errorCode: 'render_execution_failed',
+          errorMessage: 'Render operation exhausted automatic retry capacity',
+          errorRetryable: false,
+          startedAt,
+          completedAt,
+          updatedAt: completedAt,
+          nextAttemptAt: null,
+          deadLetteredAt: completedAt,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          heartbeatAt: null,
+        },
+      })
+    }
+    const childDeadLetterResponse = await fetch(
+      `${baseUrl}/v1/operations/dead-letter`,
+      { headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childDeadLetterResponse.status, 403)
+    const deadLetterQuery = new URLSearchParams({
+      limit: '1',
+      type: 'artifact-render',
+      targetId: derivedArtifactId,
+    })
+    const firstDeadLetterPageResponse = await fetch(
+      `${baseUrl}/v1/operations/dead-letter?${deadLetterQuery}`,
+      { headers: { authorization } },
+    )
+    const firstDeadLetterPage = await firstDeadLetterPageResponse.json()
+    assert.equal(firstDeadLetterPageResponse.status, 200)
+    assert.equal(firstDeadLetterPage.data.operations.length, 1)
+    assert.equal(firstDeadLetterPage.data.operations[0].status, 'failed')
+    assert.equal(firstDeadLetterPage.data.operations[0].retryable, false)
+    assert.match(firstDeadLetterPage.data.nextCursor, /^[A-Za-z0-9_-]+$/)
+    const secondDeadLetterQuery = new URLSearchParams(deadLetterQuery)
+    secondDeadLetterQuery.set('after', firstDeadLetterPage.data.nextCursor)
+    const secondDeadLetterPageResponse = await fetch(
+      `${baseUrl}/v1/operations/dead-letter?${secondDeadLetterQuery}`,
+      { headers: { authorization } },
+    )
+    const secondDeadLetterPage = await secondDeadLetterPageResponse.json()
+    assert.equal(secondDeadLetterPageResponse.status, 200)
+    assert.equal(secondDeadLetterPage.data.operations.length, 1)
+    assert.equal('nextCursor' in secondDeadLetterPage.data, false)
+    assert.deepEqual(
+      [
+        firstDeadLetterPage.data.operations[0].id,
+        secondDeadLetterPage.data.operations[0].id,
+      ].sort(),
+      [
+        renderOperation.data.operation.id,
+        secondRenderOperation.data.operation.id,
+      ].sort(),
+    )
+    const deadLetterJson = JSON.stringify([firstDeadLetterPage, secondDeadLetterPage])
+    assert.equal(deadLetterJson.includes(materialization.data.authorization.id), false)
+    assert.equal(deadLetterJson.includes(derivedRenderInput.inputHash), false)
+    assert.equal(deadLetterJson.includes('deadLetteredAt'), false)
+
+    for (const invalidQuery of [
+      'status=failed',
+      'limit=0',
+      `targetId=another-target-id&after=${encodeURIComponent(firstDeadLetterPage.data.nextCursor)}`,
+    ]) {
+      const invalidDeadLetterResponse = await fetch(
+        `${baseUrl}/v1/operations/dead-letter?${invalidQuery}`,
+        { headers: { authorization } },
+      )
+      assert.equal(invalidDeadLetterResponse.status, 422)
+      assert.equal((await invalidDeadLetterResponse.json()).error.code, 'INVALID_ARGUMENT')
+    }
+    const retriedDeadLetterResponse = await fetch(
+      `${baseUrl}/v1/operations/${firstDeadLetterPage.data.operations[0].id}/retry`,
+      { method: 'POST', headers: { authorization } },
+    )
+    const retriedDeadLetter = await retriedDeadLetterResponse.json()
+    assert.equal(retriedDeadLetterResponse.status, 200)
+    assert.equal(retriedDeadLetter.data.operation.status, 'retrying')
+    assert.equal(retriedDeadLetter.data.operation.attempt, 1)
+    assert.equal(retriedDeadLetter.data.operation.maxAttempts, 2)
+    const remainingDeadLetterResponse = await fetch(
+      `${baseUrl}/v1/operations/dead-letter?targetId=${derivedArtifactId}`,
+      { headers: { authorization } },
+    )
+    const remainingDeadLetter = await remainingDeadLetterResponse.json()
+    assert.equal(remainingDeadLetter.data.operations.length, 1)
+    assert.equal(
+      remainingDeadLetter.data.operations[0].id,
+      secondDeadLetterPage.data.operations[0].id,
+    )
     const missingOperationResponse = await fetch(
       `${baseUrl}/v1/operations/missing-operation-id`,
       { headers: { authorization } },

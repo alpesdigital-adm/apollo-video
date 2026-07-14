@@ -30,7 +30,7 @@ O modelo atual associa `artifact-render` a um `media-artifact`. Ele ainda não p
 - Como a ordem usa `createdAt`, atualizações de status ou progresso não reposicionam a operação.
 - O cursor não precisa ser assinado porque não contém segredo e sua adulteração não contorna o filtro obrigatório de workspace; valores inválidos falham com erro público tipado.
 - `projectId` será adicionado somente depois que os tipos de operação possuírem uma associação canônica e indexada com projeto.
-- Ordenações alternativas, intervalos temporais, dead-letter agregado e múltiplos tipos de job exigirão evolução aditiva do contrato.
+- Ordenações alternativas, intervalos temporais e múltiplos tipos de job exigirão evolução aditiva; descoberta de dead-letter ganhou capability própria no ADR-020.
 
 ## Evidências exigidas
 

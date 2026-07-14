@@ -127,6 +127,9 @@ Operações do workspace podem ser descobertas por `GET /v1/operations`, usando
 `limit`, cursor `after` e filtros exatos de `status`, `type` e `targetId`. O
 cursor é opaco, estável e só pode continuar a mesma combinação de workspace e
 filtros que o originou.
+Operações que esgotaram retries automáticos podem ser descobertas separadamente
+por `GET /v1/operations/dead-letter`; o mesmo item pode então ser reaberto pelo
+command individual de retry, sem edição direta do banco.
 
 ## Formatos
 

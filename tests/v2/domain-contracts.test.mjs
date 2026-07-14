@@ -68,6 +68,7 @@ import {
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
 import { enqueueAuthorizedRenderService } from '../../src/v2/application/enqueue-authorized-render.ts'
+import { listDeadLetterOperationsService } from '../../src/v2/application/list-dead-letter-operations.ts'
 import { listPublicOperationsService } from '../../src/v2/application/list-public-operations.ts'
 import { presentPublicOperation } from '../../src/v2/public-api/presenters.ts'
 
@@ -614,6 +615,55 @@ test('operation listing binds stable opaque cursors to workspace and allowlisted
       (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
     )
   }
+})
+
+test('dead-letter listing fixes exhaustion semantics and binds them into its cursor', async () => {
+  const operation = createQueuedPublicOperation({
+    id: 'operation-dead-letter-list-1',
+    workspaceId: 'workspace-dead-letter-list-1',
+    clientId: 'client-dead-letter-list-1',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-dead-letter-list-1',
+      manifestId: 'manifest-dead-letter-list-1',
+    },
+    createdAt: '2026-07-14T12:00:00.000Z',
+  })
+  const queries = []
+  const operations = {
+    async list(query) {
+      queries.push(query)
+      return [
+        { operation, context: { authorizationId: 'authorization-1', inputHash: 'a'.repeat(64) } },
+        { operation: { ...operation, id: 'operation-dead-letter-list-0' }, context: { authorizationId: 'authorization-1', inputHash: 'a'.repeat(64) } },
+      ]
+    },
+  }
+  const listDeadLetter = listDeadLetterOperationsService({ operations })
+  const first = await listDeadLetter({
+    workspaceId: 'workspace-dead-letter-list-1',
+    limit: 1,
+    type: 'artifact-render',
+    targetId: 'artifact-dead-letter-list-1',
+  })
+  assert.equal(queries[0].status, 'failed')
+  assert.equal(queries[0].deadLettered, true)
+  assert.equal(queries[0].limit, 2)
+  assert.match(first.nextCursor, /^[A-Za-z0-9_-]+$/)
+
+  const listAll = listPublicOperationsService({ operations })
+  await assert.rejects(
+    listAll({
+      workspaceId: 'workspace-dead-letter-list-1',
+      after: first.nextCursor,
+      status: 'failed',
+      type: 'artifact-render',
+      targetId: 'artifact-dead-letter-list-1',
+      deadLettered: false,
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
 })
 
 test('PublicOperation attempt transitions reject stale order and exhaust retries safely', () => {

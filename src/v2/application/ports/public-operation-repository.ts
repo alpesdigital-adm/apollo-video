@@ -36,6 +36,7 @@ export interface PublicOperationListQuery {
   status?: PublicOperationStatus
   type?: PublicOperation['type']
   targetId?: string
+  deadLettered?: boolean
   after?: {
     createdAt: string
     id: string

@@ -818,6 +818,28 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       await repository.list({ workspaceId, limit: 10, targetId: 'missing-target-id' }),
       [],
     )
+    const deadLetterList = await repository.list({
+      workspaceId,
+      limit: 10,
+      status: 'failed',
+      deadLettered: true,
+      type: 'artifact-render',
+      targetId: artifactId,
+    })
+    assert.deepEqual(
+      deadLetterList.map((record) => record.operation.id),
+      [exhaustedOperation.id],
+    )
+    assert.equal(deadLetterList[0].operation.deadLetteredAt, exhausted.operation.deadLetteredAt)
+    assert.deepEqual(
+      await repository.list({
+        workspaceId,
+        limit: 10,
+        status: 'failed',
+        deadLettered: false,
+      }),
+      [],
+    )
 
     await client.v2ArtifactRenderOperation.update({
       where: { operationId },

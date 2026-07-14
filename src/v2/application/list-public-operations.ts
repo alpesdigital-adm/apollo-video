@@ -27,6 +27,7 @@ export interface ListPublicOperationsRequest {
   status?: string
   type?: string
   targetId?: string
+  deadLettered?: boolean
 }
 
 function validateId(value: string, field: string): string {
@@ -49,6 +50,7 @@ function filterHash(input: {
   status?: PublicOperationStatus
   type?: PublicOperation['type']
   targetId?: string
+  deadLettered?: boolean
 }): string {
   return createHash('sha256')
     .update(JSON.stringify({
@@ -56,6 +58,7 @@ function filterHash(input: {
       status: input.status ?? null,
       type: input.type ?? null,
       targetId: input.targetId ?? null,
+      deadLettered: input.deadLettered ?? null,
     }))
     .digest('hex')
 }
@@ -127,7 +130,13 @@ export function listPublicOperationsService(dependencies: {
     const type = typeValue as PublicOperation['type'] | undefined
     const targetIdValue = normalizeOptional(request.targetId)
     const targetId = targetIdValue ? validateId(targetIdValue, 'targetId') : undefined
-    const queryFilterHash = filterHash({ workspaceId, status, type, targetId })
+    assertDomain(
+      request.deadLettered === undefined || typeof request.deadLettered === 'boolean',
+      'INVALID_ARGUMENT',
+      'deadLettered must be a boolean',
+    )
+    const deadLettered = request.deadLettered
+    const queryFilterHash = filterHash({ workspaceId, status, type, targetId, deadLettered })
     const afterValue = normalizeOptional(request.after)
     const after = afterValue ? decodeCursor(afterValue, queryFilterHash) : undefined
 
@@ -137,6 +146,7 @@ export function listPublicOperationsService(dependencies: {
       status,
       type,
       targetId,
+      deadLettered,
       ...(after ? { after: { createdAt: after.createdAt, id: after.id } } : {}),
     })
     const hasNextPage = records.length > limit

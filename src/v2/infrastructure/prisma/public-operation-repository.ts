@@ -477,6 +477,11 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       ...(input.status ? { status: input.status } : {}),
       ...(input.type ? { type: input.type } : {}),
       ...(input.targetId ? { targetId: input.targetId } : {}),
+      ...(input.deadLettered === true
+        ? { deadLetteredAt: { not: null } }
+        : input.deadLettered === false
+          ? { deadLetteredAt: null }
+          : {}),
       ...(input.after && afterDate
         ? {
             OR: [
