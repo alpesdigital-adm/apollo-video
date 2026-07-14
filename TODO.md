@@ -382,7 +382,7 @@
 
 - [ ] Implementar job state machine, heartbeat, attempt e idempotency key. Parcial F0-025: `artifact-render` possui state machine, enqueue idempotente, claim/lease, heartbeat, attempt como fencing token e conclusão CAS; falta generalizar para os demais jobs.
 - [ ] Persistir checkpoints antes e depois de efeitos externos. Parcial F0-026: render persiste fase antes do commit e checkpoint tipado depois, com hash/tamanho/probe/target; faltam checkpoints equivalentes nos demais jobs.
-- [ ] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-028: backoff, cancelamento cooperativo externo e marcação durável de esgotamento foram entregues; replay/retry manual e administração externa de dead-letter continuam abertos.
+- [ ] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-029: backoff, cancelamento externo, marcação durável de esgotamento e retry manual controlado foram entregues; listagem/administração agregada de dead-letter continua aberta.
 - [ ] Simular restart entre cada checkpoint e verificar retomada segura. Parcial F0-026: regressões cobrem perda antes do commit, queda depois do commit e antes do checkpoint, replay de checkpoint, reclaim e output já existente sem nova codificação; faltam checkpoints dos demais jobs.
 
 ### F0.027 — Partial invalidation [FR-233]
@@ -482,9 +482,9 @@
 
 ### F0.037 — Operações assíncronas [FR-243]
 
-- [ ] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade. Parcial F0-028: contrato, persistência, lease/fencing, fases, backoff e cancelamento público foram entregues; retry manual público e generalização para outros jobs continuam abertos.
+- [ ] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade. Parcial F0-029: contrato, persistência, lease/fencing, fases, backoff, cancelamento e retry manual públicos foram entregues para render; generalização aos demais jobs continua aberta.
 - [ ] Retornar 202+operation ID para ingest, Director, provider, sync, batch, render e export. Parcial F0-024: render autorizado retorna 202 com operation ID; os demais tipos continuam abertos.
-- [ ] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-028: read por ID e cancel workspace-scoped foram entregues; list, filtros e retry manual continuam abertos.
+- [ ] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-029: read, cancel e retry workspace-scoped foram entregues; listagem e filtros continuam abertos.
 - [ ] Expor fase e progresso real ou estado indeterminado honesto. Parcial F0-025: worker persiste `materializing`, `rendering`, `persisting` e terminal; progresso permanece honestamente 0/1, faltando medição granular e uso separado de `verifying`.
 - [ ] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-026: sucesso exige checkpoint durável do output e expõe somente artifact/manifest; storage key, receipt técnico e diagnóstico permanecem internos; custo continua aberto.
 - [ ] Criar resilience tests de restart, stale result, cancel e retry. Parcial F0-028: restart/reclaim, stale attempt, disputa de claim, perda de lease, queda pós-commit, retry limitado e cancelamento concorrente estão cobertos; matriz dos demais job types continua aberta.
@@ -495,7 +495,7 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions.
 - [ ] Modelar endpoint, subscription, secret, filter e delivery attempt.
 - [ ] Implementar challenge, assinatura, timestamp e anti-replay.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-027: claim com lease/fencing, espera exponencial persistida e checkpoint de esgotamento estão ativos no render; replay controlado e generalização aos demais jobs continuam abertos.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-029: claim com lease/fencing, espera exponencial, checkpoint de esgotamento e replay manual controlado estão ativos no render; generalização aos demais jobs e console agregada continuam abertos.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
 - [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay.
 
@@ -1618,7 +1618,7 @@
 - [ ] Persistir checkpoint e artifact parcial antes de confirmar avanço do workflow.
 - [ ] Reconciliar jobs `running` sem heartbeat após restart.
 - [ ] Criar chaos tests interrompendo cada fase longa.
-- [ ] Garantir que operador possa retry/cancel sem editar banco manualmente. Parcial F0-028: cancelamento está disponível pela API/capability; retry manual continua aberto.
+- [x] Garantir que operador possa retry/cancel sem editar banco manualmente. Evidência F0-028/F0-029: capabilities e endpoints externos com scopes separados, persistência transacional e regressões HTTP/PostgreSQL.
 
 ### NFR.003 — Observabilidade [NFR-003]
 
@@ -3231,7 +3231,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-028 — Cancelamento cooperativo e externo
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado em 14 de julho de 2026 no commit `5991987`.
 
 Entregas:
 
@@ -3260,5 +3260,39 @@ Limites explícitos desta slice:
 - cancelamento é cooperativo; renderer/provider que ignora `AbortSignal` pode continuar consumindo até o próximo gate, mas não pode publicar;
 - bytes promovidos na janela entre commit físico e checkpoint não são apagados automaticamente e exigirão reconciliação/retention;
 - ator/motivo persistidos, event outbox, custo consumido e métricas de cancelamento continuam no incremento de audit/cost;
-- retry manual, listagem de operações e administração de dead-letter continuam abertos;
+- retry manual foi entregue no F0-029; listagem de operações e administração agregada de dead-letter continuam abertas;
+- hosted CI `29350400758` aprovou 63 testes, corrida claim/cancel no PostgreSQL, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-029 — Retry manual e replay controlado
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- `retryPublicOperation` reabre somente operações `failed` ou `canceled`, preservando ID, target, contexto protegido, checkpoint e histórico de attempts;
+- canceled com `attempt = 0` volta para `queued`; operações com tentativa anterior voltam para `retrying` com disponibilidade persistida 1 ms depois;
+- dead-letter esgotado recebe exatamente uma nova vaga em `maxAttempts`; capacidade ainda disponível não é ampliada;
+- `succeeded` retorna conflito tipado e nunca perde resultado;
+- chamadas sobre estados não terminais são replay natural e não concedem tentativas adicionais;
+- repository limpa conclusão/error/dead-letter, mantém fencing e resolve duas chamadas concorrentes com uma única transição;
+- `POST /v1/operations/{operationId}/retry` expõe o command com scope `operations:retry` e confirmação humana;
+- response reutiliza `public-operation-detail/v1`, sem copiar ou expor autorização, RenderInput ou storage;
+- baseline público foi atualizado para 24 capabilities e 21 paths;
+- ADR-018 formaliza reabertura, capacidade, idempotência e revalidação obrigatória.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 64 testes;
+- domínio cobre queued não terminal, canceled antes da primeira tentativa, dead-letter esgotado, nova attempt e rejeição de sucesso;
+- integração Prisma cobre isolamento por workspace, replay imediato, boundary temporal, aumento único de `maxAttempts` e claim após retry;
+- integração PostgreSQL executa duas chamadas de retry concorrentes e comprova que não há concessão dupla;
+- jornada HTTP cobre scope negado, cancel → retry, replay, leitura posterior e operação ausente;
+- typecheck, contrato público, build e integrações SQLite descartáveis passam.
+
+Limites explícitos desta slice:
+
+- retry reaproveita a autorização original, mas não ignora expiração, revogação ou nova decisão de rights;
+- cada nova falha terminal requer um novo command explícito; não há loop manual implícito;
+- budget, quota, motivo, ator persistido, event outbox e custo por tentativa continuam abertos;
+- listagem/filtros de operações e console de dead-letter continuam no próximo incremento;
 - hosted CI será registrado após publicação no próximo ciclo.

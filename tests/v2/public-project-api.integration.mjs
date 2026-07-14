@@ -159,6 +159,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'clients:admin',
         'operations:cancel',
         'operations:read',
+        'operations:retry',
         'projects:read',
         'projects:write',
       ],
@@ -384,6 +385,12 @@ test('authenticated public API manages projects, clients and artifact inspection
       ],
       'apollo.operations.cancel',
     )
+    assert.equal(
+      openApi.paths['/v1/operations/{operationId}/retry'].post[
+        'x-apollo-capability-id'
+      ],
+      'apollo.operations.retry',
+    )
 
     const schemaResponse = await fetch(
       `${baseUrl}/v1/schemas/create-project-request/v1`,
@@ -430,6 +437,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.artifacts.render.enqueue',
         'apollo.operations.read',
         'apollo.operations.cancel',
+        'apollo.operations.retry',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
         'apollo.projects.create',
@@ -910,13 +918,35 @@ test('authenticated public API manages projects, clients and artifact inspection
     const canceledReplay = await canceledReplayResponse.json()
     assert.equal(canceledReplayResponse.status, 200)
     assert.deepEqual(canceledReplay.data.operation, canceledOperation.data.operation)
+    const childRetryResponse = await fetch(
+      `${baseUrl}/v1/operations/${renderOperation.data.operation.id}/retry`,
+      { method: 'POST', headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childRetryResponse.status, 403)
+    const retryOperationRequest = () => fetch(
+      `${baseUrl}/v1/operations/${renderOperation.data.operation.id}/retry`,
+      { method: 'POST', headers: { authorization } },
+    )
+    const retriedOperationResponse = await retryOperationRequest()
+    const retriedOperation = await retriedOperationResponse.json()
+    assert.equal(retriedOperationResponse.status, 200)
+    assert.equal(retriedOperation.data.operation.status, 'queued')
+    assert.equal(retriedOperation.data.operation.phase, 'queued')
+    assert.equal(retriedOperation.data.operation.attempt, 0)
+    assert.equal(retriedOperation.data.operation.cancelable, true)
+    assert.equal('completedAt' in retriedOperation.data.operation, false)
+    const retriedReplayResponse = await retryOperationRequest()
+    assert.deepEqual(
+      (await retriedReplayResponse.json()).data.operation,
+      retriedOperation.data.operation,
+    )
     const canceledReadResponse = await fetch(
       `${baseUrl}/v1/operations/${renderOperation.data.operation.id}`,
       { headers: { authorization } },
     )
     assert.deepEqual(
       (await canceledReadResponse.json()).data.operation,
-      canceledOperation.data.operation,
+      retriedOperation.data.operation,
     )
     const missingOperationResponse = await fetch(
       `${baseUrl}/v1/operations/missing-operation-id`,
@@ -932,6 +962,11 @@ test('authenticated public API manages projects, clients and artifact inspection
       { method: 'POST', headers: { authorization } },
     )
     assert.equal(missingCancellationResponse.status, 404)
+    const missingRetryResponse = await fetch(
+      `${baseUrl}/v1/operations/missing-operation-id/retry`,
+      { method: 'POST', headers: { authorization } },
+    )
+    assert.equal(missingRetryResponse.status, 404)
     assert.equal(
       await client.v2PublicOperation.count({ where: { workspaceId } }),
       1,

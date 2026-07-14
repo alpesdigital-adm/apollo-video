@@ -43,6 +43,12 @@ export interface PublicOperationRepository {
     operationId: string
     canceledAt: string
   }): Promise<PublicOperationRecord | null>
+  retry(input: {
+    workspaceId: string
+    operationId: string
+    requestedAt: string
+    nextAttemptAt: string
+  }): Promise<PublicOperationRecord | null>
   findReplay(input: {
     workspaceId: string
     clientId: string

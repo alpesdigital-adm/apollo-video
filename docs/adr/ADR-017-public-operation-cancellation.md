@@ -31,7 +31,7 @@ Operações de render podem estar na fila, aguardando retry ou consumindo CPU qu
 - Um renderer que respeita `AbortSignal` encerra cedo; um provider que não respeita ainda é impedido de publicar pela lease e pelo fencing.
 - O tempo máximo até aborto durante cálculo é limitado pelo heartbeat configurado; o gate pré-commit permanece obrigatório.
 - Motivo, ator persistido, event outbox e cobrança proporcional do trabalho cancelado continuam no incremento de audit/cost.
-- Retry manual e replay de dead-letter são commands distintos e permanecem posteriores.
+- O ADR-018 entrega retry manual e replay controlado como command distinto, sem alterar a idempotência do cancelamento.
 
 ## Evidências exigidas
 

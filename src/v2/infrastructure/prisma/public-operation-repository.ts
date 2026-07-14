@@ -15,6 +15,7 @@ import {
   cancelPublicOperation,
   isTerminalPublicOperation,
   rehydratePublicOperation,
+  retryPublicOperation,
   retryOrFailPublicOperation,
   startPublicOperationAttempt,
   succeedPublicOperation,
@@ -367,6 +368,72 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       if (updated.count === 1 || result.operation.status === 'canceled') return result
       if (isTerminalPublicOperation(result.operation)) return result
       throw new DomainError('PERSISTENCE_CONFLICT', 'PublicOperation cancellation collided')
+    })
+  }
+
+  async retry(input: {
+    workspaceId: string
+    operationId: string
+    requestedAt: string
+    nextAttemptAt: string
+  }): Promise<PublicOperationRecord | null> {
+    if (!ID_PATTERN.test(input.workspaceId) || !ID_PATTERN.test(input.operationId)) {
+      throw new DomainError('INVALID_PUBLIC_OPERATION', 'Retry target is invalid')
+    }
+    const requestedAt = parseCommandDate(input.requestedAt, 'requestedAt')
+    const nextAttemptAt = parseCommandDate(input.nextAttemptAt, 'nextAttemptAt')
+    if (nextAttemptAt.getTime() <= requestedAt.getTime()) {
+      throw new DomainError('INVALID_PUBLIC_OPERATION', 'Retry availability is invalid')
+    }
+    return this.client.$transaction(async (transaction) => {
+      const stored = await transaction.v2PublicOperation.findFirst({
+        where: { id: input.operationId, workspaceId: input.workspaceId },
+        include: OPERATION_INCLUDE,
+      })
+      if (!stored) return null
+      const current = hydrateRecord(stored)
+      const retried = retryPublicOperation(
+        current.operation,
+        requestedAt.toISOString(),
+        nextAttemptAt.toISOString(),
+      )
+      if (retried.status === stored.status) return current
+
+      const updated = await transaction.v2PublicOperation.updateMany({
+        where: {
+          id: input.operationId,
+          workspaceId: input.workspaceId,
+          status: stored.status,
+          updatedAt: stored.updatedAt,
+        },
+        data: {
+          status: retried.status,
+          phase: retried.phase,
+          cancelable: retried.cancelable,
+          retryable: retried.retryable,
+          maxAttempts: retried.maxAttempts,
+          resultJson: null,
+          errorCode: null,
+          errorMessage: null,
+          errorRetryable: null,
+          startedAt: retried.startedAt ? new Date(retried.startedAt) : null,
+          completedAt: null,
+          nextAttemptAt: retried.nextAttemptAt ? new Date(retried.nextAttemptAt) : null,
+          deadLetteredAt: null,
+          updatedAt: requestedAt,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          heartbeatAt: null,
+        },
+      })
+      const persisted = await transaction.v2PublicOperation.findFirst({
+        where: { id: input.operationId, workspaceId: input.workspaceId },
+        include: OPERATION_INCLUDE,
+      })
+      if (!persisted) return null
+      const result = hydrateRecord(persisted)
+      if (updated.count === 1 || !isTerminalPublicOperation(result.operation)) return result
+      throw new DomainError('PERSISTENCE_CONFLICT', 'PublicOperation retry collided')
     })
   }
 

@@ -480,6 +480,29 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.operations.retry": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "operations:retry"
+      ],
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/operations/{operationId}/retry"
+      },
+      "toolName": "apollo.operations.retry",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.create": {
       "version": "1.0.0",
       "exposure": "public",

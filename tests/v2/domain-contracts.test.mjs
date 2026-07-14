@@ -63,6 +63,7 @@ import {
   createQueuedPublicOperation,
   rehydratePublicOperation,
   retryOrFailPublicOperation,
+  retryPublicOperation,
   startPublicOperationAttempt,
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
@@ -644,6 +645,79 @@ test('PublicOperation cancellation is terminal, idempotent and clears retry sche
   assert.equal(canceledRetry.retryable, false)
   assert.equal(canceledRetry.attempt, 1)
   assert.equal(presentPublicOperation(canceledRetry).status, 'canceled')
+})
+
+test('manual retry reopens only failed or canceled operations and preserves attempt history', () => {
+  const queued = createQueuedPublicOperation({
+    id: 'operation-manual-retry-1',
+    workspaceId: 'workspace-1',
+    clientId: 'client-1',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-manual-retry-1',
+      manifestId: 'manifest-manual-retry-1',
+    },
+    maxAttempts: 1,
+    createdAt: '2026-07-14T12:00:00.000Z',
+  })
+  assert.deepEqual(
+    retryPublicOperation(
+      queued,
+      '2026-07-14T12:00:01.000Z',
+      '2026-07-14T12:00:01.001Z',
+    ),
+    queued,
+  )
+  const canceledQueued = cancelPublicOperation(queued, '2026-07-14T12:00:01.000Z')
+  const reopenedQueued = retryPublicOperation(
+    canceledQueued,
+    '2026-07-14T12:00:02.000Z',
+    '2026-07-14T12:00:02.001Z',
+  )
+  assert.equal(reopenedQueued.status, 'queued')
+  assert.equal(reopenedQueued.completedAt, undefined)
+  assert.equal(reopenedQueued.attempt, 0)
+
+  const running = startPublicOperationAttempt(queued, '2026-07-14T12:00:01.000Z')
+  const failed = retryOrFailPublicOperation(
+    running,
+    { code: 'render_execution_failed', message: 'Render failed safely', retryable: true },
+    '2026-07-14T12:00:02.000Z',
+  )
+  assert.equal(failed.deadLetteredAt, failed.completedAt)
+  const reopenedFailed = retryPublicOperation(
+    failed,
+    '2026-07-14T12:00:03.000Z',
+    '2026-07-14T12:00:03.001Z',
+  )
+  assert.equal(reopenedFailed.status, 'retrying')
+  assert.equal(reopenedFailed.attempt, 1)
+  assert.equal(reopenedFailed.maxAttempts, 2)
+  assert.equal(reopenedFailed.deadLetteredAt, undefined)
+  assert.equal(reopenedFailed.error, undefined)
+  const secondAttempt = startPublicOperationAttempt(
+    reopenedFailed,
+    '2026-07-14T12:00:03.001Z',
+  )
+  const persisted = advancePublicOperationPhase(
+    advancePublicOperationPhase(
+      secondAttempt,
+      'rendering',
+      '2026-07-14T12:00:04.000Z',
+    ),
+    'persisting',
+    '2026-07-14T12:00:05.000Z',
+  )
+  const succeeded = succeedPublicOperation(persisted, '2026-07-14T12:00:06.000Z')
+  expectDomainError(
+    () => retryPublicOperation(
+      succeeded,
+      '2026-07-14T12:00:07.000Z',
+      '2026-07-14T12:00:07.001Z',
+    ),
+    'PUBLIC_OPERATION_RETRY_REJECTED',
+  )
 })
 
 test('authorized render enqueue is idempotent, actor-bound and expiry-aware', async () => {

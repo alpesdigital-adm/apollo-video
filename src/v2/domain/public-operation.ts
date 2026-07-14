@@ -631,6 +631,63 @@ export function cancelPublicOperation(
   })
 }
 
+export function retryPublicOperation(
+  operation: PublicOperation,
+  updatedAtValue: string,
+  nextAttemptAtValue: string,
+): Readonly<PublicOperation> {
+  assertPublicOperation(operation)
+  if (!isTerminalPublicOperation(operation)) {
+    return freezeOperation({ ...operation })
+  }
+  assertDomain(
+    operation.status === 'failed' || operation.status === 'canceled',
+    'PUBLIC_OPERATION_RETRY_REJECTED',
+    'A succeeded PublicOperation cannot be retried',
+  )
+  const updatedAt = transitionDate(operation, updatedAtValue)
+  const maxAttempts = operation.attempt >= operation.maxAttempts
+    ? operation.attempt + 1
+    : operation.maxAttempts
+  if (operation.attempt === 0) {
+    return freezeOperation({
+      ...operation,
+      status: 'queued',
+      phase: 'queued',
+      cancelable: true,
+      retryable: false,
+      result: undefined,
+      error: undefined,
+      maxAttempts,
+      updatedAt,
+      startedAt: undefined,
+      completedAt: undefined,
+      nextAttemptAt: undefined,
+      deadLetteredAt: undefined,
+    })
+  }
+  const nextAttemptAt = validateDate(nextAttemptAtValue, 'nextAttemptAt')
+  assertDomain(
+    Date.parse(nextAttemptAt) > Date.parse(updatedAt),
+    'INVALID_PUBLIC_OPERATION',
+    'Manual retry requires a future nextAttemptAt',
+  )
+  return freezeOperation({
+    ...operation,
+    status: 'retrying',
+    phase: 'retrying',
+    cancelable: true,
+    retryable: true,
+    result: undefined,
+    error: undefined,
+    maxAttempts,
+    updatedAt,
+    completedAt: undefined,
+    nextAttemptAt,
+    deadLetteredAt: undefined,
+  })
+}
+
 export function isTerminalPublicOperation(operation: PublicOperation): boolean {
   return TERMINAL_STATUSES.has(operation.status)
 }

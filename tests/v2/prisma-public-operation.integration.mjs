@@ -645,6 +645,132 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
     assert.equal(completedReplay.operation.status, 'succeeded')
     assert.equal(completedReplay.operation.completedAt, succeeded.operation.completedAt)
+    await assert.rejects(
+      repository.retry({
+        workspaceId,
+        operationId,
+        requestedAt: '2026-01-01T15:40:01.000Z',
+        nextAttemptAt: '2026-01-01T15:40:01.001Z',
+      }),
+      (error) =>
+        error instanceof DomainError && error.code === 'PUBLIC_OPERATION_RETRY_REJECTED',
+    )
+    assert.equal(
+      await repository.retry({
+        workspaceId: 'different-workspace-id',
+        operationId: cancelQueuedOperation.id,
+        requestedAt: '2026-01-01T15:41:00.000Z',
+        nextAttemptAt: '2026-01-01T15:41:00.001Z',
+      }),
+      null,
+    )
+    const retriedQueued = await repository.retry({
+      workspaceId,
+      operationId: cancelQueuedOperation.id,
+      requestedAt: '2026-01-01T15:41:00.000Z',
+      nextAttemptAt: '2026-01-01T15:41:00.001Z',
+    })
+    assert.equal(retriedQueued.operation.status, 'queued')
+    assert.equal(retriedQueued.operation.attempt, 0)
+    assert.equal(retriedQueued.operation.completedAt, undefined)
+    const retriedQueuedReplay = await repository.retry({
+      workspaceId,
+      operationId: cancelQueuedOperation.id,
+      requestedAt: '2026-01-01T15:41:00.500Z',
+      nextAttemptAt: '2026-01-01T15:41:00.501Z',
+    })
+    assert.equal(retriedQueuedReplay.operation.updatedAt, retriedQueued.operation.updatedAt)
+    const retriedQueuedClaim = await repository.claimNext({
+      workspaceId,
+      leaseOwner: 'worker-integration-retried-queued',
+      now: '2026-01-01T15:41:01.000Z',
+      leaseUntil: '2026-01-01T15:41:31.000Z',
+    })
+    assert.equal(retriedQueuedClaim.operation.attempt, 1)
+    await repository.cancel({
+      workspaceId,
+      operationId: cancelQueuedOperation.id,
+      canceledAt: '2026-01-01T15:41:02.000Z',
+    })
+
+    const retriedRunning = await repository.retry({
+      workspaceId,
+      operationId: cancelRunningOperation.id,
+      requestedAt: '2026-01-01T15:42:00.000Z',
+      nextAttemptAt: '2026-01-01T15:42:00.001Z',
+    })
+    assert.equal(retriedRunning.operation.status, 'retrying')
+    assert.equal(retriedRunning.operation.attempt, 1)
+    assert.equal(retriedRunning.operation.maxAttempts, 3)
+    assert.equal(
+      await repository.claimNext({
+        workspaceId,
+        leaseOwner: 'worker-integration-retry-too-early',
+        now: '2026-01-01T15:42:00.000Z',
+        leaseUntil: '2026-01-01T15:42:30.000Z',
+      }),
+      null,
+    )
+    const retriedRunningClaim = await repository.claimNext({
+      workspaceId,
+      leaseOwner: 'worker-integration-retried-running',
+      now: '2026-01-01T15:42:00.001Z',
+      leaseUntil: '2026-01-01T15:42:30.001Z',
+    })
+    assert.equal(retriedRunningClaim.operation.attempt, 2)
+    await repository.cancel({
+      workspaceId,
+      operationId: cancelRunningOperation.id,
+      canceledAt: '2026-01-01T15:42:01.000Z',
+    })
+
+    const retriedDeadLetter = await repository.retry({
+      workspaceId,
+      operationId: scheduledOperation.id,
+      requestedAt: '2026-01-01T15:43:00.000Z',
+      nextAttemptAt: '2026-01-01T15:43:00.001Z',
+    })
+    assert.equal(retriedDeadLetter.operation.status, 'retrying')
+    assert.equal(retriedDeadLetter.operation.attempt, 2)
+    assert.equal(retriedDeadLetter.operation.maxAttempts, 3)
+    assert.equal(retriedDeadLetter.operation.deadLetteredAt, undefined)
+    const retriedDeadLetterClaim = await repository.claimNext({
+      workspaceId,
+      leaseOwner: 'worker-integration-retried-dead-letter',
+      now: '2026-01-01T15:43:00.001Z',
+      leaseUntil: '2026-01-01T15:43:30.001Z',
+    })
+    assert.equal(retriedDeadLetterClaim.operation.attempt, 3)
+    await repository.cancel({
+      workspaceId,
+      operationId: scheduledOperation.id,
+      canceledAt: '2026-01-01T15:43:01.000Z',
+    })
+
+    if (process.env.APOLLO_V2_PERSISTENCE === 'postgres') {
+      const [firstRetry, secondRetry] = await Promise.all([
+        repository.retry({
+          workspaceId,
+          operationId: cancelRetryOperation.id,
+          requestedAt: '2026-01-01T15:44:00.000Z',
+          nextAttemptAt: '2026-01-01T15:44:00.001Z',
+        }),
+        repository.retry({
+          workspaceId,
+          operationId: cancelRetryOperation.id,
+          requestedAt: '2026-01-01T15:44:00.000Z',
+          nextAttemptAt: '2026-01-01T15:44:00.001Z',
+        }),
+      ])
+      assert.equal(firstRetry.operation.status, 'retrying')
+      assert.equal(secondRetry.operation.status, 'retrying')
+      assert.equal(firstRetry.operation.maxAttempts, secondRetry.operation.maxAttempts)
+      await repository.cancel({
+        workspaceId,
+        operationId: cancelRetryOperation.id,
+        canceledAt: '2026-01-01T15:44:01.000Z',
+      })
+    }
 
     await client.v2ArtifactRenderOperation.update({
       where: { operationId },

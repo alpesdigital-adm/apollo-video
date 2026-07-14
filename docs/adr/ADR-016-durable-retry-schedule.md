@@ -26,7 +26,7 @@ Uma falha recuperável não pode devolver a operação imediatamente à fila. Se
 - Vários workers continuam disputando somente operações disponíveis, usando o fencing já definido no ADR-014.
 - A política não usa jitter nesta etapa; workloads com grande fan-out poderão adicionar jitter determinístico sem alterar os timestamps já persistidos.
 - `deadLetteredAt` é o checkpoint durável para futura fila administrativa e replay controlado, não uma autorização automática para reexecutar.
-- O ADR-017 entrega cancelamento como command e scope próprios. Retry manual continua separado porque precisa decidir nova tentativa, dead-letter e audit trail.
+- O ADR-017 entrega cancelamento e o ADR-018 entrega retry manual como commands e scopes próprios. Audit trail agregado e administração de dead-letter continuam separados.
 
 ## Evidências exigidas
 

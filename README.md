@@ -120,6 +120,9 @@ contrato público v1. `APOLLO_V2_WORKER_RETRY_BASE_MS` e
 Operações podem ser canceladas externamente por
 `POST /v1/operations/{operationId}/cancel` com o scope `operations:cancel`;
 o estado persistido invalida a lease e impede publicação pela tentativa antiga.
+Operações `failed` ou `canceled` podem ser reabertas por
+`POST /v1/operations/{operationId}/retry` com o scope `operations:retry`; uma
+operação bem-sucedida nunca é reaberta.
 
 ## Formatos
 
