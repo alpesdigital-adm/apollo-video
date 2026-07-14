@@ -50,6 +50,11 @@ renderer ◄── RenderInput materializado
 - Todo processo de mídia usa timeout finito, `AbortSignal`, `maxBuffer`, `shell: false`, `-nostdin` e saída sem progresso interativo.
 - Falhas de processo são classificadas como cancelamento, timeout, limite de saída ou erro operacional; argumentos e paths não entram na mensagem pública.
 - Outputs FFmpeg são materializados em arquivo parcial irmão, validados e promovidos por rename no mesmo filesystem; o path final nunca aponta para encode incompleto.
+- O worker só materializa um `RenderInput` a partir de uma autorização workspace-scoped ainda válida. O application service relê manifest, payload protegido, target, assets e rights antes de chamar qualquer adapter de storage.
+- O adapter local recebe uma raiz absoluta privada do worker, reconfirma no banco a identidade imutável do artifact, resolve o `artifactKey` abaixo dessa raiz por `realpath` e rejeita traversal ou symlink que escape dela.
+- Bytes locais são lidos em streaming, com tamanho e SHA-256 confrontados com banco e `RenderInput`; identidade do arquivo é verificada antes e depois da leitura para detectar troca durante a materialização.
+- Paths e URLs existem apenas no `MaterializedRenderInput` em memória. A lease do worker serializa somente um receipt seguro e não torna localização, props ou canonical key parte da API pública.
+- A materialização interna não ganha endpoint isolado: ela será acionada pela operação pública de render, pois executar I/O no processo web e descartar o resultado violaria o isolamento do worker.
 - Falha, timeout ou cancelamento preservam o derivado anterior e tentam remover o parcial; falha de cleanup/promoção possui erro tipado próprio.
 - A identidade portátil de um derivado usa `media-artifact-manifest/v1`: SHA-256 do conteúdo, byte size, canonical artifact key, recipe/version, parameters hash, sources e probe opcional.
 - Manifests não contêm path absoluto, timestamp volátil ou parâmetros brutos; o corpo canônico possui `manifestHash` e o writer rejeita adulteração.

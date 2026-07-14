@@ -137,7 +137,22 @@ function hydrateAuthorization(row: StoredAuthorization): MaterializationAuthoriz
 export class PrismaMaterializationAuthorizationRepository
   implements MaterializationAuthorizationRepository
 {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) {
+    this.client = client
+  }
+
+  async findById(
+    workspaceId: string,
+    authorizationId: string,
+  ): Promise<MaterializationAuthorization | null> {
+    const stored = await this.client.v2MaterializationAuthorization.findFirst({
+      where: { id: authorizationId, workspaceId },
+      include: { decisions: { include: { rightsSnapshot: true } } },
+    })
+    return stored ? hydrateAuthorization(stored) : null
+  }
 
   private async findStored(
     workspaceId: string,

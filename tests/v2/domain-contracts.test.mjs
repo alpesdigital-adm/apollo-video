@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join } from 'node:path'
 import test from 'node:test'
 
 import { DomainError } from '../../src/v2/domain/errors.ts'
@@ -48,6 +52,9 @@ import {
   evaluateAssetUse,
 } from '../../src/v2/domain/asset-rights.ts'
 import { authorizeRenderInputMaterializationService } from '../../src/v2/application/authorize-render-input-materialization.ts'
+import { materializeAuthorizedRenderInputService } from '../../src/v2/application/materialize-authorized-render-input.ts'
+import { createMaterializationAuthorization } from '../../src/v2/domain/materialization-authorization.ts'
+import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -370,6 +377,253 @@ test('materialization authorization evaluates every RenderInput asset and record
   assert.equal(recorded.requestFingerprint.length, 64)
   assert.equal(JSON.stringify(result).includes('must-not-leak'), false)
   assert.equal(JSON.stringify(result).includes('workspaces/1/source.mp4'), false)
+})
+
+test('authorized worker materialization revalidates rights and keeps locations internal', async () => {
+  const input = createRenderInputSpec({
+    schemaVersion: 'render-input/v1',
+    renderer: { id: 'remotion', version: '4.0.489', digest: 'd'.repeat(64) },
+    composition: {
+      id: 'apollo-video',
+      version: 'v1',
+      propsSchemaRef: 'apollo://render-props/apollo-video/v1',
+    },
+    plan: { id: 'plan-worker', versionId: 'plan-version-worker', hash: 'e'.repeat(64) },
+    output: {
+      id: 'preset-9x16',
+      locale: 'pt-BR',
+      aspectRatio: '9:16',
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+      durationInFrames: 90,
+    },
+    assets: [
+      {
+        id: 'worker-source',
+        artifactId: 'artifact-worker-source',
+        artifactKey: 'workspaces/1/worker-source.mp4',
+        kind: 'video',
+        role: 'primary',
+        ordinal: 0,
+        sha256: 'f'.repeat(64),
+        byteSize: 2048,
+      },
+    ],
+    props: { confidentialPrompt: 'never-serialize-this' },
+  })
+  const rights = createAssetRightsSnapshot({
+    id: 'rights-worker-source',
+    workspaceId: 'workspace-1',
+    artifactId: 'artifact-worker-source',
+    sequence: 1,
+    draft: {
+      owner: 'Alpes Digital',
+      status: 'approved',
+      allowedUses: ['paid-ad'],
+      prohibitedUses: [],
+      allowedMarkets: ['BR'],
+      allowedLocales: ['pt-BR'],
+      consent: { status: 'not-required', allowedUses: [] },
+    },
+    createdBy: { type: 'api-client', id: 'client-1' },
+    createdAt: '2026-07-14T12:00:00.000Z',
+  })
+  const evaluatedAt = new Date('2026-07-14T12:01:00.000Z')
+  const authorization = createMaterializationAuthorization({
+    id: 'materialization-worker-1',
+    workspaceId: 'workspace-1',
+    artifactId: 'artifact-worker-output',
+    manifestId: 'manifest-worker-output',
+    inputHash: input.inputHash,
+    use: 'paid-ad',
+    market: 'BR',
+    locale: 'pt-BR',
+    syntheticOperations: [],
+    issues: [],
+    decisions: [
+      {
+        artifactId: 'artifact-worker-source',
+        assetOrdinal: 0,
+        assetKind: 'video',
+        ...evaluateAssetUse(
+          rights,
+          { workspaceId: 'workspace-1', use: 'paid-ad', market: 'BR', locale: 'pt-BR' },
+          evaluatedAt,
+        ),
+      },
+    ],
+    evaluatedAt: evaluatedAt.toISOString(),
+    actor: { type: 'api-client', id: 'client-1' },
+  })
+  let currentRights = rights
+  let workerNow = new Date('2026-07-14T12:02:00.000Z')
+  let resolverCalls = 0
+  const materialize = materializeAuthorizedRenderInputService({
+    artifacts: {
+      async findById() {
+        return {
+          id: 'artifact-worker-output',
+          manifests: [
+            {
+              id: 'manifest-worker-output',
+              renderInput: {
+                ref: `render-input/sha256/${input.inputHash}`,
+                inputHash: input.inputHash,
+              },
+            },
+          ],
+        }
+      },
+    },
+    protectedRenderInputs: { async read() { return input } },
+    assetAvailability: { async inspect() { return { available: true } } },
+    targets: { supportsRenderer() { return true }, supportsComposition() { return true } },
+    rights: {
+      async findCurrentForArtifacts() {
+        return new Map([['artifact-worker-source', currentRights]])
+      },
+    },
+    authorizations: { async findById() { return authorization } },
+    resolverForWorkspace() {
+      return {
+        async resolve(asset) {
+          resolverCalls += 1
+          return {
+            uri: 'file:///worker/private/materialized-source.mp4',
+            sha256: asset.sha256,
+            byteSize: asset.byteSize,
+          }
+        },
+      }
+    },
+    clock: () => workerNow,
+  })
+
+  const lease = await materialize({
+    workspaceId: 'workspace-1',
+    authorizationId: 'materialization-worker-1',
+  })
+  assert.equal(resolverCalls, 1)
+  assert.equal(lease.receipt.assetCount, 1)
+  assert.equal(lease.receipt.revalidationHash.length, 64)
+  assert.equal(
+    lease.getRenderInput().assets[0].uri,
+    'file:///worker/private/materialized-source.mp4',
+  )
+  const serialized = JSON.stringify(lease)
+  assert.equal(serialized.includes('file:///'), false)
+  assert.equal(serialized.includes('workspaces/1/worker-source.mp4'), false)
+  assert.equal(serialized.includes('never-serialize-this'), false)
+
+  workerNow = new Date('2026-07-14T12:06:00.000Z')
+  await assert.rejects(
+    materialize({
+      workspaceId: 'workspace-1',
+      authorizationId: 'materialization-worker-1',
+    }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'MATERIALIZATION_AUTHORIZATION_EXPIRED',
+  )
+  assert.equal(resolverCalls, 1)
+  workerNow = new Date('2026-07-14T12:02:00.000Z')
+
+  currentRights = createAssetRightsSnapshot({
+    id: 'rights-worker-source-revised',
+    workspaceId: 'workspace-1',
+    artifactId: 'artifact-worker-source',
+    sequence: 2,
+    draft: {
+      owner: 'Alpes Digital',
+      license: 'Revised terms',
+      status: 'approved',
+      allowedUses: ['paid-ad'],
+      prohibitedUses: [],
+      allowedMarkets: ['BR'],
+      allowedLocales: ['pt-BR'],
+      consent: { status: 'not-required', allowedUses: [] },
+    },
+    createdBy: { type: 'api-client', id: 'client-1' },
+    createdAt: '2026-07-14T12:01:30.000Z',
+  })
+  await assert.rejects(
+    materialize({
+      workspaceId: 'workspace-1',
+      authorizationId: 'materialization-worker-1',
+    }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'MATERIALIZATION_REVALIDATION_FAILED' &&
+      error.details.reasonCode === 'ASSET_RIGHTS_SNAPSHOT_CHANGED',
+  )
+  assert.equal(resolverCalls, 1)
+})
+
+test('local artifact resolver streams and verifies bytes inside the configured root', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-artifacts-'))
+  const outside = `${root}-outside.mp4`
+  context.after(async () => {
+    await Promise.all([
+      rm(root, { recursive: true, force: true }),
+      rm(outside, { force: true }),
+    ])
+  })
+  const artifactKey = 'workspaces/workspace-1/masters/source.mp4'
+  const target = join(root, ...artifactKey.split('/'))
+  const bytes = Buffer.from('immutable-render-source')
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  await mkdir(dirname(target), { recursive: true })
+  await writeFile(target, bytes)
+  const stored = {
+    id: 'artifact-local-source',
+    workspaceId: 'workspace-1',
+    artifactKey,
+    sha256,
+    byteSize: BigInt(bytes.byteLength),
+    mediaType: 'video',
+    status: 'available',
+  }
+  const resolver = new LocalArtifactRenderInputResolver(
+    { v2MediaArtifact: { async findFirst() { return stored } } },
+    { root, workspaceId: 'workspace-1' },
+  )
+  const asset = {
+    id: 'local-source',
+    artifactId: stored.id,
+    artifactKey,
+    kind: 'video',
+    role: 'primary',
+    ordinal: 0,
+    sha256,
+    byteSize: bytes.byteLength,
+  }
+  const resolved = await resolver.resolve(asset)
+  assert.match(resolved.uri, /^file:/)
+  assert.equal(resolved.sha256, sha256)
+  assert.equal(resolved.byteSize, bytes.byteLength)
+
+  const originalArtifactKey = stored.artifactKey
+  stored.artifactKey = `../${basename(outside)}`
+  await writeFile(outside, bytes)
+  await assert.rejects(
+    resolver.resolve({ ...asset, artifactKey: stored.artifactKey }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'MATERIALIZATION_REVALIDATION_FAILED' &&
+      error.details.reasonCode === 'ASSET_PATH_OUTSIDE_STORAGE_ROOT',
+  )
+  stored.artifactKey = originalArtifactKey
+
+  await writeFile(target, Buffer.from('tampered-render-source!'))
+  await assert.rejects(
+    resolver.resolve(asset),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'MATERIALIZATION_REVALIDATION_FAILED' &&
+      ['ASSET_BYTE_SIZE_MISMATCH', 'ASSET_CONTENT_MISMATCH'].includes(error.details.reasonCode),
+  )
 })
 test('output dimensions must match the declared ratio', () => {
   expectDomainError(

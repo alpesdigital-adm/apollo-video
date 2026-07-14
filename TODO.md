@@ -395,7 +395,7 @@
 ### F0.028 — Props e manifest [FR-234]
 
 - [x] Definir `RenderInput` autocontido e schema versionado. Evidência: `render-input/v1`, hash canônico, preflight público e testes de materialização sem banco.
-- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-021: resolver port, validação de URI/checksum/tamanho, preflight workspace-scoped e autorização rights/consent auditável entregues; faltam storage tipado, signed URLs e integração com o worker.
+- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-022: worker relê autorização/payload/rights, adapter local resolve vídeo/áudio/imagem sob raiz privada e verifica bytes por streaming; faltam storage S3-compatible/signed URLs, fonts, LUTs, data e integração com a execução do renderer.
 - [x] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
 - [x] Salvar manifest com checksums, plan hash e renderer version. Evidência: `media-artifact-manifest/v4` vincula por hash um `render-input/v1` protegido que contém checksums ordenados, plan hash e identidade versionada do renderer.
 - [ ] Reexecutar golden render somente a partir do manifest salvo.
@@ -524,7 +524,7 @@
 - [ ] Gerar signed single/multipart sessions curtas com headers obrigatórios.
 - [ ] Implementar resume, parts completion e verification antes do ingest.
 - [ ] Gerar download grants curtos por asset/artifact autorizado.
-- [ ] Impedir storage path/URI permanente de virar identidade pública.
+- [ ] Impedir storage path/URI permanente de virar identidade pública. Parcial F0-022: lease interna serializa apenas receipt seguro e paths/URLs vivem somente no `MaterializedRenderInput` em memória; faltam download grants e enforcement nos adapters futuros.
 - [ ] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado.
 
 ### F0.042 — Preflight e lote externo [FR-248]
@@ -2915,7 +2915,7 @@ Confirmação hospedada:
 
 ### Slice F0-021 — Rights, consent e autorização auditável de materialização
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `fa3adb9`.
 
 Entregas:
 
@@ -2950,7 +2950,7 @@ Evidências locais:
 - contratos aprovam 20 capabilities, 27 schemas, 33 exemplos e 17 paths;
 - suíte unitária passa com 48 testes;
 - build Next.js registra as rotas dinâmicas de rights e materialization authorizations;
-- API completa passou em banco SQLite descartável; a aplicação real da migration PostgreSQL será confirmada pelo CI hospedado quando esta slice for publicada.
+- API completa passou em banco SQLite descartável; migration PostgreSQL e todos os gates hospedados também passaram.
 
 Limites explícitos desta slice:
 
@@ -2961,3 +2961,55 @@ Limites explícitos desta slice:
 - revogação cria um novo snapshot corrente, mas ainda não marca outputs downstream para review;
 - fonts, LUTs e data continuam bloqueados até existir storage tipado;
 - smoke/golden render continua pendente até materialização efetiva e execução isolada pelo manifest.
+
+Confirmação hospedada:
+
+- o run `29329930615` aprovou os 20 passos no Linux, incluindo migration Postgres, build de produção e integrações públicas.
+
+### Slice F0-022 — Materialização efetiva e revalidação no worker
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- `materializeAuthorizedRenderInputService` aceita somente `workspaceId` e authorization ID, sem confiar em payload externo com locations ou props;
+- repository de authorization ganhou lookup workspace-scoped e hidrata novamente o aggregate e suas decisões persistidas;
+- autorização negada, ausente ou expirada é bloqueada antes de qualquer acesso aos bytes;
+- artifact, manifest, protected RenderInput, renderer, composição, locale, assets e decisões são relidos e comparados com a autorização;
+- rights/consent correntes são reavaliados imediatamente antes do storage; troca de snapshot exige nova autorização mesmo se o novo conteúdo ainda permitir o uso;
+- `LocalArtifactRenderInputResolver` suporta `video`, `audio` e `image` a partir de `APOLLO_V2_ARTIFACT_ROOT`, sem aceitar raiz relativa;
+- o resolver reconfirma no banco workspace, artifact ID, canonical key, status, kind, checksum e byte size antes de tocar no filesystem;
+- `realpath` e containment impedem traversal e links que resolvam fora da raiz privada do worker;
+- arquivo precisa ser regular e manter size, mtime, device e inode durante a leitura;
+- SHA-256 e byte size reais são calculados em streaming e precisam coincidir com banco e RenderInput;
+- assets são resolvidos deterministicamente em ordem, sem abrir até 4.096 streams simultâneos;
+- locations ficam no `MaterializedRenderInput` imutável capturado pela lease interna; `JSON.stringify` da lease devolve apenas `materialized-render-input-receipt/v1`;
+- o receipt seguro contém authorization/artifact/manifest/input hashes, contagem, revalidation hash e validade, sem path, URL, props, key ou nota jurídica;
+- composition root do worker liga repositories, cipher, target registry, rights gate e resolver local sem criar acesso público ao storage;
+- erros seguros distinguem autorização ausente, negada, expirada e falha de revalidação, sem incluir path na mensagem ou details;
+- `.env.local.example`, ADR-001 e ADR-010 registram a configuração e os boundaries.
+
+Evidências locais:
+
+- suíte unitária completa passa com 50 testes;
+- teste do worker comprova materialização autorizada, lease serializável sem location/props/key e receipt com revalidation hash;
+- autorização no limite de validade é rejeitada antes do resolver;
+- novo snapshot corrente, ainda permissivo, invalida a autorização antiga e não toca no storage;
+- teste do adapter usa bytes reais em diretório temporário, confirma URI interna, checksum e tamanho;
+- tentativa de usar key com traversal até arquivo existente fora da raiz é bloqueada;
+- alteração dos bytes após o cadastro é detectada por tamanho ou SHA-256;
+- lookup Prisma da autorização comprova hidratação completa e isolamento entre workspaces;
+- integrações Prisma, artifacts e API completa passam em cópia SQLite descartável sincronizada com o schema, sem alterar o banco local existente;
+- contratos permanecem em 20 capabilities, 27 schemas, 33 exemplos e 17 paths, sem expor a capability interna;
+- typecheck, `git diff --check`, audits sem vulnerabilidades, migration validation, bundle Remotion e build Next.js passam.
+
+Limites explícitos desta slice:
+
+- a materialização é um boundary interno consumível pelo futuro render worker; não existe endpoint que devolva paths/URLs e a futura operação pública de render será o gatilho externo;
+- ainda não existe job durável, fila, heartbeat, retry/cancel ou registro persistido da execução da materialização; o aggregate de autorização continua sendo o audit durável disponível;
+- storage S3-compatible, signed URLs curtas e promoção multipart continuam pendentes;
+- `font`, `lut` e `data` permanecem fail-closed até receberem storage tipado;
+- esta slice não converte props para a composição Remotion nem executa o renderer;
+- o worker que promover o output final deverá executar novamente o rights gate e verificar a validade da lease;
+- smoke/golden render continua sendo o próximo incremento.
+- PostgreSQL local não pôde ser repetido por ausência de Docker nesta máquina; aplicação real das migrations e integrações Postgres será confirmada pelo CI hospedado após a publicação.

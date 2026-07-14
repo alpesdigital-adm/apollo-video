@@ -51,6 +51,9 @@ test('authenticated public API manages projects, clients and artifact inspection
   const { PrismaMediaArtifactRepository } = await import(
     '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
   )
+  const { PrismaMaterializationAuthorizationRepository } = await import(
+    '../../src/v2/infrastructure/prisma/materialization-authorization-repository.ts'
+  )
   const { PrismaWorkspaceRepository } = await import(
     '../../src/v2/infrastructure/prisma/workspace-repository.ts'
   )
@@ -772,6 +775,19 @@ test('authenticated public API manages projects, clients and artifact inspection
         where: { workspaceId, authorizationId: materialization.data.authorization.id },
       }),
       1,
+    )
+    const storedAuthorization = await new PrismaMaterializationAuthorizationRepository(
+      client,
+    ).findById(workspaceId, materialization.data.authorization.id)
+    assert.equal(storedAuthorization.id, materialization.data.authorization.id)
+    assert.equal(storedAuthorization.status, 'authorized')
+    assert.equal(storedAuthorization.decisions[0].rightsSnapshotHash.length, 64)
+    assert.equal(
+      await new PrismaMaterializationAuthorizationRepository(client).findById(
+        otherWorkspaceId,
+        materialization.data.authorization.id,
+      ),
+      null,
     )
 
     const legacyRenderInputResponse = await fetch(

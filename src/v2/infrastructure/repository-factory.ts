@@ -1,15 +1,18 @@
 import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
 
+import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
 import type { AssetRightsRepository } from '../application/ports/asset-rights-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
 import type { ProtectedRenderInputStore } from '../application/ports/protected-render-input-store.ts'
+import type { RenderInputAssetResolver } from '../application/ports/render-input-asset-resolver.ts'
 import type { RenderInputAssetAvailability } from '../application/ports/render-reconstruction-readiness.ts'
 import type { ProjectCreationRepository } from '../application/ports/project-creation-repository.ts'
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
+import { DomainError } from '../domain/errors.ts'
 import { prisma } from '../../lib/db.ts'
 import { resolveV2PersistenceMode } from './persistence-mode.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
@@ -22,6 +25,8 @@ import { PrismaProjectCreationRepository } from './prisma/project-creation-repos
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
+import { LocalArtifactRenderInputResolver } from './local-artifact-render-input-resolver.ts'
+import { createConfiguredRenderTargetRegistry } from './render-target-registry.ts'
 import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
 
 // The two generated clients expose the same v2 model delegates. This cast is
@@ -64,6 +69,40 @@ export function createProtectedRenderInputStore(): ProtectedRenderInputStore {
 
 export function createRenderInputAssetAvailability(): RenderInputAssetAvailability {
   return new PrismaRenderInputAssetAvailability(resolveV2Client())
+}
+
+export function createRenderInputAssetResolver(
+  workspaceId: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): RenderInputAssetResolver {
+  const root = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
+  if (!root) {
+    throw new DomainError(
+      'PERSISTENCE_NOT_CONFIGURED',
+      'Local artifact storage is not configured for the render worker',
+    )
+  }
+  return new LocalArtifactRenderInputResolver(resolveV2Client(), {
+    root,
+    workspaceId,
+  })
+}
+
+export function createAuthorizedRenderInputMaterializer(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  return materializeAuthorizedRenderInputService({
+    artifacts: createMediaArtifactQueryRepository(),
+    protectedRenderInputs: createProtectedRenderInputStore(),
+    assetAvailability: createRenderInputAssetAvailability(),
+    targets: createConfiguredRenderTargetRegistry(environment),
+    rights: createAssetRightsRepository(),
+    authorizations: createMaterializationAuthorizationRepository(),
+    resolverForWorkspace: (workspaceId) =>
+      createRenderInputAssetResolver(workspaceId, environment),
+    clock,
+  })
 }
 
 export function createProjectCreationRepository(): ProjectCreationRepository {

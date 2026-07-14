@@ -6,6 +6,10 @@ export interface MaterializationAuthorizationResult {
 }
 
 export interface MaterializationAuthorizationRepository {
+  findById(
+    workspaceId: string,
+    authorizationId: string,
+  ): Promise<MaterializationAuthorization | null>
   findReplay(input: {
     workspaceId: string
     clientId: string

@@ -40,6 +40,10 @@ Scope nunca substitui ownership, rights, consent, Policy Snapshot, budget ou est
 - O primeiro consumidor do gate é a autorização de materialização do RenderInput. O service autentica o payload protegido, valida o target técnico, revalida identidade/disponibilidade dos assets e só então avalia cada snapshot.
 - Cada tentativa persiste um aggregate de autorização e uma decisão ordenada por asset, com snapshot/hash, outcome, reason codes, actor, contexto e tempo.
 - Autorizações positivas duram no máximo cinco minutos e carregam `revalidationRequired=true`. O worker deve reavaliar o snapshot corrente imediatamente antes de resolver storage e novamente antes de promover o output.
+- No início da materialização, o worker relê a autorização por `workspaceId` e ID, rejeita status negado ou validade expirada e autentica novamente o mesmo `RenderInput` ligado ao artifact/manifest autorizados.
+- Cada decisão autorizada precisa continuar correspondendo ao mesmo asset, ordinal, kind, snapshot ID e snapshot hash. Uma revisão nova exige nova autorização mesmo quando o novo snapshot também permitiria o uso; não há upgrade silencioso do contexto auditado.
+- A avaliação corrente de rights/consent é executada antes de resolver bytes. Expiração durante a leitura também invalida a lease; uma segunda revalidação continuará obrigatória imediatamente antes da promoção do output final.
+- O objeto entregue ao renderer encapsula as locations em memória e define serialização segura contendo somente IDs públicos, hashes, contagem e janela de validade.
 - `Idempotency-Key` identifica uma tentativa externa. Replay retorna o mesmo receipt; a mesma chave com request diferente falha com conflito.
 - Receipts externos nunca expõem notas jurídicas, props, canonical keys, storage locations, ciphertext ou material criptográfico.
 
