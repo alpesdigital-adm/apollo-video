@@ -7,12 +7,9 @@ import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { rename, rm, stat } from 'fs/promises'
 import path from 'path'
-import { promisify } from 'util'
 import type { Silence } from '../types/project.ts'
 import { FPS } from '../types/timing.ts'
 import { parseSilenceDetection } from '../utils/silence.ts'
-
-const execFileAsync = promisify(execFile)
 
 const DEFAULT_FFMPEG_TIMEOUT_MS = 30 * 60_000
 const DEFAULT_FFPROBE_TIMEOUT_MS = 60_000
@@ -229,13 +226,39 @@ async function executeMediaProcess(
     : timeoutController.signal
 
   try {
-    return (await execFileAsync(executable, args, {
-      encoding: 'utf8',
-      windowsHide: true,
-      shell: false,
-      maxBuffer: maxBufferBytes,
-      signal: executionSignal
-    })) as { stdout: string; stderr: string }
+    return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      let closed = false
+      let callbackCompleted = false
+      let callbackError: Error | null = null
+      let stdout = ''
+      let stderr = ''
+      const finish = () => {
+        if (!closed || !callbackCompleted) return
+        if (callbackError) {
+          Object.assign(callbackError, { stdout, stderr })
+          reject(callbackError)
+        } else {
+          resolve({ stdout, stderr })
+        }
+      }
+      const child = execFile(executable, args, {
+        encoding: 'utf8',
+        windowsHide: true,
+        shell: false,
+        maxBuffer: maxBufferBytes,
+        signal: executionSignal
+      }, (error, processStdout, processStderr) => {
+        callbackError = error
+        stdout = processStdout
+        stderr = processStderr
+        callbackCompleted = true
+        finish()
+      })
+      child.once('close', () => {
+        closed = true
+        finish()
+      })
+    })
   } catch (error) {
     const failure = error as MediaProcessFailure
     const code = timedOut
