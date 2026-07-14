@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
 
 import { activateWebhookEndpointService } from '../application/secure-webhook.ts'
+import { materializeNextWebhookEventService } from '../application/materialize-webhook-deliveries.ts'
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
 import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
@@ -20,6 +21,7 @@ import type { ProjectQueryRepository } from '../application/ports/project-query-
 import type { PublicOperationRepository } from '../application/ports/public-operation-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
 import type { WebhookRegistrationRepository } from '../application/ports/webhook-registration-repository.ts'
+import type { WebhookFanoutRepository } from '../application/ports/webhook-fanout-repository.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
@@ -40,6 +42,7 @@ import { PrismaProjectQueryRepository } from './prisma/project-query-repository.
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
+import { PrismaWebhookFanoutRepository } from './prisma/webhook-fanout-repository.ts'
 import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
 import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-transport.ts'
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
@@ -85,6 +88,19 @@ export function createPublicOperationRepository(): PublicOperationRepository {
 
 export function createWebhookRegistrationRepository(): WebhookRegistrationRepository {
   return new PrismaWebhookRegistrationRepository(resolveV2Client())
+}
+
+export function createWebhookFanoutRepository(): WebhookFanoutRepository {
+  return new PrismaWebhookFanoutRepository(resolveV2Client())
+}
+
+export function createWebhookFanoutMaterializer(
+  clock: () => Date = () => new Date(),
+) {
+  return materializeNextWebhookEventService({
+    repository: createWebhookFanoutRepository(),
+    clock,
+  })
 }
 
 export function createWebhookSecurityRepository(): WebhookChallengeRepository &

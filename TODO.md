@@ -495,7 +495,7 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031: claim com lease/fencing, espera exponencial, checkpoint, descoberta e replay manual estão ativos no render; generalização aos demais jobs, métricas e console agregada continuam abertas.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-037: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks agora materializam deliveries deduplicadas antes de publicar o outbox, mas claim, envio assinado, retry e replay de delivery continuam abertos.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
 - [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Parcial F0-035/F0-036: assinatura adulterada, replay durável, timeout absoluto, DNS misto e rebinding possuem regressões; dispatcher real e duplicação/retry de delivery continuam abertos.
 
@@ -3516,7 +3516,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-036 — Transporte HTTPS seguro do challenge
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `e4a816e`.
 
 Entregas:
 
@@ -3548,4 +3548,43 @@ Limites explícitos desta slice:
 - secret provider, abertura/rotação da chave e assinatura do dispatcher continuam ligados à futura execução de deliveries, não ao challenge;
 - fan-out do outbox, materialização de deliveries, claim/lease, at-least-once, backoff, dead-letter e replay administrativo continuam abertos;
 - a política fail-closed pode recusar faixas especiais que sejam tecnicamente roteáveis; exceções exigirão revisão explícita, nunca allowlist implícita;
+- hosted CI `29374221527` aprovou PostgreSQL, 79 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-037 — Fan-out durável do outbox para deliveries
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- materializador server-side processa o próximo evento pendente de um workspace por vez, impedindo que corrupção ou excesso de um tenant bloqueie a fila global;
+- seleção é determinística por `occurredAt` e event ID, com índice composto por workspace, estado de publicação e ordem;
+- somente endpoint e subscription atualmente ativos, criados/verificados antes do evento, podem receber delivery;
+- filtros são reidratados e revalidados pelo catálogo; hash, tipos e resource IDs precisam coincidir exatamente com o conteúdo persistido;
+- o próprio envelope do outbox é reidratado pelo domínio antes do match, impedindo publicação silenciosa de tipo, versão, recurso ou payload corrompidos;
+- cada subscription compatível recebe uma delivery `pending`, com retry policy limitada e `nextAttemptAt` igual ao instante de materialização;
+- unicidade `(subscriptionId, eventId)` e `upsert` tornam recuperação/reexecução deduplicada mesmo quando a marca de publicação precisa ser refeita;
+- deliveries e `publishedAt` são gravados na mesma transação; falha de ID, filtro, limite ou persistência reverte tudo e mantém o evento pendente;
+- evento sem destino elegível também é marcado como publicado, registrando que o roteamento foi concluído sem inventar uma delivery;
+- fan-out é limitado a 10.000 subscriptions ativas por evento e falha fechado acima disso;
+- factory server-side fornece o materializador, mas nenhuma tabela interna foi exposta pela API.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 81 testes;
+- regressões de domínio cobrem tipo exato, resource ID exato, ausência de resource filter, retry policy e workspace inválido;
+- integração Prisma cobre evento anterior à verificação, evento compatível, resource divergente, ausência de destino e ordem determinística;
+- recuperação com `publishedAt` removido reutiliza a delivery existente e não duplica `(subscription,event)`;
+- filtro adulterado produz `PERSISTENCE_CONFLICT`, não publica o evento e não deixa delivery parcial;
+- workspace diferente retorna idle mesmo quando outro tenant possui evento corrompido pendente;
+- migration v2 passa com 25 tabelas, 89 índices e 55 foreign keys;
+- typecheck, geração dos clients Prisma e integração dedicada em SQLite descartável passam.
+
+Limites explícitos desta slice:
+
+- `publishedAt` significa que o fan-out durável terminou, não que o endpoint recebeu ou confirmou o evento;
+- subscriptions ativadas depois de `occurredAt` não recebem backlog automaticamente; replay histórico exigirá comando explícito posterior;
+- endpoint/subscription pausado, suspenso ou revogado no instante do fan-out não recebe nova delivery;
+- ainda não há claim/lease da delivery, abertura do secret, assinatura do request, chamada HTTPS, classificação de resposta, retry, dead-letter ou replay administrativo;
+- o dispatcher futuro deverá reutilizar a resolução DNS pinada do ADR-025 em toda tentativa, não apenas no challenge;
+- API/UI administrativa e presenters externos seguros continuam em incremento posterior;
 - hosted CI será registrado após publicação no próximo ciclo.

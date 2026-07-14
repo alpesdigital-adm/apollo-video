@@ -505,6 +505,7 @@ model V2PublicEventOutbox {
 
   @@unique([id, workspaceId])
   @@index([publishedAt, occurredAt, id])
+  @@index([workspaceId, publishedAt, occurredAt, id])
   @@index([workspaceId, occurredAt(sort: Asc), id(sort: Asc)])
   @@index([workspaceId, resourceType, resourceId, occurredAt(sort: Asc)])
   @@map("public_event_outbox")

@@ -9,6 +9,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { PrismaClient } = await import(clientPackage)
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { registerWebhookService } = await import('../../src/v2/application/register-webhook.ts')
+  const { materializeNextWebhookEventService } = await import(
+    '../../src/v2/application/materialize-webhook-deliveries.ts'
+  )
   const {
     issueWebhookChallengeService,
     verifyWebhookChallengeService,
@@ -25,6 +28,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   )
   const { PrismaWebhookRegistrationRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-registration-repository.ts'
+  )
+  const { PrismaWebhookFanoutRepository } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-fanout-repository.ts'
   )
   const { PrismaWebhookSecurityRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-security-repository.ts'
@@ -66,6 +72,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     await client.v2WebhookSubscription.deleteMany({ where: { workspaceId } })
     await client.v2WebhookSigningSecret.deleteMany({ where: { workspaceId } })
     await client.v2WebhookEndpoint.deleteMany({ where: { workspaceId } })
+    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
   }
@@ -298,6 +305,116 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_REPLAY_DETECTED',
     )
     assert.equal(await client.v2WebhookReplayReceipt.count({ where: { workspaceId } }), 1)
+
+    const fanoutAt = new Date(now.getTime() + 10_000)
+    const eventRows = [
+      {
+        id: '00000000-0000-4000-8000-000000000301',
+        type: 'project.created',
+        resourceId: 'integration-project-1',
+        occurredAt: now,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000302',
+        type: 'project.created',
+        resourceId: 'integration-project-1',
+        occurredAt: new Date(now.getTime() + 2_000),
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000303',
+        type: 'project.created',
+        resourceId: 'another-project',
+        occurredAt: new Date(now.getTime() + 3_000),
+      },
+    ]
+    await client.v2PublicEventOutbox.createMany({
+      data: eventRows.map((event) => ({
+        ...event,
+        workspaceId,
+        version: '1.0.0',
+        actorClientId: clientId,
+        resourceType: 'project',
+        dataJson: '{}',
+        createdAt: fanoutAt,
+      })),
+    })
+    let deliveryId = 401
+    let fanoutClock = fanoutAt
+    const materialize = materializeNextWebhookEventService({
+      repository: new PrismaWebhookFanoutRepository(
+        client,
+        () => `00000000-0000-4000-8000-${String(deliveryId++).padStart(12, '0')}`,
+      ),
+      clock: () => fanoutClock,
+    })
+    const runFanout = () => materialize({ workspaceId })
+    const beforeVerification = await runFanout()
+    assert.equal(beforeVerification.eventId, eventRows[0].id)
+    assert.equal(beforeVerification.matchedSubscriptions, 0)
+    const matching = await runFanout()
+    assert.equal(matching.eventId, eventRows[1].id)
+    assert.equal(matching.matchedSubscriptions, 1)
+    assert.equal(matching.deliveries[0].subscriptionId, subscription.id)
+    assert.equal(matching.deliveries[0].status, 'pending')
+    assert.equal(matching.deliveries[0].maxAttempts, 8)
+    const wrongResource = await runFanout()
+    assert.equal(wrongResource.eventId, eventRows[2].id)
+    assert.equal(wrongResource.matchedSubscriptions, 0)
+    assert.deepEqual(await runFanout(), { status: 'idle' })
+    assert.equal(await client.v2WebhookDelivery.count({ where: { workspaceId } }), 1)
+    assert.equal(
+      await client.v2PublicEventOutbox.count({
+        where: { workspaceId, publishedAt: { not: null } },
+      }),
+      3,
+    )
+
+    await client.v2PublicEventOutbox.update({
+      where: { id: eventRows[1].id },
+      data: { publishedAt: null },
+    })
+    fanoutClock = new Date(fanoutAt.getTime() + 1_000)
+    const replayedFanout = await runFanout()
+    assert.equal(replayedFanout.eventId, eventRows[1].id)
+    assert.equal(replayedFanout.deliveries[0].id, matching.deliveries[0].id)
+    assert.equal(await client.v2WebhookDelivery.count({ where: { workspaceId } }), 1)
+
+    const corruptedEventId = '00000000-0000-4000-8000-000000000304'
+    await client.$transaction([
+      client.v2WebhookSubscription.update({
+        where: { id: subscription.id },
+        data: { filterHash: 'f'.repeat(64) },
+      }),
+      client.v2PublicEventOutbox.create({
+        data: {
+          id: corruptedEventId,
+          workspaceId,
+          type: 'project.created',
+          version: '1.0.0',
+          occurredAt: new Date(now.getTime() + 4_000),
+          actorClientId: clientId,
+          resourceType: 'project',
+          resourceId: 'integration-project-1',
+          dataJson: '{}',
+          createdAt: fanoutAt,
+        },
+      }),
+    ])
+    await assert.rejects(
+      () => runFanout(),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    assert.equal(
+      (await client.v2PublicEventOutbox.findUniqueOrThrow({
+        where: { id: corruptedEventId },
+      })).publishedAt,
+      null,
+    )
+    assert.equal(await client.v2WebhookDelivery.count({ where: { workspaceId } }), 1)
+    assert.deepEqual(
+      await materialize({ workspaceId: 'another-workspace' }),
+      { status: 'idle' },
+    )
 
     registrationIndex = 1
     await assert.rejects(

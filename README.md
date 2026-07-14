@@ -152,7 +152,9 @@ challenge one-shot, HMAC sobre bytes exatos, timestamp e receipt anti-replay já
 durável e testado. O transporte interno do challenge resolve DNS a cada request,
 rejeita qualquer endereço não público e prende a conexão HTTPS ao IP validado,
 mantendo SNI e certificado do hostname. A ativação ainda não possui endpoint
-administrativo público; fan-out e entrega de eventos virão nas próximas slices.
+administrativo público. Eventos pendentes já são materializados atomicamente em
+deliveries deduplicadas conforme workspace e filtros; o dispatcher HTTPS,
+retries e administração externa virão nas próximas slices.
 
 ## Formatos
 

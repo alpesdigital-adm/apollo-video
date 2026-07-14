@@ -28,7 +28,7 @@ O outbox do ADR-022 preserva eventos, mas ainda não existe uma representação 
 ## Consequências
 
 - O modelo necessário para challenge, assinatura, fan-out e retry existe sem iniciar efeitos externos.
-- Nenhuma delivery é materializada a partir do outbox nesta slice; `publishedAt` continua nulo.
+- O ADR-026 passou a materializar deliveries a partir do outbox e só então atualiza `publishedAt`; envio e confirmação continuam posteriores.
 - O challenge durável, o HMAC sobre bytes exatos e o recibo anti-replay foram definidos pelo ADR-024. Ainda não há secret provider adapter, rotação, DNS pinning, dispatcher ou chamada HTTPS.
 - A API administrativa, paginação, pause/revoke, status e diagnostics continuam em slices posteriores.
 - Filtros incompatíveis futuros exigirão uma versão explícita do contrato, não interpretação retroativa.

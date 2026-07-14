@@ -74,6 +74,11 @@ export interface WebhookEventFilter {
   hash: string
 }
 
+export interface WebhookFilterableEvent {
+  type: string
+  resourceId: string
+}
+
 export interface WebhookSubscription {
   schemaVersion: 1
   id: string
@@ -220,6 +225,16 @@ export function createWebhookEventFilter(input: {
     ...(resourceIds ? { resourceIds: Object.freeze(resourceIds) } : {}),
     hash,
   })
+}
+
+export function webhookEventMatchesFilter(
+  filter: Readonly<WebhookEventFilter>,
+  event: Readonly<WebhookFilterableEvent>,
+): boolean {
+  return (
+    filter.eventTypes.includes(event.type) &&
+    (!filter.resourceIds || filter.resourceIds.includes(event.resourceId))
+  )
 }
 
 export function createWebhookEndpoint(

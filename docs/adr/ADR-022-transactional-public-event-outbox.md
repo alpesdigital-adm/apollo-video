@@ -30,8 +30,8 @@ A criação de projeto é a primeira transição externa que já possui transaç
 
 - A unicidade global dos event IDs deixa de ser apenas uma validação em memória para as transições já conectadas ao outbox.
 - Somente criação de projeto e versão inicial emitem eventos nesta slice. Estar no catálogo continua não sendo evidência de emissão para os demais tipos.
-- O estado pendente sobrevive a restart. O ADR-023 acrescenta os modelos de subscription e delivery attempt, mas dispatcher, claim/lease, broker e materialização de deliveries ainda não existem.
-- `publishedAt` não deve ser atualizado até uma futura transação de publicação definir o destino durável e a semântica de retomada.
+- O estado pendente sobrevive a restart. O ADR-023 acrescenta os modelos de subscription e delivery attempt; o ADR-026 materializa deliveries antes de atualizar `publishedAt`.
+- `publishedAt` agora significa que o fan-out durável terminou, inclusive quando nenhum destino era elegível. Não significa entrega HTTPS nem confirmação do consumidor.
 - At-least-once, assinatura, challenge, filtros, retry, dead-letter, replay e retenção continuam em slices posteriores.
 
 ## Evidências exigidas

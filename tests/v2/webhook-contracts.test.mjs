@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { registerWebhookService } from '../../src/v2/application/register-webhook.ts'
 import { activateWebhookEndpointService } from '../../src/v2/application/secure-webhook.ts'
+import { materializeNextWebhookEventService } from '../../src/v2/application/materialize-webhook-deliveries.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -11,6 +12,7 @@ import {
   createWebhookEventFilter,
   createWebhookSigningSecret,
   normalizeWebhookUrl,
+  webhookEventMatchesFilter,
 } from '../../src/v2/domain/webhook.ts'
 import {
   createWebhookVerificationChallenge,
@@ -163,6 +165,57 @@ test('delivery and attempt identities are bounded before any network execution',
   )
   assert.throws(
     () => createWebhookDeliveryAttempt({ ...attempt, status: 'failed' }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_WEBHOOK',
+  )
+})
+
+test('webhook filters match event type and optional resource exactly', () => {
+  const typeOnly = createWebhookEventFilter({ eventTypes: ['project.created'] })
+  const scoped = createWebhookEventFilter({
+    eventTypes: ['project.created', 'project.version.created'],
+    resourceIds: ['project-1'],
+  })
+  assert.equal(
+    webhookEventMatchesFilter(typeOnly, { type: 'project.created', resourceId: 'any-project' }),
+    true,
+  )
+  assert.equal(
+    webhookEventMatchesFilter(scoped, { type: 'project.created', resourceId: 'project-1' }),
+    true,
+  )
+  assert.equal(
+    webhookEventMatchesFilter(scoped, { type: 'project.created', resourceId: 'project-10' }),
+    false,
+  )
+  assert.equal(
+    webhookEventMatchesFilter(scoped, { type: 'project.status.changed', resourceId: 'project-1' }),
+    false,
+  )
+})
+
+test('webhook fan-out service validates bounded retry policy and canonical clock', async () => {
+  let command
+  const materialize = materializeNextWebhookEventService({
+    repository: {
+      async materializeNext(received) {
+        command = received
+        return { status: 'idle' }
+      },
+    },
+    clock: () => new Date('2026-07-14T23:20:00.000Z'),
+  })
+  assert.deepEqual(await materialize({ workspaceId: 'workspace-1' }), { status: 'idle' })
+  assert.deepEqual(command, {
+    workspaceId: 'workspace-1',
+    maxAttempts: 8,
+    publishedAt: '2026-07-14T23:20:00.000Z',
+  })
+  await assert.rejects(
+    () => materialize({ workspaceId: 'workspace-1', maxAttempts: 21 }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_WEBHOOK',
+  )
+  await assert.rejects(
+    () => materialize({ workspaceId: 'x' }),
     (error) => error instanceof DomainError && error.code === 'INVALID_WEBHOOK',
   )
 })
