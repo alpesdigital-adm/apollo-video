@@ -157,6 +157,8 @@ export function createPublicOperationWorker(
 ) {
   const configuredLease = Number(environment.APOLLO_V2_WORKER_LEASE_MS)
   const configuredHeartbeat = Number(environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
+  const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
+  const configuredRetryMax = Number(environment.APOLLO_V2_WORKER_RETRY_MAX_MS)
   return runNextPublicOperationService({
     operations: createPublicOperationRepository(),
     checkpoints: createArtifactRenderCheckpointRepository(),
@@ -167,6 +169,12 @@ export function createPublicOperationWorker(
       : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0
       ? { heartbeatIntervalMs: configuredHeartbeat }
+      : {}),
+    ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0
+      ? { retryBaseDelayMs: configuredRetryBase }
+      : {}),
+    ...(Number.isSafeInteger(configuredRetryMax) && configuredRetryMax > 0
+      ? { retryMaxDelayMs: configuredRetryMax }
       : {}),
   })
 }

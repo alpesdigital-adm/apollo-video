@@ -8,7 +8,10 @@ import {
   startPublicOperationAttempt,
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
-import { runNextPublicOperationService } from '../../src/v2/application/run-public-operation-worker.ts'
+import {
+  calculatePublicOperationRetryDelayMs,
+  runNextPublicOperationService,
+} from '../../src/v2/application/run-public-operation-worker.ts'
 
 function createClock() {
   let current = Date.parse('2026-07-14T12:00:00.000Z')
@@ -56,6 +59,10 @@ function createOperations() {
           !['queued', 'retrying'].includes(operation.status) &&
           !(operation.status === 'running' && allowExpiredClaim)
         ) return null
+        if (
+          operation.status === 'retrying' &&
+          Date.parse(operation.nextAttemptAt) > Date.parse(input.now)
+        ) return null
         operation = startPublicOperationAttempt(operation, input.now)
         allowExpiredClaim = false
         lease = {
@@ -85,7 +92,12 @@ function createOperations() {
       },
       async failOrRetry(input) {
         if (!matches(input)) return null
-        operation = retryOrFailPublicOperation(operation, input.error, input.now)
+        operation = retryOrFailPublicOperation(
+          operation,
+          input.error,
+          input.now,
+          input.nextAttemptAt,
+        )
         lease = undefined
         return record()
       },
@@ -197,6 +209,8 @@ test('retryable failure is reclaimed after restart and succeeds on the next atte
     clock: createClock(),
     leaseDurationMs: 10_000,
     heartbeatIntervalMs: 1_000,
+    retryBaseDelayMs: 100,
+    retryMaxDelayMs: 1_000,
     async render(request) {
       renders += 1
       if (renders === 1) throw new Error('private renderer detail')
@@ -206,9 +220,51 @@ test('retryable failure is reclaimed after restart and succeeds on the next atte
   })
   assert.equal((await runNext('worker-restart-one')).status, 'retrying')
   assert.equal(operations.operation.attempt, 1)
+  assert.equal(operations.operation.nextAttemptAt, '2026-07-14T12:00:00.400Z')
   assert.equal((await runNext('worker-restart-two')).status, 'succeeded')
   assert.equal(operations.operation.attempt, 2)
   assert.equal(JSON.stringify(operations.operation).includes('private renderer detail'), false)
+})
+
+test('retry exhaustion is terminal and marked for dead-letter handling', async () => {
+  const operations = createOperations()
+  const runNext = runNextPublicOperationService({
+    operations: operations.repository,
+    checkpoints: createCheckpoints().repository,
+    clock: createClock(),
+    leaseDurationMs: 10_000,
+    heartbeatIntervalMs: 1_000,
+    retryBaseDelayMs: 100,
+    retryMaxDelayMs: 1_000,
+    async render() {
+      throw new Error('private repeated renderer detail')
+    },
+  })
+  assert.equal((await runNext('worker-dead-letter-one')).status, 'retrying')
+  assert.equal((await runNext('worker-dead-letter-two')).status, 'failed')
+  assert.equal(operations.operation.attempt, 2)
+  assert.equal(operations.operation.deadLetteredAt, operations.operation.completedAt)
+  assert.equal(operations.operation.error.retryable, false)
+  assert.equal(JSON.stringify(operations.operation).includes('private repeated'), false)
+})
+
+test('retry delay grows exponentially and caps without overflow', () => {
+  const calculate = (attempt) => calculatePublicOperationRetryDelayMs({
+    attempt,
+    baseDelayMs: 5_000,
+    maxDelayMs: 300_000,
+  })
+  assert.deepEqual([1, 2, 3, 4].map(calculate), [5_000, 10_000, 20_000, 40_000])
+  assert.equal(calculate(8), 300_000)
+  assert.equal(calculate(1_000), 300_000)
+  assert.throws(
+    () => calculatePublicOperationRetryDelayMs({
+      attempt: 0,
+      baseDelayMs: 5_000,
+      maxDelayMs: 300_000,
+    }),
+    { code: 'INVALID_PUBLIC_OPERATION' },
+  )
 })
 
 test('output committed before checkpoint is recovered by the next fenced attempt', async () => {

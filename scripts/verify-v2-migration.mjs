@@ -135,6 +135,7 @@ const requiredChecks = [
   'public_operations_lease_check',
   'artifact_render_operations_hash_check',
   'artifact_render_operations_output_check',
+  'public_operations_retry_schedule_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

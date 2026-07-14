@@ -366,7 +366,74 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     const exhausted = await repository.findById(workspaceId, exhaustedOperation.id)
     assert.equal(exhausted.operation.status, 'failed')
     assert.equal(exhausted.operation.error.code, 'worker_lease_expired')
+    assert.equal(exhausted.operation.deadLetteredAt, exhausted.operation.completedAt)
     assert.equal(JSON.stringify(exhausted).includes('worker-integration-exhausted'), false)
+
+    const scheduledOperation = createQueuedPublicOperation({
+      ...operation,
+      id: 'operation-integration-scheduled-retry',
+      maxAttempts: 2,
+      createdAt: '2026-01-01T15:34:00.000Z',
+    })
+    await repository.createOrReplay({
+      operation: scheduledOperation,
+      context: input.context,
+      idempotencyKey: 'operation-scheduled-retry-request',
+      requestFingerprint: sha('7'),
+    })
+    const scheduledFirst = await repository.claimNext({
+      workspaceId,
+      leaseOwner: 'worker-integration-scheduled-one',
+      now: '2026-01-01T15:35:00.000Z',
+      leaseUntil: '2026-01-01T15:35:30.000Z',
+    })
+    const retryScheduled = await repository.failOrRetry({
+      operationId: scheduledOperation.id,
+      leaseOwner: scheduledFirst.lease.owner,
+      attempt: scheduledFirst.lease.attempt,
+      now: '2026-01-01T15:35:01.000Z',
+      nextAttemptAt: '2026-01-01T15:35:11.000Z',
+      error: {
+        code: 'render_execution_failed',
+        message: 'Render operation could not be completed',
+        retryable: true,
+      },
+    })
+    assert.equal(retryScheduled.operation.status, 'retrying')
+    assert.equal(retryScheduled.operation.nextAttemptAt, '2026-01-01T15:35:11.000Z')
+    assert.equal(
+      await repository.claimNext({
+        workspaceId,
+        leaseOwner: 'worker-integration-too-early',
+        now: '2026-01-01T15:35:10.999Z',
+        leaseUntil: '2026-01-01T15:35:40.999Z',
+      }),
+      null,
+    )
+    const scheduledSecond = await repository.claimNext({
+      workspaceId,
+      leaseOwner: 'worker-integration-scheduled-two',
+      now: '2026-01-01T15:35:11.000Z',
+      leaseUntil: '2026-01-01T15:35:41.000Z',
+    })
+    assert.equal(scheduledSecond.operation.attempt, 2)
+    assert.equal(scheduledSecond.operation.nextAttemptAt, undefined)
+    const scheduledExhausted = await repository.failOrRetry({
+      operationId: scheduledOperation.id,
+      leaseOwner: scheduledSecond.lease.owner,
+      attempt: scheduledSecond.lease.attempt,
+      now: '2026-01-01T15:35:12.000Z',
+      error: {
+        code: 'render_execution_failed',
+        message: 'Render operation could not be completed',
+        retryable: true,
+      },
+    })
+    assert.equal(scheduledExhausted.operation.status, 'failed')
+    assert.equal(
+      scheduledExhausted.operation.deadLetteredAt,
+      scheduledExhausted.operation.completedAt,
+    )
 
     await client.v2ArtifactRenderOperation.update({
       where: { operationId },

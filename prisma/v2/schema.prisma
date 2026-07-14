@@ -47,7 +47,7 @@ model V2ApiClient {
   updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
   lastUsedAt  DateTime? @db.Timestamptz(3)
 
-  workspace   V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace   V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   credentials V2ApiCredential[]
   operations  V2PublicOperation[]
 
@@ -178,14 +178,14 @@ model V2MediaArtifact {
   rightsRevision          Int      @default(0)
   createdAt               DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace                   V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  manifests                   V2MediaArtifactManifest[]
-  lineageUses                 V2MediaArtifactLineage[]        @relation("MediaLineageSource")
-  rightsSnapshots             V2AssetRightsSnapshot[]         @relation("AssetRightsSnapshots")
-  currentRightsSnapshot       V2AssetRightsSnapshot?          @relation("CurrentAssetRights", fields: [currentRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  consentEvidenceFor          V2AssetRightsSnapshot[]         @relation("ConsentDocument")
-  materializationTargets      V2MaterializationAuthorization[] @relation("MaterializationTarget")
-  renderOperationTargets      V2ArtifactRenderOperation[]      @relation("ArtifactRenderTarget")
+  workspace              V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  manifests              V2MediaArtifactManifest[]
+  lineageUses            V2MediaArtifactLineage[]         @relation("MediaLineageSource")
+  rightsSnapshots        V2AssetRightsSnapshot[]          @relation("AssetRightsSnapshots")
+  currentRightsSnapshot  V2AssetRightsSnapshot?           @relation("CurrentAssetRights", fields: [currentRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  consentEvidenceFor     V2AssetRightsSnapshot[]          @relation("ConsentDocument")
+  materializationTargets V2MaterializationAuthorization[] @relation("MaterializationTarget")
+  renderOperationTargets V2ArtifactRenderOperation[]      @relation("ArtifactRenderTarget")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -210,11 +210,11 @@ model V2MediaArtifactManifest {
   manifestJson        String   @db.Text
   createdAt           DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace        V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  artifact         V2MediaArtifact           @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace        V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact         V2MediaArtifact                  @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   lineageEdges     V2MediaArtifactLineage[]
-  recipeParameters V2RecipeParameterPayload? @relation(fields: [recipeParametersRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
-  renderInput      V2RenderInputPayload?     @relation(fields: [renderInputRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
+  recipeParameters V2RecipeParameterPayload?        @relation(fields: [recipeParametersRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
+  renderInput      V2RenderInputPayload?            @relation(fields: [renderInputRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
   materializations V2MaterializationAuthorization[]
   renderOperations V2ArtifactRenderOperation[]
 
@@ -324,10 +324,10 @@ model V2AssetRightsSnapshot {
   createdById                    String    @db.VarChar(128)
   createdAt                      DateTime  @default(now()) @db.Timestamptz(3)
 
-  workspace           V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  artifact            V2MediaArtifact    @relation("AssetRightsSnapshots", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  currentForArtifacts V2MediaArtifact[]  @relation("CurrentAssetRights")
-  consentDocument     V2MediaArtifact?   @relation("ConsentDocument", fields: [consentDocumentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace           V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact            V2MediaArtifact      @relation("AssetRightsSnapshots", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  currentForArtifacts V2MediaArtifact[]    @relation("CurrentAssetRights")
+  consentDocument     V2MediaArtifact?     @relation("ConsentDocument", fields: [consentDocumentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   decisions           V2AssetUseDecision[]
 
   @@unique([id, workspaceId])
@@ -340,28 +340,28 @@ model V2AssetRightsSnapshot {
 }
 
 model V2MaterializationAuthorization {
-  id                  String    @id @db.VarChar(128)
-  workspaceId         String    @db.VarChar(128)
-  artifactId          String    @db.VarChar(128)
-  manifestId          String    @db.VarChar(128)
-  inputHash           String    @db.Char(64)
-  rightsUse           String    @db.VarChar(64)
-  market              String?   @db.VarChar(16)
-  locale              String    @db.VarChar(32)
-  syntheticOpsJson    String    @db.Text
-  status              String    @db.VarChar(32)
-  issuesJson          String    @db.Text
-  clientId            String    @db.VarChar(80)
-  idempotencyKey      String    @db.VarChar(128)
-  requestFingerprint  String    @db.Char(64)
-  evaluatedAt         DateTime  @db.Timestamptz(3)
-  validUntil          DateTime? @db.Timestamptz(3)
-  createdAt           DateTime  @default(now()) @db.Timestamptz(3)
+  id                 String    @id @db.VarChar(128)
+  workspaceId        String    @db.VarChar(128)
+  artifactId         String    @db.VarChar(128)
+  manifestId         String    @db.VarChar(128)
+  inputHash          String    @db.Char(64)
+  rightsUse          String    @db.VarChar(64)
+  market             String?   @db.VarChar(16)
+  locale             String    @db.VarChar(32)
+  syntheticOpsJson   String    @db.Text
+  status             String    @db.VarChar(32)
+  issuesJson         String    @db.Text
+  clientId           String    @db.VarChar(80)
+  idempotencyKey     String    @db.VarChar(128)
+  requestFingerprint String    @db.Char(64)
+  evaluatedAt        DateTime  @db.Timestamptz(3)
+  validUntil         DateTime? @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
 
-  workspace      V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  targetArtifact V2MediaArtifact         @relation("MaterializationTarget", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  manifest       V2MediaArtifactManifest @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  decisions      V2AssetUseDecision[]
+  workspace        V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  targetArtifact   V2MediaArtifact             @relation("MaterializationTarget", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  manifest         V2MediaArtifactManifest     @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  decisions        V2AssetUseDecision[]
   renderOperations V2ArtifactRenderOperation[]
 
   @@unique([id, workspaceId])
@@ -372,21 +372,21 @@ model V2MaterializationAuthorization {
 }
 
 model V2AssetUseDecision {
-  id                String    @id @db.VarChar(128)
-  workspaceId       String    @db.VarChar(128)
-  authorizationId   String    @db.VarChar(128)
-  artifactId        String    @db.VarChar(128)
-  assetOrdinal      Int
-  assetKind         String    @db.VarChar(16)
-  rightsSnapshotId  String?   @db.VarChar(128)
-  outcome           String    @db.VarChar(16)
-  reasonCodesJson   String    @db.Text
-  evaluatedAt       DateTime  @db.Timestamptz(3)
-  validUntil        DateTime? @db.Timestamptz(3)
-  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
+  id               String    @id @db.VarChar(128)
+  workspaceId      String    @db.VarChar(128)
+  authorizationId  String    @db.VarChar(128)
+  artifactId       String    @db.VarChar(128)
+  assetOrdinal     Int
+  assetKind        String    @db.VarChar(16)
+  rightsSnapshotId String?   @db.VarChar(128)
+  outcome          String    @db.VarChar(16)
+  reasonCodesJson  String    @db.Text
+  evaluatedAt      DateTime  @db.Timestamptz(3)
+  validUntil       DateTime? @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
 
-  workspace     V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  authorization V2MaterializationAuthorization @relation(fields: [authorizationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  workspace      V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  authorization  V2MaterializationAuthorization @relation(fields: [authorizationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   rightsSnapshot V2AssetRightsSnapshot?         @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@unique([authorizationId, assetOrdinal])
@@ -424,6 +424,8 @@ model V2PublicOperation {
   leaseOwner         String?   @db.VarChar(128)
   leaseExpiresAt     DateTime? @db.Timestamptz(3)
   heartbeatAt        DateTime? @db.Timestamptz(3)
+  nextAttemptAt      DateTime? @db.Timestamptz(3)
+  deadLetteredAt     DateTime? @db.Timestamptz(3)
 
   workspace      V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   client         V2ApiClient                @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -435,16 +437,17 @@ model V2PublicOperation {
   @@index([workspaceId, type, createdAt(sort: Desc)])
   @@index([workspaceId, targetType, targetId])
   @@index([status, leaseExpiresAt, createdAt])
+  @@index([status, nextAttemptAt, createdAt])
   @@map("public_operations")
 }
 
 model V2ArtifactRenderOperation {
-  operationId    String @id @db.VarChar(128)
-  workspaceId    String @db.VarChar(128)
-  artifactId     String @db.VarChar(128)
-  manifestId     String @db.VarChar(128)
-  authorizationId String @db.VarChar(128)
-  inputHash      String @db.Char(64)
+  operationId            String    @id @db.VarChar(128)
+  workspaceId            String    @db.VarChar(128)
+  artifactId             String    @db.VarChar(128)
+  manifestId             String    @db.VarChar(128)
+  authorizationId        String    @db.VarChar(128)
+  inputHash              String    @db.Char(64)
   outputKey              String?   @db.Text
   outputSha256           String?   @db.Char(64)
   outputByteSize         BigInt?
@@ -458,11 +461,11 @@ model V2ArtifactRenderOperation {
   outputCommittedAt      DateTime? @db.Timestamptz(3)
   outputRecordedAt       DateTime? @db.Timestamptz(3)
 
-  workspace     V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  operation     V2PublicOperation                @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  artifact      V2MediaArtifact                  @relation("ArtifactRenderTarget", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  manifest      V2MediaArtifactManifest          @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  authorization V2MaterializationAuthorization   @relation(fields: [authorizationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace     V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  operation     V2PublicOperation              @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  artifact      V2MediaArtifact                @relation("ArtifactRenderTarget", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  manifest      V2MediaArtifactManifest        @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  authorization V2MaterializationAuthorization @relation(fields: [authorizationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@unique([operationId, workspaceId])
   @@index([workspaceId, artifactId, manifestId])

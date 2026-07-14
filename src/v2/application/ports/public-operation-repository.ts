@@ -65,5 +65,6 @@ export interface PublicOperationRepository {
   succeed(input: PublicOperationLeaseCommand): Promise<PublicOperationRecord | null>
   failOrRetry(input: PublicOperationLeaseCommand & {
     error: PublicOperationError
+    nextAttemptAt?: string
   }): Promise<PublicOperationRecord | null>
 }

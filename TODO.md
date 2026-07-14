@@ -382,7 +382,7 @@
 
 - [ ] Implementar job state machine, heartbeat, attempt e idempotency key. Parcial F0-025: `artifact-render` possui state machine, enqueue idempotente, claim/lease, heartbeat, attempt como fencing token e conclusão CAS; falta generalizar para os demais jobs.
 - [ ] Persistir checkpoints antes e depois de efeitos externos. Parcial F0-026: render persiste fase antes do commit e checkpoint tipado depois, com hash/tamanho/probe/target; faltam checkpoints equivalentes nos demais jobs.
-- [ ] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-025: falha retryable volta a `retrying` até `maxAttempts`; backoff, cancelamento e dead-letter continuam abertos.
+- [ ] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-027: backoff exponencial, `nextAttemptAt` durável e marcação de esgotamento foram entregues; cancelamento, replay/retry manual e administração externa de dead-letter continuam abertos.
 - [ ] Simular restart entre cada checkpoint e verificar retomada segura. Parcial F0-026: regressões cobrem perda antes do commit, queda depois do commit e antes do checkpoint, replay de checkpoint, reclaim e output já existente sem nova codificação; faltam checkpoints dos demais jobs.
 
 ### F0.027 — Partial invalidation [FR-233]
@@ -495,7 +495,7 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions.
 - [ ] Modelar endpoint, subscription, secret, filter e delivery attempt.
 - [ ] Implementar challenge, assinatura, timestamp e anti-replay.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-027: claim com lease/fencing, espera exponencial persistida e checkpoint de esgotamento estão ativos no render; replay controlado e generalização aos demais jobs continuam abertos.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
 - [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay.
 
@@ -3159,7 +3159,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-026 — Checkpoint durável do output renderizado
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado em 14 de julho de 2026 nos commits `9e6451a` e `b14091b`.
 
 Entregas:
 
@@ -3191,5 +3191,40 @@ Limites explícitos desta slice:
 - comparação binária cross-platform não é assumida; o endpoint de reconstrução exige identidade com o target persistido e falha se o renderer produzir bytes diferentes;
 - storage S3-compatible e reconciliação/limpeza administrativa de outputs inválidos continuam abertos;
 - ainda falta uma fixture única que combine Postgres persistido, storage real e Remotion em um golden tolerante;
-- cancelamento, backoff, dead-letter, custo e audit/event outbox continuam em incrementos posteriores;
-- hosted CI desta slice será registrado após publicação no próximo ciclo.
+- cancelamento, custo e audit/event outbox continuam em incrementos posteriores;
+- hosted CI `29343481216` aprovou 59 testes, migrations PostgreSQL, persistência, API, FFmpeg, Remotion real com recuperação, build e auditorias.
+
+### Slice F0-027 — Retry durável, backoff e esgotamento
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- `public_operations` ganhou `nextAttemptAt` e `deadLetteredAt`, com constraint de coerência e índice de disponibilidade;
+- a migration inicializa com espera segura qualquer operação `retrying` já existente antes de validar a nova constraint;
+- falha recuperável agenda atraso exponencial determinístico de 5 segundos, dobrando por tentativa até o teto padrão de 5 minutos;
+- base e teto são configuráveis no worker e valores incompatíveis falham fechados;
+- `claimNext` exclui retries prematuros e aceita o boundary exato de `nextAttemptAt`;
+- o domínio repete a proteção temporal, limpa o agendamento ao iniciar a tentativa e impede schedule em falha terminal;
+- esgotamento de erro recuperável ou de lease expirada grava `deadLetteredAt` junto da conclusão;
+- falhas não recuperáveis continuam distinguíveis porque não recebem marcação de dead-letter;
+- presenter e schema público v1 permanecem inalterados; datas internas não vazam nem quebram integrações existentes;
+- ADR-016 formaliza a política e reserva contrato versionado próprio para administração/replay externo.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 61 testes;
+- testes cobrem progressão 5/10/20/40 segundos, teto de 5 minutos e tentativa extrema sem overflow;
+- domínio recusa tentativa 1 ms antes do agendamento e aceita o instante exato;
+- worker cobre restart após espera, sucesso posterior e esgotamento sanitizado;
+- integração Prisma cobre persistência do schedule, claim prematuro nulo, claim no boundary, limpeza do schedule e dead-letter terminal;
+- migração possui verificação estática da constraint e o schema passa com 17 tabelas, 58 índices e 38 foreign keys;
+- typecheck e contrato público v1 passam sem alteração de schema.
+
+Limites explícitos desta slice:
+
+- `deadLetteredAt` é checkpoint durável; listagem administrativa, replay controlado e retry manual ainda não foram expostos;
+- cancelamento cooperativo e command público de cancel continuam abertos;
+- a política é aplicada ao worker de render; outros tipos de job deverão reutilizar a mesma semântica;
+- jitter determinístico, quotas, custo por tentativa e alertas operacionais ficam para incrementos posteriores;
+- hosted CI será registrado após publicação no próximo ciclo.

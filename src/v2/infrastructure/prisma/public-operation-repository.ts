@@ -207,6 +207,21 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   ) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored PublicOperation error is invalid')
   }
+  if (
+    (row.status === 'retrying' &&
+      (row.nextAttemptAt === null ||
+        row.nextAttemptAt.getTime() <= row.updatedAt.getTime() ||
+        row.deadLetteredAt !== null)) ||
+    (row.status === 'failed' &&
+      (row.nextAttemptAt !== null ||
+        (row.deadLetteredAt !== null &&
+          (row.completedAt === null ||
+            row.deadLetteredAt.getTime() !== row.completedAt.getTime())))) ||
+    (!['retrying', 'failed'].includes(row.status) &&
+      (row.nextAttemptAt !== null || row.deadLetteredAt !== null))
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored PublicOperation retry schedule is invalid')
+  }
 
   try {
     const operation = rehydratePublicOperation({
@@ -249,6 +264,8 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       updatedAt: row.updatedAt.toISOString(),
       ...(row.startedAt ? { startedAt: row.startedAt.toISOString() } : {}),
       ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}),
+      ...(row.nextAttemptAt ? { nextAttemptAt: row.nextAttemptAt.toISOString() } : {}),
+      ...(row.deadLetteredAt ? { deadLetteredAt: row.deadLetteredAt.toISOString() } : {}),
     })
     return Object.freeze({
       operation,
@@ -469,7 +486,12 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           type: 'artifact-render',
           ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
           OR: [
-            { status: { in: ['queued', 'retrying'] }, leaseOwner: null },
+            { status: 'queued', leaseOwner: null },
+            {
+              status: 'retrying',
+              leaseOwner: null,
+              nextAttemptAt: { lte: now },
+            },
             { status: 'running', leaseExpiresAt: { lte: now } },
           ],
         },
@@ -501,6 +523,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                 errorMessage: 'Render operation exhausted its available attempts',
                 errorRetryable: false,
                 completedAt: now,
+                nextAttemptAt: null,
+                deadLetteredAt: now,
                 updatedAt: now,
                 leaseOwner: null,
                 leaseExpiresAt: null,
@@ -540,6 +564,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             errorRetryable: null,
             startedAt: new Date(claimed.startedAt as string),
             completedAt: null,
+            nextAttemptAt: null,
+            deadLetteredAt: null,
             updatedAt: now,
             leaseOwner: input.leaseOwner,
             leaseExpiresAt: leaseUntil,
@@ -641,6 +667,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           errorMessage: next.error?.message ?? null,
           errorRetryable: next.error?.retryable ?? null,
           completedAt: next.completedAt ? new Date(next.completedAt) : null,
+          nextAttemptAt: next.nextAttemptAt ? new Date(next.nextAttemptAt) : null,
+          deadLetteredAt: next.deadLetteredAt ? new Date(next.deadLetteredAt) : null,
           updatedAt: now,
           ...(next.status === 'running'
             ? {}
@@ -675,9 +703,10 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
 
   failOrRetry(input: PublicOperationLeaseCommand & {
     error: PublicOperationError
+    nextAttemptAt?: string
   }): Promise<PublicOperationRecord | null> {
     return this.transitionRunning(input, (operation) =>
-      retryOrFailPublicOperation(operation, input.error, input.now),
+      retryOrFailPublicOperation(operation, input.error, input.now, input.nextAttemptAt),
     )
   }
 }

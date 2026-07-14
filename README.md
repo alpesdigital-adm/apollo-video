@@ -113,6 +113,10 @@ Claim, heartbeat e attempt impedem dois workers de concluir a mesma tentativa;
 uma lease expirada pode ser recuperada com segurança por outro processo. O
 status `succeeded` exige checkpoint do hash/probe do output; um arquivo já
 comprometido é verificado e retomado sem nova codificação após restart.
+Falhas recuperáveis respeitam uma espera exponencial persistida entre tentativas;
+o esgotamento é marcado para tratamento administrativo sem expor dados internos no
+contrato público v1. `APOLLO_V2_WORKER_RETRY_BASE_MS` e
+`APOLLO_V2_WORKER_RETRY_MAX_MS` ajustam a base e o teto da espera.
 
 ## Formatos
 

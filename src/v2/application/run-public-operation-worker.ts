@@ -35,6 +35,25 @@ function safeFailure(error: unknown) {
   }
 }
 
+export function calculatePublicOperationRetryDelayMs(input: {
+  attempt: number
+  baseDelayMs: number
+  maxDelayMs: number
+}): number {
+  if (
+    !Number.isSafeInteger(input.attempt) ||
+    input.attempt <= 0 ||
+    !Number.isSafeInteger(input.baseDelayMs) ||
+    input.baseDelayMs <= 0 ||
+    !Number.isSafeInteger(input.maxDelayMs) ||
+    input.maxDelayMs < input.baseDelayMs
+  ) {
+    throw new DomainError('INVALID_PUBLIC_OPERATION', 'Worker retry configuration is invalid')
+  }
+  const multiplier = 2 ** Math.min(input.attempt - 1, 52)
+  return Math.min(input.baseDelayMs * multiplier, input.maxDelayMs)
+}
+
 export function runNextPublicOperationService(dependencies: {
   operations: PublicOperationRepository
   checkpoints: ArtifactRenderCheckpointRepository
@@ -42,15 +61,23 @@ export function runNextPublicOperationService(dependencies: {
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
+  retryBaseDelayMs?: number
+  retryMaxDelayMs?: number
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const leaseDurationMs = dependencies.leaseDurationMs ?? 30_000
   const heartbeatIntervalMs = dependencies.heartbeatIntervalMs ?? 10_000
+  const retryBaseDelayMs = dependencies.retryBaseDelayMs ?? 5_000
+  const retryMaxDelayMs = dependencies.retryMaxDelayMs ?? 300_000
   if (
     !Number.isSafeInteger(leaseDurationMs) ||
     !Number.isSafeInteger(heartbeatIntervalMs) ||
     heartbeatIntervalMs <= 0 ||
-    leaseDurationMs <= heartbeatIntervalMs
+    leaseDurationMs <= heartbeatIntervalMs ||
+    !Number.isSafeInteger(retryBaseDelayMs) ||
+    retryBaseDelayMs <= 0 ||
+    !Number.isSafeInteger(retryMaxDelayMs) ||
+    retryMaxDelayMs < retryBaseDelayMs
   ) {
     throw new DomainError(
       'INVALID_PUBLIC_OPERATION',
@@ -195,9 +222,22 @@ export function runNextPublicOperationService(dependencies: {
       if (leaseLost) {
         return Object.freeze({ operationId, status: 'lease-lost' })
       }
+      const failedAt = clock()
+      const failure = safeFailure(error)
+      const nextAttemptAt = failure.retryable && attempt < claimed.operation.maxAttempts
+        ? new Date(
+            failedAt.getTime() +
+              calculatePublicOperationRetryDelayMs({
+                attempt,
+                baseDelayMs: retryBaseDelayMs,
+                maxDelayMs: retryMaxDelayMs,
+              }),
+          ).toISOString()
+        : undefined
       const failed = await dependencies.operations.failOrRetry({
-        ...command(clock()),
-        error: safeFailure(error),
+        ...command(failedAt),
+        error: failure,
+        ...(nextAttemptAt ? { nextAttemptAt } : {}),
       })
       if (!failed) {
         return Object.freeze({ operationId, status: 'lease-lost' })

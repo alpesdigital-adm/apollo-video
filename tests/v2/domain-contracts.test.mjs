@@ -307,7 +307,6 @@ test('Apollo Video props compiler resolves only declared materialized asset IDs'
     { from: compiled.scenes[0].from, to: compiled.scenes[0].to },
     { from: 0.5, to: 1.5 },
   )
-
   const unsafe = createCompilerInput({
     props: {
       primaryVideoAssetId: 'primary-video',
@@ -562,10 +561,26 @@ test('PublicOperation attempt transitions reject stale order and exhaust retries
     rendering,
     { code: 'render_execution_failed', message: 'Render failed safely', retryable: true },
     '2026-07-14T12:00:04.000Z',
+    '2026-07-14T12:00:05.000Z',
   )
   assert.deepEqual(
-    { status: retrying.status, phase: retrying.phase, retryable: retrying.retryable },
-    { status: 'retrying', phase: 'retrying', retryable: true },
+    {
+      status: retrying.status,
+      phase: retrying.phase,
+      retryable: retrying.retryable,
+      nextAttemptAt: retrying.nextAttemptAt,
+    },
+    {
+      status: 'retrying',
+      phase: 'retrying',
+      retryable: true,
+      nextAttemptAt: '2026-07-14T12:00:05.000Z',
+    },
+  )
+  assert.equal(presentPublicOperation(retrying).nextAttemptAt, undefined)
+  expectDomainError(
+    () => startPublicOperationAttempt(retrying, '2026-07-14T12:00:04.999Z'),
+    'INVALID_PUBLIC_OPERATION',
   )
   const second = startPublicOperationAttempt(retrying, '2026-07-14T12:00:05.000Z')
   const terminal = retryOrFailPublicOperation(
@@ -576,6 +591,8 @@ test('PublicOperation attempt transitions reject stale order and exhaust retries
   assert.equal(terminal.status, 'failed')
   assert.equal(terminal.retryable, false)
   assert.equal(terminal.error.retryable, false)
+  assert.equal(terminal.deadLetteredAt, terminal.completedAt)
+  assert.equal(presentPublicOperation(terminal).deadLetteredAt, undefined)
   expectDomainError(
     () => startPublicOperationAttempt(terminal, '2026-07-14T12:00:07.000Z'),
     'INVALID_PUBLIC_OPERATION',

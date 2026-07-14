@@ -69,6 +69,8 @@ export interface PublicOperation {
   updatedAt: string
   startedAt?: string
   completedAt?: string
+  nextAttemptAt?: string
+  deadLetteredAt?: string
 }
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
@@ -213,6 +215,12 @@ export function assertPublicOperation(operation: PublicOperation): void {
   const completedAt = operation.completedAt
     ? validateDate(operation.completedAt, 'operation.completedAt')
     : undefined
+  const nextAttemptAt = operation.nextAttemptAt
+    ? validateDate(operation.nextAttemptAt, 'operation.nextAttemptAt')
+    : undefined
+  const deadLetteredAt = operation.deadLetteredAt
+    ? validateDate(operation.deadLetteredAt, 'operation.deadLetteredAt')
+    : undefined
   if (startedAt) {
     assertDomain(
       Date.parse(startedAt) >= Date.parse(createdAt),
@@ -227,6 +235,20 @@ export function assertPublicOperation(operation: PublicOperation): void {
       'PublicOperation completedAt cannot precede its start',
     )
   }
+  if (nextAttemptAt) {
+    assertDomain(
+      Date.parse(nextAttemptAt) > Date.parse(updatedAt),
+      'INVALID_PUBLIC_OPERATION',
+      'PublicOperation nextAttemptAt must follow its latest transition',
+    )
+  }
+  if (deadLetteredAt) {
+    assertDomain(
+      deadLetteredAt === completedAt,
+      'INVALID_PUBLIC_OPERATION',
+      'PublicOperation deadLetteredAt must match terminal completion',
+    )
+  }
 
   if (operation.status === 'queued') {
     assertDomain(
@@ -236,6 +258,8 @@ export function assertPublicOperation(operation: PublicOperation): void {
         !operation.completedAt &&
         !operation.result &&
         !operation.error &&
+        !nextAttemptAt &&
+        !deadLetteredAt &&
         operation.cancelable &&
         !operation.retryable,
       'INVALID_PUBLIC_OPERATION',
@@ -252,23 +276,43 @@ export function assertPublicOperation(operation: PublicOperation): void {
         !operation.completedAt &&
         !operation.result &&
         !operation.error &&
+        !nextAttemptAt &&
+        !deadLetteredAt &&
         operation.cancelable &&
         !operation.retryable,
       'INVALID_PUBLIC_OPERATION',
       'Running PublicOperation invariants are invalid',
     )
   }
-  if (operation.status === 'waiting' || operation.status === 'retrying') {
+  if (operation.status === 'waiting') {
     assertDomain(
-      operation.phase === operation.status &&
+      operation.phase === 'waiting' &&
         operation.attempt > 0 &&
         Boolean(operation.startedAt) &&
         !operation.completedAt &&
         !operation.result &&
         !operation.error &&
+        !nextAttemptAt &&
+        !deadLetteredAt &&
         operation.cancelable,
       'INVALID_PUBLIC_OPERATION',
-      'Waiting or retrying PublicOperation invariants are invalid',
+      'Waiting PublicOperation invariants are invalid',
+    )
+  }
+  if (operation.status === 'retrying') {
+    assertDomain(
+      operation.phase === 'retrying' &&
+        operation.attempt > 0 &&
+        Boolean(operation.startedAt) &&
+        !operation.completedAt &&
+        !operation.result &&
+        !operation.error &&
+        Boolean(nextAttemptAt) &&
+        !deadLetteredAt &&
+        operation.cancelable &&
+        operation.retryable,
+      'INVALID_PUBLIC_OPERATION',
+      'Retrying PublicOperation invariants are invalid',
     )
   }
   if (operation.status === 'succeeded') {
@@ -278,6 +322,8 @@ export function assertPublicOperation(operation: PublicOperation): void {
         Boolean(operation.completedAt) &&
         Boolean(operation.result) &&
         !operation.error &&
+        !nextAttemptAt &&
+        !deadLetteredAt &&
         !operation.cancelable &&
         !operation.retryable,
       'INVALID_PUBLIC_OPERATION',
@@ -299,6 +345,7 @@ export function assertPublicOperation(operation: PublicOperation): void {
         Boolean(operation.completedAt) &&
         Boolean(error) &&
         !operation.result &&
+        !nextAttemptAt &&
         !operation.cancelable &&
         operation.retryable === error?.retryable,
       'INVALID_PUBLIC_OPERATION',
@@ -311,6 +358,8 @@ export function assertPublicOperation(operation: PublicOperation): void {
         Boolean(operation.completedAt) &&
         !operation.result &&
         !operation.error &&
+        !nextAttemptAt &&
+        !deadLetteredAt &&
         !operation.cancelable &&
         !operation.retryable,
       'INVALID_PUBLIC_OPERATION',
@@ -398,6 +447,12 @@ export function rehydratePublicOperation(operation: PublicOperation): Readonly<P
     ...(operation.completedAt
       ? { completedAt: validateDate(operation.completedAt, 'completedAt') }
       : {}),
+    ...(operation.nextAttemptAt
+      ? { nextAttemptAt: validateDate(operation.nextAttemptAt, 'nextAttemptAt') }
+      : {}),
+    ...(operation.deadLetteredAt
+      ? { deadLetteredAt: validateDate(operation.deadLetteredAt, 'deadLetteredAt') }
+      : {}),
   })
 }
 
@@ -413,6 +468,13 @@ export function startPublicOperationAttempt(
     'PublicOperation cannot start another attempt',
   )
   const updatedAt = transitionDate(operation, updatedAtValue)
+  assertDomain(
+    operation.status !== 'retrying' ||
+      (Boolean(operation.nextAttemptAt) &&
+        Date.parse(updatedAt) >= Date.parse(operation.nextAttemptAt as string)),
+    'INVALID_PUBLIC_OPERATION',
+    'PublicOperation retry is not available yet',
+  )
   return freezeOperation({
     ...operation,
     status: 'running',
@@ -424,6 +486,8 @@ export function startPublicOperationAttempt(
     updatedAt,
     startedAt: operation.startedAt ?? updatedAt,
     completedAt: undefined,
+    nextAttemptAt: undefined,
+    deadLetteredAt: undefined,
     result: undefined,
     error: undefined,
   })
@@ -473,6 +537,8 @@ export function succeedPublicOperation(
     error: undefined,
     updatedAt: completedAt,
     completedAt,
+    nextAttemptAt: undefined,
+    deadLetteredAt: undefined,
   })
 }
 
@@ -480,6 +546,7 @@ export function retryOrFailPublicOperation(
   operation: PublicOperation,
   error: PublicOperationError,
   updatedAtValue: string,
+  nextAttemptAtValue?: string,
 ): Readonly<PublicOperation> {
   assertPublicOperation(operation)
   assertDomain(
@@ -490,6 +557,14 @@ export function retryOrFailPublicOperation(
   const safeError = validateError(error)
   const updatedAt = transitionDate(operation, updatedAtValue)
   if (safeError.retryable && operation.attempt < operation.maxAttempts) {
+    const nextAttemptAt = nextAttemptAtValue
+      ? validateDate(nextAttemptAtValue, 'nextAttemptAt')
+      : undefined
+    assertDomain(
+      Boolean(nextAttemptAt) && Date.parse(nextAttemptAt as string) > Date.parse(updatedAt),
+      'INVALID_PUBLIC_OPERATION',
+      'Retryable PublicOperation failure requires a future nextAttemptAt',
+    )
     return freezeOperation({
       ...operation,
       status: 'retrying',
@@ -500,9 +575,17 @@ export function retryOrFailPublicOperation(
       error: undefined,
       updatedAt,
       completedAt: undefined,
+      nextAttemptAt,
+      deadLetteredAt: undefined,
     })
   }
+  assertDomain(
+    nextAttemptAtValue === undefined,
+    'INVALID_PUBLIC_OPERATION',
+    'Terminal PublicOperation failure cannot schedule another attempt',
+  )
   const terminalError = { ...safeError, retryable: false }
+  const exhausted = safeError.retryable && operation.attempt >= operation.maxAttempts
   return freezeOperation({
     ...operation,
     status: 'failed',
@@ -513,6 +596,8 @@ export function retryOrFailPublicOperation(
     error: terminalError,
     updatedAt,
     completedAt: updatedAt,
+    nextAttemptAt: undefined,
+    deadLetteredAt: exhausted ? updatedAt : undefined,
   })
 }
 
