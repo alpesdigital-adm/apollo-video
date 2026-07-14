@@ -17,7 +17,7 @@ Toda capacidade operável deve ser acessível por ferramentas e agentes externos
 - Operações longas retornam `PublicOperation`.
 - Mutações exigem idempotência e precondition de versão quando aplicável.
 - Ações caras, amplas ou destrutivas exigem preflight/commit token.
-- Capabilities externas acionam boundaries internos sem publicá-los como recursos crus. Exemplo: a futura operação de render usa a autorização para materializar assets dentro do worker; não existe endpoint para obter path local, signed URL interna ou `RenderInput` descriptografado.
+- Capabilities externas acionam boundaries internos sem publicá-los como recursos crus. A operação pública de render retornará um `PublicOperation`; materialização, stage, segunda revalidação, commit/discard e paths ou URLs temporárias permanecem exclusivos do worker. Não existe endpoint para obter path local, signed URL interna ou `RenderInput` descriptografado.
 - Eventos saem por outbox e webhooks at-least-once assinados.
 - O primeiro slice expõe somente health e capability discovery, sem dados de workspace.
 

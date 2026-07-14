@@ -44,6 +44,8 @@ Scope nunca substitui ownership, rights, consent, Policy Snapshot, budget ou est
 - Cada decisão autorizada precisa continuar correspondendo ao mesmo asset, ordinal, kind, snapshot ID e snapshot hash. Uma revisão nova exige nova autorização mesmo quando o novo snapshot também permitiria o uso; não há upgrade silencioso do contexto auditado.
 - A avaliação corrente de rights/consent é executada antes de resolver bytes. Expiração durante a leitura também invalida a lease; uma segunda revalidação continuará obrigatória imediatamente antes da promoção do output final.
 - O objeto entregue ao renderer encapsula as locations em memória e define serialização segura contendo somente IDs públicos, hashes, contagem e janela de validade.
+- Após produzir o partial, o render service repete a materialização autorizada inteira. Somente igualdade de `inputHash` e `revalidationHash`, autorização ainda válida e nova conferência dos bytes permitem a promoção atômica do output.
+- O subprocesso Remotion recebe props compiladas por stdin e devolve somente resultado técnico seguro; paths não são argumentos públicos, receipts ou identidade externa.
 - `Idempotency-Key` identifica uma tentativa externa. Replay retorna o mesmo receipt; a mesma chave com request diferente falha com conflito.
 - Receipts externos nunca expõem notas jurídicas, props, canonical keys, storage locations, ciphertext ou material criptográfico.
 

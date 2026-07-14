@@ -89,6 +89,9 @@ jobs:
       - name: Bundle Remotion renderer
         run: npm run remotion:build
 
+      - name: Run authorized Remotion smoke render
+        run: npm run test:integration:render
+
       - name: Build production application
         run: npm run build
 

@@ -1,6 +1,8 @@
 import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
 
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
+import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
+import { calculateVersionHash } from '../application/version-hash.ts'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
 import type { AssetRightsRepository } from '../application/ports/asset-rights-repository.ts'
@@ -26,6 +28,7 @@ import { PrismaProjectQueryRepository } from './prisma/project-query-repository.
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
 import { LocalArtifactRenderInputResolver } from './local-artifact-render-input-resolver.ts'
+import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts'
 import { createConfiguredRenderTargetRegistry } from './render-target-registry.ts'
 import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
 
@@ -102,6 +105,37 @@ export function createAuthorizedRenderInputMaterializer(
     resolverForWorkspace: (workspaceId) =>
       createRenderInputAssetResolver(workspaceId, environment),
     clock,
+  })
+}
+
+export function createAuthorizedRenderExecutor(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const outputRoot = environment.APOLLO_V2_RENDER_OUTPUT_ROOT?.trim()
+  if (!outputRoot) {
+    throw new DomainError(
+      'PERSISTENCE_NOT_CONFIGURED',
+      'Render output storage is not configured for the render worker',
+    )
+  }
+  const configuredTimeout = Number(environment.APOLLO_V2_RENDER_TIMEOUT_MS)
+  const renderer = new RemotionRenderInputRenderer({
+    projectRoot: process.cwd(),
+    outputRoot,
+    ...(Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0
+      ? { timeoutMs: configuredTimeout }
+      : {}),
+    clock,
+  })
+  return renderAuthorizedInputService({
+    materialize: createAuthorizedRenderInputMaterializer(environment, clock),
+    renderer,
+    outputKeyFor: ({ workspaceId, authorizationId, inputHash }) => {
+      const workspaceNamespace = calculateVersionHash({ workspaceId }).slice(0, 32)
+      const outputIdentity = calculateVersionHash({ authorizationId, inputHash })
+      return `workspaces/${workspaceNamespace}/renders/${outputIdentity}.mp4`
+    },
   })
 }
 

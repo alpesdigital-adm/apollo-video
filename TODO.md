@@ -376,7 +376,7 @@
 - [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
 - [x] Persistir hashes e versões de tool/model em cada edge. Evidência: manifest v2, colunas normalizadas de execution provenance e API pública por manifest.
 - [x] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
-- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-021: grafo, provenance, recipe e RenderInput protegidos, checkout autenticado, preflight técnico e autorização auditável de rights/consent já foram entregues; faltam materialização efetiva, execução e comparação golden.
+- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-023: grafo, provenance, recipe e RenderInput protegidos, checkout autenticado, preflight técnico, autorização auditável, materialização efetiva e smoke render real já foram entregues; faltam replay a partir do manifest persistido, persistência do output/lineage e comparação golden.
 
 ### F0.026 — Durable jobs [FR-232]
 
@@ -395,10 +395,10 @@
 ### F0.028 — Props e manifest [FR-234]
 
 - [x] Definir `RenderInput` autocontido e schema versionado. Evidência: `render-input/v1`, hash canônico, preflight público e testes de materialização sem banco.
-- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-022: worker relê autorização/payload/rights, adapter local resolve vídeo/áudio/imagem sob raiz privada e verifica bytes por streaming; faltam storage S3-compatible/signed URLs, fonts, LUTs, data e integração com a execução do renderer.
+- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-023: worker relê autorização/payload/rights, adapter local resolve vídeo/áudio/imagem sob raiz privada, verifica bytes por streaming e entrega somente a lease ao renderer real; faltam storage S3-compatible/signed URLs, fonts, LUTs e data.
 - [x] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
 - [x] Salvar manifest com checksums, plan hash e renderer version. Evidência: `media-artifact-manifest/v4` vincula por hash um `render-input/v1` protegido que contém checksums ordenados, plan hash e identidade versionada do renderer.
-- [ ] Reexecutar golden render somente a partir do manifest salvo.
+- [ ] Reexecutar golden render somente a partir do manifest salvo. Parcial F0-023: um MP4 real já é produzido exclusivamente pela lease autorizada/materializada, com segunda revalidação e promoção segura; faltam fixture persistida no banco, replay pelo manifest salvo e comparação golden tolerante.
 
 ### F0.029 — Estados visíveis [FR-236]
 
@@ -415,7 +415,7 @@
 - [ ] Criar seeds mínimos para workspace, projeto, source e OutputSpec.
 - [x] Configurar audit, typecheck, unit, migration check, contract gate, build e integrações Postgres/API no CI. Evidência: `.github/workflows/ci.yml`.
 - [ ] Configurar lint no CI após selecionar regras e corrigir o baseline da v1.
-- [ ] Configurar golden tests no CI após existir fixture/render determinístico.
+- [ ] Configurar golden tests no CI após existir fixture/render determinístico. Parcial F0-023: smoke render real e sem golden hash foi incluído no CI; faltam fixture persistida e tolerâncias visual/áudio cross-platform.
 - [ ] Configurar E2E no CI após existir jornada vertical F0 executável.
 - [ ] Criar telemetria comum com trace, job, workspace e project IDs.
 - [ ] Fazer upload de fixture, normalizar, criar plano estático e renderizar proxy.
@@ -2968,7 +2968,7 @@ Confirmação hospedada:
 
 ### Slice F0-022 — Materialização efetiva e revalidação no worker
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `c15e023`.
 
 Entregas:
 
@@ -3012,4 +3012,61 @@ Limites explícitos desta slice:
 - esta slice não converte props para a composição Remotion nem executa o renderer;
 - o worker que promover o output final deverá executar novamente o rights gate e verificar a validade da lease;
 - smoke/golden render continua sendo o próximo incremento.
-- PostgreSQL local não pôde ser repetido por ausência de Docker nesta máquina; aplicação real das migrations e integrações Postgres será confirmada pelo CI hospedado após a publicação.
+- PostgreSQL local não pôde ser repetido por ausência de Docker nesta máquina; a aplicação real das migrations e todas as integrações Postgres foram confirmadas pelo CI hospedado após a publicação.
+
+Confirmação hospedada:
+
+- o run `29331516521` aprovou todos os passos no Linux, incluindo migrations e integrações PostgreSQL, 50 testes, contratos, FFmpeg, Remotion e build Next.js.
+
+### Slice F0-023 — Primeiro render autorizado a partir da lease
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- o bundle Remotion agora registra a composition canônica `apollo-video`, preservando os IDs legacy `vertical` e `horizontal`;
+- compiler fechado de `apollo://render-props/apollo-video/v1` transforma somente props protegidas e um `MaterializedRenderInput` em props da composição;
+- `primaryVideoAssetId`, `imageAssetId` e `videoAssetId` são resolvidos contra a lease; referências ausentes ou kind incompatível falham fechadas;
+- `imageSrc`, `imagePath` e `videoSrc` vindos diretamente das props de cena são rejeitados para impedir bypass do storage/rights gate;
+- compiler valida composition/version/schema ref, output suportado, palette, cenas, ranges de frames, legendas e presets;
+- `apollo-video/v1` suporta inicialmente `9:16` e `16:9`; os outros três formatos permanecem bloqueados para evitar layout incorreto silencioso;
+- novo port `RenderInputRenderer` separa stage, commit e discard e nunca inclui output path no receipt;
+- `RemotionRenderInputRenderer` executa o subprojeto isolado, recebe request/props por stdin e limita timeout e volume de stdout/stderr;
+- asset `file:` é servido ao Chromium somente por HTTP efêmero em `127.0.0.1`, com token aleatório, allowlist exata, MIME, HEAD e byte ranges;
+- apenas campos de location produzidos pelo compiler são convertidos; strings comuns, prompts, títulos e textos não são interpretados como paths;
+- o render nasce como partial irmão dentro de `APOLLO_V2_RENDER_OUTPUT_ROOT` e a output key precisa ser portátil e permanecer sob a raiz real;
+- stage valida arquivo regular e não vazio, dimensões, fps, duração, SHA-256, byte size e identidade antes/depois do hash;
+- `renderAuthorizedInputService` repete a materialização completa após o encode e antes do commit;
+- promoção exige os mesmos `inputHash` e `revalidationHash`; expiração, revogação, mudança dos bytes ou cancelamento descartam o partial;
+- commit reconfirma identidade do partial e ausência de output preexistente antes do rename no mesmo filesystem;
+- receipt final contém apenas IDs/hashes, probe, codec/container, tamanho e horário de commit;
+- composition root cria o executor interno a partir de artifact root, output root, repositories, rights gate e timeout configurado;
+- smoke render real foi adicionado ao CI imediatamente depois do bundle Remotion.
+
+Evidências locais:
+
+- suíte unitária passa com 52 testes;
+- testes do compiler comprovam resolução por asset ID e rejeição de URL direta em props;
+- teste de orchestration comprova duas materializações, commit somente após igualdade e discard diante de revalidation hash divergente;
+- smoke cria fonte audiovisual real com FFmpeg, materializa os bytes pela lease, renderiza a composition `apollo-video` e promove um MP4 H.264 real;
+- output smoke possui 270×480, 30 fps, aproximadamente um segundo, byte size positivo e SHA-256 igual ao receipt;
+- diretório final contém somente `smoke.mp4`, sem arquivo partial;
+- receipt serializado não contém `file:`, artifact key nem diretório temporário;
+- `npm test` passa com 52/52 testes e typecheck sem erros;
+- contrato público permanece compatível com 20 capabilities, 27 schemas, 33 exemplos e 17 paths;
+- migration v2 permanece válida com 15 tabelas, 48 índices e 31 foreign keys;
+- auditorias do app e do subprojeto Remotion reportam zero vulnerabilidades;
+- build Next.js, bundle Remotion, integração FFmpeg e smoke render real passam;
+- integrações de repository, artifacts e Public API passam em SQLite temporário isolado;
+- `git diff --check` passa após as proteções finais.
+
+Limites explícitos desta slice:
+
+- o smoke parte de manifest/protected store/repositories em memória; replay a partir de um manifest realmente persistido continua aberto;
+- o output ainda não é persistido como `V2MediaArtifact`/manifest/lineage e não existe audit durável do stage/commit;
+- ainda não existe `PublicOperation`, fila, heartbeat, retry, cancel persistido ou endpoint externo de render;
+- compiler v1 ainda não leva creator, layout segments, punch-ins, cold open, trilha/SFX, LUT, fonts ou data ao renderer;
+- `4:5`, `1:1` e `21:9` permanecem fail-closed no compiler atual;
+- o smoke valida identidade e probe, não igualdade binária cross-platform nem tolerância visual/áudio de um golden;
+- o servidor de assets é um bridge local temporário; object storage usará HTTPS assinada curta em adapter separado;
+- o próximo incremento deve persistir a operação/output/lineage e expor o comando de render assíncrono pela Public API sem devolver internals.

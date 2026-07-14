@@ -30,6 +30,15 @@ export const RemotionRoot: React.FC = () => {
   return (
     <>
       <Composition
+        id="apollo-video"
+        component={VideoComposition}
+        durationInFrames={FPS * DEFAULT_DURATION_SECONDS}
+        fps={FPS}
+        width={VERTICAL_WIDTH}
+        height={VERTICAL_HEIGHT}
+        defaultProps={defaultProps}
+      />
+      <Composition
         id="vertical"
         component={VideoComposition}
         durationInFrames={FPS * DEFAULT_DURATION_SECONDS}

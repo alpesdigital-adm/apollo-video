@@ -55,6 +55,12 @@ renderer ◄── RenderInput materializado
 - Bytes locais são lidos em streaming, com tamanho e SHA-256 confrontados com banco e `RenderInput`; identidade do arquivo é verificada antes e depois da leitura para detectar troca durante a materialização.
 - Paths e URLs existem apenas no `MaterializedRenderInput` em memória. A lease do worker serializa somente um receipt seguro e não torna localização, props ou canonical key parte da API pública.
 - A materialização interna não ganha endpoint isolado: ela será acionada pela operação pública de render, pois executar I/O no processo web e descartar o resultado violaria o isolamento do worker.
+- O bundle registra `apollo-video` como composition ID canônico, preservando `vertical` e `horizontal` somente para compatibilidade temporária com a v1.
+- `apollo://render-props/apollo-video/v1` aceita IDs de assets no payload protegido. O compiler resolve esses IDs exclusivamente contra o `MaterializedRenderInput`; props com `imageSrc`, `imagePath` ou `videoSrc` fornecidos pelo plano são rejeitados.
+- Arquivos locais materializados são disponibilizados ao Chromium somente durante o render por servidor HTTP aleatório, efêmero e restrito a `127.0.0.1`, com allowlist derivada da lease e suporte a byte ranges. Texto e props comuns não são percorridos como locations.
+- O adapter Remotion escreve um partial irmão, limita tempo e output do subprocesso, valida probe, duração, dimensões, fps, byte size e SHA-256 e reconfirma que o partial não mudou durante a validação.
+- A promoção ocorre somente após uma segunda materialização completa da mesma autorização. `inputHash` e `revalidationHash` precisam permanecer iguais; falha, cancelamento ou divergência remove o partial.
+- O primeiro compiler v1 falha fechado fora de `9:16` e `16:9`. `4:5`, `1:1` e `21:9` exigem layout responsivo próprio antes de serem habilitados no renderer.
 - Falha, timeout ou cancelamento preservam o derivado anterior e tentam remover o parcial; falha de cleanup/promoção possui erro tipado próprio.
 - A identidade portátil de um derivado usa `media-artifact-manifest/v1`: SHA-256 do conteúdo, byte size, canonical artifact key, recipe/version, parameters hash, sources e probe opcional.
 - Manifests não contêm path absoluto, timestamp volátil ou parâmetros brutos; o corpo canônico possui `manifestHash` e o writer rejeita adulteração.

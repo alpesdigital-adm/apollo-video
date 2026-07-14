@@ -55,6 +55,8 @@ import { authorizeRenderInputMaterializationService } from '../../src/v2/applica
 import { materializeAuthorizedRenderInputService } from '../../src/v2/application/materialize-authorized-render-input.ts'
 import { createMaterializationAuthorization } from '../../src/v2/domain/materialization-authorization.ts'
 import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
+import { compileApolloVideoRenderProps } from '../../src/v2/application/compile-apollo-video-render-props.ts'
+import { renderAuthorizedInputService } from '../../src/v2/application/render-authorized-input.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -206,6 +208,218 @@ test('RenderInput materialization resolves locations without changing portable i
     })(spec),
     (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT',
   )
+})
+
+test('Apollo Video props compiler resolves only declared materialized asset IDs', async () => {
+  const createCompilerInput = (overrides = {}) =>
+    createRenderInputSpec({
+      schemaVersion: 'render-input/v1',
+      renderer: { id: 'remotion', version: '4.0.489', digest: '1'.repeat(64) },
+      composition: {
+        id: 'apollo-video',
+        version: 'v1',
+        propsSchemaRef: 'apollo://render-props/apollo-video/v1',
+      },
+      plan: { id: 'plan-compiler', versionId: 'plan-compiler-version', hash: '2'.repeat(64) },
+      output: {
+        id: 'preset-9x16',
+        locale: 'pt-BR',
+        aspectRatio: '9:16',
+        width: 1080,
+        height: 1920,
+        fps: 30,
+        safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+        durationInFrames: 60,
+        ...overrides.output,
+      },
+      assets: [
+        {
+          id: 'primary-video',
+          artifactId: 'artifact-compiler-video',
+          artifactKey: 'workspaces/1/compiler-video.mp4',
+          kind: 'video',
+          role: 'primary',
+          ordinal: 0,
+          sha256: '3'.repeat(64),
+          byteSize: 4096,
+        },
+        {
+          id: 'insert-image',
+          artifactId: 'artifact-compiler-image',
+          artifactKey: 'workspaces/1/compiler-image.jpg',
+          kind: 'image',
+          role: 'b-roll',
+          ordinal: 1,
+          sha256: '4'.repeat(64),
+          byteSize: 1024,
+        },
+      ],
+      props: overrides.props ?? {
+        primaryVideoAssetId: 'primary-video',
+        scenes: [
+          {
+            type: 'image-insert',
+            fromFrame: 15,
+            toFrame: 45,
+            props: { imageAssetId: 'insert-image', layout: 'full' },
+          },
+        ],
+        subtitles: [{ text: 'Uma legenda segura', fromFrame: 0, toFrame: 30 }],
+        palette: {
+          primary: '#FFB800',
+          secondary: '#20202A',
+          accent: '#FF6B35',
+          text: '#FFFFFF',
+          background: '#050508',
+        },
+        stylePreset: 'creator-clean',
+        subtitleStyle: 'kinetic',
+        gradePreset: 'natural',
+      },
+    })
+  const spec = createCompilerInput()
+  const materialized = await materializeRenderInputService({
+    resolver: {
+      async resolve(asset) {
+        return {
+          uri: `file:///worker/${asset.id}.${asset.kind === 'image' ? 'jpg' : 'mp4'}`,
+          sha256: asset.sha256,
+          byteSize: asset.byteSize,
+        }
+      },
+    },
+  })(spec)
+  const compiled = compileApolloVideoRenderProps(materialized)
+  assert.equal(compiled.videoSrc, 'file:///worker/primary-video.mp4')
+  assert.equal(compiled.scenes[0].props.imageSrc, 'file:///worker/insert-image.jpg')
+  assert.equal('imageAssetId' in compiled.scenes[0].props, false)
+  assert.deepEqual(
+    { from: compiled.scenes[0].from, to: compiled.scenes[0].to },
+    { from: 0.5, to: 1.5 },
+  )
+
+  const unsafe = createCompilerInput({
+    props: {
+      primaryVideoAssetId: 'primary-video',
+      scenes: [
+        {
+          type: 'image-insert',
+          fromFrame: 15,
+          toFrame: 45,
+          props: { imageSrc: 'https://untrusted.example/image.jpg' },
+        },
+      ],
+      subtitles: [],
+      palette: {
+        primary: '#FFB800', secondary: '#20202A', accent: '#FF6B35',
+        text: '#FFFFFF', background: '#050508',
+      },
+    },
+  })
+  await assert.rejects(
+    materializeRenderInputService({
+      resolver: {
+        async resolve(asset) {
+          return {
+            uri: `file:///worker/${asset.id}`,
+            sha256: asset.sha256,
+            byteSize: asset.byteSize,
+          }
+        },
+      },
+    })(unsafe).then(compileApolloVideoRenderProps),
+    (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT',
+  )
+})
+
+test('authorized render promotes staged output only after a matching second materialization', async () => {
+  const receipt = Object.freeze({
+    schemaVersion: 'materialized-render-input-receipt/v1',
+    authorizationId: 'authorization-render-1',
+    artifactId: 'artifact-render-target',
+    manifestId: 'manifest-render-target',
+    inputHash: '5'.repeat(64),
+    revalidationHash: '6'.repeat(64),
+    assetCount: 1,
+    revalidatedAt: '2026-07-14T12:00:00.000Z',
+    validUntil: '2026-07-14T12:05:00.000Z',
+  })
+  const lease = {
+    receipt,
+    getRenderInput() { return { inputHash: receipt.inputHash } },
+    toJSON() { return receipt },
+  }
+  let materializations = 0
+  let commits = 0
+  let discards = 0
+  const renderer = {
+    async stage(input) {
+      assert.equal(input.inputHash, receipt.inputHash)
+      const stagedReceipt = {
+        schemaVersion: 'staged-render-receipt/v1',
+        stageId: 'stage-render-1',
+        inputHash: receipt.inputHash,
+        outputSha256: '7'.repeat(64),
+        byteSize: 4096,
+        width: 1080,
+        height: 1920,
+        fps: 30,
+        durationInFrames: 60,
+        codec: 'h264',
+        container: 'mp4',
+      }
+      return {
+        receipt: stagedReceipt,
+        async commit() {
+          commits += 1
+          return {
+            ...stagedReceipt,
+            schemaVersion: 'committed-render-receipt/v1',
+            committedAt: '2026-07-14T12:02:00.000Z',
+          }
+        },
+        async discard() { discards += 1 },
+        toJSON() { return stagedReceipt },
+      }
+    },
+  }
+  const render = renderAuthorizedInputService({
+    async materialize() {
+      materializations += 1
+      return lease
+    },
+    renderer,
+    outputKeyFor: () => 'workspaces/1/renders/output.mp4',
+  })
+  const result = await render({
+    workspaceId: 'workspace-1',
+    authorizationId: 'authorization-render-1',
+  })
+  assert.equal(materializations, 2)
+  assert.equal(commits, 1)
+  assert.equal(discards, 0)
+  assert.equal(result.output.outputSha256, '7'.repeat(64))
+
+  materializations = 0
+  commits = 0
+  discards = 0
+  await assert.rejects(
+    renderAuthorizedInputService({
+      async materialize() {
+        materializations += 1
+        return materializations === 1
+          ? lease
+          : { ...lease, receipt: { ...receipt, revalidationHash: '8'.repeat(64) } }
+      },
+      renderer,
+      outputKeyFor: () => 'workspaces/1/renders/output-2.mp4',
+    })({ workspaceId: 'workspace-1', authorizationId: 'authorization-render-1' }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'MATERIALIZATION_REVALIDATION_FAILED',
+  )
+  assert.equal(commits, 0)
+  assert.equal(discards, 1)
 })
 
 test('asset rights and consent are immutable, content-addressed and fail closed', () => {
