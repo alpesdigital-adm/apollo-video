@@ -23,7 +23,9 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
   const authorizationId = 'operation-integration-authorization'
   const operationId = 'operation-integration-render-1'
   const sha = (character) => character.repeat(64)
-  const now = new Date('2026-07-14T15:30:00.000Z')
+  // Keep fixture dates in the past because Prisma's @updatedAt uses the database
+  // execution clock when corruption scenarios update the stored record.
+  const now = new Date('2026-01-01T15:30:00.000Z')
 
   const cleanup = async () => {
     await client.v2ArtifactRenderOperation.deleteMany({ where: { workspaceId } })
