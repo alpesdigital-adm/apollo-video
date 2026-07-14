@@ -3,6 +3,8 @@ import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
+import type { ProtectedRenderInputStore } from '../application/ports/protected-render-input-store.ts'
+import type { RenderInputAssetAvailability } from '../application/ports/render-reconstruction-readiness.ts'
 import type { ProjectCreationRepository } from '../application/ports/project-creation-repository.ts'
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
@@ -10,10 +12,13 @@ import { prisma } from '../../lib/db.ts'
 import { resolveV2PersistenceMode } from './persistence-mode.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
+import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
+import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
 import { PrismaProjectCreationRepository } from './prisma/project-creation-repository.ts'
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
+import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
 
 // The two generated clients expose the same v2 model delegates. This cast is
 // kept at the persistence boundary so application and public API code remain
@@ -36,6 +41,17 @@ export function createApiClientAdministrationRepository(): ApiClientAdministrati
 
 export function createMediaArtifactQueryRepository(): MediaArtifactQueryRepository {
   return new PrismaMediaArtifactRepository(resolveV2Client())
+}
+
+export function createProtectedRenderInputStore(): ProtectedRenderInputStore {
+  return new PrismaProtectedRenderInputStore(
+    resolveV2Client(),
+    createProtectedPayloadCipherFromEnvironment(),
+  )
+}
+
+export function createRenderInputAssetAvailability(): RenderInputAssetAvailability {
+  return new PrismaRenderInputAssetAvailability(resolveV2Client())
 }
 
 export function createProjectCreationRepository(): ProjectCreationRepository {

@@ -71,6 +71,29 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.artifacts.reconstruction.preflight": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "preflight",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/artifact-reconstruction-preflight/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/artifacts/{artifactId}/reconstruction-preflight/{manifestId}"
+      },
+      "toolName": "apollo.artifacts.reconstruction.preflight",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
     "apollo.artifacts.render-input.read": {
       "version": "1.0.0",
       "exposure": "public",
@@ -1539,6 +1562,259 @@
               }
             }
           }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/artifact-reconstruction-preflight/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifactId",
+            "manifestId",
+            "schemaVersion",
+            "manifestHash",
+            "validationScope",
+            "rightsValidationRequired",
+            "materializationRequired",
+            "payloadAuthenticated",
+            "eligible",
+            "assets",
+            "issues"
+          ],
+          "properties": {
+            "artifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "manifestId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "schemaVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "manifestHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "validationScope": {
+              "const": "protected-input-and-asset-identity"
+            },
+            "rightsValidationRequired": {
+              "const": true
+            },
+            "materializationRequired": {
+              "const": true
+            },
+            "payloadAuthenticated": {
+              "type": "boolean"
+            },
+            "eligible": {
+              "type": "boolean"
+            },
+            "inputHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "renderer": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version",
+                "digest",
+                "supported"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "supported": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "composition": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version",
+                "propsSchemaRef",
+                "supported"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+                },
+                "propsSchemaRef": {
+                  "type": "string",
+                  "pattern": "^apollo://render-props/[a-z0-9][a-z0-9-]*/v[1-9][0-9]*$"
+                },
+                "supported": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "assets": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "total",
+                "available"
+              ],
+              "properties": {
+                "total": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4096
+                },
+                "available": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4096
+                }
+              }
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code",
+                  "message"
+                ],
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "RENDER_INPUT_MISSING",
+                      "RENDERER_UNAVAILABLE",
+                      "COMPOSITION_UNAVAILABLE",
+                      "ASSET_NOT_FOUND",
+                      "ASSET_UNAVAILABLE",
+                      "ASSET_IDENTITY_MISMATCH",
+                      "ASSET_KIND_UNSUPPORTED"
+                    ]
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "assetOrdinal": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4095
+                  },
+                  "assetKind": {
+                    "enum": [
+                      "video",
+                      "audio",
+                      "image",
+                      "font",
+                      "lut",
+                      "data"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "payloadAuthenticated": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "inputHash",
+                  "renderer",
+                  "composition"
+                ],
+                "properties": {
+                  "inputHash": {},
+                  "renderer": {},
+                  "composition": {}
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "eligible": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "issues": {
+                    "type": "array",
+                    "maxItems": 0
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "eligible": {
+                    "const": false
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "issues": {
+                    "type": "array",
+                    "minItems": 1
+                  }
+                }
+              }
+            }
+          ]
         },
         "meta": {
           "type": "object",

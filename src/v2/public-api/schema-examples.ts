@@ -314,6 +314,58 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/artifact-reconstruction-preflight/v1': [
+      {
+        data: {
+          artifactId,
+          manifestId: 'manifest-example-4',
+          schemaVersion: 'media-artifact-manifest/v4',
+          manifestHash: '8'.repeat(64),
+          validationScope: 'protected-input-and-asset-identity',
+          rightsValidationRequired: true,
+          materializationRequired: true,
+          payloadAuthenticated: true,
+          eligible: true,
+          inputHash: '9'.repeat(64),
+          renderer: {
+            id: 'remotion',
+            version: '4.0.489',
+            digest: '7'.repeat(64),
+            supported: true,
+          },
+          composition: {
+            id: 'apollo-video',
+            version: 'v1',
+            propsSchemaRef: 'apollo://render-props/apollo-video/v1',
+            supported: true,
+          },
+          assets: { total: 1, available: 1 },
+          issues: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          artifactId,
+          manifestId: 'manifest-example-legacy',
+          schemaVersion: 'media-artifact-manifest/v3',
+          manifestHash: 'a'.repeat(64),
+          validationScope: 'protected-input-and-asset-identity',
+          rightsValidationRequired: true,
+          materializationRequired: true,
+          payloadAuthenticated: false,
+          eligible: false,
+          assets: { total: 0, available: 0 },
+          issues: [
+            {
+              code: 'RENDER_INPUT_MISSING',
+              message: 'Manifest predates protected RenderInput',
+            },
+          ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/render-input-preflight-request/v1': [
       renderInputRequestExample,
     ],

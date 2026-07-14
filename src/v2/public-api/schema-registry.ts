@@ -690,6 +690,105 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       ],
     }),
   ),
+  defineSchema('artifact-reconstruction-preflight', 1, 'Artifact reconstruction preflight response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'artifactId', 'manifestId', 'schemaVersion', 'manifestHash',
+        'validationScope', 'rightsValidationRequired', 'materializationRequired',
+        'payloadAuthenticated', 'eligible', 'assets', 'issues',
+      ],
+      properties: {
+        artifactId: idSchema,
+        manifestId: idSchema,
+        schemaVersion: { type: 'string', minLength: 1, maxLength: 64 },
+        manifestHash: sha256Schema,
+        validationScope: { const: 'protected-input-and-asset-identity' },
+        rightsValidationRequired: { const: true },
+        materializationRequired: { const: true },
+        payloadAuthenticated: { type: 'boolean' },
+        eligible: { type: 'boolean' },
+        inputHash: sha256Schema,
+        renderer: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'version', 'digest', 'supported'],
+          properties: {
+            id: renderTokenSchema,
+            version: renderTokenSchema,
+            digest: sha256Schema,
+            supported: { type: 'boolean' },
+          },
+        },
+        composition: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'version', 'propsSchemaRef', 'supported'],
+          properties: {
+            id: renderTokenSchema,
+            version: renderTokenSchema,
+            propsSchemaRef: {
+              type: 'string',
+              pattern: '^apollo://render-props/[a-z0-9][a-z0-9-]*/v[1-9][0-9]*$',
+            },
+            supported: { type: 'boolean' },
+          },
+        },
+        assets: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['total', 'available'],
+          properties: {
+            total: { type: 'integer', minimum: 0, maximum: 4096 },
+            available: { type: 'integer', minimum: 0, maximum: 4096 },
+          },
+        },
+        issues: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['code', 'message'],
+            properties: {
+              code: {
+                enum: [
+                  'RENDER_INPUT_MISSING', 'RENDERER_UNAVAILABLE',
+                  'COMPOSITION_UNAVAILABLE', 'ASSET_NOT_FOUND',
+                  'ASSET_UNAVAILABLE', 'ASSET_IDENTITY_MISMATCH',
+                  'ASSET_KIND_UNSUPPORTED',
+                ],
+              },
+              message: { type: 'string', minLength: 1 },
+              assetOrdinal: { type: 'integer', minimum: 0, maximum: 4095 },
+              assetKind: { enum: ['video', 'audio', 'image', 'font', 'lut', 'data'] },
+            },
+          },
+        },
+      },
+      allOf: [
+        {
+          if: { properties: { payloadAuthenticated: { const: true } } },
+          then: {
+            required: ['inputHash', 'renderer', 'composition'],
+            properties: {
+              inputHash: {},
+              renderer: {},
+              composition: {},
+            },
+          },
+        },
+        {
+          if: { properties: { eligible: { const: true } } },
+          then: { properties: { issues: { type: 'array', maxItems: 0 } } },
+        },
+        {
+          if: { properties: { eligible: { const: false } } },
+          then: { properties: { issues: { type: 'array', minItems: 1 } } },
+        },
+      ],
+    }),
+  ),
   defineSchema('render-input-preflight-request', 1, 'Portable RenderInput preflight request', {
     type: 'object',
     additionalProperties: false,

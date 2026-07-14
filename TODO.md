@@ -376,7 +376,7 @@
 - [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
 - [x] Persistir hashes e versões de tool/model em cada edge. Evidência: manifest v2, colunas normalizadas de execution provenance e API pública por manifest.
 - [x] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
-- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-017: grafo, diagnóstico, provenance e payload de parâmetros protegido já foram entregues; falta ligar RenderInput/plan/providers e executar a reconstrução golden.
+- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-020: grafo, provenance, recipe e RenderInput protegidos, checkout autenticado e preflight de renderer/composição/assets já foram entregues; faltam rights/consent, materialização, execução e comparação golden.
 
 ### F0.026 — Durable jobs [FR-232]
 
@@ -395,7 +395,7 @@
 ### F0.028 — Props e manifest [FR-234]
 
 - [x] Definir `RenderInput` autocontido e schema versionado. Evidência: `render-input/v1`, hash canônico, preflight público e testes de materialização sem banco.
-- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-018: resolver port e verificação de URI/checksum/tamanho entregues; faltam adapters de storage e integração com o job de render.
+- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-020: resolver port, validação de URI/checksum/tamanho e preflight workspace-scoped de identidade/disponibilidade entregues; faltam storage tipado, signed URLs, rights/consent e integração com o worker.
 - [x] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
 - [x] Salvar manifest com checksums, plan hash e renderer version. Evidência: `media-artifact-manifest/v4` vincula por hash um `render-input/v1` protegido que contém checksums ordenados, plan hash e identidade versionada do renderer.
 - [ ] Reexecutar golden render somente a partir do manifest salvo.
@@ -2813,7 +2813,7 @@ Confirmação hospedada:
 
 ### Slice F0-019 — RenderInput protegido vinculado ao manifest v4
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `3b304c6`.
 
 Entregas:
 
@@ -2858,3 +2858,53 @@ Limites explícitos desta slice:
 - schema semântico das props continua responsabilidade do adapter da composição;
 - esta slice não inicia render e não implementa rotação ou reencriptação de chaves;
 - o golden render permanece aberto até existir worker que recupere o payload protegido, materialize assets e execute o renderer somente a partir do manifest salvo.
+
+Confirmação hospedada:
+
+- o run `29326445993` aprovou os 20 passos no Linux, incluindo a migration real no Postgres 16, checkout de contracts, builds e integrações públicas.
+
+### Slice F0-020 — Checkout autenticado e preflight de reconstrução
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- port interno `ProtectedRenderInputStore` recupera o payload somente por workspace, referência e input hash exatos;
+- adapter Prisma abre AES-256-GCM com AAD workspace+ref, autentica o ciphertext e revalida schema, canonicidade, tamanho e `inputHash` antes de devolver o spec ao application service;
+- payload ausente após um vínculo v4 válido é tratado como conflito de persistência, nunca como input vazio;
+- contexto criptográfico de recipe e RenderInput foi centralizado para evitar divergência entre escrita e leitura;
+- configuração preferencial usa `APOLLO_PROTECTED_PAYLOAD_KEY_ID` e `APOLLO_PROTECTED_PAYLOAD_KEY`, preservando fallback temporário dos nomes F0-017;
+- `PrismaRenderInputAssetAvailability` verifica ownership de workspace, status disponível, artifact ID, canonical key, checksum, byte size e media kind;
+- kinds ainda sem storage tipado (`font`, `lut`, `data`) falham fechados com `ASSET_KIND_UNSUPPORTED`;
+- registry de render exige ID, versão e digest exatos do renderer;
+- registry de composição exige ID, versão e `propsSchemaRef` exatos;
+- digest ausente ou inválido na configuração torna o renderer indisponível, sem fallback silencioso;
+- application service de preflight seleciona artifact/manifest exatos, autentica o RenderInput e verifica targets e assets em ordem determinística;
+- resposta distingue `payloadAuthenticated`, `eligible`, `rightsValidationRequired` e `materializationRequired`;
+- `eligible=true` significa apenas que identidade protegida, target técnico e assets atuais passaram; não autoriza nem inicia render;
+- issues seguras distinguem manifest legacy, renderer/composição indisponíveis, asset ausente, indisponível, divergente ou ainda sem storage suportado;
+- capability externa `apollo.artifacts.reconstruction.preflight@1.0.0` usa `artifacts:read`, custo free e idempotência natural;
+- endpoint `POST /v1/artifacts/{artifactId}/reconstruction-preflight/{manifestId}` não aceita payload e não cria job ou custo;
+- JSON Schema, exemplos, OpenAPI, baseline e `.env.local.example` foram atualizados.
+
+Evidências locais:
+
+- teste de domínio comprova preflight elegível, bloqueios determinísticos e comportamento legacy;
+- resposta de domínio não contém props, logical asset ID nem canonical key protegidos;
+- integração Prisma comprova round-trip do checkout e isolamento de workspace;
+- alteração de um byte no ciphertext faz a autenticação falhar com conflito;
+- integração Prisma comprova asset íntegro e detecta checksum divergente;
+- API ponta a ponta comprova capability discovery, OpenAPI, scope 403, isolamento 404, v4 elegível e legacy bloqueado;
+- resposta pública não contém props, asset key, ciphertext ou key ID;
+- suíte unitária completa passou com 46 testes;
+- contratos aprovados com 17 capabilities, 22 schemas, 27 exemplos e 15 paths;
+- build Next.js registra a nova rota dinâmica de reconstruction preflight.
+
+Limites explícitos desta slice:
+
+- o preflight não materializa URL/path e não acessa o arquivo do asset;
+- ownership e identidade não substituem rights, consent, disclosure ou policy snapshot;
+- `eligible=true` não é promessa de que o render será aceito no commit futuro;
+- ainda não existe `PublicOperation`, reserva de custo, worker isolado, heartbeat, cancel ou retry;
+- nenhum endpoint devolve o `RenderInput` canônico descriptografado;
+- o próximo passo é implementar rights gate e materialização auditável, então executar o smoke/golden render somente a partir deste checkout.

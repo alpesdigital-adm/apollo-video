@@ -36,11 +36,13 @@ import { readMediaArtifactReplaySpecService } from '../../src/v2/application/rea
 import { readMediaArtifactRenderInputService } from '../../src/v2/application/read-media-artifact-render-input.ts'
 import { materializeRenderInputService } from '../../src/v2/application/materialize-render-input.ts'
 import { preflightRenderInputService } from '../../src/v2/application/preflight-render-input.ts'
+import { preflightMediaArtifactReconstructionService } from '../../src/v2/application/preflight-media-artifact-reconstruction.ts'
 import {
   assertRenderInputSpec,
   createRenderInputSpec,
 } from '../../src/v2/domain/render-input.ts'
 import { assertRenderInputPayload } from '../../src/v2/domain/render-input-payload.ts'
+import { createConfiguredRenderTargetRegistry } from '../../src/v2/infrastructure/render-target-registry.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -744,6 +746,128 @@ test('artifact RenderInput inspection exposes safe metadata but never protected 
   assert.equal(legacy.available, false)
   assert.equal('renderInput' in legacy, false)
   assert.deepEqual(legacy.issues.map((issue) => issue.code), ['RENDER_INPUT_MISSING'])
+})
+
+test('artifact reconstruction preflight authenticates input and fails closed before rights or materialization', async () => {
+  const input = createRenderInputSpec({
+    schemaVersion: 'render-input/v1',
+    renderer: { id: 'remotion', version: '4.0.489', digest: '1'.repeat(64) },
+    composition: {
+      id: 'apollo-video',
+      version: 'v1',
+      propsSchemaRef: 'apollo://render-props/apollo-video/v1',
+    },
+    plan: { id: 'plan-preflight', versionId: 'plan-version-preflight', hash: '2'.repeat(64) },
+    output: {
+      id: 'preset-9x16',
+      locale: 'pt-BR',
+      aspectRatio: '9:16',
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+      durationInFrames: 90,
+    },
+    assets: [
+      {
+        id: 'private-logical-asset-id',
+        artifactId: 'artifact-source',
+        artifactKey: 'workspaces/1/private/source.mp4',
+        kind: 'video',
+        role: 'primary',
+        ordinal: 0,
+        sha256: '3'.repeat(64),
+        byteSize: 1024,
+      },
+    ],
+    props: { title: 'protected-preflight-title' },
+  })
+  const artifact = {
+    id: 'artifact-reconstructable',
+    manifests: [
+      {
+        id: 'manifest-v4',
+        schemaVersion: 'media-artifact-manifest/v4',
+        manifestHash: '4'.repeat(64),
+        recipe: { id: 'render-video', version: 'v4', parametersHash: '5'.repeat(64) },
+        renderInput: {
+          ref: `render-input/sha256/${input.inputHash}`,
+          inputHash: input.inputHash,
+          canonicalByteSize: 1024,
+          algorithm: 'aes-256-gcm',
+        },
+        sources: [],
+        createdAt: '2026-07-14T11:30:00.000Z',
+      },
+      {
+        id: 'manifest-legacy',
+        schemaVersion: 'media-artifact-manifest/v3',
+        manifestHash: '6'.repeat(64),
+        recipe: { id: 'render-video', version: 'v3', parametersHash: '7'.repeat(64) },
+        sources: [],
+        createdAt: '2026-07-14T11:29:00.000Z',
+      },
+    ],
+  }
+  let protectedReads = 0
+  const createPreflight = (assetAvailability, targets) =>
+    preflightMediaArtifactReconstructionService({
+      repository: { async findById() { return artifact } },
+      protectedRenderInputs: {
+        async read(workspaceId, ref, inputHash) {
+          protectedReads += 1
+          assert.equal(workspaceId, 'workspace-1')
+          assert.equal(ref, `render-input/sha256/${input.inputHash}`)
+          assert.equal(inputHash, input.inputHash)
+          return input
+        },
+      },
+      assetAvailability,
+      targets,
+    })
+
+  const configuredTargets = createConfiguredRenderTargetRegistry({
+    APOLLO_RENDERER_DIGEST: '1'.repeat(64),
+  })
+  const eligible = await createPreflight(
+    { async inspect() { return { available: true } } },
+    configuredTargets,
+  )('workspace-1', artifact.id, 'manifest-v4')
+  assert.equal(eligible.payloadAuthenticated, true)
+  assert.equal(eligible.eligible, true)
+  assert.equal(eligible.rightsValidationRequired, true)
+  assert.equal(eligible.materializationRequired, true)
+  assert.deepEqual(eligible.assets, { total: 1, available: 1 })
+  assert.deepEqual(eligible.issues, [])
+  assert.equal(JSON.stringify(eligible).includes('protected-preflight-title'), false)
+  assert.equal(JSON.stringify(eligible).includes('private-logical-asset-id'), false)
+  assert.equal(JSON.stringify(eligible).includes('workspaces/1/private'), false)
+
+  const blocked = await createPreflight(
+    { async inspect() { return { available: false, code: 'ASSET_UNAVAILABLE' } } },
+    { supportsRenderer() { return false }, supportsComposition() { return false } },
+  )('workspace-1', artifact.id, 'manifest-v4')
+  assert.equal(blocked.eligible, false)
+  assert.deepEqual(blocked.issues.map((issue) => issue.code), [
+    'RENDERER_UNAVAILABLE',
+    'COMPOSITION_UNAVAILABLE',
+    'ASSET_UNAVAILABLE',
+  ])
+  assert.deepEqual(blocked.issues[2], {
+    code: 'ASSET_UNAVAILABLE',
+    message: 'A required render asset is not available with its immutable identity',
+    assetOrdinal: 0,
+    assetKind: 'video',
+  })
+
+  const legacy = await createPreflight(
+    { async inspect() { throw new Error('must not inspect legacy assets') } },
+    configuredTargets,
+  )('workspace-1', artifact.id, 'manifest-legacy')
+  assert.equal(legacy.payloadAuthenticated, false)
+  assert.equal(legacy.eligible, false)
+  assert.deepEqual(legacy.issues.map((issue) => issue.code), ['RENDER_INPUT_MISSING'])
+  assert.equal(protectedReads, 2)
 })
 
 test('media artifact lookup normalizes ids and hides missing workspace records', async () => {

@@ -24,6 +24,10 @@ import {
   assertRenderInputPayload,
   type RenderInputPayload,
 } from '../../domain/render-input-payload.ts'
+import {
+  recipeParameterCipherContext,
+  renderInputCipherContext,
+} from '../security/recipe-parameter-cipher.ts'
 
 type PersistenceClient = Pick<
   PrismaClient,
@@ -171,14 +175,6 @@ async function findReplay(
   return { artifactId: artifact.id, manifestId: storedManifest.id, replayed: true }
 }
 
-function recipeParameterContext(workspaceId: string, ref: string): string {
-  return `apollo-recipe-parameters/v1:${workspaceId}:${ref}`
-}
-
-function renderInputContext(workspaceId: string, ref: string): string {
-  return `apollo-render-input/v1:${workspaceId}:${ref}`
-}
-
 function storedRecipeParametersMatch(stored: {
   ref: string
   parametersHash: string
@@ -238,7 +234,7 @@ async function assertStoredRecipeParameters(
         ciphertext: stored.ciphertext,
         authTag: stored.authTag,
       },
-      recipeParameterContext(workspaceId, expected.ref),
+      recipeParameterCipherContext(workspaceId, expected.ref),
     )
     if (plaintext !== expected.canonicalJson) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Recipe parameter plaintext is invalid')
@@ -306,7 +302,7 @@ async function assertStoredRenderInput(
         ciphertext: stored.ciphertext,
         authTag: stored.authTag,
       },
-      renderInputContext(workspaceId, expected.ref),
+      renderInputCipherContext(workspaceId, expected.ref),
     )
     if (plaintext !== expected.canonicalJson) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'RenderInput plaintext is invalid')
@@ -675,7 +671,7 @@ export class PrismaMediaArtifactRepository
           } else {
             const sealed = await recipeParameterCipher.seal(
               bundle.recipeParameters.canonicalJson,
-              recipeParameterContext(bundle.workspaceId, bundle.recipeParameters.ref),
+              recipeParameterCipherContext(bundle.workspaceId, bundle.recipeParameters.ref),
             )
             const created = await transaction.v2RecipeParameterPayload.upsert({
               where: {
@@ -741,7 +737,7 @@ export class PrismaMediaArtifactRepository
           } else {
             const sealed = await protectedPayloadCipher.seal(
               bundle.renderInput.canonicalJson,
-              renderInputContext(bundle.workspaceId, bundle.renderInput.ref),
+              renderInputCipherContext(bundle.workspaceId, bundle.renderInput.ref),
             )
             const created = await transaction.v2RenderInputPayload.upsert({
               where: {

@@ -265,6 +265,9 @@ test('authenticated public API manages projects, clients and artifact inspection
           ...process.env,
           NODE_ENV: 'production',
           APOLLO_API_ENVIRONMENT: apiEnvironment,
+          APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'public-api-recipe-key-v1',
+          APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 9).toString('base64url'),
+          APOLLO_RENDERER_DIGEST: sha('8'),
         },
         stdio: 'ignore',
       },
@@ -313,6 +316,12 @@ test('authenticated public API manages projects, clients and artifact inspection
       'apollo.artifacts.render-input.read',
     )
     assert.equal(
+      openApi.paths[
+        '/v1/artifacts/{artifactId}/reconstruction-preflight/{manifestId}'
+      ].post['x-apollo-capability-id'],
+      'apollo.artifacts.reconstruction.preflight',
+    )
+    assert.equal(
       openApi.paths['/v1/render-inputs/preflight'].post['x-apollo-capability-id'],
       'apollo.render-inputs.preflight',
     )
@@ -354,6 +363,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.artifacts.provenance.read',
         'apollo.artifacts.replay-spec.read',
         'apollo.artifacts.render-input.read',
+        'apollo.artifacts.reconstruction.preflight',
         'apollo.render-inputs.preflight',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
@@ -436,6 +446,11 @@ test('authenticated public API manages projects, clients and artifact inspection
       { headers: { authorization: childAuthorization } },
     )
     assert.equal(childRenderInputMetadataResponse.status, 403)
+    const childReconstructionPreflightResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/reconstruction-preflight/${derivedManifestId}`,
+      { method: 'POST', headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childReconstructionPreflightResponse.status, 403)
     const childRenderInputResponse = await fetch(`${baseUrl}/v1/render-inputs/preflight`, {
       method: 'POST',
       headers: {
@@ -551,6 +566,39 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(JSON.stringify(persistedRenderInput).includes('ciphertext'), false)
     assert.equal(JSON.stringify(persistedRenderInput).includes('keyId'), false)
 
+    const reconstructionPreflightResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/reconstruction-preflight/${derivedManifestId}`,
+      { method: 'POST', headers: { authorization } },
+    )
+    const reconstructionPreflight = await reconstructionPreflightResponse.json()
+    assert.equal(reconstructionPreflightResponse.status, 200)
+    assert.equal(reconstructionPreflight.data.payloadAuthenticated, true)
+    assert.equal(reconstructionPreflight.data.eligible, true)
+    assert.equal(reconstructionPreflight.data.rightsValidationRequired, true)
+    assert.equal(reconstructionPreflight.data.materializationRequired, true)
+    assert.equal(reconstructionPreflight.data.inputHash, derivedRenderInput.inputHash)
+    assert.equal(reconstructionPreflight.data.renderer.supported, true)
+    assert.equal(reconstructionPreflight.data.composition.supported, true)
+    assert.deepEqual(reconstructionPreflight.data.assets, { total: 1, available: 1 })
+    assert.deepEqual(reconstructionPreflight.data.issues, [])
+    assert.equal(
+      JSON.stringify(reconstructionPreflight).includes('protected-api-render-input-value'),
+      false,
+    )
+    assert.equal(JSON.stringify(reconstructionPreflight).includes(sourceKey), false)
+    assert.equal(JSON.stringify(reconstructionPreflight).includes('ciphertext'), false)
+    assert.equal(JSON.stringify(reconstructionPreflight).includes('keyId'), false)
+    const reconstructionBodyResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/reconstruction-preflight/${derivedManifestId}`,
+      {
+        method: 'POST',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: '{}',
+      },
+    )
+    assert.equal(reconstructionBodyResponse.status, 422)
+    assert.equal((await reconstructionBodyResponse.json()).error.code, 'INVALID_ARGUMENT')
+
     const legacyRenderInputResponse = await fetch(
       `${baseUrl}/v1/artifacts/${sourceArtifactId}/render-input/public-api-source-manifest-v2`,
       { headers: { authorization } },
@@ -561,6 +609,18 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal('renderInput' in legacyRenderInput.data, false)
     assert.deepEqual(
       legacyRenderInput.data.issues.map((issue) => issue.code),
+      ['RENDER_INPUT_MISSING'],
+    )
+    const legacyReconstructionPreflightResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${sourceArtifactId}/reconstruction-preflight/public-api-source-manifest-v2`,
+      { method: 'POST', headers: { authorization } },
+    )
+    const legacyReconstructionPreflight = await legacyReconstructionPreflightResponse.json()
+    assert.equal(legacyReconstructionPreflightResponse.status, 200)
+    assert.equal(legacyReconstructionPreflight.data.payloadAuthenticated, false)
+    assert.equal(legacyReconstructionPreflight.data.eligible, false)
+    assert.deepEqual(
+      legacyReconstructionPreflight.data.issues.map((issue) => issue.code),
       ['RENDER_INPUT_MISSING'],
     )
 
@@ -677,12 +737,22 @@ test('authenticated public API manages projects, clients and artifact inspection
       `${baseUrl}/v1/artifacts/${otherArtifactId}/render-input/public-api-other-manifest-v2`,
       { headers: { authorization } },
     )
+    const missingReconstructionPreflight = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/reconstruction-preflight/missing-manifest-v2`,
+      { method: 'POST', headers: { authorization } },
+    )
+    const hiddenReconstructionPreflight = await fetch(
+      `${baseUrl}/v1/artifacts/${otherArtifactId}/reconstruction-preflight/public-api-other-manifest-v2`,
+      { method: 'POST', headers: { authorization } },
+    )
     assert.equal(missingManifestDiagnostic.status, 404)
     assert.equal(hiddenDiagnostic.status, 404)
     assert.equal(missingReplaySpec.status, 404)
     assert.equal(hiddenReplaySpec.status, 404)
     assert.equal(missingRenderInput.status, 404)
     assert.equal(hiddenRenderInput.status, 404)
+    assert.equal(missingReconstructionPreflight.status, 404)
+    assert.equal(hiddenReconstructionPreflight.status, 404)
 
     const hiddenArtifactResponse = await fetch(
       `${baseUrl}/v1/artifacts/${otherArtifactId}`,

@@ -21,6 +21,12 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
   const { PrismaMediaArtifactRepository } = await import(
     '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
   )
+  const { PrismaProtectedRenderInputStore } = await import(
+    '../../src/v2/infrastructure/prisma/protected-render-input-store.ts'
+  )
+  const { PrismaRenderInputAssetAvailability } = await import(
+    '../../src/v2/infrastructure/prisma/render-input-asset-availability.ts'
+  )
   const { PrismaWorkspaceRepository } = await import(
     '../../src/v2/infrastructure/prisma/workspace-repository.ts'
   )
@@ -272,6 +278,64 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
         `apollo-render-input/v1:${workspaceA}:${storedRenderInput.ref}`,
       ),
       derivedReplayable.renderInput.canonicalJson,
+    )
+    const protectedRenderInputs = new PrismaProtectedRenderInputStore(client, recipeCipher)
+    assert.deepEqual(
+      await protectedRenderInputs.read(
+        workspaceA,
+        derivedReplayable.renderInput.ref,
+        derivedReplayable.renderInput.inputHash,
+      ),
+      derivedRenderInput,
+    )
+    assert.equal(
+      await protectedRenderInputs.read(
+        workspaceB,
+        derivedReplayable.renderInput.ref,
+        derivedReplayable.renderInput.inputHash,
+      ),
+      null,
+    )
+    const originalCiphertext = storedRenderInput.ciphertext
+    await client.v2RenderInputPayload.update({
+      where: {
+        workspaceId_ref: {
+          workspaceId: workspaceA,
+          ref: derivedReplayable.renderInput.ref,
+        },
+      },
+      data: {
+        ciphertext: `${originalCiphertext[0] === 'A' ? 'B' : 'A'}${originalCiphertext.slice(1)}`,
+      },
+    })
+    await expectDomainCode(
+      protectedRenderInputs.read(
+        workspaceA,
+        derivedReplayable.renderInput.ref,
+        derivedReplayable.renderInput.inputHash,
+      ),
+      'PERSISTENCE_CONFLICT',
+    )
+    await client.v2RenderInputPayload.update({
+      where: {
+        workspaceId_ref: {
+          workspaceId: workspaceA,
+          ref: derivedReplayable.renderInput.ref,
+        },
+      },
+      data: { ciphertext: originalCiphertext },
+    })
+    const assetAvailability = new PrismaRenderInputAssetAvailability(client)
+    assert.deepEqual(
+      await assetAvailability.inspect(workspaceA, derivedRenderInput.assets[0]),
+      { available: true },
+    )
+    assert.deepEqual(
+      await assetAvailability.inspect(workspaceA, {
+        ...derivedRenderInput.assets[0],
+        sha256: sha('f'),
+      }),
+      { available: false, code: 'ASSET_IDENTITY_MISMATCH' },
     )
     assert.equal(
       await client.v2RenderInputPayload.count({ where: { workspaceId: workspaceA } }),

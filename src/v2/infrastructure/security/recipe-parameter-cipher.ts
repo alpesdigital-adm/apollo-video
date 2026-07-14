@@ -12,6 +12,14 @@ import { DomainError } from '../../domain/errors.ts'
 
 const ALGORITHM = 'aes-256-gcm'
 
+export function recipeParameterCipherContext(workspaceId: string, ref: string): string {
+  return `apollo-recipe-parameters/v1:${workspaceId}:${ref}`
+}
+
+export function renderInputCipherContext(workspaceId: string, ref: string): string {
+  return `apollo-render-input/v1:${workspaceId}:${ref}`
+}
+
 export function createAesRecipeParameterCipher(config: {
   keyId: string
   key: Buffer
@@ -62,8 +70,18 @@ export function createAesRecipeParameterCipher(config: {
 }
 
 export function createRecipeParameterCipherFromEnvironment(): RecipeParameterCipher {
-  const keyId = process.env.APOLLO_RECIPE_PARAMETER_KEY_ID?.trim() ?? ''
-  const encodedKey = process.env.APOLLO_RECIPE_PARAMETER_KEY?.trim() ?? ''
+  return createProtectedPayloadCipherFromEnvironment()
+}
+
+export function createProtectedPayloadCipherFromEnvironment(): RecipeParameterCipher {
+  const keyId =
+    process.env.APOLLO_PROTECTED_PAYLOAD_KEY_ID?.trim() ??
+    process.env.APOLLO_RECIPE_PARAMETER_KEY_ID?.trim() ??
+    ''
+  const encodedKey =
+    process.env.APOLLO_PROTECTED_PAYLOAD_KEY?.trim() ??
+    process.env.APOLLO_RECIPE_PARAMETER_KEY?.trim() ??
+    ''
   let key: Buffer
   try {
     key = Buffer.from(encodedKey, 'base64url')
