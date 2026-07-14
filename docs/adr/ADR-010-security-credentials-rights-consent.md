@@ -1,6 +1,6 @@
 # ADR-010 — Segurança, credenciais, rights e consent
 
-> **Status:** Accepted para autenticação externa; rights/consent continuam incrementais
+> **Status:** Accepted para autenticação externa e primeiro boundary de rights/consent; enforcement global continua incremental
 >
 > **Data:** 12 de julho de 2026
 
@@ -30,11 +30,24 @@ A Public API já manipula recursos de workspace e precisa ser operável sem aces
 
 ## Rights e consent
 
-O mesmo boundary de autorização receberá rights, consent, finalidade, território e expiração nos slices de Media Library e mídia sintética. Scope nunca substituirá ownership, rights, consent, Policy Snapshot, budget ou estado protegido.
+Scope nunca substitui ownership, rights, consent, Policy Snapshot, budget ou estado protegido.
+
+- Cada artifact possui zero ou um snapshot corrente `asset-rights/v1` e mantém todas as revisões anteriores imutáveis.
+- O hash do snapshot cobre artifact/workspace, owner, license, status, finalidade, proibições, território, locale, operações sintéticas, expiração e consentimento; metadata de criação não altera a identidade do conteúdo.
+- Rights e consentimento têm statuses independentes. `unknown`, `restricted`, `expired`, `revoked` ou snapshot ausente bloqueiam uso automático. Consentimento `not-required` precisa ser afirmado explicitamente.
+- O workspace permitido é atribuído server-side nesta primeira versão. Um client não concede acesso cross-workspace por payload.
+- Evidência de consentimento opcional referencia um artifact existente no mesmo workspace e é protegida por foreign key.
+- O primeiro consumidor do gate é a autorização de materialização do RenderInput. O service autentica o payload protegido, valida o target técnico, revalida identidade/disponibilidade dos assets e só então avalia cada snapshot.
+- Cada tentativa persiste um aggregate de autorização e uma decisão ordenada por asset, com snapshot/hash, outcome, reason codes, actor, contexto e tempo.
+- Autorizações positivas duram no máximo cinco minutos e carregam `revalidationRequired=true`. O worker deve reavaliar o snapshot corrente imediatamente antes de resolver storage e novamente antes de promover o output.
+- `Idempotency-Key` identifica uma tentativa externa. Replay retorna o mesmo receipt; a mesma chave com request diferente falha com conflito.
+- Receipts externos nunca expõem notas jurídicas, props, canonical keys, storage locations, ciphertext ou material criptográfico.
+
+O mesmo evaluator será ligado incrementalmente à busca, Director, geração sintética e export. `restricted` continuará bloqueado para auto-use até existir um workflow administrativo explícito; não há override implícito por scope.
 
 ## Consequências
 
 - A migration de credenciais segue expand-contract: cria a tabela nova e migra hashes legados antes de remover colunas antigas em release posterior.
 - Credenciais comprometidas podem ser revogadas sem trocar identidade, scopes ou integrações não afetadas.
 - O secret store futuro poderá substituir o hash local por referência sem alterar o contrato de domínio.
-- Rate limit, audit log persistido, anomaly detection e kill switch de workspace permanecem gates antes de abrir a API amplamente.
+- O audit de decisão de uso já é persistido; deleção/export do audit, rate limit, anomaly detection e kill switch de workspace permanecem gates antes de abrir a API amplamente.

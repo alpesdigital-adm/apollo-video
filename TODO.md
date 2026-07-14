@@ -167,7 +167,7 @@
 #### ADR-010 — Segurança, credenciais, rights e consent
 
 - [ ] Definir secret store, rotação, escopo e acesso de workers.
-- [ ] Modelar direitos, consentimento, finalidade, território e expiração.
+- [x] Modelar direitos, consentimento, finalidade, território e expiração. Evidência: F0-021 entrega `asset-rights/v1`, snapshots imutáveis, consent scope, use/market/locale/synthetic operations e validade temporal.
 - [ ] Definir audit log, deleção e exportação de dados.
 - [ ] Fazer threat model de upload, prompt injection, SSRF e webhook forgery.
 
@@ -266,10 +266,10 @@
 
 ### F0.010 — Direitos [FR-035]
 
-- [ ] Modelar owner, license, permitted uses, territory, expiry, consent e status unknown/restricted.
-- [ ] Criar gate central consultado por busca, Director, geração, render e export.
-- [ ] Bloquear uso quando direitos forem ausentes ou incompatíveis; permitir revisão autorizada.
-- [ ] Registrar cada decisão de uso e testar expiração durante projeto ativo.
+- [x] Modelar owner, license, permitted uses, territory, expiry, consent e status unknown/restricted. Evidência: `AssetRightsSnapshot` v1 content-addressed e migration F0-021.
+- [ ] Criar gate central consultado por busca, Director, geração, render e export. Parcial F0-021: o mesmo evaluator fail-closed já protege a autorização de materialização do RenderInput; faltam busca, Director, geração e export.
+- [ ] Bloquear uso quando direitos forem ausentes ou incompatíveis; permitir revisão autorizada. Parcial F0-021: materialização automática é negada para rights/consent ausentes, unknown, restricted, expired, revoked ou fora de use/market/locale/operação; fluxo administrativo de revisão ainda falta.
+- [ ] Registrar cada decisão de uso e testar expiração durante projeto ativo. Parcial F0-021: cada autorização persiste decisão por asset, snapshot usado, motivos, actor e validade curta; falta propagação/revogação em projetos ativos.
 
 ### F0.011 — Tipos de ativos [FR-041]
 
@@ -376,7 +376,7 @@
 - [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
 - [x] Persistir hashes e versões de tool/model em cada edge. Evidência: manifest v2, colunas normalizadas de execution provenance e API pública por manifest.
 - [x] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
-- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-020: grafo, provenance, recipe e RenderInput protegidos, checkout autenticado e preflight de renderer/composição/assets já foram entregues; faltam rights/consent, materialização, execução e comparação golden.
+- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-021: grafo, provenance, recipe e RenderInput protegidos, checkout autenticado, preflight técnico e autorização auditável de rights/consent já foram entregues; faltam materialização efetiva, execução e comparação golden.
 
 ### F0.026 — Durable jobs [FR-232]
 
@@ -395,7 +395,7 @@
 ### F0.028 — Props e manifest [FR-234]
 
 - [x] Definir `RenderInput` autocontido e schema versionado. Evidência: `render-input/v1`, hash canônico, preflight público e testes de materialização sem banco.
-- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-020: resolver port, validação de URI/checksum/tamanho e preflight workspace-scoped de identidade/disponibilidade entregues; faltam storage tipado, signed URLs, rights/consent e integração com o worker.
+- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-021: resolver port, validação de URI/checksum/tamanho, preflight workspace-scoped e autorização rights/consent auditável entregues; faltam storage tipado, signed URLs e integração com o worker.
 - [x] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
 - [x] Salvar manifest com checksums, plan hash e renderer version. Evidência: `media-artifact-manifest/v4` vincula por hash um `render-input/v1` protegido que contém checksums ordenados, plan hash e identidade versionada do renderer.
 - [ ] Reexecutar golden render somente a partir do manifest salvo.
@@ -2865,7 +2865,7 @@ Confirmação hospedada:
 
 ### Slice F0-020 — Checkout autenticado e preflight de reconstrução
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `07409eb`.
 
 Entregas:
 
@@ -2908,3 +2908,56 @@ Limites explícitos desta slice:
 - ainda não existe `PublicOperation`, reserva de custo, worker isolado, heartbeat, cancel ou retry;
 - nenhum endpoint devolve o `RenderInput` canônico descriptografado;
 - o próximo passo é implementar rights gate e materialização auditável, então executar o smoke/golden render somente a partir deste checkout.
+
+Confirmação hospedada:
+
+- o run `29327471607` aprovou os 20 passos no Linux, incluindo migration Postgres, build de produção e integrações públicas.
+
+### Slice F0-021 — Rights, consent e autorização auditável de materialização
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- contrato de domínio fechado `asset-rights/v1`, content-addressed e imutável por artifact;
+- snapshots versionam owner, license, status, usos permitidos/proibidos, workspace, mercados, locales, operações sintéticas, expiração e nota de origem;
+- consentimento possui status independente, finalidade, mercado, locale, operação sintética, expiração e referência opcional ao artifact de evidência;
+- statuses `unknown`, `restricted`, `expired` e `revoked` falham fechados; ausência de snapshot nunca equivale a autorização;
+- `not-required` é uma declaração explícita de consentimento, separada de `approved`;
+- evaluator determinístico valida finalidade, proibição, workspace, território, locale, operação sintética e tempo;
+- autorizações positivas possuem validade máxima de cinco minutos e sempre exigem revalidação no worker/commit;
+- `V2AssetRightsSnapshot` preserva histórico e o artifact aponta para a revisão corrente sem alterar snapshots anteriores;
+- replay natural de um PUT semanticamente idêntico reutiliza o snapshot pelo hash e não cria nova revisão;
+- evidência de consentimento precisa existir no mesmo workspace e fica protegida por foreign key;
+- `V2MaterializationAuthorization` registra target artifact, manifest, input hash, actor, request fingerprint, contexto, status, issues e validade;
+- `V2AssetUseDecision` registra uma decisão ordenada por asset, snapshot avaliado, outcome, reason codes e validade;
+- autorização usa `Idempotency-Key`; replay devolve o mesmo receipt e payload diferente com a mesma chave retorna conflito;
+- o service autentica o RenderInput protegido, revalida renderer/composição/identidade dos assets e aplica rights/consent a todos os inputs;
+- capability `apollo.artifacts.rights.read@1.0.0` expõe `GET /v1/artifacts/{artifactId}/rights` com `artifacts:rights`;
+- capability `apollo.artifacts.rights.set@1.0.0` expõe `PUT /v1/artifacts/{artifactId}/rights` com `artifacts:rights`;
+- capability `apollo.artifacts.materialization.authorize@1.0.0` expõe `POST /v1/artifacts/{artifactId}/materialization-authorizations/{manifestId}` com `artifacts:render`;
+- receipts públicos não contêm props, canonical keys, URLs, paths, ciphertext, chaves nem notas jurídicas;
+- JSON Schemas, exemplos, OpenAPI, capability discovery, baseline e constraints PostgreSQL foram ampliados aditivamente.
+
+Evidências locais:
+
+- testes de domínio comprovam hash canônico, imutabilidade, allow válido e bloqueios por mercado, consent unknown e rights ausente;
+- service test comprova avaliação de todos os assets, locale derivado do RenderInput, validade curta e ausência de props/keys no receipt;
+- API ponta a ponta comprova rights inicialmente ausentes, nega materialização, configura snapshot, autoriza, reproduz idempotentemente e rejeita reuso divergente da key;
+- integração pública comprova uma autorização e uma decisão persistidas sem duplicata;
+- scope filtering esconde as três capabilities de clients sem `artifacts:read`, `artifacts:rights` ou `artifacts:render`;
+- migration valida 15 tabelas, 48 índices, 31 foreign keys e checks de status, hashes, JSON, outcome e validade;
+- contratos aprovam 20 capabilities, 27 schemas, 33 exemplos e 17 paths;
+- suíte unitária passa com 48 testes;
+- build Next.js registra as rotas dinâmicas de rights e materialization authorizations;
+- API completa passou em banco SQLite descartável; a aplicação real da migration PostgreSQL será confirmada pelo CI hospedado quando esta slice for publicada.
+
+Limites explícitos desta slice:
+
+- o receipt autoriza a etapa, mas ainda não cria URL assinada, path local nem materializa bytes;
+- o worker futuro deve reler os snapshots correntes imediatamente antes de resolver storage e antes de promover o output final;
+- busca, Director, geração sintética e export ainda não consomem o gate central;
+- não existe ainda fila de revisão administrativa para uso restricted;
+- revogação cria um novo snapshot corrente, mas ainda não marca outputs downstream para review;
+- fonts, LUTs e data continuam bloqueados até existir storage tipado;
+- smoke/golden render continua pendente até materialização efetiva e execução isolada pelo manifest.

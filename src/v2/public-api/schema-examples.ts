@@ -6,6 +6,35 @@ const workspaceId = 'workspace-example-1'
 const clientId = 'client-example-1'
 const credentialId = 'credential-example-1'
 const artifactId = 'artifact-example-1'
+const rightsSnapshotId = 'rights-example-1'
+const assetRightsRequestExample = {
+  owner: 'Alpes Digital',
+  license: 'owned-media',
+  status: 'approved',
+  allowedUses: ['paid-ad', 'organic-content'],
+  prohibitedUses: [],
+  allowedMarkets: ['BR'],
+  allowedLocales: ['pt-BR'],
+  allowedSyntheticOperations: [],
+  expiresAt: '2027-07-12T20:00:00.000Z',
+  consent: {
+    status: 'not-required',
+    allowedUses: [],
+  },
+  sourceNote: 'Direitos confirmados pelo administrador do workspace.',
+}
+const assetRightsSnapshotExample = {
+  schemaVersion: 'asset-rights/v1',
+  id: rightsSnapshotId,
+  workspaceId,
+  artifactId,
+  sequence: 1,
+  snapshotHash: '6'.repeat(64),
+  ...assetRightsRequestExample,
+  allowedWorkspaceIds: [workspaceId],
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+}
 const renderInputRequestExample = {
   schemaVersion: 'render-input/v1',
   renderer: {
@@ -362,6 +391,72 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               message: 'Manifest predates protected RenderInput',
             },
           ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/set-asset-rights-request/v1': [
+      assetRightsRequestExample,
+    ],
+    'apollo://schemas/asset-rights-current/v1': [
+      {
+        data: {
+          artifactId,
+          configured: true,
+          rights: assetRightsSnapshotExample,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: { artifactId, configured: false },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/asset-rights-set/v1': [
+      {
+        data: {
+          artifactId,
+          rights: assetRightsSnapshotExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/authorize-materialization-request/v1': [
+      { use: 'paid-ad', market: 'BR', syntheticOperations: [] },
+    ],
+    'apollo://schemas/materialization-authorization/v1': [
+      {
+        data: {
+          authorization: {
+            schemaVersion: 'materialization-authorization/v1',
+            id: 'materialization-auth-example-1',
+            artifactId,
+            manifestId: 'manifest-example-4',
+            inputHash: '9'.repeat(64),
+            use: 'paid-ad',
+            market: 'BR',
+            locale: 'pt-BR',
+            syntheticOperations: [],
+            status: 'authorized',
+            issues: [],
+            decisions: [
+              {
+                artifactId,
+                assetOrdinal: 0,
+                assetKind: 'video',
+                outcome: 'allow',
+                reasonCodes: [],
+                rightsSnapshotId,
+                rightsSnapshotHash: '6'.repeat(64),
+                validUntil: '2026-07-12T20:05:00.000Z',
+              },
+            ],
+            evaluatedAt: createdAt,
+            validUntil: '2026-07-12T20:05:00.000Z',
+            revalidationRequired: true,
+          },
+          replayed: false,
         },
         meta: { apiVersion: 'v1' },
       },

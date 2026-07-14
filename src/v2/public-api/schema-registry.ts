@@ -255,6 +255,112 @@ const renderInputAssetSchema = {
   },
 }
 
+const rightsTokenSchema = {
+  type: 'string',
+  pattern: '^[a-z0-9][a-z0-9._:-]{0,63}$',
+}
+const rightsTokenArraySchema = {
+  type: 'array',
+  maxItems: 64,
+  uniqueItems: true,
+  items: rightsTokenSchema,
+}
+const marketArraySchema = {
+  type: 'array',
+  maxItems: 64,
+  uniqueItems: true,
+  items: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9-]{1,15}$' },
+}
+const localeArraySchema = {
+  type: 'array',
+  maxItems: 64,
+  uniqueItems: true,
+  items: {
+    type: 'string',
+    pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$',
+  },
+}
+const consentScopeSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['status', 'allowedUses'],
+  properties: {
+    status: {
+      enum: ['not-required', 'approved', 'restricted', 'unknown', 'expired', 'revoked'],
+    },
+    allowedUses: rightsTokenArraySchema,
+    allowedMarkets: marketArraySchema,
+    allowedLocales: localeArraySchema,
+    allowedSyntheticOperations: rightsTokenArraySchema,
+    expiresAt: dateTimeSchema,
+    documentArtifactId: idSchema,
+  },
+}
+const assetRightsDraftSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['status', 'allowedUses', 'prohibitedUses', 'consent'],
+  properties: {
+    owner: { type: 'string', minLength: 1, maxLength: 240 },
+    license: { type: 'string', minLength: 1, maxLength: 240 },
+    status: { enum: ['approved', 'restricted', 'unknown', 'expired', 'revoked'] },
+    allowedUses: rightsTokenArraySchema,
+    prohibitedUses: rightsTokenArraySchema,
+    allowedMarkets: marketArraySchema,
+    allowedLocales: localeArraySchema,
+    allowedSyntheticOperations: rightsTokenArraySchema,
+    expiresAt: dateTimeSchema,
+    consent: consentScopeSchema,
+    sourceNote: { type: 'string', minLength: 1, maxLength: 2000 },
+  },
+}
+const assetRightsSnapshotSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'artifactId', 'sequence',
+    'snapshotHash', 'status', 'allowedUses', 'prohibitedUses',
+    'allowedWorkspaceIds', 'consent', 'createdBy', 'createdAt',
+  ],
+  properties: {
+    ...assetRightsDraftSchema.properties,
+    schemaVersion: { const: 'asset-rights/v1' },
+    id: idSchema,
+    workspaceId: idSchema,
+    artifactId: idSchema,
+    sequence: { type: 'integer', minimum: 1 },
+    snapshotHash: sha256Schema,
+    allowedWorkspaceIds: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 64,
+      uniqueItems: true,
+      items: idSchema,
+    },
+    createdBy: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id'],
+      properties: {
+        type: { enum: ['api-client', 'user', 'system'] },
+        id: idSchema,
+      },
+    },
+    createdAt: dateTimeSchema,
+  },
+}
+const assetUseDenialCodes = [
+  'RIGHTS_MISSING', 'RIGHTS_STATUS_RESTRICTED', 'RIGHTS_STATUS_UNKNOWN',
+  'RIGHTS_STATUS_EXPIRED', 'RIGHTS_STATUS_REVOKED', 'RIGHTS_EXPIRED',
+  'RIGHTS_WORKSPACE_NOT_ALLOWED', 'RIGHTS_USE_PROHIBITED',
+  'RIGHTS_USE_NOT_ALLOWED', 'RIGHTS_MARKET_NOT_ALLOWED',
+  'RIGHTS_LOCALE_NOT_ALLOWED', 'RIGHTS_SYNTHETIC_OPERATION_NOT_ALLOWED',
+  'CONSENT_STATUS_RESTRICTED', 'CONSENT_STATUS_UNKNOWN',
+  'CONSENT_STATUS_EXPIRED', 'CONSENT_STATUS_REVOKED', 'CONSENT_EXPIRED',
+  'CONSENT_USE_NOT_ALLOWED', 'CONSENT_MARKET_NOT_ALLOWED',
+  'CONSENT_LOCALE_NOT_ALLOWED', 'CONSENT_SYNTHETIC_OPERATION_NOT_ALLOWED',
+]
+
 const credentialMutationDataSchema = {
   type: 'object',
   additionalProperties: false,
@@ -787,6 +893,173 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           then: { properties: { issues: { type: 'array', minItems: 1 } } },
         },
       ],
+    }),
+  ),
+  defineSchema('set-asset-rights-request', 1, 'Set asset rights request',
+    assetRightsDraftSchema,
+  ),
+  defineSchema('asset-rights-current', 1, 'Current asset rights response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['artifactId', 'configured'],
+      properties: {
+        artifactId: idSchema,
+        configured: { type: 'boolean' },
+        rights: assetRightsSnapshotSchema,
+      },
+      allOf: [
+        {
+          if: { properties: { configured: { const: true } }, required: ['configured'] },
+          then: { required: ['rights'], properties: { rights: {} } },
+          else: { properties: { rights: false } },
+        },
+      ],
+    }),
+  ),
+  defineSchema('asset-rights-set', 1, 'Asset rights set response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['artifactId', 'rights', 'replayed'],
+      properties: {
+        artifactId: idSchema,
+        rights: assetRightsSnapshotSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'authorize-materialization-request',
+    1,
+    'Authorize RenderInput materialization request',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['use'],
+      properties: {
+        use: rightsTokenSchema,
+        market: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9-]{1,15}$' },
+        syntheticOperations: rightsTokenArraySchema,
+      },
+    },
+  ),
+  defineSchema(
+    'materialization-authorization',
+    1,
+    'RenderInput materialization authorization response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['authorization', 'replayed'],
+      properties: {
+        replayed: { type: 'boolean' },
+        authorization: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'schemaVersion', 'id', 'artifactId', 'manifestId', 'inputHash',
+            'use', 'locale', 'syntheticOperations', 'status', 'issues',
+            'decisions', 'evaluatedAt', 'revalidationRequired',
+          ],
+          properties: {
+            schemaVersion: { const: 'materialization-authorization/v1' },
+            id: idSchema,
+            artifactId: idSchema,
+            manifestId: idSchema,
+            inputHash: sha256Schema,
+            use: rightsTokenSchema,
+            market: { type: 'string', pattern: '^[A-Z0-9][A-Z0-9-]{1,15}$' },
+            locale: {
+              type: 'string',
+              pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$',
+            },
+            syntheticOperations: rightsTokenArraySchema,
+            status: { enum: ['authorized', 'denied'] },
+            issues: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['code'],
+                properties: {
+                  code: {
+                    enum: [
+                      'RENDERER_UNAVAILABLE', 'COMPOSITION_UNAVAILABLE',
+                      'ASSET_NOT_FOUND', 'ASSET_UNAVAILABLE',
+                      'ASSET_IDENTITY_MISMATCH', 'ASSET_KIND_UNSUPPORTED',
+                      'ASSET_RIGHTS_DENIED',
+                    ],
+                  },
+                  assetOrdinal: { type: 'integer', minimum: 0, maximum: 4095 },
+                  assetKind: { enum: ['video', 'audio', 'image', 'font', 'lut', 'data'] },
+                },
+              },
+            },
+            decisions: {
+              type: 'array',
+              maxItems: 4096,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: [
+                  'artifactId', 'assetOrdinal', 'assetKind', 'outcome', 'reasonCodes',
+                ],
+                properties: {
+                  artifactId: idSchema,
+                  assetOrdinal: { type: 'integer', minimum: 0, maximum: 4095 },
+                  assetKind: { enum: ['video', 'audio', 'image', 'font', 'lut', 'data'] },
+                  outcome: { enum: ['allow', 'deny'] },
+                  reasonCodes: {
+                    type: 'array',
+                    uniqueItems: true,
+                    items: { enum: assetUseDenialCodes },
+                  },
+                  rightsSnapshotId: idSchema,
+                  rightsSnapshotHash: sha256Schema,
+                  validUntil: dateTimeSchema,
+                },
+                allOf: [
+                  {
+                    if: { properties: { outcome: { const: 'allow' } }, required: ['outcome'] },
+                    then: {
+                      required: ['rightsSnapshotId', 'rightsSnapshotHash', 'validUntil'],
+                      properties: {
+                        reasonCodes: { type: 'array', maxItems: 0 },
+                        rightsSnapshotId: {},
+                        rightsSnapshotHash: {},
+                        validUntil: {},
+                      },
+                    },
+                    else: { properties: { reasonCodes: { type: 'array', minItems: 1 } } },
+                  },
+                ],
+              },
+            },
+            evaluatedAt: dateTimeSchema,
+            validUntil: dateTimeSchema,
+            revalidationRequired: { const: true },
+          },
+          allOf: [
+            {
+              if: { properties: { status: { const: 'authorized' } }, required: ['status'] },
+              then: {
+                required: ['validUntil'],
+                properties: {
+                  issues: { type: 'array', maxItems: 0 },
+                  validUntil: {},
+                },
+              },
+              else: {
+                properties: {
+                  issues: { type: 'array', minItems: 1 },
+                  validUntil: false,
+                },
+              },
+            },
+          ],
+        },
+      },
     }),
   ),
   defineSchema('render-input-preflight-request', 1, 'Portable RenderInput preflight request', {

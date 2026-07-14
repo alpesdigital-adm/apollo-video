@@ -71,6 +71,9 @@ model V2Workspace {
   mediaLineage       V2MediaArtifactLineage[]
   recipeParameters   V2RecipeParameterPayload[]
   renderInputs       V2RenderInputPayload[]
+  rightsSnapshots    V2AssetRightsSnapshot[]
+  materializations   V2MaterializationAuthorization[]
+  assetUseDecisions  V2AssetUseDecision[]
 
   @@map("v2_workspaces")
 }
@@ -206,24 +209,31 @@ model V2IdempotencyRecord {
 }
 
 model V2MediaArtifact {
-  id          String   @id
-  workspaceId String
-  artifactKey String
-  sha256      String
-  byteSize    BigInt
-  mediaType   String
-  container   String
-  status      String   @default("available")
-  createdAt   DateTime @default(now())
+  id                      String   @id
+  workspaceId             String
+  artifactKey             String
+  sha256                  String
+  byteSize                BigInt
+  mediaType               String
+  container               String
+  status                  String   @default("available")
+  currentRightsSnapshotId String?
+  rightsRevision          Int      @default(0)
+  createdAt               DateTime @default(now())
 
-  workspace   V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  manifests   V2MediaArtifactManifest[]
-  lineageUses V2MediaArtifactLineage[]  @relation("V2MediaLineageSource")
+  workspace                V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  manifests                V2MediaArtifactManifest[]
+  lineageUses              V2MediaArtifactLineage[]         @relation("V2MediaLineageSource")
+  rightsSnapshots          V2AssetRightsSnapshot[]          @relation("V2AssetRightsSnapshots")
+  currentRightsSnapshot    V2AssetRightsSnapshot?           @relation("V2CurrentAssetRights", fields: [currentRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  consentEvidenceFor       V2AssetRightsSnapshot[]          @relation("V2ConsentDocument")
+  materializationTargets   V2MaterializationAuthorization[] @relation("V2MaterializationTarget")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
   @@index([workspaceId, sha256])
   @@index([workspaceId, mediaType, status])
+  @@index([workspaceId, currentRightsSnapshotId])
   @@map("v2_media_artifacts")
 }
 
@@ -247,6 +257,7 @@ model V2MediaArtifactManifest {
   lineageEdges     V2MediaArtifactLineage[]
   recipeParameters V2RecipeParameterPayload? @relation(fields: [recipeParametersRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
   renderInput      V2RenderInputPayload?     @relation(fields: [renderInputRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
+  materializations V2MaterializationAuthorization[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, manifestHash])
@@ -323,4 +334,103 @@ model V2MediaArtifactLineage {
   @@unique([manifestId, sourceArtifactId, role])
   @@index([workspaceId, sourceArtifactId])
   @@map("v2_media_artifact_lineage")
+}
+
+model V2AssetRightsSnapshot {
+  id                             String    @id
+  workspaceId                    String
+  artifactId                     String
+  sequence                       Int
+  schemaVersion                  String
+  snapshotHash                   String
+  owner                          String?
+  license                        String?
+  status                         String
+  allowedUsesJson                String
+  prohibitedUsesJson             String
+  allowedWorkspaceIdsJson        String
+  allowedMarketsJson             String?
+  allowedLocalesJson             String?
+  allowedSyntheticOperationsJson String?
+  expiresAt                      DateTime?
+  consentStatus                  String
+  consentAllowedUsesJson         String
+  consentAllowedMarketsJson      String?
+  consentAllowedLocalesJson      String?
+  consentSyntheticOperationsJson String?
+  consentExpiresAt               DateTime?
+  consentDocumentArtifactId      String?
+  sourceNote                     String?
+  createdByType                  String
+  createdById                    String
+  createdAt                      DateTime  @default(now())
+
+  workspace           V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact            V2MediaArtifact   @relation("V2AssetRightsSnapshots", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  currentForArtifacts V2MediaArtifact[] @relation("V2CurrentAssetRights")
+  consentDocument     V2MediaArtifact?  @relation("V2ConsentDocument", fields: [consentDocumentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  decisions           V2AssetUseDecision[]
+
+  @@unique([id, workspaceId])
+  @@unique([artifactId, sequence])
+  @@unique([artifactId, snapshotHash])
+  @@index([workspaceId, status, expiresAt])
+  @@index([workspaceId, consentStatus, consentExpiresAt])
+  @@index([workspaceId, consentDocumentArtifactId])
+  @@map("v2_asset_rights_snapshots")
+}
+
+model V2MaterializationAuthorization {
+  id                 String    @id
+  workspaceId        String
+  artifactId         String
+  manifestId         String
+  inputHash          String
+  rightsUse          String
+  market             String?
+  locale             String
+  syntheticOpsJson   String
+  status             String
+  issuesJson         String
+  clientId           String
+  idempotencyKey     String
+  requestFingerprint String
+  evaluatedAt        DateTime
+  validUntil         DateTime?
+  createdAt          DateTime  @default(now())
+
+  workspace      V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  targetArtifact V2MediaArtifact         @relation("V2MaterializationTarget", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  manifest       V2MediaArtifactManifest @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  decisions      V2AssetUseDecision[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, clientId, idempotencyKey])
+  @@index([workspaceId, artifactId, evaluatedAt])
+  @@index([workspaceId, status, validUntil])
+  @@map("v2_materialization_authorizations")
+}
+
+model V2AssetUseDecision {
+  id               String    @id
+  workspaceId      String
+  authorizationId  String
+  artifactId       String
+  assetOrdinal     Int
+  assetKind        String
+  rightsSnapshotId String?
+  outcome          String
+  reasonCodesJson  String
+  evaluatedAt      DateTime
+  validUntil       DateTime?
+  createdAt        DateTime  @default(now())
+
+  workspace      V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  authorization  V2MaterializationAuthorization @relation(fields: [authorizationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  rightsSnapshot V2AssetRightsSnapshot?          @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([authorizationId, assetOrdinal])
+  @@index([workspaceId, artifactId, evaluatedAt])
+  @@index([workspaceId, rightsSnapshotId])
+  @@map("v2_asset_use_decisions")
 }

@@ -25,6 +25,32 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.artifacts.materialization.authorize": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:render"
+      ],
+      "inputSchemaRef": "apollo://schemas/authorize-materialization-request/v1",
+      "outputSchemaRef": "apollo://schemas/materialization-authorization/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/artifacts/{artifactId}/materialization-authorizations/{manifestId}"
+      },
+      "toolName": "apollo.artifacts.materialization.authorize",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.artifacts.provenance.read": {
       "version": "1.0.0",
       "exposure": "public",
@@ -138,6 +164,54 @@
         200
       ],
       "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.artifacts.rights.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:rights"
+      ],
+      "outputSchemaRef": "apollo://schemas/asset-rights-current/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/artifacts/{artifactId}/rights"
+      },
+      "toolName": "apollo.artifacts.rights.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.artifacts.rights.set": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:rights"
+      ],
+      "inputSchemaRef": "apollo://schemas/set-asset-rights-request/v1",
+      "outputSchemaRef": "apollo://schemas/asset-rights-set/v1",
+      "endpoint": {
+        "method": "PUT",
+        "path": "/v1/artifacts/{artifactId}/rights"
+      },
+      "toolName": "apollo.artifacts.rights.set",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
     "apollo.capabilities.list": {
@@ -2173,6 +2247,584 @@
         }
       }
     },
+    "apollo://schemas/asset-rights-current/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifactId",
+            "configured"
+          ],
+          "properties": {
+            "artifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "configured": {
+              "type": "boolean"
+            },
+            "rights": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "artifactId",
+                "sequence",
+                "snapshotHash",
+                "status",
+                "allowedUses",
+                "prohibitedUses",
+                "allowedWorkspaceIds",
+                "consent",
+                "createdBy",
+                "createdAt"
+              ],
+              "properties": {
+                "owner": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                },
+                "license": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                },
+                "status": {
+                  "enum": [
+                    "approved",
+                    "restricted",
+                    "unknown",
+                    "expired",
+                    "revoked"
+                  ]
+                },
+                "allowedUses": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                  }
+                },
+                "prohibitedUses": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                  }
+                },
+                "allowedMarkets": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{1,15}$"
+                  }
+                },
+                "allowedLocales": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+                  }
+                },
+                "allowedSyntheticOperations": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                  }
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "consent": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "allowedUses"
+                  ],
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "not-required",
+                        "approved",
+                        "restricted",
+                        "unknown",
+                        "expired",
+                        "revoked"
+                      ]
+                    },
+                    "allowedUses": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                      }
+                    },
+                    "allowedMarkets": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{1,15}$"
+                      }
+                    },
+                    "allowedLocales": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+                      }
+                    },
+                    "allowedSyntheticOperations": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                      }
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "documentArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "sourceNote": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "schemaVersion": {
+                  "const": "asset-rights/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "artifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "snapshotHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "allowedWorkspaceIds": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "api-client",
+                        "user",
+                        "system"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "configured": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "configured"
+                ]
+              },
+              "then": {
+                "required": [
+                  "rights"
+                ],
+                "properties": {
+                  "rights": {}
+                }
+              },
+              "else": {
+                "properties": {
+                  "rights": false
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/asset-rights-set/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifactId",
+            "rights",
+            "replayed"
+          ],
+          "properties": {
+            "artifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "rights": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "artifactId",
+                "sequence",
+                "snapshotHash",
+                "status",
+                "allowedUses",
+                "prohibitedUses",
+                "allowedWorkspaceIds",
+                "consent",
+                "createdBy",
+                "createdAt"
+              ],
+              "properties": {
+                "owner": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                },
+                "license": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                },
+                "status": {
+                  "enum": [
+                    "approved",
+                    "restricted",
+                    "unknown",
+                    "expired",
+                    "revoked"
+                  ]
+                },
+                "allowedUses": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                  }
+                },
+                "prohibitedUses": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                  }
+                },
+                "allowedMarkets": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{1,15}$"
+                  }
+                },
+                "allowedLocales": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+                  }
+                },
+                "allowedSyntheticOperations": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                  }
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "consent": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "allowedUses"
+                  ],
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "not-required",
+                        "approved",
+                        "restricted",
+                        "unknown",
+                        "expired",
+                        "revoked"
+                      ]
+                    },
+                    "allowedUses": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                      }
+                    },
+                    "allowedMarkets": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{1,15}$"
+                      }
+                    },
+                    "allowedLocales": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+                      }
+                    },
+                    "allowedSyntheticOperations": {
+                      "type": "array",
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                      }
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "documentArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "sourceNote": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "schemaVersion": {
+                  "const": "asset-rights/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "artifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "snapshotHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "allowedWorkspaceIds": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "api-client",
+                        "user",
+                        "system"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/authorize-materialization-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "use"
+      ],
+      "properties": {
+        "use": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+        },
+        "market": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{1,15}$"
+        },
+        "syntheticOperations": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+          }
+        }
+      }
+    },
     "apollo://schemas/capability-list/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -2489,6 +3141,318 @@
         },
         "title": {
           "type": "string"
+        }
+      }
+    },
+    "apollo://schemas/materialization-authorization/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authorization",
+            "replayed"
+          ],
+          "properties": {
+            "replayed": {
+              "type": "boolean"
+            },
+            "authorization": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "artifactId",
+                "manifestId",
+                "inputHash",
+                "use",
+                "locale",
+                "syntheticOperations",
+                "status",
+                "issues",
+                "decisions",
+                "evaluatedAt",
+                "revalidationRequired"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "materialization-authorization/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "artifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "manifestId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "inputHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "use": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                },
+                "market": {
+                  "type": "string",
+                  "pattern": "^[A-Z0-9][A-Z0-9-]{1,15}$"
+                },
+                "locale": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+                },
+                "syntheticOperations": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+                  }
+                },
+                "status": {
+                  "enum": [
+                    "authorized",
+                    "denied"
+                  ]
+                },
+                "issues": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "code"
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "RENDERER_UNAVAILABLE",
+                          "COMPOSITION_UNAVAILABLE",
+                          "ASSET_NOT_FOUND",
+                          "ASSET_UNAVAILABLE",
+                          "ASSET_IDENTITY_MISMATCH",
+                          "ASSET_KIND_UNSUPPORTED",
+                          "ASSET_RIGHTS_DENIED"
+                        ]
+                      },
+                      "assetOrdinal": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 4095
+                      },
+                      "assetKind": {
+                        "enum": [
+                          "video",
+                          "audio",
+                          "image",
+                          "font",
+                          "lut",
+                          "data"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "decisions": {
+                  "type": "array",
+                  "maxItems": 4096,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "artifactId",
+                      "assetOrdinal",
+                      "assetKind",
+                      "outcome",
+                      "reasonCodes"
+                    ],
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "assetOrdinal": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 4095
+                      },
+                      "assetKind": {
+                        "enum": [
+                          "video",
+                          "audio",
+                          "image",
+                          "font",
+                          "lut",
+                          "data"
+                        ]
+                      },
+                      "outcome": {
+                        "enum": [
+                          "allow",
+                          "deny"
+                        ]
+                      },
+                      "reasonCodes": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "RIGHTS_MISSING",
+                            "RIGHTS_STATUS_RESTRICTED",
+                            "RIGHTS_STATUS_UNKNOWN",
+                            "RIGHTS_STATUS_EXPIRED",
+                            "RIGHTS_STATUS_REVOKED",
+                            "RIGHTS_EXPIRED",
+                            "RIGHTS_WORKSPACE_NOT_ALLOWED",
+                            "RIGHTS_USE_PROHIBITED",
+                            "RIGHTS_USE_NOT_ALLOWED",
+                            "RIGHTS_MARKET_NOT_ALLOWED",
+                            "RIGHTS_LOCALE_NOT_ALLOWED",
+                            "RIGHTS_SYNTHETIC_OPERATION_NOT_ALLOWED",
+                            "CONSENT_STATUS_RESTRICTED",
+                            "CONSENT_STATUS_UNKNOWN",
+                            "CONSENT_STATUS_EXPIRED",
+                            "CONSENT_STATUS_REVOKED",
+                            "CONSENT_EXPIRED",
+                            "CONSENT_USE_NOT_ALLOWED",
+                            "CONSENT_MARKET_NOT_ALLOWED",
+                            "CONSENT_LOCALE_NOT_ALLOWED",
+                            "CONSENT_SYNTHETIC_OPERATION_NOT_ALLOWED"
+                          ]
+                        }
+                      },
+                      "rightsSnapshotId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "rightsSnapshotHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "validUntil": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {
+                            "outcome": {
+                              "const": "allow"
+                            }
+                          },
+                          "required": [
+                            "outcome"
+                          ]
+                        },
+                        "then": {
+                          "required": [
+                            "rightsSnapshotId",
+                            "rightsSnapshotHash",
+                            "validUntil"
+                          ],
+                          "properties": {
+                            "reasonCodes": {
+                              "type": "array",
+                              "maxItems": 0
+                            },
+                            "rightsSnapshotId": {},
+                            "rightsSnapshotHash": {},
+                            "validUntil": {}
+                          }
+                        },
+                        "else": {
+                          "properties": {
+                            "reasonCodes": {
+                              "type": "array",
+                              "minItems": 1
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                "evaluatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "validUntil": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revalidationRequired": {
+                  "const": true
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "status": {
+                        "const": "authorized"
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  },
+                  "then": {
+                    "required": [
+                      "validUntil"
+                    ],
+                    "properties": {
+                      "issues": {
+                        "type": "array",
+                        "maxItems": 0
+                      },
+                      "validUntil": {}
+                    }
+                  },
+                  "else": {
+                    "properties": {
+                      "issues": {
+                        "type": "array",
+                        "minItems": 1
+                      },
+                      "validUntil": false
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },
@@ -3155,6 +4119,156 @@
           "minimum": 0,
           "maximum": 86400,
           "default": 900
+        }
+      }
+    },
+    "apollo://schemas/set-asset-rights-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "allowedUses",
+        "prohibitedUses",
+        "consent"
+      ],
+      "properties": {
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "status": {
+          "enum": [
+            "approved",
+            "restricted",
+            "unknown",
+            "expired",
+            "revoked"
+          ]
+        },
+        "allowedUses": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+          }
+        },
+        "prohibitedUses": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+          }
+        },
+        "allowedMarkets": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{1,15}$"
+          }
+        },
+        "allowedLocales": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+          }
+        },
+        "allowedSyntheticOperations": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+          }
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "consent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "allowedUses"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "not-required",
+                "approved",
+                "restricted",
+                "unknown",
+                "expired",
+                "revoked"
+              ]
+            },
+            "allowedUses": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+              }
+            },
+            "allowedMarkets": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{1,15}$"
+              }
+            },
+            "allowedLocales": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+              }
+            },
+            "allowedSyntheticOperations": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+              }
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "documentArtifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "sourceNote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
         }
       }
     }

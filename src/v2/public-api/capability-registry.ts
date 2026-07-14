@@ -4,7 +4,7 @@ export type CapabilityExposure = 'public' | 'workspace-admin' | 'internal-only'
 export type CapabilityOperationKind = 'query' | 'command' | 'preflight' | 'job'
 export type CapabilityCostClass = 'free' | 'low' | 'medium' | 'high' | 'variable'
 export type CapabilityConfirmation = 'none' | 'preflight-token' | 'human-approval'
-export type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE'
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type CapabilityAuthMode = 'none' | 'optional' | 'required'
 export type CapabilityIdempotency = 'not-applicable' | 'required' | 'natural'
 export type CapabilitySuccessStatus = 200 | 201 | 202 | 204
@@ -439,6 +439,67 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     confirmation: 'none',
     successStatuses: [200],
     idempotency: 'natural',
+  },
+  {
+    id: 'apollo.artifacts.rights.read',
+    version: '1.0.0',
+    title: 'Read current asset rights',
+    description: 'Returns the current immutable rights and consent snapshot for one workspace artifact.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['artifacts:rights'],
+    outputSchemaRef: 'apollo://schemas/asset-rights-current/v1',
+    endpoint: { method: 'GET', path: '/v1/artifacts/{artifactId}/rights' },
+    toolName: 'apollo.artifacts.rights.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.artifacts.rights.set',
+    version: '1.0.0',
+    title: 'Set current asset rights',
+    description: 'Creates or reuses an immutable rights and consent snapshot and makes it current for one workspace artifact.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['artifacts:rights'],
+    inputSchemaRef: 'apollo://schemas/set-asset-rights-request/v1',
+    outputSchemaRef: 'apollo://schemas/asset-rights-set/v1',
+    endpoint: { method: 'PUT', path: '/v1/artifacts/{artifactId}/rights' },
+    toolName: 'apollo.artifacts.rights.set',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'natural',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.artifacts.materialization.authorize',
+    version: '1.0.0',
+    title: 'Authorize RenderInput materialization',
+    description: 'Authenticates a protected RenderInput, applies current rights and consent to every asset, and records an auditable short-lived authorization without exposing storage locations.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['artifacts:render'],
+    inputSchemaRef: 'apollo://schemas/authorize-materialization-request/v1',
+    outputSchemaRef: 'apollo://schemas/materialization-authorization/v1',
+    endpoint: {
+      method: 'POST',
+      path: '/v1/artifacts/{artifactId}/materialization-authorizations/{manifestId}',
+    },
+    toolName: 'apollo.artifacts.materialization.authorize',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'required',
+    requestBodyRequired: true,
   },
   {
     id: 'apollo.render-inputs.preflight',

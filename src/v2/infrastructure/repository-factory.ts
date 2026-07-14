@@ -2,6 +2,8 @@ import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
 
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
+import type { AssetRightsRepository } from '../application/ports/asset-rights-repository.ts'
+import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
 import type { ProtectedRenderInputStore } from '../application/ports/protected-render-input-store.ts'
 import type { RenderInputAssetAvailability } from '../application/ports/render-reconstruction-readiness.ts'
@@ -11,6 +13,8 @@ import type { WorkspaceRepository } from '../application/ports/workspace-reposit
 import { prisma } from '../../lib/db.ts'
 import { resolveV2PersistenceMode } from './persistence-mode.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
+import { PrismaAssetRightsRepository } from './prisma/asset-rights-repository.ts'
+import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
@@ -37,6 +41,14 @@ export function createApiClientRepository(): ApiClientRepository {
 
 export function createApiClientAdministrationRepository(): ApiClientAdministrationRepository {
   return new PrismaApiClientRepository(resolveV2Client())
+}
+
+export function createAssetRightsRepository(): AssetRightsRepository {
+  return new PrismaAssetRightsRepository(resolveV2Client())
+}
+
+export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {
+  return new PrismaMaterializationAuthorizationRepository(resolveV2Client())
 }
 
 export function createMediaArtifactQueryRepository(): MediaArtifactQueryRepository {

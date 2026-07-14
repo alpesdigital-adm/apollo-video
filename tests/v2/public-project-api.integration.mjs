@@ -76,10 +76,23 @@ test('authenticated public API manages projects, clients and artifact inspection
   let server
 
   const cleanup = async () => {
+    await client.v2AssetUseDecision.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2MaterializationAuthorization.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2MediaArtifactLineage.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
     await client.v2MediaArtifactManifest.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2MediaArtifact.updateMany({
+      where: { workspaceId: { in: workspaceIds } },
+      data: { currentRightsSnapshotId: null },
+    })
+    await client.v2AssetRightsSnapshot.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
     await client.v2MediaArtifact.deleteMany({
@@ -130,7 +143,14 @@ test('authenticated public API manages projects, clients and artifact inspection
       workspaceId,
       name: 'Public API Test Client',
       environment: apiEnvironment,
-      scopes: ['artifacts:read', 'clients:admin', 'projects:read', 'projects:write'],
+      scopes: [
+        'artifacts:read',
+        'artifacts:render',
+        'artifacts:rights',
+        'clients:admin',
+        'projects:read',
+        'projects:write',
+      ],
     })
 
     const artifacts = new PrismaMediaArtifactRepository(
@@ -322,6 +342,18 @@ test('authenticated public API manages projects, clients and artifact inspection
       'apollo.artifacts.reconstruction.preflight',
     )
     assert.equal(
+      openApi.paths['/v1/artifacts/{artifactId}/rights'].put[
+        'x-apollo-capability-id'
+      ],
+      'apollo.artifacts.rights.set',
+    )
+    assert.equal(
+      openApi.paths[
+        '/v1/artifacts/{artifactId}/materialization-authorizations/{manifestId}'
+      ].post['x-apollo-capability-id'],
+      'apollo.artifacts.materialization.authorize',
+    )
+    assert.equal(
       openApi.paths['/v1/render-inputs/preflight'].post['x-apollo-capability-id'],
       'apollo.render-inputs.preflight',
     )
@@ -364,6 +396,9 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.artifacts.replay-spec.read',
         'apollo.artifacts.render-input.read',
         'apollo.artifacts.reconstruction.preflight',
+        'apollo.artifacts.rights.read',
+        'apollo.artifacts.rights.set',
+        'apollo.artifacts.materialization.authorize',
         'apollo.render-inputs.preflight',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
@@ -451,6 +486,11 @@ test('authenticated public API manages projects, clients and artifact inspection
       { method: 'POST', headers: { authorization: childAuthorization } },
     )
     assert.equal(childReconstructionPreflightResponse.status, 403)
+    const childRightsResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`,
+      { headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childRightsResponse.status, 403)
     const childRenderInputResponse = await fetch(`${baseUrl}/v1/render-inputs/preflight`, {
       method: 'POST',
       headers: {
@@ -598,6 +638,141 @@ test('authenticated public API manages projects, clients and artifact inspection
     )
     assert.equal(reconstructionBodyResponse.status, 422)
     assert.equal((await reconstructionBodyResponse.json()).error.code, 'INVALID_ARGUMENT')
+
+    const unconfiguredRightsResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`,
+      { headers: { authorization } },
+    )
+    const unconfiguredRights = await unconfiguredRightsResponse.json()
+    assert.equal(unconfiguredRightsResponse.status, 200)
+    assert.deepEqual(unconfiguredRights.data, {
+      artifactId: sourceArtifactId,
+      configured: false,
+    })
+
+    const missingRightsAuthorizationResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${derivedArtifactId}/materialization-authorizations/${derivedManifestId}`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'materialization-missing-rights-1',
+        },
+        body: JSON.stringify({ use: 'paid-ad', market: 'BR' }),
+      },
+    )
+    const missingRightsAuthorization = await missingRightsAuthorizationResponse.json()
+    assert.equal(missingRightsAuthorizationResponse.status, 201)
+    assert.equal(missingRightsAuthorization.data.authorization.status, 'denied')
+    assert.deepEqual(
+      missingRightsAuthorization.data.authorization.decisions[0].reasonCodes,
+      ['RIGHTS_MISSING'],
+    )
+    assert.equal('validUntil' in missingRightsAuthorization.data.authorization, false)
+
+    const approvedRightsRequest = {
+      owner: 'Public API Workspace V2',
+      license: 'owned-media',
+      status: 'approved',
+      allowedUses: ['paid-ad'],
+      prohibitedUses: [],
+      allowedMarkets: ['BR'],
+      allowedLocales: ['pt-BR'],
+      allowedSyntheticOperations: [],
+      expiresAt: '2027-07-14T12:00:00.000Z',
+      consent: { status: 'not-required', allowedUses: [] },
+      sourceNote: 'Internal legal note that must not leak into authorization receipts.',
+    }
+    const setRights = () =>
+      fetch(`${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`, {
+        method: 'PUT',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify(approvedRightsRequest),
+      })
+    const setRightsResponse = await setRights()
+    const setRightsResult = await setRightsResponse.json()
+    assert.equal(setRightsResponse.status, 200)
+    assert.equal(setRightsResult.data.replayed, false)
+    assert.equal(setRightsResult.data.rights.status, 'approved')
+    assert.equal(setRightsResult.data.rights.sequence, 1)
+    assert.equal(setRightsResult.data.rights.snapshotHash.length, 64)
+
+    const replayRightsResponse = await setRights()
+    const replayRights = await replayRightsResponse.json()
+    assert.equal(replayRightsResponse.status, 200)
+    assert.equal(replayRights.data.replayed, true)
+    assert.equal(replayRights.data.rights.id, setRightsResult.data.rights.id)
+
+    const currentRightsResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`,
+      { headers: { authorization } },
+    )
+    const currentRights = await currentRightsResponse.json()
+    assert.equal(currentRightsResponse.status, 200)
+    assert.equal(currentRights.data.configured, true)
+    assert.equal(currentRights.data.rights.id, setRightsResult.data.rights.id)
+
+    const createMaterializationAuthorization = (key, body = { use: 'paid-ad', market: 'BR' }) =>
+      fetch(
+        `${baseUrl}/v1/artifacts/${derivedArtifactId}/materialization-authorizations/${derivedManifestId}`,
+        {
+          method: 'POST',
+          headers: {
+            authorization,
+            'content-type': 'application/json',
+            'idempotency-key': key,
+          },
+          body: JSON.stringify(body),
+        },
+      )
+    const materializationResponse = await createMaterializationAuthorization(
+      'materialization-approved-1',
+    )
+    const materialization = await materializationResponse.json()
+    assert.equal(materializationResponse.status, 201)
+    assert.equal(materialization.data.authorization.status, 'authorized')
+    assert.equal(materialization.data.authorization.locale, 'pt-BR')
+    assert.equal(materialization.data.authorization.revalidationRequired, true)
+    assert.deepEqual(materialization.data.authorization.issues, [])
+    assert.deepEqual(
+      materialization.data.authorization.decisions.map((decision) => decision.outcome),
+      ['allow'],
+    )
+    assert.equal(JSON.stringify(materialization).includes(sourceKey), false)
+    assert.equal(JSON.stringify(materialization).includes('Internal legal note'), false)
+
+    const materializationReplayResponse = await createMaterializationAuthorization(
+      'materialization-approved-1',
+    )
+    const materializationReplay = await materializationReplayResponse.json()
+    assert.equal(materializationReplayResponse.status, 200)
+    assert.equal(materializationReplay.data.replayed, true)
+    assert.equal(
+      materializationReplay.data.authorization.id,
+      materialization.data.authorization.id,
+    )
+    const materializationMismatchResponse = await createMaterializationAuthorization(
+      'materialization-approved-1',
+      { use: 'organic-content', market: 'BR' },
+    )
+    assert.equal(materializationMismatchResponse.status, 409)
+    assert.equal(
+      (await materializationMismatchResponse.json()).error.code,
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    assert.equal(
+      await client.v2MaterializationAuthorization.count({
+        where: { workspaceId, id: materialization.data.authorization.id },
+      }),
+      1,
+    )
+    assert.equal(
+      await client.v2AssetUseDecision.count({
+        where: { workspaceId, authorizationId: materialization.data.authorization.id },
+      }),
+      1,
+    )
 
     const legacyRenderInputResponse = await fetch(
       `${baseUrl}/v1/artifacts/${sourceArtifactId}/render-input/public-api-source-manifest-v2`,

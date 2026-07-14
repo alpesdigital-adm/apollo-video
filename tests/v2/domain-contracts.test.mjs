@@ -43,6 +43,11 @@ import {
 } from '../../src/v2/domain/render-input.ts'
 import { assertRenderInputPayload } from '../../src/v2/domain/render-input-payload.ts'
 import { createConfiguredRenderTargetRegistry } from '../../src/v2/infrastructure/render-target-registry.ts'
+import {
+  createAssetRightsSnapshot,
+  evaluateAssetUse,
+} from '../../src/v2/domain/asset-rights.ts'
+import { authorizeRenderInputMaterializationService } from '../../src/v2/application/authorize-render-input-materialization.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -194,6 +199,177 @@ test('RenderInput materialization resolves locations without changing portable i
     })(spec),
     (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT',
   )
+})
+
+test('asset rights and consent are immutable, content-addressed and fail closed', () => {
+  const createRights = (overrides = {}) =>
+    createAssetRightsSnapshot({
+      id: 'rights-snapshot-1',
+      workspaceId: 'workspace-1',
+      artifactId: 'artifact-source-1',
+      sequence: 1,
+      draft: {
+        owner: 'Alpes Digital',
+        status: 'approved',
+        allowedUses: ['organic-content', 'paid-ad'],
+        prohibitedUses: [],
+        allowedMarkets: ['BR'],
+        allowedLocales: ['pt-BR'],
+        allowedSyntheticOperations: [],
+        consent: { status: 'not-required', allowedUses: [] },
+        ...overrides,
+      },
+      createdBy: { type: 'api-client', id: 'client-1' },
+      createdAt: '2026-07-14T12:00:00.000Z',
+    })
+  const rights = createRights()
+  const reordered = createRights({ allowedUses: ['paid-ad', 'organic-content'] })
+  assert.equal(rights.snapshotHash, reordered.snapshotHash)
+  assert.ok(Object.isFrozen(rights))
+  assert.ok(Object.isFrozen(rights.consent))
+
+  const allowed = evaluateAssetUse(
+    rights,
+    { workspaceId: 'workspace-1', use: 'paid-ad', market: 'BR', locale: 'pt-BR' },
+    new Date('2026-07-14T12:01:00.000Z'),
+  )
+  assert.equal(allowed.outcome, 'allow')
+  assert.equal(allowed.validUntil, '2026-07-14T12:06:00.000Z')
+
+  assert.deepEqual(
+    evaluateAssetUse(
+      rights,
+      { workspaceId: 'workspace-1', use: 'paid-ad', market: 'US', locale: 'pt-BR' },
+      new Date('2026-07-14T12:01:00.000Z'),
+    ).reasonCodes,
+    ['RIGHTS_MARKET_NOT_ALLOWED'],
+  )
+  assert.deepEqual(
+    evaluateAssetUse(
+      createRights({ consent: { status: 'unknown', allowedUses: [] } }),
+      { workspaceId: 'workspace-1', use: 'paid-ad', market: 'BR', locale: 'pt-BR' },
+      new Date('2026-07-14T12:01:00.000Z'),
+    ).reasonCodes,
+    ['CONSENT_STATUS_UNKNOWN'],
+  )
+  assert.deepEqual(
+    evaluateAssetUse(
+      createRights({ expiresAt: '2026-07-14T12:00:30.000Z' }),
+      { workspaceId: 'workspace-1', use: 'paid-ad', market: 'BR', locale: 'pt-BR' },
+      new Date('2026-07-14T12:01:00.000Z'),
+    ).reasonCodes,
+    ['RIGHTS_EXPIRED'],
+  )
+  assert.deepEqual(
+    evaluateAssetUse(
+      null,
+      { workspaceId: 'workspace-1', use: 'paid-ad', market: 'BR', locale: 'pt-BR' },
+      new Date('2026-07-14T12:01:00.000Z'),
+    ).reasonCodes,
+    ['RIGHTS_MISSING'],
+  )
+})
+
+test('materialization authorization evaluates every RenderInput asset and records a bounded decision', async () => {
+  const input = createRenderInputSpec({
+    schemaVersion: 'render-input/v1',
+    renderer: { id: 'remotion', version: '4.0.489', digest: 'a'.repeat(64) },
+    composition: {
+      id: 'apollo-video',
+      version: 'v1',
+      propsSchemaRef: 'apollo://render-props/apollo-video/v1',
+    },
+    plan: { id: 'plan-auth', versionId: 'plan-version-auth', hash: 'b'.repeat(64) },
+    output: {
+      id: 'preset-9x16',
+      locale: 'pt-BR',
+      aspectRatio: '9:16',
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+      durationInFrames: 90,
+    },
+    assets: [
+      {
+        id: 'asset-auth-source',
+        artifactId: 'artifact-auth-source',
+        artifactKey: 'workspaces/1/source.mp4',
+        kind: 'video',
+        role: 'primary',
+        ordinal: 0,
+        sha256: 'c'.repeat(64),
+        byteSize: 1024,
+      },
+    ],
+    props: { privateTitle: 'must-not-leak' },
+  })
+  const rights = createAssetRightsSnapshot({
+    id: 'rights-auth-source',
+    workspaceId: 'workspace-1',
+    artifactId: 'artifact-auth-source',
+    sequence: 1,
+    draft: {
+      status: 'approved',
+      allowedUses: ['paid-ad'],
+      prohibitedUses: [],
+      allowedMarkets: ['BR'],
+      allowedLocales: ['pt-BR'],
+      consent: { status: 'not-required', allowedUses: [] },
+    },
+    createdBy: { type: 'api-client', id: 'client-1' },
+    createdAt: '2026-07-14T12:00:00.000Z',
+  })
+  let recorded
+  const authorize = authorizeRenderInputMaterializationService({
+    artifactRepository: {
+      async findById() {
+        return {
+          id: 'artifact-output',
+          manifests: [
+            {
+              id: 'manifest-output',
+              renderInput: {
+                ref: `render-input/sha256/${input.inputHash}`,
+                inputHash: input.inputHash,
+              },
+            },
+          ],
+        }
+      },
+    },
+    protectedRenderInputs: { async read() { return input } },
+    assetAvailability: { async inspect() { return { available: true } } },
+    targets: { supportsRenderer() { return true }, supportsComposition() { return true } },
+    rights: {
+      async findCurrentForArtifacts() { return new Map([['artifact-auth-source', rights]]) },
+    },
+    authorizations: {
+      async findReplay() { return null },
+      async createOrReplay(value) {
+        recorded = value
+        return { authorization: value.authorization, replayed: false }
+      },
+    },
+    clock: () => new Date('2026-07-14T12:01:00.000Z'),
+    createId: () => 'materialization-auth-1',
+  })
+  const result = await authorize({
+    workspaceId: 'workspace-1',
+    artifactId: 'artifact-output',
+    manifestId: 'manifest-output',
+    use: 'paid-ad',
+    market: 'BR',
+    actor: { type: 'api-client', id: 'client-1' },
+    idempotencyKey: 'authorization-request-1',
+  })
+  assert.equal(result.authorization.status, 'authorized')
+  assert.equal(result.authorization.locale, 'pt-BR')
+  assert.equal(result.authorization.validUntil, '2026-07-14T12:06:00.000Z')
+  assert.deepEqual(result.authorization.decisions.map((decision) => decision.outcome), ['allow'])
+  assert.equal(recorded.requestFingerprint.length, 64)
+  assert.equal(JSON.stringify(result).includes('must-not-leak'), false)
+  assert.equal(JSON.stringify(result).includes('workspaces/1/source.mp4'), false)
 })
 test('output dimensions must match the declared ratio', () => {
   expectDomainError(

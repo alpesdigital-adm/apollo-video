@@ -98,6 +98,23 @@ const requiredChecks = [
   'render_input_payloads_cipher_check',
   'media_artifact_manifests_render_input_check',
   'media_artifact_manifests_recipe_parameters_check',
+  'media_artifacts_rights_revision_check',
+  'asset_rights_snapshots_sequence_check',
+  'asset_rights_snapshots_schema_check',
+  'asset_rights_snapshots_hash_check',
+  'asset_rights_snapshots_status_check',
+  'asset_rights_snapshots_consent_status_check',
+  'asset_rights_snapshots_creator_type_check',
+  'asset_rights_snapshots_json_check',
+  'materialization_authorizations_hash_check',
+  'materialization_authorizations_status_check',
+  'materialization_authorizations_validity_check',
+  'materialization_authorizations_json_check',
+  'asset_use_decisions_ordinal_check',
+  'asset_use_decisions_kind_check',
+  'asset_use_decisions_outcome_check',
+  'asset_use_decisions_validity_check',
+  'asset_use_decisions_reasons_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))
