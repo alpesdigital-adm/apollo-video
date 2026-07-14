@@ -18,7 +18,7 @@ Toda capacidade operável deve ser acessível por ferramentas e agentes externos
 - Mutações exigem idempotência e precondition de versão quando aplicável.
 - Ações caras, amplas ou destrutivas exigem preflight/commit token.
 - Capabilities externas acionam boundaries internos sem publicá-los como recursos crus. A operação pública de render retornará um `PublicOperation`; materialização, stage, segunda revalidação, commit/discard e paths ou URLs temporárias permanecem exclusivos do worker. Não existe endpoint para obter path local, signed URL interna ou `RenderInput` descriptografado.
-- Eventos saem por outbox e webhooks at-least-once assinados.
+- Eventos sairão por outbox e webhooks at-least-once assinados. O ADR-021 fixa primeiro o envelope e o catálogo público sem afirmar que a entrega já existe.
 - O primeiro slice expõe somente health e capability discovery, sem dados de workspace.
 
 ## Autenticação
@@ -44,3 +44,4 @@ O domínio depende de `AuthenticatedExternalActor`. O ADR-010 escolhe credenciai
 - Novas capabilities e novos schema refs são aditivos; atualizar o baseline exige comando separado e diff revisável.
 - O primeiro `PublicOperation` durável é `artifact-render`: enqueue idempotente responde `202`, leitura é workspace-scoped e o presenter omite client/workspace internos, authorization ID, RenderInput hash e storage details.
 - A persistência geral da operação e o contexto específico de render usam tabelas distintas. O ADR-014 implementa claim/lease, o ADR-016 agenda retries, o ADR-017 expõe cancelamento, o ADR-018 retry manual, o ADR-019 listagem workspace-scoped e o ADR-020 descoberta de dead-letter; métricas e administração agregada permanecem posteriores.
+- O ADR-021 implementa o tipo canônico `PublicEvent`, o schema e o catálogo inicial descobrível. Outbox, subscriptions, entrega assinada e replay permanecem posteriores.

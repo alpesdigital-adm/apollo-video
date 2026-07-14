@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { PUBLIC_EVENT_CATALOG } from '../../src/v2/domain/public-event.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { createOpenApiDocument } from '../../src/v2/public-api/openapi.ts'
 import {
@@ -36,6 +37,19 @@ test('schema routes are stable, versioned and reject unknown documents', () => {
   assert.throws(
     () => getPublicSchemaByRoute('missing-schema', 'v1'),
     (error) => error instanceof DomainError && error.code === 'PUBLIC_SCHEMA_NOT_FOUND',
+  )
+})
+
+test('public event schema and catalog expose the same versioned event types', () => {
+  const eventSchema = getPublicSchema('apollo://schemas/public-event/v1').schema
+  const catalogSchema = getPublicSchema('apollo://schemas/event-catalog/v1').schema
+  const eventTypes = PUBLIC_EVENT_CATALOG.map((event) => event.type)
+
+  assert.deepEqual(eventSchema.properties.type.enum, eventTypes)
+  assert.deepEqual(catalogSchema.properties.data.properties.events.items.properties.type.enum, eventTypes)
+  assert.equal(
+    catalogSchema.properties.data.properties.envelopeSchemaRef.const,
+    'apollo://schemas/public-event/v1',
   )
 })
 

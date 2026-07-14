@@ -22,3 +22,4 @@ Estados usados:
 - [ADR-018 — Retry manual e replay controlado](./ADR-018-manual-operation-retry.md)
 - [ADR-019 — Listagem e cursor estável de PublicOperation](./ADR-019-public-operation-list-cursor.md)
 - [ADR-020 — Descoberta administrativa de dead-letter](./ADR-020-public-operation-dead-letter-discovery.md)
+- [ADR-021 — Envelope público e catálogo inicial de eventos](./ADR-021-public-event-envelope-and-catalog.md)

@@ -1,4 +1,5 @@
 import type { PublicSchemaDefinition } from './schema-registry.ts'
+import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 const projectId = 'project-example-1'
@@ -130,6 +131,28 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               responseMediaType: 'application/json',
             },
           ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/public-event/v1': [
+      {
+        id: '123e4567-e89b-42d3-a456-426614174000',
+        type: 'operation.status.changed',
+        version: '1.0.0',
+        workspaceId,
+        occurredAt: createdAt,
+        sequence: 7,
+        actor: { clientId },
+        resource: { type: 'operation', id: 'operation-render-example-1' },
+        data: { previousStatus: 'queued', status: 'running' },
+      },
+    ],
+    'apollo://schemas/event-catalog/v1': [
+      {
+        data: {
+          envelopeSchemaRef: 'apollo://schemas/public-event/v1',
+          events: PUBLIC_EVENT_CATALOG.map((descriptor) => ({ ...descriptor })),
         },
         meta: { apiVersion: 'v1' },
       },

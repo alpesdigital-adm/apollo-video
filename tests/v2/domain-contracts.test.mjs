@@ -71,6 +71,12 @@ import { enqueueAuthorizedRenderService } from '../../src/v2/application/enqueue
 import { listDeadLetterOperationsService } from '../../src/v2/application/list-dead-letter-operations.ts'
 import { listPublicOperationsService } from '../../src/v2/application/list-public-operations.ts'
 import { presentPublicOperation } from '../../src/v2/public-api/presenters.ts'
+import {
+  PUBLIC_EVENT_CATALOG,
+  assertUniquePublicEventIds,
+  createPublicEvent,
+  createPublicEventId,
+} from '../../src/v2/domain/public-event.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -87,6 +93,101 @@ test('all required output presets satisfy the v2 contract', () => {
     assert.equal(spec.schemaVersion, 1)
     assert.ok(Object.isFrozen(spec))
     assert.ok(Object.isFrozen(spec.safeArea))
+  }
+})
+
+test('public event envelope is versioned, bounded and tied to the initial catalog', () => {
+  assert.deepEqual(
+    PUBLIC_EVENT_CATALOG.map((descriptor) => descriptor.type),
+    [
+      'project.created',
+      'project.version.created',
+      'project.status.changed',
+      'operation.status.changed',
+      'operation.succeeded',
+      'operation.failed',
+      'annotation.created',
+      'annotation.resolved',
+      'quality.report.created',
+      'approval.changed',
+      'artifact.ready',
+      'artifact.rejected',
+      'budget.threshold.reached',
+      'client.suspended',
+    ],
+  )
+  assert.ok(Object.isFrozen(PUBLIC_EVENT_CATALOG))
+  assert.ok(PUBLIC_EVENT_CATALOG.every(Object.isFrozen))
+  assert.equal(
+    createPublicEventId(() => '123E4567-E89B-42D3-A456-426614174000'),
+    '123e4567-e89b-42d3-a456-426614174000',
+  )
+
+  const sourceData = {
+    previousStatus: 'queued',
+    status: 'running',
+    changes: [{ field: 'status', safe: true }],
+  }
+  const event = createPublicEvent({
+    id: '123e4567-e89b-42d3-a456-426614174000',
+    type: 'operation.status.changed',
+    version: '1.0.0',
+    workspaceId: 'workspace-event-1',
+    occurredAt: '2026-07-14T18:00:00.000Z',
+    sequence: 7,
+    actor: { clientId: 'client-event-1' },
+    resource: { type: 'operation', id: 'operation-event-1' },
+    data: sourceData,
+  })
+  sourceData.status = 'tampered'
+  assert.equal(event.data.status, 'running')
+  assert.ok(Object.isFrozen(event))
+  assert.ok(Object.isFrozen(event.actor))
+  assert.ok(Object.isFrozen(event.resource))
+  assert.ok(Object.isFrozen(event.data))
+  assert.ok(Object.isFrozen(event.data.changes))
+  assert.ok(Object.isFrozen(event.data.changes[0]))
+
+  const second = createPublicEvent({
+    ...event,
+    id: '123e4567-e89b-42d3-b456-426614174001',
+    data: { status: 'succeeded' },
+  })
+  assert.doesNotThrow(() => assertUniquePublicEventIds([event, second]))
+  expectDomainError(
+    () => assertUniquePublicEventIds([event, event]),
+    'INVALID_PUBLIC_EVENT',
+  )
+
+  const cyclic = {}
+  cyclic.self = cyclic
+  for (const override of [
+    { id: 'not-a-uuid' },
+    { type: 'operation.unknown' },
+    { version: '2.0.0' },
+    { occurredAt: '2026-07-14T18:00:00Z' },
+    { sequence: 0 },
+    { actor: {} },
+    { resource: { type: 'project', id: 'operation-event-1' } },
+    { data: { value: Number.POSITIVE_INFINITY } },
+    { data: cyclic },
+    { data: { value: new Date() } },
+    { data: JSON.parse('{"__proto__":{"polluted":true}}') },
+    { data: { value: 'x'.repeat(65_536) } },
+  ]) {
+    expectDomainError(
+      () => createPublicEvent({
+        id: '123e4567-e89b-42d3-a456-426614174000',
+        type: 'operation.status.changed',
+        version: '1.0.0',
+        workspaceId: 'workspace-event-1',
+        occurredAt: '2026-07-14T18:00:00.000Z',
+        resource: { type: 'operation', id: 'operation-event-1' },
+        data: {},
+        ...override,
+      }),
+      'INVALID_PUBLIC_EVENT',
+    )
   }
 })
 

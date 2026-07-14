@@ -491,7 +491,7 @@
 
 ### F0.038 — Webhooks e eventos [FR-244]
 
-- [ ] Definir event envelope versionado, IDs únicos e catálogo inicial.
+- [x] Definir event envelope versionado, IDs únicos e catálogo inicial. Evidência F0-032: `PublicEvent`, UUID v4, catálogo de 14 tipos, schemas e `GET /v1/events/catalog`; unicidade global durável será fechada pelo outbox.
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions.
 - [ ] Modelar endpoint, subscription, secret, filter e delivery attempt.
 - [ ] Implementar challenge, assinatura, timestamp e anti-replay.
@@ -2050,7 +2050,7 @@ Para cada decisão:
 - [ ] Criar tipos canônicos para EvidenceSegment, TreatmentPlan, StoryPlan e EditPlan.
 - [ ] Criar tipos canônicos para FormatVariantPlan, LocalizationVariant e VariantRecipe.
 - [ ] Criar tipos canônicos para DirectorRun, QualityReport, Provider Adapter e CaptureSession.
-- [ ] Criar tipos canônicos para ApiClient, PublicCapability, PublicOperation e PublicEvent.
+- [x] Criar tipos canônicos para ApiClient, PublicCapability, PublicOperation e PublicEvent. Evidência: domínios versionados e registries entregues até F0-032.
 - [ ] Gerar OpenAPI, JSON Schemas e tool schemas do mesmo catálogo de capabilities.
 - [ ] Documentar API Client, Public Operation, Capability Discovery e MCP Adapter.
 - [ ] Documentar Apollo Sync Marker, Cold open, Voiceover e Synthetic Presenter nos fluxos em que aparecem.
@@ -3336,7 +3336,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-031 — Descoberta externa de dead-letter
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado no commit `8b9d9f7` em 14 de julho de 2026.
 
 Entregas:
 
@@ -3368,4 +3368,39 @@ Limites explícitos desta slice:
 - não há retry em lote, replay automático, acknowledgement, purge ou política de retenção nesta etapa;
 - métricas, alertas, custo, ator/motivo persistido e audit/event outbox continuam abertos;
 - somente `artifact-render` participa até a generalização dos demais tipos de job;
+- hosted CI `29359738397` aprovou 66 testes, fluxo dead-letter no PostgreSQL, migration, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-032 — Envelope e catálogo inicial de eventos
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- tipo canônico `PublicEvent<T>` fixa ID, tipo, versão, workspace, instante, ator opcional, recurso e payload JSON;
+- IDs são UUID v4 normalizados e a criação em lote rejeita duplicação antes da persistência;
+- catálogo inicial imutável registra 14 tipos versionados e o `resource.type` permitido para cada evento;
+- fábrica de domínio rejeita tipo/versão/recurso incompatíveis, timestamp fora do UTC canônico, sequência inválida e ator vazio;
+- payload é copiado e congelado profundamente, limitado a 64 KiB, profundidade 8 e 1.024 itens por coleção;
+- ciclos, objetos não JSON, números não finitos e chaves que permitiriam prototype pollution falham com erro de domínio tipado;
+- capability aditiva `apollo.events.catalog.read` publica `GET /v1/events/catalog` sem autenticação e sem dados de workspace;
+- schemas `public-event/v1` e `event-catalog/v1`, exemplos, OpenAPI e baseline foram ampliados de forma aditiva;
+- ADR-021 separa explicitamente disponibilidade do contrato de emissão ou entrega efetiva.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 68 testes;
+- domínio cobre catálogo exato, UUID v4, imutabilidade, unicidade em lote e matriz de payloads inválidos;
+- contract test impede divergência entre catálogo e enum do schema público;
+- jornada HTTP lê schema e catálogo sem credencial, valida os 14 tipos e comprova ausência de contexto de workspace;
+- contrato público passa com 27 capabilities, 33 schemas, 40 examples e 24 paths;
+- typecheck, build de produção e compatibilidade aditiva do baseline passam;
+- migration v2, FFmpeg, bundle e render real do Remotion, auditorias e integrações Prisma/API em SQLite descartável passam.
+
+Limites explícitos desta slice:
+
+- unicidade global ainda depende da futura chave única do outbox; a garantia atual cobre geração válida e lotes em memória;
+- nenhum dos 14 tipos é considerado emitido apenas por estar catalogado;
+- outbox, subscriptions, endpoints receptores, secrets, filtros e delivery attempts continuam abertos;
+- assinatura, challenge, anti-replay, at-least-once, backoff e replay de eventos continuam abertos;
+- ordem entre eventos não é prometida até existir persistência e semântica operacional para `sequence`;
 - hosted CI será registrado após publicação no próximo ciclo.

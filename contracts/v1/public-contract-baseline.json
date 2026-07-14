@@ -413,6 +413,27 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/schema+json"
     },
+    "apollo.events.catalog.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "none",
+      "requiredScopes": [],
+      "outputSchemaRef": "apollo://schemas/event-catalog/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/events/catalog"
+      },
+      "toolName": "apollo.events.catalog.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.health.read": {
       "version": "1.0.0",
       "exposure": "public",
@@ -3567,6 +3588,99 @@
         }
       }
     },
+    "apollo://schemas/event-catalog/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "envelopeSchemaRef",
+            "events"
+          ],
+          "properties": {
+            "envelopeSchemaRef": {
+              "const": "apollo://schemas/public-event/v1"
+            },
+            "events": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "version",
+                  "resourceType",
+                  "description"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "project.created",
+                      "project.version.created",
+                      "project.status.changed",
+                      "operation.status.changed",
+                      "operation.succeeded",
+                      "operation.failed",
+                      "annotation.created",
+                      "annotation.resolved",
+                      "quality.report.created",
+                      "approval.changed",
+                      "artifact.ready",
+                      "artifact.rejected",
+                      "budget.threshold.reached",
+                      "client.suspended"
+                    ]
+                  },
+                  "version": {
+                    "const": "1.0.0"
+                  },
+                  "resourceType": {
+                    "type": "string",
+                    "enum": [
+                      "project",
+                      "project-version",
+                      "operation",
+                      "annotation",
+                      "quality-report",
+                      "approval",
+                      "media-artifact",
+                      "workspace",
+                      "api-client"
+                    ]
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/health-response/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -4157,6 +4271,111 @@
               "const": "v1"
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/public-event/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "version",
+        "workspaceId",
+        "occurredAt",
+        "resource",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "project.created",
+            "project.version.created",
+            "project.status.changed",
+            "operation.status.changed",
+            "operation.succeeded",
+            "operation.failed",
+            "annotation.created",
+            "annotation.resolved",
+            "quality.report.created",
+            "approval.changed",
+            "artifact.ready",
+            "artifact.rejected",
+            "budget.threshold.reached",
+            "client.suspended"
+          ]
+        },
+        "version": {
+          "const": "1.0.0"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "actor": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "clientId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "userId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "project",
+                "project-version",
+                "operation",
+                "annotation",
+                "quality-report",
+                "approval",
+                "media-artifact",
+                "workspace",
+                "api-client"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "data": {
+          "type": "object",
+          "maxProperties": 1024,
+          "additionalProperties": true
         }
       }
     },

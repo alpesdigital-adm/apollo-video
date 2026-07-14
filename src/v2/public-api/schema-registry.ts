@@ -1,4 +1,5 @@
 import { DomainError, assertDomain } from '../domain/errors.ts'
+import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
 
@@ -17,6 +18,51 @@ const apiMetaSchema = {
   additionalProperties: false,
   required: ['apiVersion'],
   properties: { apiVersion: { const: 'v1' } },
+}
+
+const publicEventResourceTypes = [...new Set(
+  PUBLIC_EVENT_CATALOG.map((descriptor) => descriptor.resourceType),
+)]
+const publicEventTypes = PUBLIC_EVENT_CATALOG.map((descriptor) => descriptor.type)
+
+const publicEventSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'type', 'version', 'workspaceId', 'occurredAt', 'resource', 'data'],
+  properties: {
+    id: {
+      type: 'string',
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+    },
+    type: { type: 'string', enum: publicEventTypes },
+    version: { const: '1.0.0' },
+    workspaceId: idSchema,
+    occurredAt: dateTimeSchema,
+    sequence: { type: 'integer', minimum: 1 },
+    actor: {
+      type: 'object',
+      additionalProperties: false,
+      minProperties: 1,
+      properties: {
+        clientId: idSchema,
+        userId: idSchema,
+      },
+    },
+    resource: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id'],
+      properties: {
+        type: { type: 'string', enum: publicEventResourceTypes },
+        id: idSchema,
+      },
+    },
+    data: {
+      type: 'object',
+      maxProperties: 1024,
+      additionalProperties: true,
+    },
+  },
 }
 
 function successSchema(data: Record<string, unknown>) {
@@ -553,6 +599,33 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               responseMediaType: {
                 enum: ['application/json', 'application/schema+json'],
               },
+            },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema('public-event', 1, 'Public event envelope', publicEventSchema),
+  defineSchema('event-catalog', 1, 'Public event catalog response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['envelopeSchemaRef', 'events'],
+      properties: {
+        envelopeSchemaRef: { const: 'apollo://schemas/public-event/v1' },
+        events: {
+          type: 'array',
+          minItems: 1,
+          uniqueItems: true,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'version', 'resourceType', 'description'],
+            properties: {
+              type: { type: 'string', enum: publicEventTypes },
+              version: { const: '1.0.0' },
+              resourceType: { type: 'string', enum: publicEventResourceTypes },
+              description: { type: 'string', minLength: 1, maxLength: 512 },
             },
           },
         },

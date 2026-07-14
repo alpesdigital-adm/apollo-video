@@ -376,6 +376,10 @@ test('authenticated public API manages projects, clients and artifact inspection
       'apollo.artifacts.render.enqueue',
     )
     assert.equal(
+      openApi.paths['/v1/events/catalog'].get['x-apollo-capability-id'],
+      'apollo.events.catalog.read',
+    )
+    assert.equal(
       openApi.paths['/v1/operations'].get['x-apollo-capability-id'],
       'apollo.operations.list',
     )
@@ -423,6 +427,45 @@ test('authenticated public API manages projects, clients and artifact inspection
     const missingSchemaResponse = await fetch(`${baseUrl}/v1/schemas/missing/v1`)
     assert.equal(missingSchemaResponse.status, 404)
 
+    const eventEnvelopeSchemaResponse = await fetch(
+      `${baseUrl}/v1/schemas/public-event/v1`,
+    )
+    const eventEnvelopeSchema = await eventEnvelopeSchemaResponse.json()
+    assert.equal(eventEnvelopeSchemaResponse.status, 200)
+    assert.equal(eventEnvelopeSchema.$id, 'apollo://schemas/public-event/v1')
+    assert.deepEqual(
+      eventEnvelopeSchema.required,
+      ['id', 'type', 'version', 'workspaceId', 'occurredAt', 'resource', 'data'],
+    )
+    const eventCatalogResponse = await fetch(`${baseUrl}/v1/events/catalog`)
+    const eventCatalog = await eventCatalogResponse.json()
+    assert.equal(eventCatalogResponse.status, 200)
+    assert.equal(
+      eventCatalog.data.envelopeSchemaRef,
+      'apollo://schemas/public-event/v1',
+    )
+    assert.equal(eventCatalog.data.events.length, 14)
+    assert.deepEqual(
+      eventCatalog.data.events.map((event) => event.type),
+      [
+        'project.created',
+        'project.version.created',
+        'project.status.changed',
+        'operation.status.changed',
+        'operation.succeeded',
+        'operation.failed',
+        'annotation.created',
+        'annotation.resolved',
+        'quality.report.created',
+        'approval.changed',
+        'artifact.ready',
+        'artifact.rejected',
+        'budget.threshold.reached',
+        'client.suspended',
+      ],
+    )
+    assert.equal(JSON.stringify(eventCatalog).includes(workspaceId), false)
+
     const unauthorized = await fetch(`${baseUrl}/v1/projects`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': 'unauthorized' },
@@ -441,6 +484,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       [
         'apollo.health.read',
         'apollo.capabilities.list',
+        'apollo.events.catalog.read',
         'apollo.projects.list',
         'apollo.artifacts.read',
         'apollo.artifacts.lineage.diagnose',
@@ -508,6 +552,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       [
         'apollo.health.read',
         'apollo.capabilities.list',
+        'apollo.events.catalog.read',
         'apollo.projects.list',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',

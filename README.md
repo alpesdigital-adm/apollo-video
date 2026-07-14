@@ -131,6 +131,15 @@ Operações que esgotaram retries automáticos podem ser descobertas separadamen
 por `GET /v1/operations/dead-letter`; o mesmo item pode então ser reaberto pelo
 command individual de retry, sem edição direta do banco.
 
+## Eventos públicos v2
+
+O envelope versionado e o catálogo inicial de eventos podem ser descobertos em
+`GET /v1/events/catalog`. O catálogo referencia o JSON Schema público do envelope
+e contém somente metadados estáticos, por isso não exige autenticação. A presença
+de um tipo no catálogo não significa que ele já esteja sendo emitido: outbox,
+subscriptions, assinatura e entrega at-least-once serão adicionados nas próximas
+slices de F0.038.
+
 ## Formatos
 
 - **Vertical (9:16)** — Shorts, Reels, TikTok

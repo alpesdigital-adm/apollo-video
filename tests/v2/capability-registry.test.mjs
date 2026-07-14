@@ -21,6 +21,7 @@ test('foundation registry exposes health and discovery without scopes', () => {
     [
       'apollo.health.read',
       'apollo.capabilities.list',
+      'apollo.events.catalog.read',
       'apollo.contracts.openapi.read',
       'apollo.contracts.schemas.read',
     ],
