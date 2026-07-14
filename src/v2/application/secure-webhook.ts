@@ -9,8 +9,10 @@ import {
 import { assertDomain } from '../domain/errors.ts'
 import type {
   WebhookChallengeRepository,
+  WebhookChallengeTargetRepository,
   WebhookReplayReceiptRepository,
 } from './ports/webhook-security-repository.ts'
+import type { WebhookChallengeTransport } from './ports/webhook-challenge-transport.ts'
 
 export interface IssueWebhookChallengeDependencies {
   repository: WebhookChallengeRepository
@@ -74,6 +76,42 @@ export function verifyWebhookChallengeService(dependencies: {
       challengeId: request.challengeId,
       responseHash: hashWebhookChallengeToken(request.echoedToken),
       verifiedAt: dependencies.clock().toISOString(),
+    })
+  }
+}
+
+export function activateWebhookEndpointService(dependencies: {
+  repository: WebhookChallengeRepository & WebhookChallengeTargetRepository
+  transport: WebhookChallengeTransport
+  clock: () => Date
+  createId: () => string
+  issueToken?: () => Readonly<{ token: string; tokenHash: string }>
+}) {
+  const issue = issueWebhookChallengeService(dependencies)
+  const verify = verifyWebhookChallengeService(dependencies)
+
+  return async function execute(request: {
+    workspaceId: string
+    endpointId: string
+    ttlSeconds?: number
+    maxAttempts?: number
+  }) {
+    const target = await dependencies.repository.getPendingTarget(
+      request.workspaceId,
+      request.endpointId,
+    )
+    const issued = await issue(request)
+    const response = await dependencies.transport.send({
+      url: target.url,
+      challengeId: issued.challenge.id,
+      token: issued.token,
+      expiresAt: issued.challenge.expiresAt,
+    })
+    return verify({
+      workspaceId: request.workspaceId,
+      endpointId: request.endpointId,
+      challengeId: issued.challenge.id,
+      echoedToken: response.echoedToken,
     })
   }
 }

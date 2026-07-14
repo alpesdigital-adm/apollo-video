@@ -494,10 +494,10 @@
 - [x] Definir event envelope versionado, IDs únicos e catálogo inicial. Evidência F0-032: `PublicEvent`, UUID v4, catálogo de 14 tipos, schemas e `GET /v1/events/catalog`; unicidade global durável será fechada pelo outbox.
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
-- [ ] Implementar challenge, assinatura, timestamp e anti-replay. Parcial F0-035: emissão/verificação durável de challenge, HMAC dos bytes exatos, janela de timestamp e receipt anti-replay foram entregues; transporte HTTPS com resolução DNS segura continua aberto.
+- [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031: claim com lease/fencing, espera exponencial, checkpoint, descoberta e replay manual estão ativos no render; generalização aos demais jobs, métricas e console agregada continuam abertas.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
-- [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay.
+- [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Parcial F0-035/F0-036: assinatura adulterada, replay durável, timeout absoluto, DNS misto e rebinding possuem regressões; dispatcher real e duplicação/retry de delivery continuam abertos.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
 
@@ -3481,7 +3481,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-035 — Challenge, assinatura e anti-replay de webhook
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `1485c19`.
 
 Entregas:
 
@@ -3512,4 +3512,40 @@ Limites explícitos desta slice:
 - fan-out do outbox, materialização de deliveries, claim/lease, at-least-once, backoff, dead-letter e replay administrativo continuam abertos;
 - a microtarefa permanece aberta até o transporte HTTPS seguro integrar o challenge;
 - API/UI administrativa e presenters externos seguros continuam em incremento posterior;
+- hosted CI `29372852481` aprovou PostgreSQL, 73 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-036 — Transporte HTTPS seguro do challenge
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- o workflow de ativação carrega a URL do endpoint pendente diretamente do repository, emite o token one-shot, transporta a prova e só então executa a ativação atômica;
+- DNS é resolvido novamente antes de cada conexão, com no máximo 16 respostas, famílias coerentes e rejeição do conjunto inteiro quando qualquer endereço é inseguro;
+- política de rede bloqueia IPv4/IPv6 privados, loopback, link-local, carrier-grade NAT, metadata, multicast, documentação, benchmark, reservados, IPv4-mapped e faixas especiais;
+- a conexão HTTPS é presa ao IP público validado por `lookup` próprio, mantendo hostname, Host/SNI e validação normal do certificado;
+- cada request usa conexão isolada, TLS mínimo 1.2, porta 443, sem proxy e sem seguir redirects;
+- deadline absoluto cobre DNS e HTTPS, configurável entre 1 e 10 segundos, com default de 5 segundos;
+- request e response são limitados a 1 KiB; somente status 200, `application/json` e proof JSON canônico com `challengeId` e `token` exatos são aceitos;
+- respostas excessivas, malformadas, ambíguas, com content type incorreto, redirect ou ID divergente falham fechadas sem expor o token em resultado ou erro;
+- o factory server-side configura o timeout por ambiente e entrega um ativador pronto para futura API/administração;
+- ADR-025 formaliza o protocolo de rede, pinning e limites operacionais.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 79 testes;
+- regressões cobrem endereços IPv4/IPv6 públicos e especiais, conjunto DNS misto, ausência de respostas e bloqueio antes da conexão;
+- teste de rebinding comprova nova resolução por request e impede a segunda conexão quando o hostname muda de IP público para loopback;
+- opções do cliente comprovam IP/família pinados, SNI do hostname, certificado obrigatório, TLS 1.2 e agente não reutilizável;
+- deadline absoluto é exercitado contra um adapter que nunca responde e encerra o fluxo dentro do limite configurado;
+- respostas com redirect, tipo incorreto, JSON inválido, campos extras, whitespace ambíguo ou challenge divergente são rejeitadas;
+- integração Prisma comprova que o target vem do endpoint pendente workspace-scoped;
+- typecheck e integração dedicada de webhook em SQLite descartável passam.
+
+Limites explícitos desta slice:
+
+- o ativador existe apenas no boundary server-side; capability, endpoint público e UI administrativa serão entregues no incremento administrativo previsto;
+- secret provider, abertura/rotação da chave e assinatura do dispatcher continuam ligados à futura execução de deliveries, não ao challenge;
+- fan-out do outbox, materialização de deliveries, claim/lease, at-least-once, backoff, dead-letter e replay administrativo continuam abertos;
+- a política fail-closed pode recusar faixas especiais que sejam tecnicamente roteáveis; exceções exigirão revisão explícita, nunca allowlist implícita;
 - hosted CI será registrado após publicação no próximo ciclo.

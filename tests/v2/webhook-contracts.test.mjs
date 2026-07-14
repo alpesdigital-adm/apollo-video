@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { registerWebhookService } from '../../src/v2/application/register-webhook.ts'
+import { activateWebhookEndpointService } from '../../src/v2/application/secure-webhook.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -18,6 +19,14 @@ import {
   signWebhookPayload,
   verifyWebhookSignature,
 } from '../../src/v2/domain/webhook-security.ts'
+import {
+  isPublicWebhookAddress,
+  validateWebhookResolution,
+} from '../../src/v2/domain/webhook-network.ts'
+import {
+  createPinnedWebhookRequestOptions,
+  SafeWebhookChallengeTransport,
+} from '../../src/v2/infrastructure/webhook/safe-webhook-challenge-transport.ts'
 
 const ids = {
   'webhook-endpoint': '00000000-0000-4000-8000-000000000101',
@@ -221,4 +230,282 @@ test('webhook signature binds timestamp, event ID and exact body bytes', () => {
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_SIGNATURE_INVALID',
     )
   }
+})
+
+test('webhook network policy accepts only globally routable DNS answers', () => {
+  for (const [address, family] of [
+    ['8.8.8.8', 4],
+    ['1.1.1.1', 4],
+    ['2606:4700:4700::1111', 6],
+    ['2a00:1450:4001:81b::200e', 6],
+  ]) {
+    assert.equal(isPublicWebhookAddress(address, family), true)
+  }
+  for (const [address, family] of [
+    ['0.0.0.0', 4],
+    ['10.0.0.1', 4],
+    ['100.64.0.1', 4],
+    ['127.0.0.1', 4],
+    ['169.254.169.254', 4],
+    ['172.31.0.1', 4],
+    ['192.168.1.1', 4],
+    ['198.18.0.1', 4],
+    ['203.0.113.10', 4],
+    ['224.0.0.1', 4],
+    ['::', 6],
+    ['::1', 6],
+    ['::ffff:127.0.0.1', 6],
+    ['2001:db8::1', 6],
+    ['3fff::1', 6],
+    ['fc00::1', 6],
+    ['fe80::1', 6],
+    ['ff02::1', 6],
+  ]) {
+    assert.equal(isPublicWebhookAddress(address, family), false, address)
+  }
+  assert.throws(
+    () => validateWebhookResolution([
+      { address: '8.8.8.8', family: 4 },
+      { address: '127.0.0.1', family: 4 },
+    ]),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_NETWORK_REJECTED',
+  )
+  assert.throws(
+    () => validateWebhookResolution([]),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_NETWORK_REJECTED',
+  )
+})
+
+test('safe webhook challenge pins a fresh public DNS answer and accepts exact proof', async () => {
+  const issued = issueWebhookChallengeToken(() => Buffer.alloc(32, 10))
+  const challengeId = '00000000-0000-4000-8000-000000000109'
+  let pinnedRequest
+  const transport = new SafeWebhookChallengeTransport({
+    resolver: {
+      async resolve(hostname) {
+        assert.equal(hostname, 'hooks.example.com')
+        return [
+          { address: '8.8.8.8', family: 4 },
+          { address: '2606:4700:4700::1111', family: 6 },
+        ]
+      },
+    },
+    client: {
+      async post(request) {
+        pinnedRequest = request
+        const payload = JSON.parse(request.body.toString('utf8'))
+        assert.deepEqual(payload, {
+          type: 'apollo.webhook.challenge',
+          challengeId,
+          token: issued.token,
+          expiresAt: '2026-07-14T23:10:00.000Z',
+        })
+        return {
+          statusCode: 200,
+          contentType: 'application/json; charset=utf-8',
+          body: Buffer.from(JSON.stringify({ challengeId, token: issued.token })),
+        }
+      },
+    },
+  })
+
+  const result = await transport.send({
+    url: 'https://hooks.example.com/apollo',
+    challengeId,
+    token: issued.token,
+    expiresAt: '2026-07-14T23:10:00.000Z',
+  })
+  assert.equal(result.echoedToken, issued.token)
+  assert.deepEqual(pinnedRequest.address, { address: '8.8.8.8', family: 4 })
+  assert.ok(pinnedRequest.timeoutMs > 0 && pinnedRequest.timeoutMs <= 5_000)
+
+  const options = createPinnedWebhookRequestOptions(pinnedRequest)
+  assert.equal(options.hostname, 'hooks.example.com')
+  assert.equal(options.family, 4)
+  assert.equal(options.servername, 'hooks.example.com')
+  assert.equal(options.agent, false)
+  assert.equal(options.rejectUnauthorized, true)
+  assert.equal(options.minVersion, 'TLSv1.2')
+  assert.equal(options.path, '/apollo')
+  const pinnedLookup = await new Promise((resolve, reject) => {
+    options.lookup('hooks.example.com', {}, (error, address, family) => {
+      if (error) reject(error)
+      else resolve({ address, family })
+    })
+  })
+  assert.deepEqual(pinnedLookup, { address: '8.8.8.8', family: 4 })
+})
+
+test('safe webhook challenge fails closed before connection and rejects ambiguous responses', async () => {
+  const issued = issueWebhookChallengeToken(() => Buffer.alloc(32, 11))
+  const challengeId = '00000000-0000-4000-8000-000000000110'
+  let connections = 0
+  const privateTransport = new SafeWebhookChallengeTransport({
+    resolver: { async resolve() { return [{ address: '169.254.169.254', family: 4 }] } },
+    client: { async post() { connections += 1; throw new Error('must not connect') } },
+  })
+  await assert.rejects(
+    () => privateTransport.send({
+      url: 'https://hooks.example.com/apollo',
+      challengeId,
+      token: issued.token,
+      expiresAt: '2026-07-14T23:10:00.000Z',
+    }),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_NETWORK_REJECTED',
+  )
+  assert.equal(connections, 0)
+
+  for (const response of [
+    { statusCode: 302, contentType: 'application/json', body: Buffer.from('{}') },
+    { statusCode: 200, contentType: 'text/plain', body: Buffer.from(issued.token) },
+    { statusCode: 200, contentType: 'application/json', body: Buffer.from('{') },
+    {
+      statusCode: 200,
+      contentType: 'application/json',
+      body: Buffer.from(JSON.stringify({ challengeId, token: issued.token, extra: true })),
+    },
+    {
+      statusCode: 200,
+      contentType: 'application/json',
+      body: Buffer.from(` ${JSON.stringify({ challengeId, token: issued.token })}`),
+    },
+    {
+      statusCode: 200,
+      contentType: 'application/json',
+      body: Buffer.from(JSON.stringify({
+        challengeId: '00000000-0000-4000-8000-000000000111',
+        token: issued.token,
+      })),
+    },
+    {
+      statusCode: 200,
+      contentType: 'application/json',
+      body: Buffer.alloc(1_025, 32),
+    },
+  ]) {
+    const transport = new SafeWebhookChallengeTransport({
+      resolver: { async resolve() { return [{ address: '8.8.8.8', family: 4 }] } },
+      client: { async post() { return response } },
+    })
+    await assert.rejects(
+      () => transport.send({
+        url: 'https://hooks.example.com/apollo',
+        challengeId,
+        token: issued.token,
+        expiresAt: '2026-07-14T23:10:00.000Z',
+      }),
+      (error) =>
+        error instanceof DomainError &&
+        error.code === 'WEBHOOK_CHALLENGE_TRANSPORT_FAILED' &&
+        !error.message.includes(issued.token),
+    )
+  }
+  assert.throws(
+    () => new SafeWebhookChallengeTransport({ timeoutMs: 999 }),
+    (error) =>
+      error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_TRANSPORT_FAILED',
+  )
+})
+
+test('webhook challenge resolves every connection again and blocks rebinding', async () => {
+  const issued = issueWebhookChallengeToken(() => Buffer.alloc(32, 13))
+  const challengeId = '00000000-0000-4000-8000-000000000113'
+  let resolutions = 0
+  let connections = 0
+  const transport = new SafeWebhookChallengeTransport({
+    resolver: {
+      async resolve() {
+        resolutions += 1
+        return resolutions === 1
+          ? [{ address: '8.8.8.8', family: 4 }]
+          : [{ address: '127.0.0.1', family: 4 }]
+      },
+    },
+    client: {
+      async post() {
+        connections += 1
+        return {
+          statusCode: 200,
+          contentType: 'application/json',
+          body: Buffer.from(JSON.stringify({ challengeId, token: issued.token })),
+        }
+      },
+    },
+  })
+  const request = {
+    url: 'https://hooks.example.com/apollo',
+    challengeId,
+    token: issued.token,
+    expiresAt: '2026-07-14T23:10:00.000Z',
+  }
+  await transport.send(request)
+  await assert.rejects(
+    () => transport.send(request),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_NETWORK_REJECTED',
+  )
+  assert.equal(resolutions, 2)
+  assert.equal(connections, 1)
+})
+
+test('webhook challenge enforces one absolute deadline across transport boundaries', async () => {
+  const issued = issueWebhookChallengeToken(() => Buffer.alloc(32, 14))
+  const startedAt = Date.now()
+  const transport = new SafeWebhookChallengeTransport({
+    timeoutMs: 1_000,
+    resolver: { async resolve() { return [{ address: '8.8.8.8', family: 4 }] } },
+    client: { async post() { return new Promise(() => {}) } },
+  })
+  await assert.rejects(
+    () => transport.send({
+      url: 'https://hooks.example.com/apollo',
+      challengeId: '00000000-0000-4000-8000-000000000114',
+      token: issued.token,
+      expiresAt: '2026-07-14T23:10:00.000Z',
+    }),
+    (error) =>
+      error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_TRANSPORT_FAILED',
+  )
+  const elapsedMs = Date.now() - startedAt
+  assert.ok(elapsedMs >= 900 && elapsedMs < 2_000, `elapsed ${elapsedMs}ms`)
+})
+
+test('endpoint activation keeps the one-shot token inside the challenge workflow', async () => {
+  const now = new Date('2026-07-14T23:00:00.000Z')
+  const issued = issueWebhookChallengeToken(() => Buffer.alloc(32, 12))
+  let storedChallenge
+  let transportedToken
+  const repository = {
+    async getPendingTarget(workspaceId, endpointId) {
+      return { workspaceId, endpointId, url: 'https://hooks.example.com/apollo' }
+    },
+    async issue(challenge) {
+      storedChallenge = challenge
+      return challenge
+    },
+    async verify(command) {
+      assert.equal(command.responseHash, storedChallenge.tokenHash)
+      return { challenge: storedChallenge, activatedSubscriptions: 2 }
+    },
+  }
+  const activate = activateWebhookEndpointService({
+    repository,
+    transport: {
+      async send(request) {
+        transportedToken = request.token
+        return { echoedToken: request.token }
+      },
+    },
+    clock: () => now,
+    createId: () => '00000000-0000-4000-8000-000000000112',
+    issueToken: () => issued,
+  })
+
+  const result = await activate({
+    workspaceId: 'workspace-1',
+    endpointId: ids['webhook-endpoint'],
+  })
+  assert.equal(transportedToken, issued.token)
+  assert.equal(JSON.stringify(storedChallenge).includes(issued.token), false)
+  assert.equal(JSON.stringify(result).includes(issued.token), false)
+  assert.equal(result.activatedSubscriptions, 2)
 })

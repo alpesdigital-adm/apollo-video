@@ -24,3 +24,16 @@ export interface WebhookChallengeRepository {
 export interface WebhookReplayReceiptRepository {
   consume(receipt: Readonly<WebhookReplayReceipt>): Promise<WebhookReplayReceipt>
 }
+
+export interface WebhookChallengeTarget {
+  workspaceId: string
+  endpointId: string
+  url: string
+}
+
+export interface WebhookChallengeTargetRepository {
+  getPendingTarget(
+    workspaceId: string,
+    endpointId: string,
+  ): Promise<Readonly<WebhookChallengeTarget>>
+}

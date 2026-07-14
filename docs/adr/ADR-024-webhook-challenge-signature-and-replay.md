@@ -24,20 +24,21 @@ O ADR-023 deixou endpoints e subscriptions em `pending-verification` e manteve o
 
 ## Fronteira desta decisão
 
-Este incremento entrega a máquina de estado, a assinatura e a persistência anti-replay, mas deliberadamente não realiza chamadas de rede. O próximo adaptador deverá:
+Este incremento entrega a máquina de estado, a assinatura e a persistência anti-replay. O transporte de challenge foi implementado posteriormente pelo ADR-025 e deve:
 
 - resolver DNS antes de cada conexão e bloquear redes privadas, loopback, link-local, respostas ambíguas e DNS rebinding;
 - exigir HTTPS na porta 443, controlar redirects e limitar tempo, tamanho e número de conexões;
 - enviar o token ao destino e aceitar somente o eco exato antes do vencimento;
-- abrir a chave por meio de um secret provider e descartá-la após o uso;
 - reutilizar as funções canônicas deste ADR, sem implementar uma segunda forma de assinatura.
+
+A abertura da chave por secret provider não participa do challenge. Ela será exigida pelo futuro dispatcher ao assinar deliveries e deverá descartar o material após o uso.
 
 ## Consequências
 
 - Segurança criptográfica e transições persistidas podem ser verificadas sem acesso à internet.
 - Um vazamento de banco não revela tokens de challenge nem chaves de assinatura.
 - Event IDs são também nonces de entrega; reutilizá-los no mesmo endpoint é rejeitado durante a retenção.
-- O endpoint ainda não pode ser ativado automaticamente em produção: falta o transporte HTTPS com proteção SSRF/DNS.
+- O endpoint pode ser ativado pelo boundary server-side seguro do ADR-025; API e UI administrativas ainda não o expõem.
 - Fan-out do outbox, claim/lease de delivery, retry, dead-letter e replay administrativo continuam fora desta slice.
 
 ## Evidências exigidas

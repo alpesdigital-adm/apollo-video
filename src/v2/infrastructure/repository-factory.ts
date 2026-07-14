@@ -1,5 +1,8 @@
+import { randomUUID } from 'node:crypto'
+
 import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
 
+import { activateWebhookEndpointService } from '../application/secure-webhook.ts'
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
 import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
@@ -19,6 +22,7 @@ import type { WorkspaceRepository } from '../application/ports/workspace-reposit
 import type { WebhookRegistrationRepository } from '../application/ports/webhook-registration-repository.ts'
 import type {
   WebhookChallengeRepository,
+  WebhookChallengeTargetRepository,
   WebhookReplayReceiptRepository,
 } from '../application/ports/webhook-security-repository.ts'
 import { DomainError } from '../domain/errors.ts'
@@ -37,6 +41,7 @@ import { PrismaPublicOperationRepository } from './prisma/public-operation-repos
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
 import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
+import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-transport.ts'
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
 import { LocalArtifactRenderInputResolver } from './local-artifact-render-input-resolver.ts'
 import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts'
@@ -82,8 +87,28 @@ export function createWebhookRegistrationRepository(): WebhookRegistrationReposi
   return new PrismaWebhookRegistrationRepository(resolveV2Client())
 }
 
-export function createWebhookSecurityRepository(): WebhookChallengeRepository & WebhookReplayReceiptRepository {
+export function createWebhookSecurityRepository(): WebhookChallengeRepository &
+  WebhookChallengeTargetRepository &
+  WebhookReplayReceiptRepository {
   return new PrismaWebhookSecurityRepository(resolveV2Client())
+}
+
+export function createWebhookEndpointActivator(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const configuredTimeout = Number(environment.APOLLO_V2_WEBHOOK_CHALLENGE_TIMEOUT_MS)
+  const transport = new SafeWebhookChallengeTransport({
+    ...(Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0
+      ? { timeoutMs: configuredTimeout }
+      : {}),
+  })
+  return activateWebhookEndpointService({
+    repository: createWebhookSecurityRepository(),
+    transport,
+    clock,
+    createId: randomUUID,
+  })
 }
 
 export function createArtifactRenderCheckpointRepository() {

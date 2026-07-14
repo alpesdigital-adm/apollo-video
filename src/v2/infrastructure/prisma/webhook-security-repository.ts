@@ -6,6 +6,7 @@ import { prisma } from '../../../lib/db.ts'
 import type {
   VerifyWebhookChallengeCommand,
   WebhookChallengeRepository,
+  WebhookChallengeTargetRepository,
   WebhookReplayReceiptRepository,
 } from '../../application/ports/webhook-security-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -43,11 +44,32 @@ function hashesMatch(left: string, right: string): boolean {
 }
 
 export class PrismaWebhookSecurityRepository
-  implements WebhookChallengeRepository, WebhookReplayReceiptRepository {
+  implements
+    WebhookChallengeRepository,
+    WebhookChallengeTargetRepository,
+    WebhookReplayReceiptRepository {
   private readonly client: PrismaClient
 
   constructor(client: PrismaClient = prisma) {
     this.client = client
+  }
+
+  async getPendingTarget(workspaceId: string, endpointId: string) {
+    const endpoint = await this.client.v2WebhookEndpoint.findFirst({
+      where: { id: endpointId, workspaceId, status: 'pending-verification' },
+      select: { workspaceId: true, id: true, url: true },
+    })
+    if (!endpoint) {
+      throw new DomainError(
+        'WEBHOOK_CHALLENGE_NOT_FOUND',
+        'Pending webhook endpoint was not found',
+      )
+    }
+    return Object.freeze({
+      workspaceId: endpoint.workspaceId,
+      endpointId: endpoint.id,
+      url: endpoint.url,
+    })
   }
 
   async issue(challenge: Readonly<WebhookVerificationChallenge>) {

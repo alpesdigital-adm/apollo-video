@@ -26,3 +26,4 @@ Estados usados:
 - [ADR-022 — Outbox transacional de eventos públicos](./ADR-022-transactional-public-event-outbox.md)
 - [ADR-023 — Modelo de subscription e delivery de webhook](./ADR-023-webhook-subscription-and-delivery-model.md)
 - [ADR-024 — Challenge, assinatura e anti-replay de webhook](./ADR-024-webhook-challenge-signature-and-replay.md)
+- [ADR-025 — Transporte seguro do challenge de webhook](./ADR-025-safe-webhook-challenge-transport.md)

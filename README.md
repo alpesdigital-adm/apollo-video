@@ -149,8 +149,10 @@ deste incremento.
 Endpoints e subscriptions de webhook possuem modelos duráveis separados, filtros
 exatos pelo catálogo e referências opacas para secrets de assinatura. O núcleo de
 challenge one-shot, HMAC sobre bytes exatos, timestamp e receipt anti-replay já é
-durável e testado. Nenhum destino recebe tráfego antes do adaptador HTTPS com
-resolução DNS segura e proteção contra SSRF/rebinding.
+durável e testado. O transporte interno do challenge resolve DNS a cada request,
+rejeita qualquer endereço não público e prende a conexão HTTPS ao IP validado,
+mantendo SNI e certificado do hostname. A ativação ainda não possui endpoint
+administrativo público; fan-out e entrega de eventos virão nas próximas slices.
 
 ## Formatos
 

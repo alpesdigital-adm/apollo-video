@@ -133,6 +133,18 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     ])
 
     const security = new PrismaWebhookSecurityRepository(client)
+    assert.deepEqual(
+      await security.getPendingTarget(workspaceId, endpoint.id),
+      {
+        workspaceId,
+        endpointId: endpoint.id,
+        url: 'https://hooks.example.com/apollo',
+      },
+    )
+    await assert.rejects(
+      () => security.getPendingTarget('another-workspace', endpoint.id),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_NOT_FOUND',
+    )
     const wrongToken = issueWebhookChallengeToken(() => Buffer.alloc(32, 6)).token
 
     const exhausted = await issueWebhookChallengeService({
@@ -238,6 +250,10 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.equal(
       (await client.v2WebhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } })).status,
       'active',
+    )
+    await assert.rejects(
+      () => security.getPendingTarget(workspaceId, endpoint.id),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_NOT_FOUND',
     )
     assert.equal(
       (await client.v2WebhookSubscription.findUniqueOrThrow({
