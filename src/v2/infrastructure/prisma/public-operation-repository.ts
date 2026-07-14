@@ -4,6 +4,7 @@ import type {
   ArtifactRenderOperationContext,
   ClaimedPublicOperationRecord,
   PublicOperationLeaseCommand,
+  PublicOperationListQuery,
   PublicOperationPersistenceResult,
   PublicOperationRecord,
   PublicOperationRepository,
@@ -453,6 +454,45 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
   ): Promise<PublicOperationRecord | null> {
     const stored = await this.findStoredById(workspaceId, operationId)
     return stored ? hydrateRecord(stored) : null
+  }
+
+  async list(input: PublicOperationListQuery): Promise<readonly PublicOperationRecord[]> {
+    if (
+      !ID_PATTERN.test(input.workspaceId) ||
+      !Number.isInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > 101 ||
+      (input.targetId !== undefined && !ID_PATTERN.test(input.targetId))
+    ) {
+      throw new DomainError('INVALID_PUBLIC_OPERATION', 'Operation list query is invalid')
+    }
+    const afterDate = input.after
+      ? parseCommandDate(input.after.createdAt, 'after.createdAt')
+      : undefined
+    if (input.after && !ID_PATTERN.test(input.after.id)) {
+      throw new DomainError('INVALID_PUBLIC_OPERATION', 'Operation cursor is invalid')
+    }
+    const where: Prisma.V2PublicOperationWhereInput = {
+      workspaceId: input.workspaceId,
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.type ? { type: input.type } : {}),
+      ...(input.targetId ? { targetId: input.targetId } : {}),
+      ...(input.after && afterDate
+        ? {
+            OR: [
+              { createdAt: { lt: afterDate } },
+              { createdAt: afterDate, id: { lt: input.after.id } },
+            ],
+          }
+        : {}),
+    }
+    const rows = await this.client.v2PublicOperation.findMany({
+      where,
+      include: OPERATION_INCLUDE,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: input.limit,
+    })
+    return rows.map(hydrateRecord)
   }
 
   private findStoredReplay(

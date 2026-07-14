@@ -772,6 +772,53 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       })
     }
 
+    for (const suffix of ['a', 'b']) {
+      await repository.createOrReplay({
+        operation: createQueuedPublicOperation({
+          ...operation,
+          id: `operation-integration-list-${suffix}`,
+          createdAt: '2026-01-01T15:45:00.000Z',
+        }),
+        context: input.context,
+        idempotencyKey: `operation-list-${suffix}-request`,
+        requestFingerprint: sha(suffix),
+      })
+    }
+    const firstListPage = await repository.list({
+      workspaceId,
+      limit: 1,
+      status: 'queued',
+      type: 'artifact-render',
+      targetId: artifactId,
+    })
+    assert.deepEqual(
+      firstListPage.map((record) => record.operation.id),
+      ['operation-integration-list-b'],
+    )
+    const secondListPage = await repository.list({
+      workspaceId,
+      limit: 2,
+      status: 'queued',
+      type: 'artifact-render',
+      targetId: artifactId,
+      after: {
+        createdAt: firstListPage[0].operation.createdAt,
+        id: firstListPage[0].operation.id,
+      },
+    })
+    assert.deepEqual(
+      secondListPage.map((record) => record.operation.id),
+      ['operation-integration-list-a'],
+    )
+    assert.deepEqual(
+      await repository.list({ workspaceId: 'different-workspace-id', limit: 10 }),
+      [],
+    )
+    assert.deepEqual(
+      await repository.list({ workspaceId, limit: 10, targetId: 'missing-target-id' }),
+      [],
+    )
+
     await client.v2ArtifactRenderOperation.update({
       where: { operationId },
       data: { outputSha256: sha('b') },

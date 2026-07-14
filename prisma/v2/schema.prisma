@@ -433,6 +433,7 @@ model V2PublicOperation {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
+  @@index([workspaceId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, status, updatedAt(sort: Desc)])
   @@index([workspaceId, type, createdAt(sort: Desc)])
   @@index([workspaceId, targetType, targetId])

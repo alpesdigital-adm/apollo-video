@@ -1244,6 +1244,26 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchema },
     }),
   ),
+  defineSchema('public-operation-list', 1, 'Public operation list response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operations'],
+      properties: {
+        operations: {
+          type: 'array',
+          maxItems: 100,
+          items: publicOperationSchema,
+        },
+        nextCursor: {
+          type: 'string',
+          minLength: 8,
+          maxLength: 1024,
+          pattern: '^[A-Za-z0-9_-]+$',
+        },
+      },
+    }),
+  ),
   defineSchema('create-project-request', 1, 'Create project request', {
     type: 'object',
     additionalProperties: false,

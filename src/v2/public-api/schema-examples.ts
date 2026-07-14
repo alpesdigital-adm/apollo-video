@@ -526,6 +526,24 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/public-operation-list/v1': [
+      {
+        data: { operations: [] },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          operations: [queuedRenderOperationExample],
+          nextCursor: Buffer.from(JSON.stringify({
+            v: 1,
+            createdAt: queuedRenderOperationExample.createdAt,
+            id: queuedRenderOperationExample.id,
+            filterHash: 'a'.repeat(64),
+          })).toString('base64url'),
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/create-project-request/v1': [
       { name: 'Anúncio de descoberta' },
     ],

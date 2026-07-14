@@ -376,6 +376,14 @@ test('authenticated public API manages projects, clients and artifact inspection
       'apollo.artifacts.render.enqueue',
     )
     assert.equal(
+      openApi.paths['/v1/operations'].get['x-apollo-capability-id'],
+      'apollo.operations.list',
+    )
+    assert.deepEqual(
+      openApi.paths['/v1/operations'].get.parameters.map((parameter) => parameter.name),
+      ['limit', 'after', 'status', 'type', 'targetId'],
+    )
+    assert.equal(
       openApi.paths['/v1/operations/{operationId}'].get['x-apollo-capability-id'],
       'apollo.operations.read',
     )
@@ -435,6 +443,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.artifacts.materialization.authorize',
         'apollo.render-inputs.preflight',
         'apollo.artifacts.render.enqueue',
+        'apollo.operations.list',
         'apollo.operations.read',
         'apollo.operations.cancel',
         'apollo.operations.retry',
@@ -948,6 +957,81 @@ test('authenticated public API manages projects, clients and artifact inspection
       (await canceledReadResponse.json()).data.operation,
       retriedOperation.data.operation,
     )
+    const secondRenderOperationResponse = await enqueueRender('render-operation-approved-2')
+    const secondRenderOperation = await secondRenderOperationResponse.json()
+    assert.equal(secondRenderOperationResponse.status, 202)
+    assert.notEqual(
+      secondRenderOperation.data.operation.id,
+      renderOperation.data.operation.id,
+    )
+    const childListResponse = await fetch(`${baseUrl}/v1/operations`, {
+      headers: { authorization: childAuthorization },
+    })
+    assert.equal(childListResponse.status, 403)
+    const listQuery = new URLSearchParams({
+      limit: '1',
+      status: 'queued',
+      type: 'artifact-render',
+      targetId: derivedArtifactId,
+    })
+    const firstOperationPageResponse = await fetch(
+      `${baseUrl}/v1/operations?${listQuery}`,
+      { headers: { authorization } },
+    )
+    const firstOperationPage = await firstOperationPageResponse.json()
+    assert.equal(firstOperationPageResponse.status, 200)
+    assert.equal(firstOperationPage.data.operations.length, 1)
+    assert.match(firstOperationPage.data.nextCursor, /^[A-Za-z0-9_-]+$/)
+    const secondPageQuery = new URLSearchParams(listQuery)
+    secondPageQuery.set('after', firstOperationPage.data.nextCursor)
+    const secondOperationPageResponse = await fetch(
+      `${baseUrl}/v1/operations?${secondPageQuery}`,
+      { headers: { authorization } },
+    )
+    const secondOperationPage = await secondOperationPageResponse.json()
+    assert.equal(secondOperationPageResponse.status, 200)
+    assert.equal(secondOperationPage.data.operations.length, 1)
+    assert.equal('nextCursor' in secondOperationPage.data, false)
+    assert.deepEqual(
+      [
+        firstOperationPage.data.operations[0].id,
+        secondOperationPage.data.operations[0].id,
+      ].sort(),
+      [
+        renderOperation.data.operation.id,
+        secondRenderOperation.data.operation.id,
+      ].sort(),
+    )
+    const operationListJson = JSON.stringify([
+      firstOperationPage,
+      secondOperationPage,
+    ])
+    assert.equal(operationListJson.includes(materialization.data.authorization.id), false)
+    assert.equal(operationListJson.includes(derivedRenderInput.inputHash), false)
+    assert.equal(operationListJson.includes(sourceKey), false)
+
+    const emptyOperationListResponse = await fetch(
+      `${baseUrl}/v1/operations?status=failed&targetId=${derivedArtifactId}`,
+      { headers: { authorization } },
+    )
+    assert.deepEqual((await emptyOperationListResponse.json()).data.operations, [])
+    for (const invalidQuery of [
+      'limit=0',
+      'limit=101',
+      'status=unknown',
+      'type=internal-render',
+      'after=not-a-cursor',
+      'status=queued&status=failed',
+      'sql=status%3Dqueued',
+      `status=failed&after=${encodeURIComponent(firstOperationPage.data.nextCursor)}`,
+    ]) {
+      const invalidListResponse = await fetch(
+        `${baseUrl}/v1/operations?${invalidQuery}`,
+        { headers: { authorization } },
+      )
+      assert.equal(invalidListResponse.status, 422)
+      assert.equal((await invalidListResponse.json()).error.code, 'INVALID_ARGUMENT')
+    }
     const missingOperationResponse = await fetch(
       `${baseUrl}/v1/operations/missing-operation-id`,
       { headers: { authorization } },
@@ -969,7 +1053,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(missingRetryResponse.status, 404)
     assert.equal(
       await client.v2PublicOperation.count({ where: { workspaceId } }),
-      1,
+      2,
     )
     const storedRenderOperation = await client.v2ArtifactRenderOperation.findUnique({
       where: { operationId: renderOperation.data.operation.id },

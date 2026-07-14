@@ -479,6 +479,7 @@ model V2PublicOperation {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
+  @@index([workspaceId, createdAt, id])
   @@index([workspaceId, status, updatedAt])
   @@index([workspaceId, type, createdAt])
   @@index([workspaceId, targetType, targetId])

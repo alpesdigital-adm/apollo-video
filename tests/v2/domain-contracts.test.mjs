@@ -68,6 +68,7 @@ import {
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
 import { enqueueAuthorizedRenderService } from '../../src/v2/application/enqueue-authorized-render.ts'
+import { listPublicOperationsService } from '../../src/v2/application/list-public-operations.ts'
 import { presentPublicOperation } from '../../src/v2/public-api/presenters.ts'
 
 function expectDomainError(callback, code) {
@@ -529,6 +530,90 @@ test('PublicOperation queue invariants fail closed and presenter omits execution
     }),
     'INVALID_PUBLIC_OPERATION',
   )
+})
+
+test('operation listing binds stable opaque cursors to workspace and allowlisted filters', async () => {
+  const createOperation = (id, createdAt) => createQueuedPublicOperation({
+    id,
+    workspaceId: 'workspace-list-1',
+    clientId: 'client-list-1',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-list-1',
+      manifestId: 'manifest-list-1',
+    },
+    createdAt,
+  })
+  const records = [
+    createOperation('operation-list-3', '2026-07-14T12:00:03.000Z'),
+    createOperation('operation-list-2', '2026-07-14T12:00:02.000Z'),
+    createOperation('operation-list-1', '2026-07-14T12:00:01.000Z'),
+  ].map((operation) => ({
+    operation,
+    context: { authorizationId: 'authorization-list-1', inputHash: 'a'.repeat(64) },
+  }))
+  const queries = []
+  const list = listPublicOperationsService({
+    operations: {
+      async list(query) {
+        queries.push(query)
+        return query.after ? records.slice(1) : records
+      },
+    },
+  })
+
+  const first = await list({
+    workspaceId: 'workspace-list-1',
+    limit: 1,
+    status: 'queued',
+    type: 'artifact-render',
+    targetId: 'artifact-list-1',
+  })
+  assert.deepEqual(first.operations.map((operation) => operation.id), ['operation-list-3'])
+  assert.match(first.nextCursor, /^[A-Za-z0-9_-]+$/)
+  assert.equal(queries[0].limit, 2)
+
+  const second = await list({
+    workspaceId: 'workspace-list-1',
+    limit: 1,
+    after: first.nextCursor,
+    status: 'queued',
+    type: 'artifact-render',
+    targetId: 'artifact-list-1',
+  })
+  assert.deepEqual(queries[1].after, {
+    createdAt: '2026-07-14T12:00:03.000Z',
+    id: 'operation-list-3',
+  })
+  assert.deepEqual(second.operations.map((operation) => operation.id), ['operation-list-2'])
+
+  await assert.rejects(
+    list({
+      workspaceId: 'workspace-list-1',
+      after: first.nextCursor,
+      status: 'failed',
+      type: 'artifact-render',
+      targetId: 'artifact-list-1',
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+  await assert.rejects(
+    list({ workspaceId: 'workspace-list-2', after: first.nextCursor }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+  for (const invalid of [
+    { limit: 0 },
+    { limit: 101 },
+    { status: 'unknown' },
+    { type: 'internal-render' },
+    { after: 'not-a-cursor' },
+  ]) {
+    await assert.rejects(
+      list({ workspaceId: 'workspace-list-1', ...invalid }),
+      (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+    )
+  }
 })
 
 test('PublicOperation attempt transitions reject stale order and exhaust retries safely', () => {

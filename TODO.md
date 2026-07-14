@@ -462,7 +462,7 @@
 
 ### F0.035 — Contrato público e descoberta [FR-241]
 
-- [ ] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros.
+- [ ] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros. Parcial F0-030: `GET /v1/operations` formaliza cursor opaco estável, `limit/after/nextCursor`, ordenação total e allowlist de filtros; convenções transversais dos demais recursos continuam abertas.
 - [x] Criar source of truth para OpenAPI, JSON Schemas e capability discovery. Evidência: `schema-registry.ts`, `openapi.ts`, endpoints `/v1/openapi.json` e `/v1/schemas/{id}/{version}`.
 - [x] Implementar error envelope e catálogo de códigos estáveis. Evidência: `public-api/errors.ts` e testes HTTP.
 - [x] Publicar examples validados e documentação por build. Evidência: 16 examples validados por Ajv Draft 2020-12 e publicados nos schemas/OpenAPI.
@@ -484,7 +484,7 @@
 
 - [ ] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade. Parcial F0-029: contrato, persistência, lease/fencing, fases, backoff, cancelamento e retry manual públicos foram entregues para render; generalização aos demais jobs continua aberta.
 - [ ] Retornar 202+operation ID para ingest, Director, provider, sync, batch, render e export. Parcial F0-024: render autorizado retorna 202 com operation ID; os demais tipos continuam abertos.
-- [ ] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-029: read, cancel e retry workspace-scoped foram entregues; listagem e filtros continuam abertos.
+- [ ] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-030: list/read/cancel/retry e filtros por status/type foram entregues, junto de `targetId`; `projectId` depende de vínculo canônico operação-projeto e continua aberto.
 - [ ] Expor fase e progresso real ou estado indeterminado honesto. Parcial F0-025: worker persiste `materializing`, `rendering`, `persisting` e terminal; progresso permanece honestamente 0/1, faltando medição granular e uso separado de `verifying`.
 - [ ] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-026: sucesso exige checkpoint durável do output e expõe somente artifact/manifest; storage key, receipt técnico e diagnóstico permanecem internos; custo continua aberto.
 - [ ] Criar resilience tests de restart, stale result, cancel e retry. Parcial F0-028: restart/reclaim, stale attempt, disputa de claim, perda de lease, queda pós-commit, retry limitado e cancelamento concorrente estão cobertos; matriz dos demais job types continua aberta.
@@ -3260,12 +3260,12 @@ Limites explícitos desta slice:
 - cancelamento é cooperativo; renderer/provider que ignora `AbortSignal` pode continuar consumindo até o próximo gate, mas não pode publicar;
 - bytes promovidos na janela entre commit físico e checkpoint não são apagados automaticamente e exigirão reconciliação/retention;
 - ator/motivo persistidos, event outbox, custo consumido e métricas de cancelamento continuam no incremento de audit/cost;
-- retry manual foi entregue no F0-029; listagem de operações e administração agregada de dead-letter continuam abertas;
+- retry manual foi entregue no F0-029 e listagem externa no F0-030; administração agregada de dead-letter continua aberta;
 - hosted CI `29350400758` aprovou 63 testes, corrida claim/cancel no PostgreSQL, contratos, API, FFmpeg, Remotion real, build e auditorias.
 
 ### Slice F0-029 — Retry manual e replay controlado
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado em 14 de julho de 2026 no commit `b25513e`.
 
 Entregas:
 
@@ -3294,5 +3294,42 @@ Limites explícitos desta slice:
 - retry reaproveita a autorização original, mas não ignora expiração, revogação ou nova decisão de rights;
 - cada nova falha terminal requer um novo command explícito; não há loop manual implícito;
 - budget, quota, motivo, ator persistido, event outbox e custo por tentativa continuam abertos;
-- listagem/filtros de operações e console de dead-letter continuam no próximo incremento;
+- listagem e filtros seguros de operações foram entregues no F0-030; console de dead-letter continua aberto;
+- hosted CI `29351454953` aprovou 64 testes, retry concorrente no PostgreSQL, contratos, migrations, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-030 — Listagem externa e cursor estável de operações
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- `GET /v1/operations` lista somente operações do workspace autenticado com scope `operations:read`;
+- a ordem fixa `createdAt DESC, id DESC` resolve empates e sustenta uma fronteira determinística;
+- paginação usa `limit`, `after` e `nextCursor`, com padrão 20 e teto 100;
+- cursor Base64 URL-safe v1 carrega apenas fronteira e hash da combinação workspace/filtros, sem segredo ou contexto operacional;
+- continuar um cursor com workspace, status, type ou target diferentes falha com `INVALID_ARGUMENT`;
+- filtros atuais são `status`, `type` e `targetId`; parâmetros desconhecidos, repetidos ou fora da allowlist são rejeitados;
+- repository busca uma unidade adicional para decidir honestamente se há próxima página;
+- índice composto workspace/criação/ID foi adicionado ao SQLite e ao PostgreSQL, com migration própria;
+- capability `apollo.operations.list`, OpenAPI, schema `public-operation-list/v1`, exemplos e baseline foram publicados de forma aditiva;
+- ADR-019 registra semântica do cursor, consistência, segurança e limite explícito do filtro por projeto.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 65 testes;
+- application service cobre cursor opaco, boundary, mudança de filtros/workspace e valores inválidos;
+- integração Prisma cobre empate de timestamp, desempate por ID, continuação sem duplicação, workspace e target ausentes;
+- jornada HTTP cobre scope negado, duas páginas, página terminal, filtros vazios, cursor incompatível e parâmetros desconhecidos/repetidos;
+- payload listado não contém authorization, input hash, storage ou paths locais;
+- contrato público passa com 25 capabilities, 31 schemas, 38 examples e 22 paths;
+- migration v2 passa com 17 tabelas, 59 índices e 38 foreign keys;
+- typecheck, build de produção e integrações SQLite descartáveis de operação/API passam.
+
+Limites explícitos desta slice:
+
+- paginação é estável, mas não constitui snapshot transacional; exclusões e mudanças de status concorrentes podem alterar páginas filtradas;
+- somente `artifact-render` existe no contrato atual; novos job types ampliarão a allowlist de forma aditiva;
+- `projectId` não é fingido a partir de artifact: depende de associação canônica e indexada entre operação e projeto;
+- intervalos de data, ordenações alternativas e filtros combinados adicionais continuam abertos;
+- console agregado de dead-letter, custo, audit/event outbox e ator/motivo persistidos continuam em incrementos posteriores;
 - hosted CI será registrado após publicação no próximo ciclo.

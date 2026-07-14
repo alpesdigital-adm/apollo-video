@@ -17,6 +17,9 @@ export interface CapabilityQueryParameter {
     type: 'string' | 'integer' | 'boolean'
     minimum?: number
     maximum?: number
+    minLength?: number
+    maxLength?: number
+    enum?: readonly (string | number | boolean)[]
     default?: string | number | boolean
   }>
 }
@@ -540,6 +543,59 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     successStatuses: [202],
     idempotency: 'required',
     requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.operations.list',
+    version: '1.0.0',
+    title: 'List public operations',
+    description: 'Returns one stable cursor page of safe workspace operation metadata with allowlisted filters.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['operations:read'],
+    outputSchemaRef: 'apollo://schemas/public-operation-list/v1',
+    endpoint: { method: 'GET', path: '/v1/operations' },
+    toolName: 'apollo.operations.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      {
+        name: 'limit',
+        description: 'Maximum number of operations to return.',
+        required: false,
+        schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+      },
+      {
+        name: 'after',
+        description: 'Opaque cursor returned by the previous page with the same filters.',
+        required: false,
+        schema: { type: 'string', minLength: 8, maxLength: 1024 },
+      },
+      {
+        name: 'status',
+        description: 'Exact public operation status.',
+        required: false,
+        schema: {
+          type: 'string',
+          enum: ['queued', 'running', 'waiting', 'retrying', 'succeeded', 'failed', 'canceled'],
+        },
+      },
+      {
+        name: 'type',
+        description: 'Exact public operation type.',
+        required: false,
+        schema: { type: 'string', enum: ['artifact-render'] },
+      },
+      {
+        name: 'targetId',
+        description: 'Exact target resource identifier.',
+        required: false,
+        schema: { type: 'string', minLength: 3, maxLength: 128 },
+      },
+    ],
   },
   {
     id: 'apollo.operations.read',

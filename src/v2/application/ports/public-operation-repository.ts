@@ -2,6 +2,7 @@ import type {
   PublicOperation,
   PublicOperationError,
   PublicOperationRunningPhase,
+  PublicOperationStatus,
 } from '../../domain/public-operation.ts'
 
 export interface ArtifactRenderOperationContext {
@@ -29,6 +30,18 @@ export interface ClaimedPublicOperationRecord extends PublicOperationRecord {
   lease: Readonly<PublicOperationLease>
 }
 
+export interface PublicOperationListQuery {
+  workspaceId: string
+  limit: number
+  status?: PublicOperationStatus
+  type?: PublicOperation['type']
+  targetId?: string
+  after?: {
+    createdAt: string
+    id: string
+  }
+}
+
 export interface PublicOperationLeaseCommand {
   operationId: string
   leaseOwner: string
@@ -38,6 +51,7 @@ export interface PublicOperationLeaseCommand {
 
 export interface PublicOperationRepository {
   findById(workspaceId: string, operationId: string): Promise<PublicOperationRecord | null>
+  list(input: PublicOperationListQuery): Promise<readonly PublicOperationRecord[]>
   cancel(input: {
     workspaceId: string
     operationId: string

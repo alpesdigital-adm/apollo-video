@@ -18,7 +18,7 @@ Uma falha recuperável não pode devolver a operação imediatamente à fila. Se
 - Ao iniciar nova tentativa, `nextAttemptAt` é limpo atomicamente com o novo fencing token.
 - Falha originalmente recuperável na última tentativa, inclusive lease expirada, termina como `failed` não retentável e recebe `deadLetteredAt` igual a `completedAt`.
 - Falha não recuperável termina sem `deadLetteredAt`; isso preserva a distinção entre rejeição definitiva e esgotamento.
-- `nextAttemptAt` e `deadLetteredAt` permanecem internos nesta versão. O schema público v1 não é alterado sem versionamento; listagem, replay e retry manual ganharão contrato externo próprio.
+- `nextAttemptAt` e `deadLetteredAt` permanecem internos nesta versão. Retry manual e listagem ganharam contratos externos próprios nos ADR-018 e ADR-019, sem expor esses checkpoints internos.
 
 ## Consequências
 
