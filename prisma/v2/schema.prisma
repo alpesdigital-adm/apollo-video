@@ -421,6 +421,9 @@ model V2PublicOperation {
   updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
   startedAt          DateTime? @db.Timestamptz(3)
   completedAt        DateTime? @db.Timestamptz(3)
+  leaseOwner         String?   @db.VarChar(128)
+  leaseExpiresAt     DateTime? @db.Timestamptz(3)
+  heartbeatAt        DateTime? @db.Timestamptz(3)
 
   workspace      V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   client         V2ApiClient                @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -431,6 +434,7 @@ model V2PublicOperation {
   @@index([workspaceId, status, updatedAt(sort: Desc)])
   @@index([workspaceId, type, createdAt(sort: Desc)])
   @@index([workspaceId, targetType, targetId])
+  @@index([status, leaseExpiresAt, createdAt])
   @@map("public_operations")
 }
 

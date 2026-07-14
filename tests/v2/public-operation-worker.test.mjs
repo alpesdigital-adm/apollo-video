@@ -1,0 +1,175 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import {
+  advancePublicOperationPhase,
+  createQueuedPublicOperation,
+  retryOrFailPublicOperation,
+  startPublicOperationAttempt,
+  succeedPublicOperation,
+} from '../../src/v2/domain/public-operation.ts'
+import { runNextPublicOperationService } from '../../src/v2/application/run-public-operation-worker.ts'
+
+function createClock() {
+  let current = Date.parse('2026-07-14T12:00:00.000Z')
+  return () => new Date((current += 100))
+}
+
+function createOperations() {
+  let operation = createQueuedPublicOperation({
+    id: 'operation-worker-test',
+    workspaceId: 'workspace-worker-test',
+    clientId: 'client-worker-test',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-worker-test',
+      manifestId: 'manifest-worker-test',
+    },
+    maxAttempts: 2,
+    createdAt: '2026-07-14T12:00:00.000Z',
+  })
+  let lease
+  let denyHeartbeat = false
+  const context = Object.freeze({
+    authorizationId: 'authorization-worker-test',
+    inputHash: 'a'.repeat(64),
+  })
+  const record = () => ({ operation, context })
+  const matches = (input) =>
+    lease &&
+    lease.owner === input.leaseOwner &&
+    lease.attempt === input.attempt &&
+    Date.parse(lease.expiresAt) > Date.parse(input.now)
+
+  return {
+    get operation() { return operation },
+    loseLease() { denyHeartbeat = true },
+    repository: {
+      async findById() { return record() },
+      async findReplay() { return null },
+      async createOrReplay() { throw new Error('not used') },
+      async claimNext(input) {
+        if (!['queued', 'retrying'].includes(operation.status)) return null
+        operation = startPublicOperationAttempt(operation, input.now)
+        lease = {
+          owner: input.leaseOwner,
+          attempt: operation.attempt,
+          heartbeatAt: input.now,
+          expiresAt: input.leaseUntil,
+        }
+        denyHeartbeat = false
+        return { ...record(), lease: Object.freeze({ ...lease }) }
+      },
+      async heartbeat(input) {
+        if (denyHeartbeat || !matches(input)) return false
+        lease = { ...lease, heartbeatAt: input.now, expiresAt: input.leaseUntil }
+        return true
+      },
+      async advancePhase(input) {
+        if (!matches(input)) return false
+        operation = advancePublicOperationPhase(operation, input.phase, input.now)
+        return true
+      },
+      async succeed(input) {
+        if (!matches(input)) return null
+        operation = succeedPublicOperation(operation, input.now)
+        lease = undefined
+        return record()
+      },
+      async failOrRetry(input) {
+        if (!matches(input)) return null
+        operation = retryOrFailPublicOperation(operation, input.error, input.now)
+        lease = undefined
+        return record()
+      },
+    },
+  }
+}
+
+function receipt() {
+  return Object.freeze({
+    schemaVersion: 'authorized-render-receipt/v1',
+    authorizationId: 'authorization-worker-test',
+    artifactId: 'artifact-worker-test',
+    manifestId: 'manifest-worker-test',
+    inputHash: 'a'.repeat(64),
+    revalidationHash: 'b'.repeat(64),
+    output: Object.freeze({
+      outputKey: 'private/output.mp4',
+      outputSha256: 'c'.repeat(64),
+      byteSize: 1024,
+      committedAt: '2026-07-14T12:00:01.000Z',
+    }),
+  })
+}
+
+test('durable worker fences promotion with heartbeat and persists a safe terminal result', async () => {
+  const operations = createOperations()
+  let committed = false
+  const runNext = runNextPublicOperationService({
+    operations: operations.repository,
+    clock: createClock(),
+    leaseDurationMs: 10_000,
+    heartbeatIntervalMs: 1_000,
+    async render(request) {
+      await request.beforeCommit()
+      committed = true
+      return receipt()
+    },
+  })
+  const outcome = await runNext('worker-success-test')
+  assert.deepEqual(outcome, {
+    operationId: 'operation-worker-test',
+    status: 'succeeded',
+  })
+  assert.equal(committed, true)
+  assert.equal(operations.operation.status, 'succeeded')
+  assert.deepEqual(operations.operation.result.resource, operations.operation.target)
+  const serialized = JSON.stringify(operations.operation)
+  assert.equal(serialized.includes('private/output.mp4'), false)
+  assert.equal(serialized.includes('authorization-worker-test'), false)
+})
+
+test('lost lease aborts before commit and cannot publish a stale result', async () => {
+  const operations = createOperations()
+  let committed = false
+  const runNext = runNextPublicOperationService({
+    operations: operations.repository,
+    clock: createClock(),
+    leaseDurationMs: 10_000,
+    heartbeatIntervalMs: 1_000,
+    async render(request) {
+      operations.loseLease()
+      await request.beforeCommit()
+      committed = true
+      return receipt()
+    },
+  })
+  const outcome = await runNext('worker-stale-test')
+  assert.equal(outcome.status, 'lease-lost')
+  assert.equal(committed, false)
+  assert.equal(operations.operation.status, 'running')
+})
+
+test('retryable failure is reclaimed after restart and succeeds on the next attempt', async () => {
+  const operations = createOperations()
+  let renders = 0
+  const runNext = runNextPublicOperationService({
+    operations: operations.repository,
+    clock: createClock(),
+    leaseDurationMs: 10_000,
+    heartbeatIntervalMs: 1_000,
+    async render(request) {
+      renders += 1
+      if (renders === 1) throw new Error('private renderer detail')
+      await request.beforeCommit()
+      return receipt()
+    },
+  })
+  assert.equal((await runNext('worker-restart-one')).status, 'retrying')
+  assert.equal(operations.operation.attempt, 1)
+  assert.equal((await runNext('worker-restart-two')).status, 'succeeded')
+  assert.equal(operations.operation.attempt, 2)
+  assert.equal(JSON.stringify(operations.operation).includes('private renderer detail'), false)
+})

@@ -99,6 +99,19 @@ isolada por workspace. A gravação é transacional e idempotente pela combinaç
 de canonical key, identidade imutável do conteúdo e `manifestHash`; source
 ausente ou divergente desfaz toda a operação.
 
+## Worker de render v2
+
+Renders solicitados pela API pública permanecem em uma operação durável e são
+executados fora do processo web:
+
+```bash
+npm run worker:v2:render
+```
+
+O processo exige Postgres e as raízes privadas de artifacts/outputs configuradas.
+Claim, heartbeat e attempt impedem dois workers de concluir a mesma tentativa;
+uma lease expirada pode ser recuperada com segurança por outro processo.
+
 ## Formatos
 
 - **Vertical (9:16)** — Shorts, Reels, TikTok

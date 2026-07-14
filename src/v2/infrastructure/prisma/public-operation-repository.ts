@@ -2,16 +2,24 @@ import type { Prisma, PrismaClient } from '@prisma/client'
 
 import type {
   ArtifactRenderOperationContext,
+  ClaimedPublicOperationRecord,
+  PublicOperationLeaseCommand,
   PublicOperationPersistenceResult,
   PublicOperationRecord,
   PublicOperationRepository,
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
+  advancePublicOperationPhase,
   assertPublicOperation,
   rehydratePublicOperation,
+  retryOrFailPublicOperation,
+  startPublicOperationAttempt,
+  succeedPublicOperation,
   type PublicOperation,
+  type PublicOperationError,
   type PublicOperationResult,
+  type PublicOperationRunningPhase,
 } from '../../domain/public-operation.ts'
 
 type StoredOperation = Prisma.V2PublicOperationGetPayload<{
@@ -52,6 +60,14 @@ const OPERATION_INCLUDE = {
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
+
+function parseCommandDate(value: string, field: string): Date {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    throw new DomainError('INVALID_PUBLIC_OPERATION', `${field} must be a valid date`)
+  }
+  return date
+}
 
 function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
@@ -115,6 +131,18 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       'Stored PublicOperation context is invalid',
       { operationId: row.id },
     )
+  }
+  const hasCompleteLease =
+    row.leaseOwner !== null && row.leaseExpiresAt !== null && row.heartbeatAt !== null
+  if (
+    (row.status === 'running' &&
+      (!hasCompleteLease ||
+        !ID_PATTERN.test(row.leaseOwner as string) ||
+        (row.leaseExpiresAt as Date).getTime() <= (row.heartbeatAt as Date).getTime())) ||
+    (row.status !== 'running' &&
+      (row.leaseOwner !== null || row.leaseExpiresAt !== null || row.heartbeatAt !== null))
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored PublicOperation lease is invalid')
   }
   const progressFields = [row.progressCompleted, row.progressTotal, row.progressUnit]
   const hasProgress = progressFields.some((value) => value !== null)
@@ -187,6 +215,27 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       { operationId: row.id },
     )
   }
+}
+
+function hydrateClaim(row: StoredOperation): ClaimedPublicOperationRecord {
+  const record = hydrateRecord(row)
+  if (
+    row.status !== 'running' ||
+    row.leaseOwner === null ||
+    row.leaseExpiresAt === null ||
+    row.heartbeatAt === null
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Claimed PublicOperation lease is missing')
+  }
+  return Object.freeze({
+    ...record,
+    lease: Object.freeze({
+      owner: row.leaseOwner,
+      attempt: row.attempt,
+      heartbeatAt: row.heartbeatAt.toISOString(),
+      expiresAt: row.leaseExpiresAt.toISOString(),
+    }),
+  })
 }
 
 export class PrismaPublicOperationRepository implements PublicOperationRepository {
@@ -347,5 +396,226 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       }
       throw error
     }
+  }
+
+  async claimNext(input: {
+    leaseOwner: string
+    now: string
+    leaseUntil: string
+    workspaceId?: string
+  }): Promise<ClaimedPublicOperationRecord | null> {
+    if (!ID_PATTERN.test(input.leaseOwner)) {
+      throw new DomainError('INVALID_PUBLIC_OPERATION', 'Worker lease owner is invalid')
+    }
+    const now = parseCommandDate(input.now, 'now')
+    const leaseUntil = parseCommandDate(input.leaseUntil, 'leaseUntil')
+    if (leaseUntil.getTime() <= now.getTime()) {
+      throw new DomainError('INVALID_PUBLIC_OPERATION', 'Worker lease must expire after now')
+    }
+
+    return this.client.$transaction(async (transaction) => {
+      const candidates = await transaction.v2PublicOperation.findMany({
+        where: {
+          type: 'artifact-render',
+          ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+          OR: [
+            { status: { in: ['queued', 'retrying'] }, leaseOwner: null },
+            { status: 'running', leaseExpiresAt: { lte: now } },
+          ],
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: 32,
+        include: OPERATION_INCLUDE,
+      })
+      for (const candidate of candidates) {
+        const current = hydrateRecord(candidate).operation
+        if (candidate.attempt >= candidate.maxAttempts) {
+          if (candidate.status === 'running') {
+            await transaction.v2PublicOperation.updateMany({
+              where: {
+                id: candidate.id,
+                status: 'running',
+                phase: candidate.phase,
+                attempt: candidate.attempt,
+                updatedAt: candidate.updatedAt,
+                leaseOwner: candidate.leaseOwner,
+                leaseExpiresAt: { lte: now },
+              },
+              data: {
+                status: 'failed',
+                phase: 'failed',
+                cancelable: false,
+                retryable: false,
+                resultJson: null,
+                errorCode: 'worker_lease_expired',
+                errorMessage: 'Render operation exhausted its available attempts',
+                errorRetryable: false,
+                completedAt: now,
+                updatedAt: now,
+                leaseOwner: null,
+                leaseExpiresAt: null,
+                heartbeatAt: null,
+              },
+            })
+          }
+          continue
+        }
+        const claimed = startPublicOperationAttempt(current, now.toISOString())
+        const updated = await transaction.v2PublicOperation.updateMany({
+          where: {
+            id: candidate.id,
+            status: candidate.status,
+            phase: candidate.phase,
+            attempt: candidate.attempt,
+            updatedAt: candidate.updatedAt,
+            ...(candidate.status === 'running'
+              ? {
+                  leaseOwner: candidate.leaseOwner,
+                  leaseExpiresAt: { lte: now },
+                }
+              : { leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null }),
+          },
+          data: {
+            status: claimed.status,
+            phase: claimed.phase,
+            progressCompleted: claimed.progress?.completed,
+            progressTotal: claimed.progress?.total,
+            progressUnit: claimed.progress?.unit,
+            cancelable: claimed.cancelable,
+            retryable: claimed.retryable,
+            attempt: claimed.attempt,
+            resultJson: null,
+            errorCode: null,
+            errorMessage: null,
+            errorRetryable: null,
+            startedAt: new Date(claimed.startedAt as string),
+            completedAt: null,
+            updatedAt: now,
+            leaseOwner: input.leaseOwner,
+            leaseExpiresAt: leaseUntil,
+            heartbeatAt: now,
+          },
+        })
+        if (updated.count !== 1) continue
+        const stored = await transaction.v2PublicOperation.findUnique({
+          where: { id: candidate.id },
+          include: OPERATION_INCLUDE,
+        })
+        if (!stored) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Claimed PublicOperation disappeared')
+        }
+        return hydrateClaim(stored)
+      }
+      return null
+    })
+  }
+
+  async heartbeat(input: PublicOperationLeaseCommand & {
+    leaseUntil: string
+  }): Promise<boolean> {
+    const now = parseCommandDate(input.now, 'now')
+    const leaseUntil = parseCommandDate(input.leaseUntil, 'leaseUntil')
+    if (!ID_PATTERN.test(input.leaseOwner) || leaseUntil.getTime() <= now.getTime()) {
+      throw new DomainError('INVALID_PUBLIC_OPERATION', 'Heartbeat lease input is invalid')
+    }
+    const updated = await this.client.v2PublicOperation.updateMany({
+      where: {
+        id: input.operationId,
+        status: 'running',
+        leaseOwner: input.leaseOwner,
+        attempt: input.attempt,
+        leaseExpiresAt: { gt: now },
+        heartbeatAt: { lte: now },
+        updatedAt: { lte: now },
+      },
+      data: { heartbeatAt: now, leaseExpiresAt: leaseUntil, updatedAt: now },
+    })
+    return updated.count === 1
+  }
+
+  private async transitionRunning(
+    input: PublicOperationLeaseCommand,
+    transition: (operation: PublicOperation) => Readonly<PublicOperation>,
+  ): Promise<PublicOperationRecord | null> {
+    const now = parseCommandDate(input.now, 'now')
+    if (!ID_PATTERN.test(input.leaseOwner)) {
+      throw new DomainError('INVALID_PUBLIC_OPERATION', 'Worker lease owner is invalid')
+    }
+    return this.client.$transaction(async (transaction) => {
+      const stored = await transaction.v2PublicOperation.findUnique({
+        where: { id: input.operationId },
+        include: OPERATION_INCLUDE,
+      })
+      if (!stored) return null
+      const record = hydrateRecord(stored)
+      if (
+        stored.status !== 'running' ||
+        stored.leaseOwner !== input.leaseOwner ||
+        stored.attempt !== input.attempt ||
+        stored.leaseExpiresAt === null ||
+        stored.leaseExpiresAt.getTime() <= now.getTime()
+      ) {
+        return null
+      }
+      const next = transition(record.operation)
+      const updated = await transaction.v2PublicOperation.updateMany({
+        where: {
+          id: input.operationId,
+          status: 'running',
+          phase: stored.phase,
+          updatedAt: stored.updatedAt,
+          leaseOwner: input.leaseOwner,
+          attempt: input.attempt,
+          leaseExpiresAt: { gt: now },
+        },
+        data: {
+          status: next.status,
+          phase: next.phase,
+          progressCompleted: next.progress?.completed,
+          progressTotal: next.progress?.total,
+          progressUnit: next.progress?.unit,
+          cancelable: next.cancelable,
+          retryable: next.retryable,
+          resultJson: next.result ? JSON.stringify(next.result) : null,
+          errorCode: next.error?.code ?? null,
+          errorMessage: next.error?.message ?? null,
+          errorRetryable: next.error?.retryable ?? null,
+          completedAt: next.completedAt ? new Date(next.completedAt) : null,
+          updatedAt: now,
+          ...(next.status === 'running'
+            ? {}
+            : { leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null }),
+        },
+      })
+      if (updated.count !== 1) return null
+      const persisted = await transaction.v2PublicOperation.findUnique({
+        where: { id: input.operationId },
+        include: OPERATION_INCLUDE,
+      })
+      return persisted ? hydrateRecord(persisted) : null
+    })
+  }
+
+  async advancePhase(input: PublicOperationLeaseCommand & {
+    phase: PublicOperationRunningPhase
+  }): Promise<boolean> {
+    const record = await this.transitionRunning(input, (operation) =>
+      advancePublicOperationPhase(operation, input.phase, input.now),
+    )
+    return record !== null
+  }
+
+  succeed(input: PublicOperationLeaseCommand): Promise<PublicOperationRecord | null> {
+    return this.transitionRunning(input, (operation) =>
+      succeedPublicOperation(operation, input.now),
+    )
+  }
+
+  failOrRetry(input: PublicOperationLeaseCommand & {
+    error: PublicOperationError
+  }): Promise<PublicOperationRecord | null> {
+    return this.transitionRunning(input, (operation) =>
+      retryOrFailPublicOperation(operation, input.error, input.now),
+    )
   }
 }

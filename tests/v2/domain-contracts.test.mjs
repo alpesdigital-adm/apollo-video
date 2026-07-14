@@ -58,8 +58,12 @@ import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/lo
 import { compileApolloVideoRenderProps } from '../../src/v2/application/compile-apollo-video-render-props.ts'
 import { renderAuthorizedInputService } from '../../src/v2/application/render-authorized-input.ts'
 import {
+  advancePublicOperationPhase,
   createQueuedPublicOperation,
   rehydratePublicOperation,
+  retryOrFailPublicOperation,
+  startPublicOperationAttempt,
+  succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
 import { enqueueAuthorizedRenderService } from '../../src/v2/application/enqueue-authorized-render.ts'
 import { presentPublicOperation } from '../../src/v2/public-api/presenters.ts'
@@ -426,6 +430,23 @@ test('authorized render promotes staged output only after a matching second mate
   )
   assert.equal(commits, 0)
   assert.equal(discards, 1)
+
+  materializations = 0
+  commits = 0
+  discards = 0
+  await assert.rejects(
+    render({
+      workspaceId: 'workspace-1',
+      authorizationId: 'authorization-render-1',
+      async beforeCommit() {
+        throw new DomainError('RENDER_EXECUTION_FAILED', 'Worker lease was lost')
+      },
+    }),
+    (error) => error instanceof DomainError && error.code === 'RENDER_EXECUTION_FAILED',
+  )
+  assert.equal(materializations, 2)
+  assert.equal(commits, 0)
+  assert.equal(discards, 1)
 })
 
 test('PublicOperation queue invariants fail closed and presenter omits execution internals', () => {
@@ -468,6 +489,67 @@ test('PublicOperation queue invariants fail closed and presenter omits execution
     }),
     'INVALID_PUBLIC_OPERATION',
   )
+})
+
+test('PublicOperation attempt transitions reject stale order and exhaust retries safely', () => {
+  const queued = createQueuedPublicOperation({
+    id: 'operation-transition-1',
+    workspaceId: 'workspace-1',
+    clientId: 'client-1',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-render-1',
+      manifestId: 'manifest-render-1',
+    },
+    maxAttempts: 2,
+    createdAt: '2026-07-14T12:00:00.000Z',
+  })
+  const first = startPublicOperationAttempt(queued, '2026-07-14T12:00:01.000Z')
+  assert.deepEqual(
+    { status: first.status, phase: first.phase, attempt: first.attempt },
+    { status: 'running', phase: 'materializing', attempt: 1 },
+  )
+  const rendering = advancePublicOperationPhase(
+    first,
+    'rendering',
+    '2026-07-14T12:00:02.000Z',
+  )
+  expectDomainError(
+    () => advancePublicOperationPhase(rendering, 'materializing', '2026-07-14T12:00:03.000Z'),
+    'INVALID_PUBLIC_OPERATION',
+  )
+  const retrying = retryOrFailPublicOperation(
+    rendering,
+    { code: 'render_execution_failed', message: 'Render failed safely', retryable: true },
+    '2026-07-14T12:00:04.000Z',
+  )
+  assert.deepEqual(
+    { status: retrying.status, phase: retrying.phase, retryable: retrying.retryable },
+    { status: 'retrying', phase: 'retrying', retryable: true },
+  )
+  const second = startPublicOperationAttempt(retrying, '2026-07-14T12:00:05.000Z')
+  const terminal = retryOrFailPublicOperation(
+    second,
+    { code: 'render_execution_failed', message: 'Render failed safely', retryable: true },
+    '2026-07-14T12:00:06.000Z',
+  )
+  assert.equal(terminal.status, 'failed')
+  assert.equal(terminal.retryable, false)
+  assert.equal(terminal.error.retryable, false)
+  expectDomainError(
+    () => startPublicOperationAttempt(terminal, '2026-07-14T12:00:07.000Z'),
+    'INVALID_PUBLIC_OPERATION',
+  )
+
+  const persisted = advancePublicOperationPhase(
+    advancePublicOperationPhase(rendering, 'verifying', '2026-07-14T12:00:03.000Z'),
+    'persisting',
+    '2026-07-14T12:00:04.000Z',
+  )
+  const succeeded = succeedPublicOperation(persisted, '2026-07-14T12:00:05.000Z')
+  assert.equal(succeeded.status, 'succeeded')
+  assert.deepEqual(succeeded.result.resource, succeeded.target)
 })
 
 test('authorized render enqueue is idempotent, actor-bound and expiry-aware', async () => {

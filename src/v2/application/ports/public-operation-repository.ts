@@ -1,4 +1,8 @@
-import type { PublicOperation } from '../../domain/public-operation.ts'
+import type {
+  PublicOperation,
+  PublicOperationError,
+  PublicOperationRunningPhase,
+} from '../../domain/public-operation.ts'
 
 export interface ArtifactRenderOperationContext {
   authorizationId: string
@@ -12,6 +16,24 @@ export interface PublicOperationRecord {
 
 export interface PublicOperationPersistenceResult extends PublicOperationRecord {
   replayed: boolean
+}
+
+export interface PublicOperationLease {
+  owner: string
+  attempt: number
+  heartbeatAt: string
+  expiresAt: string
+}
+
+export interface ClaimedPublicOperationRecord extends PublicOperationRecord {
+  lease: Readonly<PublicOperationLease>
+}
+
+export interface PublicOperationLeaseCommand {
+  operationId: string
+  leaseOwner: string
+  attempt: number
+  now: string
 }
 
 export interface PublicOperationRepository {
@@ -28,4 +50,20 @@ export interface PublicOperationRepository {
     idempotencyKey: string
     requestFingerprint: string
   }): Promise<PublicOperationPersistenceResult>
+  claimNext(input: {
+    leaseOwner: string
+    now: string
+    leaseUntil: string
+    workspaceId?: string
+  }): Promise<ClaimedPublicOperationRecord | null>
+  heartbeat(input: PublicOperationLeaseCommand & {
+    leaseUntil: string
+  }): Promise<boolean>
+  advancePhase(input: PublicOperationLeaseCommand & {
+    phase: PublicOperationRunningPhase
+  }): Promise<boolean>
+  succeed(input: PublicOperationLeaseCommand): Promise<PublicOperationRecord | null>
+  failOrRetry(input: PublicOperationLeaseCommand & {
+    error: PublicOperationError
+  }): Promise<PublicOperationRecord | null>
 }

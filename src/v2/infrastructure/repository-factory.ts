@@ -2,6 +2,7 @@ import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
 
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
+import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
 import { calculateVersionHash } from '../application/version-hash.ts'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
@@ -142,6 +143,25 @@ export function createAuthorizedRenderExecutor(
       const outputIdentity = calculateVersionHash({ authorizationId, inputHash })
       return `workspaces/${workspaceNamespace}/renders/${outputIdentity}.mp4`
     },
+  })
+}
+
+export function createPublicOperationWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const configuredLease = Number(environment.APOLLO_V2_WORKER_LEASE_MS)
+  const configuredHeartbeat = Number(environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
+  return runNextPublicOperationService({
+    operations: createPublicOperationRepository(),
+    render: createAuthorizedRenderExecutor(environment, clock),
+    clock,
+    ...(Number.isSafeInteger(configuredLease) && configuredLease > 0
+      ? { leaseDurationMs: configuredLease }
+      : {}),
+    ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0
+      ? { heartbeatIntervalMs: configuredHeartbeat }
+      : {}),
   })
 }
 

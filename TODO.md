@@ -380,10 +380,10 @@
 
 ### F0.026 — Durable jobs [FR-232]
 
-- [ ] Implementar job state machine, heartbeat, attempt e idempotency key.
-- [ ] Persistir checkpoints antes e depois de efeitos externos.
-- [ ] Implementar retry exponencial, cancelamento e dead-letter.
-- [ ] Simular restart entre cada checkpoint e verificar retomada segura.
+- [ ] Implementar job state machine, heartbeat, attempt e idempotency key. Parcial F0-025: `artifact-render` possui state machine, enqueue idempotente, claim/lease, heartbeat, attempt como fencing token e conclusão CAS; falta generalizar para os demais jobs.
+- [ ] Persistir checkpoints antes e depois de efeitos externos. Parcial F0-025: fases são persistidas e o gate `persisting` ocorre imediatamente antes do commit; falta persistir receipt/output/lineage depois do efeito e fechar a recuperação da janela entre commit e conclusão.
+- [ ] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-025: falha retryable volta a `retrying` até `maxAttempts`; backoff, cancelamento e dead-letter continuam abertos.
+- [ ] Simular restart entre cada checkpoint e verificar retomada segura. Parcial F0-025: regressões cobrem expiração de lease, reclaim com attempt incrementado, worker antigo bloqueado, retry/restart e perda de lease antes do commit; faltam quedas após commit e checkpoints de outros jobs.
 
 ### F0.027 — Partial invalidation [FR-233]
 
@@ -482,12 +482,12 @@
 
 ### F0.037 — Operações assíncronas [FR-243]
 
-- [ ] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade. Parcial F0-024: contrato canônico, estados, flags, persistência e contexto tipado de render foram entregues; faltam transições CAS do worker, lease, heartbeat, cancel e retry.
+- [ ] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade. Parcial F0-025: contrato, persistência, claim/lease, heartbeat, fencing por attempt, fases e conclusão CAS de render foram entregues; cancelamento e retry público continuam abertos.
 - [ ] Retornar 202+operation ID para ingest, Director, provider, sync, batch, render e export. Parcial F0-024: render autorizado retorna 202 com operation ID; os demais tipos continuam abertos.
 - [ ] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-024: read workspace-scoped por ID foi entregue; list, filtros, cancel e retry continuam abertos.
-- [ ] Expor fase e progresso real ou estado indeterminado honesto. Parcial F0-024: fila expõe `queued` e progresso real 0/1; fases do worker ainda não são atualizadas.
-- [ ] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-024: schemas e presenter fechados não aceitam mídia, paths ou payload protegido; terminal result/error e custo ainda não são gravados pelo worker.
-- [ ] Criar resilience tests de restart, stale result, cancel e retry. Parcial F0-024: regressões cobrem idempotência, payload divergente, expiração, actor binding, isolamento e corrupção cruzada; restart, stale result, cancel e retry continuam abertos.
+- [ ] Expor fase e progresso real ou estado indeterminado honesto. Parcial F0-025: worker persiste `materializing`, `rendering`, `persisting` e terminal; progresso permanece honestamente 0/1, faltando medição granular e uso separado de `verifying`.
+- [ ] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-025: worker grava result por artifact/manifest e erro sanitizado sem path, key, stack ou detalhe privado; custo continua aberto.
+- [ ] Criar resilience tests de restart, stale result, cancel e retry. Parcial F0-025: restart/reclaim, tentativa stale, disputa de claim, heartbeat incorreto, perda de lease pré-commit e retry limitado estão cobertos; cancel e queda após commit continuam abertos.
 
 ### F0.038 — Webhooks e eventos [FR-244]
 
@@ -3077,7 +3077,7 @@ Confirmação hospedada:
 
 ### Slice F0-024 — Operação pública durável para render autorizado
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado em 14 de julho de 2026 nos commits `8486ca0` e `2f3f38e`.
 
 Entregas:
 
@@ -3112,3 +3112,47 @@ Limites explícitos desta slice:
 - o output do F0-023 ainda não é ligado à operação persistida nem conferido contra o artifact/manifest target;
 - apenas `artifact-render` está implementado; ingest, Director, providers, sync, batch e export ainda não usam `PublicOperation`;
 - o próximo incremento deve implementar claim/lease durável, executar o render autorizado fora do processo web e persistir o resultado terminal seguro.
+
+Confirmação hospedada:
+
+- o run inicial `29335940403` detectou uma fixture com `createdAt` futuro em relação ao relógio do runner, sem falha das constraints de produção;
+- a correção `2f3f38e` estabilizou a fixture mantendo as proteções intactas;
+- o run final `29336169905` aprovou migrations PostgreSQL, render Remotion real, persistência de artifacts/operações, API, contratos, builds e auditorias.
+
+### Slice F0-025 — Worker durável com lease e fencing
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- processo `worker:v2:render` separado da aplicação web busca e executa operações persistidas;
+- `public_operations` ganhou owner, expiração e heartbeat de lease, constraint de coerência e índice de claim;
+- claim aceita queued/retrying ou running expirado, incrementa attempt e persiste `materializing` atomicamente;
+- attempt atua como fencing token: heartbeat, fase, sucesso e falha exigem owner/tentativa/lease válidos;
+- recuperação de lease expirada preserva o primeiro `startedAt`, incrementa attempt e invalida comandos do worker antigo;
+- fases seguem ordem monotônica e são persistidas por CAS;
+- heartbeat periódico aborta o renderer quando a lease é perdida ou o banco deixa de confirmar a renovação;
+- o executor ganhou gate assíncrono depois da segunda materialização e antes do commit;
+- esse gate renova a lease e grava `persisting`; rejeição descarta o partial antes da promoção;
+- receipt precisa coincidir com authorization, artifact, manifest e input hash da operação reclamada;
+- sucesso grava somente referência segura a artifact/manifest e limpa a lease;
+- falha retryable volta a `retrying` enquanto houver attempts; ao esgotar, grava erro terminal sanitizado;
+- ADR-014 formaliza restart, fencing, janela pré-commit e limites da transação distribuída.
+
+Regressões e evidências locais:
+
+- transições de domínio rejeitam retrocesso de fase, tempo regressivo, sucesso antes de `persisting` e tentativa além do máximo;
+- teste de orchestration comprova que o gate pré-commit rejeitado executa discard e nunca commit;
+- testes do worker cobrem sucesso, perda de lease, ausência de internals, retry e retomada na segunda tentativa;
+- integração Prisma cobre claim único, disputa concorrente no PostgreSQL, heartbeat com attempt incorreto, renovação, expiração, reclaim, fase/conclusão stale bloqueada e limpeza terminal da lease;
+- typecheck e validação da migration passam; o schema v2 possui 17 tabelas, 57 índices e 38 foreign keys;
+- integração dedicada passa em cópia SQLite temporária sem alterar o banco local.
+
+Limites explícitos desta slice:
+
+- backoff exponencial, `nextAttemptAt`, cancelamento, retry manual e dead-letter continuam abertos;
+- ainda não existe persistência do output como novo artifact/manifest/lineage nem checkpoint posterior ao commit físico;
+- queda depois do commit do arquivo e antes do `succeeded` ainda depende da output key determinística; a reconciliação será fechada junto à persistência do output;
+- `verifying` existe no contrato e no repository, mas probe/quality ainda ocorre dentro do renderer e não ganha fase separada;
+- lease/heartbeat são internos e deliberadamente não aparecem na Public API;
+- hosted CI desta slice será registrado após publicação no próximo ciclo.

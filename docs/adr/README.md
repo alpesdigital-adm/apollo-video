@@ -15,3 +15,4 @@ Estados usados:
 - [ADR-006 — Commands, versões e concorrência](./ADR-006-command-version-model.md)
 - [ADR-010 — Segurança, credenciais, rights e consent](./ADR-010-security-credentials-rights-consent.md)
 - [ADR-013 — API pública e automação](./ADR-013-public-api-automation.md)
+- [ADR-014 — Worker durável de render e fencing de lease](./ADR-014-durable-render-worker.md)

@@ -78,6 +78,14 @@ const TERMINAL_STATUSES = new Set<PublicOperationStatus>([
   'failed',
   'canceled',
 ])
+const RUNNING_PHASE_ORDER = [
+  'materializing',
+  'rendering',
+  'verifying',
+  'persisting',
+] as const
+
+export type PublicOperationRunningPhase = (typeof RUNNING_PHASE_ORDER)[number]
 
 function validateId(value: string, field: string): string {
   const normalized = value.trim()
@@ -330,6 +338,16 @@ function freezeOperation(operation: PublicOperation): Readonly<PublicOperation> 
   })
 }
 
+function transitionDate(operation: PublicOperation, value: string): string {
+  const updatedAt = validateDate(value, 'updatedAt')
+  assertDomain(
+    Date.parse(updatedAt) >= Date.parse(operation.updatedAt),
+    'INVALID_PUBLIC_OPERATION',
+    'PublicOperation transition cannot move time backwards',
+  )
+  return updatedAt
+}
+
 export function createQueuedPublicOperation(input: {
   id: string
   workspaceId: string
@@ -380,6 +398,121 @@ export function rehydratePublicOperation(operation: PublicOperation): Readonly<P
     ...(operation.completedAt
       ? { completedAt: validateDate(operation.completedAt, 'completedAt') }
       : {}),
+  })
+}
+
+export function startPublicOperationAttempt(
+  operation: PublicOperation,
+  updatedAtValue: string,
+): Readonly<PublicOperation> {
+  assertPublicOperation(operation)
+  assertDomain(
+    ['queued', 'retrying', 'running'].includes(operation.status) &&
+      operation.attempt < operation.maxAttempts,
+    'INVALID_PUBLIC_OPERATION',
+    'PublicOperation cannot start another attempt',
+  )
+  const updatedAt = transitionDate(operation, updatedAtValue)
+  return freezeOperation({
+    ...operation,
+    status: 'running',
+    phase: 'materializing',
+    progress: { completed: 0, total: 1, unit: 'render' },
+    cancelable: true,
+    retryable: false,
+    attempt: operation.attempt + 1,
+    updatedAt,
+    startedAt: operation.startedAt ?? updatedAt,
+    completedAt: undefined,
+    result: undefined,
+    error: undefined,
+  })
+}
+
+export function advancePublicOperationPhase(
+  operation: PublicOperation,
+  phase: PublicOperationRunningPhase,
+  updatedAtValue: string,
+): Readonly<PublicOperation> {
+  assertPublicOperation(operation)
+  const currentIndex = RUNNING_PHASE_ORDER.indexOf(
+    operation.phase as PublicOperationRunningPhase,
+  )
+  const nextIndex = RUNNING_PHASE_ORDER.indexOf(phase)
+  assertDomain(
+    operation.status === 'running' && currentIndex >= 0 && nextIndex >= currentIndex,
+    'INVALID_PUBLIC_OPERATION',
+    'PublicOperation phase transition is invalid',
+  )
+  return freezeOperation({
+    ...operation,
+    phase,
+    updatedAt: transitionDate(operation, updatedAtValue),
+  })
+}
+
+export function succeedPublicOperation(
+  operation: PublicOperation,
+  updatedAtValue: string,
+): Readonly<PublicOperation> {
+  assertPublicOperation(operation)
+  assertDomain(
+    operation.status === 'running' && operation.phase === 'persisting',
+    'INVALID_PUBLIC_OPERATION',
+    'PublicOperation can only succeed after persistence',
+  )
+  const completedAt = transitionDate(operation, updatedAtValue)
+  return freezeOperation({
+    ...operation,
+    status: 'succeeded',
+    phase: 'completed',
+    progress: { completed: 1, total: 1, unit: 'render' },
+    cancelable: false,
+    retryable: false,
+    result: { resource: { ...operation.target } },
+    error: undefined,
+    updatedAt: completedAt,
+    completedAt,
+  })
+}
+
+export function retryOrFailPublicOperation(
+  operation: PublicOperation,
+  error: PublicOperationError,
+  updatedAtValue: string,
+): Readonly<PublicOperation> {
+  assertPublicOperation(operation)
+  assertDomain(
+    operation.status === 'running',
+    'INVALID_PUBLIC_OPERATION',
+    'Only a running PublicOperation can record an attempt failure',
+  )
+  const safeError = validateError(error)
+  const updatedAt = transitionDate(operation, updatedAtValue)
+  if (safeError.retryable && operation.attempt < operation.maxAttempts) {
+    return freezeOperation({
+      ...operation,
+      status: 'retrying',
+      phase: 'retrying',
+      cancelable: true,
+      retryable: true,
+      result: undefined,
+      error: undefined,
+      updatedAt,
+      completedAt: undefined,
+    })
+  }
+  const terminalError = { ...safeError, retryable: false }
+  return freezeOperation({
+    ...operation,
+    status: 'failed',
+    phase: 'failed',
+    cancelable: false,
+    retryable: false,
+    result: undefined,
+    error: terminalError,
+    updatedAt,
+    completedAt: updatedAt,
   })
 }
 

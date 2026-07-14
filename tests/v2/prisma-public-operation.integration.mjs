@@ -157,6 +157,138 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(JSON.stringify(storedCore).includes(authorizationId), false)
     assert.equal(JSON.stringify(storedCore).includes(sha('d')), false)
 
+    const claimInputs = ['worker-integration-one', 'worker-integration-two'].map(
+      (leaseOwner) => ({
+        workspaceId,
+        leaseOwner,
+        now: '2026-01-01T15:31:00.000Z',
+        leaseUntil: '2026-01-01T15:31:30.000Z',
+      }),
+    )
+    const claims = process.env.APOLLO_V2_PERSISTENCE === 'postgres'
+      ? await Promise.all(claimInputs.map((claim) => repository.claimNext(claim)))
+      : [
+          await repository.claimNext(claimInputs[0]),
+          await repository.claimNext(claimInputs[1]),
+        ]
+    assert.equal(claims.filter(Boolean).length, 1)
+    const firstClaim = claims.find(Boolean)
+    const firstOwner = firstClaim.lease.owner
+    const recoveryOwner = firstOwner === claimInputs[0].leaseOwner
+      ? claimInputs[1].leaseOwner
+      : claimInputs[0].leaseOwner
+    assert.equal(firstClaim.operation.attempt, 1)
+    assert.equal(firstClaim.operation.phase, 'materializing')
+    assert.equal(
+      await repository.heartbeat({
+        operationId,
+        leaseOwner: firstOwner,
+        attempt: 0,
+        now: '2026-01-01T15:31:10.000Z',
+        leaseUntil: '2026-01-01T15:31:40.000Z',
+      }),
+      false,
+    )
+    assert.equal(
+      await repository.heartbeat({
+        operationId,
+        leaseOwner: firstOwner,
+        attempt: 1,
+        now: '2026-01-01T15:31:10.000Z',
+        leaseUntil: '2026-01-01T15:31:40.000Z',
+      }),
+      true,
+    )
+
+    const recovered = await repository.claimNext({
+      workspaceId,
+      leaseOwner: recoveryOwner,
+      now: '2026-01-01T15:31:41.000Z',
+      leaseUntil: '2026-01-01T15:32:11.000Z',
+    })
+    assert.equal(recovered.operation.attempt, 2)
+    assert.equal(recovered.operation.startedAt, firstClaim.operation.startedAt)
+    assert.equal(
+      await repository.advancePhase({
+        operationId,
+        leaseOwner: firstOwner,
+        attempt: 1,
+        phase: 'rendering',
+        now: '2026-01-01T15:31:42.000Z',
+      }),
+      false,
+    )
+    for (const [phase, timestamp] of [
+      ['rendering', '2026-01-01T15:31:42.000Z'],
+      ['verifying', '2026-01-01T15:31:43.000Z'],
+      ['persisting', '2026-01-01T15:31:44.000Z'],
+    ]) {
+      assert.equal(
+        await repository.advancePhase({
+          operationId,
+          leaseOwner: recoveryOwner,
+          attempt: 2,
+          phase,
+          now: timestamp,
+        }),
+        true,
+      )
+    }
+    assert.equal(
+      await repository.succeed({
+        operationId,
+        leaseOwner: firstOwner,
+        attempt: 1,
+        now: '2026-01-01T15:31:45.000Z',
+      }),
+      null,
+    )
+    const succeeded = await repository.succeed({
+      operationId,
+      leaseOwner: recoveryOwner,
+      attempt: 2,
+      now: '2026-01-01T15:31:45.000Z',
+    })
+    assert.equal(succeeded.operation.status, 'succeeded')
+    assert.deepEqual(succeeded.operation.result.resource, operation.target)
+    assert.equal(JSON.stringify(succeeded).includes('worker-integration'), false)
+    const terminalRow = await client.v2PublicOperation.findUnique({ where: { id: operationId } })
+    assert.equal(terminalRow.leaseOwner, null)
+    assert.equal(terminalRow.leaseExpiresAt, null)
+    assert.equal(terminalRow.heartbeatAt, null)
+
+    const exhaustedOperation = createQueuedPublicOperation({
+      ...operation,
+      id: 'operation-integration-exhausted',
+      maxAttempts: 1,
+      createdAt: '2026-01-01T15:32:00.000Z',
+    })
+    await repository.createOrReplay({
+      operation: exhaustedOperation,
+      context: input.context,
+      idempotencyKey: 'operation-exhausted-request',
+      requestFingerprint: sha('8'),
+    })
+    await repository.claimNext({
+      workspaceId,
+      leaseOwner: 'worker-integration-exhausted',
+      now: '2026-01-01T15:33:00.000Z',
+      leaseUntil: '2026-01-01T15:33:30.000Z',
+    })
+    assert.equal(
+      await repository.claimNext({
+        workspaceId,
+        leaseOwner: 'worker-integration-recovery',
+        now: '2026-01-01T15:33:31.000Z',
+        leaseUntil: '2026-01-01T15:34:01.000Z',
+      }),
+      null,
+    )
+    const exhausted = await repository.findById(workspaceId, exhaustedOperation.id)
+    assert.equal(exhausted.operation.status, 'failed')
+    assert.equal(exhausted.operation.error.code, 'worker_lease_expired')
+    assert.equal(JSON.stringify(exhausted).includes('worker-integration-exhausted'), false)
+
     await client.v2PublicOperation.update({
       where: { id: operationId },
       data: { targetId: 'corrupt-operation-target' },

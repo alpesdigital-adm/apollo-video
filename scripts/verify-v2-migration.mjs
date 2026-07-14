@@ -126,6 +126,7 @@ const requiredChecks = [
   'public_operations_error_check',
   'public_operations_state_check',
   'public_operations_dates_check',
+  'public_operations_lease_check',
   'artifact_render_operations_hash_check',
 ]
 for (const constraint of requiredChecks) {
