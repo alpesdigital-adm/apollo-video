@@ -161,6 +161,12 @@ const requiredChecks = [
   'webhook_delivery_attempts_status_check',
   'webhook_delivery_attempts_response_check',
   'webhook_delivery_attempts_state_check',
+  'webhook_verification_challenges_hash_check',
+  'webhook_verification_challenges_status_check',
+  'webhook_verification_challenges_attempt_check',
+  'webhook_verification_challenges_dates_check',
+  'webhook_verification_challenges_state_check',
+  'webhook_replay_receipts_dates_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

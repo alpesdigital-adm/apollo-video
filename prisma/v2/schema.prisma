@@ -16,26 +16,28 @@ model V2Workspace {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  projects             V2Project[]
-  snapshots            V2ProjectSnapshot[]
-  apiClients           V2ApiClient[]
-  idempotencyRecords   V2IdempotencyRecord[]
-  mediaArtifacts       V2MediaArtifact[]
-  mediaManifests       V2MediaArtifactManifest[]
-  mediaLineage         V2MediaArtifactLineage[]
-  recipeParameters     V2RecipeParameterPayload[]
-  renderInputs         V2RenderInputPayload[]
-  rightsSnapshots      V2AssetRightsSnapshot[]
-  materializations     V2MaterializationAuthorization[]
-  assetUseDecisions    V2AssetUseDecision[]
-  publicOperations     V2PublicOperation[]
-  renderOperations     V2ArtifactRenderOperation[]
-  publicEventOutbox    V2PublicEventOutbox[]
-  webhookEndpoints     V2WebhookEndpoint[]
-  webhookSecrets       V2WebhookSigningSecret[]
-  webhookSubscriptions V2WebhookSubscription[]
-  webhookDeliveries    V2WebhookDelivery[]
-  webhookAttempts      V2WebhookDeliveryAttempt[]
+  projects              V2Project[]
+  snapshots             V2ProjectSnapshot[]
+  apiClients            V2ApiClient[]
+  idempotencyRecords    V2IdempotencyRecord[]
+  mediaArtifacts        V2MediaArtifact[]
+  mediaManifests        V2MediaArtifactManifest[]
+  mediaLineage          V2MediaArtifactLineage[]
+  recipeParameters      V2RecipeParameterPayload[]
+  renderInputs          V2RenderInputPayload[]
+  rightsSnapshots       V2AssetRightsSnapshot[]
+  materializations      V2MaterializationAuthorization[]
+  assetUseDecisions     V2AssetUseDecision[]
+  publicOperations      V2PublicOperation[]
+  renderOperations      V2ArtifactRenderOperation[]
+  publicEventOutbox     V2PublicEventOutbox[]
+  webhookEndpoints      V2WebhookEndpoint[]
+  webhookSecrets        V2WebhookSigningSecret[]
+  webhookSubscriptions  V2WebhookSubscription[]
+  webhookDeliveries     V2WebhookDelivery[]
+  webhookAttempts       V2WebhookDeliveryAttempt[]
+  webhookChallenges     V2WebhookVerificationChallenge[]
+  webhookReplayReceipts V2WebhookReplayReceipt[]
 
   @@map("workspaces")
 }
@@ -520,10 +522,12 @@ model V2WebhookEndpoint {
   suspendedAt       DateTime? @db.Timestamptz(3)
   revokedAt         DateTime? @db.Timestamptz(3)
 
-  workspace     V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  createdBy     V2ApiClient              @relation("WebhookEndpointCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  secrets       V2WebhookSigningSecret[]
-  subscriptions V2WebhookSubscription[]
+  workspace      V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy      V2ApiClient                      @relation("WebhookEndpointCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  secrets        V2WebhookSigningSecret[]
+  subscriptions  V2WebhookSubscription[]
+  challenges     V2WebhookVerificationChallenge[]
+  replayReceipts V2WebhookReplayReceipt[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, url])
@@ -625,4 +629,44 @@ model V2WebhookDeliveryAttempt {
   @@unique([deliveryId, attemptNumber])
   @@index([workspaceId, status, scheduledAt])
   @@map("webhook_delivery_attempts")
+}
+
+model V2WebhookVerificationChallenge {
+  id           String    @id @db.Uuid
+  workspaceId  String    @db.VarChar(128)
+  endpointId   String    @db.Uuid
+  tokenHash    String    @unique @db.Char(64)
+  status       String    @default("pending") @db.VarChar(32)
+  attemptCount Int       @default(0)
+  maxAttempts  Int       @default(5)
+  expiresAt    DateTime  @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  verifiedAt   DateTime? @db.Timestamptz(3)
+  failedAt     DateTime? @db.Timestamptz(3)
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  endpoint  V2WebhookEndpoint @relation(fields: [endpointId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@index([endpointId, status, createdAt(sort: Desc)])
+  @@index([status, expiresAt])
+  @@map("webhook_verification_challenges")
+}
+
+model V2WebhookReplayReceipt {
+  id                 String   @id @db.Uuid
+  workspaceId        String   @db.VarChar(128)
+  endpointId         String   @db.Uuid
+  eventId            String   @db.Uuid
+  signatureTimestamp DateTime @db.Timestamptz(3)
+  receivedAt         DateTime @db.Timestamptz(3)
+  expiresAt          DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  endpoint  V2WebhookEndpoint @relation(fields: [endpointId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([endpointId, eventId])
+  @@index([workspaceId, expiresAt])
+  @@map("webhook_replay_receipts")
 }

@@ -147,9 +147,10 @@ permanecem pendentes internamente: dispatcher e entrega externa não fazem parte
 deste incremento.
 
 Endpoints e subscriptions de webhook possuem modelos duráveis separados, filtros
-exatos pelo catálogo e referências opacas para secrets de assinatura. Configurações
-novas permanecem em `pending-verification`; nenhum destino recebe tráfego antes da
-implementação do challenge e das proteções de rede.
+exatos pelo catálogo e referências opacas para secrets de assinatura. O núcleo de
+challenge one-shot, HMAC sobre bytes exatos, timestamp e receipt anti-replay já é
+durável e testado. Nenhum destino recebe tráfego antes do adaptador HTTPS com
+resolução DNS segura e proteção contra SSRF/rebinding.
 
 ## Formatos
 

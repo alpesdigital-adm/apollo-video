@@ -17,6 +17,10 @@ import type { ProjectQueryRepository } from '../application/ports/project-query-
 import type { PublicOperationRepository } from '../application/ports/public-operation-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
 import type { WebhookRegistrationRepository } from '../application/ports/webhook-registration-repository.ts'
+import type {
+  WebhookChallengeRepository,
+  WebhookReplayReceiptRepository,
+} from '../application/ports/webhook-security-repository.ts'
 import { DomainError } from '../domain/errors.ts'
 import { prisma } from '../../lib/db.ts'
 import { resolveV2PersistenceMode } from './persistence-mode.ts'
@@ -32,6 +36,7 @@ import { PrismaProjectQueryRepository } from './prisma/project-query-repository.
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
+import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
 import { LocalArtifactRenderInputResolver } from './local-artifact-render-input-resolver.ts'
 import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts'
@@ -75,6 +80,10 @@ export function createPublicOperationRepository(): PublicOperationRepository {
 
 export function createWebhookRegistrationRepository(): WebhookRegistrationRepository {
   return new PrismaWebhookRegistrationRepository(resolveV2Client())
+}
+
+export function createWebhookSecurityRepository(): WebhookChallengeRepository & WebhookReplayReceiptRepository {
+  return new PrismaWebhookSecurityRepository(resolveV2Client())
 }
 
 export function createArtifactRenderCheckpointRepository() {

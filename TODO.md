@@ -494,7 +494,7 @@
 - [x] Definir event envelope versionado, IDs únicos e catálogo inicial. Evidência F0-032: `PublicEvent`, UUID v4, catálogo de 14 tipos, schemas e `GET /v1/events/catalog`; unicidade global durável será fechada pelo outbox.
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
-- [ ] Implementar challenge, assinatura, timestamp e anti-replay.
+- [ ] Implementar challenge, assinatura, timestamp e anti-replay. Parcial F0-035: emissão/verificação durável de challenge, HMAC dos bytes exatos, janela de timestamp e receipt anti-replay foram entregues; transporte HTTPS com resolução DNS segura continua aberto.
 - [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031: claim com lease/fencing, espera exponencial, checkpoint, descoberta e replay manual estão ativos no render; generalização aos demais jobs, métricas e console agregada continuam abertas.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
 - [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay.
@@ -3443,7 +3443,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-034 — Modelo durável de subscriptions e deliveries
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `5c25804`.
 
 Entregas:
 
@@ -3473,8 +3473,43 @@ Limites explícitos desta slice:
 
 - validação de hostname ainda não resolve DNS; challenge e conexão deverão bloquear redes privadas e DNS rebinding a cada uso;
 - não existe provider adapter para provisionar/abrir o secret nem exibição one-shot;
-- endpoint e subscription não são ativados sem o challenge da próxima slice;
+- endpoint e subscription agora podem ser ativados atomicamente pelo núcleo de challenge do F0-035; o envio HTTPS seguro do challenge continua aberto;
 - deliveries ainda não são materializadas a partir do outbox e nenhuma chamada HTTPS é executada;
-- assinatura, timestamp, anti-replay, claim/lease, at-least-once, backoff, dead-letter e replay continuam abertos;
+- transporte de challenge, secret provider, claim/lease, at-least-once, backoff, dead-letter e replay continuam abertos;
 - API/UI administrativa e presenters seguros continuam no incremento administrativo posterior;
+- hosted CI `29371680964` aprovou persistência PostgreSQL, 71 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-035 — Challenge, assinatura e anti-replay de webhook
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- challenge one-shot usa 256 bits de entropia e persiste somente SHA-256, nunca o token original;
+- TTL e limite de tentativas são validados, tentativas incorretas são duráveis e expiração/esgotamento são terminais;
+- emissão substitui challenge pendente anterior e a verificação correta ativa endpoint e subscriptions na mesma transação;
+- HMAC-SHA256 cobre versão, timestamp, event ID e bytes exatos do body, com comparação em tempo constante;
+- chave, versão, timestamp, event ID, assinatura e body inválidos falham com erro uniforme de assinatura;
+- timestamp aceita janela limitada e configurável; payload assinado é limitado a 256 KiB;
+- receipt durável e único por endpoint/event impede replay concorrente e permite substituição somente após expiração;
+- duas tabelas, constraints PostgreSQL, índices de expiração/unicidade e relações compostas por workspace foram adicionados;
+- repository factory passa a fornecer o boundary de segurança sem expor tabelas ou secrets;
+- ADR-024 fixa o protocolo e separa o núcleo testável do futuro transporte de rede.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 73 testes;
+- testes cobrem token/hash, bytes UTF-8 exatos, chave/body/timestamp/versão/event ID adulterados e janela vencida;
+- integração Prisma comprova esgotamento, expiração, tentativa incorreta durável, ativação atômica, uso único do challenge e bloqueio do segundo consumo do evento;
+- migration v2 passa com 25 tabelas, 88 índices e 55 foreign keys;
+- typecheck e geração dos dois clients Prisma passam;
+- integração dedicada de webhook passa em SQLite descartável sem alterar a base local.
+
+Limites explícitos desta slice:
+
+- não há chamada HTTPS, DNS pinning, bloqueio de redes privadas/rebinding ou política de redirect; portanto o fluxo não ativa destinos reais ainda;
+- o secret provider e a abertura/rotação da chave continuam fora do componente; o verificador recebe bytes somente em memória;
+- fan-out do outbox, materialização de deliveries, claim/lease, at-least-once, backoff, dead-letter e replay administrativo continuam abertos;
+- a microtarefa permanece aberta até o transporte HTTPS seguro integrar o challenge;
+- API/UI administrativa e presenters externos seguros continuam em incremento posterior;
 - hosted CI será registrado após publicação no próximo ciclo.

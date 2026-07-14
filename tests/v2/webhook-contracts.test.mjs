@@ -11,6 +11,13 @@ import {
   createWebhookSigningSecret,
   normalizeWebhookUrl,
 } from '../../src/v2/domain/webhook.ts'
+import {
+  createWebhookVerificationChallenge,
+  hashWebhookChallengeToken,
+  issueWebhookChallengeToken,
+  signWebhookPayload,
+  verifyWebhookSignature,
+} from '../../src/v2/domain/webhook-security.ts'
 
 const ids = {
   'webhook-endpoint': '00000000-0000-4000-8000-000000000101',
@@ -149,4 +156,69 @@ test('delivery and attempt identities are bounded before any network execution',
     () => createWebhookDeliveryAttempt({ ...attempt, status: 'failed' }),
     (error) => error instanceof DomainError && error.code === 'INVALID_WEBHOOK',
   )
+})
+
+test('webhook challenge token is one-shot material represented durably only by hash', () => {
+  const issued = issueWebhookChallengeToken(() => Buffer.alloc(32, 7))
+  assert.match(issued.token, /^whc_[A-Za-z0-9_-]{43}$/)
+  assert.match(issued.tokenHash, /^[0-9a-f]{64}$/)
+  assert.equal(hashWebhookChallengeToken(issued.token), issued.tokenHash)
+  assert.equal(issued.tokenHash.includes(issued.token), false)
+
+  const challenge = createWebhookVerificationChallenge({
+    id: '00000000-0000-4000-8000-000000000107',
+    workspaceId: 'workspace-1',
+    endpointId: ids['webhook-endpoint'],
+    tokenHash: issued.tokenHash,
+    status: 'pending',
+    attemptCount: 0,
+    maxAttempts: 5,
+    createdAt: '2026-07-14T22:10:00.000Z',
+    expiresAt: '2026-07-14T22:20:00.000Z',
+  })
+  assert.equal(challenge.status, 'pending')
+  assert.equal('token' in challenge, false)
+  assert.throws(
+    () => hashWebhookChallengeToken('predictable-token'),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_REJECTED',
+  )
+})
+
+test('webhook signature binds timestamp, event ID and exact body bytes', () => {
+  const secret = Buffer.alloc(32, 9)
+  const rawBody = Buffer.from('{"event":"project.created","name":"Ação"}', 'utf8')
+  const eventId = '00000000-0000-4000-8000-000000000108'
+  const timestamp = new Date('2026-07-14T22:10:00.789Z')
+  const headers = signWebhookPayload({ secret, eventId, rawBody, timestamp })
+  const verified = verifyWebhookSignature({
+    secret,
+    rawBody,
+    headers,
+    now: new Date('2026-07-14T22:14:59.000Z'),
+  })
+  assert.equal(verified.eventId, eventId)
+  assert.equal(verified.timestamp, '2026-07-14T22:10:00.000Z')
+
+  for (const invalid of [
+    { secret: Buffer.alloc(32, 8), rawBody, headers, now: timestamp },
+    { secret, rawBody: Buffer.from('{"event":"project.created","name":"Acao"}'), headers, now: timestamp },
+    { secret, rawBody, headers, now: new Date('2026-07-14T22:15:01.000Z') },
+    {
+      secret,
+      rawBody,
+      headers: { ...headers, 'apollo-webhook-signature': `v2=${'a'.repeat(64)}` },
+      now: timestamp,
+    },
+    {
+      secret,
+      rawBody,
+      headers: { ...headers, 'apollo-webhook-id': 'not-an-event-id' },
+      now: timestamp,
+    },
+  ]) {
+    assert.throws(
+      () => verifyWebhookSignature(invalid),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_SIGNATURE_INVALID',
+    )
+  }
 })
