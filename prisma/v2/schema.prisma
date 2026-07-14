@@ -596,6 +596,10 @@ model V2WebhookDelivery {
   updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
   completedAt    DateTime? @db.Timestamptz(3)
   deadLetteredAt DateTime? @db.Timestamptz(3)
+  leaseOwner     String?   @db.VarChar(128)
+  leaseTokenHash String?   @db.Char(64)
+  leaseExpiresAt DateTime? @db.Timestamptz(3)
+  heartbeatAt    DateTime? @db.Timestamptz(3)
 
   workspace    V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   subscription V2WebhookSubscription      @relation(fields: [subscriptionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -605,6 +609,7 @@ model V2WebhookDelivery {
   @@unique([id, workspaceId])
   @@unique([subscriptionId, eventId])
   @@index([status, nextAttemptAt, createdAt])
+  @@index([status, leaseExpiresAt, createdAt])
   @@index([workspaceId, status, createdAt(sort: Desc)])
   @@map("webhook_deliveries")
 }

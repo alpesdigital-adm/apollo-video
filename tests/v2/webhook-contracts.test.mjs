@@ -4,6 +4,11 @@ import test from 'node:test'
 import { registerWebhookService } from '../../src/v2/application/register-webhook.ts'
 import { activateWebhookEndpointService } from '../../src/v2/application/secure-webhook.ts'
 import { materializeNextWebhookEventService } from '../../src/v2/application/materialize-webhook-deliveries.ts'
+import {
+  claimNextWebhookDeliveryService,
+  heartbeatWebhookDeliveryService,
+  settleWebhookDeliveryService,
+} from '../../src/v2/application/manage-webhook-delivery.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -25,6 +30,10 @@ import {
   isPublicWebhookAddress,
   validateWebhookResolution,
 } from '../../src/v2/domain/webhook-network.ts'
+import {
+  hashWebhookDeliveryLeaseToken,
+  issueWebhookDeliveryLeaseToken,
+} from '../../src/v2/domain/webhook-delivery-lease.ts'
 import {
   createPinnedWebhookRequestOptions,
   SafeWebhookChallengeTransport,
@@ -167,6 +176,90 @@ test('delivery and attempt identities are bounded before any network execution',
     () => createWebhookDeliveryAttempt({ ...attempt, status: 'failed' }),
     (error) => error instanceof DomainError && error.code === 'INVALID_WEBHOOK',
   )
+  assert.throws(
+    () => createWebhookDelivery({ ...delivery, attemptCount: 1 }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_WEBHOOK',
+  )
+  assert.throws(
+    () => createWebhookDeliveryAttempt({
+      ...attempt,
+      status: 'in-flight',
+      startedAt: '2026-07-14T21:44:59.000Z',
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_WEBHOOK',
+  )
+})
+
+test('delivery claim exposes one-shot token while heartbeat and settlement pass only its hash', async () => {
+  const issued = issueWebhookDeliveryLeaseToken(() => Buffer.alloc(32, 7))
+  assert.match(issued.token, /^whl_[A-Za-z0-9_-]{43}$/)
+  assert.equal(hashWebhookDeliveryLeaseToken(issued.token), issued.tokenHash)
+  assert.throws(
+    () => hashWebhookDeliveryLeaseToken('predictable'),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_LEASE_REJECTED',
+  )
+
+  const commands = []
+  const claimed = {
+    delivery: { id: 'delivery' },
+    attempt: { attemptNumber: 1 },
+    lease: { owner: 'worker-1', attemptNumber: 1 },
+  }
+  const repository = {
+    async claimNext(command) {
+      commands.push(command)
+      return claimed
+    },
+    async heartbeat(command) {
+      commands.push(command)
+      return true
+    },
+    async succeed(command) {
+      commands.push(command)
+      return claimed
+    },
+    async failOrRetry() {
+      throw new Error('not expected')
+    },
+  }
+  const clock = () => new Date('2026-07-14T23:30:00.000Z')
+  const claim = claimNextWebhookDeliveryService({
+    repository,
+    clock,
+    leaseDurationMs: 1_000,
+    createAttemptId: () => '00000000-0000-4000-8000-000000000901',
+    issueLease: () => issued,
+  })
+  const result = await claim({ workspaceId: 'workspace-1', leaseOwner: 'worker-1' })
+  assert.equal(result.leaseToken, issued.token)
+  assert.equal(commands[0].leaseTokenHash, issued.tokenHash)
+  assert.equal(JSON.stringify(commands[0]).includes(issued.token), false)
+
+  const heartbeat = heartbeatWebhookDeliveryService({
+    repository,
+    clock,
+    leaseDurationMs: 1_000,
+  })
+  assert.equal(await heartbeat({
+    workspaceId: 'workspace-1',
+    deliveryId: '00000000-0000-4000-8000-000000000902',
+    leaseOwner: 'worker-1',
+    leaseToken: issued.token,
+    attemptNumber: 1,
+  }), true)
+  assert.equal(commands[1].leaseTokenHash, issued.tokenHash)
+
+  const settle = settleWebhookDeliveryService({ repository, clock })
+  await settle({
+    workspaceId: 'workspace-1',
+    deliveryId: '00000000-0000-4000-8000-000000000902',
+    leaseOwner: 'worker-1',
+    leaseToken: issued.token,
+    attemptNumber: 1,
+    outcome: { status: 'succeeded', responseStatus: 204 },
+  })
+  assert.equal(commands[2].leaseTokenHash, issued.tokenHash)
+  assert.equal(JSON.stringify(commands.slice(1)).includes(issued.token), false)
 })
 
 test('webhook filters match event type and optional resource exactly', () => {

@@ -355,6 +355,16 @@ export function createWebhookDelivery(
     'INVALID_WEBHOOK',
     'Webhook delivery terminal state is inconsistent',
   )
+  assertDomain(
+    (input.status === 'pending' && input.attemptCount === 0) ||
+      (input.status === 'in-flight' && input.attemptCount >= 1) ||
+      (input.status === 'retry-scheduled' &&
+        input.attemptCount >= 1 &&
+        input.attemptCount < input.maxAttempts) ||
+      (['succeeded', 'dead-lettered'].includes(input.status) && input.attemptCount >= 1),
+    'INVALID_WEBHOOK',
+    'Webhook delivery attempt lifecycle is inconsistent',
+  )
   return Object.freeze({
     schemaVersion: 1,
     id: webhookId(input.id, 'id'),
@@ -415,6 +425,14 @@ export function createWebhookDeliveryAttempt(
     'INVALID_WEBHOOK',
     'Webhook attempt state is inconsistent',
   )
+  const scheduledAt = canonicalUtc(input.scheduledAt, 'scheduledAt')
+  const createdAt = canonicalUtc(input.createdAt, 'createdAt')
+  assertDomain(
+    (!startedAt || scheduledAt <= startedAt) &&
+      (!completedAt || (Boolean(startedAt) && startedAt! <= completedAt)),
+    'INVALID_WEBHOOK',
+    'Webhook attempt chronology is inconsistent',
+  )
   return Object.freeze({
     schemaVersion: 1,
     id: webhookId(input.id, 'id'),
@@ -422,8 +440,8 @@ export function createWebhookDeliveryAttempt(
     deliveryId: webhookId(input.deliveryId, 'deliveryId'),
     attemptNumber: input.attemptNumber,
     status: input.status,
-    scheduledAt: canonicalUtc(input.scheduledAt, 'scheduledAt'),
-    createdAt: canonicalUtc(input.createdAt, 'createdAt'),
+    scheduledAt,
+    createdAt,
     ...(startedAt ? { startedAt } : {}),
     ...(completedAt ? { completedAt } : {}),
     ...(input.responseStatus !== undefined ? { responseStatus: input.responseStatus } : {}),

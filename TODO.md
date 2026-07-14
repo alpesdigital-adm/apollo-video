@@ -495,9 +495,9 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-037: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks agora materializam deliveries deduplicadas antes de publicar o outbox, mas claim, envio assinado, retry e replay de delivery continuam abertos.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-038: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks materializam deliveries deduplicadas e agora possuem claim/lease, attempts duráveis, fencing, retry agendável e dead-letter por esgotamento. Envio assinado, política automática de backoff e replay administrativo continuam abertos.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
-- [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Parcial F0-035/F0-036: assinatura adulterada, replay durável, timeout absoluto, DNS misto e rebinding possuem regressões; dispatcher real e duplicação/retry de delivery continuam abertos.
+- [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Parcial F0-035/F0-038: assinatura adulterada, replay durável, timeout absoluto, DNS misto e rebinding possuem regressões; claim concorrente, lease incorreto, reclaim, worker obsoleto, retry e dead-letter de delivery também estão cobertos. Dispatcher HTTPS real e replay administrativo continuam abertos.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
 
@@ -3552,7 +3552,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-037 — Fan-out durável do outbox para deliveries
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `45ad714`.
 
 Entregas:
 
@@ -3587,4 +3587,37 @@ Limites explícitos desta slice:
 - ainda não há claim/lease da delivery, abertura do secret, assinatura do request, chamada HTTPS, classificação de resposta, retry, dead-letter ou replay administrativo;
 - o dispatcher futuro deverá reutilizar a resolução DNS pinada do ADR-025 em toda tentativa, não apenas no challenge;
 - API/UI administrativa e presenters externos seguros continuam em incremento posterior;
+- hosted CI `29375882908` aprovou PostgreSQL, 81 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-038 — Claim, lease e fencing de deliveries de webhook
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- claim workspace-scoped seleciona apenas delivery pronta e com endpoint/subscription ativos;
+- token de lease usa 256 bits e é entregue ao worker uma única vez; somente seu SHA-256 é persistido;
+- cada posse cria um attempt numerado e durável na mesma transação que move a delivery para `in-flight`;
+- heartbeat exige o fence completo e renova apenas lease válido;
+- reclaim fecha attempt expirado com `lease_expired`, cria nova tentativa e impede conclusão pelo worker antigo;
+- falha pode agendar retry futuro quando ainda há orçamento; sem retry válido ou ao esgotar tentativas, a delivery vai para dead-letter;
+- sucesso exige resposta 2xx, encerra o attempt e remove todo material de lease da delivery;
+- constraints PostgreSQL alinham estados, contagens, lease e cronologia dos attempts ao domínio;
+- factory server-side fornece claim, heartbeat e settlement, sem expor tabelas internas nem token persistido;
+- ADR-027 registra posse one-shot, fencing e política de recuperação.
+
+Regressões e evidências locais:
+
+- suíte unitária de webhook passa com 14 testes e cobre token/hash, lifecycle inválido e cronologia impossível;
+- integração Prisma cobre claim, token incorreto, heartbeat, expiração, reclaim, worker obsoleto, retry futuro, sucesso e dead-letter por esgotamento;
+- histórico mantém três attempts independentes no fluxo expiração → retry → sucesso;
+- migration v2 passa com 25 tabelas, 90 índices e 55 foreign keys;
+- typecheck, geração dos dois clients Prisma e integração dedicada em SQLite passam.
+
+Limites explícitos desta slice:
+
+- ainda não há abertura do secret, assinatura do request ou chamada HTTPS da delivery;
+- classificação automática de respostas, backoff com jitter e limites por destino entram no dispatcher posterior;
+- replay administrativo, capability/API/UI de inspeção e rotação do secret continuam abertos;
+- o transporte de delivery deverá reutilizar DNS pinning, TLS e limites do ADR-025 em cada tentativa;
 - hosted CI será registrado após publicação no próximo ciclo.

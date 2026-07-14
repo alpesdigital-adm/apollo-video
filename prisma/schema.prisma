@@ -642,6 +642,10 @@ model V2WebhookDelivery {
   updatedAt      DateTime  @updatedAt
   completedAt    DateTime?
   deadLetteredAt DateTime?
+  leaseOwner     String?
+  leaseTokenHash String?
+  leaseExpiresAt DateTime?
+  heartbeatAt    DateTime?
 
   workspace    V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   subscription V2WebhookSubscription      @relation(fields: [subscriptionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -651,6 +655,7 @@ model V2WebhookDelivery {
   @@unique([id, workspaceId])
   @@unique([subscriptionId, eventId])
   @@index([status, nextAttemptAt, createdAt])
+  @@index([status, leaseExpiresAt, createdAt])
   @@index([workspaceId, status, createdAt])
   @@map("v2_webhook_deliveries")
 }

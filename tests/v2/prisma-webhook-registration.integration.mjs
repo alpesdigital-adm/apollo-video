@@ -13,6 +13,11 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     '../../src/v2/application/materialize-webhook-deliveries.ts'
   )
   const {
+    claimNextWebhookDeliveryService,
+    heartbeatWebhookDeliveryService,
+    settleWebhookDeliveryService,
+  } = await import('../../src/v2/application/manage-webhook-delivery.ts')
+  const {
     issueWebhookChallengeService,
     verifyWebhookChallengeService,
     verifyWebhookRequestService,
@@ -23,6 +28,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     issueWebhookChallengeToken,
     signWebhookPayload,
   } = await import('../../src/v2/domain/webhook-security.ts')
+  const { issueWebhookDeliveryLeaseToken } = await import(
+    '../../src/v2/domain/webhook-delivery-lease.ts'
+  )
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
   )
@@ -31,6 +39,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   )
   const { PrismaWebhookFanoutRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-fanout-repository.ts'
+  )
+  const { PrismaWebhookDeliveryRepository } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-delivery-repository.ts'
   )
   const { PrismaWebhookSecurityRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-security-repository.ts'
@@ -379,6 +390,160 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.equal(replayedFanout.deliveries[0].id, matching.deliveries[0].id)
     assert.equal(await client.v2WebhookDelivery.count({ where: { workspaceId } }), 1)
 
+    const deliveryRepository = new PrismaWebhookDeliveryRepository(client)
+    let deliveryClock = new Date(fanoutAt.getTime() + 2_000)
+    let leaseByte = 10
+    let attemptId = 501
+    const claimDelivery = claimNextWebhookDeliveryService({
+      repository: deliveryRepository,
+      clock: () => deliveryClock,
+      leaseDurationMs: 1_000,
+      createAttemptId: () =>
+        `00000000-0000-4000-8000-${String(attemptId++).padStart(12, '0')}`,
+      issueLease: () => issueWebhookDeliveryLeaseToken(() => Buffer.alloc(32, leaseByte++)),
+    })
+    const heartbeatDelivery = heartbeatWebhookDeliveryService({
+      repository: deliveryRepository,
+      clock: () => deliveryClock,
+      leaseDurationMs: 1_000,
+    })
+    const settleDelivery = settleWebhookDeliveryService({
+      repository: deliveryRepository,
+      clock: () => deliveryClock,
+    })
+
+    const firstClaim = await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-1' })
+    assert.equal(firstClaim.delivery.id, matching.deliveries[0].id)
+    assert.equal(firstClaim.delivery.status, 'in-flight')
+    assert.equal(firstClaim.attempt.attemptNumber, 1)
+    const storedClaim = await client.v2WebhookDelivery.findUniqueOrThrow({
+      where: { id: firstClaim.delivery.id },
+    })
+    assert.match(storedClaim.leaseTokenHash, /^[0-9a-f]{64}$/)
+    assert.equal(JSON.stringify(storedClaim).includes(firstClaim.leaseToken), false)
+
+    deliveryClock = new Date(fanoutAt.getTime() + 2_500)
+    const wrongLease = issueWebhookDeliveryLeaseToken(() => Buffer.alloc(32, 99)).token
+    assert.equal(
+      await heartbeatDelivery({
+        workspaceId,
+        deliveryId: firstClaim.delivery.id,
+        leaseOwner: 'webhook-worker-1',
+        leaseToken: wrongLease,
+        attemptNumber: 1,
+      }),
+      false,
+    )
+    assert.equal(
+      await heartbeatDelivery({
+        workspaceId,
+        deliveryId: firstClaim.delivery.id,
+        leaseOwner: 'webhook-worker-1',
+        leaseToken: firstClaim.leaseToken,
+        attemptNumber: 1,
+      }),
+      true,
+    )
+
+    deliveryClock = new Date(fanoutAt.getTime() + 3_600)
+    const secondClaim = await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-2' })
+    assert.equal(secondClaim.delivery.id, firstClaim.delivery.id)
+    assert.equal(secondClaim.attempt.attemptNumber, 2)
+    assert.equal(
+      (await client.v2WebhookDeliveryAttempt.findUniqueOrThrow({
+        where: {
+          deliveryId_attemptNumber: { deliveryId: firstClaim.delivery.id, attemptNumber: 1 },
+        },
+      })).errorCode,
+      'lease_expired',
+    )
+
+    deliveryClock = new Date(fanoutAt.getTime() + 3_700)
+    assert.equal(
+      await settleDelivery({
+        workspaceId,
+        deliveryId: firstClaim.delivery.id,
+        leaseOwner: 'webhook-worker-1',
+        leaseToken: firstClaim.leaseToken,
+        attemptNumber: 1,
+        outcome: { status: 'succeeded', responseStatus: 204 },
+      }),
+      null,
+    )
+    const retryAt = new Date(fanoutAt.getTime() + 5_000).toISOString()
+    const retried = await settleDelivery({
+      workspaceId,
+      deliveryId: secondClaim.delivery.id,
+      leaseOwner: 'webhook-worker-2',
+      leaseToken: secondClaim.leaseToken,
+      attemptNumber: 2,
+      outcome: { status: 'failed', errorCode: 'http_timeout', nextAttemptAt: retryAt },
+    })
+    assert.equal(retried.delivery.status, 'retry-scheduled')
+    assert.equal(retried.attempt.status, 'failed')
+    assert.equal((await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-3' })), null)
+
+    deliveryClock = new Date(retryAt)
+    const thirdClaim = await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-3' })
+    assert.equal(thirdClaim.attempt.attemptNumber, 3)
+    deliveryClock = new Date(fanoutAt.getTime() + 5_100)
+    const succeeded = await settleDelivery({
+      workspaceId,
+      deliveryId: thirdClaim.delivery.id,
+      leaseOwner: 'webhook-worker-3',
+      leaseToken: thirdClaim.leaseToken,
+      attemptNumber: 3,
+      outcome: { status: 'succeeded', responseStatus: 204 },
+    })
+    assert.equal(succeeded.delivery.status, 'succeeded')
+    assert.equal(succeeded.attempt.status, 'succeeded')
+    assert.equal('lease' in succeeded, false)
+    assert.equal(
+      (await client.v2WebhookDelivery.findUniqueOrThrow({ where: { id: thirdClaim.delivery.id } }))
+        .leaseTokenHash,
+      null,
+    )
+    assert.equal(await client.v2WebhookDeliveryAttempt.count({
+      where: { deliveryId: thirdClaim.delivery.id },
+    }), 3)
+
+    const exhaustedEventId = '00000000-0000-4000-8000-000000000305'
+    await client.v2PublicEventOutbox.create({
+      data: {
+        id: exhaustedEventId,
+        workspaceId,
+        type: 'project.created',
+        version: '1.0.0',
+        occurredAt: new Date(fanoutAt.getTime() + 5_200),
+        actorClientId: clientId,
+        resourceType: 'project',
+        resourceId: 'integration-project-1',
+        dataJson: '{}',
+        createdAt: new Date(fanoutAt.getTime() + 5_200),
+      },
+    })
+    fanoutClock = new Date(fanoutAt.getTime() + 5_300)
+    const exhaustedFanout = await materialize({ workspaceId, maxAttempts: 1 })
+    deliveryClock = new Date(fanoutAt.getTime() + 5_400)
+    const exhaustedClaim = await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-4' })
+    assert.equal(exhaustedClaim.delivery.id, exhaustedFanout.deliveries[0].id)
+    assert.equal(exhaustedClaim.delivery.maxAttempts, 1)
+    deliveryClock = new Date(fanoutAt.getTime() + 6_500)
+    assert.equal(await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-5' }), null)
+    const deadLettered = await client.v2WebhookDelivery.findUniqueOrThrow({
+      where: { id: exhaustedClaim.delivery.id },
+    })
+    assert.equal(deadLettered.status, 'dead-lettered')
+    assert.equal(deadLettered.leaseTokenHash, null)
+    assert.equal(
+      (await client.v2WebhookDeliveryAttempt.findUniqueOrThrow({
+        where: {
+          deliveryId_attemptNumber: { deliveryId: exhaustedClaim.delivery.id, attemptNumber: 1 },
+        },
+      })).errorCode,
+      'lease_expired',
+    )
+
     const corruptedEventId = '00000000-0000-4000-8000-000000000304'
     await client.$transaction([
       client.v2WebhookSubscription.update({
@@ -410,7 +575,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       })).publishedAt,
       null,
     )
-    assert.equal(await client.v2WebhookDelivery.count({ where: { workspaceId } }), 1)
+    assert.equal(await client.v2WebhookDelivery.count({ where: { workspaceId } }), 2)
     assert.deepEqual(
       await materialize({ workspaceId: 'another-workspace' }),
       { status: 'idle' },
