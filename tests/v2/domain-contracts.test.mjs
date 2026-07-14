@@ -57,6 +57,12 @@ import { createMaterializationAuthorization } from '../../src/v2/domain/material
 import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
 import { compileApolloVideoRenderProps } from '../../src/v2/application/compile-apollo-video-render-props.ts'
 import { renderAuthorizedInputService } from '../../src/v2/application/render-authorized-input.ts'
+import {
+  createQueuedPublicOperation,
+  rehydratePublicOperation,
+} from '../../src/v2/domain/public-operation.ts'
+import { enqueueAuthorizedRenderService } from '../../src/v2/application/enqueue-authorized-render.ts'
+import { presentPublicOperation } from '../../src/v2/public-api/presenters.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -420,6 +426,149 @@ test('authorized render promotes staged output only after a matching second mate
   )
   assert.equal(commits, 0)
   assert.equal(discards, 1)
+})
+
+test('PublicOperation queue invariants fail closed and presenter omits execution internals', () => {
+  const operation = createQueuedPublicOperation({
+    id: 'operation-render-1',
+    workspaceId: 'workspace-1',
+    clientId: 'client-1',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-render-1',
+      manifestId: 'manifest-render-1',
+    },
+    createdAt: '2026-07-14T12:00:00.000Z',
+  })
+  assert.equal(operation.status, 'queued')
+  assert.equal(operation.progress.completed, 0)
+  assert.ok(Object.isFrozen(operation))
+  const presented = presentPublicOperation(operation)
+  const serialized = JSON.stringify(presented)
+  assert.equal(serialized.includes('workspaceId'), false)
+  assert.equal(serialized.includes('clientId'), false)
+  assert.equal(serialized.includes('authorizationId'), false)
+  assert.equal(serialized.includes('inputHash'), false)
+  assert.equal(serialized.includes('artifactKey'), false)
+  assert.equal(serialized.includes('file:'), false)
+
+  expectDomainError(
+    () => rehydratePublicOperation({ ...operation, cancelable: false }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+  expectDomainError(
+    () => rehydratePublicOperation({ ...operation, attempt: 1 }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+  expectDomainError(
+    () => rehydratePublicOperation({
+      ...operation,
+      target: { ...operation.target, id: '../../escape' },
+    }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+})
+
+test('authorized render enqueue is idempotent, actor-bound and expiry-aware', async () => {
+  const authorization = createMaterializationAuthorization({
+    id: 'authorization-operation-1',
+    workspaceId: 'workspace-1',
+    artifactId: 'artifact-render-1',
+    manifestId: 'manifest-render-1',
+    inputHash: 'a'.repeat(64),
+    use: 'paid-ad',
+    locale: 'pt-BR',
+    syntheticOperations: [],
+    issues: [],
+    decisions: [{
+      artifactId: 'artifact-source-1',
+      assetOrdinal: 0,
+      assetKind: 'video',
+      outcome: 'allow',
+      reasonCodes: [],
+      rightsSnapshotId: 'rights-source-1',
+      rightsSnapshotHash: 'b'.repeat(64),
+      validUntil: '2026-07-14T12:05:00.000Z',
+    }],
+    evaluatedAt: '2026-07-14T12:00:00.000Z',
+    actor: { type: 'api-client', id: 'client-1' },
+  })
+  const stored = new Map()
+  const operations = {
+    async findById() { return null },
+    async findReplay({ workspaceId, clientId, idempotencyKey, requestFingerprint }) {
+      const value = stored.get(`${workspaceId}:${clientId}:${idempotencyKey}`)
+      if (!value) return null
+      if (value.requestFingerprint !== requestFingerprint) {
+        throw new DomainError(
+          'IDEMPOTENCY_PAYLOAD_MISMATCH',
+          'Idempotency payload mismatch',
+        )
+      }
+      return { ...value.record, replayed: true }
+    },
+    async createOrReplay(input) {
+      const key = `${input.operation.workspaceId}:${input.operation.clientId}:${input.idempotencyKey}`
+      const record = {
+        operation: input.operation,
+        context: Object.freeze({ ...input.context }),
+      }
+      stored.set(key, { requestFingerprint: input.requestFingerprint, record })
+      return { ...record, replayed: false }
+    },
+  }
+  let ids = 0
+  const enqueue = enqueueAuthorizedRenderService({
+    authorizations: {
+      async findById(workspaceId, id) {
+        return workspaceId === authorization.workspaceId && id === authorization.id
+          ? authorization
+          : null
+      },
+    },
+    operations,
+    clock: () => new Date('2026-07-14T12:01:00.000Z'),
+    createId: () => `operation-render-${++ids}`,
+  })
+  const request = {
+    workspaceId: 'workspace-1',
+    artifactId: 'artifact-render-1',
+    manifestId: 'manifest-render-1',
+    authorizationId: authorization.id,
+    actor: { type: 'api-client', id: 'client-1' },
+    idempotencyKey: 'render-request-1',
+  }
+  const created = await enqueue(request)
+  const replay = await enqueue(request)
+  assert.equal(created.replayed, false)
+  assert.equal(replay.replayed, true)
+  assert.equal(replay.operation.id, created.operation.id)
+  assert.equal(created.operation.status, 'queued')
+  assert.deepEqual(created.context, {
+    authorizationId: authorization.id,
+    inputHash: authorization.inputHash,
+  })
+  assert.equal(ids, 1)
+
+  await assert.rejects(
+    enqueue({ ...request, actor: { type: 'api-client', id: 'client-2' }, idempotencyKey: 'render-request-2' }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'MATERIALIZATION_AUTHORIZATION_REJECTED',
+  )
+  const expiredEnqueue = enqueueAuthorizedRenderService({
+    authorizations: { async findById() { return authorization } },
+    operations,
+    clock: () => new Date('2026-07-14T12:06:00.000Z'),
+    createId: () => 'operation-render-expired',
+  })
+  await assert.rejects(
+    expiredEnqueue({ ...request, idempotencyKey: 'render-request-expired' }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'MATERIALIZATION_AUTHORIZATION_EXPIRED',
+  )
 })
 
 test('asset rights and consent are immutable, content-addressed and fail closed', () => {

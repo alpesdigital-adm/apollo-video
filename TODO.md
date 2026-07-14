@@ -482,12 +482,12 @@
 
 ### F0.037 — Operações assíncronas [FR-243]
 
-- [ ] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade.
-- [ ] Retornar 202+operation ID para ingest, Director, provider, sync, batch, render e export.
-- [ ] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type.
-- [ ] Expor fase e progresso real ou estado indeterminado honesto.
-- [ ] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível.
-- [ ] Criar resilience tests de restart, stale result, cancel e retry.
+- [ ] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade. Parcial F0-024: contrato canônico, estados, flags, persistência e contexto tipado de render foram entregues; faltam transições CAS do worker, lease, heartbeat, cancel e retry.
+- [ ] Retornar 202+operation ID para ingest, Director, provider, sync, batch, render e export. Parcial F0-024: render autorizado retorna 202 com operation ID; os demais tipos continuam abertos.
+- [ ] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-024: read workspace-scoped por ID foi entregue; list, filtros, cancel e retry continuam abertos.
+- [ ] Expor fase e progresso real ou estado indeterminado honesto. Parcial F0-024: fila expõe `queued` e progresso real 0/1; fases do worker ainda não são atualizadas.
+- [ ] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-024: schemas e presenter fechados não aceitam mídia, paths ou payload protegido; terminal result/error e custo ainda não são gravados pelo worker.
+- [ ] Criar resilience tests de restart, stale result, cancel e retry. Parcial F0-024: regressões cobrem idempotência, payload divergente, expiração, actor binding, isolamento e corrupção cruzada; restart, stale result, cancel e retry continuam abertos.
 
 ### F0.038 — Webhooks e eventos [FR-244]
 
@@ -2092,7 +2092,7 @@ Para cada decisão:
 | Non-goals | 12/12 |
 | Riscos | 11/11 |
 | Fases do roadmap | 6/6 |
-| Microtarefas/checks abertos | 1.209 |
+| Microtarefas/checks abertos | 1.204 |
 
 Esta contagem valida presença e fase, não conclusão. Quando o PRD mudar, atualizar este quadro e executar novamente a comparação de IDs com a matriz de rastreabilidade.
 
@@ -3020,7 +3020,7 @@ Confirmação hospedada:
 
 ### Slice F0-023 — Primeiro render autorizado a partir da lease
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado em 14 de julho de 2026 no commit `3843047`.
 
 Entregas:
 
@@ -3070,3 +3070,45 @@ Limites explícitos desta slice:
 - o smoke valida identidade e probe, não igualdade binária cross-platform nem tolerância visual/áudio de um golden;
 - o servidor de assets é um bridge local temporário; object storage usará HTTPS assinada curta em adapter separado;
 - o próximo incremento deve persistir a operação/output/lineage e expor o comando de render assíncrono pela Public API sem devolver internals.
+
+Confirmação hospedada:
+
+- o run `29333211765` aprovou todos os passos no Linux, incluindo o novo smoke Remotion autorizado, migrations PostgreSQL, contratos, builds e integrações.
+
+### Slice F0-024 — Operação pública durável para render autorizado
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- `public-operation/v1` define estados `queued/running/waiting/retrying/succeeded/failed/canceled`, fases fechadas, progresso, flags de cancel/retry, target, result/error e tentativas;
+- invariantes rejeitam operações queued adulteradas, progresso impossível, target inseguro, datas incoerentes e estados terminais incompletos;
+- persistência separa `public_operations`, genérica, de `artifact_render_operations`, contexto tipado do render sem blob genérico;
+- constraints PostgreSQL cobrem type/status/phase/target, progresso, tentativas, fingerprint, JSON, erro, coerência de estado e datas;
+- FKs ligam workspace, API client, artifact, manifest e autorização; o adapter reconfirma que todos pertencem ao mesmo contexto e que authorization/input hash/client/status continuam coerentes;
+- `PrismaPublicOperationRepository` implementa criação/replay atômicos por workspace+client+idempotency key, conflito por fingerprint divergente e leitura workspace-scoped;
+- `enqueueAuthorizedRenderService` aceita somente autorização do mesmo client, autorizada, não expirada e vinculada ao artifact/manifest exatos;
+- `POST /v1/artifacts/{artifactId}/renders/{manifestId}` retorna `202` com uma operação queued e nunca executa mídia no processo web;
+- `GET /v1/operations/{operationId}` exige `operations:read` e devolve somente o presenter público seguro;
+- capability registry, OpenAPI, três JSON Schemas/examples e baseline de compatibilidade foram atualizados;
+- o CI ganhou uma integração dedicada de persistência de operações duráveis.
+
+Regressões e evidências locais:
+
+- suíte unitária passa com 54 testes;
+- regressões de domínio cobrem imutabilidade, invariantes fail-closed, expiração, actor binding, replay e ausência de internals no presenter;
+- integração Prisma comprova persistência/replay, isolamento de workspace, conflito de idempotência e detecção de target ou input hash adulterado;
+- integração HTTP comprova discovery/OpenAPI, enqueue 202, replay, payload divergente 409, body extra 422, read 200 e missing operation 404;
+- respostas públicas não contêm workspace/client internos, authorization ID, RenderInput hash, artifact key, path ou `file:`;
+- contratos permanecem compatíveis com 22 capabilities, 30 schemas, 36 exemplos e 19 paths;
+- migration v2 permanece válida com 17 tabelas, 56 índices e 38 foreign keys;
+- typecheck, build Next.js, testes unitários, integração de operação, integração pública e `git diff --check` passam durante o desenvolvimento.
+
+Limites explícitos desta slice:
+
+- a operação permanece `queued`; ainda não há claim/lease, heartbeat, CAS de transição ou recuperação após restart;
+- listagem, filtros, cancel e retry públicos continuam abertos;
+- o worker ainda não persiste `running`, fases, resultado, erro, custo ou audit de stage/commit;
+- o output do F0-023 ainda não é ligado à operação persistida nem conferido contra o artifact/manifest target;
+- apenas `artifact-render` está implementado; ingest, Director, providers, sync, batch e export ainda não usam `PublicOperation`;
+- o próximo incremento deve implementar claim/lease durável, executar o render autorizado fora do processo web e persistir o resultado terminal seguro.

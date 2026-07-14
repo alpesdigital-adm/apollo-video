@@ -115,6 +115,18 @@ const requiredChecks = [
   'asset_use_decisions_outcome_check',
   'asset_use_decisions_validity_check',
   'asset_use_decisions_reasons_check',
+  'public_operations_type_check',
+  'public_operations_status_check',
+  'public_operations_phase_check',
+  'public_operations_target_check',
+  'public_operations_progress_check',
+  'public_operations_attempt_check',
+  'public_operations_fingerprint_check',
+  'public_operations_result_check',
+  'public_operations_error_check',
+  'public_operations_state_check',
+  'public_operations_dates_check',
+  'artifact_render_operations_hash_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

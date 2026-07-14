@@ -236,6 +236,75 @@ const renderOutputRequestSchema = {
     },
   },
 }
+
+const publicOperationTargetSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'id', 'manifestId'],
+  properties: {
+    type: { const: 'media-artifact' },
+    id: idSchema,
+    manifestId: idSchema,
+  },
+}
+
+const publicOperationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'type', 'status', 'phase', 'cancelable',
+    'retryable', 'target', 'attempt', 'maxAttempts', 'createdAt', 'updatedAt',
+  ],
+  properties: {
+    schemaVersion: { const: 'public-operation/v1' },
+    id: idSchema,
+    type: { const: 'artifact-render' },
+    status: {
+      enum: ['queued', 'running', 'waiting', 'retrying', 'succeeded', 'failed', 'canceled'],
+    },
+    phase: {
+      enum: [
+        'queued', 'materializing', 'rendering', 'verifying', 'persisting',
+        'waiting', 'retrying', 'completed', 'failed', 'canceled',
+      ],
+    },
+    progress: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['completed'],
+      properties: {
+        completed: { type: 'integer', minimum: 0 },
+        total: { type: 'integer', minimum: 1 },
+        unit: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' },
+      },
+    },
+    cancelable: { type: 'boolean' },
+    retryable: { type: 'boolean' },
+    target: publicOperationTargetSchema,
+    result: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['resource'],
+      properties: { resource: publicOperationTargetSchema },
+    },
+    error: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['code', 'message', 'retryable'],
+      properties: {
+        code: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' },
+        message: { type: 'string', minLength: 1, maxLength: 500 },
+        retryable: { type: 'boolean' },
+      },
+    },
+    attempt: { type: 'integer', minimum: 0 },
+    maxAttempts: { type: 'integer', minimum: 1 },
+    createdAt: dateTimeSchema,
+    updatedAt: dateTimeSchema,
+    startedAt: dateTimeSchema,
+    completedAt: dateTimeSchema,
+  },
+}
 const renderInputAssetSchema = {
   type: 'object',
   additionalProperties: false,
@@ -1148,6 +1217,31 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         assetCount: { type: 'integer', minimum: 0, maximum: 4096 },
         totalAssetBytes: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
       },
+    }),
+  ),
+  defineSchema('enqueue-artifact-render-request', 1, 'Authorized artifact render request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['authorizationId'],
+    properties: { authorizationId: idSchema },
+  }),
+  defineSchema('artifact-render-operation-accepted', 1, 'Accepted artifact render operation',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation', 'replayed'],
+      properties: {
+        operation: publicOperationSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('public-operation-detail', 1, 'Public operation detail response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation'],
+      properties: { operation: publicOperationSchema },
     }),
   ),
   defineSchema('create-project-request', 1, 'Create project request', {

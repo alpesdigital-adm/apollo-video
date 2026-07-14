@@ -2,6 +2,7 @@ import type { PublicCapability } from './capability-registry.ts'
 import type { ApiClient } from '../domain/api-client.ts'
 import type { ApiCredential } from '../domain/api-credential.ts'
 import type { MediaArtifactRecord } from '../application/ports/media-artifact-query-repository.ts'
+import type { PublicOperation } from '../domain/public-operation.ts'
 
 export const PUBLIC_API_VERSION = 'v1' as const
 
@@ -104,5 +105,29 @@ export function presentMediaArtifact(artifact: MediaArtifactRecord) {
       })),
       createdAt: manifest.createdAt,
     })),
+  }
+}
+
+export function presentPublicOperation(operation: PublicOperation) {
+  return {
+    schemaVersion: operation.schemaVersion,
+    id: operation.id,
+    type: operation.type,
+    status: operation.status,
+    phase: operation.phase,
+    ...(operation.progress ? { progress: { ...operation.progress } } : {}),
+    cancelable: operation.cancelable,
+    retryable: operation.retryable,
+    target: { ...operation.target },
+    ...(operation.result
+      ? { result: { resource: { ...operation.result.resource } } }
+      : {}),
+    ...(operation.error ? { error: { ...operation.error } } : {}),
+    attempt: operation.attempt,
+    maxAttempts: operation.maxAttempts,
+    createdAt: operation.createdAt,
+    updatedAt: operation.updatedAt,
+    ...(operation.startedAt ? { startedAt: operation.startedAt } : {}),
+    ...(operation.completedAt ? { completedAt: operation.completedAt } : {}),
   }
 }

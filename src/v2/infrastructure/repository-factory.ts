@@ -13,6 +13,7 @@ import type { RenderInputAssetResolver } from '../application/ports/render-input
 import type { RenderInputAssetAvailability } from '../application/ports/render-reconstruction-readiness.ts'
 import type { ProjectCreationRepository } from '../application/ports/project-creation-repository.ts'
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
+import type { PublicOperationRepository } from '../application/ports/public-operation-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
 import { DomainError } from '../domain/errors.ts'
 import { prisma } from '../../lib/db.ts'
@@ -25,6 +26,7 @@ import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
 import { PrismaProjectCreationRepository } from './prisma/project-creation-repository.ts'
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
+import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
 import { LocalArtifactRenderInputResolver } from './local-artifact-render-input-resolver.ts'
@@ -61,6 +63,10 @@ export function createMaterializationAuthorizationRepository(): MaterializationA
 
 export function createMediaArtifactQueryRepository(): MediaArtifactQueryRepository {
   return new PrismaMediaArtifactRepository(resolveV2Client())
+}
+
+export function createPublicOperationRepository(): PublicOperationRepository {
+  return new PrismaPublicOperationRepository(resolveV2Client())
 }
 
 export function createProtectedRenderInputStore(): ProtectedRenderInputStore {

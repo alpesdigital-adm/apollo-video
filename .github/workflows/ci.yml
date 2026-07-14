@@ -101,5 +101,8 @@ jobs:
       - name: Run media artifact persistence tests
         run: npm run test:integration:artifacts
 
+      - name: Run durable operation persistence tests
+        run: npm run test:integration:operations
+
       - name: Run public API integration tests
         run: npm run test:integration:api

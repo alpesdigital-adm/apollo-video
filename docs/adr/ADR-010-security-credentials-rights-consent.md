@@ -47,6 +47,7 @@ Scope nunca substitui ownership, rights, consent, Policy Snapshot, budget ou est
 - Após produzir o partial, o render service repete a materialização autorizada inteira. Somente igualdade de `inputHash` e `revalidationHash`, autorização ainda válida e nova conferência dos bytes permitem a promoção atômica do output.
 - O subprocesso Remotion recebe props compiladas por stdin e devolve somente resultado técnico seguro; paths não são argumentos públicos, receipts ou identidade externa.
 - `Idempotency-Key` identifica uma tentativa externa. Replay retorna o mesmo receipt; a mesma chave com request diferente falha com conflito.
+- Enfileirar render exige autorização emitida para o mesmo API client e vinculada ao artifact/manifest exatos. O contexto protegido fica em `artifact_render_operations`; a `PublicOperation` serializada não contém authorization ID, input hash, canonical key ou location.
 - Receipts externos nunca expõem notas jurídicas, props, canonical keys, storage locations, ciphertext ou material criptográfico.
 
 O mesmo evaluator será ligado incrementalmente à busca, Director, geração sintética e export. `restricted` continuará bloqueado para auto-use até existir um workflow administrativo explícito; não há override implícito por scope.

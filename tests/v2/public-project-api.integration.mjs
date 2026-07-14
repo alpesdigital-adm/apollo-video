@@ -79,6 +79,12 @@ test('authenticated public API manages projects, clients and artifact inspection
   let server
 
   const cleanup = async () => {
+    await client.v2ArtifactRenderOperation.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2PublicOperation.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2AssetUseDecision.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
@@ -151,6 +157,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'artifacts:render',
         'artifacts:rights',
         'clients:admin',
+        'operations:read',
         'projects:read',
         'projects:write',
       ],
@@ -360,6 +367,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       openApi.paths['/v1/render-inputs/preflight'].post['x-apollo-capability-id'],
       'apollo.render-inputs.preflight',
     )
+    assert.equal(
+      openApi.paths['/v1/artifacts/{artifactId}/renders/{manifestId}'].post[
+        'x-apollo-capability-id'
+      ],
+      'apollo.artifacts.render.enqueue',
+    )
+    assert.equal(
+      openApi.paths['/v1/operations/{operationId}'].get['x-apollo-capability-id'],
+      'apollo.operations.read',
+    )
 
     const schemaResponse = await fetch(
       `${baseUrl}/v1/schemas/create-project-request/v1`,
@@ -403,6 +420,8 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.artifacts.rights.set',
         'apollo.artifacts.materialization.authorize',
         'apollo.render-inputs.preflight',
+        'apollo.artifacts.render.enqueue',
+        'apollo.operations.read',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
         'apollo.projects.create',
@@ -789,6 +808,97 @@ test('authenticated public API manages projects, clients and artifact inspection
       ),
       null,
     )
+
+    const enqueueRender = (
+      key,
+      authorizationId = materialization.data.authorization.id,
+      bodyOverrides = {},
+    ) =>
+      fetch(
+        `${baseUrl}/v1/artifacts/${derivedArtifactId}/renders/${derivedManifestId}`,
+        {
+          method: 'POST',
+          headers: {
+            authorization,
+            'content-type': 'application/json',
+            'idempotency-key': key,
+          },
+          body: JSON.stringify({ authorizationId, ...bodyOverrides }),
+        },
+      )
+    const renderOperationResponse = await enqueueRender('render-operation-approved-1')
+    const renderOperation = await renderOperationResponse.json()
+    assert.equal(renderOperationResponse.status, 202)
+    assert.equal(renderOperation.data.replayed, false)
+    assert.equal(renderOperation.data.operation.schemaVersion, 'public-operation/v1')
+    assert.equal(renderOperation.data.operation.type, 'artifact-render')
+    assert.equal(renderOperation.data.operation.status, 'queued')
+    assert.equal(renderOperation.data.operation.phase, 'queued')
+    assert.deepEqual(renderOperation.data.operation.progress, {
+      completed: 0,
+      total: 1,
+      unit: 'render',
+    })
+    assert.deepEqual(renderOperation.data.operation.target, {
+      type: 'media-artifact',
+      id: derivedArtifactId,
+      manifestId: derivedManifestId,
+    })
+    const publicOperationJson = JSON.stringify(renderOperation)
+    assert.equal(publicOperationJson.includes(materialization.data.authorization.id), false)
+    assert.equal(publicOperationJson.includes(derivedRenderInput.inputHash), false)
+    assert.equal(publicOperationJson.includes(sourceKey), false)
+    assert.equal(publicOperationJson.includes('file:'), false)
+
+    const renderOperationReplayResponse = await enqueueRender('render-operation-approved-1')
+    const renderOperationReplay = await renderOperationReplayResponse.json()
+    assert.equal(renderOperationReplayResponse.status, 202)
+    assert.equal(renderOperationReplay.data.replayed, true)
+    assert.equal(
+      renderOperationReplay.data.operation.id,
+      renderOperation.data.operation.id,
+    )
+    const renderOperationMismatchResponse = await enqueueRender(
+      'render-operation-approved-1',
+      'another-authorization-id',
+    )
+    assert.equal(renderOperationMismatchResponse.status, 409)
+    assert.equal(
+      (await renderOperationMismatchResponse.json()).error.code,
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    const invalidRenderOperationResponse = await enqueueRender(
+      'render-operation-invalid-body',
+      materialization.data.authorization.id,
+      { outputPath: 'must-not-be-accepted' },
+    )
+    assert.equal(invalidRenderOperationResponse.status, 422)
+
+    const operationReadResponse = await fetch(
+      `${baseUrl}/v1/operations/${renderOperation.data.operation.id}`,
+      { headers: { authorization } },
+    )
+    const operationRead = await operationReadResponse.json()
+    assert.equal(operationReadResponse.status, 200)
+    assert.deepEqual(operationRead.data.operation, renderOperation.data.operation)
+    const missingOperationResponse = await fetch(
+      `${baseUrl}/v1/operations/missing-operation-id`,
+      { headers: { authorization } },
+    )
+    assert.equal(missingOperationResponse.status, 404)
+    assert.equal(
+      (await missingOperationResponse.json()).error.code,
+      'PUBLIC_OPERATION_NOT_FOUND',
+    )
+    assert.equal(
+      await client.v2PublicOperation.count({ where: { workspaceId } }),
+      1,
+    )
+    const storedRenderOperation = await client.v2ArtifactRenderOperation.findUnique({
+      where: { operationId: renderOperation.data.operation.id },
+    })
+    assert.equal(storedRenderOperation.authorizationId, materialization.data.authorization.id)
+    assert.equal(storedRenderOperation.inputHash, derivedRenderInput.inputHash)
 
     const legacyRenderInputResponse = await fetch(
       `${baseUrl}/v1/artifacts/${sourceArtifactId}/render-input/public-api-source-manifest-v2`,

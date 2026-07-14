@@ -60,6 +60,8 @@ renderer ◄── RenderInput materializado
 - Arquivos locais materializados são disponibilizados ao Chromium somente durante o render por servidor HTTP aleatório, efêmero e restrito a `127.0.0.1`, com allowlist derivada da lease e suporte a byte ranges. Texto e props comuns não são percorridos como locations.
 - O adapter Remotion escreve um partial irmão, limita tempo e output do subprocesso, valida probe, duração, dimensões, fps, byte size e SHA-256 e reconfirma que o partial não mudou durante a validação.
 - A promoção ocorre somente após uma segunda materialização completa da mesma autorização. `inputHash` e `revalidationHash` precisam permanecer iguais; falha, cancelamento ou divergência remove o partial.
+- Operações externas longas são persistidas em `public_operations`; detalhes de execução pertencem a tabelas tipadas, como `artifact_render_operations`, em vez de um payload genérico. A rota web apenas enfileira e retorna `202`.
+- O adapter de operação reconfirma workspace, client, artifact, manifest, autorização e `inputHash` como um único contexto antes de hidratar o aggregate público; referências válidas isoladamente não bastam.
 - O primeiro compiler v1 falha fechado fora de `9:16` e `16:9`. `4:5`, `1:1` e `21:9` exigem layout responsivo próprio antes de serem habilitados no renderer.
 - Falha, timeout ou cancelamento preservam o derivado anterior e tentam remover o parcial; falha de cleanup/promoção possui erro tipado próprio.
 - A identidade portátil de um derivado usa `media-artifact-manifest/v1`: SHA-256 do conteúdo, byte size, canonical artifact key, recipe/version, parameters hash, sources e probe opcional.

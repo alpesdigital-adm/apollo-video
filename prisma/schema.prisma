@@ -74,6 +74,8 @@ model V2Workspace {
   rightsSnapshots    V2AssetRightsSnapshot[]
   materializations   V2MaterializationAuthorization[]
   assetUseDecisions  V2AssetUseDecision[]
+  publicOperations   V2PublicOperation[]
+  renderOperations   V2ArtifactRenderOperation[]
 
   @@map("v2_workspaces")
 }
@@ -93,6 +95,7 @@ model V2ApiClient {
 
   workspace   V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   credentials V2ApiCredential[]
+  operations  V2PublicOperation[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -228,6 +231,7 @@ model V2MediaArtifact {
   currentRightsSnapshot    V2AssetRightsSnapshot?           @relation("V2CurrentAssetRights", fields: [currentRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   consentEvidenceFor       V2AssetRightsSnapshot[]          @relation("V2ConsentDocument")
   materializationTargets   V2MaterializationAuthorization[] @relation("V2MaterializationTarget")
+  renderOperationTargets   V2ArtifactRenderOperation[]      @relation("V2ArtifactRenderTarget")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -258,6 +262,7 @@ model V2MediaArtifactManifest {
   recipeParameters V2RecipeParameterPayload? @relation(fields: [recipeParametersRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
   renderInput      V2RenderInputPayload?     @relation(fields: [renderInputRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
   materializations V2MaterializationAuthorization[]
+  renderOperations V2ArtifactRenderOperation[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, manifestHash])
@@ -403,6 +408,7 @@ model V2MaterializationAuthorization {
   targetArtifact V2MediaArtifact         @relation("V2MaterializationTarget", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   manifest       V2MediaArtifactManifest @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   decisions      V2AssetUseDecision[]
+  renderOperations V2ArtifactRenderOperation[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
@@ -433,4 +439,63 @@ model V2AssetUseDecision {
   @@index([workspaceId, artifactId, evaluatedAt])
   @@index([workspaceId, rightsSnapshotId])
   @@map("v2_asset_use_decisions")
+}
+
+model V2PublicOperation {
+  id                 String    @id
+  workspaceId        String
+  clientId           String
+  type               String
+  status             String
+  phase              String
+  targetType         String
+  targetId           String
+  progressCompleted  Int?
+  progressTotal      Int?
+  progressUnit       String?
+  cancelable         Boolean   @default(true)
+  retryable          Boolean   @default(false)
+  attempt            Int       @default(0)
+  maxAttempts        Int       @default(3)
+  resultJson         String?
+  errorCode          String?
+  errorMessage       String?
+  errorRetryable     Boolean?
+  idempotencyKey     String
+  requestFingerprint String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  startedAt          DateTime?
+  completedAt        DateTime?
+
+  workspace      V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  client         V2ApiClient                @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  artifactRender V2ArtifactRenderOperation?
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, clientId, idempotencyKey])
+  @@index([workspaceId, status, updatedAt])
+  @@index([workspaceId, type, createdAt])
+  @@index([workspaceId, targetType, targetId])
+  @@map("v2_public_operations")
+}
+
+model V2ArtifactRenderOperation {
+  operationId     String @id
+  workspaceId     String
+  artifactId      String
+  manifestId      String
+  authorizationId String
+  inputHash       String
+
+  workspace     V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  operation     V2PublicOperation              @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  artifact      V2MediaArtifact                @relation("V2ArtifactRenderTarget", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  manifest      V2MediaArtifactManifest        @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  authorization V2MaterializationAuthorization @relation(fields: [authorizationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, artifactId, manifestId])
+  @@index([workspaceId, authorizationId])
+  @@map("v2_artifact_render_operations")
 }

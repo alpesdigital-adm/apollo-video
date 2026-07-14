@@ -42,3 +42,5 @@ O domínio depende de `AuthenticatedExternalActor`. O ADR-010 escolhe credenciai
 - Examples publicados são validados por Ajv Draft 2020-12, incluindo `date-time`.
 - Um baseline versionado impede remover capabilities ou alterar schemas existentes sob o mesmo ref sem revisão explícita.
 - Novas capabilities e novos schema refs são aditivos; atualizar o baseline exige comando separado e diff revisável.
+- O primeiro `PublicOperation` durável é `artifact-render`: enqueue idempotente responde `202`, leitura é workspace-scoped e o presenter omite client/workspace internos, authorization ID, RenderInput hash e storage details.
+- A persistência geral da operação e o contexto específico de render usam tabelas distintas. Worker claim/lease, heartbeat, cancel/retry e transições terminais permanecem incrementos posteriores do mesmo contrato.

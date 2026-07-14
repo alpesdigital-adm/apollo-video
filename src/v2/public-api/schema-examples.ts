@@ -79,6 +79,25 @@ const renderInputRequestExample = {
     title: 'Abertura validada',
   },
 }
+const queuedRenderOperationExample = {
+  schemaVersion: 'public-operation/v1',
+  id: 'operation-render-example-1',
+  type: 'artifact-render',
+  status: 'queued',
+  phase: 'queued',
+  progress: { completed: 0, total: 1, unit: 'render' },
+  cancelable: true,
+  retryable: false,
+  target: {
+    type: 'media-artifact',
+    id: artifactId,
+    manifestId: 'manifest-example-1',
+  },
+  attempt: 0,
+  maxAttempts: 3,
+  createdAt,
+  updatedAt: createdAt,
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -489,6 +508,21 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           assetCount: 1,
           totalAssetBytes: '2849012',
         },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/enqueue-artifact-render-request/v1': [
+      { authorizationId: 'materialization-auth-example-1' },
+    ],
+    'apollo://schemas/artifact-render-operation-accepted/v1': [
+      {
+        data: { operation: queuedRenderOperationExample, replayed: false },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/public-operation-detail/v1': [
+      {
+        data: { operation: queuedRenderOperationExample },
         meta: { apiVersion: 'v1' },
       },
     ],
