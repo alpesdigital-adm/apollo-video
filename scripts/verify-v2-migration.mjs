@@ -48,6 +48,12 @@ const committed = readdirSync(migrationsPath, { withFileTypes: true })
   .map((entry) => readFileSync(`${migrationsPath}/${entry.name}/migration.sql`, 'utf8'))
   .join('\n')
 
+assert.match(
+  committed,
+  /DROP CONSTRAINT "artifact_render_operations_output_check"[\s\S]*"outputKey" ~ '\^\[A-Za-z0-9\]\[A-Za-z0-9\._\/-\]\*\\\.mp4\$'/,
+  'the output-key check must use a PostgreSQL-compatible unbounded repetition plus length guard',
+)
+
 assertSetContains(
   names(committed, /CREATE TABLE "([^"]+)"/g),
   names(generated, /CREATE TABLE "([^"]+)"/g),
