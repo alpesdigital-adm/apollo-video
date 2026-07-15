@@ -9,6 +9,7 @@ import {
   heartbeatWebhookDeliveryService,
   settleWebhookDeliveryService,
 } from '../application/manage-webhook-delivery.ts'
+import { dispatchWebhookDeliveryService } from '../application/dispatch-webhook-delivery.ts'
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
 import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
@@ -28,6 +29,10 @@ import type { WorkspaceRepository } from '../application/ports/workspace-reposit
 import type { WebhookRegistrationRepository } from '../application/ports/webhook-registration-repository.ts'
 import type { WebhookFanoutRepository } from '../application/ports/webhook-fanout-repository.ts'
 import type { WebhookDeliveryRepository } from '../application/ports/webhook-delivery-repository.ts'
+import type {
+  WebhookDeliveryDispatchTargetRepository,
+  WebhookSigningSecretProvider,
+} from '../application/ports/webhook-delivery-dispatch.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
@@ -52,6 +57,7 @@ import { PrismaWebhookFanoutRepository } from './prisma/webhook-fanout-repositor
 import { PrismaWebhookDeliveryRepository } from './prisma/webhook-delivery-repository.ts'
 import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
 import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-transport.ts'
+import { SafeWebhookDeliveryTransport } from './webhook/safe-webhook-delivery-transport.ts'
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
 import { LocalArtifactRenderInputResolver } from './local-artifact-render-input-resolver.ts'
 import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts'
@@ -101,8 +107,35 @@ export function createWebhookFanoutRepository(): WebhookFanoutRepository {
   return new PrismaWebhookFanoutRepository(resolveV2Client())
 }
 
-export function createWebhookDeliveryRepository(): WebhookDeliveryRepository {
+export function createWebhookDeliveryRepository(): WebhookDeliveryRepository &
+  WebhookDeliveryDispatchTargetRepository {
   return new PrismaWebhookDeliveryRepository(resolveV2Client())
+}
+
+export function createWebhookDeliveryDispatcher(
+  secrets: WebhookSigningSecretProvider,
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const configuredTimeout = Number(environment.APOLLO_V2_WEBHOOK_DELIVERY_TIMEOUT_MS)
+  const configuredRetryBase = Number(environment.APOLLO_V2_WEBHOOK_RETRY_BASE_MS)
+  const configuredRetryMax = Number(environment.APOLLO_V2_WEBHOOK_RETRY_MAX_MS)
+  return dispatchWebhookDeliveryService({
+    repository: createWebhookDeliveryRepository(),
+    secrets,
+    transport: new SafeWebhookDeliveryTransport({
+      ...(Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0
+        ? { timeoutMs: configuredTimeout }
+        : {}),
+    }),
+    clock,
+    ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0
+      ? { retryBaseDelayMs: configuredRetryBase }
+      : {}),
+    ...(Number.isSafeInteger(configuredRetryMax) && configuredRetryMax > 0
+      ? { retryMaxDelayMs: configuredRetryMax }
+      : {}),
+  })
 }
 
 export function createWebhookDeliveryWorker(

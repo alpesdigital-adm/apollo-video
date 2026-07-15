@@ -11,10 +11,17 @@ import type {
   WebhookDeliveryFence,
   WebhookDeliveryRepository,
 } from '../../application/ports/webhook-delivery-repository.ts'
+import type {
+  WebhookDeliveryDispatchTargetRepository,
+} from '../../application/ports/webhook-delivery-dispatch.ts'
+import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { createPublicEvent } from '../../domain/public-event.ts'
 import {
   createWebhookDelivery,
   createWebhookDeliveryAttempt,
+  createWebhookSigningSecret,
+  normalizeWebhookUrl,
   type WebhookDelivery,
   type WebhookDeliveryAttempt,
 } from '../../domain/webhook.ts'
@@ -86,7 +93,8 @@ function persistenceConflict(message: string): never {
   throw new DomainError('PERSISTENCE_CONFLICT', message)
 }
 
-export class PrismaWebhookDeliveryRepository implements WebhookDeliveryRepository {
+export class PrismaWebhookDeliveryRepository
+  implements WebhookDeliveryRepository, WebhookDeliveryDispatchTargetRepository {
   private readonly client: PrismaClient
 
   constructor(client: PrismaClient = prisma) {
@@ -210,6 +218,118 @@ export class PrismaWebhookDeliveryRepository implements WebhookDeliveryRepositor
         })
       }
       return null
+    })
+  }
+
+  async getDispatchTarget(
+    fence: Parameters<WebhookDeliveryDispatchTargetRepository['getDispatchTarget']>[0],
+  ) {
+    const row = await this.client.v2WebhookDelivery.findFirst({
+      where: this.activeFence(fence),
+      select: {
+        id: true,
+        workspaceId: true,
+        event: {
+          select: {
+            id: true,
+            type: true,
+            version: true,
+            occurredAt: true,
+            sequence: true,
+            actorClientId: true,
+            actorUserId: true,
+            resourceType: true,
+            resourceId: true,
+            dataJson: true,
+          },
+        },
+        subscription: {
+          select: {
+            status: true,
+            endpoint: {
+              select: {
+                id: true,
+                status: true,
+                url: true,
+                secrets: {
+                  where: { status: 'active' },
+                  orderBy: { version: 'desc' },
+                  take: 2,
+                  select: {
+                    id: true,
+                    workspaceId: true,
+                    endpointId: true,
+                    version: true,
+                    keyRef: true,
+                    fingerprint: true,
+                    status: true,
+                    createdAt: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    if (!row) return null
+    const endpoint = row.subscription.endpoint
+    if (row.subscription.status !== 'active' || endpoint.status !== 'active') {
+      return Object.freeze({ status: 'blocked' as const, errorCode: 'target_inactive' as const })
+    }
+    if (endpoint.secrets.length !== 1) {
+      return Object.freeze({
+        status: 'blocked' as const,
+        errorCode: 'signing_secret_unavailable' as const,
+      })
+    }
+    const secret = createWebhookSigningSecret({
+      ...endpoint.secrets[0],
+      status: 'active',
+      createdAt: endpoint.secrets[0].createdAt.toISOString(),
+    })
+    let data: unknown
+    try {
+      data = JSON.parse(row.event.dataJson)
+    } catch {
+      persistenceConflict('Webhook dispatch event contains invalid JSON')
+    }
+    let event
+    try {
+      event = createPublicEvent({
+        id: row.event.id,
+        workspaceId: row.workspaceId,
+        type: row.event.type,
+        version: row.event.version,
+        occurredAt: row.event.occurredAt.toISOString(),
+        ...(row.event.sequence !== null ? { sequence: row.event.sequence } : {}),
+        ...(row.event.actorClientId || row.event.actorUserId
+          ? {
+              actor: {
+                ...(row.event.actorClientId ? { clientId: row.event.actorClientId } : {}),
+                ...(row.event.actorUserId ? { userId: row.event.actorUserId } : {}),
+              },
+            }
+          : {}),
+        resource: { type: row.event.resourceType, id: row.event.resourceId },
+        data: data as Record<string, unknown>,
+      })
+    } catch {
+      persistenceConflict('Webhook dispatch event is invalid')
+    }
+    return Object.freeze({
+      status: 'ready' as const,
+      target: Object.freeze({
+        workspaceId: row.workspaceId,
+        deliveryId: row.id,
+        eventId: event.id,
+        endpointId: endpoint.id,
+        url: normalizeWebhookUrl(endpoint.url),
+        secretKeyRef: secret.keyRef,
+        secretVersion: secret.version,
+        secretFingerprint: secret.fingerprint,
+        rawBody: Buffer.from(stableSerialize(event), 'utf8'),
+      }),
     })
   }
 

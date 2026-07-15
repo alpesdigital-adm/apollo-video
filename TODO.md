@@ -495,9 +495,9 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-038: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks materializam deliveries deduplicadas e agora possuem claim/lease, attempts duráveis, fencing, retry agendável e dead-letter por esgotamento. Envio assinado, política automática de backoff e replay administrativo continuam abertos.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-039: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks agora possuem fan-out deduplicado, claim/lease, dispatch assinado com transporte DNS-pinado, classificação de resposta, backoff com jitter e dead-letter. Adapter concreto do secret provider e replay administrativo continuam abertos.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
-- [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Parcial F0-035/F0-038: assinatura adulterada, replay durável, timeout absoluto, DNS misto e rebinding possuem regressões; claim concorrente, lease incorreto, reclaim, worker obsoleto, retry e dead-letter de delivery também estão cobertos. Dispatcher HTTPS real e replay administrativo continuam abertos.
+- [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Parcial F0-035/F0-039: assinatura adulterada, replay durável, timeout absoluto, DNS misto, rebinding, claim concorrente, lease incorreto, reclaim, worker obsoleto, retry e dead-letter estão cobertos. Dispatcher cobre bytes/headers assinados, fingerprint, DNS privado e settlement integrado; falta replay administrativo ponta a ponta.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
 
@@ -3591,7 +3591,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-038 — Claim, lease e fencing de deliveries de webhook
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `75ba853`.
 
 Entregas:
 
@@ -3620,4 +3620,40 @@ Limites explícitos desta slice:
 - classificação automática de respostas, backoff com jitter e limites por destino entram no dispatcher posterior;
 - replay administrativo, capability/API/UI de inspeção e rotação do secret continuam abertos;
 - o transporte de delivery deverá reutilizar DNS pinning, TLS e limites do ADR-025 em cada tentativa;
-- hosted CI será registrado após publicação no próximo ciclo.
+- hosted CI `29377540450` aprovou PostgreSQL, 82 testes, contratos, API, FFmpeg, Remotion real, build e auditorias após o hotfix de cleanup `7cfe9bc`.
+
+### Slice F0-039 — Dispatcher assinado de webhook deliveries
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- dispatcher só carrega o target quando workspace, delivery, owner, attempt, hash do token e lease válido coincidem;
+- evento é reidratado do outbox e serializado em JSON canônico, usando exatamente os mesmos bytes na assinatura e no request;
+- target exige endpoint/subscription ativos e exatamente um secret ativo, retornando apenas referência, versão e fingerprint;
+- boundary de secret provider é injetável e não possui fallback inseguro; a chave é aberta somente em memória, verificada por fingerprint e a cópia local é zerada no `finally`;
+- fingerprint divergente termina sem conexão; indisponibilidade do provider é classificada como transitória;
+- transporte assinado resolve DNS em toda tentativa, rejeita endereços especiais, prende HTTPS ao IP validado e preserva Host/SNI/certificado;
+- TLS mínimo 1.2, porta 443, ausência de redirect/reuso, deadline absoluto e limites de 256 KiB no request e 64 KiB na resposta são aplicados;
+- resposta bruta não atravessa o boundary: somente status HTTP e SHA-256 do body seguem para settlement;
+- 2xx conclui sucesso; 408, 425, 429 e 5xx usam retry; demais respostas não-2xx são terminais;
+- backoff exponencial limitado recebe jitter determinístico por delivery+attempt;
+- resultado da rede ainda precisa vencer o fence no settlement, impedindo worker stale de concluir;
+- ADR-028 formaliza reconstrução canônica, abertura do secret, assinatura, rede e classificação.
+
+Regressões e evidências locais:
+
+- suíte global passa com 86 testes; 18 são contratos de webhook;
+- transporte prova bytes e headers exatos, IP pinado, event ID coerente e bloqueio de DNS privado antes da conexão;
+- dispatcher prova assinatura verificável, ausência de token bruto na persistência, fingerprint mismatch sem rede, retry de falha transitória e backoff futuro;
+- integração Prisma executa outbox canônico → abertura da chave → assinatura → resposta 204 → settlement bem-sucedido;
+- build, typecheck, contratos públicos, migration, auditorias e todas as integrações SQLite passam;
+- a regressão de cleanup de mídia descoberta no CI foi corrigida no commit `7cfe9bc` e passou cinco execuções locais consecutivas e o hosted CI `29377540450`.
+
+Limites explícitos desta slice:
+
+- o adapter concreto do secret provider por ambiente ainda precisa ser escolhido e configurado;
+- ainda não existe loop executável que una claim, heartbeat e dispatch continuamente;
+- replay administrativo, rotação operacional, rate limit/circuit breaker por endpoint e observabilidade continuam abertos;
+- API/UI administrativa de endpoint, delivery e attempts permanece no incremento previsto;
+- hosted CI do dispatcher será registrado após sua publicação no próximo ciclo.

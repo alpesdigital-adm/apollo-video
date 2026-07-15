@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 test('webhook registration is atomic, workspace-scoped and stores only a secret reference', async () => {
@@ -17,6 +18,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     heartbeatWebhookDeliveryService,
     settleWebhookDeliveryService,
   } = await import('../../src/v2/application/manage-webhook-delivery.ts')
+  const { dispatchWebhookDeliveryService } = await import(
+    '../../src/v2/application/dispatch-webhook-delivery.ts'
+  )
   const {
     issueWebhookChallengeService,
     verifyWebhookChallengeService,
@@ -27,6 +31,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const {
     issueWebhookChallengeToken,
     signWebhookPayload,
+    verifyWebhookSignature,
   } = await import('../../src/v2/domain/webhook-security.ts')
   const { issueWebhookDeliveryLeaseToken } = await import(
     '../../src/v2/domain/webhook-delivery-lease.ts'
@@ -117,6 +122,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       clock: () => now,
       createId: (kind) => idSets[registrationIndex][kind],
     })
+    const webhookSigningKey = Buffer.alloc(32, 18)
     const request = {
       workspaceId,
       url: 'https://hooks.example.com/apollo',
@@ -125,7 +131,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       createdByClientId: clientId,
       secret: {
         keyRef: 'vault://apollo/webhook-integration/key-1',
-        fingerprint: 'b'.repeat(64),
+        fingerprint: createHash('sha256').update(webhookSigningKey).digest('hex'),
       },
     }
     const registered = await register(request)
@@ -487,17 +493,54 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const thirdClaim = await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-3' })
     assert.equal(thirdClaim.attempt.attemptNumber, 3)
     deliveryClock = new Date(fanoutAt.getTime() + 5_100)
-    const succeeded = await settleDelivery({
+    const dispatchDelivery = dispatchWebhookDeliveryService({
+      repository: deliveryRepository,
+      secrets: {
+        async open(secretRequest) {
+          assert.equal(secretRequest.workspaceId, workspaceId)
+          assert.equal(secretRequest.endpointId, endpoint.id)
+          assert.equal(secretRequest.keyRef, request.secret.keyRef)
+          assert.equal(secretRequest.version, 1)
+          return webhookSigningKey
+        },
+      },
+      transport: {
+        async send(transportRequest) {
+          const eventBody = JSON.parse(Buffer.from(transportRequest.rawBody).toString('utf8'))
+          assert.equal(eventBody.id, eventRows[1].id)
+          assert.equal(eventBody.resource.id, 'integration-project-1')
+          assert.equal(verifyWebhookSignature({
+            secret: webhookSigningKey,
+            rawBody: transportRequest.rawBody,
+            headers: transportRequest.headers,
+            now: deliveryClock,
+          }).eventId, eventRows[1].id)
+          return {
+            statusCode: 204,
+            responseBodyHash: createHash('sha256').update('').digest('hex'),
+          }
+        },
+      },
+      clock: () => deliveryClock,
+    })
+    const succeeded = await dispatchDelivery({
       workspaceId,
       deliveryId: thirdClaim.delivery.id,
       leaseOwner: 'webhook-worker-3',
       leaseToken: thirdClaim.leaseToken,
       attemptNumber: 3,
-      outcome: { status: 'succeeded', responseStatus: 204 },
     })
+    assert.equal(succeeded.status, 'succeeded')
     assert.equal(succeeded.delivery.status, 'succeeded')
-    assert.equal(succeeded.attempt.status, 'succeeded')
     assert.equal('lease' in succeeded, false)
+    assert.equal(
+      (await client.v2WebhookDeliveryAttempt.findUniqueOrThrow({
+        where: {
+          deliveryId_attemptNumber: { deliveryId: thirdClaim.delivery.id, attemptNumber: 3 },
+        },
+      })).status,
+      'succeeded',
+    )
     assert.equal(
       (await client.v2WebhookDelivery.findUniqueOrThrow({ where: { id: thirdClaim.delivery.id } }))
         .leaseTokenHash,

@@ -7,6 +7,7 @@ import type {
 } from '../../application/ports/webhook-challenge-transport.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { hashWebhookChallengeToken } from '../../domain/webhook-security.ts'
+import type { SignedWebhookHeaders } from '../../domain/webhook-security.ts'
 import {
   validateWebhookResolution,
   type WebhookResolvedAddress,
@@ -27,6 +28,8 @@ export interface PinnedWebhookRequest {
   body: Buffer
   timeoutMs: number
   maxResponseBytes: number
+  headers?: Readonly<SignedWebhookHeaders>
+  userAgent?: string
 }
 
 export interface PinnedWebhookResponse {
@@ -57,7 +60,8 @@ export function createPinnedWebhookRequestOptions(
       accept: 'application/json',
       'content-type': 'application/json; charset=utf-8',
       'content-length': input.body.length,
-      'user-agent': 'Apollo-Video-Webhook-Challenge/1.0',
+      'user-agent': input.userAgent ?? 'Apollo-Video-Webhook-Challenge/1.0',
+      ...(input.headers ?? {}),
     },
     lookup: (_hostname, _options, callback) => {
       callback(null, input.address.address, input.address.family)

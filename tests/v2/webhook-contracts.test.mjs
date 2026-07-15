@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { registerWebhookService } from '../../src/v2/application/register-webhook.ts'
@@ -9,6 +10,11 @@ import {
   heartbeatWebhookDeliveryService,
   settleWebhookDeliveryService,
 } from '../../src/v2/application/manage-webhook-delivery.ts'
+import {
+  calculateWebhookRetryAt,
+  classifyWebhookResponse,
+  dispatchWebhookDeliveryService,
+} from '../../src/v2/application/dispatch-webhook-delivery.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -38,6 +44,7 @@ import {
   createPinnedWebhookRequestOptions,
   SafeWebhookChallengeTransport,
 } from '../../src/v2/infrastructure/webhook/safe-webhook-challenge-transport.ts'
+import { SafeWebhookDeliveryTransport } from '../../src/v2/infrastructure/webhook/safe-webhook-delivery-transport.ts'
 
 const ids = {
   'webhook-endpoint': '00000000-0000-4000-8000-000000000101',
@@ -260,6 +267,265 @@ test('delivery claim exposes one-shot token while heartbeat and settlement pass 
   })
   assert.equal(commands[2].leaseTokenHash, issued.tokenHash)
   assert.equal(JSON.stringify(commands.slice(1)).includes(issued.token), false)
+})
+
+test('delivery transport pins DNS and preserves exact signed bytes and headers', async () => {
+  const secret = Buffer.alloc(32, 12)
+  const eventId = '00000000-0000-4000-8000-000000000903'
+  const rawBody = Buffer.from('{"exact":"bytes"}', 'utf8')
+  const headers = signWebhookPayload({
+    secret,
+    eventId,
+    rawBody,
+    timestamp: new Date('2026-07-14T23:40:00.000Z'),
+  })
+  let pinnedRequest
+  const transport = new SafeWebhookDeliveryTransport({
+    resolver: {
+      async resolve(hostname) {
+        assert.equal(hostname, 'hooks.example.com')
+        return [{ address: '8.8.8.8', family: 4 }]
+      },
+    },
+    client: {
+      async post(request) {
+        pinnedRequest = request
+        assert.deepEqual(request.body, rawBody)
+        return { statusCode: 429, body: Buffer.from('retry later', 'utf8') }
+      },
+    },
+  })
+  const result = await transport.send({
+    url: 'https://hooks.example.com/apollo',
+    eventId,
+    rawBody,
+    headers,
+  })
+  assert.equal(result.statusCode, 429)
+  assert.equal(
+    result.responseBodyHash,
+    createHash('sha256').update('retry later', 'utf8').digest('hex'),
+  )
+  const options = createPinnedWebhookRequestOptions(pinnedRequest)
+  assert.equal(options.headers['apollo-webhook-id'], eventId)
+  assert.equal(options.headers['apollo-webhook-signature'], headers['apollo-webhook-signature'])
+  assert.equal(options.headers['user-agent'], 'Apollo-Video-Webhook/1.0')
+  assert.equal(options.hostname, 'hooks.example.com')
+  assert.equal(options.lookup('ignored', {}, () => {}), undefined)
+  await assert.rejects(
+    () => transport.send({
+      url: 'https://hooks.example.com/apollo',
+      eventId: '00000000-0000-4000-8000-000000000999',
+      rawBody,
+      headers,
+    }),
+    (error) =>
+      error instanceof DomainError && error.code === 'WEBHOOK_DELIVERY_TRANSPORT_FAILED',
+  )
+
+  let connections = 0
+  const privateTransport = new SafeWebhookDeliveryTransport({
+    resolver: { async resolve() { return [{ address: '127.0.0.1', family: 4 }] } },
+    client: { async post() { connections += 1; throw new Error('must not connect') } },
+  })
+  await assert.rejects(
+    () => privateTransport.send({
+      url: 'https://hooks.example.com/apollo',
+      eventId,
+      rawBody,
+      headers,
+    }),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_NETWORK_REJECTED',
+  )
+  assert.equal(connections, 0)
+})
+
+test('dispatcher opens matching secret only in memory and settles signed success through fence', async () => {
+  const secret = Buffer.alloc(32, 13)
+  const lease = issueWebhookDeliveryLeaseToken(() => Buffer.alloc(32, 14))
+  const eventId = '00000000-0000-4000-8000-000000000904'
+  const deliveryId = '00000000-0000-4000-8000-000000000905'
+  const rawBody = Buffer.from('{"id":"event"}', 'utf8')
+  const commands = []
+  let transported = 0
+  const repository = {
+    async getDispatchTarget(fence) {
+      commands.push(fence)
+      return { status: 'ready', target: {
+          workspaceId: 'workspace-1',
+          deliveryId,
+          eventId,
+          endpointId: ids['webhook-endpoint'],
+          url: 'https://hooks.example.com/apollo',
+          secretKeyRef: 'vault://apollo/workspaces/workspace-1/webhooks/key-1',
+          secretVersion: 1,
+          secretFingerprint: createHash('sha256').update(secret).digest('hex'),
+          rawBody,
+        } }
+    },
+    async succeed(command) {
+      commands.push(command)
+      return {
+        delivery: { status: 'succeeded' },
+        attempt: { status: 'succeeded' },
+      }
+    },
+    async failOrRetry() { throw new Error('not expected') },
+  }
+  const dispatch = dispatchWebhookDeliveryService({
+    repository,
+    secrets: {
+      async open(request) {
+        assert.equal(request.keyRef, 'vault://apollo/workspaces/workspace-1/webhooks/key-1')
+        return secret
+      },
+    },
+    transport: {
+      async send(request) {
+        transported += 1
+        assert.deepEqual(request.rawBody, rawBody)
+        assert.equal(verifyWebhookSignature({
+          secret,
+          rawBody,
+          headers: request.headers,
+          now: new Date('2026-07-14T23:40:00.000Z'),
+        }).eventId, eventId)
+        return {
+          statusCode: 204,
+          responseBodyHash: createHash('sha256').update('').digest('hex'),
+        }
+      },
+    },
+    clock: () => new Date('2026-07-14T23:40:00.000Z'),
+  })
+  const result = await dispatch({
+    workspaceId: 'workspace-1',
+    deliveryId,
+    leaseOwner: 'worker-1',
+    leaseToken: lease.token,
+    attemptNumber: 1,
+  })
+  assert.equal(result.status, 'succeeded')
+  assert.equal(transported, 1)
+  assert.equal(commands[0].leaseTokenHash, lease.tokenHash)
+  assert.equal(commands[1].leaseTokenHash, lease.tokenHash)
+  assert.equal(JSON.stringify(commands).includes(lease.token), false)
+  assert.equal(secret.equals(Buffer.alloc(32, 13)), true)
+})
+
+test('dispatcher retries transient failures deterministically and dead-letters key mismatch', async () => {
+  const secret = Buffer.alloc(32, 15)
+  const lease = issueWebhookDeliveryLeaseToken(() => Buffer.alloc(32, 16))
+  const deliveryId = '00000000-0000-4000-8000-000000000906'
+  const now = new Date('2026-07-14T23:40:00.000Z')
+  assert.deepEqual(classifyWebhookResponse(429), {
+    succeeded: false,
+    retryable: true,
+    errorCode: 'http_429',
+  })
+  assert.deepEqual(classifyWebhookResponse(404), {
+    succeeded: false,
+    retryable: false,
+    errorCode: 'http_404',
+  })
+  assert.equal(
+    calculateWebhookRetryAt({ deliveryId, attemptNumber: 2, now }),
+    calculateWebhookRetryAt({ deliveryId, attemptNumber: 2, now }),
+  )
+
+  let failureCommand
+  let transports = 0
+  let targetFingerprint = 'a'.repeat(64)
+  const repository = {
+    async getDispatchTarget() {
+      return { status: 'ready', target: {
+          workspaceId: 'workspace-1',
+          deliveryId,
+          eventId: '00000000-0000-4000-8000-000000000907',
+          endpointId: ids['webhook-endpoint'],
+          url: 'https://hooks.example.com/apollo',
+          secretKeyRef: 'vault://apollo/workspaces/workspace-1/webhooks/key-1',
+          secretVersion: 1,
+          secretFingerprint: targetFingerprint,
+          rawBody: Buffer.from('{}'),
+        } }
+    },
+    async succeed() { throw new Error('not expected') },
+    async failOrRetry(command) {
+      failureCommand = command
+      return {
+        delivery: { status: command.nextAttemptAt ? 'retry-scheduled' : 'dead-lettered' },
+        attempt: { status: 'failed' },
+      }
+    },
+  }
+  const dispatch = dispatchWebhookDeliveryService({
+    repository,
+    secrets: { async open() { return secret } },
+    transport: { async send() { transports += 1; throw new Error('offline') } },
+    clock: () => now,
+  })
+  const result = await dispatch({
+    workspaceId: 'workspace-1',
+    deliveryId,
+    leaseOwner: 'worker-1',
+    leaseToken: lease.token,
+    attemptNumber: 1,
+  })
+  assert.equal(result.status, 'dead-lettered')
+  assert.equal(failureCommand.errorCode, 'signing_key_mismatch')
+  assert.equal(failureCommand.nextAttemptAt, undefined)
+  assert.equal(transports, 0)
+
+  targetFingerprint = createHash('sha256').update(secret).digest('hex')
+  const retried = await dispatch({
+    workspaceId: 'workspace-1',
+    deliveryId,
+    leaseOwner: 'worker-1',
+    leaseToken: lease.token,
+    attemptNumber: 1,
+  })
+  assert.equal(retried.status, 'retry-scheduled')
+  assert.equal(failureCommand.errorCode, 'network_error')
+  assert.ok(new Date(failureCommand.nextAttemptAt) > now)
+  assert.equal(transports, 1)
+})
+
+test('dispatcher closes an inactive target without opening secret or network', async () => {
+  const lease = issueWebhookDeliveryLeaseToken(() => Buffer.alloc(32, 17))
+  let secretReads = 0
+  let transports = 0
+  let settled
+  const dispatch = dispatchWebhookDeliveryService({
+    repository: {
+      async getDispatchTarget() {
+        return { status: 'blocked', errorCode: 'target_inactive' }
+      },
+      async succeed() { throw new Error('not expected') },
+      async failOrRetry(command) {
+        settled = command
+        return {
+          delivery: { status: 'dead-lettered' },
+          attempt: { status: 'failed' },
+        }
+      },
+    },
+    secrets: { async open() { secretReads += 1; return Buffer.alloc(32) } },
+    transport: { async send() { transports += 1; throw new Error('not expected') } },
+    clock: () => new Date('2026-07-14T23:40:00.000Z'),
+  })
+  const result = await dispatch({
+    workspaceId: 'workspace-1',
+    deliveryId: '00000000-0000-4000-8000-000000000908',
+    leaseOwner: 'worker-1',
+    leaseToken: lease.token,
+    attemptNumber: 1,
+  })
+  assert.equal(result.status, 'dead-lettered')
+  assert.equal(settled.errorCode, 'target_inactive')
+  assert.equal(settled.nextAttemptAt, undefined)
+  assert.equal(secretReads, 0)
+  assert.equal(transports, 0)
 })
 
 test('webhook filters match event type and optional resource exactly', () => {
