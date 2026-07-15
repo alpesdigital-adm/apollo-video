@@ -646,11 +646,12 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       updatedAt: activeRotationEndpointRow.updatedAt.toISOString(),
       verifiedAt: activeRotationEndpointRow.verifiedAt.toISOString(),
     })
+    const rotationStagedAt = new Date(activeRotationEndpointRow.updatedAt.getTime() + 100)
     let rotationId = 701
     const stageRotation = stageWebhookSigningSecretRotationService({
       repository: new PrismaWebhookSigningSecretRotationRepository(client),
       secrets: createWebhookSigningSecretProtector(endpointCipher, () => Buffer.alloc(32, 41)),
-      clock: () => new Date(now.getTime() + 1_200),
+      clock: () => rotationStagedAt,
       createId: (kind) => kind === 'idempotency-record'
         ? `webhook-rotation-idempotency-${rotationId++}`
         : `00000000-0000-4000-8000-${String(rotationId++).padStart(12, '0')}`,
@@ -681,10 +682,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.equal(stagedRotationReplay.replayed, true)
     assert.equal(stagedRotationReplay.secretAvailable, false)
     assert.equal('secretBase64url' in stagedRotationReplay, false)
-    const rotationActivationAt = new Date(Math.max(
-      now.getTime() + 1_300,
-      activeRotationEndpointRow.updatedAt.getTime() + 100,
-    ))
+    const rotationActivationAt = new Date(rotationStagedAt.getTime() + 100)
     const activateRotation = activateWebhookSigningSecretRotationService({
       repository: new PrismaWebhookSigningSecretRotationRepository(client),
       clock: () => rotationActivationAt,
