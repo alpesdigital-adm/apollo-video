@@ -495,7 +495,7 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-045: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem fan-out, claim/lease, dispatch assinado, transporte DNS-pinado, heartbeat, discovery/sharding, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay individual ou por evento exato, ambos idempotentes. Coordenação de rebalanceamento e replay por intervalo continuam abertos.
+- [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044: API externa lista/lê diagnostics e executa replay controlado individual ou por evento exato; UI, endpoints/subscriptions e rotação de secret continuam abertos.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
@@ -3844,7 +3844,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-045 — Secret provider e entrypoint operacional de webhook
 
-**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+**Status:** publicado em 15 de julho de 2026 no commit `aa28d32`; hosted CI `29409758065` aprovado.
 
 Entregas:
 
@@ -3876,3 +3876,39 @@ Limites explícitos desta slice:
 - o catálogo protegido é apropriado para a primeira operação, mas deployments maiores deverão usar outro adapter da mesma porta;
 - rebalanceamento coordenado entre shards e replay por intervalo continuam abertos;
 - métricas, circuit breaker, rate limits e UI operacional permanecem futuras.
+
+### Slice F0-046 — Coordenação durável de shards do worker de webhook
+
+**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- pool configura somente a quantidade de shards; cada réplica recebe automaticamente o menor slot livre;
+- lease durável vincula pool, índice, contagem, owner e token hash sem persistir token bruto;
+- unicidade impede dois donos no mesmo shard e um worker ocupar dois slots no mesmo pool;
+- topologia divergente falha fechada enquanto houver leases ativas;
+- heartbeat cercado exige lease válida, identidade completa, token correto e relógio não regressivo;
+- lease expirada é removida no claim e o slot pode ser retomado por outra réplica;
+- release antigo ou com token incorreto é inofensivo;
+- perda do heartbeat aborta o discovery atribuído antes de disputar outro slot;
+- entrypoint não aceita mais `shardIndex` manual e libera o slot em shutdown gracioso;
+- migration adiciona constraints de coordenadas, identidade, token e datas;
+- ADR-035 formaliza alocação, failover, mudança de topologia e defesa em profundidade com a lease da delivery.
+
+Regressões e evidências locais:
+
+- suíte global passa com 100 testes; 32 são contratos de webhook;
+- contratos cobrem token fora da persistência, heartbeat/release cercados e execução apenas no shard adquirido;
+- integração Prisma cobre dois slots, terceiro worker em espera, topologia incompatível, token errado, expiração, takeover e release cercado;
+- schema/migration passam com 26 tabelas, 98 índices e 55 chaves estrangeiras;
+- worker passa por verificação sintática sem índice estático;
+- contratos públicos permanecem compatíveis com 31 capabilities, 37 schemas, 47 exemplos e 28 paths;
+- todas as integrações SQLite, build, FFmpeg, Remotion real, bundle e auditorias sem vulnerabilidades passam.
+
+Limites explícitos desta slice:
+
+- diagnóstico público redigido das leases ainda não existe;
+- métricas de ocupação, churn e tempo de takeover permanecem abertas;
+- mudança planejada de `shardCount` exige drenar/expirar o pool;
+- replay por intervalo continua reservado para preflight e operação durável;
+- administração de endpoint/subscription, rotação dinâmica e UI continuam abertas.

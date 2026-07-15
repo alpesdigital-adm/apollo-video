@@ -169,6 +169,10 @@ const requiredChecks = [
   'webhook_verification_challenges_dates_check',
   'webhook_verification_challenges_state_check',
   'webhook_replay_receipts_dates_check',
+  'webhook_worker_shard_leases_coordinates_check',
+  'webhook_worker_shard_leases_identity_check',
+  'webhook_worker_shard_leases_token_check',
+  'webhook_worker_shard_leases_dates_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

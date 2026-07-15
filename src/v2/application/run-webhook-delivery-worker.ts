@@ -314,3 +314,122 @@ export async function runDiscoveredWebhookDeliveryWorkerLoop(dependencies: {
     }
   }
 }
+
+export async function runCoordinatedWebhookDeliveryWorkerLoop(dependencies: {
+  claimShard: () => Promise<Readonly<{
+    shardIndex: number
+    shardCount: number
+  }> | null>
+  heartbeatShard: (lease: Readonly<{ shardIndex: number; shardCount: number }>) => Promise<boolean>
+  releaseShard: (lease: Readonly<{ shardIndex: number; shardCount: number }>) => Promise<boolean>
+  runAssignedShard: (assignment: Readonly<{
+    shardIndex: number
+    shardCount: number
+    signal: AbortSignal
+  }>) => Promise<void>
+  signal: AbortSignal
+  heartbeatIntervalMs?: number
+  retryIntervalMs?: number
+  onCoordinationError?: () => void
+  wait?: (delayMs: number, signal: AbortSignal) => Promise<void>
+}): Promise<void> {
+  const heartbeatIntervalMs = dependencies.heartbeatIntervalMs ?? 10_000
+  const retryIntervalMs = dependencies.retryIntervalMs ?? 1_000
+  assertDomain(
+    Number.isSafeInteger(heartbeatIntervalMs) &&
+      heartbeatIntervalMs >= 1_000 &&
+      heartbeatIntervalMs <= 60_000 &&
+      Number.isSafeInteger(retryIntervalMs) &&
+      retryIntervalMs >= 100 &&
+      retryIntervalMs <= 60_000,
+    'INVALID_WEBHOOK',
+    'Webhook shard coordination loop configuration is invalid',
+  )
+  const wait = dependencies.wait ?? waitForPoll
+
+  while (!dependencies.signal.aborted) {
+    let lease: Readonly<{ shardIndex: number; shardCount: number }> | null = null
+    try {
+      lease = await dependencies.claimShard()
+    } catch {
+      notifyCoordinationError()
+    }
+    if (!lease) {
+      if (!dependencies.signal.aborted) await wait(retryIntervalMs, dependencies.signal)
+      continue
+    }
+    assertDomain(
+      Number.isSafeInteger(lease.shardCount) &&
+        lease.shardCount >= 1 &&
+        lease.shardCount <= 1_024 &&
+        Number.isSafeInteger(lease.shardIndex) &&
+        lease.shardIndex >= 0 &&
+        lease.shardIndex < lease.shardCount,
+      'PERSISTENCE_CONFLICT',
+      'Webhook shard coordinator returned an invalid assignment',
+    )
+
+    const assigned = new AbortController()
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let renewal: Promise<boolean> | undefined
+    const abortAssigned = () => assigned.abort()
+    dependencies.signal.addEventListener('abort', abortAssigned, { once: true })
+    const heartbeat = async () => {
+      if (stopped || assigned.signal.aborted) return false
+      if (renewal) return renewal
+      renewal = (async () => {
+        try {
+          const renewed = await dependencies.heartbeatShard(lease!)
+          if (!renewed) assigned.abort()
+          return renewed
+        } catch {
+          notifyCoordinationError()
+          assigned.abort()
+          return false
+        } finally {
+          renewal = undefined
+        }
+      })()
+      return renewal
+    }
+    const scheduleHeartbeat = () => {
+      if (stopped || assigned.signal.aborted) return
+      timer = setTimeout(async () => {
+        await heartbeat()
+        scheduleHeartbeat()
+      }, heartbeatIntervalMs)
+      timer.unref?.()
+    }
+
+    try {
+      scheduleHeartbeat()
+      await dependencies.runAssignedShard({
+        shardIndex: lease.shardIndex,
+        shardCount: lease.shardCount,
+        signal: assigned.signal,
+      })
+    } catch {
+      notifyCoordinationError()
+    } finally {
+      stopped = true
+      if (timer) clearTimeout(timer)
+      if (renewal) await renewal
+      dependencies.signal.removeEventListener('abort', abortAssigned)
+      try {
+        await dependencies.releaseShard(lease)
+      } catch {
+        notifyCoordinationError()
+      }
+    }
+    if (!dependencies.signal.aborted) await wait(retryIntervalMs, dependencies.signal)
+  }
+
+  function notifyCoordinationError() {
+    try {
+      dependencies.onCoordinationError?.()
+    } catch {
+      // Observability callbacks cannot control shard ownership.
+    }
+  }
+}

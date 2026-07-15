@@ -33,6 +33,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { replayWebhookEventService } = await import(
     '../../src/v2/application/replay-webhook-event.ts'
   )
+  const { coordinateWebhookWorkerShardService } = await import(
+    '../../src/v2/application/coordinate-webhook-worker-shard.ts'
+  )
   const {
     issueWebhookChallengeService,
     verifyWebhookChallengeService,
@@ -62,6 +65,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   )
   const { PrismaWebhookEventReplayRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-event-replay-repository.ts'
+  )
+  const { PrismaWebhookWorkerShardRepository } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-worker-shard-repository.ts'
   )
   const { PrismaWebhookSecurityRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-security-repository.ts'
@@ -99,6 +105,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   ]
 
   const cleanup = async () => {
+    await client.v2WebhookWorkerShardLease.deleteMany({
+      where: { poolId: 'webhook-integration-pool' },
+    })
     await client.v2WebhookReplayReceipt.deleteMany({ where: { workspaceId } })
     await client.v2WebhookVerificationChallenge.deleteMany({ where: { workspaceId } })
     await client.v2WebhookDeliveryAttempt.deleteMany({ where: { workspaceId } })
@@ -133,6 +142,60 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       environment: 'sandbox',
       scopes: ['webhooks:admin'],
     })
+
+    let shardClock = new Date('2026-07-14T21:50:01.000Z')
+    let shardLeaseId = 620
+    const shardCoordinator = coordinateWebhookWorkerShardService({
+      repository: new PrismaWebhookWorkerShardRepository(client),
+      clock: () => shardClock,
+      createId: () =>
+        `00000000-0000-4000-8000-${String(shardLeaseId++).padStart(12, '0')}`,
+      leaseDurationMs: 30_000,
+    })
+    const firstShard = await shardCoordinator.claim({
+      poolId: 'webhook-integration-pool',
+      shardCount: 2,
+      leaseOwner: 'webhook-shard-worker-1',
+    })
+    const secondShard = await shardCoordinator.claim({
+      poolId: 'webhook-integration-pool',
+      shardCount: 2,
+      leaseOwner: 'webhook-shard-worker-2',
+    })
+    assert.deepEqual([firstShard.shardIndex, secondShard.shardIndex], [0, 1])
+    assert.equal(await shardCoordinator.claim({
+      poolId: 'webhook-integration-pool',
+      shardCount: 2,
+      leaseOwner: 'webhook-shard-worker-3',
+    }), null)
+    await assert.rejects(
+      () => shardCoordinator.claim({
+        poolId: 'webhook-integration-pool',
+        shardCount: 3,
+        leaseOwner: 'webhook-shard-worker-incompatible',
+      }),
+      (error) =>
+        error instanceof DomainError && error.code === 'WEBHOOK_SHARD_COORDINATION_REJECTED',
+    )
+    shardClock = new Date('2026-07-14T21:50:11.000Z')
+    assert.equal(await shardCoordinator.heartbeat(firstShard), true)
+    assert.equal(await shardCoordinator.heartbeat({
+      ...firstShard,
+      leaseToken: secondShard.leaseToken,
+    }), false)
+    shardClock = new Date('2026-07-14T21:50:32.000Z')
+    const reclaimedShard = await shardCoordinator.claim({
+      poolId: 'webhook-integration-pool',
+      shardCount: 2,
+      leaseOwner: 'webhook-shard-worker-3',
+    })
+    assert.equal(reclaimedShard.shardIndex, 1)
+    assert.equal(await shardCoordinator.release(secondShard), false)
+    assert.equal(await shardCoordinator.release(firstShard), true)
+    assert.equal(await shardCoordinator.release(reclaimedShard), true)
+    assert.equal(await client.v2WebhookWorkerShardLease.count({
+      where: { poolId: 'webhook-integration-pool' },
+    }), 0)
 
     let registrationIndex = 0
     const register = registerWebhookService({

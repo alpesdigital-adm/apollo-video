@@ -173,9 +173,12 @@ Postgres no ambiente de produção e um catálogo protegido em
 O catálogo deve ser injetado pelo secret manager da plataforma e nunca
 versionado. O adapter exige correspondência exata de workspace, endpoint,
 referência e versão, enquanto o dispatcher ainda confere o fingerprint antes de
-assinar. Sharding e ritmo usam `APOLLO_V2_WEBHOOK_SHARD_COUNT`,
-`APOLLO_V2_WEBHOOK_SHARD_INDEX`, `APOLLO_V2_WEBHOOK_SCAN_LIMIT` e
-`APOLLO_V2_WEBHOOK_POLL_MS`.
+assinar. Réplicas do mesmo `APOLLO_V2_WEBHOOK_POOL_ID` disputam leases duráveis
+e recebem automaticamente um dos slots definidos por
+`APOLLO_V2_WEBHOOK_SHARD_COUNT`; não existe mais índice manual. Ritmo, lease e
+failover usam `APOLLO_V2_WEBHOOK_SCAN_LIMIT`, `APOLLO_V2_WEBHOOK_POLL_MS`,
+`APOLLO_V2_WEBHOOK_SHARD_LEASE_MS`, `APOLLO_V2_WEBHOOK_SHARD_HEARTBEAT_MS` e
+`APOLLO_V2_WEBHOOK_SHARD_RETRY_MS`.
 
 ## Formatos
 

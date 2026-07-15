@@ -681,3 +681,21 @@ model V2WebhookReplayReceipt {
   @@index([workspaceId, expiresAt])
   @@map("webhook_replay_receipts")
 }
+
+model V2WebhookWorkerShardLease {
+  id               String   @id @db.Uuid
+  poolId           String   @db.VarChar(128)
+  shardIndex       Int
+  shardCount       Int
+  leaseOwner       String   @db.VarChar(128)
+  leaseTokenHash   String   @db.Char(64)
+  heartbeatAt      DateTime @db.Timestamptz(3)
+  leaseExpiresAt   DateTime @db.Timestamptz(3)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
+
+  @@unique([poolId, shardIndex])
+  @@unique([poolId, leaseOwner])
+  @@index([poolId, leaseExpiresAt, shardIndex])
+  @@map("webhook_worker_shard_leases")
+}

@@ -16,10 +16,12 @@ import {
   dispatchWebhookDeliveryService,
 } from '../../src/v2/application/dispatch-webhook-delivery.ts'
 import {
+  runCoordinatedWebhookDeliveryWorkerLoop,
   runNextWebhookDeliveryService,
   runDiscoveredWebhookDeliveryWorkerLoop,
   runWebhookDeliveryWorkerLoop,
 } from '../../src/v2/application/run-webhook-delivery-worker.ts'
+import { coordinateWebhookWorkerShardService } from '../../src/v2/application/coordinate-webhook-worker-shard.ts'
 import {
   discoverRunnableWebhookWorkspacesService,
   webhookWorkspaceShard,
@@ -805,6 +807,86 @@ test('discovered worker traverses every page and stops after current workspace',
   })
   assert.equal(repeatedCursorRequests, 2)
   assert.equal(discoveryErrors, 1)
+})
+
+test('worker shard coordinator keeps the raw lease token outside persistence fences', async () => {
+  let now = new Date('2026-07-15T10:40:00.000Z')
+  let claimCommand
+  let heartbeatCommand
+  let releaseCommand
+  const issued = issueWebhookDeliveryLeaseToken(() => Buffer.alloc(32, 31))
+  const coordinator = coordinateWebhookWorkerShardService({
+    repository: {
+      async claim(command) {
+        claimCommand = command
+        return {
+          id: command.id,
+          poolId: command.poolId,
+          shardIndex: 1,
+          shardCount: command.shardCount,
+          leaseOwner: command.leaseOwner,
+          leaseTokenHash: command.leaseTokenHash,
+          heartbeatAt: command.now,
+          leaseExpiresAt: command.leaseUntil,
+          createdAt: command.now,
+        }
+      },
+      async heartbeat(command) {
+        heartbeatCommand = command
+        return true
+      },
+      async release(command) {
+        releaseCommand = command
+        return true
+      },
+    },
+    clock: () => now,
+    createId: () => '00000000-0000-4000-8000-000000000918',
+    issueLease: () => issued,
+    leaseDurationMs: 30_000,
+  })
+  const lease = await coordinator.claim({
+    poolId: 'webhook-delivery',
+    shardCount: 2,
+    leaseOwner: 'webhook-worker-1',
+  })
+  assert.equal(lease.shardIndex, 1)
+  assert.equal(lease.leaseToken, issued.token)
+  assert.equal('leaseToken' in claimCommand, false)
+  assert.equal(claimCommand.leaseTokenHash, issued.tokenHash)
+  now = new Date('2026-07-15T10:40:10.000Z')
+  assert.equal(await coordinator.heartbeat(lease), true)
+  assert.equal(heartbeatCommand.leaseTokenHash, issued.tokenHash)
+  assert.equal(await coordinator.release(lease), true)
+  assert.equal(releaseCommand.leaseTokenHash, issued.tokenHash)
+  assert.equal(JSON.stringify({ claimCommand, heartbeatCommand, releaseCommand }).includes(issued.token), false)
+})
+
+test('coordinated worker runs only its leased shard and releases it on shutdown', async () => {
+  const controller = new AbortController()
+  const events = []
+  const lease = { shardIndex: 1, shardCount: 3 }
+  await runCoordinatedWebhookDeliveryWorkerLoop({
+    signal: controller.signal,
+    claimShard: async () => {
+      events.push('claim')
+      return lease
+    },
+    heartbeatShard: async () => {
+      events.push('heartbeat')
+      return true
+    },
+    releaseShard: async (released) => {
+      events.push(`release:${released.shardIndex}/${released.shardCount}`)
+      return true
+    },
+    runAssignedShard: async (assignment) => {
+      events.push(`run:${assignment.shardIndex}/${assignment.shardCount}`)
+      controller.abort()
+      assert.equal(assignment.signal.aborted, true)
+    },
+  })
+  assert.deepEqual(events, ['claim', 'run:1/3', 'release:1/3'])
 })
 
 test('webhook delivery diagnostics paginate with filters bound into the cursor', async () => {

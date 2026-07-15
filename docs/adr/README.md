@@ -36,3 +36,4 @@ Estados usados:
 - [ADR-032 — Replay controlado e idempotente de webhook delivery](./ADR-032-controlled-webhook-delivery-replay.md)
 - [ADR-033 — Replay controlado de deliveries por evento exato](./ADR-033-controlled-webhook-event-replay.md)
 - [ADR-034 — Secret provider configurado e entrypoint do worker de webhook](./ADR-034-webhook-secret-provider-and-worker-entrypoint.md)
+- [ADR-035 — Coordenação durável de shards do worker de webhook](./ADR-035-durable-webhook-worker-shard-coordination.md)

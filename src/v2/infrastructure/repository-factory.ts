@@ -14,6 +14,7 @@ import { runNextWebhookDeliveryService } from '../application/run-webhook-delive
 import { discoverRunnableWebhookWorkspacesService } from '../application/discover-webhook-workspaces.ts'
 import { replayWebhookDeliveryService } from '../application/replay-webhook-delivery.ts'
 import { replayWebhookEventService } from '../application/replay-webhook-event.ts'
+import { coordinateWebhookWorkerShardService } from '../application/coordinate-webhook-worker-shard.ts'
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
 import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
@@ -49,6 +50,7 @@ import type {
 import type {
   WebhookEventReplayRepository,
 } from '../application/ports/webhook-event-replay-repository.ts'
+import type { WebhookWorkerShardRepository } from '../application/ports/webhook-worker-shard-repository.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
@@ -72,6 +74,7 @@ import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registrati
 import { PrismaWebhookFanoutRepository } from './prisma/webhook-fanout-repository.ts'
 import { PrismaWebhookDeliveryRepository } from './prisma/webhook-delivery-repository.ts'
 import { PrismaWebhookEventReplayRepository } from './prisma/webhook-event-replay-repository.ts'
+import { PrismaWebhookWorkerShardRepository } from './prisma/webhook-worker-shard-repository.ts'
 import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
 import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-transport.ts'
 import { SafeWebhookDeliveryTransport } from './webhook/safe-webhook-delivery-transport.ts'
@@ -202,6 +205,24 @@ export function createConfiguredWebhookSigningSecretProvider(
   environment: NodeJS.ProcessEnv = process.env,
 ): WebhookSigningSecretProvider {
   return createEnvironmentWebhookSigningSecretProvider(environment)
+}
+
+export function createWebhookWorkerShardRepository(): WebhookWorkerShardRepository {
+  return new PrismaWebhookWorkerShardRepository(resolveV2Client())
+}
+
+export function createWebhookWorkerShardCoordinator(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const configuredLease = Number(environment.APOLLO_V2_WEBHOOK_SHARD_LEASE_MS)
+  return coordinateWebhookWorkerShardService({
+    repository: createWebhookWorkerShardRepository(),
+    clock,
+    ...(Number.isSafeInteger(configuredLease) && configuredLease > 0
+      ? { leaseDurationMs: configuredLease }
+      : {}),
+  })
 }
 
 export function createWebhookDeliveryWorker(
