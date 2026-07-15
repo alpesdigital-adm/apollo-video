@@ -6,10 +6,11 @@ import {
   verifyWebhookSignature,
   type SignedWebhookHeaders,
 } from '../domain/webhook-security.ts'
-import { assertDomain } from '../domain/errors.ts'
+import { DomainError, assertDomain } from '../domain/errors.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
+  WebhookEndpointActivationStateRepository,
   WebhookReplayReceiptRepository,
 } from './ports/webhook-security-repository.ts'
 import type { WebhookChallengeTransport } from './ports/webhook-challenge-transport.ts'
@@ -113,6 +114,74 @@ export function activateWebhookEndpointService(dependencies: {
       challengeId: issued.challenge.id,
       echoedToken: response.echoedToken,
     })
+  }
+}
+
+export function activateWebhookEndpointConvergentlyService(dependencies: {
+  repository: WebhookChallengeRepository & WebhookEndpointActivationStateRepository
+  transport: WebhookChallengeTransport
+  clock: () => Date
+  createId: () => string
+  issueToken?: () => Readonly<{ token: string; tokenHash: string }>
+}) {
+  const issue = issueWebhookChallengeService(dependencies)
+  const verify = verifyWebhookChallengeService(dependencies)
+
+  return async function execute(request: {
+    workspaceId: string
+    endpointId: string
+    ttlSeconds?: number
+    maxAttempts?: number
+  }) {
+    const activate = async () => {
+      const state = await dependencies.repository.getActivationState(
+        request.workspaceId,
+        request.endpointId,
+      )
+      if (state.status === 'active') {
+        return Object.freeze({ activatedSubscriptions: 0, replayed: true })
+      }
+      assertDomain(
+        state.status === 'pending',
+        'WEBHOOK_CHALLENGE_REJECTED',
+        'Webhook endpoint cannot be activated from its current state',
+      )
+      const issued = await issue(request)
+      const response = await dependencies.transport.send({
+        url: state.url,
+        challengeId: issued.challenge.id,
+        token: issued.token,
+        expiresAt: issued.challenge.expiresAt,
+      })
+      const verified = await verify({
+        workspaceId: request.workspaceId,
+        endpointId: request.endpointId,
+        challengeId: issued.challenge.id,
+        echoedToken: response.echoedToken,
+      })
+      return Object.freeze({
+        activatedSubscriptions: verified.activatedSubscriptions,
+        replayed: false,
+      })
+    }
+
+    try {
+      return await activate()
+    } catch (error) {
+      if (
+        error instanceof DomainError &&
+        ['WEBHOOK_CHALLENGE_NOT_FOUND', 'WEBHOOK_CHALLENGE_REJECTED'].includes(error.code)
+      ) {
+        const current = await dependencies.repository.getActivationState(
+          request.workspaceId,
+          request.endpointId,
+        )
+        if (current.status === 'active') {
+          return Object.freeze({ activatedSubscriptions: 0, replayed: true })
+        }
+      }
+      throw error
+    }
   }
 }
 

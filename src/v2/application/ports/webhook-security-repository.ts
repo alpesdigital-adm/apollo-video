@@ -37,3 +37,15 @@ export interface WebhookChallengeTargetRepository {
     endpointId: string,
   ): Promise<Readonly<WebhookChallengeTarget>>
 }
+
+export type WebhookEndpointActivationState =
+  | Readonly<{ status: 'pending'; workspaceId: string; endpointId: string; url: string }>
+  | Readonly<{ status: 'active'; workspaceId: string; endpointId: string }>
+  | Readonly<{ status: 'blocked'; workspaceId: string; endpointId: string }>
+
+export interface WebhookEndpointActivationStateRepository {
+  getActivationState(
+    workspaceId: string,
+    endpointId: string,
+  ): Promise<Readonly<WebhookEndpointActivationState>>
+}

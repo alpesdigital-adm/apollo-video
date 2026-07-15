@@ -1529,6 +1529,23 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('webhook-endpoint-challenge-result', 1, 'Webhook endpoint challenge result',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['endpoint', 'effects', 'replayed'],
+      properties: {
+        endpoint: webhookEndpointSummarySchema,
+        effects: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['activatedSubscriptions'],
+          properties: { activatedSubscriptions: { type: 'integer', minimum: 0 } },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('webhook-subscription-list', 1, 'Webhook subscription list response',
     successSchema({ type: 'object', additionalProperties: false, required: ['subscriptions'], properties: {
       subscriptions: { type: 'array', maxItems: 100, items: webhookSubscriptionSchema },

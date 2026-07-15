@@ -7,6 +7,7 @@ import type {
   VerifyWebhookChallengeCommand,
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
+  WebhookEndpointActivationStateRepository,
   WebhookReplayReceiptRepository,
 } from '../../application/ports/webhook-security-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -47,11 +48,42 @@ export class PrismaWebhookSecurityRepository
   implements
     WebhookChallengeRepository,
     WebhookChallengeTargetRepository,
+    WebhookEndpointActivationStateRepository,
     WebhookReplayReceiptRepository {
   private readonly client: PrismaClient
 
   constructor(client: PrismaClient = prisma) {
     this.client = client
+  }
+
+  async getActivationState(workspaceId: string, endpointId: string) {
+    const endpoint = await this.client.v2WebhookEndpoint.findFirst({
+      where: { id: endpointId, workspaceId },
+      select: { id: true, workspaceId: true, url: true, status: true },
+    })
+    if (!endpoint) {
+      throw new DomainError('WEBHOOK_CHALLENGE_NOT_FOUND', 'Webhook endpoint was not found')
+    }
+    if (endpoint.status === 'pending-verification') {
+      return Object.freeze({
+        status: 'pending' as const,
+        workspaceId: endpoint.workspaceId,
+        endpointId: endpoint.id,
+        url: endpoint.url,
+      })
+    }
+    if (endpoint.status === 'active') {
+      return Object.freeze({
+        status: 'active' as const,
+        workspaceId: endpoint.workspaceId,
+        endpointId: endpoint.id,
+      })
+    }
+    return Object.freeze({
+      status: 'blocked' as const,
+      workspaceId: endpoint.workspaceId,
+      endpointId: endpoint.id,
+    })
   }
 
   async getPendingTarget(workspaceId: string, endpointId: string) {

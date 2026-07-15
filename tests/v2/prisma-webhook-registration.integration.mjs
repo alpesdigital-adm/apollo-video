@@ -43,6 +43,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     '../../src/v2/application/coordinate-webhook-worker-shard.ts'
   )
   const {
+    activateWebhookEndpointConvergentlyService,
     issueWebhookChallengeService,
     verifyWebhookChallengeService,
     verifyWebhookRequestService,
@@ -382,6 +383,15 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
 
     const security = new PrismaWebhookSecurityRepository(client)
     assert.deepEqual(
+      await security.getActivationState(workspaceId, endpoint.id),
+      {
+        status: 'pending',
+        workspaceId,
+        endpointId: endpoint.id,
+        url: 'https://hooks.example.com/apollo',
+      },
+    )
+    assert.deepEqual(
       await security.getPendingTarget(workspaceId, endpoint.id),
       {
         workspaceId,
@@ -391,6 +401,10 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     )
     await assert.rejects(
       () => security.getPendingTarget('another-workspace', endpoint.id),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_NOT_FOUND',
+    )
+    await assert.rejects(
+      () => security.getActivationState('another-workspace', endpoint.id),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_NOT_FOUND',
     )
     const wrongToken = issueWebhookChallengeToken(() => Buffer.alloc(32, 6)).token
@@ -499,6 +513,16 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       (await client.v2WebhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } })).status,
       'active',
     )
+    const convergentActivation = activateWebhookEndpointConvergentlyService({
+      repository: security,
+      transport: { async send() { throw new Error('active replay must not use network') } },
+      clock: () => new Date(now.getTime() + 1_100),
+      createId: () => '00000000-0000-4000-8000-000000000299',
+    })
+    assert.deepEqual(
+      await convergentActivation({ workspaceId, endpointId: endpoint.id }),
+      { activatedSubscriptions: 0, replayed: true },
+    )
     await assert.rejects(
       () => security.getPendingTarget(workspaceId, endpoint.id),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_NOT_FOUND',
@@ -527,6 +551,10 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         updatedAt: activeEndpointState.updatedAt,
       },
     })
+    assert.equal(
+      (await security.getActivationState(workspaceId, endpoint.id)).status,
+      'blocked',
+    )
     await assert.rejects(
       () => createSubscription({
         ...creationRequest,

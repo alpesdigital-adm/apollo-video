@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 
 import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
 
-import { activateWebhookEndpointService } from '../application/secure-webhook.ts'
+import { activateWebhookEndpointConvergentlyService } from '../application/secure-webhook.ts'
 import { materializeNextWebhookEventService } from '../application/materialize-webhook-deliveries.ts'
 import {
   claimNextWebhookDeliveryService,
@@ -59,6 +59,7 @@ import type { WebhookEndpointCreationRepository } from '../application/ports/web
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
+  WebhookEndpointActivationStateRepository,
   WebhookReplayReceiptRepository,
 } from '../application/ports/webhook-security-repository.ts'
 import { DomainError } from '../domain/errors.ts'
@@ -354,6 +355,7 @@ export function createWebhookFanoutMaterializer(
 
 export function createWebhookSecurityRepository(): WebhookChallengeRepository &
   WebhookChallengeTargetRepository &
+  WebhookEndpointActivationStateRepository &
   WebhookReplayReceiptRepository {
   return new PrismaWebhookSecurityRepository(resolveV2Client())
 }
@@ -368,7 +370,7 @@ export function createWebhookEndpointActivator(
       ? { timeoutMs: configuredTimeout }
       : {}),
   })
-  return activateWebhookEndpointService({
+  return activateWebhookEndpointConvergentlyService({
     repository: createWebhookSecurityRepository(),
     transport,
     clock,

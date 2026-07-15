@@ -5,7 +5,10 @@ import test from 'node:test'
 import { registerWebhookService } from '../../src/v2/application/register-webhook.ts'
 import { createWebhookEndpointService } from '../../src/v2/application/create-webhook-endpoint.ts'
 import { createWebhookSubscriptionService } from '../../src/v2/application/create-webhook-subscription.ts'
-import { activateWebhookEndpointService } from '../../src/v2/application/secure-webhook.ts'
+import {
+  activateWebhookEndpointConvergentlyService,
+  activateWebhookEndpointService,
+} from '../../src/v2/application/secure-webhook.ts'
 import { materializeNextWebhookEventService } from '../../src/v2/application/materialize-webhook-deliveries.ts'
 import {
   claimNextWebhookDeliveryService,
@@ -1851,4 +1854,68 @@ test('endpoint activation keeps the one-shot token inside the challenge workflow
   assert.equal(JSON.stringify(storedChallenge).includes(issued.token), false)
   assert.equal(JSON.stringify(result).includes(issued.token), false)
   assert.equal(result.activatedSubscriptions, 2)
+})
+
+test('public endpoint challenge activates once and converges after a lost response', async () => {
+  let state = 'pending'
+  let issues = 0
+  let transports = 0
+  const issued = issueWebhookChallengeToken(() => Buffer.alloc(32, 21))
+  const repository = {
+    async getActivationState(workspaceId, endpointId) {
+      return state === 'active'
+        ? { status: 'active', workspaceId, endpointId }
+        : { status: 'pending', workspaceId, endpointId, url: 'https://hooks.example.com/apollo' }
+    },
+    async issue(challenge) { issues += 1; return challenge },
+    async verify(command) {
+      assert.equal(command.responseHash, issued.tokenHash)
+      state = 'active'
+      return { challenge: {}, activatedSubscriptions: 3 }
+    },
+  }
+  const activate = activateWebhookEndpointConvergentlyService({
+    repository,
+    transport: {
+      async send(request) {
+        transports += 1
+        return { echoedToken: request.token }
+      },
+    },
+    clock: () => new Date('2026-07-15T21:00:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000126',
+    issueToken: () => issued,
+  })
+  const request = {
+    workspaceId: 'workspace-1',
+    endpointId: '00000000-0000-4000-8000-000000000127',
+  }
+  assert.deepEqual(await activate(request), { activatedSubscriptions: 3, replayed: false })
+  assert.deepEqual(await activate(request), { activatedSubscriptions: 0, replayed: true })
+  assert.equal(issues, 1)
+  assert.equal(transports, 1)
+})
+
+test('public endpoint challenge cannot bypass suspended or revoked lifecycle', async () => {
+  let effects = 0
+  const activate = activateWebhookEndpointConvergentlyService({
+    repository: {
+      async getActivationState(workspaceId, endpointId) {
+        return { status: 'blocked', workspaceId, endpointId }
+      },
+      async issue() { effects += 1 },
+      async verify() { effects += 1 },
+    },
+    transport: { async send() { effects += 1 } },
+    clock: () => new Date('2026-07-15T21:00:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000128',
+  })
+  await assert.rejects(
+    () => activate({
+      workspaceId: 'workspace-1',
+      endpointId: '00000000-0000-4000-8000-000000000129',
+    }),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_REJECTED',
+  )
+  assert.equal(effects, 0)
 })

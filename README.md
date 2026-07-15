@@ -172,6 +172,20 @@ secret internamente, persiste apenas seu envelope AES-256-GCM autenticado e
 devolve metadados redigidos. O endpoint nasce pendente; sua ativação depende do
 challenge explícito, que não é disparado silenciosamente durante o cadastro.
 
+A ativação é solicitada por
+`POST /v1/webhooks/endpoints/{endpointId}/challenge`, sem body. O Apollo faz um
+POST HTTPS para a URL cadastrada com JSON canônico no formato
+`{"type":"apollo.webhook.challenge","challengeId":"...","token":"...","expiresAt":"..."}`.
+O receptor deve responder em até o timeout configurado, com status 200,
+`Content-Type: application/json` e exatamente
+`{"challengeId":"...","token":"..."}`, repetindo os dois valores recebidos e
+sem campos extras. O hostname precisa resolver somente para endereços públicos,
+ter certificado TLS válido e permanecer estável durante a conexão; IP privado,
+loopback, redirect, resposta grande ou ambígua são rejeitados. Após a prova, o
+endpoint e suas subscriptions pendentes ficam ativos atomicamente. Repetir o
+command depois da ativação retorna sucesso com `replayed: true` sem nova chamada
+externa; endpoints suspensos ou revogados não podem ser ativados.
+
 O status de uma subscription pode ser alterado por
 `PUT /v1/webhooks/subscriptions/{subscriptionId}/status`. A resposta de consulta
 fornece uma revisão opaca que deve ser enviada como `baseRevision`: alterações

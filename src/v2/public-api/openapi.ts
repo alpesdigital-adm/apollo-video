@@ -82,7 +82,7 @@ function responsesFor(capability: PublicCapability) {
       },
     },
   }
-  for (const status of [401, 403, 404, 409, 422, 500]) {
+  for (const status of [401, 403, 404, 409, 422, 500, 502]) {
     responses[String(status)] = errorResponse
   }
   return responses

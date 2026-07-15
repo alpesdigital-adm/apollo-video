@@ -614,6 +614,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       '#/components/schemas/SetWebhookEndpointStatusRequestV1',
     )
     assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/challenge'].post[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.endpoints.challenge',
+    )
+    assert.equal(
+      'requestBody' in openApi.paths['/v1/webhooks/endpoints/{endpointId}/challenge'].post,
+      false,
+    )
+    assert.equal(
       openApi.paths['/v1/webhooks/subscriptions'].get['x-apollo-capability-id'],
       'apollo.webhooks.subscriptions.list',
     )
@@ -788,6 +798,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.webhooks.endpoints.list',
         'apollo.webhooks.endpoints.read',
         'apollo.webhooks.endpoints.status.set',
+        'apollo.webhooks.endpoints.challenge',
         'apollo.webhooks.subscriptions.create',
         'apollo.webhooks.subscriptions.list',
         'apollo.webhooks.subscriptions.read',
@@ -838,6 +849,33 @@ test('authenticated public API manages projects, clients and artifact inspection
       [1],
     )
     assert.equal(JSON.stringify(webhookEndpointRead).includes('vault://'), false)
+
+    const webhookChallengeUrl =
+      `${baseUrl}/v1/webhooks/endpoints/${webhookEndpointId}/challenge`
+    const webhookChallengeResponse = await fetch(webhookChallengeUrl, {
+      method: 'POST',
+      headers: { authorization },
+    })
+    const webhookChallenge = await webhookChallengeResponse.json()
+    assert.equal(webhookChallengeResponse.status, 200)
+    assert.equal(webhookChallenge.data.endpoint.id, webhookEndpointId)
+    assert.equal(webhookChallenge.data.endpoint.status, 'active')
+    assert.equal(webhookChallenge.data.effects.activatedSubscriptions, 0)
+    assert.equal(webhookChallenge.data.replayed, true)
+    assert.equal(JSON.stringify(webhookChallenge).includes('keyRef'), false)
+    assert.equal(JSON.stringify(webhookChallenge).includes('/public-api'), false)
+
+    const webhookChallengeBodyResponse = await fetch(webhookChallengeUrl, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: '{}',
+    })
+    assert.equal(webhookChallengeBodyResponse.status, 422)
+    const missingWebhookChallengeResponse = await fetch(
+      `${baseUrl}/v1/webhooks/endpoints/00000000-0000-4000-8000-000000000999/challenge`,
+      { method: 'POST', headers: { authorization } },
+    )
+    assert.equal(missingWebhookChallengeResponse.status, 404)
 
     const createWebhookEndpointRequest = (idempotencyKey, body) => fetch(
       `${baseUrl}/v1/webhooks/endpoints`,
@@ -1372,6 +1410,11 @@ test('authenticated public API manages projects, clients and artifact inspection
       body: JSON.stringify({ url: 'https://child-hooks.example.com/apollo' }),
     })
     assert.equal(childWebhookEndpointCreateResponse.status, 403)
+    const childWebhookChallengeResponse = await fetch(webhookChallengeUrl, {
+      method: 'POST',
+      headers: { authorization: childAuthorization },
+    })
+    assert.equal(childWebhookChallengeResponse.status, 403)
     const childWebhookEndpointStatusResponse = await fetch(
       webhookEndpointStatusUrl,
       {

@@ -757,6 +757,18 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'natural', requestBodyRequired: true,
   },
   {
+    id: 'apollo.webhooks.endpoints.challenge', version: '1.0.0',
+    title: 'Challenge webhook endpoint',
+    description: 'Performs a DNS-pinned HTTPS proof challenge and convergently activates a pending endpoint and its pending subscriptions.',
+    exposure: 'workspace-admin', operationKind: 'command', authMode: 'required',
+    requiredScopes: ['webhooks:admin'],
+    outputSchemaRef: 'apollo://schemas/webhook-endpoint-challenge-result/v1',
+    endpoint: { method: 'POST', path: '/v1/webhooks/endpoints/{endpointId}/challenge' },
+    toolName: 'apollo.webhooks.endpoints.challenge', supportsDryRun: false,
+    costClass: 'low', confirmation: 'human-approval', successStatuses: [200],
+    idempotency: 'natural',
+  },
+  {
     id: 'apollo.webhooks.subscriptions.create', version: '1.0.0',
     title: 'Create webhook subscription',
     description: 'Creates one exact event/resource subscription for an existing workspace endpoint with durable idempotency.',

@@ -708,6 +708,24 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/webhook-endpoint-challenge-result/v1': [
+      {
+        data: {
+          endpoint: webhookEndpointExample,
+          effects: { activatedSubscriptions: 1 },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          endpoint: webhookEndpointExample,
+          effects: { activatedSubscriptions: 0 },
+          replayed: true,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-subscription-list/v1': [
       { data: { subscriptions: [] }, meta: { apiVersion: 'v1' } },
       { data: { subscriptions: [webhookSubscriptionExample] }, meta: { apiVersion: 'v1' } },

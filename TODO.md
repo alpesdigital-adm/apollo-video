@@ -496,7 +496,7 @@
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051: API externa cria/lista/lê endpoints e subscriptions, consulta deliveries, executa replay e altera lifecycle; UI, challenge e rotação de secret continuam abertas.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052: API externa cria/lista/lê endpoints e subscriptions, consulta deliveries, executa challenge/ativação, replay e lifecycle; UI e rotação de secret continuam abertas.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051: capabilities entregam cadastro idempotente de endpoint/subscription, consultas, lifecycle com cascatas e replay workspace-scoped; challenge, rotação e UI continuam abertas.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052: capabilities entregam cadastro idempotente, consultas, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; rotação e UI continuam abertas.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -4060,7 +4060,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-051 — Cadastro externo de endpoint e cofre dinâmico
 
-**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+**Status:** publicado no `main` em 15 de julho de 2026 (`a4e2e3e`); hosted CI `29447853173` aprovada.
 
 Entregas:
 
@@ -4090,3 +4090,38 @@ Limites explícitos desta slice:
 - challenge/ativação pública do endpoint continua aberto e será a próxima fatia;
 - alteração de URL e rotação de signing secret permanecem commands separados futuros;
 - UI administrativa, audit query, métricas e alertas continuam futuros.
+
+### Slice F0-052 — Challenge público e ativação convergente de endpoint
+
+**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability `apollo.webhooks.endpoints.challenge` expõe `POST /v1/webhooks/endpoints/{endpointId}/challenge` sob `webhooks:admin`;
+- command não recebe body nem `Idempotency-Key`: a idempotência é natural pelo estado durável do endpoint;
+- endpoint pendente recebe challenge one-shot via transporte HTTPS com DNS pinado, TLS validado, deadline absoluto e bloqueio de rede privada/rebinding;
+- prova exige status 200, JSON canônico, `challengeId` exato e eco exato do token, sem redirects ou campos adicionais;
+- verificação ativa endpoint e subscriptions pendentes atomicamente e nunca devolve token, challenge ou URL completa;
+- repetição após sucesso retorna 200 com `replayed: true`, zero novas ativações e nenhuma chamada de rede;
+- corrida que concluiu a ativação mas perdeu a resposta converge para o mesmo sucesso ao reler o estado;
+- endpoints suspensos ou revogados falham com conflito e não emitem challenge;
+- erros distinguem ausência 404, lifecycle/prova rejeitada 409 e falha do transporte externo 502;
+- ADR-041 formaliza protocolo do receptor, segurança de rede, convergência e concorrência.
+
+Regressões e evidências locais:
+
+- suíte global passa com 112 testes; 44 são contratos de webhook;
+- contratos cobrem primeira ativação, replay sem rede e bloqueio dos estados suspenso/revogado;
+- integração Prisma comprova replay do endpoint já ativo sem transporte externo;
+- jornada HTTP cobre discovery/OpenAPI, sucesso redigido, replay natural, body rejeitado, 404 e 403 sem scope;
+- contratos públicos passam com 40 capabilities, 49 schemas, 67 exemplos e 35 paths;
+- build registra `POST /v1/webhooks/endpoints/{endpointId}/challenge`;
+- schema/migration permanecem com 27 tabelas, 102 índices e 57 chaves estrangeiras.
+- integrações SQLite, FFmpeg, render Remotion real, bundle e auditorias sem vulnerabilidades passam.
+
+Limites explícitos desta slice:
+
+- chamadas simultâneas enquanto o endpoint ainda está pendente podem superseder o challenge anterior; após uma delas ativar, retry das demais converge sem rede;
+- o challenge é síncrono e limitado pelo deadline; operação assíncrona será necessária apenas se providers futuros excederem essa janela;
+- alteração de URL e rotação de signing secret permanecem commands separados futuros;
+- UI administrativa, audit query, métricas, circuit breaker e alertas continuam futuros.

@@ -40,3 +40,6 @@ Estados usados:
 - [ADR-036 — Administração pública e redigida de endpoints e subscriptions de webhook](./ADR-036-public-webhook-endpoint-and-subscription-administration.md)
 - [ADR-037 — Lifecycle e concorrência de subscriptions de webhook](./ADR-037-webhook-subscription-lifecycle-and-concurrency.md)
 - [ADR-038 — Lifecycle e cascatas de endpoints de webhook](./ADR-038-webhook-endpoint-lifecycle-cascades.md)
+- [ADR-039 — Criação idempotente de subscriptions de webhook](./ADR-039-idempotent-webhook-subscription-creation.md)
+- [ADR-040 — Cadastro de endpoint com secret dinâmico cifrado](./ADR-040-encrypted-dynamic-webhook-endpoint-registration.md)
+- [ADR-041 — Challenge público e ativação convergente de webhook](./ADR-041-public-webhook-challenge-and-convergent-activation.md)

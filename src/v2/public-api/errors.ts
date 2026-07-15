@@ -15,6 +15,9 @@ const STATUS_BY_CODE: Partial<Record<DomainErrorCode, number>> = {
   MATERIALIZATION_AUTHORIZATION_NOT_FOUND: 404,
   PUBLIC_OPERATION_NOT_FOUND: 404,
   WEBHOOK_DELIVERY_NOT_FOUND: 404,
+  WEBHOOK_CHALLENGE_NOT_FOUND: 404,
+  WEBHOOK_CHALLENGE_REJECTED: 409,
+  WEBHOOK_CHALLENGE_TRANSPORT_FAILED: 502,
   WEBHOOK_ENDPOINT_NOT_FOUND: 404,
   WEBHOOK_ENDPOINT_ALREADY_EXISTS: 409,
   WEBHOOK_ENDPOINT_TRANSITION_REJECTED: 409,
@@ -73,8 +76,10 @@ export function respondPublicError(error: unknown, requestId: string) {
               ? 'auth'
               : status === 409
                 ? 'conflict'
-                : 'validation',
-          retryable: false,
+                : status >= 500
+                  ? 'internal'
+                  : 'validation',
+          retryable: error.code === 'WEBHOOK_CHALLENGE_TRANSPORT_FAILED',
           requestId,
           details,
         },
