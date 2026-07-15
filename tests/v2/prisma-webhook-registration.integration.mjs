@@ -69,6 +69,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { PrismaWebhookWorkerShardRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-worker-shard-repository.ts'
   )
+  const { PrismaWebhookAdministrationQueryRepository } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-administration-query-repository.ts'
+  )
   const { PrismaWebhookSecurityRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-security-repository.ts'
   )
@@ -365,6 +368,27 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         where: { id: subscription.id },
       })).status,
       'active',
+    )
+    const administration = new PrismaWebhookAdministrationQueryRepository(client)
+    const endpointPage = await administration.listEndpoints({
+      workspaceId, status: 'active', limit: 2,
+    })
+    assert.equal(endpointPage.length, 1)
+    assert.equal(endpointPage[0].endpoint.id, endpoint.id)
+    assert.equal(endpointPage[0].currentSecret.version, 1)
+    assert.equal('keyRef' in endpointPage[0].currentSecret, false)
+    const endpointDetail = await administration.findEndpointById(workspaceId, endpoint.id)
+    assert.equal(endpointDetail.signingSecrets.length, 1)
+    assert.equal(endpointDetail.signingSecrets[0].fingerprint, request.secret.fingerprint)
+    assert.equal(await administration.findEndpointById('another-workspace', endpoint.id), null)
+    const subscriptionPage = await administration.listSubscriptions({
+      workspaceId, endpointId: endpoint.id, status: 'active', limit: 2,
+    })
+    assert.equal(subscriptionPage.length, 1)
+    assert.deepEqual(subscriptionPage[0].filter.resourceIds, ['integration-project-1'])
+    assert.equal(
+      await administration.findSubscriptionById('another-workspace', subscription.id),
+      null,
     )
     await assert.rejects(
       () => verifyChallenge({

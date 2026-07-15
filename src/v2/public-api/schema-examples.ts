@@ -112,6 +112,33 @@ const webhookDeliveryExample = {
   createdAt,
   completedAt: '2026-07-12T20:00:01.000Z',
 }
+const webhookSecretMetadataExample = {
+  version: 1,
+  fingerprint: 'd'.repeat(64),
+  status: 'active',
+  createdAt,
+}
+const webhookEndpointExample = {
+  schemaVersion: 'webhook-endpoint/v1',
+  id: '00000000-0000-4000-8000-000000000702',
+  status: 'active',
+  destinationOrigin: 'https://hooks.example.com',
+  urlFingerprint: 'c'.repeat(64),
+  createdByClientId: clientId,
+  createdAt,
+  verifiedAt: createdAt,
+  currentSigningSecret: webhookSecretMetadataExample,
+}
+const webhookSubscriptionExample = {
+  schemaVersion: 'webhook-subscription/v1',
+  id: '00000000-0000-4000-8000-000000000703',
+  endpointId: webhookEndpointExample.id,
+  status: 'active',
+  eventTypes: ['project.created'],
+  resourceIds: ['project-example-1'],
+  createdByClientId: clientId,
+  createdAt,
+}
 const webhookAttemptExample = {
   schemaVersion: 'webhook-delivery-attempt/v1',
   id: '00000000-0000-4000-8000-000000000705',
@@ -625,6 +652,20 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         },
         meta: { apiVersion: 'v1' },
       },
+    ],
+    'apollo://schemas/webhook-endpoint-list/v1': [
+      { data: { endpoints: [] }, meta: { apiVersion: 'v1' } },
+      { data: { endpoints: [webhookEndpointExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/webhook-endpoint-detail/v1': [
+      { data: { endpoint: { ...webhookEndpointExample, signingSecrets: [webhookSecretMetadataExample] } }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/webhook-subscription-list/v1': [
+      { data: { subscriptions: [] }, meta: { apiVersion: 'v1' } },
+      { data: { subscriptions: [webhookSubscriptionExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/webhook-subscription-detail/v1': [
+      { data: { subscription: webhookSubscriptionExample }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/webhook-delivery-detail/v1': [
       {

@@ -496,7 +496,7 @@
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044: API externa lista/lê diagnostics e executa replay controlado individual ou por evento exato; UI, endpoints/subscriptions e rotação de secret continuam abertos.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047: API externa lista/lê endpoints, subscriptions e deliveries, além de executar replay controlado individual ou por evento exato; UI, mutações e rotação de secret continuam abertas.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044: capabilities `apollo.webhooks.deliveries.list/read/replay` e `apollo.webhooks.events.replay` entregam diagnóstico e replay workspace-scoped; administração de endpoints/subscriptions, rotação e UI continuam abertas.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047: capabilities `apollo.webhooks.endpoints.list/read`, `apollo.webhooks.subscriptions.list/read`, `apollo.webhooks.deliveries.list/read/replay` e `apollo.webhooks.events.replay` entregam consulta e replay workspace-scoped; criação, challenge, pausa, revogação, rotação e UI continuam abertas.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -3879,7 +3879,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-046 — Coordenação durável de shards do worker de webhook
 
-**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+**Status:** publicado em 15 de julho de 2026 no commit `a453659`; hosted CI `29410999359` aprovado.
 
 Entregas:
 
@@ -3904,6 +3904,7 @@ Regressões e evidências locais:
 - worker passa por verificação sintática sem índice estático;
 - contratos públicos permanecem compatíveis com 31 capabilities, 37 schemas, 47 exemplos e 28 paths;
 - todas as integrações SQLite, build, FFmpeg, Remotion real, bundle e auditorias sem vulnerabilidades passam.
+- hosted CI `29410999359` aprovou PostgreSQL, 100 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
 
 Limites explícitos desta slice:
 
@@ -3911,4 +3912,40 @@ Limites explícitos desta slice:
 - métricas de ocupação, churn e tempo de takeover permanecem abertas;
 - mudança planejada de `shardCount` exige drenar/expirar o pool;
 - replay por intervalo continua reservado para preflight e operação durável;
-- administração de endpoint/subscription, rotação dinâmica e UI continuam abertas.
+- administração mutável de endpoint/subscription, rotação dinâmica e UI continuam abertas.
+
+### Slice F0-047 — Consulta administrativa de endpoints e subscriptions de webhook
+
+**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- quatro capabilities externas permitem listar e ler endpoints e subscriptions sob `webhooks:admin`;
+- consultas usam exclusivamente o workspace do actor autenticado e leitura cross-workspace é indistinguível de inexistente;
+- paginação é estável por `createdAt DESC, id DESC`, limitada a 100 itens e usa cursor opaco vinculado a workspace e filtros;
+- lista de endpoints filtra por status; lista de subscriptions filtra por status e endpoint exato;
+- endpoint público expõe somente origem HTTPS e fingerprint da URL completa, nunca caminho ou query;
+- signing secrets são reduzidos a versão, fingerprint, status e timestamps, sem `keyRef` ou material criptográfico;
+- leitura de endpoint inclui no máximo 100 versões redigidas e lista somente a versão configurada mais recente;
+- subscriptions expõem tipos de evento e IDs de recurso exatos, mas não `filterHash`;
+- parâmetros desconhecidos ou repetidos falham com 422 e cliente sem scope recebe 403;
+- capability registry, schemas, exemplos e OpenAPI descrevem as mesmas quatro rotas consumidas pela aplicação;
+- ADR-036 formaliza a redação, isolamento, filtros, paginação e fronteira das futuras mutações.
+
+Regressões e evidências locais:
+
+- suíte global passa com 102 testes; 34 são contratos de webhook;
+- contratos cobrem cursores vinculados, filtros exatos, leitura workspace-scoped e respostas defensivamente copiadas;
+- integração Prisma cobre filtros, metadados redigidos, versões de secret e ausência cross-workspace;
+- jornada HTTP cobre OpenAPI, list/read real, origem sem caminho, ausência de `keyRef`, filtros, 404, 422 e 403;
+- contratos públicos passam com 35 capabilities, 41 schemas, 53 exemplos e 32 paths;
+- build registra as quatro rotas administrativas novas;
+- schema/migration permanecem válidos com 26 tabelas, 98 índices e 55 chaves estrangeiras;
+- todas as integrações SQLite, build, FFmpeg, Remotion real, bundle e auditorias sem vulnerabilidades passam.
+
+Limites explícitos desta slice:
+
+- criação, alteração, challenge, pausa e revogação de endpoint/subscription continuam abertas;
+- rotação de signing secret, reload dinâmico de provider e UI administrativa continuam abertas;
+- endpoint divulga intencionalmente a origem HTTPS para administradores, mas não o caminho operacional;
+- diagnóstico público redigido das leases, métricas e replay por intervalo permanecem futuros.

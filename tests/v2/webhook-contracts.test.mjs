@@ -28,6 +28,14 @@ import {
 } from '../../src/v2/application/discover-webhook-workspaces.ts'
 import { listWebhookDeliveriesService } from '../../src/v2/application/list-webhook-deliveries.ts'
 import { readWebhookDeliveryService } from '../../src/v2/application/read-webhook-delivery.ts'
+import {
+  listWebhookEndpointsService,
+  listWebhookSubscriptionsService,
+} from '../../src/v2/application/list-webhook-administration.ts'
+import {
+  readWebhookEndpointService,
+  readWebhookSubscriptionService,
+} from '../../src/v2/application/read-webhook-administration.ts'
 import { replayWebhookDeliveryService } from '../../src/v2/application/replay-webhook-delivery.ts'
 import { replayWebhookEventService } from '../../src/v2/application/replay-webhook-event.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
@@ -37,6 +45,7 @@ import {
   createWebhookEndpoint,
   createWebhookEventFilter,
   createWebhookSigningSecret,
+  createWebhookSubscription,
   normalizeWebhookUrl,
   replayWebhookDelivery,
   webhookEventMatchesFilter,
@@ -887,6 +896,67 @@ test('coordinated worker runs only its leased shard and releases it on shutdown'
     },
   })
   assert.deepEqual(events, ['claim', 'run:1/3', 'release:1/3'])
+})
+
+test('webhook endpoint administration paginates with filter-bound cursors and scoped reads', async () => {
+  const makeEndpoint = (id, createdAt) => ({
+    endpoint: createWebhookEndpoint({
+      id, workspaceId: 'workspace-1', url: 'https://hooks.example.com/private-path',
+      status: 'active', createdByClientId: 'client-1', createdAt, verifiedAt: createdAt,
+    }),
+    currentSecret: { version: 1, fingerprint: 'a'.repeat(64), status: 'active', createdAt },
+  })
+  const records = [
+    makeEndpoint('00000000-0000-4000-8000-000000000921', '2026-07-15T11:20:01.000Z'),
+    makeEndpoint('00000000-0000-4000-8000-000000000920', '2026-07-15T11:20:00.000Z'),
+  ]
+  const repository = {
+    async listEndpoints() { return records },
+    async findEndpointById(workspaceId, endpointId) {
+      return workspaceId === 'workspace-1' && endpointId === records[0].endpoint.id
+        ? { ...records[0], signingSecrets: [records[0].currentSecret] }
+        : null
+    },
+  }
+  const list = listWebhookEndpointsService({ repository })
+  const first = await list({ workspaceId: 'workspace-1', limit: 1, status: 'active' })
+  assert.equal(first.endpoints.length, 1)
+  assert.equal(typeof first.nextCursor, 'string')
+  await assert.rejects(
+    () => list({ workspaceId: 'workspace-1', limit: 1, status: 'revoked', after: first.nextCursor }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+  const read = readWebhookEndpointService({ repository })
+  assert.equal((await read({ workspaceId: 'workspace-1', endpointId: records[0].endpoint.id })).endpoint.id, records[0].endpoint.id)
+  await assert.rejects(
+    () => read({ workspaceId: 'workspace-2', endpointId: records[0].endpoint.id }),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_NOT_FOUND',
+  )
+})
+
+test('webhook subscription administration binds endpoint filters and scopes exact reads', async () => {
+  const subscription = createWebhookSubscription({
+    id: '00000000-0000-4000-8000-000000000922', workspaceId: 'workspace-1',
+    endpointId: ids['webhook-endpoint'], status: 'active',
+    filter: { eventTypes: ['project.created'], resourceIds: ['project-1'] },
+    createdByClientId: 'client-1', createdAt: '2026-07-15T11:21:00.000Z',
+  })
+  let query
+  const repository = {
+    async listSubscriptions(value) { query = value; return [subscription] },
+    async findSubscriptionById(workspaceId, subscriptionId) {
+      return workspaceId === 'workspace-1' && subscriptionId === subscription.id ? subscription : null
+    },
+  }
+  const list = listWebhookSubscriptionsService({ repository })
+  assert.equal((await list({ workspaceId: 'workspace-1', endpointId: ids['webhook-endpoint'] })).subscriptions[0].id, subscription.id)
+  assert.equal(query.endpointId, ids['webhook-endpoint'])
+  const read = readWebhookSubscriptionService({ repository })
+  assert.deepEqual((await read({ workspaceId: 'workspace-1', subscriptionId: subscription.id })).filter.resourceIds, ['project-1'])
+  await assert.rejects(
+    () => read({ workspaceId: 'workspace-2', subscriptionId: subscription.id }),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_NOT_FOUND',
+  )
 })
 
 test('webhook delivery diagnostics paginate with filters bound into the cursor', async () => {

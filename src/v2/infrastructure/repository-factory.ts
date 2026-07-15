@@ -51,6 +51,7 @@ import type {
   WebhookEventReplayRepository,
 } from '../application/ports/webhook-event-replay-repository.ts'
 import type { WebhookWorkerShardRepository } from '../application/ports/webhook-worker-shard-repository.ts'
+import type { WebhookAdministrationQueryRepository } from '../application/ports/webhook-administration-query-repository.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
@@ -75,6 +76,7 @@ import { PrismaWebhookFanoutRepository } from './prisma/webhook-fanout-repositor
 import { PrismaWebhookDeliveryRepository } from './prisma/webhook-delivery-repository.ts'
 import { PrismaWebhookEventReplayRepository } from './prisma/webhook-event-replay-repository.ts'
 import { PrismaWebhookWorkerShardRepository } from './prisma/webhook-worker-shard-repository.ts'
+import { PrismaWebhookAdministrationQueryRepository } from './prisma/webhook-administration-query-repository.ts'
 import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
 import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-transport.ts'
 import { SafeWebhookDeliveryTransport } from './webhook/safe-webhook-delivery-transport.ts'
@@ -122,6 +124,10 @@ export function createPublicOperationRepository(): PublicOperationRepository {
 
 export function createWebhookRegistrationRepository(): WebhookRegistrationRepository {
   return new PrismaWebhookRegistrationRepository(resolveV2Client())
+}
+
+export function createWebhookAdministrationQueryRepository(): WebhookAdministrationQueryRepository {
+  return new PrismaWebhookAdministrationQueryRepository(resolveV2Client())
 }
 
 export function createWebhookFanoutRepository(): WebhookFanoutRepository {

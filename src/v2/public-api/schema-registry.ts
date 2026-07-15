@@ -360,6 +360,44 @@ const webhookDeliverySummaryRequired = [
   'schemaVersion', 'id', 'endpointId', 'subscriptionId', 'eventId', 'status',
   'attemptCount', 'maxAttempts', 'nextAttemptAt', 'createdAt',
 ]
+const webhookSigningSecretMetadataSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['version', 'fingerprint', 'status', 'createdAt'],
+  properties: {
+    version: { type: 'integer', minimum: 1 }, fingerprint: sha256Schema,
+    status: { enum: ['active', 'retired', 'revoked'] }, createdAt: dateTimeSchema,
+    retiredAt: dateTimeSchema, revokedAt: dateTimeSchema,
+  },
+}
+const webhookEndpointSummaryProperties = {
+  schemaVersion: { const: 'webhook-endpoint/v1' }, id: webhookUuidSchema,
+  status: { enum: ['pending-verification', 'active', 'suspended', 'revoked'] },
+  destinationOrigin: { type: 'string', format: 'uri', maxLength: 255 },
+  urlFingerprint: sha256Schema, createdByClientId: idSchema, createdAt: dateTimeSchema,
+  verifiedAt: dateTimeSchema, suspendedAt: dateTimeSchema, revokedAt: dateTimeSchema,
+  currentSigningSecret: webhookSigningSecretMetadataSchema,
+}
+const webhookEndpointSummarySchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'status', 'destinationOrigin', 'urlFingerprint', 'createdByClientId', 'createdAt'],
+  properties: webhookEndpointSummaryProperties,
+}
+const webhookEndpointDetailSchema = {
+  type: 'object', additionalProperties: false,
+  required: [...webhookEndpointSummarySchema.required, 'signingSecrets'],
+  properties: { ...webhookEndpointSummaryProperties, signingSecrets: { type: 'array', maxItems: 100, items: webhookSigningSecretMetadataSchema } },
+}
+const webhookSubscriptionSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'endpointId', 'status', 'eventTypes', 'createdByClientId', 'createdAt'],
+  properties: {
+    schemaVersion: { const: 'webhook-subscription/v1' }, id: webhookUuidSchema, endpointId: webhookUuidSchema,
+    status: { enum: ['pending-verification', 'active', 'paused', 'revoked'] },
+    eventTypes: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 3, maxLength: 128 } },
+    resourceIds: { type: 'array', minItems: 1, maxItems: 128, uniqueItems: true, items: idSchema },
+    createdByClientId: idSchema, createdAt: dateTimeSchema, pausedAt: dateTimeSchema, revokedAt: dateTimeSchema,
+  },
+}
 const webhookDeliverySummaryProperties = {
   schemaVersion: { const: 'webhook-delivery/v1' },
   id: webhookUuidSchema,
@@ -1430,6 +1468,24 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         },
       },
     }),
+  ),
+  defineSchema('webhook-endpoint-list', 1, 'Webhook endpoint list response',
+    successSchema({ type: 'object', additionalProperties: false, required: ['endpoints'], properties: {
+      endpoints: { type: 'array', maxItems: 100, items: webhookEndpointSummarySchema },
+      nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+    } }),
+  ),
+  defineSchema('webhook-endpoint-detail', 1, 'Webhook endpoint detail response',
+    successSchema({ type: 'object', additionalProperties: false, required: ['endpoint'], properties: { endpoint: webhookEndpointDetailSchema } }),
+  ),
+  defineSchema('webhook-subscription-list', 1, 'Webhook subscription list response',
+    successSchema({ type: 'object', additionalProperties: false, required: ['subscriptions'], properties: {
+      subscriptions: { type: 'array', maxItems: 100, items: webhookSubscriptionSchema },
+      nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+    } }),
+  ),
+  defineSchema('webhook-subscription-detail', 1, 'Webhook subscription detail response',
+    successSchema({ type: 'object', additionalProperties: false, required: ['subscription'], properties: { subscription: webhookSubscriptionSchema } }),
   ),
   defineSchema('webhook-delivery-detail', 1, 'Webhook delivery diagnostic response',
     successSchema({

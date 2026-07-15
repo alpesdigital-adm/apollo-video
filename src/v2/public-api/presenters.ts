@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type { PublicCapability } from './capability-registry.ts'
 import type { ApiClient } from '../domain/api-client.ts'
 import type { ApiCredential } from '../domain/api-credential.ts'
@@ -8,6 +10,12 @@ import type {
   WebhookDeliverySummaryRecord,
 } from '../application/ports/webhook-delivery-query-repository.ts'
 import type { WebhookEventReplayItem } from '../application/ports/webhook-event-replay-repository.ts'
+import type {
+  WebhookEndpointDetailRecord,
+  WebhookEndpointSummaryRecord,
+  WebhookSigningSecretMetadata,
+} from '../application/ports/webhook-administration-query-repository.ts'
+import type { WebhookSubscription } from '../domain/webhook.ts'
 
 export const PUBLIC_API_VERSION = 'v1' as const
 
@@ -180,5 +188,57 @@ export function presentWebhookEventReplayItem(item: Readonly<WebhookEventReplayI
   return {
     status: item.status,
     delivery: presentWebhookDeliverySummary(item.delivery),
+  }
+}
+
+function presentWebhookSecretMetadata(secret: Readonly<WebhookSigningSecretMetadata>) {
+  return {
+    version: secret.version,
+    fingerprint: secret.fingerprint,
+    status: secret.status,
+    createdAt: secret.createdAt,
+    ...(secret.retiredAt ? { retiredAt: secret.retiredAt } : {}),
+    ...(secret.revokedAt ? { revokedAt: secret.revokedAt } : {}),
+  }
+}
+
+export function presentWebhookEndpointSummary(record: Readonly<WebhookEndpointSummaryRecord>) {
+  const endpoint = record.endpoint
+  return {
+    schemaVersion: 'webhook-endpoint/v1' as const,
+    id: endpoint.id,
+    status: endpoint.status,
+    destinationOrigin: new URL(endpoint.url).origin,
+    urlFingerprint: createHash('sha256').update(endpoint.url).digest('hex'),
+    createdByClientId: endpoint.createdByClientId,
+    createdAt: endpoint.createdAt,
+    ...(endpoint.verifiedAt ? { verifiedAt: endpoint.verifiedAt } : {}),
+    ...(endpoint.suspendedAt ? { suspendedAt: endpoint.suspendedAt } : {}),
+    ...(endpoint.revokedAt ? { revokedAt: endpoint.revokedAt } : {}),
+    ...(record.currentSecret
+      ? { currentSigningSecret: presentWebhookSecretMetadata(record.currentSecret) }
+      : {}),
+  }
+}
+
+export function presentWebhookEndpointDetail(record: Readonly<WebhookEndpointDetailRecord>) {
+  return {
+    ...presentWebhookEndpointSummary(record),
+    signingSecrets: record.signingSecrets.map(presentWebhookSecretMetadata),
+  }
+}
+
+export function presentWebhookSubscription(subscription: Readonly<WebhookSubscription>) {
+  return {
+    schemaVersion: 'webhook-subscription/v1' as const,
+    id: subscription.id,
+    endpointId: subscription.endpointId,
+    status: subscription.status,
+    eventTypes: [...subscription.filter.eventTypes],
+    ...(subscription.filter.resourceIds ? { resourceIds: [...subscription.filter.resourceIds] } : {}),
+    createdByClientId: subscription.createdByClientId,
+    createdAt: subscription.createdAt,
+    ...(subscription.pausedAt ? { pausedAt: subscription.pausedAt } : {}),
+    ...(subscription.revokedAt ? { revokedAt: subscription.revokedAt } : {}),
   }
 }

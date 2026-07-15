@@ -76,6 +76,7 @@ test('authenticated public API manages projects, clients and artifact inspection
   const derivedManifestId = 'public-api-derived-manifest-v2'
   const otherArtifactId = 'public-api-other-artifact-v2'
   const webhookEndpointId = '00000000-0000-4000-8000-000000000901'
+  const webhookSecretId = '00000000-0000-4000-8000-000000000909'
   const webhookSubscriptionId = '00000000-0000-4000-8000-000000000902'
   const webhookEventId = '00000000-0000-4000-8000-000000000903'
   const webhookDeliveryId = '00000000-0000-4000-8000-000000000904'
@@ -204,6 +205,18 @@ test('authenticated public API manages projects, clients and artifact inspection
         verifiedAt: webhookCreatedAt,
       },
     })
+    await client.v2WebhookSigningSecret.create({
+      data: {
+        id: webhookSecretId,
+        workspaceId,
+        endpointId: webhookEndpointId,
+        version: 1,
+        keyRef: 'vault://public-api/webhooks/secret-v1',
+        fingerprint: sha('b'),
+        status: 'active',
+        createdAt: webhookCreatedAt,
+      },
+    })
     await client.v2WebhookSubscription.create({
       data: {
         id: webhookSubscriptionId,
@@ -211,6 +224,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         endpointId: webhookEndpointId,
         status: 'active',
         filterEventTypesJson: '["project.created"]',
+        filterResourceIdsJson: '["public-api-webhook-project"]',
         filterHash: sha('d'),
         createdByClientId: apiClientId,
         createdAt: webhookCreatedAt,
@@ -555,6 +569,38 @@ test('authenticated public API manages projects, clients and artifact inspection
       'apollo.operations.retry',
     )
     assert.equal(
+      openApi.paths['/v1/webhooks/endpoints'].get['x-apollo-capability-id'],
+      'apollo.webhooks.endpoints.list',
+    )
+    assert.deepEqual(
+      openApi.paths['/v1/webhooks/endpoints'].get.parameters.map(
+        (parameter) => parameter.name,
+      ),
+      ['limit', 'after', 'status'],
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}'].get[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.endpoints.read',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/subscriptions'].get['x-apollo-capability-id'],
+      'apollo.webhooks.subscriptions.list',
+    )
+    assert.deepEqual(
+      openApi.paths['/v1/webhooks/subscriptions'].get.parameters.map(
+        (parameter) => parameter.name,
+      ),
+      ['limit', 'after', 'status', 'endpointId'],
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/subscriptions/{subscriptionId}'].get[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.subscriptions.read',
+    )
+    assert.equal(
       openApi.paths['/v1/webhooks/deliveries'].get['x-apollo-capability-id'],
       'apollo.webhooks.deliveries.list',
     )
@@ -683,6 +729,10 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.operations.read',
         'apollo.operations.cancel',
         'apollo.operations.retry',
+        'apollo.webhooks.endpoints.list',
+        'apollo.webhooks.endpoints.read',
+        'apollo.webhooks.subscriptions.list',
+        'apollo.webhooks.subscriptions.read',
         'apollo.webhooks.deliveries.list',
         'apollo.webhooks.deliveries.read',
         'apollo.webhooks.deliveries.replay',
@@ -696,6 +746,73 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.clients.credentials.revoke',
       ],
     )
+
+    const webhookEndpointListResponse = await fetch(
+      `${baseUrl}/v1/webhooks/endpoints?status=active`,
+      { headers: { authorization } },
+    )
+    const webhookEndpointList = await webhookEndpointListResponse.json()
+    assert.equal(webhookEndpointListResponse.status, 200)
+    assert.equal(webhookEndpointList.data.endpoints.length, 1)
+    assert.equal(webhookEndpointList.data.endpoints[0].id, webhookEndpointId)
+    assert.equal(
+      webhookEndpointList.data.endpoints[0].destinationOrigin,
+      'https://hooks.example.com',
+    )
+    assert.match(webhookEndpointList.data.endpoints[0].urlFingerprint, /^[a-f0-9]{64}$/)
+    assert.equal(webhookEndpointList.data.endpoints[0].currentSigningSecret.version, 1)
+    assert.equal(webhookEndpointList.data.endpoints[0].currentSigningSecret.fingerprint, sha('b'))
+    assert.equal(JSON.stringify(webhookEndpointList).includes('/public-api'), false)
+    assert.equal(JSON.stringify(webhookEndpointList).includes('keyRef'), false)
+    assert.equal(JSON.stringify(webhookEndpointList).includes('workspaceId'), false)
+
+    const webhookEndpointReadResponse = await fetch(
+      `${baseUrl}/v1/webhooks/endpoints/${webhookEndpointId}`,
+      { headers: { authorization } },
+    )
+    const webhookEndpointRead = await webhookEndpointReadResponse.json()
+    assert.equal(webhookEndpointReadResponse.status, 200)
+    assert.equal(webhookEndpointRead.data.endpoint.id, webhookEndpointId)
+    assert.deepEqual(
+      webhookEndpointRead.data.endpoint.signingSecrets.map((secret) => secret.version),
+      [1],
+    )
+    assert.equal(JSON.stringify(webhookEndpointRead).includes('vault://'), false)
+
+    const webhookSubscriptionListResponse = await fetch(
+      `${baseUrl}/v1/webhooks/subscriptions?status=active&endpointId=${webhookEndpointId}`,
+      { headers: { authorization } },
+    )
+    const webhookSubscriptionList = await webhookSubscriptionListResponse.json()
+    assert.equal(webhookSubscriptionListResponse.status, 200)
+    assert.equal(webhookSubscriptionList.data.subscriptions.length, 1)
+    assert.equal(webhookSubscriptionList.data.subscriptions[0].id, webhookSubscriptionId)
+    assert.deepEqual(webhookSubscriptionList.data.subscriptions[0].eventTypes, ['project.created'])
+    assert.deepEqual(
+      webhookSubscriptionList.data.subscriptions[0].resourceIds,
+      ['public-api-webhook-project'],
+    )
+    assert.equal(JSON.stringify(webhookSubscriptionList).includes('filterHash'), false)
+
+    const webhookSubscriptionReadResponse = await fetch(
+      `${baseUrl}/v1/webhooks/subscriptions/${webhookSubscriptionId}`,
+      { headers: { authorization } },
+    )
+    const webhookSubscriptionRead = await webhookSubscriptionReadResponse.json()
+    assert.equal(webhookSubscriptionReadResponse.status, 200)
+    assert.equal(webhookSubscriptionRead.data.subscription.id, webhookSubscriptionId)
+    assert.deepEqual(webhookSubscriptionRead.data.subscription.eventTypes, ['project.created'])
+
+    const invalidWebhookAdministrationFilterResponse = await fetch(
+      `${baseUrl}/v1/webhooks/endpoints?unknown=value`,
+      { headers: { authorization } },
+    )
+    assert.equal(invalidWebhookAdministrationFilterResponse.status, 422)
+    const missingWebhookEndpointResponse = await fetch(
+      `${baseUrl}/v1/webhooks/endpoints/00000000-0000-4000-8000-000000000999`,
+      { headers: { authorization } },
+    )
+    assert.equal(missingWebhookEndpointResponse.status, 404)
 
     const webhookListResponse = await fetch(
       `${baseUrl}/v1/webhooks/deliveries?status=succeeded&endpointId=${webhookEndpointId}&eventId=${webhookEventId}`,
@@ -848,6 +965,15 @@ test('authenticated public API manages projects, clients and artifact inspection
       headers: { authorization: childAuthorization },
     })
     assert.equal(childWebhookResponse.status, 403)
+    const childWebhookEndpointResponse = await fetch(`${baseUrl}/v1/webhooks/endpoints`, {
+      headers: { authorization: childAuthorization },
+    })
+    assert.equal(childWebhookEndpointResponse.status, 403)
+    const childWebhookSubscriptionResponse = await fetch(
+      `${baseUrl}/v1/webhooks/subscriptions`,
+      { headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childWebhookSubscriptionResponse.status, 403)
     const childWebhookReplayResponse = await fetch(
       `${baseUrl}/v1/webhooks/deliveries/${webhookDeliveryId}/replay`,
       {
