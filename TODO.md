@@ -496,7 +496,7 @@
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-041: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem fan-out, claim/lease, dispatch assinado, transporte DNS-pinado, heartbeat orquestrado, discovery paginada, sharding determinístico, backoff e dead-letter. Adapter concreto do secret provider, coordenação de rebalanceamento e replay administrativo continuam abertos.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042: API externa lista deliveries com cursor/filtros e lê histórico redigido de attempts; UI, endpoints/subscriptions e rotação de secret continuam abertos.
 - [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Parcial F0-035/F0-039: assinatura adulterada, replay durável, timeout absoluto, DNS misto, rebinding, claim concorrente, lease incorreto, reclaim, worker obsoleto, retry e dead-letter estão cobertos. Dispatcher cobre bytes/headers assinados, fingerprint, DNS privado e settlement integrado; falta replay administrativo ponta a ponta.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042: capabilities `apollo.webhooks.deliveries.list/read` entregam diagnóstico workspace-scoped; administração de endpoints/subscriptions, mutações e UI continuam abertas.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -3697,7 +3697,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-041 — Discovery paginada e sharding do worker de webhooks
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado em 14 de julho de 2026 no commit `03b9d4b`, com correção de compatibilidade PostgreSQL no commit `996d96f`.
 
 Entregas:
 
@@ -3728,4 +3728,41 @@ Limites explícitos desta slice:
 - o adapter concreto do secret provider e o entrypoint de produção continuam pendentes;
 - mudanças concorrentes de status não formam snapshot transacional; claim e fencing permanecem a autoridade contra execução duplicada;
 - replay administrativo, rotação operacional, rate limit/circuit breaker e observabilidade continuam abertos;
-- hosted CI será registrado após publicação no próximo ciclo.
+- o primeiro hosted CI (`29380970328`) detectou que uma fixture alterava `createdAt` além de `nextAttemptAt`, violando corretamente o constraint PostgreSQL; a fixture inválida foi removida em `996d96f` sem alterar código de produção;
+- hosted CI corrigido `29381478867` aprovou PostgreSQL, 91 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-042 — API administrativa de webhook delivery diagnostics
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability `apollo.webhooks.deliveries.list` expõe listagem workspace-scoped com scope `webhooks:admin`;
+- filtros allowlisted cobrem status, endpoint e evento, além de limite e cursor opaco;
+- cursor v1 vincula workspace e todos os filtros por SHA-256, impedindo reaproveitamento ambíguo;
+- capability `apollo.webhooks.deliveries.read` expõe uma delivery e seus attempts em ordem crescente;
+- leitura cross-workspace é indistinguível de inexistente;
+- presenters excluem workspace, URL, payload, assinatura, headers, lease, heartbeat, secret e corpo de resposta;
+- diagnóstico mantém apenas status HTTP, hash do body e error code redigido para correlação;
+- JSON Schemas, exemplos, capability discovery, OpenAPI e duas rotas Next usam o mesmo contrato versionado;
+- três índices compostos sustentam listagem geral, filtro por evento e percurso por subscription;
+- ADR-031 formaliza escopo administrativo, paginação, redaction e fronteira com replay futuro.
+
+Regressões e evidências locais:
+
+- suíte global passa com 93 testes; 25 são contratos de webhook;
+- contratos cobrem paginação, cursor vinculado a filtros, leitura workspace-scoped e attempts ordenados;
+- integração Prisma cobre status+endpoint+evento, cross-workspace e histórico dead-letter;
+- jornada HTTP autenticada cobre discovery/OpenAPI, list/read, resposta redigida, filtro inválido e 403 sem scope;
+- contratos públicos passam com 29 capabilities, 35 schemas, 43 exemplos e 26 paths;
+- build registra `/v1/webhooks/deliveries` e `/v1/webhooks/deliveries/{deliveryId}`.
+- migration passa com 25 tabelas, 95 índices e 55 chaves estrangeiras;
+- auditorias sem vulnerabilidades, FFmpeg, todas as integrações SQLite, bundle e render real do Remotion passam.
+
+Limites explícitos desta slice:
+
+- não há mutação administrativa, replay, rotação de secret ou administração de endpoint/subscription;
+- UI administrativa ainda não foi iniciada;
+- retenção e purge de attempts permanecem para política operacional posterior;
+- rate limit, quotas, circuit breaker e métricas continuam abertos;
+- hosted CI desta slice será registrado após publicação no próximo ciclo.

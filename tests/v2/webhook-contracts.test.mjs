@@ -24,6 +24,8 @@ import {
   discoverRunnableWebhookWorkspacesService,
   webhookWorkspaceShard,
 } from '../../src/v2/application/discover-webhook-workspaces.ts'
+import { listWebhookDeliveriesService } from '../../src/v2/application/list-webhook-deliveries.ts'
+import { readWebhookDeliveryService } from '../../src/v2/application/read-webhook-delivery.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -736,6 +738,126 @@ test('discovered worker traverses every page and stops after current workspace',
   })
   assert.equal(repeatedCursorRequests, 2)
   assert.equal(discoveryErrors, 1)
+})
+
+test('webhook delivery diagnostics paginate with filters bound into the cursor', async () => {
+  const endpointId = '00000000-0000-4000-8000-000000000801'
+  const subscriptionId = '00000000-0000-4000-8000-000000000802'
+  const eventId = '00000000-0000-4000-8000-000000000803'
+  const makeRecord = (suffix, createdAt) => ({
+    endpointId,
+    delivery: createWebhookDelivery({
+      id: `00000000-0000-4000-8000-${suffix}`,
+      workspaceId: 'workspace-1',
+      subscriptionId,
+      eventId,
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 8,
+      nextAttemptAt: createdAt,
+      createdAt,
+      completedAt: createdAt,
+    }),
+  })
+  const records = [
+    makeRecord('000000000812', '2026-07-15T01:00:02.000Z'),
+    makeRecord('000000000811', '2026-07-15T01:00:01.000Z'),
+    makeRecord('000000000810', '2026-07-15T01:00:00.000Z'),
+  ]
+  const queries = []
+  const list = listWebhookDeliveriesService({
+    deliveries: {
+      async list(query) {
+        queries.push(query)
+        return query.after ? [] : records
+      },
+      async findDiagnosticById() {
+        return null
+      },
+    },
+  })
+  const first = await list({
+    workspaceId: 'workspace-1',
+    limit: 2,
+    status: 'succeeded',
+    endpointId,
+    eventId,
+  })
+  assert.deepEqual(first.deliveries, records.slice(0, 2))
+  assert.equal(typeof first.nextCursor, 'string')
+  await list({
+    workspaceId: 'workspace-1',
+    limit: 2,
+    status: 'succeeded',
+    endpointId,
+    eventId,
+    after: first.nextCursor,
+  })
+  assert.deepEqual(queries[1].after, {
+    createdAt: records[1].delivery.createdAt,
+    id: records[1].delivery.id,
+  })
+  await assert.rejects(
+    () => list({
+      workspaceId: 'workspace-1',
+      limit: 2,
+      status: 'dead-lettered',
+      endpointId,
+      eventId,
+      after: first.nextCursor,
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+})
+
+test('webhook delivery diagnostic is workspace-scoped and preserves ordered attempts', async () => {
+  const deliveryId = '00000000-0000-4000-8000-000000000821'
+  const delivery = createWebhookDelivery({
+    id: deliveryId,
+    workspaceId: 'workspace-1',
+    subscriptionId: '00000000-0000-4000-8000-000000000822',
+    eventId: '00000000-0000-4000-8000-000000000823',
+    status: 'succeeded',
+    attemptCount: 1,
+    maxAttempts: 8,
+    nextAttemptAt: '2026-07-15T01:10:00.000Z',
+    createdAt: '2026-07-15T01:10:00.000Z',
+    completedAt: '2026-07-15T01:10:01.000Z',
+  })
+  const attempt = createWebhookDeliveryAttempt({
+    id: '00000000-0000-4000-8000-000000000824',
+    workspaceId: 'workspace-1',
+    deliveryId,
+    attemptNumber: 1,
+    status: 'succeeded',
+    scheduledAt: delivery.createdAt,
+    createdAt: delivery.createdAt,
+    startedAt: delivery.createdAt,
+    completedAt: delivery.completedAt,
+    responseStatus: 204,
+    responseBodyHash: 'a'.repeat(64),
+  })
+  const read = readWebhookDeliveryService({
+    deliveries: {
+      async list() {
+        return []
+      },
+      async findDiagnosticById(workspaceId, requestedId) {
+        return workspaceId === 'workspace-1' && requestedId === deliveryId
+          ? {
+              delivery,
+              endpointId: '00000000-0000-4000-8000-000000000825',
+              attempts: [attempt],
+            }
+          : null
+      },
+    },
+  })
+  assert.deepEqual((await read({ workspaceId: 'workspace-1', deliveryId })).attempts, [attempt])
+  await assert.rejects(
+    () => read({ workspaceId: 'workspace-2', deliveryId }),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_DELIVERY_NOT_FOUND',
+  )
 })
 
 test('webhook filters match event type and optional resource exactly', () => {

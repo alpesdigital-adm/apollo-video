@@ -351,6 +351,64 @@ const publicOperationSchema = {
     completedAt: dateTimeSchema,
   },
 }
+
+const webhookUuidSchema = {
+  type: 'string',
+  pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+}
+const webhookDeliverySummaryRequired = [
+  'schemaVersion', 'id', 'endpointId', 'subscriptionId', 'eventId', 'status',
+  'attemptCount', 'maxAttempts', 'nextAttemptAt', 'createdAt',
+]
+const webhookDeliverySummaryProperties = {
+  schemaVersion: { const: 'webhook-delivery/v1' },
+  id: webhookUuidSchema,
+  endpointId: webhookUuidSchema,
+  subscriptionId: webhookUuidSchema,
+  eventId: webhookUuidSchema,
+  status: {
+    enum: ['pending', 'in-flight', 'retry-scheduled', 'succeeded', 'dead-lettered'],
+  },
+  attemptCount: { type: 'integer', minimum: 0, maximum: 20 },
+  maxAttempts: { type: 'integer', minimum: 1, maximum: 20 },
+  nextAttemptAt: dateTimeSchema,
+  createdAt: dateTimeSchema,
+  completedAt: dateTimeSchema,
+  deadLetteredAt: dateTimeSchema,
+}
+const webhookDeliverySummarySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: webhookDeliverySummaryRequired,
+  properties: webhookDeliverySummaryProperties,
+}
+const webhookDeliveryAttemptSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schemaVersion', 'id', 'attemptNumber', 'status', 'scheduledAt', 'createdAt'],
+  properties: {
+    schemaVersion: { const: 'webhook-delivery-attempt/v1' },
+    id: webhookUuidSchema,
+    attemptNumber: { type: 'integer', minimum: 1, maximum: 20 },
+    status: { enum: ['scheduled', 'in-flight', 'succeeded', 'failed'] },
+    scheduledAt: dateTimeSchema,
+    createdAt: dateTimeSchema,
+    startedAt: dateTimeSchema,
+    completedAt: dateTimeSchema,
+    responseStatus: { type: 'integer', minimum: 100, maximum: 599 },
+    responseBodyHash: sha256Schema,
+    errorCode: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' },
+  },
+}
+const webhookDeliveryDiagnosticSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [...webhookDeliverySummaryRequired, 'attempts'],
+  properties: {
+    ...webhookDeliverySummaryProperties,
+    attempts: { type: 'array', maxItems: 20, items: webhookDeliveryAttemptSchema },
+  },
+}
 const renderInputAssetSchema = {
   type: 'object',
   additionalProperties: false,
@@ -1335,6 +1393,34 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           pattern: '^[A-Za-z0-9_-]+$',
         },
       },
+    }),
+  ),
+  defineSchema('webhook-delivery-list', 1, 'Webhook delivery list response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['deliveries'],
+      properties: {
+        deliveries: {
+          type: 'array',
+          maxItems: 100,
+          items: webhookDeliverySummarySchema,
+        },
+        nextCursor: {
+          type: 'string',
+          minLength: 8,
+          maxLength: 1024,
+          pattern: '^[A-Za-z0-9_-]+$',
+        },
+      },
+    }),
+  ),
+  defineSchema('webhook-delivery-detail', 1, 'Webhook delivery diagnostic response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['delivery'],
+      properties: { delivery: webhookDeliveryDiagnosticSchema },
     }),
   ),
   defineSchema('create-project-request', 1, 'Create project request', {

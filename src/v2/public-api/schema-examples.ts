@@ -99,6 +99,31 @@ const queuedRenderOperationExample = {
   createdAt,
   updatedAt: createdAt,
 }
+const webhookDeliveryExample = {
+  schemaVersion: 'webhook-delivery/v1',
+  id: '00000000-0000-4000-8000-000000000701',
+  endpointId: '00000000-0000-4000-8000-000000000702',
+  subscriptionId: '00000000-0000-4000-8000-000000000703',
+  eventId: '00000000-0000-4000-8000-000000000704',
+  status: 'succeeded',
+  attemptCount: 1,
+  maxAttempts: 8,
+  nextAttemptAt: createdAt,
+  createdAt,
+  completedAt: '2026-07-12T20:00:01.000Z',
+}
+const webhookAttemptExample = {
+  schemaVersion: 'webhook-delivery-attempt/v1',
+  id: '00000000-0000-4000-8000-000000000705',
+  attemptNumber: 1,
+  status: 'succeeded',
+  scheduledAt: createdAt,
+  createdAt,
+  startedAt: createdAt,
+  completedAt: '2026-07-12T20:00:01.000Z',
+  responseStatus: 204,
+  responseBodyHash: 'e'.repeat(64),
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -563,6 +588,32 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             id: queuedRenderOperationExample.id,
             filterHash: 'a'.repeat(64),
           })).toString('base64url'),
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/webhook-delivery-list/v1': [
+      {
+        data: { deliveries: [] },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          deliveries: [webhookDeliveryExample],
+          nextCursor: Buffer.from(JSON.stringify({
+            v: 1,
+            createdAt,
+            id: webhookDeliveryExample.id,
+            filterHash: 'f'.repeat(64),
+          })).toString('base64url'),
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/webhook-delivery-detail/v1': [
+      {
+        data: {
+          delivery: { ...webhookDeliveryExample, attempts: [webhookAttemptExample] },
         },
         meta: { apiVersion: 'v1' },
       },

@@ -605,6 +605,37 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       })).errorCode,
       'lease_expired',
     )
+    const deadLetterPage = await deliveryRepository.list({
+      workspaceId,
+      status: 'dead-lettered',
+      endpointId: endpoint.id,
+      eventId: exhaustedEventId,
+      limit: 2,
+    })
+    assert.equal(deadLetterPage.length, 1)
+    assert.equal(deadLetterPage[0].delivery.id, exhaustedClaim.delivery.id)
+    assert.equal(deadLetterPage[0].endpointId, endpoint.id)
+    assert.deepEqual(
+      await deliveryRepository.list({ workspaceId: 'another-workspace', limit: 2 }),
+      [],
+    )
+    const deadLetterDiagnostic = await deliveryRepository.findDiagnosticById(
+      workspaceId,
+      exhaustedClaim.delivery.id,
+    )
+    assert.equal(deadLetterDiagnostic.delivery.status, 'dead-lettered')
+    assert.deepEqual(
+      deadLetterDiagnostic.attempts.map((attempt) => attempt.attemptNumber),
+      [1],
+    )
+    assert.equal(deadLetterDiagnostic.attempts[0].errorCode, 'lease_expired')
+    assert.equal(
+      await deliveryRepository.findDiagnosticById(
+        'another-workspace',
+        exhaustedClaim.delivery.id,
+      ),
+      null,
+    )
 
     const corruptedEventId = '00000000-0000-4000-8000-000000000304'
     await client.$transaction([

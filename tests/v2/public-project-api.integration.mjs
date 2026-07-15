@@ -75,10 +75,30 @@ test('authenticated public API manages projects, clients and artifact inspection
   const derivedArtifactId = 'public-api-derived-artifact-v2'
   const derivedManifestId = 'public-api-derived-manifest-v2'
   const otherArtifactId = 'public-api-other-artifact-v2'
+  const webhookEndpointId = '00000000-0000-4000-8000-000000000901'
+  const webhookSubscriptionId = '00000000-0000-4000-8000-000000000902'
+  const webhookEventId = '00000000-0000-4000-8000-000000000903'
+  const webhookDeliveryId = '00000000-0000-4000-8000-000000000904'
+  const webhookAttemptId = '00000000-0000-4000-8000-000000000905'
   const sha = (character) => character.repeat(64)
   let server
 
   const cleanup = async () => {
+    await client.v2WebhookDeliveryAttempt.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2WebhookDelivery.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2WebhookSubscription.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2WebhookSigningSecret.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2WebhookEndpoint.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2ArtifactRenderOperation.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
@@ -165,7 +185,77 @@ test('authenticated public API manages projects, clients and artifact inspection
         'operations:retry',
         'projects:read',
         'projects:write',
+        'webhooks:admin',
       ],
+    })
+
+    const webhookCreatedAt = new Date('2026-07-12T16:01:30.000Z')
+    await client.v2WebhookEndpoint.create({
+      data: {
+        id: webhookEndpointId,
+        workspaceId,
+        url: 'https://hooks.example.com/public-api',
+        status: 'active',
+        createdByClientId: apiClientId,
+        createdAt: webhookCreatedAt,
+        verifiedAt: webhookCreatedAt,
+      },
+    })
+    await client.v2WebhookSubscription.create({
+      data: {
+        id: webhookSubscriptionId,
+        workspaceId,
+        endpointId: webhookEndpointId,
+        status: 'active',
+        filterEventTypesJson: '["project.created"]',
+        filterHash: sha('d'),
+        createdByClientId: apiClientId,
+        createdAt: webhookCreatedAt,
+      },
+    })
+    await client.v2PublicEventOutbox.create({
+      data: {
+        id: webhookEventId,
+        workspaceId,
+        type: 'project.created',
+        version: '1.0.0',
+        occurredAt: webhookCreatedAt,
+        actorClientId: apiClientId,
+        resourceType: 'project',
+        resourceId: 'public-api-webhook-project',
+        dataJson: '{}',
+        publishedAt: webhookCreatedAt,
+        createdAt: webhookCreatedAt,
+      },
+    })
+    await client.v2WebhookDelivery.create({
+      data: {
+        id: webhookDeliveryId,
+        workspaceId,
+        subscriptionId: webhookSubscriptionId,
+        eventId: webhookEventId,
+        status: 'succeeded',
+        attemptCount: 1,
+        maxAttempts: 8,
+        nextAttemptAt: webhookCreatedAt,
+        createdAt: webhookCreatedAt,
+        completedAt: new Date(webhookCreatedAt.getTime() + 1_000),
+      },
+    })
+    await client.v2WebhookDeliveryAttempt.create({
+      data: {
+        id: webhookAttemptId,
+        workspaceId,
+        deliveryId: webhookDeliveryId,
+        attemptNumber: 1,
+        status: 'succeeded',
+        scheduledAt: webhookCreatedAt,
+        startedAt: webhookCreatedAt,
+        completedAt: new Date(webhookCreatedAt.getTime() + 1_000),
+        responseStatus: 204,
+        responseBodyHash: sha('e'),
+        createdAt: webhookCreatedAt,
+      },
     })
 
     const artifacts = new PrismaMediaArtifactRepository(
@@ -416,6 +506,22 @@ test('authenticated public API manages projects, clients and artifact inspection
       ],
       'apollo.operations.retry',
     )
+    assert.equal(
+      openApi.paths['/v1/webhooks/deliveries'].get['x-apollo-capability-id'],
+      'apollo.webhooks.deliveries.list',
+    )
+    assert.deepEqual(
+      openApi.paths['/v1/webhooks/deliveries'].get.parameters.map(
+        (parameter) => parameter.name,
+      ),
+      ['limit', 'after', 'status', 'endpointId', 'eventId'],
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/deliveries/{deliveryId}'].get[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.deliveries.read',
+    )
 
     const schemaResponse = await fetch(
       `${baseUrl}/v1/schemas/create-project-request/v1`,
@@ -505,6 +611,8 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.operations.read',
         'apollo.operations.cancel',
         'apollo.operations.retry',
+        'apollo.webhooks.deliveries.list',
+        'apollo.webhooks.deliveries.read',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
         'apollo.projects.create',
@@ -514,6 +622,39 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.clients.credentials.revoke',
       ],
     )
+
+    const webhookListResponse = await fetch(
+      `${baseUrl}/v1/webhooks/deliveries?status=succeeded&endpointId=${webhookEndpointId}&eventId=${webhookEventId}`,
+      { headers: { authorization } },
+    )
+    const webhookList = await webhookListResponse.json()
+    assert.equal(webhookListResponse.status, 200)
+    assert.equal(webhookList.data.deliveries.length, 1)
+    assert.equal(webhookList.data.deliveries[0].id, webhookDeliveryId)
+    assert.equal(webhookList.data.deliveries[0].endpointId, webhookEndpointId)
+    assert.equal(JSON.stringify(webhookList).includes('hooks.example.com'), false)
+    assert.equal(JSON.stringify(webhookList).includes('lease'), false)
+    assert.equal(JSON.stringify(webhookList).includes('dataJson'), false)
+
+    const webhookReadResponse = await fetch(
+      `${baseUrl}/v1/webhooks/deliveries/${webhookDeliveryId}`,
+      { headers: { authorization } },
+    )
+    const webhookRead = await webhookReadResponse.json()
+    assert.equal(webhookReadResponse.status, 200)
+    assert.equal(webhookRead.data.delivery.id, webhookDeliveryId)
+    assert.deepEqual(
+      webhookRead.data.delivery.attempts.map((attempt) => attempt.attemptNumber),
+      [1],
+    )
+    assert.equal(webhookRead.data.delivery.attempts[0].responseStatus, 204)
+    assert.equal('workspaceId' in webhookRead.data.delivery, false)
+    assert.equal('deliveryId' in webhookRead.data.delivery.attempts[0], false)
+    const invalidWebhookFilterResponse = await fetch(
+      `${baseUrl}/v1/webhooks/deliveries?unknown=value`,
+      { headers: { authorization } },
+    )
+    assert.equal(invalidWebhookFilterResponse.status, 422)
 
     const createChildRequest = () =>
       fetch(`${baseUrl}/v1/workspaces/${workspaceId}/clients`, {
@@ -561,6 +702,10 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.contracts.schemas.read',
       ],
     )
+    const childWebhookResponse = await fetch(`${baseUrl}/v1/webhooks/deliveries`, {
+      headers: { authorization: childAuthorization },
+    })
+    assert.equal(childWebhookResponse.status, 403)
 
     const childArtifactResponse = await fetch(
       `${baseUrl}/v1/artifacts/${derivedArtifactId}`,

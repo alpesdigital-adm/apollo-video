@@ -39,6 +39,9 @@ import type {
   WebhookWorkspaceDiscoveryRepository,
 } from '../application/ports/webhook-workspace-discovery-repository.ts'
 import type {
+  WebhookDeliveryQueryRepository,
+} from '../application/ports/webhook-delivery-query-repository.ts'
+import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
   WebhookReplayReceiptRepository,
@@ -114,7 +117,12 @@ export function createWebhookFanoutRepository(): WebhookFanoutRepository {
 
 export function createWebhookDeliveryRepository(): WebhookDeliveryRepository &
   WebhookDeliveryDispatchTargetRepository &
-  WebhookWorkspaceDiscoveryRepository {
+  WebhookWorkspaceDiscoveryRepository &
+  WebhookDeliveryQueryRepository {
+  return new PrismaWebhookDeliveryRepository(resolveV2Client())
+}
+
+export function createWebhookDeliveryQueryRepository(): WebhookDeliveryQueryRepository {
   return new PrismaWebhookDeliveryRepository(resolveV2Client())
 }
 

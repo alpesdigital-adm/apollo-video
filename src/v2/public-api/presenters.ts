@@ -3,6 +3,10 @@ import type { ApiClient } from '../domain/api-client.ts'
 import type { ApiCredential } from '../domain/api-credential.ts'
 import type { MediaArtifactRecord } from '../application/ports/media-artifact-query-repository.ts'
 import type { PublicOperation } from '../domain/public-operation.ts'
+import type {
+  WebhookDeliveryDiagnosticRecord,
+  WebhookDeliverySummaryRecord,
+} from '../application/ports/webhook-delivery-query-repository.ts'
 
 export const PUBLIC_API_VERSION = 'v1' as const
 
@@ -129,5 +133,44 @@ export function presentPublicOperation(operation: PublicOperation) {
     updatedAt: operation.updatedAt,
     ...(operation.startedAt ? { startedAt: operation.startedAt } : {}),
     ...(operation.completedAt ? { completedAt: operation.completedAt } : {}),
+  }
+}
+
+export function presentWebhookDeliverySummary(record: WebhookDeliverySummaryRecord) {
+  const delivery = record.delivery
+  return {
+    schemaVersion: 'webhook-delivery/v1' as const,
+    id: delivery.id,
+    endpointId: record.endpointId,
+    subscriptionId: delivery.subscriptionId,
+    eventId: delivery.eventId,
+    status: delivery.status,
+    attemptCount: delivery.attemptCount,
+    maxAttempts: delivery.maxAttempts,
+    nextAttemptAt: delivery.nextAttemptAt,
+    createdAt: delivery.createdAt,
+    ...(delivery.completedAt ? { completedAt: delivery.completedAt } : {}),
+    ...(delivery.deadLetteredAt ? { deadLetteredAt: delivery.deadLetteredAt } : {}),
+  }
+}
+
+export function presentWebhookDeliveryDiagnostic(record: WebhookDeliveryDiagnosticRecord) {
+  return {
+    ...presentWebhookDeliverySummary(record),
+    attempts: record.attempts.map((attempt) => ({
+      schemaVersion: 'webhook-delivery-attempt/v1' as const,
+      id: attempt.id,
+      attemptNumber: attempt.attemptNumber,
+      status: attempt.status,
+      scheduledAt: attempt.scheduledAt,
+      createdAt: attempt.createdAt,
+      ...(attempt.startedAt ? { startedAt: attempt.startedAt } : {}),
+      ...(attempt.completedAt ? { completedAt: attempt.completedAt } : {}),
+      ...(attempt.responseStatus !== undefined
+        ? { responseStatus: attempt.responseStatus }
+        : {}),
+      ...(attempt.responseBodyHash ? { responseBodyHash: attempt.responseBodyHash } : {}),
+      ...(attempt.errorCode ? { errorCode: attempt.errorCode } : {}),
+    })),
   }
 }

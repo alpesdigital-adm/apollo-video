@@ -17,6 +17,9 @@ import type {
 import type {
   WebhookWorkspaceDiscoveryRepository,
 } from '../../application/ports/webhook-workspace-discovery-repository.ts'
+import type {
+  WebhookDeliveryQueryRepository,
+} from '../../application/ports/webhook-delivery-query-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
@@ -31,6 +34,8 @@ import {
 
 const CLAIM_SCAN_LIMIT = 32
 const EXPIRED_LEASE_ERROR = 'lease_expired'
+const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 function hydrateDelivery(row: V2WebhookDelivery): Readonly<WebhookDelivery> {
   return createWebhookDelivery({
@@ -100,7 +105,8 @@ export class PrismaWebhookDeliveryRepository
   implements
     WebhookDeliveryRepository,
     WebhookDeliveryDispatchTargetRepository,
-    WebhookWorkspaceDiscoveryRepository {
+    WebhookWorkspaceDiscoveryRepository,
+    WebhookDeliveryQueryRepository {
   private readonly client: PrismaClient
 
   constructor(client: PrismaClient = prisma) {
@@ -255,6 +261,66 @@ export class PrismaWebhookDeliveryRepository
       select: { id: true },
     })
     return Object.freeze(rows.map((row) => row.id))
+  }
+
+  async list(query: Parameters<WebhookDeliveryQueryRepository['list']>[0]) {
+    const afterDate = query.after ? new Date(query.after.createdAt) : undefined
+    if (
+      !SAFE_ID_PATTERN.test(query.workspaceId) ||
+      !Number.isSafeInteger(query.limit) ||
+      query.limit < 1 ||
+      query.limit > 101 ||
+      (query.endpointId !== undefined && !UUID_V4_PATTERN.test(query.endpointId)) ||
+      (query.eventId !== undefined && !UUID_V4_PATTERN.test(query.eventId)) ||
+      (query.after !== undefined &&
+        (!UUID_V4_PATTERN.test(query.after.id) || Number.isNaN(afterDate?.getTime())))
+    ) {
+      throw new DomainError('INVALID_WEBHOOK', 'Webhook delivery list query is invalid')
+    }
+    const rows = await this.client.v2WebhookDelivery.findMany({
+      where: {
+        workspaceId: query.workspaceId,
+        ...(query.status ? { status: query.status } : {}),
+        ...(query.eventId ? { eventId: query.eventId } : {}),
+        ...(query.endpointId
+          ? { subscription: { is: { endpointId: query.endpointId } } }
+          : {}),
+        ...(query.after && afterDate
+          ? {
+              OR: [
+                { createdAt: { lt: afterDate } },
+                { createdAt: afterDate, id: { lt: query.after.id } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: query.limit,
+      include: { subscription: { select: { endpointId: true } } },
+    })
+    return Object.freeze(rows.map((row) => Object.freeze({
+      delivery: hydrateDelivery(row),
+      endpointId: row.subscription.endpointId,
+    })))
+  }
+
+  async findDiagnosticById(workspaceId: string, deliveryId: string) {
+    if (!SAFE_ID_PATTERN.test(workspaceId) || !UUID_V4_PATTERN.test(deliveryId)) {
+      throw new DomainError('INVALID_WEBHOOK', 'Webhook delivery identity is invalid')
+    }
+    const row = await this.client.v2WebhookDelivery.findFirst({
+      where: { id: deliveryId, workspaceId },
+      include: {
+        subscription: { select: { endpointId: true } },
+        attempts: { orderBy: { attemptNumber: 'asc' } },
+      },
+    })
+    if (!row) return null
+    return Object.freeze({
+      delivery: hydrateDelivery(row),
+      endpointId: row.subscription.endpointId,
+      attempts: Object.freeze(row.attempts.map(hydrateAttempt)),
+    })
   }
 
   async getDispatchTarget(
