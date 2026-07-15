@@ -137,8 +137,7 @@ O envelope versionado e o catálogo inicial de eventos podem ser descobertos em
 `GET /v1/events/catalog`. O catálogo referencia o JSON Schema público do envelope
 e contém somente metadados estáticos, por isso não exige autenticação. A presença
 de um tipo no catálogo não significa que ele já esteja sendo emitido: cada
-transição precisa ser conectada ao outbox, e subscriptions, assinatura e entrega
-at-least-once serão adicionadas nas próximas slices de F0.038.
+transição ainda precisa ser conectada explicitamente ao outbox.
 
 A criação de projeto já persiste `project.created` e `project.version.created`
 no outbox, atomicamente com o projeto, sua versão inicial e o registro de
@@ -159,6 +158,13 @@ do tenant. A URL completa nunca é devolvida: o contrato expõe somente a origem
 HTTPS e seu fingerprint; secrets são apenas metadados de versão, fingerprint e
 estado, sem `keyRef` ou material criptográfico. Os filtros exatos da subscription
 são visíveis porque definem o comportamento contratado da entrega.
+
+Novas subscriptions podem ser criadas por `POST /v1/webhooks/subscriptions`
+para um endpoint existente. O command exige `Idempotency-Key`: repetir endpoint
+e filtro idênticos com a mesma chave devolve o recurso original, enquanto reutilizar
+a chave para outro filtro ou tentar duplicar o filtro com outra chave retorna
+conflito explícito. A criação nasce ativa somente quando o endpoint está ativo;
+endpoints ainda em challenge produzem uma subscription pendente.
 
 O status de uma subscription pode ser alterado por
 `PUT /v1/webhooks/subscriptions/{subscriptionId}/status`. A resposta de consulta

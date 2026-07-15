@@ -599,6 +599,21 @@ test('authenticated public API manages projects, clients and artifact inspection
       openApi.paths['/v1/webhooks/subscriptions'].get['x-apollo-capability-id'],
       'apollo.webhooks.subscriptions.list',
     )
+    assert.equal(
+      openApi.paths['/v1/webhooks/subscriptions'].post['x-apollo-capability-id'],
+      'apollo.webhooks.subscriptions.create',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/subscriptions'].post.requestBody.content['application/json']
+        .schema.$ref,
+      '#/components/schemas/CreateWebhookSubscriptionRequestV1',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/subscriptions'].post.parameters.some(
+        (parameter) => parameter.name === 'Idempotency-Key' && parameter.required,
+      ),
+      true,
+    )
     assert.deepEqual(
       openApi.paths['/v1/webhooks/subscriptions'].get.parameters.map(
         (parameter) => parameter.name,
@@ -754,6 +769,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.webhooks.endpoints.list',
         'apollo.webhooks.endpoints.read',
         'apollo.webhooks.endpoints.status.set',
+        'apollo.webhooks.subscriptions.create',
         'apollo.webhooks.subscriptions.list',
         'apollo.webhooks.subscriptions.read',
         'apollo.webhooks.subscriptions.status.set',
@@ -861,6 +877,70 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(webhookSubscriptionRead.data.subscription.id, webhookSubscriptionId)
     assert.deepEqual(webhookSubscriptionRead.data.subscription.eventTypes, ['project.created'])
     assert.match(webhookSubscriptionRead.data.subscription.revision, /^[a-f0-9]{64}$/)
+
+    const createWebhookSubscriptionRequest = (idempotencyKey, body) => fetch(
+      `${baseUrl}/v1/webhooks/subscriptions`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
+        },
+        body: JSON.stringify(body),
+      },
+    )
+    const createSubscriptionBody = {
+      endpointId: webhookEndpointId,
+      eventTypes: ['artifact.ready'],
+      resourceIds: ['public-api-artifact'],
+    }
+    const createSubscriptionResponse = await createWebhookSubscriptionRequest(
+      'public-subscription-create-1',
+      createSubscriptionBody,
+    )
+    const createdSubscription = await createSubscriptionResponse.json()
+    assert.equal(createSubscriptionResponse.status, 201)
+    assert.equal(createdSubscription.data.replayed, false)
+    assert.equal(createdSubscription.data.subscription.status, 'active')
+    assert.deepEqual(createdSubscription.data.subscription.eventTypes, ['artifact.ready'])
+    assert.equal('workspaceId' in createdSubscription.data.subscription, false)
+    const replaySubscriptionResponse = await createWebhookSubscriptionRequest(
+      'public-subscription-create-1',
+      createSubscriptionBody,
+    )
+    const replayedCreatedSubscription = await replaySubscriptionResponse.json()
+    assert.equal(replaySubscriptionResponse.status, 200)
+    assert.equal(replayedCreatedSubscription.data.replayed, true)
+    assert.equal(
+      replayedCreatedSubscription.data.subscription.id,
+      createdSubscription.data.subscription.id,
+    )
+    const mismatchedSubscriptionResponse = await createWebhookSubscriptionRequest(
+      'public-subscription-create-1',
+      { ...createSubscriptionBody, eventTypes: ['project.version.created'] },
+    )
+    assert.equal(mismatchedSubscriptionResponse.status, 409)
+    assert.equal(
+      (await mismatchedSubscriptionResponse.json()).error.code,
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    const duplicateSubscriptionResponse = await createWebhookSubscriptionRequest(
+      'public-subscription-create-2',
+      createSubscriptionBody,
+    )
+    assert.equal(duplicateSubscriptionResponse.status, 409)
+    assert.equal(
+      (await duplicateSubscriptionResponse.json()).error.code,
+      'WEBHOOK_SUBSCRIPTION_ALREADY_EXISTS',
+    )
+    assert.equal((await createWebhookSubscriptionRequest('', createSubscriptionBody)).status, 422)
+    await client.v2WebhookSubscription.delete({
+      where: { id: createdSubscription.data.subscription.id },
+    })
+    await client.v2IdempotencyRecord.deleteMany({
+      where: { workspaceId, key: { startsWith: 'public-subscription-create-' } },
+    })
 
     const webhookSubscriptionStatusUrl =
       `${baseUrl}/v1/webhooks/subscriptions/${webhookSubscriptionId}/status`
@@ -1223,6 +1303,22 @@ test('authenticated public API manages projects, clients and artifact inspection
       { headers: { authorization: childAuthorization } },
     )
     assert.equal(childWebhookSubscriptionResponse.status, 403)
+    const childWebhookSubscriptionCreateResponse = await fetch(
+      `${baseUrl}/v1/webhooks/subscriptions`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: childAuthorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'child-subscription-create-1',
+        },
+        body: JSON.stringify({
+          endpointId: webhookEndpointId,
+          eventTypes: ['artifact.ready'],
+        }),
+      },
+    )
+    assert.equal(childWebhookSubscriptionCreateResponse.status, 403)
     const childWebhookSubscriptionStatusResponse = await fetch(
       webhookSubscriptionStatusUrl,
       {

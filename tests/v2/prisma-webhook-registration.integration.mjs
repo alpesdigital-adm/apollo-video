@@ -10,6 +10,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { PrismaClient } = await import(clientPackage)
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { registerWebhookService } = await import('../../src/v2/application/register-webhook.ts')
+  const { createWebhookSubscriptionService } = await import(
+    '../../src/v2/application/create-webhook-subscription.ts'
+  )
   const { materializeNextWebhookEventService } = await import(
     '../../src/v2/application/materialize-webhook-deliveries.ts'
   )
@@ -76,6 +79,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { PrismaWebhookSubscriptionCommandRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-subscription-command-repository.ts'
   )
+  const { PrismaWebhookSubscriptionCreationRepository } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-subscription-creation-repository.ts'
+  )
   const { PrismaWebhookEndpointCommandRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-endpoint-command-repository.ts'
   )
@@ -126,6 +132,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     await client.v2WebhookSigningSecret.deleteMany({ where: { workspaceId } })
     await client.v2WebhookEndpoint.deleteMany({ where: { workspaceId } })
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
+    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
   }
@@ -246,6 +253,43 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.deepEqual(JSON.parse(subscription.filterResourceIdsJson), [
       'integration-project-1',
     ])
+
+    let creationId = 300
+    const createSubscription = createWebhookSubscriptionService({
+      repository: new PrismaWebhookSubscriptionCreationRepository(client),
+      clock: () => new Date(now.getTime() + 500),
+      createId: (kind) => kind === 'webhook-subscription'
+        ? `00000000-0000-4000-8000-${String(creationId++).padStart(12, '0')}`
+        : `webhook-idempotency-${creationId++}`,
+    })
+    const creationRequest = {
+      workspaceId,
+      endpointId: endpoint.id,
+      eventTypes: ['artifact.ready'],
+      resourceIds: ['integration-artifact-1'],
+      createdByClientId: clientId,
+      idempotencyKey: 'create-webhook-subscription-1',
+    }
+    const createdSubscription = await createSubscription(creationRequest)
+    assert.equal(createdSubscription.replayed, false)
+    assert.equal(createdSubscription.subscription.status, 'pending-verification')
+    assert.deepEqual(createdSubscription.subscription.filter.eventTypes, ['artifact.ready'])
+    const replayedSubscription = await createSubscription(creationRequest)
+    assert.equal(replayedSubscription.replayed, true)
+    assert.equal(replayedSubscription.subscription.id, createdSubscription.subscription.id)
+    await assert.rejects(
+      () => createSubscription({ ...creationRequest, eventTypes: ['project.created'] }),
+      (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    await assert.rejects(
+      () => createSubscription({ ...creationRequest, idempotencyKey: 'different-key' }),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_ALREADY_EXISTS',
+    )
+    assert.equal(await client.v2WebhookSubscription.count({
+      where: { endpointId: endpoint.id, filterHash: createdSubscription.subscription.filter.hash },
+    }), 1)
+    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
+    await client.v2WebhookSubscription.delete({ where: { id: createdSubscription.subscription.id } })
 
     const security = new PrismaWebhookSecurityRepository(client)
     assert.deepEqual(
@@ -376,6 +420,39 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       })).status,
       'active',
     )
+    const activeCreatedSubscription = await createSubscription({
+      ...creationRequest,
+      resourceIds: ['integration-artifact-active'],
+      idempotencyKey: 'create-webhook-subscription-active',
+    })
+    assert.equal(activeCreatedSubscription.subscription.status, 'active')
+    const activeEndpointState = await client.v2WebhookEndpoint.findUniqueOrThrow({
+      where: { id: endpoint.id },
+      select: { updatedAt: true },
+    })
+    await client.v2WebhookEndpoint.update({
+      where: { id: endpoint.id },
+      data: {
+        status: 'suspended',
+        suspendedAt: new Date(now.getTime() + 1_500),
+        updatedAt: activeEndpointState.updatedAt,
+      },
+    })
+    await assert.rejects(
+      () => createSubscription({
+        ...creationRequest,
+        eventTypes: ['artifact.rejected'],
+        resourceIds: ['integration-artifact-suspended'],
+        idempotencyKey: 'create-webhook-subscription-suspended',
+      }),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_CREATE_REJECTED',
+    )
+    await client.v2WebhookEndpoint.update({
+      where: { id: endpoint.id },
+      data: { status: 'active', suspendedAt: null, updatedAt: activeEndpointState.updatedAt },
+    })
+    await client.v2WebhookSubscription.delete({ where: { id: activeCreatedSubscription.subscription.id } })
+    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
     const administration = new PrismaWebhookAdministrationQueryRepository(client)
     const endpointPage = await administration.listEndpoints({
       workspaceId, status: 'active', limit: 2,

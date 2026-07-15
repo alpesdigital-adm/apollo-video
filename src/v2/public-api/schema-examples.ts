@@ -688,6 +688,23 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       { data: { subscriptions: [] }, meta: { apiVersion: 'v1' } },
       { data: { subscriptions: [webhookSubscriptionExample] }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/create-webhook-subscription-request/v1': [
+      {
+        endpointId: webhookEndpointExample.id,
+        eventTypes: ['artifact.ready'],
+        resourceIds: ['artifact-example-1'],
+      },
+    ],
+    'apollo://schemas/webhook-subscription-created/v1': [
+      {
+        data: { subscription: webhookSubscriptionExample, replayed: false },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: { subscription: webhookSubscriptionExample, replayed: true },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-subscription-detail/v1': [
       { data: { subscription: webhookSubscriptionExample }, meta: { apiVersion: 'v1' } },
     ],

@@ -1516,6 +1516,32 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
     } }),
   ),
+  defineSchema('create-webhook-subscription-request', 1, 'Create webhook subscription request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['endpointId', 'eventTypes'],
+    properties: {
+      endpointId: idSchema,
+      eventTypes: {
+        type: 'array', minItems: 1, maxItems: 64, uniqueItems: true,
+        items: { type: 'string', enum: publicEventTypes },
+      },
+      resourceIds: {
+        type: 'array', minItems: 1, maxItems: 128, uniqueItems: true, items: idSchema,
+      },
+    },
+  }),
+  defineSchema('webhook-subscription-created', 1, 'Webhook subscription creation response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['subscription', 'replayed'],
+      properties: {
+        subscription: webhookSubscriptionSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('webhook-subscription-detail', 1, 'Webhook subscription detail response',
     successSchema({ type: 'object', additionalProperties: false, required: ['subscription'], properties: { subscription: webhookSubscriptionSchema } }),
   ),

@@ -1,9 +1,14 @@
+import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
+import { createWebhookSubscriptionService } from '@/v2/application/create-webhook-subscription'
 import { listWebhookSubscriptionsService } from '@/v2/application/list-webhook-administration'
 import { DomainError } from '@/v2/domain/errors'
-import { createWebhookAdministrationQueryRepository } from '@/v2/infrastructure/repository-factory'
+import {
+  createWebhookAdministrationQueryRepository,
+  createWebhookSubscriptionCreationRepository,
+} from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentSuccess, presentWebhookSubscription } from '@/v2/public-api/presenters'
@@ -32,4 +37,68 @@ export async function GET(request: NextRequest) {
       ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
     }), { status: 200, headers: publicApiHeaders(requestId) })
   } catch (error) { return respondPublicError(error, requestId) }
+}
+
+export async function POST(request: NextRequest) {
+  const requestId = resolveRequestId(request)
+  try {
+    const actor = await authenticateExternalRequest(request)
+    requireScope(actor, 'webhooks:admin')
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim() ?? ''
+    let body: Record<string, unknown>
+    try {
+      const value = await request.json() as unknown
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
+      }
+      body = value as Record<string, unknown>
+    } catch (error) {
+      if (error instanceof DomainError) throw error
+      throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON')
+    }
+    const allowed = new Set(['endpointId', 'eventTypes', 'resourceIds'])
+    for (const name of Object.keys(body)) {
+      if (!allowed.has(name)) throw new DomainError('INVALID_ARGUMENT', `${name} is not supported`)
+    }
+    if (typeof body.endpointId !== 'string') {
+      throw new DomainError('INVALID_ARGUMENT', 'endpointId must be a string')
+    }
+    if (!Array.isArray(body.eventTypes) || !body.eventTypes.every((value) => typeof value === 'string')) {
+      throw new DomainError('INVALID_ARGUMENT', 'eventTypes must be an array of strings')
+    }
+    if (
+      body.resourceIds !== undefined &&
+      (!Array.isArray(body.resourceIds) || !body.resourceIds.every((value) => typeof value === 'string'))
+    ) {
+      throw new DomainError('INVALID_ARGUMENT', 'resourceIds must be an array of strings')
+    }
+
+    const createSubscription = createWebhookSubscriptionService({
+      repository: createWebhookSubscriptionCreationRepository(),
+      clock: () => new Date(),
+      createId: (kind) => kind === 'webhook-subscription'
+        ? randomUUID()
+        : `${kind}-${randomUUID()}`,
+    })
+    const result = await createSubscription({
+      workspaceId: actor.workspaceId,
+      endpointId: body.endpointId,
+      eventTypes: body.eventTypes,
+      ...(body.resourceIds ? { resourceIds: body.resourceIds as string[] } : {}),
+      createdByClientId: actor.clientId,
+      idempotencyKey,
+    })
+    return NextResponse.json(
+      presentSuccess({
+        subscription: presentWebhookSubscription(result.subscription),
+        replayed: result.replayed,
+      }),
+      {
+        status: result.replayed ? 200 : 201,
+        headers: publicApiHeaders(requestId),
+      },
+    )
+  } catch (error) {
+    return respondPublicError(error, requestId)
+  }
 }

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { registerWebhookService } from '../../src/v2/application/register-webhook.ts'
+import { createWebhookSubscriptionService } from '../../src/v2/application/create-webhook-subscription.ts'
 import { activateWebhookEndpointService } from '../../src/v2/application/secure-webhook.ts'
 import { materializeNextWebhookEventService } from '../../src/v2/application/materialize-webhook-deliveries.ts'
 import {
@@ -77,6 +78,58 @@ import {
 } from '../../src/v2/infrastructure/webhook/safe-webhook-challenge-transport.ts'
 import { SafeWebhookDeliveryTransport } from '../../src/v2/infrastructure/webhook/safe-webhook-delivery-transport.ts'
 import { createEnvironmentWebhookSigningSecretProvider } from '../../src/v2/infrastructure/security/environment-webhook-signing-secret-provider.ts'
+
+test('webhook subscription creation canonicalizes filters and persists idempotency intent', async () => {
+  const ids = {
+    'webhook-subscription': '00000000-0000-4000-8000-000000000120',
+    'idempotency-record': 'idempotency-webhook-120',
+  }
+  let captured
+  const create = createWebhookSubscriptionService({
+    repository: {
+      async createOrReplay(bundle) {
+        captured = bundle
+        return { subscription: bundle.subscription, replayed: false }
+      },
+    },
+    clock: () => new Date('2026-07-15T13:00:00.000Z'),
+    createId: (kind) => ids[kind],
+  })
+  const result = await create({
+    workspaceId: 'workspace-1',
+    endpointId: '00000000-0000-4000-8000-000000000121',
+    eventTypes: ['project.version.created', 'project.created'],
+    resourceIds: ['project-2', 'project-1'],
+    createdByClientId: 'client-1',
+    idempotencyKey: 'subscription-request-1',
+  })
+
+  assert.deepEqual(result.subscription.filter.eventTypes, ['project.created', 'project.version.created'])
+  assert.deepEqual(result.subscription.filter.resourceIds, ['project-1', 'project-2'])
+  assert.equal(captured.idempotency.requestedAt, '2026-07-15T13:00:00.000Z')
+  assert.equal(captured.idempotency.expiresAt, '2026-07-16T13:00:00.000Z')
+  assert.match(captured.idempotency.requestFingerprint, /^[a-f0-9]{64}$/)
+})
+
+test('webhook subscription creation rejects unusable idempotency keys before persistence', async () => {
+  let writes = 0
+  const create = createWebhookSubscriptionService({
+    repository: { async createOrReplay() { writes += 1 } },
+    clock: () => new Date('2026-07-15T13:00:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000122',
+  })
+  await assert.rejects(
+    () => create({
+      workspaceId: 'workspace-1',
+      endpointId: '00000000-0000-4000-8000-000000000121',
+      eventTypes: ['project.created'],
+      createdByClientId: 'client-1',
+      idempotencyKey: 'contains whitespace',
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+  assert.equal(writes, 0)
+})
 
 const ids = {
   'webhook-endpoint': '00000000-0000-4000-8000-000000000101',
