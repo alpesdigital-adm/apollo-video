@@ -726,6 +726,34 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/provision-webhook-signing-secret-request/v1': [
+      { baseRevision: webhookPendingEndpointExample.revision },
+    ],
+    'apollo://schemas/webhook-signing-secret-provisioned/v1': [
+      {
+        data: {
+          endpoint: {
+            ...webhookPendingEndpointExample,
+            currentSigningSecret: { ...webhookSecretMetadataExample, version: 2 },
+          },
+          secretBase64url: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+          secretAvailable: true,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          endpoint: {
+            ...webhookPendingEndpointExample,
+            currentSigningSecret: { ...webhookSecretMetadataExample, version: 2 },
+          },
+          secretAvailable: false,
+          replayed: true,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-subscription-list/v1': [
       { data: { subscriptions: [] }, meta: { apiVersion: 'v1' } },
       { data: { subscriptions: [webhookSubscriptionExample] }, meta: { apiVersion: 'v1' } },

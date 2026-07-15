@@ -56,6 +56,7 @@ import type { WebhookSubscriptionCommandRepository } from '../application/ports/
 import type { WebhookSubscriptionCreationRepository } from '../application/ports/webhook-subscription-creation-repository.ts'
 import type { WebhookEndpointCommandRepository } from '../application/ports/webhook-endpoint-command-repository.ts'
 import type { WebhookEndpointCreationRepository } from '../application/ports/webhook-endpoint-creation-repository.ts'
+import type { WebhookSigningSecretProvisioningRepository } from '../application/ports/webhook-signing-secret-provisioning-repository.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
@@ -86,6 +87,7 @@ import { PrismaWebhookSubscriptionCommandRepository } from './prisma/webhook-sub
 import { PrismaWebhookSubscriptionCreationRepository } from './prisma/webhook-subscription-creation-repository.ts'
 import { PrismaWebhookEndpointCommandRepository } from './prisma/webhook-endpoint-command-repository.ts'
 import { PrismaWebhookEndpointCreationRepository } from './prisma/webhook-endpoint-creation-repository.ts'
+import { PrismaWebhookSigningSecretProvisioningRepository } from './prisma/webhook-signing-secret-provisioning-repository.ts'
 import { PrismaWebhookSigningSecretProvider } from './prisma/webhook-signing-secret-provider.ts'
 import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
 import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-transport.ts'
@@ -156,6 +158,10 @@ export function createWebhookEndpointCommandRepository(): WebhookEndpointCommand
 
 export function createWebhookEndpointCreationRepository(): WebhookEndpointCreationRepository {
   return new PrismaWebhookEndpointCreationRepository(resolveV2Client())
+}
+
+export function createWebhookSigningSecretProvisioningRepository(): WebhookSigningSecretProvisioningRepository {
+  return new PrismaWebhookSigningSecretProvisioningRepository(resolveV2Client())
 }
 
 export function createConfiguredWebhookSigningSecretProtector() {

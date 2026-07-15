@@ -172,6 +172,19 @@ secret internamente, persiste apenas seu envelope AES-256-GCM autenticado e
 devolve metadados redigidos. O endpoint nasce pendente; sua ativação depende do
 challenge explícito, que não é disparado silenciosamente durante o cadastro.
 
+Antes do challenge, o administrador deve provisionar a chave de verificação no
+receptor por `POST /v1/webhooks/endpoints/{endpointId}/signing-secrets`, enviando
+`baseRevision` e `Idempotency-Key`. A primeira resposta devolve
+`secretBase64url` e `secretAvailable: true`; esse valor representa exatamente os
+32 bytes da chave HMAC em Base64URL e deve ser transferido para o secret manager
+do receptor sem entrar em logs. Replay da mesma requisição devolve os mesmos
+metadados, mas nunca repete a chave (`secretAvailable: false`). Se a primeira
+resposta for perdida, deve-se consultar a nova revisão do endpoint e provisionar
+outra versão com uma nova chave idempotente. A versão anterior é aposentada na
+mesma transação. Neste incremento, o command só aceita endpoint ainda pendente;
+rotação de endpoint ativo exige overlap para proteger deliveries em voo e será
+um contrato separado.
+
 A ativação é solicitada por
 `POST /v1/webhooks/endpoints/{endpointId}/challenge`, sem body. O Apollo faz um
 POST HTTPS para a URL cadastrada com JSON canônico no formato

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import net from 'node:net'
 import test from 'node:test'
@@ -624,6 +625,24 @@ test('authenticated public API manages projects, clients and artifact inspection
       false,
     )
     assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets'].post[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.endpoints.signing-secrets.provision',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets'].post
+        .requestBody.content['application/json'].schema.$ref,
+      '#/components/schemas/ProvisionWebhookSigningSecretRequestV1',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets'].post
+        .parameters.some(
+          (parameter) => parameter.name === 'Idempotency-Key' && parameter.required,
+        ),
+      true,
+    )
+    assert.equal(
       openApi.paths['/v1/webhooks/subscriptions'].get['x-apollo-capability-id'],
       'apollo.webhooks.subscriptions.list',
     )
@@ -799,6 +818,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.webhooks.endpoints.read',
         'apollo.webhooks.endpoints.status.set',
         'apollo.webhooks.endpoints.challenge',
+        'apollo.webhooks.endpoints.signing-secrets.provision',
         'apollo.webhooks.subscriptions.create',
         'apollo.webhooks.subscriptions.list',
         'apollo.webhooks.subscriptions.read',
@@ -930,11 +950,123 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(await client.v2WebhookSigningSecretPayload.count({
       where: { secretId: createdEndpointSecret.id },
     }), 1)
-    await client.v2WebhookSigningSecretPayload.delete({ where: { secretId: createdEndpointSecret.id } })
-    await client.v2WebhookSigningSecret.delete({ where: { id: createdEndpointSecret.id } })
+
+    const signingSecretProvisioningUrl =
+      `${baseUrl}/v1/webhooks/endpoints/${createdEndpoint.data.endpoint.id}/signing-secrets`
+    const provisionSigningSecret = (idempotencyKey, body) => fetch(
+      signingSecretProvisioningUrl,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
+        },
+        body: JSON.stringify(body),
+      },
+    )
+    const provisionSecretBody = {
+      baseRevision: createdEndpoint.data.endpoint.revision,
+    }
+    const provisionSecretResponse = await provisionSigningSecret(
+      'public-secret-provision-1',
+      provisionSecretBody,
+    )
+    const provisionedSecret = await provisionSecretResponse.json()
+    assert.equal(provisionSecretResponse.status, 201)
+    assert.equal(provisionedSecret.data.secretAvailable, true)
+    assert.equal(provisionedSecret.data.replayed, false)
+    assert.match(provisionedSecret.data.secretBase64url, /^[A-Za-z0-9_-]{43}$/)
+    assert.equal(provisionedSecret.data.endpoint.currentSigningSecret.version, 2)
+    assert.equal(JSON.stringify(provisionedSecret).includes('keyRef'), false)
+    assert.equal(JSON.stringify(provisionedSecret).includes('ciphertext'), false)
+    const persistedProvisionedSecret = await client.v2WebhookSigningSecret.findFirstOrThrow({
+      where: {
+        endpointId: createdEndpoint.data.endpoint.id,
+        workspaceId,
+        status: 'active',
+      },
+    })
+    assert.equal(
+      createHash('sha256')
+        .update(Buffer.from(provisionedSecret.data.secretBase64url, 'base64url'))
+        .digest('hex'),
+      persistedProvisionedSecret.fingerprint,
+    )
+    assert.equal(
+      (await client.v2WebhookSigningSecret.findUniqueOrThrow({
+        where: { id: createdEndpointSecret.id },
+      })).status,
+      'retired',
+    )
+    assert.equal(await client.v2WebhookSigningSecretPayload.count({
+      where: { secretId: persistedProvisionedSecret.id },
+    }), 1)
+    const provisionSecretReplayResponse = await provisionSigningSecret(
+      'public-secret-provision-1',
+      provisionSecretBody,
+    )
+    const provisionSecretReplay = await provisionSecretReplayResponse.json()
+    assert.equal(provisionSecretReplayResponse.status, 200)
+    assert.equal(provisionSecretReplay.data.secretAvailable, false)
+    assert.equal(provisionSecretReplay.data.replayed, true)
+    assert.equal('secretBase64url' in provisionSecretReplay.data, false)
+    assert.equal(
+      provisionSecretReplay.data.endpoint.currentSigningSecret.fingerprint,
+      provisionedSecret.data.endpoint.currentSigningSecret.fingerprint,
+    )
+    assert.equal(
+      (await provisionSigningSecret(
+        'public-secret-provision-1',
+        { baseRevision: 'a'.repeat(64) },
+      )).status,
+      409,
+    )
+    assert.equal((await provisionSigningSecret('', provisionSecretBody)).status, 422)
+    assert.equal(
+      (await provisionSigningSecret(
+        'public-secret-provision-extra',
+        { ...provisionSecretBody, extra: true },
+      )).status,
+      422,
+    )
+    assert.equal(
+      (await provisionSigningSecret(
+        'public-secret-provision-stale',
+        provisionSecretBody,
+      )).status,
+      409,
+    )
+    assert.equal(
+      (await fetch(
+        `${baseUrl}/v1/webhooks/endpoints/${webhookEndpointId}/signing-secrets`,
+        {
+          method: 'POST',
+          headers: {
+            authorization,
+            'content-type': 'application/json',
+            'idempotency-key': 'public-secret-provision-active',
+          },
+          body: JSON.stringify({ baseRevision: webhookEndpointRead.data.endpoint.revision }),
+        },
+      )).status,
+      409,
+    )
+    await client.v2WebhookSigningSecretPayload.deleteMany({
+      where: { endpointId: createdEndpoint.data.endpoint.id },
+    })
+    await client.v2WebhookSigningSecret.deleteMany({
+      where: { endpointId: createdEndpoint.data.endpoint.id },
+    })
     await client.v2WebhookEndpoint.delete({ where: { id: createdEndpoint.data.endpoint.id } })
     await client.v2IdempotencyRecord.deleteMany({
-      where: { workspaceId, key: { startsWith: 'public-endpoint-create-' } },
+      where: {
+        workspaceId,
+        OR: [
+          { key: { startsWith: 'public-endpoint-create-' } },
+          { key: { startsWith: 'public-secret-provision-' } },
+        ],
+      },
     })
 
     const webhookEndpointStatusUrl =
@@ -1415,6 +1547,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       headers: { authorization: childAuthorization },
     })
     assert.equal(childWebhookChallengeResponse.status, 403)
+    const childWebhookSecretProvisionResponse = await fetch(signingSecretProvisioningUrl, {
+      method: 'POST',
+      headers: {
+        authorization: childAuthorization,
+        'content-type': 'application/json',
+        'idempotency-key': 'child-secret-provision-1',
+      },
+      body: JSON.stringify(provisionSecretBody),
+    })
+    assert.equal(childWebhookSecretProvisionResponse.status, 403)
     const childWebhookEndpointStatusResponse = await fetch(
       webhookEndpointStatusUrl,
       {

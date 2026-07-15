@@ -1546,6 +1546,35 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('provision-webhook-signing-secret-request', 1, 'Provision webhook signing secret request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['baseRevision'],
+    properties: { baseRevision: sha256Schema },
+  }),
+  defineSchema('webhook-signing-secret-provisioned', 1, 'Webhook signing secret provisioning response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['endpoint', 'secretAvailable', 'replayed'],
+      properties: {
+        endpoint: webhookEndpointSummarySchema,
+        secretBase64url: { type: 'string', pattern: '^[A-Za-z0-9_-]{43}$' },
+        secretAvailable: { type: 'boolean' },
+        replayed: { type: 'boolean' },
+      },
+      allOf: [
+        {
+          if: { properties: { secretAvailable: { const: true } }, required: ['secretAvailable'] },
+          then: {
+            required: ['secretBase64url'],
+            properties: { secretBase64url: { type: 'string', pattern: '^[A-Za-z0-9_-]{43}$' } },
+          },
+          else: { properties: { secretBase64url: false } },
+        },
+      ],
+    }),
+  ),
   defineSchema('webhook-subscription-list', 1, 'Webhook subscription list response',
     successSchema({ type: 'object', additionalProperties: false, required: ['subscriptions'], properties: {
       subscriptions: { type: 'array', maxItems: 100, items: webhookSubscriptionSchema },

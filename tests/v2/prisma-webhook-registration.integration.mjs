@@ -16,6 +16,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { createWebhookSubscriptionService } = await import(
     '../../src/v2/application/create-webhook-subscription.ts'
   )
+  const { provisionWebhookSigningSecretService } = await import(
+    '../../src/v2/application/provision-webhook-signing-secret.ts'
+  )
   const { materializeNextWebhookEventService } = await import(
     '../../src/v2/application/materialize-webhook-deliveries.ts'
   )
@@ -91,6 +94,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   )
   const { PrismaWebhookEndpointCreationRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-endpoint-creation-repository.ts'
+  )
+  const { PrismaWebhookSigningSecretProvisioningRepository } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-signing-secret-provisioning-repository.ts'
   )
   const { PrismaWebhookSigningSecretProvider } = await import(
     '../../src/v2/infrastructure/prisma/webhook-signing-secret-provider.ts'
@@ -243,11 +249,105 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       }),
       (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
     )
-    await client.v2WebhookSigningSecretPayload.delete({ where: { secretId: createdEndpoint.secret.id } })
-    await client.v2WebhookSigningSecret.delete({ where: { id: createdEndpoint.secret.id } })
+
+    let provisionId = 281
+    const provisionSecret = provisionWebhookSigningSecretService({
+      repository: new PrismaWebhookSigningSecretProvisioningRepository(client),
+      secrets: createWebhookSigningSecretProtector(
+        endpointCipher,
+        () => Buffer.alloc(32, 31),
+      ),
+      clock: () => new Date(now.getTime() + 300),
+      createId: (kind) => kind === 'idempotency-record'
+        ? `webhook-secret-idempotency-${provisionId++}`
+        : `00000000-0000-4000-8000-${String(provisionId++).padStart(12, '0')}`,
+    })
+    const provisioningRequest = {
+      workspaceId,
+      endpointId: createdEndpoint.endpoint.id,
+      actorClientId: clientId,
+      baseRevision: webhookEndpointRevision(createdEndpoint.endpoint),
+      idempotencyKey: 'provision-webhook-secret-1',
+    }
+    const provisioningResults = process.env.APOLLO_V2_PERSISTENCE === 'postgres'
+      ? await Promise.all([
+          provisionSecret(provisioningRequest),
+          provisionSecret(provisioningRequest),
+        ])
+      : [await provisionSecret(provisioningRequest)]
+    const provisioned = provisioningResults.find((item) => !item.replayed)
+    assert.ok(provisioned)
+    if (process.env.APOLLO_V2_PERSISTENCE === 'postgres') {
+      assert.deepEqual(
+        provisioningResults.map((item) => item.replayed).sort(),
+        [false, true],
+      )
+    }
+    assert.equal(provisioned.secret.version, 2)
+    assert.equal(provisioned.secretAvailable, true)
+    assert.equal(provisioned.secretBase64url, Buffer.alloc(32, 31).toString('base64url'))
+    assert.equal(provisioned.replayed, false)
+    assert.equal(
+      (await client.v2WebhookSigningSecret.findUniqueOrThrow({
+        where: { id: createdEndpoint.secret.id },
+      })).status,
+      'retired',
+    )
+    assert.equal(
+      (await client.v2WebhookSigningSecret.findUniqueOrThrow({
+        where: { id: provisioned.secret.id },
+      })).status,
+      'active',
+    )
+    const openedProvisionedSecret = await new PrismaWebhookSigningSecretProvider(
+      endpointCipher,
+      client,
+    ).open({
+      workspaceId,
+      endpointId: createdEndpoint.endpoint.id,
+      keyRef: provisioned.secret.keyRef,
+      version: provisioned.secret.version,
+    })
+    assert.equal(
+      Buffer.from(openedProvisionedSecret).toString('base64url'),
+      provisioned.secretBase64url,
+    )
+    openedProvisionedSecret.fill(0)
+    const provisionReplay = await provisionSecret(provisioningRequest)
+    assert.equal(provisionReplay.replayed, true)
+    assert.equal(provisionReplay.secretAvailable, false)
+    assert.equal('secretBase64url' in provisionReplay, false)
+    assert.equal(provisionReplay.secret.id, provisioned.secret.id)
+    await assert.rejects(
+      () => provisionSecret({ ...provisioningRequest, baseRevision: 'a'.repeat(64) }),
+      (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    await assert.rejects(
+      () => provisionSecret({
+        ...provisioningRequest,
+        idempotencyKey: 'provision-webhook-secret-stale',
+      }),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
+    )
+    const storedProvisioningLedger = await client.v2IdempotencyRecord.findFirstOrThrow({
+      where: { workspaceId, key: 'provision-webhook-secret-1' },
+    })
+    assert.equal(storedProvisioningLedger.responseJson.includes(provisioned.secretBase64url), false)
+    await client.v2WebhookSigningSecretPayload.deleteMany({
+      where: { endpointId: createdEndpoint.endpoint.id },
+    })
+    await client.v2WebhookSigningSecret.deleteMany({
+      where: { endpointId: createdEndpoint.endpoint.id },
+    })
     await client.v2WebhookEndpoint.delete({ where: { id: createdEndpoint.endpoint.id } })
     await client.v2IdempotencyRecord.deleteMany({
-      where: { workspaceId, key: { startsWith: 'create-webhook-endpoint-' } },
+      where: {
+        workspaceId,
+        OR: [
+          { key: { startsWith: 'create-webhook-endpoint-' } },
+          { key: { startsWith: 'provision-webhook-secret-' } },
+        ],
+      },
     })
 
     let shardClock = new Date('2026-07-14T21:50:01.000Z')

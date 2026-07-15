@@ -5,6 +5,7 @@ import test from 'node:test'
 import { registerWebhookService } from '../../src/v2/application/register-webhook.ts'
 import { createWebhookEndpointService } from '../../src/v2/application/create-webhook-endpoint.ts'
 import { createWebhookSubscriptionService } from '../../src/v2/application/create-webhook-subscription.ts'
+import { provisionWebhookSigningSecretService } from '../../src/v2/application/provision-webhook-signing-secret.ts'
 import {
   activateWebhookEndpointConvergentlyService,
   activateWebhookEndpointService,
@@ -160,6 +161,121 @@ test('webhook endpoint creation rejects idempotency misuse before generating a s
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
   assert.equal(generated, 0)
+})
+
+test('pending endpoint provisions a signing secret once and redacts idempotent replay', async () => {
+  const endpoint = createWebhookEndpoint({
+    id: '00000000-0000-4000-8000-000000000130',
+    workspaceId: 'workspace-1',
+    url: 'https://hooks.example.com/apollo',
+    status: 'pending-verification',
+    createdByClientId: 'client-1',
+    createdAt: '2026-07-15T22:00:00.000Z',
+  })
+  const rawSecrets = []
+  const cipher = createAesRecipeParameterCipher({
+    keyId: 'webhook-provision-key',
+    key: Buffer.alloc(32, 23),
+  })
+  const protector = createWebhookSigningSecretProtector(cipher, () => {
+    const secret = Buffer.alloc(32, 24 + rawSecrets.length)
+    rawSecrets.push(secret)
+    return secret
+  })
+  let persisted
+  let writes = 0
+  let id = 131
+  const provision = provisionWebhookSigningSecretService({
+    repository: {
+      async getTarget() { return { endpoint, latestSecretVersion: 1 } },
+      async provisionOrReplay(command) {
+        writes += 1
+        if (!persisted) {
+          persisted = command
+          return { endpoint: { ...endpoint, updatedAt: command.secret.createdAt }, secret: command.secret, replayed: false }
+        }
+        return {
+          endpoint: { ...endpoint, updatedAt: persisted.secret.createdAt },
+          secret: persisted.secret,
+          replayed: true,
+        }
+      },
+    },
+    secrets: protector,
+    clock: () => new Date('2026-07-15T22:01:00.000Z'),
+    createId: () => `00000000-0000-4000-8000-${String(id++).padStart(12, '0')}`,
+  })
+  const request = {
+    workspaceId: 'workspace-1',
+    endpointId: endpoint.id,
+    actorClientId: 'client-1',
+    baseRevision: webhookEndpointRevision(endpoint),
+    idempotencyKey: 'provision-secret-1',
+  }
+  const first = await provision(request)
+  const replay = await provision(request)
+
+  assert.equal(first.secret.version, 2)
+  assert.equal(first.secretAvailable, true)
+  assert.equal(first.secretBase64url, Buffer.alloc(32, 24).toString('base64url'))
+  assert.equal(first.replayed, false)
+  assert.equal(rawSecrets.every((secret) => secret.every((value) => value === 0)), true)
+  assert.equal(JSON.stringify(persisted).includes(first.secretBase64url), false)
+  assert.equal(replay.replayed, true)
+  assert.equal(replay.secretAvailable, false)
+  assert.equal('secretBase64url' in replay, false)
+  assert.equal(replay.secret.id, first.secret.id)
+  assert.equal(writes, 2)
+})
+
+test('signing secret provisioning rejects invalid revision before secret generation', async () => {
+  let effects = 0
+  const provision = provisionWebhookSigningSecretService({
+    repository: {
+      async getTarget() { effects += 1; return null },
+      async provisionOrReplay() { effects += 1 },
+    },
+    secrets: {
+      async protect() { effects += 1 },
+      async protectForOneTimeDisclosure() { effects += 1 },
+    },
+    clock: () => new Date('2026-07-15T22:01:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000135',
+  })
+  await assert.rejects(
+    () => provision({
+      workspaceId: 'workspace-1',
+      endpointId: '00000000-0000-4000-8000-000000000130',
+      actorClientId: 'client-1',
+      baseRevision: 'invalid',
+      idempotencyKey: 'provision-secret-1',
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+  assert.equal(effects, 0)
+})
+
+test('generated webhook signing secret must contain exactly 256 bits', async () => {
+  const invalidSecret = Buffer.alloc(31, 9)
+  const protector = createWebhookSigningSecretProtector(
+    createAesRecipeParameterCipher({
+      keyId: 'webhook-size-key',
+      key: Buffer.alloc(32, 10),
+    }),
+    () => invalidSecret,
+  )
+  await assert.rejects(
+    () => protector.protectForOneTimeDisclosure({
+      secretId: '00000000-0000-4000-8000-000000000136',
+      workspaceId: 'workspace-1',
+      endpointId: '00000000-0000-4000-8000-000000000137',
+      version: 2,
+      keyRef: 'vault://apollo/webhooks/00000000-0000-4000-8000-000000000136',
+      createdAt: '2026-07-15T22:01:00.000Z',
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(invalidSecret.every((value) => value === 0), true)
 })
 
 test('webhook subscription creation canonicalizes filters and persists idempotency intent', async () => {

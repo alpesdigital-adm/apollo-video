@@ -496,7 +496,7 @@
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052: API externa cria/lista/lê endpoints e subscriptions, consulta deliveries, executa challenge/ativação, replay e lifecycle; UI e rotação de secret continuam abertas.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053: API externa cria/lista/lê endpoints e subscriptions, provisiona chave HMAC pendente, executa challenge/ativação, replay e lifecycle; UI e rotação com overlap de endpoint ativo continuam abertas.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052: capabilities entregam cadastro idempotente, consultas, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; rotação e UI continuam abertas.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053: capabilities entregam cadastro idempotente, provisionamento one-shot da chave pendente, consultas, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; rotação ativa e UI continuam abertas.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -4093,7 +4093,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-052 — Challenge público e ativação convergente de endpoint
 
-**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+**Status:** publicado no `main` em 15 de julho de 2026 (`1f93e3e`); hosted CI `29449277660` aprovada.
 
 Entregas:
 
@@ -4125,3 +4125,38 @@ Limites explícitos desta slice:
 - o challenge é síncrono e limitado pelo deadline; operação assíncrona será necessária apenas se providers futuros excederem essa janela;
 - alteração de URL e rotação de signing secret permanecem commands separados futuros;
 - UI administrativa, audit query, métricas, circuit breaker e alertas continuam futuros.
+
+### Slice F0-053 — Provisionamento one-shot da chave HMAC pendente
+
+**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability `apollo.webhooks.endpoints.signing-secrets.provision` expõe `POST /v1/webhooks/endpoints/{endpointId}/signing-secrets` sob `webhooks:admin`;
+- o fluxo corrige o pré-requisito criptográfico do HMAC: o receptor passa a receber os 32 bytes necessários para verificar deliveries;
+- body fechado exige `baseRevision` e o header exige `Idempotency-Key`;
+- somente endpoint `pending-verification` pode provisionar; endpoint ativo, suspenso ou revogado falha antes da mutação;
+- nova chave é gerada, fingerprinted e cifrada em AES-256-GCM; a versão ativa anterior é aposentada e a nova versão é persistida atomicamente;
+- endpoint recebe nova revisão na mesma transação, impedindo challenge ou provisionamentos concorrentes sobre estado obsoleto;
+- primeira resposta retorna 201, `secretBase64url` one-shot e `secretAvailable: true`;
+- replay idêntico retorna 200 com o mesmo endpoint/secret metadata, `secretAvailable: false` e sem material HMAC;
+- mesma chave idempotente com revisão diferente retorna conflito de payload; nova chave com revisão antiga retorna conflito de revisão;
+- ledger persiste apenas IDs e metadados seguros, nunca a chave retornada;
+- ADR-042 formaliza provisionamento, recuperação após resposta perdida e separação da rotação ativa com overlap.
+
+Regressões e evidências locais:
+
+- suíte global passa com 115 testes; 47 são contratos de webhook;
+- testes cobrem disclosure único, bytes temporários zerados, replay redigido e validação antes da geração;
+- integração Prisma cobre retirement da v1, criação/abertura cifrada da v2, replay, conflitos, ledger redigido e revisão obsoleta;
+- jornada HTTP cobre OpenAPI, 201/200, chave one-shot, fingerprint, body/header inválido, endpoint ativo, revisão antiga e 403 sem scope;
+- contratos públicos passam com 41 capabilities, 51 schemas, 70 exemplos e 36 paths;
+- build registra `POST /v1/webhooks/endpoints/{endpointId}/signing-secrets`;
+- schema/migration permanecem com 27 tabelas, 102 índices e 57 chaves estrangeiras.
+
+Limites explícitos desta slice:
+
+- perda da primeira resposta exige consultar a revisão atual e gerar outra versão; a chave nunca pode ser recuperada novamente;
+- endpoint ativo ainda não pode rotacionar porque deliveries em voo exigem período de overlap e escolha de versão explícita;
+- o consumidor deve decodificar Base64URL para os 32 bytes HMAC e armazená-los em seu próprio secret manager;
+- alteração de URL, UI administrativa, audit query, métricas e alertas continuam futuros.

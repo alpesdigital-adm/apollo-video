@@ -14,8 +14,16 @@ export interface ProtectedWebhookSigningSecretMaterial {
   payload: Readonly<WebhookSigningSecretPayload>
 }
 
+export interface DisclosedWebhookSigningSecretMaterial
+  extends ProtectedWebhookSigningSecretMaterial {
+  secretBase64url: string
+}
+
 export interface WebhookSigningSecretProtector {
   protect(
     request: Readonly<ProtectWebhookSigningSecretRequest>,
   ): Promise<Readonly<ProtectedWebhookSigningSecretMaterial>>
+  protectForOneTimeDisclosure(
+    request: Readonly<ProtectWebhookSigningSecretRequest>,
+  ): Promise<Readonly<DisclosedWebhookSigningSecretMaterial>>
 }

@@ -43,3 +43,4 @@ Estados usados:
 - [ADR-039 — Criação idempotente de subscriptions de webhook](./ADR-039-idempotent-webhook-subscription-creation.md)
 - [ADR-040 — Cadastro de endpoint com secret dinâmico cifrado](./ADR-040-encrypted-dynamic-webhook-endpoint-registration.md)
 - [ADR-041 — Challenge público e ativação convergente de webhook](./ADR-041-public-webhook-challenge-and-convergent-activation.md)
+- [ADR-042 — Provisionamento one-shot da chave HMAC pendente](./ADR-042-one-time-pending-webhook-secret-provisioning.md)
