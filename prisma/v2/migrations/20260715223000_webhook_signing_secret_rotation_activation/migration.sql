@@ -43,9 +43,9 @@ ALTER TABLE "webhook_signing_secret_rotations"
   );
 
 ALTER TABLE "webhook_signing_secrets"
-  DROP CONSTRAINT "webhook_signing_secrets_lifecycle_check";
+  DROP CONSTRAINT "webhook_signing_secrets_state_check";
 ALTER TABLE "webhook_signing_secrets"
-  ADD CONSTRAINT "webhook_signing_secrets_lifecycle_check" CHECK (
+  ADD CONSTRAINT "webhook_signing_secrets_state_check" CHECK (
     ("status" = 'active' AND "retiredAt" IS NULL AND "usableUntil" IS NULL AND "revokedAt" IS NULL)
     OR (
       "status" = 'retired'
