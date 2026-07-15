@@ -24,6 +24,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { runNextWebhookDeliveryService } = await import(
     '../../src/v2/application/run-webhook-delivery-worker.ts'
   )
+  const { discoverRunnableWebhookWorkspacesService } = await import(
+    '../../src/v2/application/discover-webhook-workspaces.ts'
+  )
   const {
     issueWebhookChallengeService,
     verifyWebhookChallengeService,
@@ -420,6 +423,10 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       repository: deliveryRepository,
       clock: () => deliveryClock,
     })
+    const discoverWorkspaces = discoverRunnableWebhookWorkspacesService({
+      repository: deliveryRepository,
+      clock: () => deliveryClock,
+    })
 
     const firstClaim = await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-1' })
     assert.equal(firstClaim.delivery.id, matching.deliveries[0].id)
@@ -491,8 +498,28 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.equal(retried.delivery.status, 'retry-scheduled')
     assert.equal(retried.attempt.status, 'failed')
     assert.equal((await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-3' })), null)
+    assert.deepEqual((await discoverWorkspaces()).workspaceIds, [])
 
     deliveryClock = new Date(retryAt)
+    await client.v2WebhookDelivery.update({
+      where: { id: firstClaim.delivery.id },
+      data: { createdAt: new Date(deliveryClock.getTime() + 1) },
+    })
+    assert.deepEqual((await discoverWorkspaces()).workspaceIds, [])
+    await client.v2WebhookDelivery.update({
+      where: { id: firstClaim.delivery.id },
+      data: { createdAt: fanoutAt },
+    })
+    await client.v2Workspace.update({
+      where: { id: workspaceId },
+      data: { createdAt: new Date(deliveryClock.getTime() + 1) },
+    })
+    assert.deepEqual((await discoverWorkspaces()).workspaceIds, [])
+    await client.v2Workspace.update({
+      where: { id: workspaceId },
+      data: { createdAt: now },
+    })
+    assert.deepEqual((await discoverWorkspaces()).workspaceIds, [workspaceId])
     const dispatchDelivery = dispatchWebhookDeliveryService({
       repository: deliveryRepository,
       secrets: {

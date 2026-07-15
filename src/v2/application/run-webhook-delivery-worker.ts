@@ -206,3 +206,111 @@ export async function runWebhookDeliveryWorkerLoop(dependencies: {
     }
   }
 }
+
+export async function runDiscoveredWebhookDeliveryWorkerLoop(dependencies: {
+  discover: (request: {
+    shardIndex: number
+    shardCount: number
+    scanLimit: number
+    cursor?: string
+  }) => Promise<Readonly<{ workspaceIds: readonly string[]; nextCursor?: string }>>
+  runNext: (request: {
+    workspaceId: string
+    leaseOwner: string
+  }) => Promise<Readonly<WebhookDeliveryWorkerOutcome> | null>
+  shardIndex: number
+  shardCount: number
+  leaseOwner: string
+  signal: AbortSignal
+  scanLimit?: number
+  pollIntervalMs?: number
+  onOutcome?: (outcome: Readonly<WebhookDeliveryWorkerOutcome>) => void
+  onIterationError?: (event: Readonly<{ workspaceId: string }>) => void
+  onDiscoveryError?: () => void
+  wait?: (delayMs: number, signal: AbortSignal) => Promise<void>
+}): Promise<void> {
+  const scanLimit = dependencies.scanLimit ?? 100
+  const pollIntervalMs = dependencies.pollIntervalMs ?? 1_000
+  const leaseOwner = dependencies.leaseOwner.trim()
+  assertDomain(
+    Number.isSafeInteger(dependencies.shardCount) &&
+      dependencies.shardCount >= 1 &&
+      dependencies.shardCount <= 1_024 &&
+      Number.isSafeInteger(dependencies.shardIndex) &&
+      dependencies.shardIndex >= 0 &&
+      dependencies.shardIndex < dependencies.shardCount &&
+      Number.isSafeInteger(scanLimit) &&
+      scanLimit >= 1 &&
+      scanLimit <= 500 &&
+      Number.isSafeInteger(pollIntervalMs) &&
+      pollIntervalMs >= 100 &&
+      pollIntervalMs <= 60_000 &&
+      SAFE_ID_PATTERN.test(leaseOwner),
+    'INVALID_WEBHOOK',
+    'Webhook discovery worker configuration is invalid',
+  )
+  const wait = dependencies.wait ?? waitForPoll
+
+  while (!dependencies.signal.aborted) {
+    let processed = false
+    let cursor: string | undefined
+    const seenCursors = new Set<string>()
+    const seenWorkspaceIds = new Set<string>()
+    do {
+      let page: Readonly<{ workspaceIds: readonly string[]; nextCursor?: string }>
+      try {
+        page = await dependencies.discover({
+          shardIndex: dependencies.shardIndex,
+          shardCount: dependencies.shardCount,
+          scanLimit,
+          ...(cursor ? { cursor } : {}),
+        })
+      } catch {
+        try {
+          dependencies.onDiscoveryError?.()
+        } catch {
+          // Observability callbacks cannot control discovery.
+        }
+        break
+      }
+      for (const workspaceId of page.workspaceIds) {
+        if (dependencies.signal.aborted) break
+        if (seenWorkspaceIds.has(workspaceId)) continue
+        seenWorkspaceIds.add(workspaceId)
+        try {
+          const outcome = await dependencies.runNext({ workspaceId, leaseOwner })
+          if (outcome) {
+            processed = true
+            try {
+              dependencies.onOutcome?.(outcome)
+            } catch {
+              // Observability callbacks cannot control delivery execution.
+            }
+          }
+        } catch {
+          try {
+            dependencies.onIterationError?.(Object.freeze({ workspaceId }))
+          } catch {
+            // Observability callbacks cannot stop other workspaces.
+          }
+        }
+      }
+      const nextCursor = dependencies.signal.aborted ? undefined : page.nextCursor
+      if (nextCursor && (nextCursor === cursor || seenCursors.has(nextCursor))) {
+        try {
+          dependencies.onDiscoveryError?.()
+        } catch {
+          // Observability callbacks cannot control discovery.
+        }
+        cursor = undefined
+      } else {
+        if (nextCursor) seenCursors.add(nextCursor)
+        cursor = nextCursor
+      }
+    } while (cursor)
+
+    if (!processed && !dependencies.signal.aborted) {
+      await wait(pollIntervalMs, dependencies.signal)
+    }
+  }
+}

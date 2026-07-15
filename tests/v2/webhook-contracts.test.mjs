@@ -17,8 +17,13 @@ import {
 } from '../../src/v2/application/dispatch-webhook-delivery.ts'
 import {
   runNextWebhookDeliveryService,
+  runDiscoveredWebhookDeliveryWorkerLoop,
   runWebhookDeliveryWorkerLoop,
 } from '../../src/v2/application/run-webhook-delivery-worker.ts'
+import {
+  discoverRunnableWebhookWorkspacesService,
+  webhookWorkspaceShard,
+} from '../../src/v2/application/discover-webhook-workspaces.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -626,6 +631,111 @@ test('delivery worker loop isolates workspace errors and stops gracefully withou
     }),
     (error) => error instanceof DomainError && error.code === 'INVALID_WEBHOOK',
   )
+})
+
+test('workspace discovery keeps a stable snapshot and deterministic shard across pages', async () => {
+  const workspaceIds = [
+    'workspace-1',
+    'workspace-2',
+    'workspace-3',
+    'workspace-4',
+    'workspace-5',
+  ]
+  const queries = []
+  let clockReads = 0
+  const discover = discoverRunnableWebhookWorkspacesService({
+    repository: {
+      async listRunnableWorkspaceIds(query) {
+        queries.push(query)
+        const start = query.afterWorkspaceId
+          ? workspaceIds.findIndex((id) => id > query.afterWorkspaceId)
+          : 0
+        return start < 0 ? [] : workspaceIds.slice(start, start + query.limit)
+      },
+    },
+    clock: () => {
+      clockReads += 1
+      return new Date('2026-07-15T00:30:00.000Z')
+    },
+  })
+  const discovered = []
+  let cursor
+  do {
+    const page = await discover({
+      shardIndex: 1,
+      shardCount: 2,
+      scanLimit: 2,
+      ...(cursor ? { cursor } : {}),
+    })
+    discovered.push(...page.workspaceIds)
+    cursor = page.nextCursor
+  } while (cursor)
+  assert.deepEqual(
+    discovered,
+    workspaceIds.filter((workspaceId) => webhookWorkspaceShard(workspaceId, 2) === 1),
+  )
+  assert.equal(clockReads, 1)
+  assert.equal(new Set(queries.map((query) => query.asOf)).size, 1)
+  assert.deepEqual(queries.map((query) => query.afterWorkspaceId), [undefined, 'workspace-2', 'workspace-4'])
+
+  const first = await discover({ shardIndex: 0, shardCount: 2, scanLimit: 2 })
+  await assert.rejects(
+    () => discover({ shardIndex: 1, shardCount: 2, scanLimit: 2, cursor: first.nextCursor }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_WEBHOOK',
+  )
+})
+
+test('discovered worker traverses every page and stops after current workspace', async () => {
+  const controller = new AbortController()
+  const discoveryRequests = []
+  const runs = []
+  await runDiscoveredWebhookDeliveryWorkerLoop({
+    shardIndex: 0,
+    shardCount: 1,
+    leaseOwner: 'worker-1',
+    signal: controller.signal,
+    discover: async (request) => {
+      discoveryRequests.push(request)
+      return request.cursor
+        ? { workspaceIds: ['workspace-1', 'workspace-2'] }
+        : { workspaceIds: ['workspace-1'], nextCursor: 'cursor-page-2' }
+    },
+    runNext: async ({ workspaceId }) => {
+      runs.push(workspaceId)
+      if (runs.length === 2) controller.abort()
+      return {
+        workspaceId,
+        deliveryId: `00000000-0000-4000-8000-000000000${runs.length === 1 ? '912' : '913'}`,
+        attemptNumber: 1,
+        status: 'succeeded',
+      }
+    },
+  })
+  assert.deepEqual(runs, ['workspace-1', 'workspace-2'])
+  assert.deepEqual(discoveryRequests.map((request) => request.cursor), [undefined, 'cursor-page-2'])
+
+  const repeatedCursorController = new AbortController()
+  let repeatedCursorRequests = 0
+  let discoveryErrors = 0
+  await runDiscoveredWebhookDeliveryWorkerLoop({
+    shardIndex: 0,
+    shardCount: 1,
+    leaseOwner: 'worker-1',
+    signal: repeatedCursorController.signal,
+    discover: async () => {
+      repeatedCursorRequests += 1
+      return { workspaceIds: [], nextCursor: 'repeated-cursor' }
+    },
+    runNext: async () => null,
+    onDiscoveryError: () => {
+      discoveryErrors += 1
+    },
+    wait: async () => {
+      repeatedCursorController.abort()
+    },
+  })
+  assert.equal(repeatedCursorRequests, 2)
+  assert.equal(discoveryErrors, 1)
 })
 
 test('webhook filters match event type and optional resource exactly', () => {

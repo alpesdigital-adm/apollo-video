@@ -495,7 +495,7 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-040: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem fan-out, claim/lease, dispatch assinado, transporte DNS-pinado, heartbeat orquestrado, worker round-robin por workspace, backoff e dead-letter. Adapter concreto do secret provider, discovery/rebalance de shards e replay administrativo continuam abertos.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-041: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem fan-out, claim/lease, dispatch assinado, transporte DNS-pinado, heartbeat orquestrado, discovery paginada, sharding determinístico, backoff e dead-letter. Adapter concreto do secret provider, coordenação de rebalanceamento e replay administrativo continuam abertos.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
 - [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Parcial F0-035/F0-039: assinatura adulterada, replay durável, timeout absoluto, DNS misto, rebinding, claim concorrente, lease incorreto, reclaim, worker obsoleto, retry e dead-letter estão cobertos. Dispatcher cobre bytes/headers assinados, fingerprint, DNS privado e settlement integrado; falta replay administrativo ponta a ponta.
 
@@ -3660,7 +3660,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-040 — Runner e loop do worker de webhook deliveries
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `f2a2e86`.
 
 Entregas:
 
@@ -3689,8 +3689,43 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- o host ainda precisa fornecer provider de secrets e lista autorizada de workspaces do shard;
-- discovery dinâmica, rebalanceamento de shards e autoscaling permanecem no scheduler posterior;
+- o host ainda precisa fornecer provider de secrets;
+- discovery dinâmica e sharding determinístico entram na F0-041; coordenação de rebalanceamento e autoscaling permanecem posteriores;
 - ainda não existe entrypoint de produção porque a escolha do secret provider não foi tomada;
 - replay administrativo, rotação operacional, rate limit/circuit breaker e observabilidade continuam abertos;
-- hosted CI do runner será registrado após publicação no próximo ciclo.
+- hosted CI `29379751447` aprovou PostgreSQL, 89 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-041 — Discovery paginada e sharding do worker de webhooks
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- discovery encontra automaticamente workspaces ativos com delivery vencida, retry devido ou lease expirado, exigindo também subscription e endpoint ativos;
+- cursor v1 preserva `asOf` entre páginas, usa high-water por workspace ID e é vinculado às coordenadas do shard;
+- workspaces e deliveries criados depois de `asOf` são adiados para o próximo ciclo, evitando deriva por inserção durante a paginação;
+- shard usa SHA-256 estável do workspace ID e independe da posição da página;
+- validações rejeitam cursor adulterado ou de outro shard, páginas desordenadas, IDs inválidos e limites fora da faixa;
+- scheduler percorre todas as páginas, executa no máximo uma delivery por workspace e ignora duplicatas entre páginas;
+- cursor repetido e falha de discovery encerram somente o ciclo atual, com callbacks de observabilidade que não controlam a execução;
+- factory entrega `discover` e `runNext` já compostos sobre o mesmo boundary de persistência;
+- dois índices compostos sustentam discovery por workspace, status, vencimento/lease e ID;
+- ADR-030 formaliza corte temporal, paginação, hash de shard e segurança durante redistribuição.
+
+Regressões e evidências locais:
+
+- suíte global passa com 91 testes; 23 são contratos de webhook;
+- contrato comprova `asOf` único, paginação completa, união determinística do shard e rejeição de cursor incompatível;
+- loop comprova travessia de páginas, deduplicação de workspace e parada graciosa após a unidade corrente;
+- integração Prisma comprova que retry futuro fica invisível e aparece exatamente ao vencer, seguindo até dispatch e settlement;
+- typecheck, 91 testes globais, contratos públicos, migrations, build e auditorias passam;
+- integrações SQLite de artifact, projeto, operação, webhook e API passam, assim como FFmpeg, bundle e render real do Remotion;
+- migration validada com 25 tabelas, 92 índices e 55 chaves estrangeiras.
+
+Limites explícitos desta slice:
+
+- a atribuição de `shardIndex/shardCount` ao processo ainda pertence ao deployment; coordenação dinâmica de ownership e autoscaling não foi implementada;
+- o adapter concreto do secret provider e o entrypoint de produção continuam pendentes;
+- mudanças concorrentes de status não formam snapshot transacional; claim e fencing permanecem a autoridade contra execução duplicada;
+- replay administrativo, rotação operacional, rate limit/circuit breaker e observabilidade continuam abertos;
+- hosted CI será registrado após publicação no próximo ciclo.

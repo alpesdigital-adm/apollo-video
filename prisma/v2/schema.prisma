@@ -611,6 +611,8 @@ model V2WebhookDelivery {
   @@index([status, nextAttemptAt, createdAt])
   @@index([status, leaseExpiresAt, createdAt])
   @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@index([workspaceId, status, nextAttemptAt, id])
+  @@index([workspaceId, status, leaseExpiresAt, id])
   @@map("webhook_deliveries")
 }
 

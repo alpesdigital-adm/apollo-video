@@ -28,3 +28,7 @@ Estados usados:
 - [ADR-024 — Challenge, assinatura e anti-replay de webhook](./ADR-024-webhook-challenge-signature-and-replay.md)
 - [ADR-025 — Transporte seguro do challenge de webhook](./ADR-025-safe-webhook-challenge-transport.md)
 - [ADR-026 — Fan-out transacional do outbox para webhooks](./ADR-026-transactional-webhook-fanout.md)
+- [ADR-027 — Claim, lease e fencing de deliveries de webhook](./ADR-027-webhook-delivery-leases-and-fencing.md)
+- [ADR-028 — Dispatch assinado de deliveries de webhook](./ADR-028-signed-webhook-delivery-dispatch.md)
+- [ADR-029 — Orquestração do worker de webhook deliveries](./ADR-029-webhook-delivery-worker-orchestration.md)
+- [ADR-030 — Descoberta e sharding de workspaces com webhook executável](./ADR-030-webhook-workspace-discovery-and-sharding.md)

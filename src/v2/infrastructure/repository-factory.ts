@@ -11,6 +11,7 @@ import {
 } from '../application/manage-webhook-delivery.ts'
 import { dispatchWebhookDeliveryService } from '../application/dispatch-webhook-delivery.ts'
 import { runNextWebhookDeliveryService } from '../application/run-webhook-delivery-worker.ts'
+import { discoverRunnableWebhookWorkspacesService } from '../application/discover-webhook-workspaces.ts'
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
 import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
@@ -34,6 +35,9 @@ import type {
   WebhookDeliveryDispatchTargetRepository,
   WebhookSigningSecretProvider,
 } from '../application/ports/webhook-delivery-dispatch.ts'
+import type {
+  WebhookWorkspaceDiscoveryRepository,
+} from '../application/ports/webhook-workspace-discovery-repository.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
@@ -109,8 +113,18 @@ export function createWebhookFanoutRepository(): WebhookFanoutRepository {
 }
 
 export function createWebhookDeliveryRepository(): WebhookDeliveryRepository &
-  WebhookDeliveryDispatchTargetRepository {
+  WebhookDeliveryDispatchTargetRepository &
+  WebhookWorkspaceDiscoveryRepository {
   return new PrismaWebhookDeliveryRepository(resolveV2Client())
+}
+
+export function createWebhookWorkspaceDiscovery(
+  clock: () => Date = () => new Date(),
+) {
+  return discoverRunnableWebhookWorkspacesService({
+    repository: createWebhookDeliveryRepository(),
+    clock,
+  })
 }
 
 export function createWebhookDeliveryDispatcher(
@@ -198,6 +212,17 @@ export function createWebhookDeliveryRunner(
         : {}),
     }),
     heartbeatIntervalMs,
+  })
+}
+
+export function createWebhookDeliveryScheduler(
+  secrets: WebhookSigningSecretProvider,
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  return Object.freeze({
+    discover: createWebhookWorkspaceDiscovery(clock),
+    runNext: createWebhookDeliveryRunner(secrets, environment, clock),
   })
 }
 

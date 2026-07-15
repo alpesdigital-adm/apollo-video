@@ -14,6 +14,9 @@ import type {
 import type {
   WebhookDeliveryDispatchTargetRepository,
 } from '../../application/ports/webhook-delivery-dispatch.ts'
+import type {
+  WebhookWorkspaceDiscoveryRepository,
+} from '../../application/ports/webhook-workspace-discovery-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
@@ -94,7 +97,10 @@ function persistenceConflict(message: string): never {
 }
 
 export class PrismaWebhookDeliveryRepository
-  implements WebhookDeliveryRepository, WebhookDeliveryDispatchTargetRepository {
+  implements
+    WebhookDeliveryRepository,
+    WebhookDeliveryDispatchTargetRepository,
+    WebhookWorkspaceDiscoveryRepository {
   private readonly client: PrismaClient
 
   constructor(client: PrismaClient = prisma) {
@@ -219,6 +225,36 @@ export class PrismaWebhookDeliveryRepository
       }
       return null
     })
+  }
+
+  async listRunnableWorkspaceIds(
+    query: Parameters<WebhookWorkspaceDiscoveryRepository['listRunnableWorkspaceIds']>[0],
+  ) {
+    const asOf = new Date(query.asOf)
+    const rows = await this.client.v2Workspace.findMany({
+      where: {
+        status: 'active',
+        createdAt: { lte: asOf },
+        ...(query.afterWorkspaceId ? { id: { gt: query.afterWorkspaceId } } : {}),
+        webhookDeliveries: {
+          some: {
+            createdAt: { lte: asOf },
+            subscription: {
+              is: { status: 'active', endpoint: { is: { status: 'active' } } },
+            },
+            OR: [
+              { status: 'pending', nextAttemptAt: { lte: asOf } },
+              { status: 'retry-scheduled', nextAttemptAt: { lte: asOf } },
+              { status: 'in-flight', leaseExpiresAt: { lte: asOf } },
+            ],
+          },
+        },
+      },
+      orderBy: { id: 'asc' },
+      take: query.limit,
+      select: { id: true },
+    })
+    return Object.freeze(rows.map((row) => row.id))
   }
 
   async getDispatchTarget(
