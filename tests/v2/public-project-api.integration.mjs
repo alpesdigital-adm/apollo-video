@@ -1801,20 +1801,83 @@ test('authenticated public API manages projects, clients and artifact inspection
           scopes: ['projects:read'],
         }),
       })
-    const childCreatedResponse = await createChildRequest()
-    const childCreated = await childCreatedResponse.json()
-    assert.equal(childCreatedResponse.status, 201)
+    const childConcurrentResponses = await Promise.all([
+      createChildRequest(),
+      createChildRequest(),
+    ])
+    assert.deepEqual(
+      childConcurrentResponses.map((response) => response.status).sort(),
+      [200, 201],
+    )
+    const childConcurrentBodies = await Promise.all(
+      childConcurrentResponses.map((response) => response.json()),
+    )
+    const childCreated = childConcurrentBodies.find((body) => body.data.replayed === false)
+    const childReplay = childConcurrentBodies.find((body) => body.data.replayed === true)
+    assert.ok(childCreated)
+    assert.ok(childReplay)
     assert.equal(childCreated.data.secretAvailable, true)
     assert.equal(typeof childCreated.data.token, 'string')
     assert.equal(childCreated.data.replayed, false)
-
-    const childReplayResponse = await createChildRequest()
-    const childReplay = await childReplayResponse.json()
-    assert.equal(childReplayResponse.status, 200)
     assert.equal(childReplay.data.replayed, true)
     assert.equal(childReplay.data.secretAvailable, false)
     assert.equal('token' in childReplay.data, false)
     assert.equal(childReplay.data.client.id, childCreated.data.client.id)
+
+    const responseLossRequest = () =>
+      fetch(`${baseUrl}/v1/workspaces/${workspaceId}/clients`, {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'public-create-client-response-loss-1',
+        },
+        body: JSON.stringify({
+          name: 'Client with discarded response',
+          environment: apiEnvironment,
+          scopes: ['projects:read'],
+        }),
+      })
+    const discardedResponse = await responseLossRequest()
+    assert.equal(discardedResponse.status, 201)
+    const recoveredResponse = await responseLossRequest()
+    const recovered = await recoveredResponse.json()
+    assert.equal(recoveredResponse.status, 200)
+    assert.equal(recovered.data.replayed, true)
+    assert.equal(recovered.data.secretAvailable, false)
+    assert.equal('token' in recovered.data, false)
+
+    const mismatchedClientRequest = (name) =>
+      fetch(`${baseUrl}/v1/workspaces/${workspaceId}/clients`, {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'public-create-client-concurrent-mismatch-1',
+        },
+        body: JSON.stringify({
+          name,
+          environment: apiEnvironment,
+          scopes: ['projects:read'],
+        }),
+      })
+    const mismatchedResponses = await Promise.all([
+      mismatchedClientRequest('Concurrent client A'),
+      mismatchedClientRequest('Concurrent client B'),
+    ])
+    assert.deepEqual(
+      mismatchedResponses.map((response) => response.status).sort(),
+      [201, 409],
+    )
+    const mismatchedBodies = await Promise.all(
+      mismatchedResponses.map((response) => response.json()),
+    )
+    const mismatchedWinner = mismatchedBodies.find((body) => body.data)
+    const mismatchedFailure = mismatchedBodies.find((body) => body.error)
+    assert.equal(mismatchedWinner.data.replayed, false)
+    assert.equal(mismatchedWinner.data.secretAvailable, true)
+    assert.equal(typeof mismatchedWinner.data.token, 'string')
+    assert.equal(mismatchedFailure.error.code, 'IDEMPOTENCY_PAYLOAD_MISMATCH')
 
     const childAuthorization = `Bearer ${childCreated.data.token}`
     const childCapabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`, {

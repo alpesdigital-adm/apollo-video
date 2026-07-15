@@ -150,6 +150,14 @@ se persistirem, tornam-se um conflito explícito. As linhas ainda
 permanecem pendentes internamente: dispatcher e entrega externa não fazem parte
 deste incremento.
 
+A administração externa de clientes em `POST /v1/workspaces/{workspaceId}/clients`
+também é serializável e idempotente. Duas chamadas simultâneas com a mesma chave
+e payload criam um único cliente e uma única credencial: somente a vencedora
+recebe o bearer token one-shot, enquanto todos os replays são redigidos. Se a
+primeira resposta for perdida, repetir a chamada recupera apenas os metadados;
+o token não pode ser reaberto. Reutilizar a chave com outro payload produz um
+único vencedor e conflito explícito para a chamada divergente.
+
 Endpoints e subscriptions de webhook possuem modelos duráveis separados, filtros
 exatos pelo catálogo e referências opacas para secrets de assinatura. O núcleo de
 challenge one-shot, HMAC sobre bytes exatos, timestamp e receipt anti-replay já é

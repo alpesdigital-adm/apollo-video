@@ -6,6 +6,7 @@ import {
   revokeApiCredentialService,
 } from '../../src/v2/application/administer-api-clients.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { PrismaApiClientRepository } from '../../src/v2/infrastructure/prisma/api-client-repository.ts'
 import { nodeApiCredentialCrypto } from '../../src/v2/infrastructure/security/api-credential.ts'
 
 class InMemoryAdministrationRepository {
@@ -18,6 +19,7 @@ class InMemoryAdministrationRepository {
   }
 
   async createOrReplay(bundle) {
+    this.lastCreateBundle = bundle
     const identity = `${bundle.idempotency.workspaceId}:${bundle.idempotency.actorClientId}:${bundle.idempotency.key}`
     const existing = this.idempotency.get(identity)
     if (existing) return { ...existing, replayed: true }
@@ -99,6 +101,33 @@ test('idempotent client creation only returns the bearer token once', async () =
   assert.equal(replay.token, undefined)
   assert.equal(replay.client.id, first.client.id)
   assert.equal(replay.credential.id, first.credential.id)
+})
+
+test('API client creation retries concurrent write conflicts before failing explicitly', async () => {
+  const source = new InMemoryAdministrationRepository()
+  const execute = createApiClientAdministrationService(dependencies(source))
+  await execute({
+    actor: actor(),
+    workspaceId: 'workspace-1',
+    name: 'Read Agent',
+    scopes: ['projects:read'],
+    idempotencyKey: 'create-read-agent-retry-fixture',
+  })
+  let attempts = 0
+  const repository = new PrismaApiClientRepository({
+    async $transaction() {
+      attempts += 1
+      const error = new Error('concurrent write conflict')
+      error.code = attempts % 2 === 0 ? 'P2002' : 'P2034'
+      throw error
+    },
+  })
+
+  await assert.rejects(
+    () => repository.createOrReplay(source.lastCreateBundle),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
 })
 
 test('credential used by the current request cannot revoke itself', async () => {

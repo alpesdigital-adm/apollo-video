@@ -506,7 +506,7 @@
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
-- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; os demais commands externos continuam abertos.
+- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação de cliente de API cobre os mesmos interleavings preservando divulgação one-shot do token; os demais commands externos continuam abertos.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
@@ -4361,7 +4361,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-060 — Concorrência e resposta perdida na criação de projetos
 
-**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+**Status:** publicado em 15 de julho de 2026 no commit `66977f0`; CI hospedada `29458567299` aprovada integralmente em PostgreSQL.
 
 Entregas:
 
@@ -4382,6 +4382,34 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- confirmação dos mesmos interleavings no PostgreSQL fica para a CI hospedada da publicação;
+- os mesmos interleavings foram confirmados no PostgreSQL pela CI hospedada da publicação;
 - os demais commands externos idempotentes ainda precisam das mesmas regressões concorrentes;
 - o retry automático é restrito a conflitos de serialização e não mascara erros de domínio ou payload divergente.
+
+### Slice F0-061 — Concorrência e token one-shot na criação de clientes de API
+
+**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+
+Entregas:
+
+- criação administrativa de cliente passa a usar isolamento serializável;
+- conflitos de unicidade concorrente e serialização são repetidos até três vezes antes de `PERSISTENCE_CONFLICT` explícito;
+- dois requests HTTP simultâneos e idênticos convergem para um cliente e uma credencial;
+- exatamente uma resposta retorna status 201, `secretAvailable=true` e bearer token; o replay retorna status 200 e nunca contém token;
+- primeira resposta deliberadamente descartada é recuperada por retry redigido, sem possibilidade de reabrir o segredo;
+- mesma chave usada simultaneamente com payloads diferentes produz um vencedor e `IDEMPOTENCY_PAYLOAD_MISMATCH`;
+- ADR-050 formaliza os invariantes de concorrência e divulgação one-shot.
+
+Regressões e evidências locais:
+
+- jornada HTTP real passou cinco execuções SQLite consecutivas com os novos interleavings;
+- teste unitário alterna conflitos `P2034` e `P2002`, comprova três tentativas e conflito explícito ao final;
+- suíte geral permanece verde com 126 testes, além das integrações Prisma, artifacts, operations, webhooks, FFmpeg e render real;
+- build de produção, typecheck, bundle Remotion e auditorias sem vulnerabilidades permanecem verdes;
+- contratos permanecem em 47 capabilities, 61 schemas, 82 exemplos e 41 paths; schema permanece com 28 tabelas, 110 índices e 59 chaves estrangeiras.
+
+Limites explícitos desta slice:
+
+- confirmação PostgreSQL fica para a CI hospedada da publicação;
+- rotação de credencial continua com idempotência sequencial e receberá regressão concorrente própria;
+- token perdido depois da primeira resposta não é recuperável; o administrador deve criar ou rotacionar outra credencial.

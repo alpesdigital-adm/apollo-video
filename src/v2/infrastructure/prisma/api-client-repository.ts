@@ -1,8 +1,9 @@
-import type {
-  PrismaClient,
-  V2ApiClient,
-  V2ApiCredential,
-  V2IdempotencyRecord,
+import {
+  Prisma,
+  type PrismaClient,
+  type V2ApiClient,
+  type V2ApiCredential,
+  type V2IdempotencyRecord,
 } from '@prisma/client'
 
 import { prisma } from '../../../lib/db.ts'
@@ -33,6 +34,15 @@ interface StoredAdministrationResponse {
   operation: 'api-client.create' | 'api-credential.rotate'
   clientId: string
   credentialId: string
+}
+
+function isConcurrentWriteConflict(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error.code === 'P2002' || error.code === 'P2034')
+  )
 }
 
 function hydrateClient(row: V2ApiClient): ApiClient {
@@ -225,8 +235,11 @@ export class PrismaApiClientRepository
     return rows.map(hydrateClient)
   }
 
-  async createOrReplay(bundle: CreateApiClientBundle): Promise<ApiCredentialMutationResult> {
-    return this.client.$transaction(async (transaction) => {
+  async createOrReplay(
+    bundle: CreateApiClientBundle,
+    concurrentWriteAttempt = 1,
+  ): Promise<ApiCredentialMutationResult> {
+    const result = this.client.$transaction(async (transaction) => {
       const key = {
         workspaceId_clientId_key: {
           workspaceId: bundle.idempotency.workspaceId,
@@ -321,6 +334,17 @@ export class PrismaApiClientRepository
         credential: hydrateCredential(credentialRow),
         replayed: false,
       }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+
+    return result.catch((error: unknown) => {
+      if (!isConcurrentWriteConflict(error)) throw error
+      if (concurrentWriteAttempt < 3) {
+        return this.createOrReplay(bundle, concurrentWriteAttempt + 1)
+      }
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'API client creation conflicted with another transaction',
+      )
     })
   }
 
