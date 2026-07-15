@@ -27,6 +27,7 @@ export interface WebhookDeliveryDispatchTargetRepository {
 }
 
 export interface WebhookSigningSecretProvider {
+  // Returns a fresh disposable byte array. The dispatcher zeroes it after copying.
   open(request: Readonly<{
     workspaceId: string
     endpointId: string

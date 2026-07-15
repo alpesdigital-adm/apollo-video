@@ -122,7 +122,11 @@ export function dispatchWebhookDeliveryService(dependencies: {
       } catch {
         return settleFailure('secret_unavailable', true)
       }
-      secret = Buffer.from(opened)
+      try {
+        secret = Buffer.from(opened)
+      } finally {
+        opened.fill(0)
+      }
       const fingerprint = createHash('sha256').update(secret).digest('hex')
       if (fingerprint !== target.secretFingerprint) {
         return settleFailure('signing_key_mismatch', false)

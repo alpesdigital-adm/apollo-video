@@ -59,6 +59,7 @@ import {
   SafeWebhookChallengeTransport,
 } from '../../src/v2/infrastructure/webhook/safe-webhook-challenge-transport.ts'
 import { SafeWebhookDeliveryTransport } from '../../src/v2/infrastructure/webhook/safe-webhook-delivery-transport.ts'
+import { createEnvironmentWebhookSigningSecretProvider } from '../../src/v2/infrastructure/security/environment-webhook-signing-secret-provider.ts'
 
 const ids = {
   'webhook-endpoint': '00000000-0000-4000-8000-000000000101',
@@ -105,6 +106,66 @@ test('webhook registration normalizes a pending endpoint, opaque secret and exac
   assert.equal(persisted, result)
   assert.ok(Object.isFrozen(result.endpoint))
   assert.ok(Object.isFrozen(result.subscription.filter.eventTypes))
+})
+
+test('environment signing secret provider opens only an exact bound version with fresh bytes', async () => {
+  const secret = Buffer.alloc(32, 42)
+  const endpointId = ids['webhook-endpoint']
+  const keyRef = 'vault://apollo/workspaces/workspace-1/webhooks/key-1'
+  const provider = createEnvironmentWebhookSigningSecretProvider({
+    APOLLO_V2_WEBHOOK_SIGNING_SECRETS_JSON: JSON.stringify([{
+      workspaceId: 'workspace-1',
+      endpointId,
+      keyRef,
+      version: 1,
+      secretBase64url: secret.toString('base64url'),
+    }]),
+  })
+  const request = { workspaceId: 'workspace-1', endpointId, keyRef, version: 1 }
+  const first = await provider.open(request)
+  assert.deepEqual(Buffer.from(first), secret)
+  first.fill(0)
+  assert.deepEqual(Buffer.from(await provider.open(request)), secret)
+  for (const changed of [
+    { ...request, workspaceId: 'workspace-2' },
+    { ...request, endpointId: '00000000-0000-4000-8000-000000000199' },
+    { ...request, keyRef: 'vault://apollo/workspaces/workspace-1/webhooks/key-2' },
+    { ...request, version: 2 },
+  ]) {
+    await assert.rejects(
+      () => provider.open(changed),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_SECRET_UNAVAILABLE',
+    )
+  }
+})
+
+test('environment signing secret provider rejects ambiguous configuration without disclosure', () => {
+  const encodedSecret = Buffer.alloc(32, 73).toString('base64url')
+  const valid = {
+    workspaceId: 'workspace-1',
+    endpointId: ids['webhook-endpoint'],
+    keyRef: 'vault://apollo/workspaces/workspace-1/webhooks/key-1',
+    version: 1,
+    secretBase64url: encodedSecret,
+  }
+  for (const configured of [
+    '',
+    'not-json',
+    '[]',
+    JSON.stringify([{ ...valid, extra: true }]),
+    JSON.stringify([{ ...valid, secretBase64url: Buffer.alloc(16, 1).toString('base64url') }]),
+    JSON.stringify([valid, valid]),
+  ]) {
+    assert.throws(
+      () => createEnvironmentWebhookSigningSecretProvider({
+        APOLLO_V2_WEBHOOK_SIGNING_SECRETS_JSON: configured,
+      }),
+      (error) =>
+        error instanceof DomainError &&
+        error.code === 'PERSISTENCE_NOT_CONFIGURED' &&
+        !error.message.includes(encodedSecret),
+    )
+  }
 })
 
 test('webhook models reject unsafe targets, ambiguous filters and secret material', () => {
@@ -361,6 +422,7 @@ test('dispatcher opens matching secret only in memory and settles signed success
   const deliveryId = '00000000-0000-4000-8000-000000000905'
   const rawBody = Buffer.from('{"id":"event"}', 'utf8')
   const commands = []
+  let openedSecret
   let transported = 0
   const repository = {
     async getDispatchTarget(fence) {
@@ -391,7 +453,8 @@ test('dispatcher opens matching secret only in memory and settles signed success
     secrets: {
       async open(request) {
         assert.equal(request.keyRef, 'vault://apollo/workspaces/workspace-1/webhooks/key-1')
-        return secret
+        openedSecret = Uint8Array.from(secret)
+        return openedSecret
       },
     },
     transport: {
@@ -425,6 +488,7 @@ test('dispatcher opens matching secret only in memory and settles signed success
   assert.equal(commands[1].leaseTokenHash, lease.tokenHash)
   assert.equal(JSON.stringify(commands).includes(lease.token), false)
   assert.equal(secret.equals(Buffer.alloc(32, 13)), true)
+  assert.deepEqual(openedSecret, new Uint8Array(32))
 })
 
 test('dispatcher retries transient failures deterministically and dead-letters key mismatch', async () => {
@@ -475,7 +539,7 @@ test('dispatcher retries transient failures deterministically and dead-letters k
   }
   const dispatch = dispatchWebhookDeliveryService({
     repository,
-    secrets: { async open() { return secret } },
+    secrets: { async open() { return Uint8Array.from(secret) } },
     transport: { async send() { transports += 1; throw new Error('offline') } },
     clock: () => now,
   })

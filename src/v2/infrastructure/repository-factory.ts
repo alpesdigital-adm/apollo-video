@@ -80,6 +80,7 @@ import { LocalArtifactRenderInputResolver } from './local-artifact-render-input-
 import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts'
 import { createConfiguredRenderTargetRegistry } from './render-target-registry.ts'
 import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
+import { createEnvironmentWebhookSigningSecretProvider } from './security/environment-webhook-signing-secret-provider.ts'
 
 // The two generated clients expose the same v2 model delegates. This cast is
 // kept at the persistence boundary so application and public API code remain
@@ -195,6 +196,12 @@ export function createWebhookDeliveryDispatcher(
       ? { retryMaxDelayMs: configuredRetryMax }
       : {}),
   })
+}
+
+export function createConfiguredWebhookSigningSecretProvider(
+  environment: NodeJS.ProcessEnv = process.env,
+): WebhookSigningSecretProvider {
+  return createEnvironmentWebhookSigningSecretProvider(environment)
 }
 
 export function createWebhookDeliveryWorker(

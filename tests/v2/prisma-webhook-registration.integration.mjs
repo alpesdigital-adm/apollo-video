@@ -72,6 +72,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { nodeApiCredentialCrypto } = await import(
     '../../src/v2/infrastructure/security/api-credential.ts'
   )
+  const { createEnvironmentWebhookSigningSecretProvider } = await import(
+    '../../src/v2/infrastructure/security/environment-webhook-signing-secret-provider.ts'
+  )
 
   const client = new PrismaClient()
   const workspaceId = 'webhook-integration-workspace'
@@ -522,15 +525,15 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.deepEqual((await discoverWorkspaces()).workspaceIds, [workspaceId])
     const dispatchDelivery = dispatchWebhookDeliveryService({
       repository: deliveryRepository,
-      secrets: {
-        async open(secretRequest) {
-          assert.equal(secretRequest.workspaceId, workspaceId)
-          assert.equal(secretRequest.endpointId, endpoint.id)
-          assert.equal(secretRequest.keyRef, request.secret.keyRef)
-          assert.equal(secretRequest.version, 1)
-          return webhookSigningKey
-        },
-      },
+      secrets: createEnvironmentWebhookSigningSecretProvider({
+        APOLLO_V2_WEBHOOK_SIGNING_SECRETS_JSON: JSON.stringify([{
+          workspaceId,
+          endpointId: endpoint.id,
+          keyRef: request.secret.keyRef,
+          version: 1,
+          secretBase64url: webhookSigningKey.toString('base64url'),
+        }]),
+      }),
       transport: {
         async send(transportRequest) {
           const eventBody = JSON.parse(Buffer.from(transportRequest.rawBody).toString('utf8'))

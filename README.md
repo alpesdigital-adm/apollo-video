@@ -162,6 +162,21 @@ individualmente ou por um event ID exato. O replay por evento avalia no máximo
 todo o histórico de attempts; replay por intervalo continua reservado para uma
 operação durável com preflight.
 
+O worker de entrega pode ser iniciado com `npm run worker:v2:webhook`. Ele exige
+Postgres no ambiente de produção e um catálogo protegido em
+`APOLLO_V2_WEBHOOK_SIGNING_SECRETS_JSON`, com entradas no formato abaixo:
+
+```json
+[{"workspaceId":"workspace-1","endpointId":"00000000-0000-4000-8000-000000000001","keyRef":"vault://apollo/workspaces/workspace-1/webhooks/key-1","version":1,"secretBase64url":"<secret-base64url-de-32-bytes-ou-mais>"}]
+```
+
+O catálogo deve ser injetado pelo secret manager da plataforma e nunca
+versionado. O adapter exige correspondência exata de workspace, endpoint,
+referência e versão, enquanto o dispatcher ainda confere o fingerprint antes de
+assinar. Sharding e ritmo usam `APOLLO_V2_WEBHOOK_SHARD_COUNT`,
+`APOLLO_V2_WEBHOOK_SHARD_INDEX`, `APOLLO_V2_WEBHOOK_SCAN_LIMIT` e
+`APOLLO_V2_WEBHOOK_POLL_MS`.
+
 ## Formatos
 
 - **Vertical (9:16)** — Shorts, Reels, TikTok

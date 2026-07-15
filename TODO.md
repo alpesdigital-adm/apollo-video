@@ -495,7 +495,7 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-044: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem fan-out, claim/lease, dispatch assinado, transporte DNS-pinado, heartbeat, discovery/sharding, backoff, dead-letter e replay individual ou por evento exato, ambos idempotentes. Adapter concreto do secret provider, coordenação de rebalanceamento e replay por intervalo continuam abertos.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-045: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem fan-out, claim/lease, dispatch assinado, transporte DNS-pinado, heartbeat, discovery/sharding, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay individual ou por evento exato, ambos idempotentes. Coordenação de rebalanceamento e replay por intervalo continuam abertos.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044: API externa lista/lê diagnostics e executa replay controlado individual ou por evento exato; UI, endpoints/subscriptions e rotação de secret continuam abertos.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
@@ -3808,7 +3808,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-044 — Replay administrativo por evento exato
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** publicado em 15 de julho de 2026 no commit `ab85061`; hosted CI `29407811656` aprovado.
 
 Entregas:
 
@@ -3832,7 +3832,7 @@ Regressões e evidências locais:
 - jornada HTTP cobre OpenAPI, 422 sem chave, 202 inicial, 200 idempotente, 409 sem elegíveis, redaction e 403 sem scope;
 - contratos públicos passam com 31 capabilities, 37 schemas, 47 exemplos e 28 paths;
 - build registra `/v1/webhooks/events/{eventId}/replay`;
-- integração SQLite dedicada de webhook e jornada pública passam; PostgreSQL será confirmado pelo hosted CI após publicação.
+- hosted CI `29407811656` aprovou PostgreSQL, 96 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
 
 Limites explícitos desta slice:
 
@@ -3841,3 +3841,38 @@ Limites explícitos desta slice:
 - não há cancelamento específico após a aceitação além das regras normais do worker;
 - rotação de secret, mutações de endpoint/subscription e UI continuam abertas;
 - política de retenção/purge do ledger e attempts permanece operacional.
+
+### Slice F0-045 — Secret provider e entrypoint operacional de webhook
+
+**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- adapter concreto lê um catálogo protegido de signing secrets do ambiente sem persistir material no banco;
+- cada secret é vinculado exatamente a workspace, endpoint, referência opaca e versão;
+- boot falha fechado para configuração ausente, malformada, duplicada, grande demais ou com secret fora de 32–512 bytes;
+- catálogo aceita no máximo 1.000 entradas e 256 KiB, sem campos desconhecidos;
+- mensagens de erro não incluem configuração, referência ou bytes sensíveis;
+- cada abertura entrega bytes novos; temporários do adapter e o array devolvido ao dispatcher são zerados;
+- fingerprint persistido continua sendo verificado antes da rede;
+- factory expõe construção configurada sem fallback inseguro;
+- `worker:v2:webhook` inicia discovery e runner com lease owner único, sharding limitado e encerramento gracioso;
+- ADR-034 formaliza binding, redaction, lifecycle dos bytes e fronteira com providers externos/rotação futura.
+
+Regressões e evidências locais:
+
+- suíte global passa com 98 testes; 30 são contratos de webhook;
+- contratos cobrem binding exato, cópias independentes, request divergente e configurações ambíguas sem disclosure;
+- contrato do dispatcher confirma descarte do array aberto pelo provider;
+- integração Prisma executa assinatura e settlement usando o adapter concreto;
+- entrypoint passa por verificação sintática e permanece interno: nenhuma capability externa pode ler material secreto;
+- contratos públicos permanecem compatíveis com 31 capabilities, 37 schemas, 47 exemplos e 28 paths;
+- migration permanece válida com 25 tabelas, 95 índices e 55 chaves estrangeiras;
+- todas as integrações SQLite, build, FFmpeg, Remotion real, bundle e auditorias sem vulnerabilidades passam.
+
+Limites explícitos desta slice:
+
+- rotação administrativa, reload dinâmico e integração nativa com vault/KMS continuam abertos;
+- o catálogo protegido é apropriado para a primeira operação, mas deployments maiores deverão usar outro adapter da mesma porta;
+- rebalanceamento coordenado entre shards e replay por intervalo continuam abertos;
+- métricas, circuit breaker, rate limits e UI operacional permanecem futuras.
