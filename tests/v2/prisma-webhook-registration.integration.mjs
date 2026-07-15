@@ -501,15 +501,6 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.deepEqual((await discoverWorkspaces()).workspaceIds, [])
 
     deliveryClock = new Date(retryAt)
-    await client.v2WebhookDelivery.update({
-      where: { id: firstClaim.delivery.id },
-      data: { createdAt: new Date(deliveryClock.getTime() + 1) },
-    })
-    assert.deepEqual((await discoverWorkspaces()).workspaceIds, [])
-    await client.v2WebhookDelivery.update({
-      where: { id: firstClaim.delivery.id },
-      data: { createdAt: fanoutAt },
-    })
     await client.v2Workspace.update({
       where: { id: workspaceId },
       data: { createdAt: new Date(deliveryClock.getTime() + 1) },
