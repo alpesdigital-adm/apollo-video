@@ -681,6 +681,15 @@ test('authenticated public API manages projects, clients and artifact inspection
       'apollo.webhooks.endpoints.signing-secrets.rotations.read',
     )
     assert.equal(
+      openApi.paths['/v1/webhooks/signing-secrets/hygiene'].post['x-apollo-capability-id'],
+      'apollo.webhooks.signing-secrets.hygiene.run',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/signing-secrets/hygiene'].post
+        .requestBody.content['application/json'].schema.$ref,
+      '#/components/schemas/RunWebhookSigningSecretHygieneRequestV1',
+    )
+    assert.equal(
       openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/activate'].post[
         'x-apollo-capability-id'
       ],
@@ -879,6 +888,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.webhooks.endpoints.signing-secrets.rotations.cancel',
         'apollo.webhooks.endpoints.signing-secrets.rotations.list',
         'apollo.webhooks.endpoints.signing-secrets.rotations.read',
+        'apollo.webhooks.signing-secrets.hygiene.run',
         'apollo.webhooks.subscriptions.create',
         'apollo.webhooks.subscriptions.list',
         'apollo.webhooks.subscriptions.read',
@@ -1285,6 +1295,56 @@ test('authenticated public API manages projects, clients and artifact inspection
       `${stageRotationUrl}/${stagedRotation.data.rotation.id}/cancel`,
       { baseRevision: stageRotationBody.baseRevision },
     )).status, 409)
+    const thirdStageRotationResponse = await stageRotation(
+      'public-secret-rotation-stage-3',
+      secondStageRotationBody,
+    )
+    const thirdStagedRotation = await thirdStageRotationResponse.json()
+    assert.equal(thirdStageRotationResponse.status, 201)
+    assert.equal(thirdStagedRotation.data.rotation.candidateVersion, 4)
+    const hygieneNow = new Date()
+    await client.v2WebhookSigningSecretRotation.update({
+      where: { id: thirdStagedRotation.data.rotation.id },
+      data: {
+        createdAt: new Date(hygieneNow.getTime() - 2_000),
+        expiresAt: new Date(hygieneNow.getTime() - 1_000),
+      },
+    })
+    const retiredSecret = await client.v2WebhookSigningSecret.findFirstOrThrow({
+      where: { endpointId: webhookEndpointId, status: 'retired' },
+    })
+    await client.v2WebhookSigningSecret.update({
+      where: { id: retiredSecret.id },
+      data: {
+        retiredAt: new Date(hygieneNow.getTime() - 2_000),
+        usableUntil: new Date(hygieneNow.getTime() - 1_000),
+      },
+    })
+    const hygieneResponse = await fetch(`${baseUrl}/v1/webhooks/signing-secrets/hygiene`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ limitPerKind: 100 }),
+    })
+    const hygiene = await hygieneResponse.json()
+    assert.equal(hygieneResponse.status, 200)
+    assert.equal(hygiene.data.expiredRotations, 1)
+    assert.equal(hygiene.data.destroyedRotationEnvelopes, 1)
+    assert.equal(hygiene.data.destroyedSigningSecretPayloads, 1)
+    assert.equal(hygiene.data.hasMore, false)
+    assert.equal((await client.v2WebhookSigningSecretRotation.findUniqueOrThrow({
+      where: { id: thirdStagedRotation.data.rotation.id },
+    })).status, 'expired')
+    assert.equal(await client.v2WebhookSigningSecretPayload.count({
+      where: { secretId: retiredSecret.id },
+    }), 0)
+    assert.equal(await client.v2WebhookSigningSecretPayload.count({
+      where: { endpointId: webhookEndpointId, secret: { status: 'active' } },
+    }), 1)
+    assert.equal((await fetch(`${baseUrl}/v1/webhooks/signing-secrets/hygiene`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ limitPerKind: 0 }),
+    })).status, 422)
     await client.v2WebhookSigningSecretPayload.deleteMany({
       where: { endpointId: createdEndpoint.data.endpoint.id },
     })

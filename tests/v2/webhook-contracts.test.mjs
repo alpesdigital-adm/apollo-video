@@ -9,6 +9,7 @@ import { provisionWebhookSigningSecretService } from '../../src/v2/application/p
 import { stageWebhookSigningSecretRotationService } from '../../src/v2/application/stage-webhook-signing-secret-rotation.ts'
 import { activateWebhookSigningSecretRotationService } from '../../src/v2/application/activate-webhook-signing-secret-rotation.ts'
 import { cancelWebhookSigningSecretRotationService } from '../../src/v2/application/cancel-webhook-signing-secret-rotation.ts'
+import { runWebhookSigningSecretHygieneService } from '../../src/v2/application/run-webhook-signing-secret-hygiene.ts'
 import {
   activateWebhookEndpointConvergentlyService,
   activateWebhookEndpointService,
@@ -1417,6 +1418,31 @@ test('webhook endpoint administration paginates with filter-bound cursors and sc
   await assert.rejects(
     () => read({ workspaceId: 'workspace-2', endpointId: records[0].endpoint.id }),
     (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_NOT_FOUND',
+  )
+})
+
+test('signing secret hygiene is workspace-scoped, bounded and clock-stable', async () => {
+  let command
+  const run = runWebhookSigningSecretHygieneService({
+    repository: {
+      async run(value) {
+        command = value
+        return {
+          asOf: value.asOf, expiredRotations: 1, destroyedRotationEnvelopes: 1,
+          destroyedSigningSecretPayloads: 2, hasMore: false,
+        }
+      },
+    },
+    clock: () => new Date('2026-07-15T12:00:00.000Z'),
+  })
+  const result = await run({ workspaceId: ' workspace-1 ', limitPerKind: 25 })
+  assert.equal(command.workspaceId, 'workspace-1')
+  assert.equal(command.asOf, '2026-07-15T12:00:00.000Z')
+  assert.equal(command.limitPerKind, 25)
+  assert.equal(result.destroyedSigningSecretPayloads, 2)
+  await assert.rejects(
+    () => run({ workspaceId: 'workspace-1', limitPerKind: 101 }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
 })
 

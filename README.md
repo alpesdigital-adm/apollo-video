@@ -208,6 +208,11 @@ e filtro opcional de status, e o item exato por
 As respostas incluem lifecycle, fingerprint, overlap e revisão-base necessária
 aos comandos, mas nunca retornam referências internas de chaves, IDs dos secrets
 ou campos do envelope cifrado.
+Material criptográfico que perdeu toda utilidade pode ser removido em lotes por
+`POST /v1/webhooks/signing-secrets/hygiene`, com `limitPerKind`. A operação marca
+preparos vencidos como `expired`, destrói seus envelopes e apaga payloads de
+secrets revogados ou aposentados após o overlap. Metadados históricos permanecem
+consultáveis, e a chave ativa nunca é candidata à higiene.
 
 A ativação é solicitada por
 `POST /v1/webhooks/endpoints/{endpointId}/challenge`, sem body. O Apollo faz um

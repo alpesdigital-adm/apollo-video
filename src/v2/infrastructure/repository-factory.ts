@@ -58,6 +58,7 @@ import type { WebhookEndpointCommandRepository } from '../application/ports/webh
 import type { WebhookEndpointCreationRepository } from '../application/ports/webhook-endpoint-creation-repository.ts'
 import type { WebhookSigningSecretProvisioningRepository } from '../application/ports/webhook-signing-secret-provisioning-repository.ts'
 import type { WebhookSigningSecretRotationRepository } from '../application/ports/webhook-signing-secret-rotation-repository.ts'
+import type { WebhookSigningSecretHygieneRepository } from '../application/ports/webhook-signing-secret-hygiene-repository.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
@@ -90,6 +91,7 @@ import { PrismaWebhookEndpointCommandRepository } from './prisma/webhook-endpoin
 import { PrismaWebhookEndpointCreationRepository } from './prisma/webhook-endpoint-creation-repository.ts'
 import { PrismaWebhookSigningSecretProvisioningRepository } from './prisma/webhook-signing-secret-provisioning-repository.ts'
 import { PrismaWebhookSigningSecretRotationRepository } from './prisma/webhook-signing-secret-rotation-repository.ts'
+import { PrismaWebhookSigningSecretHygieneRepository } from './prisma/webhook-signing-secret-hygiene-repository.ts'
 import { PrismaWebhookSigningSecretProvider } from './prisma/webhook-signing-secret-provider.ts'
 import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
 import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-transport.ts'
@@ -168,6 +170,10 @@ export function createWebhookSigningSecretProvisioningRepository(): WebhookSigni
 
 export function createWebhookSigningSecretRotationRepository(): WebhookSigningSecretRotationRepository {
   return new PrismaWebhookSigningSecretRotationRepository(resolveV2Client())
+}
+
+export function createWebhookSigningSecretHygieneRepository(): WebhookSigningSecretHygieneRepository {
+  return new PrismaWebhookSigningSecretHygieneRepository(resolveV2Client())
 }
 
 export function createConfiguredWebhookSigningSecretProtector() {

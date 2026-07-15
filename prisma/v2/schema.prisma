@@ -561,6 +561,7 @@ model V2WebhookSigningSecret {
   @@unique([id, workspaceId, endpointId, version])
   @@unique([endpointId, version])
   @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@index([workspaceId, status, usableUntil])
   @@index([endpointId, status, usableUntil])
   @@map("webhook_signing_secrets")
 }
@@ -617,6 +618,7 @@ model V2WebhookSigningSecretRotation {
   @@unique([id, workspaceId])
   @@unique([endpointId, candidateVersion])
   @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@index([workspaceId, status, expiresAt])
   @@index([endpointId, status, expiresAt])
   @@map("webhook_signing_secret_rotations")
 }

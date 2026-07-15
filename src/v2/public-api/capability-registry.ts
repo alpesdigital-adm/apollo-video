@@ -847,6 +847,18 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
   {
+    id: 'apollo.webhooks.signing-secrets.hygiene.run', version: '1.0.0',
+    title: 'Run webhook signing secret hygiene',
+    description: 'Expires a bounded page of stale staged rotations and destroys payloads for revoked or overlap-expired signing secrets in the authenticated workspace.',
+    exposure: 'workspace-admin', operationKind: 'command', authMode: 'required', requiredScopes: ['webhooks:admin'],
+    inputSchemaRef: 'apollo://schemas/run-webhook-signing-secret-hygiene-request/v1',
+    outputSchemaRef: 'apollo://schemas/webhook-signing-secret-hygiene-result/v1',
+    endpoint: { method: 'POST', path: '/v1/webhooks/signing-secrets/hygiene' },
+    toolName: 'apollo.webhooks.signing-secrets.hygiene.run', supportsDryRun: false,
+    costClass: 'free', confirmation: 'human-approval', successStatuses: [200],
+    idempotency: 'natural', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.webhooks.subscriptions.create', version: '1.0.0',
     title: 'Create webhook subscription',
     description: 'Creates one exact event/resource subscription for an existing workspace endpoint with durable idempotency.',

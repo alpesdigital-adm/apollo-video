@@ -496,7 +496,7 @@
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057: API externa cria/lista/lê endpoints, subscriptions e rotações redigidas, provisiona chave HMAC pendente, prepara, ativa e cancela rotação com overlap, executa challenge, replay e lifecycle; UI continua aberta.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057/F0-058: API externa cria/lista/lê endpoints, subscriptions e rotações redigidas, provisiona chave HMAC pendente, prepara, ativa, cancela e executa higiene limitada da rotação com overlap, challenge, replay e lifecycle; UI continua aberta.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057: capabilities entregam cadastro idempotente, provisionamento one-shot, rotação ativa em duas fases com cancelamento seguro e consulta redigida, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; UI continua aberta.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057/F0-058: capabilities entregam cadastro idempotente, provisionamento one-shot, rotação ativa em duas fases com cancelamento, consulta e higiene segura, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; UI continua aberta.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -4265,7 +4265,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-057 — Consulta e listagem redigida de rotações HMAC
 
-**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação das integrações PostgreSQL na publicação.
+**Status:** publicado em `main` nos commits `b21c033` e `9672806`; CI hospedada `29454974517` aprovada em 15 de julho de 2026.
 
 Entregas:
 
@@ -4294,3 +4294,38 @@ Limites explícitos desta slice:
 - consulta não altera estado: preparo vencido continua duravelmente `staged` até cancelamento/expiração explícita ou manutenção futura, sempre com `expiresAt` visível;
 - UI administrativa continua futura;
 - higiene automática de envelopes e payloads aposentados após o overlap continua em incremento separado.
+
+### Slice F0-058 — Higiene limitada de material criptográfico de webhook
+
+**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL/HTTP na publicação.
+
+Entregas:
+
+- capability `apollo.webhooks.signing-secrets.hygiene.run` expõe `POST /v1/webhooks/signing-secrets/hygiene` sob `webhooks:admin` e confirmação humana;
+- body fechado exige `limitPerKind` de 1 a 100, limitando separadamente rotações vencidas e payloads terminais;
+- um único `asOf` estável governa a execução e aparece na resposta;
+- rotações `staged` vencidas passam a `expired`, recebem `cancelledAt` e perdem atomicamente todos os campos do envelope;
+- payloads de secrets revogados ou aposentados cujo overlap terminou são apagados fisicamente, preservando metadata e histórico;
+- chave ativa e chave aposentada ainda dentro do overlap não são tocadas;
+- adapter seleciona apenas IDs dos candidatos e nunca carrega ciphertext, nonce, auth tag ou keyRef para a aplicação;
+- execução serializável é convergente: nova chamada após esgotamento retorna contagens zero;
+- resposta informa somente contagens, `asOf` e `hasMore`, permitindo automação externa por páginas;
+- numeração da candidata agora considera também versões canceladas/expiradas, impedindo colisão ou reutilização após cancelamento;
+- ADR-047 formaliza elegibilidade, limites, redaction e monotonicidade das versões.
+
+Regressões e evidências locais:
+
+- suíte global passa com 124 testes; 56 são contratos de webhook;
+- contrato cobre workspace, limite e relógio estável antes de persistência;
+- integração SQLite cobre cancelamento v3, preparação/ativação v4, preparo v5, expiração v5, destruição do envelope, remoção do payload aposentado, preservação do payload ativo e replay vazio;
+- jornada HTTP cobre capability/OpenAPI, execução efetiva, limite inválido e ausência de material sensível;
+- contratos públicos passam com 47 capabilities, 61 schemas, 82 exemplos e 41 paths;
+- build registra `POST /v1/webhooks/signing-secrets/hygiene`;
+- schema/migration passam a 28 tabelas, 110 índices e 59 chaves estrangeiras, incluindo índices workspace/status/eligibility para manter a higiene limitada eficiente.
+
+Limites explícitos desta slice:
+
+- a API não agenda recorrência; um scheduler futuro pode chamá-la até `hasMore=false`;
+- o lote máximo é por categoria e pode afetar até 200 registros em uma chamada;
+- metadata histórica não é apagada;
+- confirmação PostgreSQL e jornada HTTP completas ficam para a CI hospedada da publicação.

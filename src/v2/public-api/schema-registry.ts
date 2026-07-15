@@ -1710,6 +1710,26 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { rotation: webhookSigningSecretRotationMetadataSchema },
     }),
   ),
+  defineSchema('run-webhook-signing-secret-hygiene-request', 1, 'Run webhook signing secret hygiene request', {
+    type: 'object', additionalProperties: false, required: ['limitPerKind'],
+    properties: { limitPerKind: { type: 'integer', minimum: 1, maximum: 100 } },
+  }),
+  defineSchema('webhook-signing-secret-hygiene-result', 1, 'Webhook signing secret hygiene result',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: [
+        'asOf', 'expiredRotations', 'destroyedRotationEnvelopes',
+        'destroyedSigningSecretPayloads', 'hasMore',
+      ],
+      properties: {
+        asOf: dateTimeSchema,
+        expiredRotations: { type: 'integer', minimum: 0, maximum: 100 },
+        destroyedRotationEnvelopes: { type: 'integer', minimum: 0, maximum: 100 },
+        destroyedSigningSecretPayloads: { type: 'integer', minimum: 0, maximum: 100 },
+        hasMore: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('webhook-subscription-list', 1, 'Webhook subscription list response',
     successSchema({ type: 'object', additionalProperties: false, required: ['subscriptions'], properties: {
       subscriptions: { type: 'array', maxItems: 100, items: webhookSubscriptionSchema },

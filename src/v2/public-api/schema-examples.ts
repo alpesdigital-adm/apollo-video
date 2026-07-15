@@ -853,6 +853,18 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/webhook-signing-secret-rotation-detail/v1': [
       { data: { rotation: webhookSigningSecretRotationExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/run-webhook-signing-secret-hygiene-request/v1': [
+      { limitPerKind: 100 },
+    ],
+    'apollo://schemas/webhook-signing-secret-hygiene-result/v1': [
+      {
+        data: {
+          asOf: createdAt, expiredRotations: 1, destroyedRotationEnvelopes: 1,
+          destroyedSigningSecretPayloads: 2, hasMore: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-subscription-list/v1': [
       { data: { subscriptions: [] }, meta: { apiVersion: 'v1' } },
       { data: { subscriptions: [webhookSubscriptionExample] }, meta: { apiVersion: 'v1' } },
