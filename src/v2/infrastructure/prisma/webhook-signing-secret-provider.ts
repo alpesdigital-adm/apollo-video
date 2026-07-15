@@ -8,8 +8,12 @@ import { DomainError } from '../../domain/errors.ts'
 import { createWebhookSigningSecretPayload } from '../../domain/webhook-signing-secret-payload.ts'
 import { webhookSigningSecretCipherContext } from '../security/webhook-signing-secret-protector.ts'
 
-function unavailable(): never {
-  throw new DomainError('WEBHOOK_SECRET_UNAVAILABLE', 'Webhook signing secret is unavailable')
+function unavailable(fallbackAllowed = true): never {
+  throw new DomainError(
+    'WEBHOOK_SECRET_UNAVAILABLE',
+    'Webhook signing secret is unavailable',
+    { fallbackAllowed },
+  )
 }
 
 function invalidPayload(): never {
@@ -19,10 +23,12 @@ function invalidPayload(): never {
 export class PrismaWebhookSigningSecretProvider implements WebhookSigningSecretProvider {
   private readonly client: PrismaClient
   private readonly cipher: RecipeParameterCipher
+  private readonly clock: () => Date
 
-  constructor(cipher: RecipeParameterCipher, client: PrismaClient = prisma) {
+  constructor(cipher: RecipeParameterCipher, client: PrismaClient = prisma, clock: () => Date = () => new Date()) {
     this.cipher = cipher
     this.client = client
+    this.clock = clock
   }
 
   async open(request: Parameters<WebhookSigningSecretProvider['open']>[0]): Promise<Uint8Array> {
@@ -32,11 +38,17 @@ export class PrismaWebhookSigningSecretProvider implements WebhookSigningSecretP
         endpointId: request.endpointId,
         keyRef: request.keyRef,
         version: request.version,
-        status: 'active',
       },
       include: { payload: true },
     })
-    if (!row?.payload) unavailable()
+    if (!row) unavailable()
+    const now = this.clock()
+    if (Number.isNaN(now.getTime())) invalidPayload()
+    const eligible = row.status === 'active' || (
+      row.status === 'retired' && row.usableUntil !== null && row.usableUntil > now
+    )
+    if (!eligible) unavailable(false)
+    if (!row.payload) invalidPayload()
     let payload: ReturnType<typeof createWebhookSigningSecretPayload>
     try {
       payload = createWebhookSigningSecretPayload({

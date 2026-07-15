@@ -664,6 +664,17 @@ test('authenticated public API manages projects, clients and artifact inspection
       true,
     )
     assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/activate'].post[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.endpoints.signing-secrets.rotations.activate',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/activate'].post
+        .requestBody.content['application/json'].schema.$ref,
+      '#/components/schemas/ActivateWebhookSigningSecretRotationRequestV1',
+    )
+    assert.equal(
       openApi.paths['/v1/webhooks/subscriptions'].get['x-apollo-capability-id'],
       'apollo.webhooks.subscriptions.list',
     )
@@ -841,6 +852,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.webhooks.endpoints.challenge',
         'apollo.webhooks.endpoints.signing-secrets.provision',
         'apollo.webhooks.endpoints.signing-secrets.rotations.stage',
+        'apollo.webhooks.endpoints.signing-secrets.rotations.activate',
         'apollo.webhooks.subscriptions.create',
         'apollo.webhooks.subscriptions.list',
         'apollo.webhooks.subscriptions.read',
@@ -1129,6 +1141,45 @@ test('authenticated public API manages projects, clients and artifact inspection
       'public-secret-rotation-stage-extra',
       { ...stageRotationBody, extra: true },
     )).status, 422)
+    const activateRotationUrl = `${stageRotationUrl}/${stagedRotation.data.rotation.id}/activate`
+    const activateRotation = (body) => fetch(activateRotationUrl, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const activateRotationResponse = await activateRotation({
+      baseRevision: stageRotationBody.baseRevision,
+    })
+    const activatedRotation = await activateRotationResponse.json()
+    assert.equal(activateRotationResponse.status, 200)
+    assert.equal(activatedRotation.data.replayed, false)
+    assert.equal(activatedRotation.data.endpoint.id, webhookEndpointId)
+    assert.equal(activatedRotation.data.endpoint.status, 'active')
+    assert.notEqual(activatedRotation.data.endpoint.revision, stageRotationBody.baseRevision)
+    assert.equal(activatedRotation.data.rotation.status, 'activated')
+    assert.equal(activatedRotation.data.rotation.candidateVersion, 2)
+    assert.equal(activatedRotation.data.signing.activeVersion, 2)
+    assert.equal(activatedRotation.data.signing.previousVersion, 1)
+    assert.equal(
+      activatedRotation.data.signing.previousUsableUntil,
+      activatedRotation.data.rotation.overlapUntil,
+    )
+    assert.equal(JSON.stringify(activatedRotation).includes('keyRef'), false)
+    assert.equal(JSON.stringify(activatedRotation).includes('secretBase64url'), false)
+    const activationReplayResponse = await activateRotation({
+      baseRevision: stageRotationBody.baseRevision,
+    })
+    const activationReplay = await activationReplayResponse.json()
+    assert.equal(activationReplayResponse.status, 200)
+    assert.equal(activationReplay.data.replayed, true)
+    assert.equal(activationReplay.data.rotation.id, activatedRotation.data.rotation.id)
+    assert.equal((await activateRotation({ baseRevision: 'invalid' })).status, 422)
+    assert.equal((await activateRotation({ baseRevision: 'a'.repeat(64) })).status, 409)
+    assert.equal((await fetch(activateRotationUrl, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ baseRevision: stageRotationBody.baseRevision, extra: true }),
+    })).status, 422)
     await client.v2WebhookSigningSecretPayload.deleteMany({
       where: { endpointId: createdEndpoint.data.endpoint.id },
     })
@@ -1343,7 +1394,7 @@ test('authenticated public API manages projects, clients and artifact inspection
 
     const suspendEndpointResponse = await setWebhookEndpointStatus(
       'suspended',
-      webhookEndpointRead.data.endpoint.revision,
+      activatedRotation.data.endpoint.revision,
     )
     const suspendedEndpoint = await suspendEndpointResponse.json()
     assert.equal(suspendEndpointResponse.status, 200)
@@ -1355,7 +1406,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(JSON.stringify(suspendedEndpoint).includes('keyRef'), false)
     const suspendEndpointAgainResponse = await setWebhookEndpointStatus(
       'suspended',
-      webhookEndpointRead.data.endpoint.revision,
+      activatedRotation.data.endpoint.revision,
     )
     const suspendedEndpointAgain = await suspendEndpointAgainResponse.json()
     assert.equal(suspendEndpointAgainResponse.status, 200)

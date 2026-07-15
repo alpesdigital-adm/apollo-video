@@ -28,6 +28,7 @@ export interface WebhookSigningSecretRotation {
   createdAt: string
   expiresAt: string
   activatedAt?: string
+  overlapUntil?: string
   cancelledAt?: string
 }
 
@@ -43,6 +44,7 @@ export function createWebhookSigningSecretRotation(
   const createdAt = canonicalUtc(input.createdAt, 'createdAt')
   const expiresAt = canonicalUtc(input.expiresAt, 'expiresAt')
   const activatedAt = input.activatedAt ? canonicalUtc(input.activatedAt, 'activatedAt') : undefined
+  const overlapUntil = input.overlapUntil ? canonicalUtc(input.overlapUntil, 'overlapUntil') : undefined
   const cancelledAt = input.cancelledAt ? canonicalUtc(input.cancelledAt, 'cancelledAt') : undefined
   assertDomain(
     WEBHOOK_SIGNING_SECRET_ROTATION_STATUSES.includes(input.status),
@@ -63,9 +65,9 @@ export function createWebhookSigningSecretRotation(
   assertDomain(/^[a-f0-9]{64}$/.test(input.fingerprint), 'INVALID_ARGUMENT', 'Webhook signing secret fingerprint is invalid')
   assertDomain(/^[a-f0-9]{64}$/.test(input.baseRevision), 'INVALID_ARGUMENT', 'Webhook endpoint base revision is invalid')
   assertDomain(
-    (input.status === 'staged' && !activatedAt && !cancelledAt) ||
-      (input.status === 'activated' && Boolean(activatedAt) && !cancelledAt) ||
-      ((input.status === 'cancelled' || input.status === 'expired') && !activatedAt && Boolean(cancelledAt)),
+    (input.status === 'staged' && !activatedAt && !overlapUntil && !cancelledAt) ||
+      (input.status === 'activated' && Boolean(activatedAt) && Boolean(overlapUntil) && overlapUntil! > activatedAt! && !cancelledAt) ||
+      ((input.status === 'cancelled' || input.status === 'expired') && !activatedAt && !overlapUntil && Boolean(cancelledAt)),
     'INVALID_ARGUMENT',
     'Webhook signing secret rotation lifecycle is invalid',
   )
@@ -76,6 +78,7 @@ export function createWebhookSigningSecretRotation(
     createdAt,
     expiresAt,
     ...(activatedAt ? { activatedAt } : {}),
+    ...(overlapUntil ? { overlapUntil } : {}),
     ...(cancelledAt ? { cancelledAt } : {}),
   })
 }

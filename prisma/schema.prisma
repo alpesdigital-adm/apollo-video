@@ -596,6 +596,7 @@ model V2WebhookSigningSecret {
   status      String    @default("active")
   createdAt   DateTime  @default(now())
   retiredAt   DateTime?
+  usableUntil DateTime?
   revokedAt   DateTime?
 
   workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -606,6 +607,7 @@ model V2WebhookSigningSecret {
   @@unique([id, workspaceId, endpointId, version])
   @@unique([endpointId, version])
   @@index([workspaceId, status, createdAt])
+  @@index([endpointId, status, usableUntil])
   @@map("v2_webhook_signing_secrets")
 }
 
@@ -643,15 +645,16 @@ model V2WebhookSigningSecretRotation {
   fingerprint         String
   status              String   @default("staged")
   overlapSeconds      Int
-  payloadAlgorithm    String
-  payloadKeyId        String
-  payloadNonce        String
-  payloadCiphertext   String
-  payloadAuthTag      String
+  payloadAlgorithm    String?
+  payloadKeyId        String?
+  payloadNonce        String?
+  payloadCiphertext   String?
+  payloadAuthTag      String?
   baseRevision        String
   createdAt           DateTime @default(now())
   expiresAt           DateTime
   activatedAt         DateTime?
+  overlapUntil        DateTime?
   cancelledAt         DateTime?
 
   workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)

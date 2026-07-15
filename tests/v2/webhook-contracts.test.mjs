@@ -7,6 +7,7 @@ import { createWebhookEndpointService } from '../../src/v2/application/create-we
 import { createWebhookSubscriptionService } from '../../src/v2/application/create-webhook-subscription.ts'
 import { provisionWebhookSigningSecretService } from '../../src/v2/application/provision-webhook-signing-secret.ts'
 import { stageWebhookSigningSecretRotationService } from '../../src/v2/application/stage-webhook-signing-secret-rotation.ts'
+import { activateWebhookSigningSecretRotationService } from '../../src/v2/application/activate-webhook-signing-secret-rotation.ts'
 import {
   activateWebhookEndpointConvergentlyService,
   activateWebhookEndpointService,
@@ -84,6 +85,8 @@ import {
 } from '../../src/v2/infrastructure/webhook/safe-webhook-challenge-transport.ts'
 import { SafeWebhookDeliveryTransport } from '../../src/v2/infrastructure/webhook/safe-webhook-delivery-transport.ts'
 import { createEnvironmentWebhookSigningSecretProvider } from '../../src/v2/infrastructure/security/environment-webhook-signing-secret-provider.ts'
+import { createFallbackWebhookSigningSecretProvider } from '../../src/v2/infrastructure/security/fallback-webhook-signing-secret-provider.ts'
+import { PrismaWebhookSigningSecretProvider } from '../../src/v2/infrastructure/prisma/webhook-signing-secret-provider.ts'
 import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
 import {
   createWebhookSigningSecretProtector,
@@ -355,6 +358,70 @@ test('signing secret rotation rejects inactive endpoint before generating materi
     idempotencyKey: 'rotate-secret-inactive',
   }), (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_TRANSITION_REJECTED')
   assert.equal(generated, 0)
+})
+
+test('signing secret rotation activation validates identity before persistence', async () => {
+  let effects = 0
+  const activate = activateWebhookSigningSecretRotationService({
+    repository: {
+      async getTarget() { effects += 1 },
+      async stageOrReplay() { effects += 1 },
+      async activateOrReplay() { effects += 1 },
+    },
+    clock: () => new Date('2026-07-15T22:10:00.000Z'),
+  })
+  await assert.rejects(() => activate({
+    workspaceId: 'workspace-1',
+    endpointId: '00000000-0000-4000-8000-000000000150',
+    rotationId: 'invalid',
+    actorClientId: 'client-1',
+    baseRevision: 'a'.repeat(64),
+  }), (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT')
+  assert.equal(effects, 0)
+})
+
+test('retired signing secret opens only during overlap and cannot fall back after expiry', async () => {
+  const secretId = '00000000-0000-4000-8000-000000000160'
+  const endpointId = '00000000-0000-4000-8000-000000000161'
+  const keyRef = `vault://apollo/webhooks/${secretId}`
+  const cipher = createAesRecipeParameterCipher({ keyId: 'webhook-overlap-key', key: Buffer.alloc(32, 43) })
+  const material = await createWebhookSigningSecretProtector(
+    cipher,
+    () => Buffer.alloc(32, 44),
+  ).protectForOneTimeDisclosure({
+    secretId, workspaceId: 'workspace-1', endpointId, version: 1, keyRef,
+    createdAt: '2026-07-15T22:00:00.000Z',
+  })
+  const row = {
+    id: secretId, workspaceId: 'workspace-1', endpointId, version: 1,
+    algorithm: 'hmac-sha256', keyRef, fingerprint: material.fingerprint,
+    status: 'retired', createdAt: new Date('2026-07-15T22:00:00.000Z'),
+    retiredAt: new Date('2026-07-15T22:05:00.000Z'),
+    usableUntil: new Date('2026-07-15T22:10:00.000Z'), revokedAt: null,
+    payload: {
+      ...material.payload,
+      createdAt: new Date(material.payload.createdAt),
+    },
+  }
+  let now = new Date('2026-07-15T22:09:59.999Z')
+  const database = new PrismaWebhookSigningSecretProvider(
+    cipher,
+    { v2WebhookSigningSecret: { async findFirst() { return row } } },
+    () => now,
+  )
+  const opened = await database.open({ workspaceId: 'workspace-1', endpointId, keyRef, version: 1 })
+  assert.equal(Buffer.from(opened).toString('base64url'), material.secretBase64url)
+  opened.fill(0)
+  let fallbackCalls = 0
+  const provider = createFallbackWebhookSigningSecretProvider(database, {
+    async open() { fallbackCalls += 1; return Buffer.alloc(32, 99) },
+  })
+  now = new Date('2026-07-15T22:10:00.000Z')
+  await assert.rejects(
+    () => provider.open({ workspaceId: 'workspace-1', endpointId, keyRef, version: 1 }),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_SECRET_UNAVAILABLE',
+  )
+  assert.equal(fallbackCalls, 0)
 })
 
 test('generated webhook signing secret must contain exactly 256 bits', async () => {

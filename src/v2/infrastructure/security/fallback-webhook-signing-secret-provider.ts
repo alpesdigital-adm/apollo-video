@@ -10,7 +10,11 @@ export function createFallbackWebhookSigningSecretProvider(
       try {
         return await primary.open(request)
       } catch (error) {
-        if (!(error instanceof DomainError) || error.code !== 'WEBHOOK_SECRET_UNAVAILABLE') {
+        if (
+          !(error instanceof DomainError) ||
+          error.code !== 'WEBHOOK_SECRET_UNAVAILABLE' ||
+          error.details.fallbackAllowed === false
+        ) {
           throw error
         }
         return fallback.open(request)

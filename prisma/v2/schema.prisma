@@ -550,6 +550,7 @@ model V2WebhookSigningSecret {
   status      String    @default("active") @db.VarChar(32)
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)
   retiredAt   DateTime? @db.Timestamptz(3)
+  usableUntil DateTime? @db.Timestamptz(3)
   revokedAt   DateTime? @db.Timestamptz(3)
 
   workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -560,6 +561,7 @@ model V2WebhookSigningSecret {
   @@unique([id, workspaceId, endpointId, version])
   @@unique([endpointId, version])
   @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@index([endpointId, status, usableUntil])
   @@map("webhook_signing_secrets")
 }
 
@@ -597,15 +599,16 @@ model V2WebhookSigningSecretRotation {
   fingerprint        String   @db.Char(64)
   status             String   @default("staged") @db.VarChar(32)
   overlapSeconds     Int
-  payloadAlgorithm   String   @db.VarChar(32)
-  payloadKeyId       String   @db.VarChar(64)
-  payloadNonce       String   @db.VarChar(64)
-  payloadCiphertext  String   @db.Text
-  payloadAuthTag     String   @db.VarChar(64)
+  payloadAlgorithm   String?  @db.VarChar(32)
+  payloadKeyId       String?  @db.VarChar(64)
+  payloadNonce       String?  @db.VarChar(64)
+  payloadCiphertext  String?  @db.Text
+  payloadAuthTag     String?  @db.VarChar(64)
   baseRevision       String   @db.Char(64)
   createdAt          DateTime @default(now()) @db.Timestamptz(3)
   expiresAt          DateTime @db.Timestamptz(3)
   activatedAt        DateTime? @db.Timestamptz(3)
+  overlapUntil       DateTime? @db.Timestamptz(3)
   cancelledAt        DateTime? @db.Timestamptz(3)
 
   workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)

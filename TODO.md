@@ -496,7 +496,7 @@
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054: API externa cria/lista/lê endpoints e subscriptions, provisiona chave HMAC pendente, prepara rotação ativa em duas fases, executa challenge/ativação, replay e lifecycle; UI e corte com overlap continuam abertos.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055: API externa cria/lista/lê endpoints e subscriptions, provisiona chave HMAC pendente, prepara e ativa rotação com overlap, executa challenge, replay e lifecycle; UI, cancelamento e consulta de rotações continuam abertos.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054: capabilities entregam cadastro idempotente, provisionamento one-shot, preparação cifrada da rotação ativa, consultas, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; ativação/cancelamento da rotação e UI continuam abertos.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055: capabilities entregam cadastro idempotente, provisionamento one-shot, rotação ativa em duas fases, consultas, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; cancelamento/consulta da rotação e UI continuam abertos.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -4163,7 +4163,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-054 — Preparação segura da rotação de signing secret ativo
 
-**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+**Status:** publicado em `main` no commit `137bd26`; CI hospedada `29451964409` aprovada em 15 de julho de 2026.
 
 Entregas:
 
@@ -4195,3 +4195,37 @@ Limites explícitos desta slice:
 - o corte explícito, a abertura temporária da chave aposentada para deliveries em voo, cancelamento e consulta administrativa da rotação pertencem à próxima slice;
 - perda da primeira resposta exige deixar a preparação expirar ou cancelá-la quando esse command estiver disponível; o plaintext nunca será recuperável;
 - UI administrativa, audit query, métricas e alertas continuam futuros.
+
+### Slice F0-055 — Ativação atômica da rotação HMAC com overlap
+
+**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability `apollo.webhooks.endpoints.signing-secrets.rotations.activate` expõe `POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/activate` sob `webhooks:admin`;
+- body fechado exige a mesma `baseRevision` usada na preparação; a operação possui idempotência natural pelo rotation ID;
+- somente rotação `staged`, não expirada, ligada ao endpoint ativo e ainda baseada na mesma chave anterior pode ser ativada;
+- em uma transação serializável, a candidata vira a única chave ativa, seu envelope é movido para o secret store, a anterior é aposentada com `usableUntil` e o endpoint avança de revisão;
+- o envelope cifrado é removido do agregado de rotação após a transferência, evitando duas cópias duráveis do mesmo material;
+- novas deliveries escolhem somente a versão ativa nova; uma versão anterior exata pode ser aberta apenas até o limite exclusivo `usableUntil`;
+- provider recusa chave aposentada no instante do vencimento e impede fallback para configuração legada, fechando bypass do overlap;
+- replay de ativação retorna o mesmo resultado redigido, sem repetir ou recuperar chave, e rejeita revisão diferente;
+- resposta informa versões, fingerprints, `activatedAt`, `overlapUntil`, nova revisão e `replayed`, sem `keyRef`, plaintext ou envelope;
+- ADR-044 formaliza corte, janela exclusiva e tratamento da corrida entre resolução do target e abertura da chave.
+
+Regressões e evidências locais:
+
+- suíte global passa com 120 testes; 52 são contratos de webhook;
+- testes cobrem validação antes de persistência, abertura da aposentada dentro da janela, bloqueio no limite e proibição de fallback;
+- integração Prisma cobre corte atômico, uma única ativa, retirement com `usableUntil`, transferência/limpeza do envelope, abertura da candidata e replay convergente;
+- jornada HTTP cobre capability/OpenAPI, ativação 200, nova revisão, metadados redigidos, replay, revisão divergente e body inválido;
+- contratos públicos passam com 43 capabilities, 55 schemas, 75 exemplos e 38 paths;
+- build registra `POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/activate`;
+- schema/migration passam com 28 tabelas, 108 índices e 59 chaves estrangeiras.
+
+Limites explícitos desta slice:
+
+- não existe dual-signature: após o corte, novas deliveries usam somente a candidata; overlap serve ao receptor e aos attempts que já capturaram a chave anterior;
+- o limite é exclusivo: `now === usableUntil` já bloqueia a chave anterior;
+- cancelamento, expiração administrativa explícita, consulta/listagem de rotações e UI permanecem para slices seguintes;
+- remoção física futura do payload aposentado poderá ser executada por job de higiene após o overlap, sem alterar a regra de abertura.

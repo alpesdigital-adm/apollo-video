@@ -66,6 +66,7 @@ export interface WebhookSigningSecret {
   status: WebhookSecretStatus
   createdAt: string
   retiredAt?: string
+  usableUntil?: string
   revokedAt?: string
 }
 
@@ -345,10 +346,11 @@ export function createWebhookSigningSecret(
   assertDomain(WEBHOOK_SECRET_STATUSES.includes(input.status), 'INVALID_WEBHOOK', 'Webhook secret status is invalid')
   const createdAt = canonicalUtc(input.createdAt, 'createdAt')
   const retiredAt = input.retiredAt ? canonicalUtc(input.retiredAt, 'retiredAt') : undefined
+  const usableUntil = input.usableUntil ? canonicalUtc(input.usableUntil, 'usableUntil') : undefined
   const revokedAt = input.revokedAt ? canonicalUtc(input.revokedAt, 'revokedAt') : undefined
   assertDomain(
-    (input.status === 'active' && !retiredAt && !revokedAt) ||
-      (input.status === 'retired' && Boolean(retiredAt) && !revokedAt) ||
+    (input.status === 'active' && !retiredAt && !usableUntil && !revokedAt) ||
+      (input.status === 'retired' && Boolean(retiredAt) && !revokedAt && (!usableUntil || usableUntil > retiredAt!)) ||
       (input.status === 'revoked' && Boolean(revokedAt)),
     'INVALID_WEBHOOK',
     'Webhook secret retirement state is inconsistent',
@@ -365,6 +367,7 @@ export function createWebhookSigningSecret(
     status: input.status,
     createdAt,
     ...(retiredAt ? { retiredAt } : {}),
+    ...(usableUntil ? { usableUntil } : {}),
     ...(revokedAt ? { revokedAt } : {}),
   })
 }

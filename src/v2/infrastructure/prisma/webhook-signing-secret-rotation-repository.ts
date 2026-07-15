@@ -11,6 +11,8 @@ import { prisma } from '../../../lib/db.ts'
 import type {
   StageWebhookSigningSecretRotationCommand,
   StageWebhookSigningSecretRotationResult,
+  ActivateWebhookSigningSecretRotationCommand,
+  ActivateWebhookSigningSecretRotationResult,
   WebhookSigningSecretRotationRepository,
 } from '../../application/ports/webhook-signing-secret-rotation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -40,6 +42,7 @@ function secret(row: V2WebhookSigningSecret): Readonly<WebhookSigningSecret> {
     keyRef: row.keyRef, fingerprint: row.fingerprint, status: row.status as WebhookSigningSecret['status'],
     createdAt: row.createdAt.toISOString(),
     ...(row.retiredAt ? { retiredAt: row.retiredAt.toISOString() } : {}),
+    ...(row.usableUntil ? { usableUntil: row.usableUntil.toISOString() } : {}),
     ...(row.revokedAt ? { revokedAt: row.revokedAt.toISOString() } : {}),
   })
 }
@@ -53,6 +56,7 @@ function rotation(row: V2WebhookSigningSecretRotation): Readonly<WebhookSigningS
     status: row.status as WebhookSigningSecretRotation['status'], overlapSeconds: row.overlapSeconds,
     baseRevision: row.baseRevision, createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt.toISOString(),
     ...(row.activatedAt ? { activatedAt: row.activatedAt.toISOString() } : {}),
+    ...(row.overlapUntil ? { overlapUntil: row.overlapUntil.toISOString() } : {}),
     ...(row.cancelledAt ? { cancelledAt: row.cancelledAt.toISOString() } : {}),
   })
 }
@@ -70,6 +74,22 @@ function storedResponse(record: V2IdempotencyRecord): StoredRotationResponse {
 
 function result(endpointRow: V2WebhookEndpoint, rotationRow: V2WebhookSigningSecretRotation, replayed: boolean): Readonly<StageWebhookSigningSecretRotationResult> {
   return Object.freeze({ endpoint: endpoint(endpointRow), rotation: rotation(rotationRow), replayed })
+}
+
+function activationResult(
+  endpointRow: V2WebhookEndpoint,
+  rotationRow: V2WebhookSigningSecretRotation,
+  previousSecretRow: V2WebhookSigningSecret,
+  activatedSecretRow: V2WebhookSigningSecret,
+  replayed: boolean,
+): Readonly<ActivateWebhookSigningSecretRotationResult> {
+  return Object.freeze({
+    endpoint: endpoint(endpointRow),
+    rotation: rotation(rotationRow),
+    previousSecret: secret(previousSecretRow),
+    activatedSecret: secret(activatedSecretRow),
+    replayed,
+  })
 }
 
 export class PrismaWebhookSigningSecretRotationRepository implements WebhookSigningSecretRotationRepository {
@@ -153,6 +173,96 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
       if (isPrismaError(error, 'P2034') || isPrismaError(error, 'P2002')) {
         const existing = await this.client.v2IdempotencyRecord.findUnique({ where: key })
         if (existing && existing.expiresAt > requestedAt) return readReplay(this.client, existing)
+        throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint or rotation changed concurrently')
+      }
+      throw error
+    }
+  }
+
+  async activateOrReplay(command: Readonly<ActivateWebhookSigningSecretRotationCommand>) {
+    const activatedAt = new Date(command.activatedAt)
+    const readActivated = async (transaction: Prisma.TransactionClient | PrismaClient) => {
+      const rotationRow = await transaction.v2WebhookSigningSecretRotation.findFirst({
+        where: { id: command.rotationId, endpointId: command.endpointId, workspaceId: command.workspaceId },
+      })
+      if (!rotationRow || rotationRow.status !== 'activated') return null
+      if (rotationRow.baseRevision !== command.baseRevision) {
+        throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint revision does not match activated rotation')
+      }
+      const [endpointRow, previousSecretRow, activatedSecretRow] = await Promise.all([
+        transaction.v2WebhookEndpoint.findFirst({ where: { id: command.endpointId, workspaceId: command.workspaceId } }),
+        transaction.v2WebhookSigningSecret.findFirst({ where: { id: rotationRow.previousSecretId, endpointId: command.endpointId, workspaceId: command.workspaceId } }),
+        transaction.v2WebhookSigningSecret.findFirst({ where: { id: rotationRow.candidateSecretId, endpointId: command.endpointId, workspaceId: command.workspaceId } }),
+      ])
+      if (!endpointRow || !previousSecretRow || !activatedSecretRow) throw new DomainError('PERSISTENCE_CONFLICT', 'Activated webhook secret rotation result is incomplete')
+      return activationResult(endpointRow, rotationRow, previousSecretRow, activatedSecretRow, true)
+    }
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const existingActivation = await readActivated(transaction)
+        if (existingActivation) return existingActivation
+        const [workspace, actor, endpointRow, rotationRow] = await Promise.all([
+          transaction.v2Workspace.findUnique({ where: { id: command.workspaceId }, select: { status: true } }),
+          transaction.v2ApiClient.findFirst({ where: { id: command.actorClientId, workspaceId: command.workspaceId, status: 'active' }, select: { id: true } }),
+          transaction.v2WebhookEndpoint.findFirst({ where: { id: command.endpointId, workspaceId: command.workspaceId } }),
+          transaction.v2WebhookSigningSecretRotation.findFirst({ where: { id: command.rotationId, endpointId: command.endpointId, workspaceId: command.workspaceId } }),
+        ])
+        if (!workspace || workspace.status !== 'active') throw new DomainError('WORKSPACE_NOT_FOUND', 'Active workspace was not found')
+        if (!actor) throw new DomainError('API_CLIENT_NOT_FOUND', 'Active API client was not found')
+        if (!endpointRow) throw new DomainError('WEBHOOK_ENDPOINT_NOT_FOUND', 'Webhook endpoint was not found')
+        if (!rotationRow) throw new DomainError('WEBHOOK_ENDPOINT_NOT_FOUND', 'Webhook signing secret rotation was not found')
+        if (rotationRow.status !== 'staged') throw new DomainError('WEBHOOK_ENDPOINT_TRANSITION_REJECTED', 'Webhook signing secret rotation cannot be activated')
+        if (rotationRow.expiresAt <= activatedAt) throw new DomainError('WEBHOOK_ENDPOINT_TRANSITION_REJECTED', 'Webhook signing secret rotation has expired')
+        const currentEndpoint = endpoint(endpointRow)
+        if (currentEndpoint.status !== 'active') throw new DomainError('WEBHOOK_ENDPOINT_TRANSITION_REJECTED', 'Only an active webhook endpoint can activate a signing secret rotation')
+        const currentRevision = webhookEndpointRevision(currentEndpoint)
+        if (currentRevision !== command.baseRevision || rotationRow.baseRevision !== command.baseRevision) throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint revision does not match staged rotation')
+        if (activatedAt < endpointRow.updatedAt) throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook signing secret rotation activation clock is stale')
+        if (!rotationRow.payloadAlgorithm || !rotationRow.payloadKeyId || !rotationRow.payloadNonce || !rotationRow.payloadCiphertext || !rotationRow.payloadAuthTag) throw new DomainError('PERSISTENCE_CONFLICT', 'Staged webhook signing secret payload is incomplete')
+
+        const [activeSecrets, latestSecret] = await Promise.all([
+          transaction.v2WebhookSigningSecret.findMany({ where: { endpointId: command.endpointId, workspaceId: command.workspaceId, status: 'active' }, take: 2 }),
+          transaction.v2WebhookSigningSecret.findFirst({ where: { endpointId: command.endpointId, workspaceId: command.workspaceId }, orderBy: { version: 'desc' } }),
+        ])
+        if (activeSecrets.length !== 1 || !latestSecret || activeSecrets[0].id !== rotationRow.previousSecretId || rotationRow.candidateVersion !== latestSecret.version + 1) throw new DomainError('PERSISTENCE_CONFLICT', 'Staged webhook signing secret rotation no longer matches the active secret')
+        const overlapUntil = new Date(activatedAt.getTime() + rotationRow.overlapSeconds * 1_000)
+        const changed = await transaction.v2WebhookEndpoint.updateMany({
+          where: { id: command.endpointId, workspaceId: command.workspaceId, status: 'active', updatedAt: endpointRow.updatedAt },
+          data: { updatedAt: activatedAt },
+        })
+        if (changed.count !== 1) throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint changed concurrently')
+        const retired = await transaction.v2WebhookSigningSecret.updateMany({
+          where: { id: rotationRow.previousSecretId, workspaceId: command.workspaceId, endpointId: command.endpointId, status: 'active' },
+          data: { status: 'retired', retiredAt: activatedAt, usableUntil: overlapUntil },
+        })
+        if (retired.count !== 1) throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook signing secret changed concurrently')
+        const activatedSecretRow = await transaction.v2WebhookSigningSecret.create({ data: {
+          id: rotationRow.candidateSecretId, workspaceId: command.workspaceId, endpointId: command.endpointId,
+          version: rotationRow.candidateVersion, algorithm: rotationRow.algorithm, keyRef: rotationRow.keyRef,
+          fingerprint: rotationRow.fingerprint, status: 'active', createdAt: activatedAt,
+        } })
+        await transaction.v2WebhookSigningSecretPayload.create({ data: {
+          secretId: rotationRow.candidateSecretId, workspaceId: command.workspaceId, endpointId: command.endpointId,
+          secretVersion: rotationRow.candidateVersion, algorithm: rotationRow.payloadAlgorithm,
+          keyId: rotationRow.payloadKeyId, nonce: rotationRow.payloadNonce,
+          ciphertext: rotationRow.payloadCiphertext, authTag: rotationRow.payloadAuthTag, createdAt: activatedAt,
+        } })
+        const activatedRotationRow = await transaction.v2WebhookSigningSecretRotation.update({
+          where: { id: rotationRow.id },
+          data: {
+            status: 'activated', activatedAt, overlapUntil,
+            payloadAlgorithm: null, payloadKeyId: null, payloadNonce: null,
+            payloadCiphertext: null, payloadAuthTag: null,
+          },
+        })
+        const previousSecretRow = await transaction.v2WebhookSigningSecret.findUniqueOrThrow({ where: { id: rotationRow.previousSecretId } })
+        const persistedEndpoint = await transaction.v2WebhookEndpoint.findUniqueOrThrow({ where: { id: command.endpointId } })
+        return activationResult(persistedEndpoint, activatedRotationRow, previousSecretRow, activatedSecretRow, false)
+      }, { isolationLevel: 'Serializable' })
+    } catch (error) {
+      if (isPrismaError(error, 'P2034') || isPrismaError(error, 'P2002')) {
+        const replay = await readActivated(this.client)
+        if (replay) return replay
         throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint or rotation changed concurrently')
       }
       throw error

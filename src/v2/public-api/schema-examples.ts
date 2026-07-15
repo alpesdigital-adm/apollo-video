@@ -794,6 +794,28 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/activate-webhook-signing-secret-rotation-request/v1': [
+      { baseRevision: webhookEndpointExample.revision },
+    ],
+    'apollo://schemas/webhook-signing-secret-rotation-activated/v1': [
+      {
+        data: {
+          endpoint: { id: webhookEndpointExample.id, status: 'active', revision: 'd'.repeat(64) },
+          rotation: {
+            id: '20000000-0000-4000-8000-000000000010', status: 'activated',
+            candidateVersion: 2, fingerprint: 'c'.repeat(64), overlapSeconds: 300,
+            activatedAt: '2026-07-12T20:05:00.000Z', overlapUntil: '2026-07-12T20:10:00.000Z',
+          },
+          signing: {
+            activeVersion: 2, activeFingerprint: 'c'.repeat(64),
+            previousVersion: 1, previousFingerprint: webhookSecretMetadataExample.fingerprint,
+            previousUsableUntil: '2026-07-12T20:10:00.000Z',
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-subscription-list/v1': [
       { data: { subscriptions: [] }, meta: { apiVersion: 'v1' } },
       { data: { subscriptions: [webhookSubscriptionExample] }, meta: { apiVersion: 'v1' } },

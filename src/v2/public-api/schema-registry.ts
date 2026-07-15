@@ -1619,6 +1619,42 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       }],
     }),
   ),
+  defineSchema('activate-webhook-signing-secret-rotation-request', 1, 'Activate webhook signing secret rotation request', {
+    type: 'object', additionalProperties: false, required: ['baseRevision'],
+    properties: { baseRevision: sha256Schema },
+  }),
+  defineSchema('webhook-signing-secret-rotation-activated', 1, 'Activated webhook signing secret rotation response',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['endpoint', 'rotation', 'signing', 'replayed'],
+      properties: {
+        endpoint: {
+          type: 'object', additionalProperties: false, required: ['id', 'status', 'revision'],
+          properties: { id: idSchema, status: { type: 'string', const: 'active' }, revision: sha256Schema },
+        },
+        rotation: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'status', 'candidateVersion', 'fingerprint', 'overlapSeconds', 'activatedAt', 'overlapUntil'],
+          properties: {
+            id: idSchema, status: { type: 'string', const: 'activated' },
+            candidateVersion: { type: 'integer', minimum: 2 }, fingerprint: sha256Schema,
+            overlapSeconds: { type: 'integer', minimum: 60, maximum: 86400 },
+            activatedAt: dateTimeSchema, overlapUntil: dateTimeSchema,
+          },
+        },
+        signing: {
+          type: 'object', additionalProperties: false,
+          required: ['activeVersion', 'activeFingerprint', 'previousVersion', 'previousFingerprint', 'previousUsableUntil'],
+          properties: {
+            activeVersion: { type: 'integer', minimum: 2 }, activeFingerprint: sha256Schema,
+            previousVersion: { type: 'integer', minimum: 1 }, previousFingerprint: sha256Schema,
+            previousUsableUntil: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('webhook-subscription-list', 1, 'Webhook subscription list response',
     successSchema({ type: 'object', additionalProperties: false, required: ['subscriptions'], properties: {
       subscriptions: { type: 'array', maxItems: 100, items: webhookSubscriptionSchema },

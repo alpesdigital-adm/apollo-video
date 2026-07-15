@@ -189,9 +189,13 @@ Para endpoint ativo, a rotação começa por
 e devolve a candidata uma única vez, mas mantém a chave atual assinando todas as
 deliveries. O receptor pode instalar a candidata sem corrida com o tráfego em
 curso. A preparação expira em 24 horas, somente uma pode ficar aberta por
-endpoint e replay nunca repete `secretBase64url`. A ativação/corte e a janela
-de abertura da chave anterior serão um command separado, preservando deliveries
-que já estavam em voo.
+endpoint e replay nunca repete `secretBase64url`. Depois que o receptor instalar
+a candidata, o administrador confirma o corte por
+`POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/activate`,
+enviando a mesma `baseRevision`. O corte cria uma nova revisão, passa a assinar
+somente com a candidata e mantém a versão anterior abrível apenas até
+`overlapUntil`. O limite é exclusivo e não pode ser contornado pelo provider de
+configuração legada. Repetir a ativação converge sem novo efeito ou segredo.
 
 A ativação é solicitada por
 `POST /v1/webhooks/endpoints/{endpointId}/challenge`, sem body. O Apollo faz um

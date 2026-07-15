@@ -45,3 +45,4 @@ Estados usados:
 - [ADR-041 — Challenge público e ativação convergente de webhook](./ADR-041-public-webhook-challenge-and-convergent-activation.md)
 - [ADR-042 — Provisionamento one-shot da chave HMAC pendente](./ADR-042-one-time-pending-webhook-secret-provisioning.md)
 - [ADR-043 — Rotação HMAC ativa preparada em duas fases](./ADR-043-two-phase-active-webhook-secret-rotation.md)
+- [ADR-044 — Corte HMAC atômico e overlap limitado](./ADR-044-atomic-webhook-secret-cutover-and-overlap.md)

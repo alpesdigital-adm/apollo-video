@@ -26,7 +26,25 @@ export interface StageWebhookSigningSecretRotationResult {
   replayed: boolean
 }
 
+export interface ActivateWebhookSigningSecretRotationCommand {
+  workspaceId: string
+  endpointId: string
+  rotationId: string
+  actorClientId: string
+  baseRevision: string
+  activatedAt: string
+}
+
+export interface ActivateWebhookSigningSecretRotationResult {
+  endpoint: Readonly<WebhookEndpoint>
+  rotation: Readonly<WebhookSigningSecretRotation>
+  previousSecret: Readonly<WebhookSigningSecret>
+  activatedSecret: Readonly<WebhookSigningSecret>
+  replayed: boolean
+}
+
 export interface WebhookSigningSecretRotationRepository {
   getTarget(workspaceId: string, endpointId: string): Promise<Readonly<WebhookSigningSecretRotationTarget> | null>
   stageOrReplay(command: Readonly<StageWebhookSigningSecretRotationCommand>): Promise<Readonly<StageWebhookSigningSecretRotationResult>>
+  activateOrReplay(command: Readonly<ActivateWebhookSigningSecretRotationCommand>): Promise<Readonly<ActivateWebhookSigningSecretRotationResult>>
 }
