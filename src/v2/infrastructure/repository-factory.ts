@@ -53,6 +53,7 @@ import type {
 import type { WebhookWorkerShardRepository } from '../application/ports/webhook-worker-shard-repository.ts'
 import type { WebhookAdministrationQueryRepository } from '../application/ports/webhook-administration-query-repository.ts'
 import type { WebhookSubscriptionCommandRepository } from '../application/ports/webhook-subscription-command-repository.ts'
+import type { WebhookEndpointCommandRepository } from '../application/ports/webhook-endpoint-command-repository.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
@@ -79,6 +80,7 @@ import { PrismaWebhookEventReplayRepository } from './prisma/webhook-event-repla
 import { PrismaWebhookWorkerShardRepository } from './prisma/webhook-worker-shard-repository.ts'
 import { PrismaWebhookAdministrationQueryRepository } from './prisma/webhook-administration-query-repository.ts'
 import { PrismaWebhookSubscriptionCommandRepository } from './prisma/webhook-subscription-command-repository.ts'
+import { PrismaWebhookEndpointCommandRepository } from './prisma/webhook-endpoint-command-repository.ts'
 import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
 import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-transport.ts'
 import { SafeWebhookDeliveryTransport } from './webhook/safe-webhook-delivery-transport.ts'
@@ -134,6 +136,10 @@ export function createWebhookAdministrationQueryRepository(): WebhookAdministrat
 
 export function createWebhookSubscriptionCommandRepository(): WebhookSubscriptionCommandRepository {
   return new PrismaWebhookSubscriptionCommandRepository(resolveV2Client())
+}
+
+export function createWebhookEndpointCommandRepository(): WebhookEndpointCommandRepository {
+  return new PrismaWebhookEndpointCommandRepository(resolveV2Client())
 }
 
 export function createWebhookFanoutRepository(): WebhookFanoutRepository {

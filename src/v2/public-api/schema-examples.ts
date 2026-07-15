@@ -122,6 +122,7 @@ const webhookEndpointExample = {
   schemaVersion: 'webhook-endpoint/v1',
   id: '00000000-0000-4000-8000-000000000702',
   status: 'active',
+  revision: 'f'.repeat(64),
   destinationOrigin: 'https://hooks.example.com',
   urlFingerprint: 'c'.repeat(64),
   createdByClientId: clientId,
@@ -660,6 +661,28 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/webhook-endpoint-detail/v1': [
       { data: { endpoint: { ...webhookEndpointExample, signingSecrets: [webhookSecretMetadataExample] } }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/set-webhook-endpoint-status-request/v1': [
+      { status: 'suspended', baseRevision: webhookEndpointExample.revision },
+      { status: 'revoked', baseRevision: webhookEndpointExample.revision },
+    ],
+    'apollo://schemas/webhook-endpoint-status-result/v1': [
+      {
+        data: {
+          endpoint: { ...webhookEndpointExample, status: 'suspended' },
+          effects: { pausedSubscriptions: 1, revokedSubscriptions: 0, revokedSigningSecrets: 0 },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          endpoint: webhookEndpointExample,
+          effects: { pausedSubscriptions: 0, revokedSubscriptions: 0, revokedSigningSecrets: 0 },
+          replayed: true,
+        },
+        meta: { apiVersion: 'v1' },
+      },
     ],
     'apollo://schemas/webhook-subscription-list/v1': [
       { data: { subscriptions: [] }, meta: { apiVersion: 'v1' } },

@@ -585,6 +585,17 @@ test('authenticated public API manages projects, clients and artifact inspection
       'apollo.webhooks.endpoints.read',
     )
     assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/status'].put[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.endpoints.status.set',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/status'].put
+        .requestBody.content['application/json'].schema.$ref,
+      '#/components/schemas/SetWebhookEndpointStatusRequestV1',
+    )
+    assert.equal(
       openApi.paths['/v1/webhooks/subscriptions'].get['x-apollo-capability-id'],
       'apollo.webhooks.subscriptions.list',
     )
@@ -742,6 +753,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.operations.retry',
         'apollo.webhooks.endpoints.list',
         'apollo.webhooks.endpoints.read',
+        'apollo.webhooks.endpoints.status.set',
         'apollo.webhooks.subscriptions.list',
         'apollo.webhooks.subscriptions.read',
         'apollo.webhooks.subscriptions.status.set',
@@ -785,11 +797,45 @@ test('authenticated public API manages projects, clients and artifact inspection
     const webhookEndpointRead = await webhookEndpointReadResponse.json()
     assert.equal(webhookEndpointReadResponse.status, 200)
     assert.equal(webhookEndpointRead.data.endpoint.id, webhookEndpointId)
+    assert.match(webhookEndpointRead.data.endpoint.revision, /^[a-f0-9]{64}$/)
     assert.deepEqual(
       webhookEndpointRead.data.endpoint.signingSecrets.map((secret) => secret.version),
       [1],
     )
     assert.equal(JSON.stringify(webhookEndpointRead).includes('vault://'), false)
+
+    const webhookEndpointStatusUrl =
+      `${baseUrl}/v1/webhooks/endpoints/${webhookEndpointId}/status`
+    const setWebhookEndpointStatus = (status, baseRevision) => fetch(
+      webhookEndpointStatusUrl,
+      {
+        method: 'PUT',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ status, baseRevision }),
+      },
+    )
+    const invalidEndpointBodyResponse = await fetch(webhookEndpointStatusUrl, {
+      method: 'PUT',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        status: 'suspended',
+        baseRevision: webhookEndpointRead.data.endpoint.revision,
+        unexpected: true,
+      }),
+    })
+    assert.equal(invalidEndpointBodyResponse.status, 422)
+    const missingEndpointStatusResponse = await fetch(
+      `${baseUrl}/v1/webhooks/endpoints/00000000-0000-4000-8000-000000000999/status`,
+      {
+        method: 'PUT',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          status: 'suspended',
+          baseRevision: webhookEndpointRead.data.endpoint.revision,
+        }),
+      },
+    )
+    assert.equal(missingEndpointStatusResponse.status, 404)
 
     const webhookSubscriptionListResponse = await fetch(
       `${baseUrl}/v1/webhooks/subscriptions?status=active&endpointId=${webhookEndpointId}`,
@@ -882,11 +928,72 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(resumeSubscriptionResponse.status, 200)
     assert.equal(resumedSubscription.data.subscription.status, 'active')
     assert.equal('pausedAt' in resumedSubscription.data.subscription, false)
+    let currentSubscription = resumedSubscription.data.subscription
     const invalidSubscriptionStatusResponse = await setWebhookSubscriptionStatus(
       'pending-verification',
       resumedSubscription.data.subscription.revision,
     )
     assert.equal(invalidSubscriptionStatusResponse.status, 422)
+
+    const suspendEndpointResponse = await setWebhookEndpointStatus(
+      'suspended',
+      webhookEndpointRead.data.endpoint.revision,
+    )
+    const suspendedEndpoint = await suspendEndpointResponse.json()
+    assert.equal(suspendEndpointResponse.status, 200)
+    assert.equal(suspendedEndpoint.data.endpoint.status, 'suspended')
+    assert.equal(suspendedEndpoint.data.effects.pausedSubscriptions, 1)
+    assert.equal(suspendedEndpoint.data.effects.revokedSubscriptions, 0)
+    assert.equal(suspendedEndpoint.data.replayed, false)
+    assert.equal(JSON.stringify(suspendedEndpoint).includes('/public-api'), false)
+    assert.equal(JSON.stringify(suspendedEndpoint).includes('keyRef'), false)
+    const suspendEndpointAgainResponse = await setWebhookEndpointStatus(
+      'suspended',
+      webhookEndpointRead.data.endpoint.revision,
+    )
+    const suspendedEndpointAgain = await suspendEndpointAgainResponse.json()
+    assert.equal(suspendEndpointAgainResponse.status, 200)
+    assert.equal(suspendedEndpointAgain.data.replayed, true)
+    assert.equal(suspendedEndpointAgain.data.effects.pausedSubscriptions, 0)
+    const staleEndpointResumeResponse = await setWebhookEndpointStatus('active', '0'.repeat(64))
+    assert.equal(staleEndpointResumeResponse.status, 409)
+    assert.equal(
+      (await staleEndpointResumeResponse.json()).error.code,
+      'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
+    )
+    const cascadePausedSubscriptionResponse = await fetch(
+      `${baseUrl}/v1/webhooks/subscriptions/${webhookSubscriptionId}`,
+      { headers: { authorization } },
+    )
+    const cascadePausedSubscription = await cascadePausedSubscriptionResponse.json()
+    assert.equal(cascadePausedSubscription.data.subscription.status, 'paused')
+    const resumeWhileEndpointSuspendedResponse = await setWebhookSubscriptionStatus(
+      'active',
+      cascadePausedSubscription.data.subscription.revision,
+    )
+    assert.equal(resumeWhileEndpointSuspendedResponse.status, 409)
+    const resumeEndpointResponse = await setWebhookEndpointStatus(
+      'active',
+      suspendedEndpoint.data.endpoint.revision,
+    )
+    const resumedEndpoint = await resumeEndpointResponse.json()
+    assert.equal(resumeEndpointResponse.status, 200)
+    assert.equal(resumedEndpoint.data.endpoint.status, 'active')
+    assert.equal(resumedEndpoint.data.effects.pausedSubscriptions, 0)
+    const stillPausedSubscriptionResponse = await fetch(
+      `${baseUrl}/v1/webhooks/subscriptions/${webhookSubscriptionId}`,
+      { headers: { authorization } },
+    )
+    const stillPausedSubscription = await stillPausedSubscriptionResponse.json()
+    assert.equal(stillPausedSubscription.data.subscription.status, 'paused')
+    const resumeAfterEndpointResponse = await setWebhookSubscriptionStatus(
+      'active',
+      stillPausedSubscription.data.subscription.revision,
+    )
+    assert.equal(resumeAfterEndpointResponse.status, 200)
+    currentSubscription = (await resumeAfterEndpointResponse.json()).data.subscription
+    assert.equal(currentSubscription.status, 'active')
+    const currentEndpoint = resumedEndpoint.data.endpoint
 
     const invalidWebhookAdministrationFilterResponse = await fetch(
       `${baseUrl}/v1/webhooks/endpoints?unknown=value`,
@@ -1000,9 +1107,25 @@ test('authenticated public API manages projects, clients and artifact inspection
       'WEBHOOK_EVENT_REPLAY_REJECTED',
     )
 
+    const revokeEndpointResponse = await setWebhookEndpointStatus(
+      'revoked',
+      currentEndpoint.revision,
+    )
+    const revokedEndpoint = await revokeEndpointResponse.json()
+    assert.equal(revokeEndpointResponse.status, 200)
+    assert.equal(revokedEndpoint.data.endpoint.status, 'revoked')
+    assert.equal(revokedEndpoint.data.effects.revokedSubscriptions, 1)
+    assert.equal(revokedEndpoint.data.effects.revokedSigningSecrets, 1)
+    assert.equal(revokedEndpoint.data.endpoint.currentSigningSecret.status, 'revoked')
+    const cascadedRevokedSubscriptionResponse = await fetch(
+      `${baseUrl}/v1/webhooks/subscriptions/${webhookSubscriptionId}`,
+      { headers: { authorization } },
+    )
+    const cascadedRevokedSubscription = await cascadedRevokedSubscriptionResponse.json()
+    assert.equal(cascadedRevokedSubscription.data.subscription.status, 'revoked')
     const revokeSubscriptionResponse = await setWebhookSubscriptionStatus(
       'revoked',
-      resumedSubscription.data.subscription.revision,
+      cascadedRevokedSubscription.data.subscription.revision,
     )
     const revokedSubscription = await revokeSubscriptionResponse.json()
     assert.equal(revokeSubscriptionResponse.status, 200)
@@ -1015,6 +1138,15 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(
       (await resumeRevokedSubscriptionResponse.json()).error.code,
       'WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED',
+    )
+    const resumeRevokedEndpointResponse = await setWebhookEndpointStatus(
+      'active',
+      revokedEndpoint.data.endpoint.revision,
+    )
+    assert.equal(resumeRevokedEndpointResponse.status, 409)
+    assert.equal(
+      (await resumeRevokedEndpointResponse.json()).error.code,
+      'WEBHOOK_ENDPOINT_TRANSITION_REJECTED',
     )
 
     const createChildRequest = () =>
@@ -1071,6 +1203,21 @@ test('authenticated public API manages projects, clients and artifact inspection
       headers: { authorization: childAuthorization },
     })
     assert.equal(childWebhookEndpointResponse.status, 403)
+    const childWebhookEndpointStatusResponse = await fetch(
+      webhookEndpointStatusUrl,
+      {
+        method: 'PUT',
+        headers: {
+          authorization: childAuthorization,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: 'suspended',
+          baseRevision: revokedEndpoint.data.endpoint.revision,
+        }),
+      },
+    )
+    assert.equal(childWebhookEndpointStatusResponse.status, 403)
     const childWebhookSubscriptionResponse = await fetch(
       `${baseUrl}/v1/webhooks/subscriptions`,
       { headers: { authorization: childAuthorization } },

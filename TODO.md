@@ -496,7 +496,7 @@
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048: API externa lista/lê endpoints, subscriptions e deliveries, executa replay controlado e altera lifecycle de subscriptions; UI, mutações de endpoint e rotação de secret continuam abertas.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049: API externa lista/lê endpoints, subscriptions e deliveries, executa replay e altera lifecycle de endpoints/subscriptions; UI, criação/challenge e rotação de secret continuam abertas.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
@@ -504,7 +504,7 @@
 - [x] Implementar ledger por workspace/client/key com request fingerprint. Evidência: `V2IdempotencyRecord` e repository Prisma.
 - [x] Retornar response/operation original em repetição idêntica. Evidência: testes unitário, Prisma e HTTP.
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
-- [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048: lifecycle de subscription exige `baseRevision` opaca e compare-and-set; a regra ainda precisa ser aplicada às demais mutações versionadas.
+- [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
 - [ ] Criar property tests de requests simultâneas e timeout após commit.
 
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048: capabilities de endpoints, subscriptions, deliveries e replay entregam consulta, pause/resume/revoke e replay workspace-scoped; criação, challenge, lifecycle de endpoint, rotação e UI continuam abertas.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049: capabilities de endpoints, subscriptions, deliveries e replay entregam consulta, lifecycle com cascatas e replay workspace-scoped; criação, challenge, rotação e UI continuam abertas.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -3953,7 +3953,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-048 — Lifecycle concorrente de subscriptions de webhook
 
-**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+**Status:** publicado em 15 de julho de 2026 no commit `ff8b95e`; hosted CI `29413558772` aprovado.
 
 Entregas:
 
@@ -3980,6 +3980,7 @@ Regressões e evidências locais:
 - build registra `PUT /v1/webhooks/subscriptions/{subscriptionId}/status`;
 - schema/migration permanecem válidos com 26 tabelas, 98 índices e 55 chaves estrangeiras;
 - todas as integrações SQLite, build, FFmpeg, Remotion real, bundle e auditorias sem vulnerabilidades passam.
+- hosted CI `29413558772` aprovou PostgreSQL, 104 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
 
 Limites explícitos desta slice:
 
@@ -3987,3 +3988,41 @@ Limites explícitos desta slice:
 - lifecycle, criação e challenge de endpoint ainda não possuem command público;
 - rotação de signing secret e reload dinâmico de provider permanecem abertas;
 - UI administrativa, audit query e métricas operacionais continuam futuras.
+
+### Slice F0-049 — Lifecycle e cascatas de endpoints de webhook
+
+**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability externa `apollo.webhooks.endpoints.status.set` suspende, retoma ou revoga endpoint sob `webhooks:admin`;
+- endpoint público recebe revisão SHA-256 opaca e command exige `baseRevision` para alteração real;
+- compare-and-set cobre workspace, ID, status e `updatedAt`;
+- lifecycle de endpoint e subscription usa transação serializável para impedir write skew entre comandos concorrentes;
+- repetição do mesmo alvo converge sem nova cascata ou gravação;
+- suspensão pausa atomicamente apenas subscriptions ativas e informa quantas foram afetadas;
+- retomada exige exatamente um signing secret ativo e não reativa subscriptions automaticamente;
+- revogação é terminal e encerra atomicamente subscriptions não terminais e signing secrets ativos;
+- relógio do command não pode anteceder endpoint ou subscription afetada;
+- resposta redigida informa contagens de subscriptions pausadas/revogadas e secrets revogados;
+- body fechado rejeita campos extras e estados internos; cross-workspace retorna 404 e falta de scope retorna 403;
+- ADR-038 formaliza a máquina de estados, cascatas, isolamento e política conservadora de retomada.
+
+Regressões e evidências locais:
+
+- suíte global passa com 106 testes; 38 são contratos de webhook;
+- contratos cobrem suspend/resume/revoke terminal, revisão, repetição convergente e validação do command;
+- integração Prisma cobre cascata de pausa, endpoint inativo, retomada explícita da subscription, CAS e cross-workspace;
+- jornada HTTP cobre OpenAPI, body fechado, 404, suspend, retry, stale revision, resume conservador, revoke com cascata e 403;
+- revogação HTTP comprova que subscription e secret ativo chegam ao estado terminal sem exposição de `keyRef`;
+- contratos públicos passam com 37 capabilities, 44 schemas, 59 exemplos e 34 paths;
+- build registra `PUT /v1/webhooks/endpoints/{endpointId}/status`;
+- schema/migration permanecem válidos com 26 tabelas, 98 índices e 55 chaves estrangeiras;
+- todas as integrações SQLite, build, FFmpeg, Remotion real, bundle e auditorias sem vulnerabilidades passam.
+
+Limites explícitos desta slice:
+
+- criação, alteração de URL e challenge público de endpoint continuam abertos;
+- criação e alteração de filtros de subscription permanecem abertas;
+- rotação de signing secret e reload dinâmico de provider permanecem abertas;
+- UI administrativa, audit query, métricas e alertas operacionais continuam futuros.

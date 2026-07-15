@@ -48,6 +48,7 @@ export interface WebhookEndpoint {
   status: WebhookEndpointStatus
   createdByClientId: string
   createdAt: string
+  updatedAt: string
   verifiedAt?: string
   suspendedAt?: string
   revokedAt?: string
@@ -239,15 +240,24 @@ export function webhookEventMatchesFilter(
 }
 
 export function createWebhookEndpoint(
-  input: Omit<WebhookEndpoint, 'schemaVersion' | 'url'> & { url: string },
+  input: Omit<WebhookEndpoint, 'schemaVersion' | 'url' | 'updatedAt'> & {
+    url: string
+    updatedAt?: string
+  },
 ): Readonly<WebhookEndpoint> {
   const createdAt = canonicalUtc(input.createdAt, 'createdAt')
+  const updatedAt = canonicalUtc(input.updatedAt ?? input.createdAt, 'updatedAt')
   const verifiedAt = input.verifiedAt ? canonicalUtc(input.verifiedAt, 'verifiedAt') : undefined
   const suspendedAt = input.suspendedAt
     ? canonicalUtc(input.suspendedAt, 'suspendedAt')
     : undefined
   const revokedAt = input.revokedAt ? canonicalUtc(input.revokedAt, 'revokedAt') : undefined
   assertDomain(WEBHOOK_ENDPOINT_STATUSES.includes(input.status), 'INVALID_WEBHOOK', 'Webhook endpoint status is invalid')
+  assertDomain(
+    new Date(updatedAt).getTime() >= new Date(createdAt).getTime(),
+    'INVALID_WEBHOOK',
+    'Webhook endpoint update cannot predate creation',
+  )
   assertDomain(
     (input.status === 'pending-verification' && !verifiedAt && !suspendedAt && !revokedAt) ||
       (input.status === 'active' && Boolean(verifiedAt) && !suspendedAt && !revokedAt) ||
@@ -264,9 +274,61 @@ export function createWebhookEndpoint(
     status: input.status,
     createdByClientId: safeId(input.createdByClientId, 'createdByClientId'),
     createdAt,
+    updatedAt,
     ...(verifiedAt ? { verifiedAt } : {}),
     ...(suspendedAt ? { suspendedAt } : {}),
     ...(revokedAt ? { revokedAt } : {}),
+  })
+}
+
+export type WebhookEndpointMutableStatus = Exclude<
+  WebhookEndpointStatus,
+  'pending-verification'
+>
+
+export function webhookEndpointRevision(endpoint: Readonly<WebhookEndpoint>): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ id: endpoint.id, status: endpoint.status, updatedAt: endpoint.updatedAt }))
+    .digest('hex')
+}
+
+export function transitionWebhookEndpoint(
+  endpoint: Readonly<WebhookEndpoint>,
+  targetStatus: WebhookEndpointMutableStatus,
+  changedAtValue: string,
+): Readonly<WebhookEndpoint> {
+  const changedAt = canonicalUtc(changedAtValue, 'changedAt')
+  assertDomain(
+    new Date(changedAt).getTime() >= new Date(endpoint.updatedAt).getTime(),
+    'WEBHOOK_ENDPOINT_TRANSITION_REJECTED',
+    'Webhook endpoint transition clock is stale',
+  )
+  if (endpoint.status === targetStatus) return endpoint
+  const allowed =
+    (endpoint.status === 'pending-verification' && targetStatus === 'revoked') ||
+    (endpoint.status === 'active' && ['suspended', 'revoked'].includes(targetStatus)) ||
+    (endpoint.status === 'suspended' && ['active', 'revoked'].includes(targetStatus))
+  assertDomain(
+    allowed,
+    'WEBHOOK_ENDPOINT_TRANSITION_REJECTED',
+    'Webhook endpoint status transition is not allowed',
+  )
+  return createWebhookEndpoint({
+    id: endpoint.id,
+    workspaceId: endpoint.workspaceId,
+    url: endpoint.url,
+    status: targetStatus,
+    createdByClientId: endpoint.createdByClientId,
+    createdAt: endpoint.createdAt,
+    updatedAt: changedAt,
+    ...(endpoint.verifiedAt ? { verifiedAt: endpoint.verifiedAt } : {}),
+    ...(targetStatus === 'suspended' ? { suspendedAt: changedAt } : {}),
+    ...(targetStatus === 'revoked'
+      ? {
+          revokedAt: changedAt,
+          ...(endpoint.suspendedAt ? { suspendedAt: endpoint.suspendedAt } : {}),
+        }
+      : {}),
   })
 }
 

@@ -372,6 +372,7 @@ const webhookSigningSecretMetadataSchema = {
 const webhookEndpointSummaryProperties = {
   schemaVersion: { const: 'webhook-endpoint/v1' }, id: webhookUuidSchema,
   status: { enum: ['pending-verification', 'active', 'suspended', 'revoked'] },
+  revision: sha256Schema,
   destinationOrigin: { type: 'string', format: 'uri', maxLength: 255 },
   urlFingerprint: sha256Schema, createdByClientId: idSchema, createdAt: dateTimeSchema,
   verifiedAt: dateTimeSchema, suspendedAt: dateTimeSchema, revokedAt: dateTimeSchema,
@@ -1478,6 +1479,36 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ),
   defineSchema('webhook-endpoint-detail', 1, 'Webhook endpoint detail response',
     successSchema({ type: 'object', additionalProperties: false, required: ['endpoint'], properties: { endpoint: webhookEndpointDetailSchema } }),
+  ),
+  defineSchema('set-webhook-endpoint-status-request', 1, 'Set webhook endpoint status request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['status', 'baseRevision'],
+    properties: {
+      status: { enum: ['active', 'suspended', 'revoked'] },
+      baseRevision: sha256Schema,
+    },
+  }),
+  defineSchema('webhook-endpoint-status-result', 1, 'Webhook endpoint status result',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['endpoint', 'effects', 'replayed'],
+      properties: {
+        endpoint: webhookEndpointSummarySchema,
+        effects: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['pausedSubscriptions', 'revokedSubscriptions', 'revokedSigningSecrets'],
+          properties: {
+            pausedSubscriptions: { type: 'integer', minimum: 0 },
+            revokedSubscriptions: { type: 'integer', minimum: 0 },
+            revokedSigningSecrets: { type: 'integer', minimum: 0 },
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
   ),
   defineSchema('webhook-subscription-list', 1, 'Webhook subscription list response',
     successSchema({ type: 'object', additionalProperties: false, required: ['subscriptions'], properties: {

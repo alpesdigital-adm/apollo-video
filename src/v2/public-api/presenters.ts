@@ -16,6 +16,7 @@ import type {
   WebhookSigningSecretMetadata,
 } from '../application/ports/webhook-administration-query-repository.ts'
 import {
+  webhookEndpointRevision,
   webhookSubscriptionRevision,
   type WebhookSubscription,
 } from '../domain/webhook.ts'
@@ -211,6 +212,7 @@ export function presentWebhookEndpointSummary(record: Readonly<WebhookEndpointSu
     schemaVersion: 'webhook-endpoint/v1' as const,
     id: endpoint.id,
     status: endpoint.status,
+    revision: webhookEndpointRevision(endpoint),
     destinationOrigin: new URL(endpoint.url).origin,
     urlFingerprint: createHash('sha256').update(endpoint.url).digest('hex'),
     createdByClientId: endpoint.createdByClientId,

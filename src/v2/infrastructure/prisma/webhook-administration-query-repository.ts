@@ -27,6 +27,7 @@ function endpoint(row: V2WebhookEndpoint): Readonly<WebhookEndpoint> {
     status: row.status as WebhookEndpoint['status'],
     createdByClientId: row.createdByClientId,
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
     ...(row.verifiedAt ? { verifiedAt: row.verifiedAt.toISOString() } : {}),
     ...(row.suspendedAt ? { suspendedAt: row.suspendedAt.toISOString() } : {}),
     ...(row.revokedAt ? { revokedAt: row.revokedAt.toISOString() } : {}),

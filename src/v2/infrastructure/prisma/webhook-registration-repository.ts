@@ -61,6 +61,7 @@ export class PrismaWebhookRegistrationRepository implements WebhookRegistrationR
             status: endpoint.status,
             createdByClientId: endpoint.createdByClientId,
             createdAt: new Date(endpoint.createdAt),
+            updatedAt: new Date(endpoint.updatedAt),
             verifiedAt: endpoint.verifiedAt ? new Date(endpoint.verifiedAt) : null,
             suspendedAt: endpoint.suspendedAt ? new Date(endpoint.suspendedAt) : null,
             revokedAt: endpoint.revokedAt ? new Date(endpoint.revokedAt) : null,

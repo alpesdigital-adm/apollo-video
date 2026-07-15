@@ -1,4 +1,5 @@
-import type { Prisma, PrismaClient, V2WebhookSubscription } from '@prisma/client'
+import type { PrismaClient, V2WebhookSubscription } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 import type {
   SetWebhookSubscriptionStatusCommand,
@@ -56,64 +57,74 @@ export class PrismaWebhookSubscriptionCommandRepository
   }
 
   async setStatus(command: Readonly<SetWebhookSubscriptionStatusCommand>) {
-    return this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
-      const row = await transaction.v2WebhookSubscription.findFirst({
-        where: { id: command.subscriptionId, workspaceId: command.workspaceId },
-      })
-      if (!row) return null
-      const current = hydrate(row)
-      const currentRevision = webhookSubscriptionRevision(current)
-      if (current.status === command.targetStatus) {
-        return Object.freeze({
-          subscription: current,
-          revision: currentRevision,
-          replayed: true,
+    try {
+      return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
+        const row = await transaction.v2WebhookSubscription.findFirst({
+          where: { id: command.subscriptionId, workspaceId: command.workspaceId },
         })
-      }
-      if (currentRevision !== command.baseRevision) {
-        throw new DomainError(
-          'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
-          'Webhook subscription revision does not match',
-        )
-      }
-      if (command.targetStatus === 'active') {
-        const endpoint = await transaction.v2WebhookEndpoint.findFirst({
-          where: { id: current.endpointId, workspaceId: current.workspaceId, status: 'active' },
-          select: { id: true },
-        })
-        if (!endpoint) {
+        if (!row) return null
+        const current = hydrate(row)
+        const currentRevision = webhookSubscriptionRevision(current)
+        if (current.status === command.targetStatus) {
+          return Object.freeze({
+            subscription: current,
+            revision: currentRevision,
+            replayed: true,
+          })
+        }
+        if (currentRevision !== command.baseRevision) {
           throw new DomainError(
-            'WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED',
-            'Webhook subscription requires an active endpoint',
+            'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
+            'Webhook subscription revision does not match',
           )
         }
-      }
-      const next = transitionWebhookSubscription(current, command.targetStatus, command.changedAt)
-      const changed = await transaction.v2WebhookSubscription.updateMany({
-        where: {
-          id: current.id,
-          workspaceId: current.workspaceId,
-          status: current.status,
-          updatedAt: row.updatedAt,
-        },
-        data: {
-          status: next.status,
-          updatedAt: new Date(next.updatedAt),
-          pausedAt: next.pausedAt ? new Date(next.pausedAt) : null,
-          revokedAt: next.revokedAt ? new Date(next.revokedAt) : null,
-        },
-      })
-      if (changed.count !== 1) {
+        if (command.targetStatus === 'active') {
+          const endpoint = await transaction.v2WebhookEndpoint.findFirst({
+            where: { id: current.endpointId, workspaceId: current.workspaceId, status: 'active' },
+            select: { id: true },
+          })
+          if (!endpoint) {
+            throw new DomainError(
+              'WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED',
+              'Webhook subscription requires an active endpoint',
+            )
+          }
+        }
+        const next = transitionWebhookSubscription(current, command.targetStatus, command.changedAt)
+        const changed = await transaction.v2WebhookSubscription.updateMany({
+          where: {
+            id: current.id,
+            workspaceId: current.workspaceId,
+            status: current.status,
+            updatedAt: row.updatedAt,
+          },
+          data: {
+            status: next.status,
+            updatedAt: new Date(next.updatedAt),
+            pausedAt: next.pausedAt ? new Date(next.pausedAt) : null,
+            revokedAt: next.revokedAt ? new Date(next.revokedAt) : null,
+          },
+        })
+        if (changed.count !== 1) {
+          throw new DomainError(
+            'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
+            'Webhook subscription changed concurrently',
+          )
+        }
+        return Object.freeze({
+          subscription: next,
+          revision: webhookSubscriptionRevision(next),
+          replayed: false,
+        })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034') {
         throw new DomainError(
           'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
           'Webhook subscription changed concurrently',
         )
       }
-      return Object.freeze({
-        subscription: next,
-        revision: webhookSubscriptionRevision(next),
-        replayed: false,
-      })
-    })
+      throw error
+    }
   }
 }

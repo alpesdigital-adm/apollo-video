@@ -167,6 +167,13 @@ concorrentes retornam conflito, enquanto repetir o mesmo estado converge sem
 novo efeito. Subscriptions ativas podem ser pausadas ou revogadas; pausadas podem
 ser retomadas somente se o endpoint estiver ativo; revogação é terminal.
 
+O endpoint usa o mesmo modelo em
+`PUT /v1/webhooks/endpoints/{endpointId}/status`. Suspender o endpoint pausa
+atomicamente suas subscriptions ativas; retomá-lo não as religa automaticamente.
+Revogar é terminal e revoga, na mesma transação, todas as subscriptions ainda
+abertas e o signing secret ativo. A resposta informa os totais afetados sem
+expor URL completa ou referência do secret.
+
 Deliveries terminais podem ser reabertas de forma idempotente pela API externa,
 individualmente ou por um event ID exato. O replay por evento avalia no máximo
 100 deliveries, informa separadamente itens reagendados e ignorados e preserva

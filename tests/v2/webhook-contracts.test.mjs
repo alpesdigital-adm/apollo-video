@@ -39,6 +39,7 @@ import {
 import { replayWebhookDeliveryService } from '../../src/v2/application/replay-webhook-delivery.ts'
 import { replayWebhookEventService } from '../../src/v2/application/replay-webhook-event.ts'
 import { setWebhookSubscriptionStatusService } from '../../src/v2/application/set-webhook-subscription-status.ts'
+import { setWebhookEndpointStatusService } from '../../src/v2/application/set-webhook-endpoint-status.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -49,7 +50,9 @@ import {
   createWebhookSubscription,
   normalizeWebhookUrl,
   replayWebhookDelivery,
+  transitionWebhookEndpoint,
   transitionWebhookSubscription,
+  webhookEndpointRevision,
   webhookSubscriptionRevision,
   webhookEventMatchesFilter,
 } from '../../src/v2/domain/webhook.ts'
@@ -934,6 +937,64 @@ test('webhook endpoint administration paginates with filter-bound cursors and sc
   await assert.rejects(
     () => read({ workspaceId: 'workspace-2', endpointId: records[0].endpoint.id }),
     (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_NOT_FOUND',
+  )
+})
+
+test('webhook endpoint lifecycle is revisioned, reversible only from suspension and terminal after revoke', () => {
+  const active = createWebhookEndpoint({
+    id: '00000000-0000-4000-8000-000000000925', workspaceId: 'workspace-1',
+    url: 'https://hooks.example.com/lifecycle', status: 'active',
+    createdByClientId: 'client-1', createdAt: '2026-07-15T11:24:00.000Z',
+    verifiedAt: '2026-07-15T11:24:00.000Z',
+  })
+  const suspended = transitionWebhookEndpoint(active, 'suspended', '2026-07-15T11:24:01.000Z')
+  assert.equal(suspended.status, 'suspended')
+  assert.notEqual(webhookEndpointRevision(suspended), webhookEndpointRevision(active))
+  assert.equal(transitionWebhookEndpoint(suspended, 'suspended', suspended.updatedAt), suspended)
+  const resumed = transitionWebhookEndpoint(suspended, 'active', '2026-07-15T11:24:02.000Z')
+  assert.equal(resumed.status, 'active')
+  assert.equal('suspendedAt' in resumed, false)
+  const revoked = transitionWebhookEndpoint(resumed, 'revoked', '2026-07-15T11:24:03.000Z')
+  assert.equal(revoked.status, 'revoked')
+  assert.throws(
+    () => transitionWebhookEndpoint(revoked, 'active', '2026-07-15T11:24:04.000Z'),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_TRANSITION_REJECTED',
+  )
+})
+
+test('webhook endpoint status command validates revision and scopes repository input', async () => {
+  const endpoint = createWebhookEndpoint({
+    id: '00000000-0000-4000-8000-000000000926', workspaceId: 'workspace-1',
+    url: 'https://hooks.example.com/command', status: 'active',
+    createdByClientId: 'client-1', createdAt: '2026-07-15T11:25:00.000Z',
+    verifiedAt: '2026-07-15T11:25:00.000Z',
+  })
+  const baseRevision = webhookEndpointRevision(endpoint)
+  let command
+  const setStatus = setWebhookEndpointStatusService({
+    repository: {
+      async setStatus(value) {
+        command = value
+        const next = transitionWebhookEndpoint(endpoint, value.targetStatus, value.changedAt)
+        return {
+          endpoint: { endpoint: next }, replayed: false,
+          effects: { pausedSubscriptions: 1, revokedSubscriptions: 0, revokedSigningSecrets: 0 },
+        }
+      },
+    },
+    clock: () => new Date('2026-07-15T11:25:01.000Z'),
+  })
+  const result = await setStatus({
+    workspaceId: 'workspace-1', endpointId: endpoint.id,
+    status: 'suspended', baseRevision,
+  })
+  assert.equal(result.endpoint.endpoint.status, 'suspended')
+  assert.equal(result.effects.pausedSubscriptions, 1)
+  assert.equal(command.workspaceId, 'workspace-1')
+  assert.equal(command.baseRevision, baseRevision)
+  await assert.rejects(
+    () => setStatus({ workspaceId: 'workspace-1', endpointId: endpoint.id, status: 'pending-verification', baseRevision }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
 })
 
