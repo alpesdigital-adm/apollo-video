@@ -47,3 +47,4 @@ Estados usados:
 - [ADR-043 — Rotação HMAC ativa preparada em duas fases](./ADR-043-two-phase-active-webhook-secret-rotation.md)
 - [ADR-044 — Corte HMAC atômico e overlap limitado](./ADR-044-atomic-webhook-secret-cutover-and-overlap.md)
 - [ADR-045 — Cancelamento terminal e descarte do envelope HMAC](./ADR-045-terminal-webhook-rotation-cancellation.md)
+- [ADR-046 — Consulta redigida de rotações de signing secret](./ADR-046-redacted-webhook-rotation-administration.md)

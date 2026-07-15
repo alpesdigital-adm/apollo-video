@@ -1,12 +1,14 @@
 import type {
   PrismaClient,
   V2WebhookEndpoint,
+  V2WebhookSigningSecretRotation,
   V2WebhookSubscription,
 } from '@prisma/client'
 
 import type {
   WebhookAdministrationQueryRepository,
   WebhookSigningSecretMetadata,
+  WebhookSigningSecretRotationMetadata,
 } from '../../application/ports/webhook-administration-query-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
@@ -93,6 +95,30 @@ function secret(value: {
   })
 }
 
+function rotation(row: Pick<
+  V2WebhookSigningSecretRotation,
+  'id' | 'endpointId' | 'candidateVersion' | 'fingerprint' | 'status' | 'overlapSeconds' |
+  'baseRevision' | 'createdAt' | 'expiresAt' | 'activatedAt' | 'overlapUntil' | 'cancelledAt'
+>): Readonly<WebhookSigningSecretRotationMetadata> {
+  if (!['staged', 'activated', 'cancelled', 'expired'].includes(row.status)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored webhook signing secret rotation metadata is invalid')
+  }
+  return Object.freeze({
+    id: row.id,
+    endpointId: row.endpointId,
+    candidateVersion: row.candidateVersion,
+    fingerprint: row.fingerprint,
+    status: row.status as WebhookSigningSecretRotationMetadata['status'],
+    overlapSeconds: row.overlapSeconds,
+    baseRevision: row.baseRevision,
+    createdAt: row.createdAt.toISOString(),
+    expiresAt: row.expiresAt.toISOString(),
+    ...(row.activatedAt ? { activatedAt: row.activatedAt.toISOString() } : {}),
+    ...(row.overlapUntil ? { overlapUntil: row.overlapUntil.toISOString() } : {}),
+    ...(row.cancelledAt ? { cancelledAt: row.cancelledAt.toISOString() } : {}),
+  })
+}
+
 function validateList(query: { workspaceId: string; limit: number; after?: { id: string; createdAt: string }; endpointId?: string }) {
   const afterDate = query.after ? new Date(query.after.createdAt) : undefined
   if (
@@ -111,6 +137,21 @@ const secretSelect = {
   createdAt: true,
   retiredAt: true,
   revokedAt: true,
+} as const
+
+const rotationMetadataSelect = {
+  id: true,
+  endpointId: true,
+  candidateVersion: true,
+  fingerprint: true,
+  status: true,
+  overlapSeconds: true,
+  baseRevision: true,
+  createdAt: true,
+  expiresAt: true,
+  activatedAt: true,
+  overlapUntil: true,
+  cancelledAt: true,
 } as const
 
 export class PrismaWebhookAdministrationQueryRepository implements WebhookAdministrationQueryRepository {
@@ -171,5 +212,32 @@ export class PrismaWebhookAdministrationQueryRepository implements WebhookAdmini
     if (!SAFE_ID_PATTERN.test(workspaceId) || !UUID_V4_PATTERN.test(subscriptionId)) throw new DomainError('INVALID_WEBHOOK', 'Webhook subscription identity is invalid')
     const row = await this.client.v2WebhookSubscription.findFirst({ where: { id: subscriptionId, workspaceId } })
     return row ? subscription(row) : null
+  }
+
+  async listSigningSecretRotations(query: Parameters<WebhookAdministrationQueryRepository['listSigningSecretRotations']>[0]) {
+    const afterDate = validateList(query)
+    const rows = await this.client.v2WebhookSigningSecretRotation.findMany({
+      where: {
+        workspaceId: query.workspaceId,
+        endpointId: query.endpointId,
+        ...(query.status ? { status: query.status } : {}),
+        ...(query.after && afterDate ? { OR: [{ createdAt: { lt: afterDate } }, { createdAt: afterDate, id: { lt: query.after.id } }] } : {}),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: query.limit,
+      select: rotationMetadataSelect,
+    })
+    return Object.freeze(rows.map(rotation))
+  }
+
+  async findSigningSecretRotationById(workspaceId: string, endpointId: string, rotationId: string) {
+    if (!SAFE_ID_PATTERN.test(workspaceId) || !UUID_V4_PATTERN.test(endpointId) || !UUID_V4_PATTERN.test(rotationId)) {
+      throw new DomainError('INVALID_WEBHOOK', 'Webhook signing secret rotation identity is invalid')
+    }
+    const row = await this.client.v2WebhookSigningSecretRotation.findFirst({
+      where: { id: rotationId, endpointId, workspaceId },
+      select: rotationMetadataSelect,
+    })
+    return row ? rotation(row) : null
   }
 }

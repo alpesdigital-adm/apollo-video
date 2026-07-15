@@ -28,3 +28,17 @@ export function readWebhookSubscriptionService(dependencies: { repository: Webho
     return record
   }
 }
+
+export function readWebhookSigningSecretRotationService(dependencies: { repository: WebhookAdministrationQueryRepository }) {
+  return async (request: { workspaceId: string; endpointId: string; rotationId: string }) => {
+    const endpoint = identity(request.workspaceId, request.endpointId)
+    const rotation = identity(request.workspaceId, request.rotationId)
+    const record = await dependencies.repository.findSigningSecretRotationById(
+      endpoint.workspaceId,
+      endpoint.resourceId,
+      rotation.resourceId,
+    )
+    if (!record) throw new DomainError('WEBHOOK_SIGNING_SECRET_ROTATION_NOT_FOUND', 'Webhook signing secret rotation was not found')
+    return record
+  }
+}

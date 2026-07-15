@@ -842,6 +842,24 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.equal(endpointDetail.signingSecrets.length, 2)
     assert.equal(endpointDetail.signingSecrets[1].fingerprint, stagedRotation.rotation.fingerprint)
     assert.equal(await administration.findEndpointById('another-workspace', endpoint.id), null)
+    const rotationPage = await administration.listSigningSecretRotations({
+      workspaceId, endpointId: endpoint.id, status: 'activated', limit: 2,
+    })
+    assert.equal(rotationPage.length, 1)
+    assert.equal(rotationPage[0].id, activatedRotation.rotation.id)
+    assert.equal('keyRef' in rotationPage[0], false)
+    assert.equal('candidateSecretId' in rotationPage[0], false)
+    assert.equal('payloadCiphertext' in rotationPage[0], false)
+    const rotationDetail = await administration.findSigningSecretRotationById(
+      workspaceId, endpoint.id, activatedRotation.rotation.id,
+    )
+    assert.equal(rotationDetail.status, 'activated')
+    assert.equal(
+      await administration.findSigningSecretRotationById(
+        'another-workspace', endpoint.id, activatedRotation.rotation.id,
+      ),
+      null,
+    )
     const subscriptionPage = await administration.listSubscriptions({
       workspaceId, endpointId: endpoint.id, status: 'active', limit: 2,
     })

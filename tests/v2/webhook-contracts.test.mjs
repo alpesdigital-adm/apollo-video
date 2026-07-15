@@ -39,10 +39,12 @@ import { listWebhookDeliveriesService } from '../../src/v2/application/list-webh
 import { readWebhookDeliveryService } from '../../src/v2/application/read-webhook-delivery.ts'
 import {
   listWebhookEndpointsService,
+  listWebhookSigningSecretRotationsService,
   listWebhookSubscriptionsService,
 } from '../../src/v2/application/list-webhook-administration.ts'
 import {
   readWebhookEndpointService,
+  readWebhookSigningSecretRotationService,
   readWebhookSubscriptionService,
 } from '../../src/v2/application/read-webhook-administration.ts'
 import { replayWebhookDeliveryService } from '../../src/v2/application/replay-webhook-delivery.ts'
@@ -1415,6 +1417,50 @@ test('webhook endpoint administration paginates with filter-bound cursors and sc
   await assert.rejects(
     () => read({ workspaceId: 'workspace-2', endpointId: records[0].endpoint.id }),
     (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_NOT_FOUND',
+  )
+})
+
+test('webhook signing secret rotation administration is endpoint-scoped and cursor-bound', async () => {
+  const endpointId = '00000000-0000-4000-8000-000000000931'
+  const rotations = [
+    {
+      id: '00000000-0000-4000-8000-000000000933', endpointId,
+      candidateVersion: 3, fingerprint: 'c'.repeat(64), status: 'cancelled',
+      overlapSeconds: 300, baseRevision: 'b'.repeat(64),
+      createdAt: '2026-07-15T11:30:01.000Z', expiresAt: '2026-07-16T11:30:01.000Z',
+      cancelledAt: '2026-07-15T11:31:01.000Z',
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000932', endpointId,
+      candidateVersion: 2, fingerprint: 'a'.repeat(64), status: 'activated',
+      overlapSeconds: 300, baseRevision: 'd'.repeat(64),
+      createdAt: '2026-07-15T11:30:00.000Z', expiresAt: '2026-07-16T11:30:00.000Z',
+      activatedAt: '2026-07-15T11:30:30.000Z', overlapUntil: '2026-07-15T11:35:30.000Z',
+    },
+  ]
+  let query
+  const repository = {
+    async listSigningSecretRotations(value) { query = value; return rotations },
+    async findSigningSecretRotationById(workspaceId, requestedEndpointId, rotationId) {
+      return workspaceId === 'workspace-1' && requestedEndpointId === endpointId
+        ? rotations.find((rotation) => rotation.id === rotationId) ?? null
+        : null
+    },
+  }
+  const list = listWebhookSigningSecretRotationsService({ repository })
+  const first = await list({ workspaceId: 'workspace-1', endpointId, limit: 1, status: 'cancelled' })
+  assert.equal(first.rotations.length, 1)
+  assert.equal(query.endpointId, endpointId)
+  assert.equal(typeof first.nextCursor, 'string')
+  await assert.rejects(
+    () => list({ workspaceId: 'workspace-1', endpointId, limit: 1, status: 'activated', after: first.nextCursor }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+  const read = readWebhookSigningSecretRotationService({ repository })
+  assert.equal((await read({ workspaceId: 'workspace-1', endpointId, rotationId: rotations[0].id })).status, 'cancelled')
+  await assert.rejects(
+    () => read({ workspaceId: 'workspace-2', endpointId, rotationId: rotations[0].id }),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_SIGNING_SECRET_ROTATION_NOT_FOUND',
   )
 })
 

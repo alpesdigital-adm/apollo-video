@@ -3,17 +3,44 @@ import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
+import { listWebhookSigningSecretRotationsService } from '@/v2/application/list-webhook-administration'
 import { stageWebhookSigningSecretRotationService } from '@/v2/application/stage-webhook-signing-secret-rotation'
 import { DomainError } from '@/v2/domain/errors'
 import {
   createConfiguredWebhookSigningSecretProtector,
+  createWebhookAdministrationQueryRepository,
   createWebhookSigningSecretRotationRepository,
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
-import { presentSuccess } from '@/v2/public-api/presenters'
+import { presentSuccess, presentWebhookSigningSecretRotation } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
+
+export async function GET(request: NextRequest, context: { params: Promise<{ endpointId: string }> }) {
+  const requestId = resolveRequestId(request)
+  try {
+    const actor = await authenticateExternalRequest(request)
+    requireScope(actor, 'webhooks:admin')
+    const params = request.nextUrl.searchParams
+    const allowed = new Set(['limit', 'after', 'status'])
+    for (const name of params.keys()) if (!allowed.has(name)) throw new DomainError('INVALID_ARGUMENT', `${name} is not a supported filter`)
+    for (const name of allowed) if (params.getAll(name).length > 1) throw new DomainError('INVALID_ARGUMENT', `${name} cannot be repeated`)
+    const { endpointId } = await context.params
+    const list = listWebhookSigningSecretRotationsService({ repository: createWebhookAdministrationQueryRepository() })
+    const result = await list({
+      workspaceId: actor.workspaceId,
+      endpointId,
+      ...(params.has('limit') ? { limit: Number(params.get('limit')) } : {}),
+      ...(params.has('after') ? { after: params.get('after') ?? '' } : {}),
+      ...(params.has('status') ? { status: params.get('status') ?? '' } : {}),
+    })
+    return NextResponse.json(presentSuccess({
+      rotations: result.rotations.map(presentWebhookSigningSecretRotation),
+      ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+    }), { status: 200, headers: publicApiHeaders(requestId) })
+  } catch (error) { return respondPublicError(error, requestId) }
+}
 
 export async function POST(request: NextRequest, context: { params: Promise<{ endpointId: string }> }) {
   const requestId = resolveRequestId(request)

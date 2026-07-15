@@ -388,6 +388,22 @@ const webhookEndpointDetailSchema = {
   required: [...webhookEndpointSummarySchema.required, 'signingSecrets'],
   properties: { ...webhookEndpointSummaryProperties, signingSecrets: { type: 'array', maxItems: 100, items: webhookSigningSecretMetadataSchema } },
 }
+const webhookSigningSecretRotationMetadataSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'endpointId', 'candidateVersion', 'fingerprint', 'status',
+    'overlapSeconds', 'baseRevision', 'createdAt', 'expiresAt',
+  ],
+  properties: {
+    schemaVersion: { const: 'webhook-signing-secret-rotation/v1' },
+    id: webhookUuidSchema, endpointId: webhookUuidSchema,
+    candidateVersion: { type: 'integer', minimum: 2 }, fingerprint: sha256Schema,
+    status: { enum: ['staged', 'activated', 'cancelled', 'expired'] },
+    overlapSeconds: { type: 'integer', minimum: 60, maximum: 86400 },
+    baseRevision: sha256Schema, createdAt: dateTimeSchema, expiresAt: dateTimeSchema,
+    activatedAt: dateTimeSchema, overlapUntil: dateTimeSchema, cancelledAt: dateTimeSchema,
+  },
+}
 const webhookSubscriptionSchema = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'id', 'endpointId', 'status', 'eventTypes', 'createdByClientId', 'createdAt'],
@@ -1677,6 +1693,21 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         envelopeDestroyed: { type: 'boolean', const: true },
         replayed: { type: 'boolean' },
       },
+    }),
+  ),
+  defineSchema('webhook-signing-secret-rotation-list', 1, 'Webhook signing secret rotation list response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['rotations'],
+      properties: {
+        rotations: { type: 'array', maxItems: 100, items: webhookSigningSecretRotationMetadataSchema },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      },
+    }),
+  ),
+  defineSchema('webhook-signing-secret-rotation-detail', 1, 'Webhook signing secret rotation detail response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['rotation'],
+      properties: { rotation: webhookSigningSecretRotationMetadataSchema },
     }),
   ),
   defineSchema('webhook-subscription-list', 1, 'Webhook subscription list response',

@@ -664,6 +664,23 @@ test('authenticated public API manages projects, clients and artifact inspection
       true,
     )
     assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations'].get[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.endpoints.signing-secrets.rotations.list',
+    )
+    assert.deepEqual(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations'].get
+        .parameters.map((parameter) => parameter.name),
+      ['endpointId', 'limit', 'after', 'status'],
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}'].get[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.endpoints.signing-secrets.rotations.read',
+    )
+    assert.equal(
       openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/activate'].post[
         'x-apollo-capability-id'
       ],
@@ -1230,6 +1247,31 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(cancelRotationReplayResponse.status, 200)
     assert.equal(cancelRotationReplay.data.replayed, true)
     assert.equal(cancelRotationReplay.data.rotation.id, cancelledRotation.data.rotation.id)
+    const rotationListResponse = await fetch(`${stageRotationUrl}?limit=1&status=cancelled`, {
+      headers: { authorization },
+    })
+    const rotationList = await rotationListResponse.json()
+    assert.equal(rotationListResponse.status, 200)
+    assert.equal(rotationList.data.rotations.length, 1)
+    assert.equal(rotationList.data.rotations[0].id, cancelledRotation.data.rotation.id)
+    assert.equal(rotationList.data.rotations[0].baseRevision, secondStageRotationBody.baseRevision)
+    assert.equal(JSON.stringify(rotationList).includes('candidateSecretId'), false)
+    assert.equal(JSON.stringify(rotationList).includes('keyRef'), false)
+    assert.equal(JSON.stringify(rotationList).includes('payloadCiphertext'), false)
+    const rotationReadResponse = await fetch(
+      `${stageRotationUrl}/${cancelledRotation.data.rotation.id}`,
+      { headers: { authorization } },
+    )
+    const rotationRead = await rotationReadResponse.json()
+    assert.equal(rotationReadResponse.status, 200)
+    assert.deepEqual(rotationRead.data.rotation, rotationList.data.rotations[0])
+    assert.equal((await fetch(`${stageRotationUrl}?status=invalid`, {
+      headers: { authorization },
+    })).status, 422)
+    assert.equal((await fetch(
+      `${stageRotationUrl}/00000000-0000-4000-8000-000000000999`,
+      { headers: { authorization } },
+    )).status, 404)
     assert.equal((await stageRotation(
       'public-secret-rotation-stage-2',
       secondStageRotationBody,

@@ -201,6 +201,13 @@ Uma preparação ainda não ativada pode ser descartada por
 com a revisão original. O command destrói o envelope candidato, converge em
 replay e também transforma preparo vencido em `expired`. Ele continua permitido
 se o endpoint foi suspenso ou revogado, mas nunca desfaz uma rotação ativada.
+O histórico redigido pode ser consultado por
+`GET /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations`, com paginação
+e filtro opcional de status, e o item exato por
+`GET /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}`.
+As respostas incluem lifecycle, fingerprint, overlap e revisão-base necessária
+aos comandos, mas nunca retornam referências internas de chaves, IDs dos secrets
+ou campos do envelope cifrado.
 
 A ativação é solicitada por
 `POST /v1/webhooks/endpoints/{endpointId}/challenge`, sem body. O Apollo faz um

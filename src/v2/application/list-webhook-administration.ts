@@ -4,6 +4,7 @@ import type {
   WebhookAdministrationQueryRepository,
   WebhookEndpointListQuery,
   WebhookSubscriptionListQuery,
+  WebhookSigningSecretRotationListQuery,
 } from './ports/webhook-administration-query-repository.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import {
@@ -12,6 +13,10 @@ import {
   type WebhookEndpointStatus,
   type WebhookSubscriptionStatus,
 } from '../domain/webhook.ts'
+import {
+  WEBHOOK_SIGNING_SECRET_ROTATION_STATUSES,
+  type WebhookSigningSecretRotationStatus,
+} from '../domain/webhook-signing-secret-rotation.ts'
 
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -120,5 +125,32 @@ export function listWebhookSubscriptionsService(dependencies: { repository: Webh
     const records = await dependencies.repository.listSubscriptions(query)
     const result = pageResult(records, page.limit, hash, (record) => record)
     return Object.freeze({ subscriptions: result.records, ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) })
+  }
+}
+
+export function listWebhookSigningSecretRotationsService(dependencies: { repository: WebhookAdministrationQueryRepository }) {
+  return async (request: { workspaceId: string; endpointId: string; limit?: number; after?: string; status?: string }) => {
+    const scopedWorkspaceId = workspaceId(request.workspaceId)
+    const endpointId = optionalUuid(request.endpointId, 'endpointId')
+    assertDomain(endpointId, 'INVALID_ARGUMENT', 'endpointId is required')
+    const statusValue = request.status?.trim()
+    assertDomain(
+      !statusValue || WEBHOOK_SIGNING_SECRET_ROTATION_STATUSES.includes(statusValue as WebhookSigningSecretRotationStatus),
+      'INVALID_ARGUMENT',
+      'status is not supported',
+    )
+    const status = statusValue as WebhookSigningSecretRotationStatus | undefined
+    const hash = filterHash({ kind: 'signing-secret-rotation', workspaceId: scopedWorkspaceId, endpointId, status: status ?? null })
+    const page = pageRequest({ workspaceId: scopedWorkspaceId, limit: request.limit, after: request.after }, hash)
+    const query: WebhookSigningSecretRotationListQuery = {
+      workspaceId: scopedWorkspaceId,
+      endpointId,
+      limit: page.limit + 1,
+      ...(status ? { status } : {}),
+      ...(page.after ? { after: { createdAt: page.after.createdAt, id: page.after.id } } : {}),
+    }
+    const records = await dependencies.repository.listSigningSecretRotations(query)
+    const result = pageResult(records, page.limit, hash, (record) => record)
+    return Object.freeze({ rotations: result.records, ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) })
   }
 }

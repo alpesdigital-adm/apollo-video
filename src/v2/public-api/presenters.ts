@@ -14,6 +14,7 @@ import type {
   WebhookEndpointDetailRecord,
   WebhookEndpointSummaryRecord,
   WebhookSigningSecretMetadata,
+  WebhookSigningSecretRotationMetadata,
 } from '../application/ports/webhook-administration-query-repository.ts'
 import {
   webhookEndpointRevision,
@@ -230,6 +231,24 @@ export function presentWebhookEndpointDetail(record: Readonly<WebhookEndpointDet
   return {
     ...presentWebhookEndpointSummary(record),
     signingSecrets: record.signingSecrets.map(presentWebhookSecretMetadata),
+  }
+}
+
+export function presentWebhookSigningSecretRotation(rotation: Readonly<WebhookSigningSecretRotationMetadata>) {
+  return {
+    schemaVersion: 'webhook-signing-secret-rotation/v1' as const,
+    id: rotation.id,
+    endpointId: rotation.endpointId,
+    candidateVersion: rotation.candidateVersion,
+    fingerprint: rotation.fingerprint,
+    status: rotation.status,
+    overlapSeconds: rotation.overlapSeconds,
+    baseRevision: rotation.baseRevision,
+    createdAt: rotation.createdAt,
+    expiresAt: rotation.expiresAt,
+    ...(rotation.activatedAt ? { activatedAt: rotation.activatedAt } : {}),
+    ...(rotation.overlapUntil ? { overlapUntil: rotation.overlapUntil } : {}),
+    ...(rotation.cancelledAt ? { cancelledAt: rotation.cancelledAt } : {}),
   }
 }
 

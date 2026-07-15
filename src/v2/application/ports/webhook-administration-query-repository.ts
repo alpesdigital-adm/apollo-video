@@ -4,6 +4,9 @@ import type {
   WebhookSubscription,
   WebhookSubscriptionStatus,
 } from '../../domain/webhook.ts'
+import type {
+  WebhookSigningSecretRotationStatus,
+} from '../../domain/webhook-signing-secret-rotation.ts'
 
 export interface WebhookSigningSecretMetadata {
   version: number
@@ -38,6 +41,29 @@ export interface WebhookSubscriptionListQuery {
   after?: Readonly<{ createdAt: string; id: string }>
 }
 
+export interface WebhookSigningSecretRotationMetadata {
+  id: string
+  endpointId: string
+  candidateVersion: number
+  fingerprint: string
+  status: WebhookSigningSecretRotationStatus
+  overlapSeconds: number
+  baseRevision: string
+  createdAt: string
+  expiresAt: string
+  activatedAt?: string
+  overlapUntil?: string
+  cancelledAt?: string
+}
+
+export interface WebhookSigningSecretRotationListQuery {
+  workspaceId: string
+  endpointId: string
+  limit: number
+  status?: WebhookSigningSecretRotationStatus
+  after?: Readonly<{ createdAt: string; id: string }>
+}
+
 export interface WebhookAdministrationQueryRepository {
   listEndpoints(
     query: Readonly<WebhookEndpointListQuery>,
@@ -53,4 +79,12 @@ export interface WebhookAdministrationQueryRepository {
     workspaceId: string,
     subscriptionId: string,
   ): Promise<Readonly<WebhookSubscription> | null>
+  listSigningSecretRotations(
+    query: Readonly<WebhookSigningSecretRotationListQuery>,
+  ): Promise<readonly Readonly<WebhookSigningSecretRotationMetadata>[]>
+  findSigningSecretRotationById(
+    workspaceId: string,
+    endpointId: string,
+    rotationId: string,
+  ): Promise<Readonly<WebhookSigningSecretRotationMetadata> | null>
 }

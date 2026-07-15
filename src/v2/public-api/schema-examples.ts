@@ -141,6 +141,18 @@ const webhookPendingEndpointExample = {
   createdAt,
   currentSigningSecret: webhookSecretMetadataExample,
 }
+const webhookSigningSecretRotationExample = {
+  schemaVersion: 'webhook-signing-secret-rotation/v1',
+  id: '20000000-0000-4000-8000-000000000010',
+  endpointId: webhookEndpointExample.id,
+  candidateVersion: 2,
+  fingerprint: 'c'.repeat(64),
+  status: 'staged',
+  overlapSeconds: 300,
+  baseRevision: webhookEndpointExample.revision,
+  createdAt,
+  expiresAt: '2026-07-13T20:00:00.000Z',
+}
 const webhookSubscriptionExample = {
   schemaVersion: 'webhook-subscription/v1',
   id: '00000000-0000-4000-8000-000000000703',
@@ -833,6 +845,13 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         },
         meta: { apiVersion: 'v1' },
       },
+    ],
+    'apollo://schemas/webhook-signing-secret-rotation-list/v1': [
+      { data: { rotations: [] }, meta: { apiVersion: 'v1' } },
+      { data: { rotations: [webhookSigningSecretRotationExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/webhook-signing-secret-rotation-detail/v1': [
+      { data: { rotation: webhookSigningSecretRotationExample }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/webhook-subscription-list/v1': [
       { data: { subscriptions: [] }, meta: { apiVersion: 'v1' } },

@@ -496,7 +496,7 @@
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056: API externa cria/lista/lê endpoints e subscriptions, provisiona chave HMAC pendente, prepara, ativa e cancela rotação com overlap, executa challenge, replay e lifecycle; UI e consulta de rotações continuam abertas.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057: API externa cria/lista/lê endpoints, subscriptions e rotações redigidas, provisiona chave HMAC pendente, prepara, ativa e cancela rotação com overlap, executa challenge, replay e lifecycle; UI continua aberta.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056: capabilities entregam cadastro idempotente, provisionamento one-shot, rotação ativa em duas fases com cancelamento seguro, consultas, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; consulta da rotação e UI continuam abertas.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057: capabilities entregam cadastro idempotente, provisionamento one-shot, rotação ativa em duas fases com cancelamento seguro e consulta redigida, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; UI continua aberta.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -4232,7 +4232,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-056 — Cancelamento e descarte seguro de rotação HMAC
 
-**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+**Status:** publicado em `main` no commit `aa76895`; CI hospedada `29453965585` aprovada em 15 de julho de 2026.
 
 Entregas:
 
@@ -4262,3 +4262,35 @@ Limites explícitos desta slice:
 - cancelamento não altera a revisão nem o lifecycle do endpoint;
 - consulta e listagem de rotações, paginação/filtros e UI administrativa pertencem ao próximo incremento;
 - higiene dos payloads de signing secrets aposentados após overlap continua separada do descarte da candidata nunca ativada.
+
+### Slice F0-057 — Consulta e listagem redigida de rotações HMAC
+
+**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação das integrações PostgreSQL na publicação.
+
+Entregas:
+
+- capability `apollo.webhooks.endpoints.signing-secrets.rotations.list` expõe `GET /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations` sob `webhooks:admin`;
+- capability `apollo.webhooks.endpoints.signing-secrets.rotations.read` expõe o item exato em `GET /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}`;
+- lista aceita somente `limit`, `after` e `status`, ordena por `createdAt desc, id desc` e limita páginas a 100 itens;
+- cursor opaco fica vinculado a workspace, endpoint e status, recusando troca de escopo ou filtro;
+- leitura exata exige correspondência simultânea de workspace, endpoint e rotation ID e usa erro 404 específico sem revelar existência fora do escopo;
+- presenter divulga apenas versão candidata, fingerprint, lifecycle, overlap, revisão-base e timestamps necessários aos próximos comandos;
+- adapter Prisma usa seleção positiva e nunca lê `keyRef`, IDs internos de secrets, ator solicitante ou qualquer campo do envelope AES;
+- `baseRevision` permanece disponível por ser o token de concorrência exigido na ativação/cancelamento, não material secreto;
+- ADR-046 formaliza allowlist, isolamento e decisão de manter consultas sem efeitos colaterais.
+
+Regressões e evidências locais:
+
+- suíte global passa com 123 testes; 55 são contratos de webhook;
+- contratos cobrem cursor vinculado a filtro, endpoint obrigatório, leitura workspace-scoped e 404 opaco;
+- integração Prisma cobre lista/status, detalhe, isolamento entre workspaces e ausência de referências/envelope;
+- jornada HTTP cobre lista, detalhe, filtro inválido, 404, capability e OpenAPI;
+- contratos públicos passam com 46 capabilities, 59 schemas, 80 exemplos e 40 paths;
+- build registra os dois GETs da administração de rotações;
+- schema/migration permanecem com 28 tabelas, 108 índices e 59 chaves estrangeiras.
+
+Limites explícitos desta slice:
+
+- consulta não altera estado: preparo vencido continua duravelmente `staged` até cancelamento/expiração explícita ou manutenção futura, sempre com `expiresAt` visível;
+- UI administrativa continua futura;
+- higiene automática de envelopes e payloads aposentados após o overlap continua em incremento separado.
