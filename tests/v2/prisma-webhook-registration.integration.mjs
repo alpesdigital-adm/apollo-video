@@ -19,6 +19,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { provisionWebhookSigningSecretService } = await import(
     '../../src/v2/application/provision-webhook-signing-secret.ts'
   )
+  const { stageWebhookSigningSecretRotationService } = await import(
+    '../../src/v2/application/stage-webhook-signing-secret-rotation.ts'
+  )
   const { materializeNextWebhookEventService } = await import(
     '../../src/v2/application/materialize-webhook-deliveries.ts'
   )
@@ -52,7 +55,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     verifyWebhookRequestService,
   } = await import('../../src/v2/application/secure-webhook.ts')
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
-  const { webhookEndpointRevision, webhookSubscriptionRevision } = await import('../../src/v2/domain/webhook.ts')
+  const { createWebhookEndpoint, webhookEndpointRevision, webhookSubscriptionRevision } = await import('../../src/v2/domain/webhook.ts')
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
   const {
     issueWebhookChallengeToken,
@@ -97,6 +100,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   )
   const { PrismaWebhookSigningSecretProvisioningRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-signing-secret-provisioning-repository.ts'
+  )
+  const { PrismaWebhookSigningSecretRotationRepository } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-signing-secret-rotation-repository.ts'
   )
   const { PrismaWebhookSigningSecretProvider } = await import(
     '../../src/v2/infrastructure/prisma/webhook-signing-secret-provider.ts'
@@ -151,6 +157,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     await client.v2WebhookDeliveryAttempt.deleteMany({ where: { workspaceId } })
     await client.v2WebhookDelivery.deleteMany({ where: { workspaceId } })
     await client.v2WebhookSubscription.deleteMany({ where: { workspaceId } })
+    await client.v2WebhookSigningSecretRotation.deleteMany({ where: { workspaceId } })
     await client.v2WebhookSigningSecretPayload.deleteMany({ where: { workspaceId } })
     await client.v2WebhookSigningSecret.deleteMany({ where: { workspaceId } })
     await client.v2WebhookEndpoint.deleteMany({ where: { workspaceId } })
@@ -623,6 +630,54 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       await convergentActivation({ workspaceId, endpointId: endpoint.id }),
       { activatedSubscriptions: 0, replayed: true },
     )
+    const activeRotationEndpointRow = await client.v2WebhookEndpoint.findUniqueOrThrow({
+      where: { id: endpoint.id },
+    })
+    const activeRotationEndpoint = createWebhookEndpoint({
+      id: activeRotationEndpointRow.id,
+      workspaceId: activeRotationEndpointRow.workspaceId,
+      url: activeRotationEndpointRow.url,
+      status: activeRotationEndpointRow.status,
+      createdByClientId: activeRotationEndpointRow.createdByClientId,
+      createdAt: activeRotationEndpointRow.createdAt.toISOString(),
+      updatedAt: activeRotationEndpointRow.updatedAt.toISOString(),
+      verifiedAt: activeRotationEndpointRow.verifiedAt.toISOString(),
+    })
+    let rotationId = 701
+    const stageRotation = stageWebhookSigningSecretRotationService({
+      repository: new PrismaWebhookSigningSecretRotationRepository(client),
+      secrets: createWebhookSigningSecretProtector(endpointCipher, () => Buffer.alloc(32, 41)),
+      clock: () => new Date(now.getTime() + 1_200),
+      createId: (kind) => kind === 'idempotency-record'
+        ? `webhook-rotation-idempotency-${rotationId++}`
+        : `00000000-0000-4000-8000-${String(rotationId++).padStart(12, '0')}`,
+    })
+    const rotationRequest = {
+      workspaceId,
+      endpointId: endpoint.id,
+      actorClientId: clientId,
+      baseRevision: webhookEndpointRevision(activeRotationEndpoint),
+      overlapSeconds: 300,
+      idempotencyKey: 'stage-webhook-secret-rotation-1',
+    }
+    const stagedRotation = await stageRotation(rotationRequest)
+    assert.equal(stagedRotation.rotation.status, 'staged')
+    assert.equal(stagedRotation.secretAvailable, true)
+    assert.equal(stagedRotation.secretBase64url, Buffer.alloc(32, 41).toString('base64url'))
+    assert.equal(await client.v2WebhookSigningSecret.count({
+      where: { endpointId: endpoint.id, status: 'active' },
+    }), 1)
+    assert.equal(await client.v2WebhookSigningSecret.count({
+      where: { endpointId: endpoint.id, version: stagedRotation.rotation.candidateVersion },
+    }), 0)
+    const storedRotation = await client.v2WebhookSigningSecretRotation.findUniqueOrThrow({
+      where: { id: stagedRotation.rotation.id },
+    })
+    assert.equal(storedRotation.payloadCiphertext.includes(stagedRotation.secretBase64url), false)
+    const stagedRotationReplay = await stageRotation(rotationRequest)
+    assert.equal(stagedRotationReplay.replayed, true)
+    assert.equal(stagedRotationReplay.secretAvailable, false)
+    assert.equal('secretBase64url' in stagedRotationReplay, false)
     await assert.rejects(
       () => security.getPendingTarget(workspaceId, endpoint.id),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_NOT_FOUND',

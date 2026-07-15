@@ -181,9 +181,17 @@ do receptor sem entrar em logs. Replay da mesma requisição devolve os mesmos
 metadados, mas nunca repete a chave (`secretAvailable: false`). Se a primeira
 resposta for perdida, deve-se consultar a nova revisão do endpoint e provisionar
 outra versão com uma nova chave idempotente. A versão anterior é aposentada na
-mesma transação. Neste incremento, o command só aceita endpoint ainda pendente;
-rotação de endpoint ativo exige overlap para proteger deliveries em voo e será
-um contrato separado.
+mesma transação. Esse command só aceita endpoint ainda pendente.
+
+Para endpoint ativo, a rotação começa por
+`POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations`, com
+`baseRevision`, `overlapSeconds` e `Idempotency-Key`. Essa primeira fase prepara
+e devolve a candidata uma única vez, mas mantém a chave atual assinando todas as
+deliveries. O receptor pode instalar a candidata sem corrida com o tráfego em
+curso. A preparação expira em 24 horas, somente uma pode ficar aberta por
+endpoint e replay nunca repete `secretBase64url`. A ativação/corte e a janela
+de abertura da chave anterior serão um command separado, preservando deliveries
+que já estavam em voo.
 
 A ativação é solicitada por
 `POST /v1/webhooks/endpoints/{endpointId}/challenge`, sem body. O Apollo faz um

@@ -81,6 +81,7 @@ model V2Workspace {
   webhookSecrets        V2WebhookSigningSecret[]
   webhookSubscriptions  V2WebhookSubscription[]
   webhookSigningSecretPayloads V2WebhookSigningSecretPayload[]
+  webhookSigningSecretRotations V2WebhookSigningSecretRotation[]
   webhookDeliveries     V2WebhookDelivery[]
   webhookAttempts       V2WebhookDeliveryAttempt[]
   webhookChallenges     V2WebhookVerificationChallenge[]
@@ -576,6 +577,7 @@ model V2WebhookEndpoint {
   subscriptions  V2WebhookSubscription[]
   challenges     V2WebhookVerificationChallenge[]
   replayReceipts V2WebhookReplayReceipt[]
+  signingSecretRotations V2WebhookSigningSecretRotation[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, url])
@@ -626,6 +628,40 @@ model V2WebhookSigningSecretPayload {
   @@unique([secretId, workspaceId, endpointId, secretVersion])
   @@index([workspaceId, endpointId, secretVersion])
   @@map("v2_webhook_signing_secret_payloads")
+}
+
+model V2WebhookSigningSecretRotation {
+  id                  String   @id
+  workspaceId         String
+  endpointId          String
+  requestedByClientId String
+  previousSecretId    String
+  candidateSecretId   String
+  candidateVersion    Int
+  algorithm           String   @default("hmac-sha256")
+  keyRef              String   @unique
+  fingerprint         String
+  status              String   @default("staged")
+  overlapSeconds      Int
+  payloadAlgorithm    String
+  payloadKeyId        String
+  payloadNonce        String
+  payloadCiphertext   String
+  payloadAuthTag      String
+  baseRevision        String
+  createdAt           DateTime @default(now())
+  expiresAt           DateTime
+  activatedAt         DateTime?
+  cancelledAt         DateTime?
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  endpoint  V2WebhookEndpoint @relation(fields: [endpointId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([endpointId, candidateVersion])
+  @@index([workspaceId, status, createdAt])
+  @@index([endpointId, status, expiresAt])
+  @@map("webhook_signing_secret_rotations")
 }
 
 model V2WebhookSubscription {

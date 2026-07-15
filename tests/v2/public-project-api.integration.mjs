@@ -98,6 +98,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2WebhookSubscription.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2WebhookSigningSecretRotation.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2WebhookSigningSecretPayload.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
@@ -643,6 +646,24 @@ test('authenticated public API manages projects, clients and artifact inspection
       true,
     )
     assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations'].post[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.endpoints.signing-secrets.rotations.stage',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations'].post
+        .requestBody.content['application/json'].schema.$ref,
+      '#/components/schemas/StageWebhookSigningSecretRotationRequestV1',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations'].post
+        .parameters.some(
+          (parameter) => parameter.name === 'Idempotency-Key' && parameter.required,
+        ),
+      true,
+    )
+    assert.equal(
       openApi.paths['/v1/webhooks/subscriptions'].get['x-apollo-capability-id'],
       'apollo.webhooks.subscriptions.list',
     )
@@ -819,6 +840,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.webhooks.endpoints.status.set',
         'apollo.webhooks.endpoints.challenge',
         'apollo.webhooks.endpoints.signing-secrets.provision',
+        'apollo.webhooks.endpoints.signing-secrets.rotations.stage',
         'apollo.webhooks.subscriptions.create',
         'apollo.webhooks.subscriptions.list',
         'apollo.webhooks.subscriptions.read',
@@ -1052,6 +1074,61 @@ test('authenticated public API manages projects, clients and artifact inspection
       )).status,
       409,
     )
+    const stageRotationUrl =
+      `${baseUrl}/v1/webhooks/endpoints/${webhookEndpointId}/signing-secrets/rotations`
+    const stageRotation = (idempotencyKey, body) => fetch(stageRotationUrl, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+    const stageRotationBody = {
+      baseRevision: webhookEndpointRead.data.endpoint.revision,
+      overlapSeconds: 300,
+    }
+    const stageRotationResponse = await stageRotation(
+      'public-secret-rotation-stage-1',
+      stageRotationBody,
+    )
+    const stagedRotation = await stageRotationResponse.json()
+    assert.equal(stageRotationResponse.status, 201)
+    assert.equal(stagedRotation.data.rotation.endpointId, webhookEndpointId)
+    assert.equal(stagedRotation.data.rotation.candidateVersion, 2)
+    assert.equal(stagedRotation.data.rotation.status, 'staged')
+    assert.equal(stagedRotation.data.rotation.overlapSeconds, 300)
+    assert.equal(stagedRotation.data.secretAvailable, true)
+    assert.equal(stagedRotation.data.replayed, false)
+    assert.match(stagedRotation.data.secretBase64url, /^[A-Za-z0-9_-]{43}$/)
+    assert.equal(JSON.stringify(stagedRotation).includes('keyRef'), false)
+    assert.equal(JSON.stringify(stagedRotation).includes('payloadCiphertext'), false)
+    assert.equal(await client.v2WebhookSigningSecret.count({
+      where: { endpointId: webhookEndpointId, status: 'active' },
+    }), 1)
+    assert.equal(await client.v2WebhookSigningSecret.count({
+      where: { endpointId: webhookEndpointId, version: 2 },
+    }), 0)
+    const stagedRotationReplayResponse = await stageRotation(
+      'public-secret-rotation-stage-1',
+      stageRotationBody,
+    )
+    const stagedRotationReplay = await stagedRotationReplayResponse.json()
+    assert.equal(stagedRotationReplayResponse.status, 200)
+    assert.equal(stagedRotationReplay.data.secretAvailable, false)
+    assert.equal(stagedRotationReplay.data.replayed, true)
+    assert.equal('secretBase64url' in stagedRotationReplay.data, false)
+    assert.equal(stagedRotationReplay.data.rotation.id, stagedRotation.data.rotation.id)
+    assert.equal((await stageRotation(
+      'public-secret-rotation-stage-1',
+      { ...stageRotationBody, overlapSeconds: 301 },
+    )).status, 409)
+    assert.equal((await stageRotation('', stageRotationBody)).status, 422)
+    assert.equal((await stageRotation(
+      'public-secret-rotation-stage-extra',
+      { ...stageRotationBody, extra: true },
+    )).status, 422)
     await client.v2WebhookSigningSecretPayload.deleteMany({
       where: { endpointId: createdEndpoint.data.endpoint.id },
     })

@@ -1575,6 +1575,50 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       ],
     }),
   ),
+  defineSchema('stage-webhook-signing-secret-rotation-request', 1, 'Stage webhook signing secret rotation request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['baseRevision', 'overlapSeconds'],
+    properties: {
+      baseRevision: sha256Schema,
+      overlapSeconds: { type: 'integer', minimum: 60, maximum: 86400 },
+    },
+  }),
+  defineSchema('webhook-signing-secret-rotation-staged', 1, 'Staged webhook signing secret rotation response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['rotation', 'secretAvailable', 'replayed'],
+      properties: {
+        rotation: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'endpointId', 'candidateVersion', 'fingerprint', 'status', 'overlapSeconds', 'createdAt', 'expiresAt'],
+          properties: {
+            id: idSchema,
+            endpointId: idSchema,
+            candidateVersion: { type: 'integer', minimum: 1 },
+            fingerprint: sha256Schema,
+            status: { type: 'string', const: 'staged' },
+            overlapSeconds: { type: 'integer', minimum: 60, maximum: 86400 },
+            createdAt: dateTimeSchema,
+            expiresAt: dateTimeSchema,
+          },
+        },
+        secretBase64url: { type: 'string', pattern: '^[A-Za-z0-9_-]{43}$' },
+        secretAvailable: { type: 'boolean' },
+        replayed: { type: 'boolean' },
+      },
+      allOf: [{
+        if: { properties: { secretAvailable: { const: true } }, required: ['secretAvailable'] },
+        then: {
+          required: ['secretBase64url'],
+          properties: { secretBase64url: { type: 'string', pattern: '^[A-Za-z0-9_-]{43}$' } },
+        },
+        else: { properties: { secretBase64url: false } },
+      }],
+    }),
+  ),
   defineSchema('webhook-subscription-list', 1, 'Webhook subscription list response',
     successSchema({ type: 'object', additionalProperties: false, required: ['subscriptions'], properties: {
       subscriptions: { type: 'array', maxItems: 100, items: webhookSubscriptionSchema },

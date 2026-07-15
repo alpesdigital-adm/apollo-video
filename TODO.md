@@ -496,7 +496,7 @@
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053: API externa cria/lista/lê endpoints e subscriptions, provisiona chave HMAC pendente, executa challenge/ativação, replay e lifecycle; UI e rotação com overlap de endpoint ativo continuam abertas.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054: API externa cria/lista/lê endpoints e subscriptions, provisiona chave HMAC pendente, prepara rotação ativa em duas fases, executa challenge/ativação, replay e lifecycle; UI e corte com overlap continuam abertos.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053: capabilities entregam cadastro idempotente, provisionamento one-shot da chave pendente, consultas, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; rotação ativa e UI continuam abertas.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054: capabilities entregam cadastro idempotente, provisionamento one-shot, preparação cifrada da rotação ativa, consultas, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; ativação/cancelamento da rotação e UI continuam abertos.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -4128,7 +4128,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-053 — Provisionamento one-shot da chave HMAC pendente
 
-**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+**Status:** publicado em `main` no commit `6ec24de`; CI hospedada `29450830993` aprovada em 15 de julho de 2026.
 
 Entregas:
 
@@ -4160,3 +4160,38 @@ Limites explícitos desta slice:
 - endpoint ativo ainda não pode rotacionar porque deliveries em voo exigem período de overlap e escolha de versão explícita;
 - o consumidor deve decodificar Base64URL para os 32 bytes HMAC e armazená-los em seu próprio secret manager;
 - alteração de URL, UI administrativa, audit query, métricas e alertas continuam futuros.
+
+### Slice F0-054 — Preparação segura da rotação de signing secret ativo
+
+**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability `apollo.webhooks.endpoints.signing-secrets.rotations.stage` expõe `POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations` sob `webhooks:admin`;
+- o body fechado exige `baseRevision` e `overlapSeconds` entre 60 e 86.400; `Idempotency-Key` continua obrigatória;
+- somente endpoint ativo pode preparar rotação, com revisão otimista e exatamente uma chave ativa;
+- a nova chave de 32 bytes é devolvida uma única vez, cifrada em AES-256-GCM no registro de rotação e nunca criada ainda como signing secret ativo;
+- a assinatura de deliveries permanece na versão atual durante toda a preparação, dando tempo para o receptor instalar a chave candidata;
+- primeira resposta retorna 201, `secretAvailable: true` e metadados redigidos da rotação; replay retorna 200, `secretAvailable: false` e omite a chave;
+- uma única preparação não expirada pode existir por endpoint; preparação vencida é marcada `expired` atomicamente antes de nova tentativa;
+- ledger idempotente armazena somente `endpointId` e `rotationId`; material HMAC, `keyRef` e envelope cifrado não aparecem na resposta persistida;
+- migração adiciona o agregado durável `webhook_signing_secret_rotations`, lifecycle verificado, TTL, índice parcial de unicidade e FKs de workspace/endpoint/ator/chave anterior;
+- ADR-043 formaliza o protocolo em duas fases: preparar primeiro, ativar/cortar depois.
+
+Regressões e evidências locais:
+
+- suíte global passa com 118 testes; 50 são contratos de webhook;
+- testes cobrem disclosure one-shot, replay redigido, validação antes de efeitos, chave ativa intacta e ausência de plaintext no comando persistido;
+- integração Prisma cobre persistência cifrada da candidata, versão ainda ausente da tabela ativa, replay e ledger redigido;
+- jornada HTTP cobre capability/OpenAPI, 201/200, fingerprint/metadados seguros, headers/body inválidos e conflito idempotente;
+- contratos públicos passam com 42 capabilities, 53 schemas, 73 exemplos e 37 paths;
+- build registra `POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations`;
+- schema/migration passam com 28 tabelas, 107 índices e 59 chaves estrangeiras;
+- integrações SQLite de projeto, artifact, operação, webhook e API, FFmpeg, render real e bundle Remotion passam; audits permanecem com zero vulnerabilidades.
+
+Limites explícitos desta slice:
+
+- preparar não muda a chave usada nas assinaturas e não inicia o overlap;
+- o corte explícito, a abertura temporária da chave aposentada para deliveries em voo, cancelamento e consulta administrativa da rotação pertencem à próxima slice;
+- perda da primeira resposta exige deixar a preparação expirar ou cancelá-la quando esse command estiver disponível; o plaintext nunca será recuperável;
+- UI administrativa, audit query, métricas e alertas continuam futuros.

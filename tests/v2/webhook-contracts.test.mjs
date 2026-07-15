@@ -6,6 +6,7 @@ import { registerWebhookService } from '../../src/v2/application/register-webhoo
 import { createWebhookEndpointService } from '../../src/v2/application/create-webhook-endpoint.ts'
 import { createWebhookSubscriptionService } from '../../src/v2/application/create-webhook-subscription.ts'
 import { provisionWebhookSigningSecretService } from '../../src/v2/application/provision-webhook-signing-secret.ts'
+import { stageWebhookSigningSecretRotationService } from '../../src/v2/application/stage-webhook-signing-secret-rotation.ts'
 import {
   activateWebhookEndpointConvergentlyService,
   activateWebhookEndpointService,
@@ -253,6 +254,107 @@ test('signing secret provisioning rejects invalid revision before secret generat
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
   assert.equal(effects, 0)
+})
+
+test('active endpoint stages a signing secret rotation without changing the active secret', async () => {
+  const endpoint = createWebhookEndpoint({
+    id: '00000000-0000-4000-8000-000000000140', workspaceId: 'workspace-1',
+    url: 'https://hooks.example.com/apollo', status: 'active', createdByClientId: 'client-1',
+    createdAt: '2026-07-15T22:00:00.000Z', verifiedAt: '2026-07-15T22:01:00.000Z',
+  })
+  const activeSecret = createWebhookSigningSecret({
+    id: '00000000-0000-4000-8000-000000000141', workspaceId: 'workspace-1', endpointId: endpoint.id,
+    version: 1, keyRef: 'vault://apollo/webhooks/active', fingerprint: 'a'.repeat(64),
+    status: 'active', createdAt: '2026-07-15T22:00:00.000Z',
+  })
+  const rawSecrets = []
+  const protector = createWebhookSigningSecretProtector(
+    createAesRecipeParameterCipher({ keyId: 'webhook-rotation-key', key: Buffer.alloc(32, 31) }),
+    () => { const value = Buffer.alloc(32, 32 + rawSecrets.length); rawSecrets.push(value); return value },
+  )
+  let persisted
+  let id = 142
+  const stage = stageWebhookSigningSecretRotationService({
+    repository: {
+      async getTarget() { return { endpoint, activeSecret, latestSecretVersion: 1 } },
+      async stageOrReplay(command) {
+        if (!persisted) { persisted = command; return { endpoint, rotation: command.rotation, replayed: false } }
+        return { endpoint, rotation: persisted.rotation, replayed: true }
+      },
+    },
+    secrets: protector,
+    clock: () => new Date('2026-07-15T22:02:00.000Z'),
+    createId: () => `00000000-0000-4000-8000-${String(id++).padStart(12, '0')}`,
+  })
+  const request = {
+    workspaceId: 'workspace-1', endpointId: endpoint.id, actorClientId: 'client-1',
+    baseRevision: webhookEndpointRevision(endpoint), overlapSeconds: 300,
+    idempotencyKey: 'rotate-secret-1',
+  }
+  const first = await stage(request)
+  const replay = await stage(request)
+
+  assert.equal(first.rotation.status, 'staged')
+  assert.equal(first.rotation.previousSecretId, activeSecret.id)
+  assert.equal(first.rotation.candidateVersion, 2)
+  assert.equal(first.rotation.overlapSeconds, 300)
+  assert.equal(first.secretAvailable, true)
+  assert.equal(first.secretBase64url, Buffer.alloc(32, 32).toString('base64url'))
+  assert.equal(JSON.stringify(persisted).includes(first.secretBase64url), false)
+  assert.equal(rawSecrets.every((value) => value.every((byte) => byte === 0)), true)
+  assert.equal(replay.secretAvailable, false)
+  assert.equal('secretBase64url' in replay, false)
+  assert.equal(replay.rotation.id, first.rotation.id)
+  assert.equal(activeSecret.status, 'active')
+})
+
+test('signing secret rotation validates overlap before reading or generating material', async () => {
+  let effects = 0
+  const stage = stageWebhookSigningSecretRotationService({
+    repository: { async getTarget() { effects += 1 }, async stageOrReplay() { effects += 1 } },
+    secrets: { async protect() { effects += 1 }, async protectForOneTimeDisclosure() { effects += 1 } },
+    clock: () => new Date('2026-07-15T22:02:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000149',
+  })
+  await assert.rejects(() => stage({
+    workspaceId: 'workspace-1', endpointId: '00000000-0000-4000-8000-000000000140',
+    actorClientId: 'client-1', baseRevision: 'b'.repeat(64), overlapSeconds: 0,
+    idempotencyKey: 'rotate-secret-1',
+  }), (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT')
+  assert.equal(effects, 0)
+})
+
+test('signing secret rotation rejects inactive endpoint before generating material', async () => {
+  const endpoint = createWebhookEndpoint({
+    id: '00000000-0000-4000-8000-000000000150', workspaceId: 'workspace-1',
+    url: 'https://hooks.example.com/apollo', status: 'suspended', createdByClientId: 'client-1',
+    createdAt: '2026-07-15T22:00:00.000Z', verifiedAt: '2026-07-15T22:01:00.000Z',
+    suspendedAt: '2026-07-15T22:02:00.000Z',
+  })
+  const activeSecret = createWebhookSigningSecret({
+    id: '00000000-0000-4000-8000-000000000151', workspaceId: 'workspace-1', endpointId: endpoint.id,
+    version: 1, keyRef: 'vault://apollo/webhooks/active', fingerprint: 'a'.repeat(64),
+    status: 'active', createdAt: '2026-07-15T22:00:00.000Z',
+  })
+  let generated = 0
+  const stage = stageWebhookSigningSecretRotationService({
+    repository: {
+      async getTarget() { return { endpoint, activeSecret, latestSecretVersion: 1 } },
+      async stageOrReplay() { throw new Error('must not persist') },
+    },
+    secrets: {
+      async protect() { generated += 1 },
+      async protectForOneTimeDisclosure() { generated += 1 },
+    },
+    clock: () => new Date('2026-07-15T22:03:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000152',
+  })
+  await assert.rejects(() => stage({
+    workspaceId: 'workspace-1', endpointId: endpoint.id, actorClientId: 'client-1',
+    baseRevision: webhookEndpointRevision(endpoint), overlapSeconds: 300,
+    idempotencyKey: 'rotate-secret-inactive',
+  }), (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_TRANSITION_REJECTED')
+  assert.equal(generated, 0)
 })
 
 test('generated webhook signing secret must contain exactly 256 bits', async () => {
