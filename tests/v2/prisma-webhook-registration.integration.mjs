@@ -21,6 +21,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { dispatchWebhookDeliveryService } = await import(
     '../../src/v2/application/dispatch-webhook-delivery.ts'
   )
+  const { runNextWebhookDeliveryService } = await import(
+    '../../src/v2/application/run-webhook-delivery-worker.ts'
+  )
   const {
     issueWebhookChallengeService,
     verifyWebhookChallengeService,
@@ -490,9 +493,6 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.equal((await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-3' })), null)
 
     deliveryClock = new Date(retryAt)
-    const thirdClaim = await claimDelivery({ workspaceId, leaseOwner: 'webhook-worker-3' })
-    assert.equal(thirdClaim.attempt.attemptNumber, 3)
-    deliveryClock = new Date(fanoutAt.getTime() + 5_100)
     const dispatchDelivery = dispatchWebhookDeliveryService({
       repository: deliveryRepository,
       secrets: {
@@ -523,31 +523,32 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       },
       clock: () => deliveryClock,
     })
-    const succeeded = await dispatchDelivery({
-      workspaceId,
-      deliveryId: thirdClaim.delivery.id,
-      leaseOwner: 'webhook-worker-3',
-      leaseToken: thirdClaim.leaseToken,
-      attemptNumber: 3,
+    const runDelivery = runNextWebhookDeliveryService({
+      claim: claimDelivery,
+      heartbeat: heartbeatDelivery,
+      dispatch: dispatchDelivery,
+      heartbeatIntervalMs: 100,
     })
+    const succeeded = await runDelivery({ workspaceId, leaseOwner: 'webhook-worker-3' })
     assert.equal(succeeded.status, 'succeeded')
-    assert.equal(succeeded.delivery.status, 'succeeded')
-    assert.equal('lease' in succeeded, false)
+    assert.equal(succeeded.deliveryId, firstClaim.delivery.id)
+    assert.equal(succeeded.attemptNumber, 3)
+    assert.equal('leaseToken' in succeeded, false)
     assert.equal(
       (await client.v2WebhookDeliveryAttempt.findUniqueOrThrow({
         where: {
-          deliveryId_attemptNumber: { deliveryId: thirdClaim.delivery.id, attemptNumber: 3 },
+          deliveryId_attemptNumber: { deliveryId: firstClaim.delivery.id, attemptNumber: 3 },
         },
       })).status,
       'succeeded',
     )
     assert.equal(
-      (await client.v2WebhookDelivery.findUniqueOrThrow({ where: { id: thirdClaim.delivery.id } }))
+      (await client.v2WebhookDelivery.findUniqueOrThrow({ where: { id: firstClaim.delivery.id } }))
         .leaseTokenHash,
       null,
     )
     assert.equal(await client.v2WebhookDeliveryAttempt.count({
-      where: { deliveryId: thirdClaim.delivery.id },
+      where: { deliveryId: firstClaim.delivery.id },
     }), 3)
 
     const exhaustedEventId = '00000000-0000-4000-8000-000000000305'

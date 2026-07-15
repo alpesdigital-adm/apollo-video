@@ -207,6 +207,15 @@ export function dispatchWebhookDeliveryService(dependencies: {
         },
       })
       if (!settled) return Object.freeze({ status: 'stale' as const })
+      if (
+        settled.delivery.status !== 'retry-scheduled' &&
+        settled.delivery.status !== 'dead-lettered'
+      ) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Webhook failure settlement returned an invalid delivery state',
+        )
+      }
       return Object.freeze({ status: settled.delivery.status, delivery: settled.delivery })
     }
   }

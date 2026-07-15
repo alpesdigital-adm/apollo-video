@@ -495,7 +495,7 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-039: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks agora possuem fan-out deduplicado, claim/lease, dispatch assinado com transporte DNS-pinado, classificação de resposta, backoff com jitter e dead-letter. Adapter concreto do secret provider e replay administrativo continuam abertos.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-040: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem fan-out, claim/lease, dispatch assinado, transporte DNS-pinado, heartbeat orquestrado, worker round-robin por workspace, backoff e dead-letter. Adapter concreto do secret provider, discovery/rebalance de shards e replay administrativo continuam abertos.
 - [ ] Criar UI/API administrativa de status, attempts e rotação de secret.
 - [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Parcial F0-035/F0-039: assinatura adulterada, replay durável, timeout absoluto, DNS misto, rebinding, claim concorrente, lease incorreto, reclaim, worker obsoleto, retry e dead-letter estão cobertos. Dispatcher cobre bytes/headers assinados, fingerprint, DNS privado e settlement integrado; falta replay administrativo ponta a ponta.
 
@@ -3624,7 +3624,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-039 — Dispatcher assinado de webhook deliveries
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `2012560`.
 
 Entregas:
 
@@ -3656,4 +3656,41 @@ Limites explícitos desta slice:
 - ainda não existe loop executável que una claim, heartbeat e dispatch continuamente;
 - replay administrativo, rotação operacional, rate limit/circuit breaker por endpoint e observabilidade continuam abertos;
 - API/UI administrativa de endpoint, delivery e attempts permanece no incremento previsto;
-- hosted CI do dispatcher será registrado após sua publicação no próximo ciclo.
+- hosted CI `29378737291` aprovou PostgreSQL, 86 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-040 — Runner e loop do worker de webhook deliveries
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- runner une claim, heartbeat, dispatch e settlement em uma única unidade workspace-scoped;
+- claim ocioso retorna sem criar timer, abrir secret ou executar transporte;
+- heartbeat não sobrepõe renovações e permanece ativo durante abertura da chave, DNS e HTTPS;
+- factory valida heartbeat menor que lease e constrói runner completo com repository, transporte e provider injetado;
+- settlement fenced continua sendo a autoridade final: `stale` vira `lease-lost`, enquanto sucesso persistido não é rebaixado por heartbeat tardio;
+- outcomes expõem apenas workspace, delivery, attempt e status, sem token, URL, chave, payload, assinatura ou resposta;
+- loop recebe shard explícito de 1 a 1.000 workspaces únicos e processa uma delivery por tenant a cada passagem;
+- round-robin impede starvation por workspace com backlog elevado;
+- falha de um tenant é isolada e reportada apenas com workspace ID, sem interromper os demais;
+- polling ocorre somente quando todo o shard está ocioso e pode ser interrompido por `AbortSignal`;
+- desligamento gracioso impede novos claims e deixa a iteração corrente concluir;
+- ADR-029 formaliza lifecycle, justiça entre tenants, callbacks seguros e pré-requisitos do host.
+
+Regressões e evidências locais:
+
+- suíte global passa com 89 testes; 21 são contratos de webhook;
+- runner longo comprova heartbeat durante dispatch e ausência de renovação sobreposta;
+- perda do heartbeat com settlement stale retorna `lease-lost`;
+- loop comprova isolamento de erro, passagem para o próximo workspace e parada graciosa;
+- callbacks foram verificados sem token ou chave;
+- integração Prisma agora executa retry due → claim → dispatcher assinado → settlement através do runner;
+- typecheck e integração dedicada de webhook em SQLite passam.
+
+Limites explícitos desta slice:
+
+- o host ainda precisa fornecer provider de secrets e lista autorizada de workspaces do shard;
+- discovery dinâmica, rebalanceamento de shards e autoscaling permanecem no scheduler posterior;
+- ainda não existe entrypoint de produção porque a escolha do secret provider não foi tomada;
+- replay administrativo, rotação operacional, rate limit/circuit breaker e observabilidade continuam abertos;
+- hosted CI do runner será registrado após publicação no próximo ciclo.

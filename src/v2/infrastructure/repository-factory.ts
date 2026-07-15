@@ -10,6 +10,7 @@ import {
   settleWebhookDeliveryService,
 } from '../application/manage-webhook-delivery.ts'
 import { dispatchWebhookDeliveryService } from '../application/dispatch-webhook-delivery.ts'
+import { runNextWebhookDeliveryService } from '../application/run-webhook-delivery-worker.ts'
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
 import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
@@ -151,6 +152,52 @@ export function createWebhookDeliveryWorker(
     claim: claimNextWebhookDeliveryService({ repository, clock, leaseDurationMs }),
     heartbeat: heartbeatWebhookDeliveryService({ repository, clock, leaseDurationMs }),
     settle: settleWebhookDeliveryService({ repository, clock }),
+  })
+}
+
+export function createWebhookDeliveryRunner(
+  secrets: WebhookSigningSecretProvider,
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const configuredLease = Number(environment.APOLLO_V2_WEBHOOK_DELIVERY_LEASE_MS)
+  const configuredHeartbeat = Number(environment.APOLLO_V2_WEBHOOK_HEARTBEAT_MS)
+  const configuredTimeout = Number(environment.APOLLO_V2_WEBHOOK_DELIVERY_TIMEOUT_MS)
+  const configuredRetryBase = Number(environment.APOLLO_V2_WEBHOOK_RETRY_BASE_MS)
+  const configuredRetryMax = Number(environment.APOLLO_V2_WEBHOOK_RETRY_MAX_MS)
+  const leaseDurationMs = Number.isSafeInteger(configuredLease) && configuredLease > 0
+    ? configuredLease
+    : 30_000
+  const heartbeatIntervalMs = Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0
+    ? configuredHeartbeat
+    : 10_000
+  if (heartbeatIntervalMs >= leaseDurationMs) {
+    throw new DomainError(
+      'INVALID_WEBHOOK',
+      'Webhook heartbeat interval must be shorter than its lease',
+    )
+  }
+  const repository = createWebhookDeliveryRepository()
+  return runNextWebhookDeliveryService({
+    claim: claimNextWebhookDeliveryService({ repository, clock, leaseDurationMs }),
+    heartbeat: heartbeatWebhookDeliveryService({ repository, clock, leaseDurationMs }),
+    dispatch: dispatchWebhookDeliveryService({
+      repository,
+      secrets,
+      transport: new SafeWebhookDeliveryTransport({
+        ...(Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0
+          ? { timeoutMs: configuredTimeout }
+          : {}),
+      }),
+      clock,
+      ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0
+        ? { retryBaseDelayMs: configuredRetryBase }
+        : {}),
+      ...(Number.isSafeInteger(configuredRetryMax) && configuredRetryMax > 0
+        ? { retryMaxDelayMs: configuredRetryMax }
+        : {}),
+    }),
+    heartbeatIntervalMs,
   })
 }
 

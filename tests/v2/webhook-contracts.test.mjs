@@ -15,6 +15,10 @@ import {
   classifyWebhookResponse,
   dispatchWebhookDeliveryService,
 } from '../../src/v2/application/dispatch-webhook-delivery.ts'
+import {
+  runNextWebhookDeliveryService,
+  runWebhookDeliveryWorkerLoop,
+} from '../../src/v2/application/run-webhook-delivery-worker.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -526,6 +530,102 @@ test('dispatcher closes an inactive target without opening secret or network', a
   assert.equal(settled.nextAttemptAt, undefined)
   assert.equal(secretReads, 0)
   assert.equal(transports, 0)
+})
+
+test('delivery runner keeps heartbeat during dispatch and reports terminal outcome', async () => {
+  const commands = []
+  const runNext = runNextWebhookDeliveryService({
+    claim: async () => ({
+      delivery: { id: '00000000-0000-4000-8000-000000000909' },
+      attempt: { attemptNumber: 2 },
+      leaseToken: issueWebhookDeliveryLeaseToken(() => Buffer.alloc(32, 19)).token,
+    }),
+    heartbeat: async (command) => {
+      commands.push({ kind: 'heartbeat', command })
+      return true
+    },
+    dispatch: async (command) => {
+      commands.push({ kind: 'dispatch', command })
+      await new Promise((resolve) => setTimeout(resolve, 140))
+      return { status: 'succeeded' }
+    },
+    heartbeatIntervalMs: 100,
+  })
+  const outcome = await runNext({ workspaceId: 'workspace-1', leaseOwner: 'worker-1' })
+  assert.deepEqual(outcome, {
+    workspaceId: 'workspace-1',
+    deliveryId: '00000000-0000-4000-8000-000000000909',
+    attemptNumber: 2,
+    status: 'succeeded',
+  })
+  assert.equal(commands.filter((entry) => entry.kind === 'heartbeat').length, 1)
+  assert.equal(commands.filter((entry) => entry.kind === 'dispatch').length, 1)
+})
+
+test('delivery runner converts stale settlement and failed heartbeat into lease-lost', async () => {
+  let heartbeats = 0
+  const runNext = runNextWebhookDeliveryService({
+    claim: async () => ({
+      delivery: { id: '00000000-0000-4000-8000-000000000910' },
+      attempt: { attemptNumber: 1 },
+      leaseToken: issueWebhookDeliveryLeaseToken(() => Buffer.alloc(32, 20)).token,
+    }),
+    heartbeat: async () => {
+      heartbeats += 1
+      return false
+    },
+    dispatch: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 140))
+      return { status: 'stale' }
+    },
+    heartbeatIntervalMs: 100,
+  })
+  assert.equal(
+    (await runNext({ workspaceId: 'workspace-1', leaseOwner: 'worker-1' })).status,
+    'lease-lost',
+  )
+  assert.equal(heartbeats, 1)
+})
+
+test('delivery worker loop isolates workspace errors and stops gracefully without secrets', async () => {
+  const controller = new AbortController()
+  const iterations = []
+  const errors = []
+  const outcomes = []
+  await runWebhookDeliveryWorkerLoop({
+    workspaceIds: ['workspace-1', 'workspace-2'],
+    leaseOwner: 'worker-1',
+    signal: controller.signal,
+    runNext: async ({ workspaceId }) => {
+      iterations.push(workspaceId)
+      if (workspaceId === 'workspace-1') throw new Error('tenant-local failure')
+      return {
+        workspaceId,
+        deliveryId: '00000000-0000-4000-8000-000000000911',
+        attemptNumber: 1,
+        status: 'retry-scheduled',
+      }
+    },
+    onIterationError: (event) => errors.push(event),
+    onOutcome: (outcome) => {
+      outcomes.push(outcome)
+      controller.abort()
+    },
+  })
+  assert.deepEqual(iterations, ['workspace-1', 'workspace-2'])
+  assert.deepEqual(errors, [{ workspaceId: 'workspace-1' }])
+  assert.equal(outcomes[0].status, 'retry-scheduled')
+  assert.equal(JSON.stringify({ errors, outcomes }).includes('leaseToken'), false)
+
+  await assert.rejects(
+    () => runWebhookDeliveryWorkerLoop({
+      workspaceIds: ['workspace-1', 'workspace-1'],
+      leaseOwner: 'worker-1',
+      signal: new AbortController().signal,
+      runNext: async () => null,
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_WEBHOOK',
+  )
 })
 
 test('webhook filters match event type and optional resource exactly', () => {
