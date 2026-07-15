@@ -55,6 +55,7 @@ import type { WebhookAdministrationQueryRepository } from '../application/ports/
 import type { WebhookSubscriptionCommandRepository } from '../application/ports/webhook-subscription-command-repository.ts'
 import type { WebhookSubscriptionCreationRepository } from '../application/ports/webhook-subscription-creation-repository.ts'
 import type { WebhookEndpointCommandRepository } from '../application/ports/webhook-endpoint-command-repository.ts'
+import type { WebhookEndpointCreationRepository } from '../application/ports/webhook-endpoint-creation-repository.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
@@ -83,6 +84,8 @@ import { PrismaWebhookAdministrationQueryRepository } from './prisma/webhook-adm
 import { PrismaWebhookSubscriptionCommandRepository } from './prisma/webhook-subscription-command-repository.ts'
 import { PrismaWebhookSubscriptionCreationRepository } from './prisma/webhook-subscription-creation-repository.ts'
 import { PrismaWebhookEndpointCommandRepository } from './prisma/webhook-endpoint-command-repository.ts'
+import { PrismaWebhookEndpointCreationRepository } from './prisma/webhook-endpoint-creation-repository.ts'
+import { PrismaWebhookSigningSecretProvider } from './prisma/webhook-signing-secret-provider.ts'
 import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
 import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-transport.ts'
 import { SafeWebhookDeliveryTransport } from './webhook/safe-webhook-delivery-transport.ts'
@@ -92,6 +95,8 @@ import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts
 import { createConfiguredRenderTargetRegistry } from './render-target-registry.ts'
 import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
 import { createEnvironmentWebhookSigningSecretProvider } from './security/environment-webhook-signing-secret-provider.ts'
+import { createFallbackWebhookSigningSecretProvider } from './security/fallback-webhook-signing-secret-provider.ts'
+import { createWebhookSigningSecretProtector } from './security/webhook-signing-secret-protector.ts'
 
 // The two generated clients expose the same v2 model delegates. This cast is
 // kept at the persistence boundary so application and public API code remain
@@ -146,6 +151,14 @@ export function createWebhookSubscriptionCreationRepository(): WebhookSubscripti
 
 export function createWebhookEndpointCommandRepository(): WebhookEndpointCommandRepository {
   return new PrismaWebhookEndpointCommandRepository(resolveV2Client())
+}
+
+export function createWebhookEndpointCreationRepository(): WebhookEndpointCreationRepository {
+  return new PrismaWebhookEndpointCreationRepository(resolveV2Client())
+}
+
+export function createConfiguredWebhookSigningSecretProtector() {
+  return createWebhookSigningSecretProtector(createProtectedPayloadCipherFromEnvironment())
 }
 
 export function createWebhookFanoutRepository(): WebhookFanoutRepository {
@@ -228,7 +241,15 @@ export function createWebhookDeliveryDispatcher(
 export function createConfiguredWebhookSigningSecretProvider(
   environment: NodeJS.ProcessEnv = process.env,
 ): WebhookSigningSecretProvider {
-  return createEnvironmentWebhookSigningSecretProvider(environment)
+  const database = new PrismaWebhookSigningSecretProvider(
+    createProtectedPayloadCipherFromEnvironment(environment),
+    resolveV2Client(),
+  )
+  if (!environment.APOLLO_V2_WEBHOOK_SIGNING_SECRETS_JSON?.trim()) return database
+  return createFallbackWebhookSigningSecretProvider(
+    database,
+    createEnvironmentWebhookSigningSecretProvider(environment),
+  )
 }
 
 export function createWebhookWorkerShardRepository(): WebhookWorkerShardRepository {

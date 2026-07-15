@@ -80,6 +80,7 @@ model V2Workspace {
   webhookEndpoints      V2WebhookEndpoint[]
   webhookSecrets        V2WebhookSigningSecret[]
   webhookSubscriptions  V2WebhookSubscription[]
+  webhookSigningSecretPayloads V2WebhookSigningSecretPayload[]
   webhookDeliveries     V2WebhookDelivery[]
   webhookAttempts       V2WebhookDeliveryAttempt[]
   webhookChallenges     V2WebhookVerificationChallenge[]
@@ -597,11 +598,34 @@ model V2WebhookSigningSecret {
 
   workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   endpoint  V2WebhookEndpoint @relation(fields: [endpointId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  payload   V2WebhookSigningSecretPayload?
 
   @@unique([id, workspaceId])
+  @@unique([id, workspaceId, endpointId, version])
   @@unique([endpointId, version])
   @@index([workspaceId, status, createdAt])
   @@map("v2_webhook_signing_secrets")
+}
+
+model V2WebhookSigningSecretPayload {
+  secretId      String   @id
+  workspaceId   String
+  endpointId    String
+  secretVersion Int
+  algorithm     String
+  keyId         String
+  nonce         String
+  ciphertext    String
+  authTag       String
+  createdAt     DateTime @default(now())
+
+  workspace V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  secret    V2WebhookSigningSecret @relation(fields: [secretId, workspaceId, endpointId, secretVersion], references: [id, workspaceId, endpointId, version], onDelete: Restrict)
+
+  @@unique([secretId, workspaceId])
+  @@unique([secretId, workspaceId, endpointId, secretVersion])
+  @@index([workspaceId, endpointId, secretVersion])
+  @@map("v2_webhook_signing_secret_payloads")
 }
 
 model V2WebhookSubscription {

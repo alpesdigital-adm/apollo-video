@@ -166,6 +166,12 @@ a chave para outro filtro ou tentar duplicar o filtro com outra chave retorna
 conflito explícito. A criação nasce ativa somente quando o endpoint está ativo;
 endpoints ainda em challenge produzem uma subscription pendente.
 
+Endpoints também podem ser cadastrados por `POST /v1/webhooks/endpoints`,
+informando somente a URL HTTPS e uma `Idempotency-Key`. Apollo gera o signing
+secret internamente, persiste apenas seu envelope AES-256-GCM autenticado e
+devolve metadados redigidos. O endpoint nasce pendente; sua ativação depende do
+challenge explícito, que não é disparado silenciosamente durante o cadastro.
+
 O status de uma subscription pode ser alterado por
 `PUT /v1/webhooks/subscriptions/{subscriptionId}/status`. A resposta de consulta
 fornece uma revisão opaca que deve ser enviada como `baseRevision`: alterações
@@ -187,8 +193,10 @@ todo o histórico de attempts; replay por intervalo continua reservado para uma
 operação durável com preflight.
 
 O worker de entrega pode ser iniciado com `npm run worker:v2:webhook`. Ele exige
-Postgres no ambiente de produção e um catálogo protegido em
-`APOLLO_V2_WEBHOOK_SIGNING_SECRETS_JSON`, com entradas no formato abaixo:
+Postgres e a chave mestra de payload protegido no ambiente de produção. Secrets
+gerados pelo cadastro público são abertos diretamente do envelope cifrado no
+banco. `APOLLO_V2_WEBHOOK_SIGNING_SECRETS_JSON` permanece como fallback opcional
+para endpoints legados, com entradas no formato abaixo:
 
 ```json
 [{"workspaceId":"workspace-1","endpointId":"00000000-0000-4000-8000-000000000001","keyRef":"vault://apollo/workspaces/workspace-1/webhooks/key-1","version":1,"secretBase64url":"<secret-base64url-de-32-bytes-ou-mais>"}]

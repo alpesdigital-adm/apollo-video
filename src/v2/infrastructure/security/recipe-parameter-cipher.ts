@@ -73,14 +73,16 @@ export function createRecipeParameterCipherFromEnvironment(): RecipeParameterCip
   return createProtectedPayloadCipherFromEnvironment()
 }
 
-export function createProtectedPayloadCipherFromEnvironment(): RecipeParameterCipher {
+export function createProtectedPayloadCipherFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+): RecipeParameterCipher {
   const keyId =
-    process.env.APOLLO_PROTECTED_PAYLOAD_KEY_ID?.trim() ??
-    process.env.APOLLO_RECIPE_PARAMETER_KEY_ID?.trim() ??
+    environment.APOLLO_PROTECTED_PAYLOAD_KEY_ID?.trim() ??
+    environment.APOLLO_RECIPE_PARAMETER_KEY_ID?.trim() ??
     ''
   const encodedKey =
-    process.env.APOLLO_PROTECTED_PAYLOAD_KEY?.trim() ??
-    process.env.APOLLO_RECIPE_PARAMETER_KEY?.trim() ??
+    environment.APOLLO_PROTECTED_PAYLOAD_KEY?.trim() ??
+    environment.APOLLO_RECIPE_PARAMETER_KEY?.trim() ??
     ''
   let key: Buffer
   try {

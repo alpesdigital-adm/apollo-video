@@ -714,6 +714,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'natural',
   },
   {
+    id: 'apollo.webhooks.endpoints.create', version: '1.0.0', title: 'Create webhook endpoint',
+    description: 'Creates a pending HTTPS endpoint with a generated encrypted signing secret and durable idempotency.',
+    exposure: 'workspace-admin', operationKind: 'command', authMode: 'required', requiredScopes: ['webhooks:admin'],
+    inputSchemaRef: 'apollo://schemas/create-webhook-endpoint-request/v1',
+    outputSchemaRef: 'apollo://schemas/webhook-endpoint-created/v1', endpoint: { method: 'POST', path: '/v1/webhooks/endpoints' },
+    toolName: 'apollo.webhooks.endpoints.create', supportsDryRun: false, costClass: 'free', confirmation: 'human-approval', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.webhooks.endpoints.list',
     version: '1.0.0',
     title: 'List webhook endpoints',

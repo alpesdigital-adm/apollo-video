@@ -10,6 +10,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { PrismaClient } = await import(clientPackage)
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { registerWebhookService } = await import('../../src/v2/application/register-webhook.ts')
+  const { createWebhookEndpointService } = await import(
+    '../../src/v2/application/create-webhook-endpoint.ts'
+  )
   const { createWebhookSubscriptionService } = await import(
     '../../src/v2/application/create-webhook-subscription.ts'
   )
@@ -85,6 +88,12 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { PrismaWebhookEndpointCommandRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-endpoint-command-repository.ts'
   )
+  const { PrismaWebhookEndpointCreationRepository } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-endpoint-creation-repository.ts'
+  )
+  const { PrismaWebhookSigningSecretProvider } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-signing-secret-provider.ts'
+  )
   const { PrismaWebhookSecurityRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-security-repository.ts'
   )
@@ -96,6 +105,12 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   )
   const { createEnvironmentWebhookSigningSecretProvider } = await import(
     '../../src/v2/infrastructure/security/environment-webhook-signing-secret-provider.ts'
+  )
+  const { createAesRecipeParameterCipher } = await import(
+    '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
+  )
+  const { createWebhookSigningSecretProtector } = await import(
+    '../../src/v2/infrastructure/security/webhook-signing-secret-protector.ts'
   )
 
   const client = new PrismaClient()
@@ -129,6 +144,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     await client.v2WebhookDeliveryAttempt.deleteMany({ where: { workspaceId } })
     await client.v2WebhookDelivery.deleteMany({ where: { workspaceId } })
     await client.v2WebhookSubscription.deleteMany({ where: { workspaceId } })
+    await client.v2WebhookSigningSecretPayload.deleteMany({ where: { workspaceId } })
     await client.v2WebhookSigningSecret.deleteMany({ where: { workspaceId } })
     await client.v2WebhookEndpoint.deleteMany({ where: { workspaceId } })
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
@@ -158,6 +174,79 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       name: 'Webhook administrator',
       environment: 'sandbox',
       scopes: ['webhooks:admin'],
+    })
+
+    const endpointCipher = createAesRecipeParameterCipher({
+      keyId: 'webhook-integration-key',
+      key: Buffer.alloc(32, 29),
+    })
+    let endpointCreationId = 271
+    const createEndpoint = createWebhookEndpointService({
+      repository: new PrismaWebhookEndpointCreationRepository(client),
+      secrets: createWebhookSigningSecretProtector(endpointCipher),
+      clock: () => new Date(now.getTime() + 250),
+      createId: (kind) => kind === 'idempotency-record'
+        ? `webhook-endpoint-idempotency-${endpointCreationId++}`
+        : `00000000-0000-4000-8000-${String(endpointCreationId++).padStart(12, '0')}`,
+    })
+    const endpointCreationRequest = {
+      workspaceId,
+      url: 'https://generated-hooks.example.com/apollo',
+      createdByClientId: clientId,
+      idempotencyKey: 'create-webhook-endpoint-1',
+    }
+    const createdEndpoint = await createEndpoint(endpointCreationRequest)
+    assert.equal(createdEndpoint.replayed, false)
+    assert.equal(createdEndpoint.endpoint.status, 'pending-verification')
+    assert.equal(await client.v2WebhookSigningSecretPayload.count({
+      where: { secretId: createdEndpoint.secret.id },
+    }), 1)
+    const endpointReplay = await createEndpoint(endpointCreationRequest)
+    assert.equal(endpointReplay.replayed, true)
+    assert.equal(endpointReplay.endpoint.id, createdEndpoint.endpoint.id)
+    assert.equal(endpointReplay.secret.id, createdEndpoint.secret.id)
+    await assert.rejects(
+      () => createEndpoint({ ...endpointCreationRequest, url: 'https://other-hooks.example.com/apollo' }),
+      (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    await assert.rejects(
+      () => createEndpoint({ ...endpointCreationRequest, idempotencyKey: 'create-webhook-endpoint-2' }),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_ALREADY_EXISTS',
+    )
+    const openedGeneratedSecret = await new PrismaWebhookSigningSecretProvider(
+      endpointCipher,
+      client,
+    ).open({
+      workspaceId,
+      endpointId: createdEndpoint.endpoint.id,
+      keyRef: createdEndpoint.secret.keyRef,
+      version: createdEndpoint.secret.version,
+    })
+    assert.equal(
+      createHash('sha256').update(openedGeneratedSecret).digest('hex'),
+      createdEndpoint.secret.fingerprint,
+    )
+    openedGeneratedSecret.fill(0)
+    await assert.rejects(
+      () => new PrismaWebhookSigningSecretProvider(
+        createAesRecipeParameterCipher({
+          keyId: 'webhook-integration-key',
+          key: Buffer.alloc(32, 30),
+        }),
+        client,
+      ).open({
+        workspaceId,
+        endpointId: createdEndpoint.endpoint.id,
+        keyRef: createdEndpoint.secret.keyRef,
+        version: createdEndpoint.secret.version,
+      }),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    await client.v2WebhookSigningSecretPayload.delete({ where: { secretId: createdEndpoint.secret.id } })
+    await client.v2WebhookSigningSecret.delete({ where: { id: createdEndpoint.secret.id } })
+    await client.v2WebhookEndpoint.delete({ where: { id: createdEndpoint.endpoint.id } })
+    await client.v2IdempotencyRecord.deleteMany({
+      where: { workspaceId, key: { startsWith: 'create-webhook-endpoint-' } },
     })
 
     let shardClock = new Date('2026-07-14T21:50:01.000Z')

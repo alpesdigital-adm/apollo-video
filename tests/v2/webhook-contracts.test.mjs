@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { registerWebhookService } from '../../src/v2/application/register-webhook.ts'
+import { createWebhookEndpointService } from '../../src/v2/application/create-webhook-endpoint.ts'
 import { createWebhookSubscriptionService } from '../../src/v2/application/create-webhook-subscription.ts'
 import { activateWebhookEndpointService } from '../../src/v2/application/secure-webhook.ts'
 import { materializeNextWebhookEventService } from '../../src/v2/application/materialize-webhook-deliveries.ts'
@@ -78,6 +79,85 @@ import {
 } from '../../src/v2/infrastructure/webhook/safe-webhook-challenge-transport.ts'
 import { SafeWebhookDeliveryTransport } from '../../src/v2/infrastructure/webhook/safe-webhook-delivery-transport.ts'
 import { createEnvironmentWebhookSigningSecretProvider } from '../../src/v2/infrastructure/security/environment-webhook-signing-secret-provider.ts'
+import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
+import {
+  createWebhookSigningSecretProtector,
+  webhookSigningSecretCipherContext,
+} from '../../src/v2/infrastructure/security/webhook-signing-secret-protector.ts'
+
+test('webhook endpoint creation generates only encrypted signing material and canonical intent', async () => {
+  const rawSecret = Buffer.alloc(32, 17)
+  const expectedFingerprint = createHash('sha256').update(rawSecret).digest('hex')
+  const cipher = createAesRecipeParameterCipher({ keyId: 'webhook-test-key', key: Buffer.alloc(32, 8) })
+  const protector = createWebhookSigningSecretProtector(cipher, () => rawSecret)
+  const ids = {
+    'webhook-endpoint': '00000000-0000-4000-8000-000000000123',
+    'webhook-secret': '00000000-0000-4000-8000-000000000124',
+    'idempotency-record': 'idempotency-webhook-endpoint-1',
+  }
+  let captured
+  const create = createWebhookEndpointService({
+    repository: {
+      async createOrReplay(bundle) {
+        captured = bundle
+        return { endpoint: bundle.endpoint, secret: bundle.secret, replayed: false }
+      },
+    },
+    secrets: protector,
+    clock: () => new Date('2026-07-15T20:00:00.000Z'),
+    createId: (kind) => ids[kind],
+  })
+  const result = await create({
+    workspaceId: 'workspace-1',
+    url: 'HTTPS://Hooks.Example.com:443/apollo',
+    createdByClientId: 'client-1',
+    idempotencyKey: 'endpoint-request-1',
+  })
+
+  assert.equal(result.endpoint.url, 'https://hooks.example.com/apollo')
+  assert.equal(result.endpoint.status, 'pending-verification')
+  assert.equal(result.secret.fingerprint, expectedFingerprint)
+  assert.equal(rawSecret.every((value) => value === 0), true)
+  assert.equal(JSON.stringify(captured).includes(Buffer.alloc(32, 17).toString('base64url')), false)
+  const opened = await cipher.open(
+    {
+      algorithm: captured.secretPayload.algorithm,
+      keyId: captured.secretPayload.keyId,
+      nonce: captured.secretPayload.nonce,
+      ciphertext: captured.secretPayload.ciphertext,
+      authTag: captured.secretPayload.authTag,
+    },
+    webhookSigningSecretCipherContext({
+      secretId: captured.secret.id,
+      workspaceId: captured.endpoint.workspaceId,
+      endpointId: captured.endpoint.id,
+      version: captured.secret.version,
+      keyRef: captured.secret.keyRef,
+    }),
+  )
+  assert.equal(createHash('sha256').update(Buffer.from(opened, 'base64url')).digest('hex'), expectedFingerprint)
+  assert.match(captured.idempotency.requestFingerprint, /^[a-f0-9]{64}$/)
+})
+
+test('webhook endpoint creation rejects idempotency misuse before generating a secret', async () => {
+  let generated = 0
+  const create = createWebhookEndpointService({
+    repository: { async createOrReplay() { throw new Error('must not persist') } },
+    secrets: { async protect() { generated += 1; throw new Error('must not generate') } },
+    clock: () => new Date('2026-07-15T20:00:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000125',
+  })
+  await assert.rejects(
+    () => create({
+      workspaceId: 'workspace-1',
+      url: 'https://hooks.example.com/apollo',
+      createdByClientId: 'client-1',
+      idempotencyKey: 'invalid key',
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+  assert.equal(generated, 0)
+})
 
 test('webhook subscription creation canonicalizes filters and persists idempotency intent', async () => {
   const ids = {

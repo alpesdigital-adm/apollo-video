@@ -130,6 +130,17 @@ const webhookEndpointExample = {
   verifiedAt: createdAt,
   currentSigningSecret: webhookSecretMetadataExample,
 }
+const webhookPendingEndpointExample = {
+  schemaVersion: webhookEndpointExample.schemaVersion,
+  id: '00000000-0000-4000-8000-000000000710',
+  status: 'pending-verification',
+  revision: 'a'.repeat(64),
+  destinationOrigin: 'https://hooks.example.com',
+  urlFingerprint: 'b'.repeat(64),
+  createdByClientId: clientId,
+  createdAt,
+  currentSigningSecret: webhookSecretMetadataExample,
+}
 const webhookSubscriptionExample = {
   schemaVersion: 'webhook-subscription/v1',
   id: '00000000-0000-4000-8000-000000000703',
@@ -658,6 +669,19 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/webhook-endpoint-list/v1': [
       { data: { endpoints: [] }, meta: { apiVersion: 'v1' } },
       { data: { endpoints: [webhookEndpointExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/create-webhook-endpoint-request/v1': [
+      { url: 'https://hooks.example.com/apollo' },
+    ],
+    'apollo://schemas/webhook-endpoint-created/v1': [
+      {
+        data: { endpoint: webhookPendingEndpointExample, replayed: false },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: { endpoint: webhookPendingEndpointExample, replayed: true },
+        meta: { apiVersion: 'v1' },
+      },
     ],
     'apollo://schemas/webhook-endpoint-detail/v1': [
       { data: { endpoint: { ...webhookEndpointExample, signingSecrets: [webhookSecretMetadataExample] } }, meta: { apiVersion: 'v1' } },

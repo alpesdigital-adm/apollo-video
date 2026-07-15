@@ -496,7 +496,7 @@
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050: API externa lista/lê endpoints, subscriptions e deliveries, cria subscriptions com filtros exatos, executa replay e altera lifecycle de endpoints/subscriptions; UI, criação/challenge de endpoint e rotação de secret continuam abertas.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051: API externa cria/lista/lê endpoints e subscriptions, consulta deliveries, executa replay e altera lifecycle; UI, challenge e rotação de secret continuam abertas.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050: capabilities de endpoints, subscriptions, deliveries e replay entregam consulta, criação idempotente de subscription, lifecycle com cascatas e replay workspace-scoped; criação/challenge de endpoint, rotação e UI continuam abertas.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051: capabilities entregam cadastro idempotente de endpoint/subscription, consultas, lifecycle com cascatas e replay workspace-scoped; challenge, rotação e UI continuam abertas.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -4029,7 +4029,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-050 — Criação externa idempotente de subscriptions
 
-**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+**Status:** publicado no `main` em 15 de julho de 2026 (`aac19d8`); hosted CI `29446498706` aprovada.
 
 Entregas:
 
@@ -4057,3 +4057,36 @@ Limites explícitos desta slice:
 - criação, alteração de URL e challenge público de endpoint continuam abertos;
 - alteração de filtro de subscription permanece um command futuro separado;
 - rotação de signing secret, UI administrativa, audit query, métricas e alertas continuam futuros.
+
+### Slice F0-051 — Cadastro externo de endpoint e cofre dinâmico
+
+**Status:** concluído localmente em 15 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability `apollo.webhooks.endpoints.create` expõe `POST /v1/webhooks/endpoints` sob `webhooks:admin`;
+- body fechado recebe somente URL HTTPS e exige `Idempotency-Key`;
+- endpoint nasce `pending-verification` com signing secret v1 gerado internamente;
+- chave HMAC de 32 bytes é fingerprinted, cifrada em AES-256-GCM com contexto autenticado e zerada após o uso;
+- endpoint, metadados do secret, payload cifrado e ledger são persistidos atomicamente em transação serializável;
+- payload possui vínculo exato com workspace, endpoint, secret e versão, além de constraints de envelope;
+- primeira criação retorna 201 e replay idêntico retorna os mesmos IDs com 200;
+- chave reutilizada para outra URL e URL duplicada com outra chave possuem conflitos distintos;
+- provider dinâmico abre o payload do banco, autentica o envelope e reconfirma o fingerprint;
+- fallback ao catálogo estático ocorre somente quando não existe payload dinâmico; corrupção falha fechado;
+- ADR-040 formaliza a fronteira pública, cifragem, idempotência e compatibilidade operacional.
+
+Regressões e evidências locais:
+
+- suíte global passa com 110 testes; 42 são contratos de webhook;
+- integração Prisma cobre persistência atômica, replay, conflitos, abertura exata e chave mestra incorreta;
+- jornada HTTP cobre OpenAPI, 201/200, chave ausente, conflitos, redaction e 403 sem scope;
+- contratos públicos passam com 39 capabilities, 48 schemas, 65 exemplos e 34 paths;
+- build registra `POST /v1/webhooks/endpoints` junto do GET existente;
+- schema/migration passam com 27 tabelas, 102 índices e 57 chaves estrangeiras.
+
+Limites explícitos desta slice:
+
+- challenge/ativação pública do endpoint continua aberto e será a próxima fatia;
+- alteração de URL e rotação de signing secret permanecem commands separados futuros;
+- UI administrativa, audit query, métricas e alertas continuam futuros.

@@ -1477,6 +1477,25 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
     } }),
   ),
+  defineSchema('create-webhook-endpoint-request', 1, 'Create webhook endpoint request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['url'],
+    properties: {
+      url: { type: 'string', format: 'uri', pattern: '^https://', minLength: 12, maxLength: 2048 },
+    },
+  }),
+  defineSchema('webhook-endpoint-created', 1, 'Webhook endpoint creation response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['endpoint', 'replayed'],
+      properties: {
+        endpoint: webhookEndpointSummarySchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('webhook-endpoint-detail', 1, 'Webhook endpoint detail response',
     successSchema({ type: 'object', additionalProperties: false, required: ['endpoint'], properties: { endpoint: webhookEndpointDetailSchema } }),
   ),

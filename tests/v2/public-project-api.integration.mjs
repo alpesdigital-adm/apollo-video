@@ -97,6 +97,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2WebhookSubscription.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2WebhookSigningSecretPayload.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2WebhookSigningSecret.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
@@ -572,6 +575,21 @@ test('authenticated public API manages projects, clients and artifact inspection
       openApi.paths['/v1/webhooks/endpoints'].get['x-apollo-capability-id'],
       'apollo.webhooks.endpoints.list',
     )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints'].post['x-apollo-capability-id'],
+      'apollo.webhooks.endpoints.create',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints'].post.requestBody.content['application/json']
+        .schema.$ref,
+      '#/components/schemas/CreateWebhookEndpointRequestV1',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/endpoints'].post.parameters.some(
+        (parameter) => parameter.name === 'Idempotency-Key' && parameter.required,
+      ),
+      true,
+    )
     assert.deepEqual(
       openApi.paths['/v1/webhooks/endpoints'].get.parameters.map(
         (parameter) => parameter.name,
@@ -766,6 +784,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.operations.read',
         'apollo.operations.cancel',
         'apollo.operations.retry',
+        'apollo.webhooks.endpoints.create',
         'apollo.webhooks.endpoints.list',
         'apollo.webhooks.endpoints.read',
         'apollo.webhooks.endpoints.status.set',
@@ -819,6 +838,66 @@ test('authenticated public API manages projects, clients and artifact inspection
       [1],
     )
     assert.equal(JSON.stringify(webhookEndpointRead).includes('vault://'), false)
+
+    const createWebhookEndpointRequest = (idempotencyKey, body) => fetch(
+      `${baseUrl}/v1/webhooks/endpoints`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
+        },
+        body: JSON.stringify(body),
+      },
+    )
+    const createEndpointBody = { url: 'https://created-hooks.example.com/apollo' }
+    const createEndpointResponse = await createWebhookEndpointRequest(
+      'public-endpoint-create-1',
+      createEndpointBody,
+    )
+    const createdEndpoint = await createEndpointResponse.json()
+    assert.equal(createEndpointResponse.status, 201)
+    assert.equal(createdEndpoint.data.replayed, false)
+    assert.equal(createdEndpoint.data.endpoint.status, 'pending-verification')
+    assert.equal(createdEndpoint.data.endpoint.destinationOrigin, 'https://created-hooks.example.com')
+    assert.equal(createdEndpoint.data.endpoint.currentSigningSecret.version, 1)
+    assert.equal(JSON.stringify(createdEndpoint).includes('keyRef'), false)
+    assert.equal(JSON.stringify(createdEndpoint).includes('ciphertext'), false)
+    assert.equal(JSON.stringify(createdEndpoint).includes('workspaceId'), false)
+    const replayEndpointResponse = await createWebhookEndpointRequest(
+      'public-endpoint-create-1',
+      createEndpointBody,
+    )
+    const replayedEndpoint = await replayEndpointResponse.json()
+    assert.equal(replayEndpointResponse.status, 200)
+    assert.equal(replayedEndpoint.data.replayed, true)
+    assert.equal(replayedEndpoint.data.endpoint.id, createdEndpoint.data.endpoint.id)
+    const mismatchedEndpointResponse = await createWebhookEndpointRequest(
+      'public-endpoint-create-1',
+      { url: 'https://different-hooks.example.com/apollo' },
+    )
+    assert.equal(mismatchedEndpointResponse.status, 409)
+    assert.equal((await mismatchedEndpointResponse.json()).error.code, 'IDEMPOTENCY_PAYLOAD_MISMATCH')
+    const duplicateEndpointResponse = await createWebhookEndpointRequest(
+      'public-endpoint-create-2',
+      createEndpointBody,
+    )
+    assert.equal(duplicateEndpointResponse.status, 409)
+    assert.equal((await duplicateEndpointResponse.json()).error.code, 'WEBHOOK_ENDPOINT_ALREADY_EXISTS')
+    assert.equal((await createWebhookEndpointRequest('', createEndpointBody)).status, 422)
+    const createdEndpointSecret = await client.v2WebhookSigningSecret.findFirstOrThrow({
+      where: { endpointId: createdEndpoint.data.endpoint.id, workspaceId },
+    })
+    assert.equal(await client.v2WebhookSigningSecretPayload.count({
+      where: { secretId: createdEndpointSecret.id },
+    }), 1)
+    await client.v2WebhookSigningSecretPayload.delete({ where: { secretId: createdEndpointSecret.id } })
+    await client.v2WebhookSigningSecret.delete({ where: { id: createdEndpointSecret.id } })
+    await client.v2WebhookEndpoint.delete({ where: { id: createdEndpoint.data.endpoint.id } })
+    await client.v2IdempotencyRecord.deleteMany({
+      where: { workspaceId, key: { startsWith: 'public-endpoint-create-' } },
+    })
 
     const webhookEndpointStatusUrl =
       `${baseUrl}/v1/webhooks/endpoints/${webhookEndpointId}/status`
@@ -1283,6 +1362,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       headers: { authorization: childAuthorization },
     })
     assert.equal(childWebhookEndpointResponse.status, 403)
+    const childWebhookEndpointCreateResponse = await fetch(`${baseUrl}/v1/webhooks/endpoints`, {
+      method: 'POST',
+      headers: {
+        authorization: childAuthorization,
+        'content-type': 'application/json',
+        'idempotency-key': 'child-endpoint-create-1',
+      },
+      body: JSON.stringify({ url: 'https://child-hooks.example.com/apollo' }),
+    })
+    assert.equal(childWebhookEndpointCreateResponse.status, 403)
     const childWebhookEndpointStatusResponse = await fetch(
       webhookEndpointStatusUrl,
       {
