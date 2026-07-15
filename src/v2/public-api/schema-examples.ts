@@ -134,6 +134,7 @@ const webhookSubscriptionExample = {
   id: '00000000-0000-4000-8000-000000000703',
   endpointId: webhookEndpointExample.id,
   status: 'active',
+  revision: 'e'.repeat(64),
   eventTypes: ['project.created'],
   resourceIds: ['project-example-1'],
   createdByClientId: clientId,
@@ -666,6 +667,10 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/webhook-subscription-detail/v1': [
       { data: { subscription: webhookSubscriptionExample }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/set-webhook-subscription-status-request/v1': [
+      { status: 'paused', baseRevision: webhookSubscriptionExample.revision },
+      { status: 'revoked', baseRevision: webhookSubscriptionExample.revision },
     ],
     'apollo://schemas/webhook-delivery-detail/v1': [
       {

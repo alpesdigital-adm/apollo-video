@@ -38,6 +38,7 @@ import {
 } from '../../src/v2/application/read-webhook-administration.ts'
 import { replayWebhookDeliveryService } from '../../src/v2/application/replay-webhook-delivery.ts'
 import { replayWebhookEventService } from '../../src/v2/application/replay-webhook-event.ts'
+import { setWebhookSubscriptionStatusService } from '../../src/v2/application/set-webhook-subscription-status.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -48,6 +49,8 @@ import {
   createWebhookSubscription,
   normalizeWebhookUrl,
   replayWebhookDelivery,
+  transitionWebhookSubscription,
+  webhookSubscriptionRevision,
   webhookEventMatchesFilter,
 } from '../../src/v2/domain/webhook.ts'
 import {
@@ -956,6 +959,61 @@ test('webhook subscription administration binds endpoint filters and scopes exac
   await assert.rejects(
     () => read({ workspaceId: 'workspace-2', subscriptionId: subscription.id }),
     (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_NOT_FOUND',
+  )
+})
+
+test('webhook subscription lifecycle is revisioned, convergent and terminal after revocation', () => {
+  const active = createWebhookSubscription({
+    id: '00000000-0000-4000-8000-000000000923', workspaceId: 'workspace-1',
+    endpointId: ids['webhook-endpoint'], status: 'active',
+    filter: { eventTypes: ['project.created'] }, createdByClientId: 'client-1',
+    createdAt: '2026-07-15T11:22:00.000Z', updatedAt: '2026-07-15T11:22:00.000Z',
+  })
+  const paused = transitionWebhookSubscription(active, 'paused', '2026-07-15T11:22:01.000Z')
+  assert.equal(paused.status, 'paused')
+  assert.equal(paused.pausedAt, '2026-07-15T11:22:01.000Z')
+  assert.notEqual(webhookSubscriptionRevision(paused), webhookSubscriptionRevision(active))
+  assert.equal(transitionWebhookSubscription(paused, 'paused', paused.updatedAt), paused)
+  const resumed = transitionWebhookSubscription(paused, 'active', '2026-07-15T11:22:02.000Z')
+  assert.equal(resumed.status, 'active')
+  assert.equal('pausedAt' in resumed, false)
+  const revoked = transitionWebhookSubscription(resumed, 'revoked', '2026-07-15T11:22:03.000Z')
+  assert.equal(revoked.status, 'revoked')
+  assert.throws(
+    () => transitionWebhookSubscription(revoked, 'active', '2026-07-15T11:22:04.000Z'),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED',
+  )
+})
+
+test('webhook subscription status command validates revision and scopes repository input', async () => {
+  const subscription = createWebhookSubscription({
+    id: '00000000-0000-4000-8000-000000000924', workspaceId: 'workspace-1',
+    endpointId: ids['webhook-endpoint'], status: 'active',
+    filter: { eventTypes: ['project.created'] }, createdByClientId: 'client-1',
+    createdAt: '2026-07-15T11:23:00.000Z',
+  })
+  const baseRevision = webhookSubscriptionRevision(subscription)
+  let command
+  const setStatus = setWebhookSubscriptionStatusService({
+    repository: {
+      async setStatus(value) {
+        command = value
+        const next = transitionWebhookSubscription(subscription, value.targetStatus, value.changedAt)
+        return { subscription: next, revision: webhookSubscriptionRevision(next), replayed: false }
+      },
+    },
+    clock: () => new Date('2026-07-15T11:23:01.000Z'),
+  })
+  const result = await setStatus({
+    workspaceId: 'workspace-1', subscriptionId: subscription.id,
+    status: 'paused', baseRevision,
+  })
+  assert.equal(result.subscription.status, 'paused')
+  assert.equal(command.workspaceId, 'workspace-1')
+  assert.equal(command.baseRevision, baseRevision)
+  await assert.rejects(
+    () => setStatus({ workspaceId: 'workspace-1', subscriptionId: subscription.id, status: 'pending-verification', baseRevision }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
 })
 

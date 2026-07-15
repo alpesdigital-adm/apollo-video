@@ -88,6 +88,7 @@ export interface WebhookSubscription {
   filter: Readonly<WebhookEventFilter>
   createdByClientId: string
   createdAt: string
+  updatedAt: string
   pausedAt?: string
   revokedAt?: string
 }
@@ -307,8 +308,9 @@ export function createWebhookSigningSecret(
 }
 
 export function createWebhookSubscription(
-  input: Omit<WebhookSubscription, 'schemaVersion' | 'filter'> & {
+  input: Omit<WebhookSubscription, 'schemaVersion' | 'filter' | 'updatedAt'> & {
     filter: { eventTypes: readonly string[]; resourceIds?: readonly string[] }
+    updatedAt?: string
   },
 ): Readonly<WebhookSubscription> {
   assertDomain(WEBHOOK_SUBSCRIPTION_STATUSES.includes(input.status), 'INVALID_WEBHOOK', 'Webhook subscription status is invalid')
@@ -321,6 +323,13 @@ export function createWebhookSubscription(
     'INVALID_WEBHOOK',
     'Webhook subscription state is inconsistent',
   )
+  const createdAt = canonicalUtc(input.createdAt, 'createdAt')
+  const updatedAt = canonicalUtc(input.updatedAt ?? input.createdAt, 'updatedAt')
+  assertDomain(
+    new Date(updatedAt).getTime() >= new Date(createdAt).getTime(),
+    'INVALID_WEBHOOK',
+    'Webhook subscription update cannot predate creation',
+  )
   return Object.freeze({
     schemaVersion: 1,
     id: webhookId(input.id, 'id'),
@@ -329,9 +338,72 @@ export function createWebhookSubscription(
     status: input.status,
     filter: createWebhookEventFilter(input.filter),
     createdByClientId: safeId(input.createdByClientId, 'createdByClientId'),
-    createdAt: canonicalUtc(input.createdAt, 'createdAt'),
+    createdAt,
+    updatedAt,
     ...(pausedAt ? { pausedAt } : {}),
     ...(revokedAt ? { revokedAt } : {}),
+  })
+}
+
+export type WebhookSubscriptionMutableStatus = Exclude<
+  WebhookSubscriptionStatus,
+  'pending-verification'
+>
+
+export function webhookSubscriptionRevision(
+  subscription: Readonly<WebhookSubscription>,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      id: subscription.id,
+      status: subscription.status,
+      updatedAt: subscription.updatedAt,
+    }))
+    .digest('hex')
+}
+
+export function transitionWebhookSubscription(
+  subscription: Readonly<WebhookSubscription>,
+  targetStatus: WebhookSubscriptionMutableStatus,
+  changedAtValue: string,
+): Readonly<WebhookSubscription> {
+  const changedAt = canonicalUtc(changedAtValue, 'changedAt')
+  assertDomain(
+    new Date(changedAt).getTime() >= new Date(subscription.updatedAt).getTime(),
+    'WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED',
+    'Webhook subscription transition clock is stale',
+  )
+  if (subscription.status === targetStatus) return subscription
+  const allowed =
+    (subscription.status === 'pending-verification' && targetStatus === 'revoked') ||
+    (subscription.status === 'active' && ['paused', 'revoked'].includes(targetStatus)) ||
+    (subscription.status === 'paused' && ['active', 'revoked'].includes(targetStatus))
+  assertDomain(
+    allowed,
+    'WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED',
+    'Webhook subscription status transition is not allowed',
+  )
+  return createWebhookSubscription({
+    id: subscription.id,
+    workspaceId: subscription.workspaceId,
+    endpointId: subscription.endpointId,
+    status: targetStatus,
+    filter: {
+      eventTypes: subscription.filter.eventTypes,
+      ...(subscription.filter.resourceIds
+        ? { resourceIds: subscription.filter.resourceIds }
+        : {}),
+    },
+    createdByClientId: subscription.createdByClientId,
+    createdAt: subscription.createdAt,
+    updatedAt: changedAt,
+    ...(targetStatus === 'paused' ? { pausedAt: changedAt } : {}),
+    ...(targetStatus === 'revoked'
+      ? {
+          revokedAt: changedAt,
+          ...(subscription.pausedAt ? { pausedAt: subscription.pausedAt } : {}),
+        }
+      : {}),
   })
 }
 

@@ -61,6 +61,7 @@ function subscription(row: V2WebhookSubscription): Readonly<WebhookSubscription>
       filter: { eventTypes, ...(resourceIds ? { resourceIds } : {}) },
       createdByClientId: row.createdByClientId,
       createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
       ...(row.pausedAt ? { pausedAt: row.pausedAt.toISOString() } : {}),
       ...(row.revokedAt ? { revokedAt: row.revokedAt.toISOString() } : {}),
     })

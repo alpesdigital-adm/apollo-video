@@ -15,7 +15,10 @@ import type {
   WebhookEndpointSummaryRecord,
   WebhookSigningSecretMetadata,
 } from '../application/ports/webhook-administration-query-repository.ts'
-import type { WebhookSubscription } from '../domain/webhook.ts'
+import {
+  webhookSubscriptionRevision,
+  type WebhookSubscription,
+} from '../domain/webhook.ts'
 
 export const PUBLIC_API_VERSION = 'v1' as const
 
@@ -234,6 +237,7 @@ export function presentWebhookSubscription(subscription: Readonly<WebhookSubscri
     id: subscription.id,
     endpointId: subscription.endpointId,
     status: subscription.status,
+    revision: webhookSubscriptionRevision(subscription),
     eventTypes: [...subscription.filter.eventTypes],
     ...(subscription.filter.resourceIds ? { resourceIds: [...subscription.filter.resourceIds] } : {}),
     createdByClientId: subscription.createdByClientId,

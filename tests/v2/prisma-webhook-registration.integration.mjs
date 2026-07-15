@@ -42,6 +42,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     verifyWebhookRequestService,
   } = await import('../../src/v2/application/secure-webhook.ts')
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
+  const { webhookSubscriptionRevision } = await import('../../src/v2/domain/webhook.ts')
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
   const {
     issueWebhookChallengeToken,
@@ -71,6 +72,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   )
   const { PrismaWebhookAdministrationQueryRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-administration-query-repository.ts'
+  )
+  const { PrismaWebhookSubscriptionCommandRepository } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-subscription-command-repository.ts'
   )
   const { PrismaWebhookSecurityRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-security-repository.ts'
@@ -388,6 +392,67 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.deepEqual(subscriptionPage[0].filter.resourceIds, ['integration-project-1'])
     assert.equal(
       await administration.findSubscriptionById('another-workspace', subscription.id),
+      null,
+    )
+    const subscriptionCommands = new PrismaWebhookSubscriptionCommandRepository(client)
+    const activeSubscription = await administration.findSubscriptionById(workspaceId, subscription.id)
+    const activeRevision = webhookSubscriptionRevision(activeSubscription)
+    const subscriptionChangedAt = new Date(activeSubscription.updatedAt)
+    const paused = await subscriptionCommands.setStatus({
+      workspaceId, subscriptionId: subscription.id, targetStatus: 'paused',
+      baseRevision: activeRevision, changedAt: new Date(subscriptionChangedAt.getTime() + 1_000).toISOString(),
+    })
+    assert.equal(paused.subscription.status, 'paused')
+    assert.equal(paused.replayed, false)
+    assert.notEqual(paused.revision, activeRevision)
+    assert.equal(
+      (await client.v2WebhookSubscription.findUniqueOrThrow({ where: { id: subscription.id } })).pausedAt.toISOString(),
+      new Date(subscriptionChangedAt.getTime() + 1_000).toISOString(),
+    )
+    const pausedAgain = await subscriptionCommands.setStatus({
+      workspaceId, subscriptionId: subscription.id, targetStatus: 'paused',
+      baseRevision: activeRevision, changedAt: new Date(subscriptionChangedAt.getTime() + 1_500).toISOString(),
+    })
+    assert.equal(pausedAgain.replayed, true)
+    assert.equal(pausedAgain.revision, paused.revision)
+    await assert.rejects(
+      () => subscriptionCommands.setStatus({
+        workspaceId, subscriptionId: subscription.id, targetStatus: 'active',
+        baseRevision: '0'.repeat(64), changedAt: new Date(subscriptionChangedAt.getTime() + 2_000).toISOString(),
+      }),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
+    )
+    await client.v2WebhookEndpoint.update({
+      where: { id: endpoint.id },
+      data: {
+        status: 'suspended',
+        suspendedAt: new Date(subscriptionChangedAt.getTime() + 1_750),
+      },
+    })
+    await assert.rejects(
+      () => subscriptionCommands.setStatus({
+        workspaceId, subscriptionId: subscription.id, targetStatus: 'active',
+        baseRevision: paused.revision,
+        changedAt: new Date(subscriptionChangedAt.getTime() + 2_000).toISOString(),
+      }),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED',
+    )
+    await client.v2WebhookEndpoint.update({
+      where: { id: endpoint.id },
+      data: { status: 'active', suspendedAt: null },
+    })
+    const resumed = await subscriptionCommands.setStatus({
+      workspaceId, subscriptionId: subscription.id, targetStatus: 'active',
+      baseRevision: paused.revision, changedAt: new Date(subscriptionChangedAt.getTime() + 2_000).toISOString(),
+    })
+    assert.equal(resumed.subscription.status, 'active')
+    assert.equal(resumed.subscription.pausedAt, undefined)
+    assert.equal(
+      await subscriptionCommands.setStatus({
+        workspaceId: 'another-workspace', subscriptionId: subscription.id,
+        targetStatus: 'paused', baseRevision: resumed.revision,
+        changedAt: new Date(subscriptionChangedAt.getTime() + 3_000).toISOString(),
+      }),
       null,
     )
     await assert.rejects(

@@ -38,3 +38,4 @@ Estados usados:
 - [ADR-034 — Secret provider configurado e entrypoint do worker de webhook](./ADR-034-webhook-secret-provider-and-worker-entrypoint.md)
 - [ADR-035 — Coordenação durável de shards do worker de webhook](./ADR-035-durable-webhook-worker-shard-coordination.md)
 - [ADR-036 — Administração pública e redigida de endpoints e subscriptions de webhook](./ADR-036-public-webhook-endpoint-and-subscription-administration.md)
+- [ADR-037 — Lifecycle e concorrência de subscriptions de webhook](./ADR-037-webhook-subscription-lifecycle-and-concurrency.md)

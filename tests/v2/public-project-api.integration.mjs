@@ -601,6 +601,17 @@ test('authenticated public API manages projects, clients and artifact inspection
       'apollo.webhooks.subscriptions.read',
     )
     assert.equal(
+      openApi.paths['/v1/webhooks/subscriptions/{subscriptionId}/status'].put[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.subscriptions.status.set',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/subscriptions/{subscriptionId}/status'].put
+        .requestBody.content['application/json'].schema.$ref,
+      '#/components/schemas/SetWebhookSubscriptionStatusRequestV1',
+    )
+    assert.equal(
       openApi.paths['/v1/webhooks/deliveries'].get['x-apollo-capability-id'],
       'apollo.webhooks.deliveries.list',
     )
@@ -733,6 +744,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.webhooks.endpoints.read',
         'apollo.webhooks.subscriptions.list',
         'apollo.webhooks.subscriptions.read',
+        'apollo.webhooks.subscriptions.status.set',
         'apollo.webhooks.deliveries.list',
         'apollo.webhooks.deliveries.read',
         'apollo.webhooks.deliveries.replay',
@@ -802,6 +814,79 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(webhookSubscriptionReadResponse.status, 200)
     assert.equal(webhookSubscriptionRead.data.subscription.id, webhookSubscriptionId)
     assert.deepEqual(webhookSubscriptionRead.data.subscription.eventTypes, ['project.created'])
+    assert.match(webhookSubscriptionRead.data.subscription.revision, /^[a-f0-9]{64}$/)
+
+    const webhookSubscriptionStatusUrl =
+      `${baseUrl}/v1/webhooks/subscriptions/${webhookSubscriptionId}/status`
+    const setWebhookSubscriptionStatus = (status, baseRevision) => fetch(
+      webhookSubscriptionStatusUrl,
+      {
+        method: 'PUT',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ status, baseRevision }),
+      },
+    )
+    const invalidSubscriptionBodyResponse = await fetch(webhookSubscriptionStatusUrl, {
+      method: 'PUT',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        status: 'paused',
+        baseRevision: webhookSubscriptionRead.data.subscription.revision,
+        unexpected: true,
+      }),
+    })
+    assert.equal(invalidSubscriptionBodyResponse.status, 422)
+    const missingSubscriptionStatusResponse = await fetch(
+      `${baseUrl}/v1/webhooks/subscriptions/00000000-0000-4000-8000-000000000999/status`,
+      {
+        method: 'PUT',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          status: 'paused',
+          baseRevision: webhookSubscriptionRead.data.subscription.revision,
+        }),
+      },
+    )
+    assert.equal(missingSubscriptionStatusResponse.status, 404)
+    const pauseSubscriptionResponse = await setWebhookSubscriptionStatus(
+      'paused',
+      webhookSubscriptionRead.data.subscription.revision,
+    )
+    const pausedSubscription = await pauseSubscriptionResponse.json()
+    assert.equal(pauseSubscriptionResponse.status, 200)
+    assert.equal(pausedSubscription.data.subscription.status, 'paused')
+    assert.notEqual(
+      pausedSubscription.data.subscription.revision,
+      webhookSubscriptionRead.data.subscription.revision,
+    )
+    const pauseSubscriptionAgainResponse = await setWebhookSubscriptionStatus(
+      'paused',
+      webhookSubscriptionRead.data.subscription.revision,
+    )
+    assert.equal(pauseSubscriptionAgainResponse.status, 200)
+    assert.equal(
+      (await pauseSubscriptionAgainResponse.json()).data.subscription.revision,
+      pausedSubscription.data.subscription.revision,
+    )
+    const staleResumeResponse = await setWebhookSubscriptionStatus('active', '0'.repeat(64))
+    assert.equal(staleResumeResponse.status, 409)
+    assert.equal(
+      (await staleResumeResponse.json()).error.code,
+      'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
+    )
+    const resumeSubscriptionResponse = await setWebhookSubscriptionStatus(
+      'active',
+      pausedSubscription.data.subscription.revision,
+    )
+    const resumedSubscription = await resumeSubscriptionResponse.json()
+    assert.equal(resumeSubscriptionResponse.status, 200)
+    assert.equal(resumedSubscription.data.subscription.status, 'active')
+    assert.equal('pausedAt' in resumedSubscription.data.subscription, false)
+    const invalidSubscriptionStatusResponse = await setWebhookSubscriptionStatus(
+      'pending-verification',
+      resumedSubscription.data.subscription.revision,
+    )
+    assert.equal(invalidSubscriptionStatusResponse.status, 422)
 
     const invalidWebhookAdministrationFilterResponse = await fetch(
       `${baseUrl}/v1/webhooks/endpoints?unknown=value`,
@@ -915,6 +1000,23 @@ test('authenticated public API manages projects, clients and artifact inspection
       'WEBHOOK_EVENT_REPLAY_REJECTED',
     )
 
+    const revokeSubscriptionResponse = await setWebhookSubscriptionStatus(
+      'revoked',
+      resumedSubscription.data.subscription.revision,
+    )
+    const revokedSubscription = await revokeSubscriptionResponse.json()
+    assert.equal(revokeSubscriptionResponse.status, 200)
+    assert.equal(revokedSubscription.data.subscription.status, 'revoked')
+    const resumeRevokedSubscriptionResponse = await setWebhookSubscriptionStatus(
+      'active',
+      revokedSubscription.data.subscription.revision,
+    )
+    assert.equal(resumeRevokedSubscriptionResponse.status, 409)
+    assert.equal(
+      (await resumeRevokedSubscriptionResponse.json()).error.code,
+      'WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED',
+    )
+
     const createChildRequest = () =>
       fetch(`${baseUrl}/v1/workspaces/${workspaceId}/clients`, {
         method: 'POST',
@@ -974,6 +1076,21 @@ test('authenticated public API manages projects, clients and artifact inspection
       { headers: { authorization: childAuthorization } },
     )
     assert.equal(childWebhookSubscriptionResponse.status, 403)
+    const childWebhookSubscriptionStatusResponse = await fetch(
+      webhookSubscriptionStatusUrl,
+      {
+        method: 'PUT',
+        headers: {
+          authorization: childAuthorization,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: 'paused',
+          baseRevision: revokedSubscription.data.subscription.revision,
+        }),
+      },
+    )
+    assert.equal(childWebhookSubscriptionStatusResponse.status, 403)
     const childWebhookReplayResponse = await fetch(
       `${baseUrl}/v1/webhooks/deliveries/${webhookDeliveryId}/replay`,
       {

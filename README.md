@@ -160,6 +160,13 @@ HTTPS e seu fingerprint; secrets são apenas metadados de versão, fingerprint e
 estado, sem `keyRef` ou material criptográfico. Os filtros exatos da subscription
 são visíveis porque definem o comportamento contratado da entrega.
 
+O status de uma subscription pode ser alterado por
+`PUT /v1/webhooks/subscriptions/{subscriptionId}/status`. A resposta de consulta
+fornece uma revisão opaca que deve ser enviada como `baseRevision`: alterações
+concorrentes retornam conflito, enquanto repetir o mesmo estado converge sem
+novo efeito. Subscriptions ativas podem ser pausadas ou revogadas; pausadas podem
+ser retomadas somente se o endpoint estiver ativo; revogação é terminal.
+
 Deliveries terminais podem ser reabertas de forma idempotente pela API externa,
 individualmente ou por um event ID exato. O replay por evento avalia no máximo
 100 deliveries, informa separadamente itens reagendados e ignorados e preserva

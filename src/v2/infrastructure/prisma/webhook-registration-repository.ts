@@ -94,6 +94,7 @@ export class PrismaWebhookRegistrationRepository implements WebhookRegistrationR
             filterHash: subscription.filter.hash,
             createdByClientId: subscription.createdByClientId,
             createdAt: new Date(subscription.createdAt),
+            updatedAt: new Date(subscription.updatedAt),
             pausedAt: subscription.pausedAt ? new Date(subscription.pausedAt) : null,
             revokedAt: subscription.revokedAt ? new Date(subscription.revokedAt) : null,
           },

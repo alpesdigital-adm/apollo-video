@@ -393,6 +393,7 @@ const webhookSubscriptionSchema = {
   properties: {
     schemaVersion: { const: 'webhook-subscription/v1' }, id: webhookUuidSchema, endpointId: webhookUuidSchema,
     status: { enum: ['pending-verification', 'active', 'paused', 'revoked'] },
+    revision: sha256Schema,
     eventTypes: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 3, maxLength: 128 } },
     resourceIds: { type: 'array', minItems: 1, maxItems: 128, uniqueItems: true, items: idSchema },
     createdByClientId: idSchema, createdAt: dateTimeSchema, pausedAt: dateTimeSchema, revokedAt: dateTimeSchema,
@@ -1487,6 +1488,15 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('webhook-subscription-detail', 1, 'Webhook subscription detail response',
     successSchema({ type: 'object', additionalProperties: false, required: ['subscription'], properties: { subscription: webhookSubscriptionSchema } }),
   ),
+  defineSchema('set-webhook-subscription-status-request', 1, 'Set webhook subscription status request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['status', 'baseRevision'],
+    properties: {
+      status: { enum: ['active', 'paused', 'revoked'] },
+      baseRevision: sha256Schema,
+    },
+  }),
   defineSchema('webhook-delivery-detail', 1, 'Webhook delivery diagnostic response',
     successSchema({
       type: 'object',
