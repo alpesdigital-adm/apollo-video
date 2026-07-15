@@ -141,7 +141,12 @@ transição ainda precisa ser conectada explicitamente ao outbox.
 
 A criação de projeto já persiste `project.created` e `project.version.created`
 no outbox, atomicamente com o projeto, sua versão inicial e o registro de
-idempotência. Replay da mesma requisição não duplica eventos. As linhas ainda
+idempotência. Duas criações simultâneas com a mesma chave e o mesmo payload
+convergem para o mesmo projeto; se os payloads diferirem, apenas uma vence e a
+outra retorna conflito de idempotência. Se a resposta se perder depois do
+commit, repetir a requisição recupera o projeto original sem duplicar versão,
+snapshots ou eventos. Conflitos de serialização são tentados até três vezes e,
+se persistirem, tornam-se um conflito explícito. As linhas ainda
 permanecem pendentes internamente: dispatcher e entrega externa não fazem parte
 deste incremento.
 

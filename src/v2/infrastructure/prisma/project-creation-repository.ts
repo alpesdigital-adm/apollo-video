@@ -1,4 +1,5 @@
 import {
+  Prisma,
   type PrismaClient,
   type V2IdempotencyRecord,
   type V2Project,
@@ -29,6 +30,10 @@ function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
     'code' in error &&
     error.code === 'P2002'
   )
+}
+
+function isSerializationConflict(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
 }
 
 function parseStoredResponse(record: V2IdempotencyRecord): StoredProjectCreationResponse {
@@ -93,7 +98,10 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
     this.client = client
   }
 
-  async createOrReplay(bundle: ProjectCreationBundle): Promise<ProjectCreationResult> {
+  async createOrReplay(
+    bundle: ProjectCreationBundle,
+    serializationAttempt = 1,
+  ): Promise<ProjectCreationResult> {
     assertUniquePublicEventIds(bundle.events)
     for (const event of bundle.events) {
       if (event.workspaceId !== bundle.project.workspaceId) {
@@ -232,8 +240,17 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
         })
 
         return hydrateResult(updatedProject, versionRow, false)
-      })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
+      if (isSerializationConflict(error)) {
+        if (serializationAttempt < 3) {
+          return this.createOrReplay(bundle, serializationAttempt + 1)
+        }
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Project creation conflicted with another transaction',
+        )
+      }
       if (isUniqueConstraintError(error)) {
         const existing = await this.client.v2IdempotencyRecord.findUnique({
           where: {

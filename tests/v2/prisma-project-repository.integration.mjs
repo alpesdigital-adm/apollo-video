@@ -45,8 +45,9 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       return `integration-${kind}-${next}`
     }
     let eventCounter = 0
+    const repository = new PrismaProjectCreationRepository(client)
     const createProject = createProjectService({
-      repository: new PrismaProjectCreationRepository(client),
+      repository,
       clock: () => testNow,
       createId: createEntityId,
       createEventId: () => {
@@ -75,14 +76,94 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       where: { workspaceId },
       orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
     })
-    assert.deepEqual(outbox.map((event) => event.type), [
-      'project.created',
-      'project.version.created',
-    ])
+    assert.deepEqual(
+      outbox.map((event) => event.type),
+      ['project.created', 'project.version.created'],
+    )
     assert.ok(outbox.every((event) => event.publishedAt === null))
     assert.equal(outbox[0].resourceId, first.project.id)
     assert.equal(outbox[1].resourceId, first.version.id)
     assert.equal(JSON.parse(outbox[1].dataJson).projectId, first.project.id)
+
+    const concurrentRequest = {
+      ...request,
+      name: 'Projeto concorrente',
+      idempotency: {
+        ...request.idempotency,
+        key: 'integration-create-project-concurrent',
+      },
+    }
+    const concurrentResults = await Promise.all([
+      createProject(concurrentRequest),
+      createProject(concurrentRequest),
+    ])
+    assert.deepEqual(concurrentResults.map((result) => result.replayed).sort(), [false, true])
+    assert.equal(concurrentResults[0].project.id, concurrentResults[1].project.id)
+    assert.equal(concurrentResults[0].version.id, concurrentResults[1].version.id)
+    assert.equal(await client.v2Project.count({ where: { workspaceId } }), 2)
+    assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 2)
+    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 4)
+    assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 4)
+
+    let discardCommittedResponse = true
+    const createProjectWithResponseLoss = createProjectService({
+      repository: {
+        async createOrReplay(bundle) {
+          const result = await repository.createOrReplay(bundle)
+          if (discardCommittedResponse) {
+            discardCommittedResponse = false
+            throw new Error('simulated response loss after project commit')
+          }
+          return result
+        },
+      },
+      clock: () => new Date(testNow.getTime() + 2_000),
+      createId: createEntityId,
+      createEventId: () => {
+        eventCounter += 1
+        return `00000000-0000-4000-8000-${String(eventCounter).padStart(12, '0')}`
+      },
+    })
+    const responseLossRequest = {
+      ...request,
+      name: 'Projeto resposta perdida',
+      idempotency: {
+        ...request.idempotency,
+        key: 'integration-create-project-response-loss',
+      },
+    }
+    await assert.rejects(
+      () => createProjectWithResponseLoss(responseLossRequest),
+      /simulated response loss after project commit/,
+    )
+    const recovered = await createProjectWithResponseLoss(responseLossRequest)
+    assert.equal(recovered.replayed, true)
+    assert.equal(await client.v2Project.count({ where: { workspaceId } }), 3)
+    assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 3)
+    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 6)
+    assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 6)
+
+    const mismatchedKey = 'integration-create-project-concurrent-mismatch'
+    const mismatchedResults = await Promise.allSettled([
+      createProject({
+        ...request,
+        name: 'Projeto vencedor A',
+        idempotency: { ...request.idempotency, key: mismatchedKey },
+      }),
+      createProject({
+        ...request,
+        name: 'Projeto vencedor B',
+        idempotency: { ...request.idempotency, key: mismatchedKey },
+      }),
+    ])
+    assert.equal(mismatchedResults.filter((result) => result.status === 'fulfilled').length, 1)
+    const mismatchedFailure = mismatchedResults.find((result) => result.status === 'rejected')
+    assert.equal(mismatchedFailure?.reason?.code, 'IDEMPOTENCY_PAYLOAD_MISMATCH')
+    assert.equal(await client.v2Project.count({ where: { workspaceId } }), 4)
+    assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 4)
+    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 8)
+    assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 4)
+    assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 8)
 
     let collisionEventCall = 0
     const createProjectWithCollision = createProjectService({
@@ -91,22 +172,24 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       createId: createEntityId,
       createEventId: () => {
         collisionEventCall += 1
-        return collisionEventCall === 1
-          ? outbox[0].id
-          : '00000000-0000-4000-8000-999999999999'
+        return collisionEventCall === 1 ? outbox[0].id : '00000000-0000-4000-8000-999999999999'
       },
     })
     await assert.rejects(
-      () => createProjectWithCollision({
-        ...request,
-        name: 'Project that must roll back',
-        idempotency: { ...request.idempotency, key: 'integration-create-project-collision' },
-      }),
+      () =>
+        createProjectWithCollision({
+          ...request,
+          name: 'Project that must roll back',
+          idempotency: {
+            ...request.idempotency,
+            key: 'integration-create-project-collision',
+          },
+        }),
       (error) => error?.code === 'PERSISTENCE_CONFLICT',
     )
-    assert.equal(await client.v2Project.count({ where: { workspaceId } }), 1)
-    assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 1)
-    assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 2)
+    assert.equal(await client.v2Project.count({ where: { workspaceId } }), 4)
+    assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 4)
+    assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 8)
   } finally {
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })

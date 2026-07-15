@@ -50,3 +50,4 @@ Estados usados:
 - [ADR-046 — Consulta redigida de rotações de signing secret](./ADR-046-redacted-webhook-rotation-administration.md)
 - [ADR-047 — Higiene limitada de material criptográfico de webhook](./ADR-047-bounded-webhook-secret-hygiene.md)
 - [ADR-048 — Concorrência e perda de resposta nos comandos de secret de webhook](./ADR-048-concurrent-webhook-secret-commands.md)
+- [ADR-049 — Concorrência e perda de resposta na criação de projetos](./ADR-049-concurrent-project-creation.md)

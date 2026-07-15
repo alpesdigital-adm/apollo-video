@@ -4,6 +4,7 @@ import test from 'node:test'
 import { createProjectService } from '../../src/v2/application/create-project.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createWorkspace } from '../../src/v2/domain/workspace.ts'
+import { PrismaProjectCreationRepository } from '../../src/v2/infrastructure/prisma/project-creation-repository.ts'
 
 class InMemoryProjectCreationRepository {
   constructor(workspaces) {
@@ -43,7 +44,11 @@ class InMemoryProjectCreationRepository {
       }
       this.events.set(event.id, event)
     }
-    const result = { project: bundle.project, version: bundle.version, replayed: false }
+    const result = {
+      project: bundle.project,
+      version: bundle.version,
+      replayed: false,
+    }
     this.records.set(identity, {
       fingerprint: bundle.idempotency.requestFingerprint,
       result,
@@ -113,15 +118,14 @@ test('create project persists an initial version and immutable snapshots', async
     ['edit-plan', 'policies'],
   )
   assert.ok(repository.lastBundle.snapshots.every((snapshot) => snapshot.contentHash.length === 64))
-  assert.equal(
-    result.version.snapshotRefs.editPlan,
-    repository.lastBundle.snapshots[0].id,
-  )
+  assert.equal(result.version.snapshotRefs.editPlan, repository.lastBundle.snapshots[0].id)
   assert.deepEqual(
     repository.lastBundle.events.map((event) => event.type),
     ['project.created', 'project.version.created'],
   )
-  assert.deepEqual(repository.lastBundle.events[0].actor, { clientId: 'client-1' })
+  assert.deepEqual(repository.lastBundle.events[0].actor, {
+    clientId: 'client-1',
+  })
   assert.deepEqual(repository.lastBundle.events[0].resource, {
     type: 'project',
     id: result.project.id,
@@ -150,6 +154,26 @@ test('same idempotency key with a different payload is rejected', async () => {
     () => service(request({ name: 'Outra campanha' })),
     (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
   )
+})
+
+test('project creation retries serialization conflicts before returning an explicit conflict', async () => {
+  const { repository, service } = createFixture()
+  await service(request())
+  let attempts = 0
+  const prismaRepository = new PrismaProjectCreationRepository({
+    async $transaction() {
+      attempts += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+
+  await assert.rejects(
+    () => prismaRepository.createOrReplay(repository.lastBundle),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
 })
 
 test('unknown workspace is rejected before a project is persisted', async () => {

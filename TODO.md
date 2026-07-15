@@ -506,7 +506,7 @@
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
-- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; os demais commands externos continuam abertos.
+- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; os demais commands externos continuam abertos.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
@@ -4332,7 +4332,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-059 — Concorrência externa e resposta perdida no ciclo HMAC
 
-**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+**Status:** publicado em 15 de julho de 2026 no commit `78b5729`; CI hospedada `29457514663` aprovada integralmente em PostgreSQL.
 
 Entregas:
 
@@ -4357,4 +4357,31 @@ Limites explícitos desta slice:
 
 - property/concurrency tests dos demais commands externos continuam abertos;
 - retry automático cobre apenas conflito serializável da higiene; stage/activate/cancel preservam seus conflitos específicos e idempotência existente;
-- confirmação do mesmo comportamento no PostgreSQL fica para a CI hospedada da publicação.
+- os interleavings cobertos foram confirmados no PostgreSQL pela CI hospedada da publicação.
+
+### Slice F0-060 — Concorrência e resposta perdida na criação de projetos
+
+**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+
+Entregas:
+
+- transação de criação de projeto passa a usar isolamento serializável;
+- conflitos de serialização são repetidos até três vezes antes de `PERSISTENCE_CONFLICT` explícito;
+- duas criações simultâneas com workspace, client, chave e payload idênticos convergem para um projeto e uma versão;
+- a execução concorrente recebe replay do resultado durável, sem duplicar snapshots ou eventos públicos;
+- duas criações simultâneas com a mesma chave e payloads diferentes produzem exatamente um vencedor e `IDEMPOTENCY_PAYLOAD_MISMATCH` para a perdedora;
+- perda simulada da resposta depois do commit é recuperada pelo retry idempotente;
+- ADR-049 formaliza os invariantes da criação concorrente.
+
+Regressões e evidências locais:
+
+- integração Prisma passou cinco execuções SQLite consecutivas com os novos interleavings;
+- teste unitário comprova três tentativas diante de `P2034` persistente e conflito explícito ao final;
+- o cenário confirma uma única linha por projeto, versão e ledger, dois snapshots e dois eventos por criação vencedora;
+- contratos públicos e schema não mudam: esta slice endurece garantias da API existente.
+
+Limites explícitos desta slice:
+
+- confirmação dos mesmos interleavings no PostgreSQL fica para a CI hospedada da publicação;
+- os demais commands externos idempotentes ainda precisam das mesmas regressões concorrentes;
+- o retry automático é restrito a conflitos de serialização e não mascara erros de domínio ou payload divergente.
