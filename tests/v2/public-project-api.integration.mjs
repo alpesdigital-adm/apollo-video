@@ -877,6 +877,8 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.webhooks.endpoints.signing-secrets.rotations.stage',
         'apollo.webhooks.endpoints.signing-secrets.rotations.activate',
         'apollo.webhooks.endpoints.signing-secrets.rotations.cancel',
+        'apollo.webhooks.endpoints.signing-secrets.rotations.list',
+        'apollo.webhooks.endpoints.signing-secrets.rotations.read',
         'apollo.webhooks.subscriptions.create',
         'apollo.webhooks.subscriptions.list',
         'apollo.webhooks.subscriptions.read',
