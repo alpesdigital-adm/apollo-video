@@ -43,8 +43,23 @@ export interface ActivateWebhookSigningSecretRotationResult {
   replayed: boolean
 }
 
+export interface CancelWebhookSigningSecretRotationCommand {
+  workspaceId: string
+  endpointId: string
+  rotationId: string
+  actorClientId: string
+  baseRevision: string
+  cancelledAt: string
+}
+
+export interface CancelWebhookSigningSecretRotationResult {
+  rotation: Readonly<WebhookSigningSecretRotation>
+  replayed: boolean
+}
+
 export interface WebhookSigningSecretRotationRepository {
   getTarget(workspaceId: string, endpointId: string): Promise<Readonly<WebhookSigningSecretRotationTarget> | null>
   stageOrReplay(command: Readonly<StageWebhookSigningSecretRotationCommand>): Promise<Readonly<StageWebhookSigningSecretRotationResult>>
   activateOrReplay(command: Readonly<ActivateWebhookSigningSecretRotationCommand>): Promise<Readonly<ActivateWebhookSigningSecretRotationResult>>
+  cancelOrReplay(command: Readonly<CancelWebhookSigningSecretRotationCommand>): Promise<Readonly<CancelWebhookSigningSecretRotationResult>>
 }

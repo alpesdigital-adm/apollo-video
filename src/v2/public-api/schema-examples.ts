@@ -816,6 +816,24 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/cancel-webhook-signing-secret-rotation-request/v1': [
+      { baseRevision: webhookEndpointExample.revision },
+    ],
+    'apollo://schemas/webhook-signing-secret-rotation-cancelled/v1': [
+      {
+        data: {
+          rotation: {
+            id: '20000000-0000-4000-8000-000000000011',
+            endpointId: webhookEndpointExample.id,
+            status: 'cancelled', candidateVersion: 3,
+            fingerprint: 'e'.repeat(64), cancelledAt: '2026-07-12T20:15:00.000Z',
+          },
+          envelopeDestroyed: true,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-subscription-list/v1': [
       { data: { subscriptions: [] }, meta: { apiVersion: 'v1' } },
       { data: { subscriptions: [webhookSubscriptionExample] }, meta: { apiVersion: 'v1' } },

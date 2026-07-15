@@ -196,6 +196,11 @@ enviando a mesma `baseRevision`. O corte cria uma nova revisão, passa a assinar
 somente com a candidata e mantém a versão anterior abrível apenas até
 `overlapUntil`. O limite é exclusivo e não pode ser contornado pelo provider de
 configuração legada. Repetir a ativação converge sem novo efeito ou segredo.
+Uma preparação ainda não ativada pode ser descartada por
+`POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/cancel`,
+com a revisão original. O command destrói o envelope candidato, converge em
+replay e também transforma preparo vencido em `expired`. Ele continua permitido
+se o endpoint foi suspenso ou revogado, mas nunca desfaz uma rotação ativada.
 
 A ativação é solicitada por
 `POST /v1/webhooks/endpoints/{endpointId}/challenge`, sem body. O Apollo faz um

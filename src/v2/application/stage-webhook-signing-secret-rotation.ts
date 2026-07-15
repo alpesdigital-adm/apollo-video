@@ -61,6 +61,11 @@ export function stageWebhookSigningSecretRotationService(dependencies: {
       keyRef,
       createdAt,
     })
+    assertDomain(
+      protectedSecret.fingerprint !== target.activeSecret.fingerprint,
+      'PERSISTENCE_CONFLICT',
+      'Generated webhook signing secret matches the active secret',
+    )
     const rotation = createWebhookSigningSecretRotation({
       id: dependencies.createId('webhook-secret-rotation'),
       workspaceId,

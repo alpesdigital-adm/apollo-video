@@ -25,6 +25,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { activateWebhookSigningSecretRotationService } = await import(
     '../../src/v2/application/activate-webhook-signing-secret-rotation.ts'
   )
+  const { cancelWebhookSigningSecretRotationService } = await import(
+    '../../src/v2/application/cancel-webhook-signing-secret-rotation.ts'
+  )
   const { materializeNextWebhookEventService } = await import(
     '../../src/v2/application/materialize-webhook-deliveries.ts'
   )
@@ -728,6 +731,58 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const activationReplay = await activateRotation(activationRequest)
     assert.equal(activationReplay.replayed, true)
     assert.equal(activationReplay.rotation.id, activatedRotation.rotation.id)
+    let secondRotationId = 710
+    const stageSecondRotation = stageWebhookSigningSecretRotationService({
+      repository: new PrismaWebhookSigningSecretRotationRepository(client),
+      secrets: createWebhookSigningSecretProtector(endpointCipher, () => Buffer.alloc(32, 42)),
+      clock: () => new Date(rotationActivationAt.getTime() + 1_000),
+      createId: (kind) => kind === 'idempotency-record'
+        ? `webhook-rotation-idempotency-${secondRotationId++}`
+        : `00000000-0000-4000-8000-${String(secondRotationId++).padStart(12, '0')}`,
+    })
+    const secondRotationRequest = {
+      workspaceId,
+      endpointId: endpoint.id,
+      actorClientId: clientId,
+      baseRevision: webhookEndpointRevision(activatedRotation.endpoint),
+      overlapSeconds: 600,
+      idempotencyKey: 'stage-webhook-secret-rotation-2',
+    }
+    const secondStagedRotation = await stageSecondRotation(secondRotationRequest)
+    assert.equal(secondStagedRotation.rotation.candidateVersion, 3)
+    const cancelRotation = cancelWebhookSigningSecretRotationService({
+      repository: new PrismaWebhookSigningSecretRotationRepository(client),
+      clock: () => new Date(rotationActivationAt.getTime() + 1_100),
+    })
+    const cancellationRequest = {
+      workspaceId,
+      endpointId: endpoint.id,
+      rotationId: secondStagedRotation.rotation.id,
+      actorClientId: clientId,
+      baseRevision: secondRotationRequest.baseRevision,
+    }
+    const cancelledRotation = await cancelRotation(cancellationRequest)
+    assert.equal(cancelledRotation.replayed, false)
+    assert.equal(cancelledRotation.rotation.status, 'cancelled')
+    const storedCancelledRotation = await client.v2WebhookSigningSecretRotation.findUniqueOrThrow({
+      where: { id: secondStagedRotation.rotation.id },
+    })
+    assert.equal(storedCancelledRotation.payloadAlgorithm, null)
+    assert.equal(storedCancelledRotation.payloadCiphertext, null)
+    assert.equal(await client.v2WebhookSigningSecret.count({
+      where: { endpointId: endpoint.id, version: 3 },
+    }), 0)
+    const cancellationReplay = await cancelRotation(cancellationRequest)
+    assert.equal(cancellationReplay.replayed, true)
+    assert.equal(cancellationReplay.rotation.id, cancelledRotation.rotation.id)
+    await assert.rejects(
+      () => cancelRotation({
+        ...cancellationRequest,
+        rotationId: activatedRotation.rotation.id,
+        baseRevision: activationRequest.baseRevision,
+      }),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_TRANSITION_REJECTED',
+    )
     await assert.rejects(
       () => security.getPendingTarget(workspaceId, endpoint.id),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_NOT_FOUND',

@@ -675,6 +675,12 @@ test('authenticated public API manages projects, clients and artifact inspection
       '#/components/schemas/ActivateWebhookSigningSecretRotationRequestV1',
     )
     assert.equal(
+      openApi.paths['/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/cancel'].post[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.endpoints.signing-secrets.rotations.cancel',
+    )
+    assert.equal(
       openApi.paths['/v1/webhooks/subscriptions'].get['x-apollo-capability-id'],
       'apollo.webhooks.subscriptions.list',
     )
@@ -853,6 +859,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.webhooks.endpoints.signing-secrets.provision',
         'apollo.webhooks.endpoints.signing-secrets.rotations.stage',
         'apollo.webhooks.endpoints.signing-secrets.rotations.activate',
+        'apollo.webhooks.endpoints.signing-secrets.rotations.cancel',
         'apollo.webhooks.subscriptions.create',
         'apollo.webhooks.subscriptions.list',
         'apollo.webhooks.subscriptions.read',
@@ -1180,6 +1187,60 @@ test('authenticated public API manages projects, clients and artifact inspection
       headers: { authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ baseRevision: stageRotationBody.baseRevision, extra: true }),
     })).status, 422)
+    const secondStageRotationBody = {
+      baseRevision: activatedRotation.data.endpoint.revision,
+      overlapSeconds: 600,
+    }
+    const secondStageRotationResponse = await stageRotation(
+      'public-secret-rotation-stage-2',
+      secondStageRotationBody,
+    )
+    const secondStagedRotation = await secondStageRotationResponse.json()
+    assert.equal(secondStageRotationResponse.status, 201)
+    assert.equal(secondStagedRotation.data.rotation.candidateVersion, 3)
+    const cancelRotationUrl = `${stageRotationUrl}/${secondStagedRotation.data.rotation.id}/cancel`
+    const cancelRotation = (url, body) => fetch(url, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const cancelRotationResponse = await cancelRotation(cancelRotationUrl, {
+      baseRevision: secondStageRotationBody.baseRevision,
+    })
+    const cancelledRotation = await cancelRotationResponse.json()
+    assert.equal(cancelRotationResponse.status, 200)
+    assert.equal(cancelledRotation.data.rotation.status, 'cancelled')
+    assert.equal(cancelledRotation.data.rotation.candidateVersion, 3)
+    assert.equal(cancelledRotation.data.envelopeDestroyed, true)
+    assert.equal(cancelledRotation.data.replayed, false)
+    assert.equal(JSON.stringify(cancelledRotation).includes('secretBase64url'), false)
+    assert.equal(JSON.stringify(cancelledRotation).includes('ciphertext'), false)
+    const storedCancelledRotation = await client.v2WebhookSigningSecretRotation.findUniqueOrThrow({
+      where: { id: secondStagedRotation.data.rotation.id },
+    })
+    assert.equal(storedCancelledRotation.payloadAlgorithm, null)
+    assert.equal(storedCancelledRotation.payloadCiphertext, null)
+    assert.equal(await client.v2WebhookSigningSecret.count({
+      where: { endpointId: webhookEndpointId, version: 3 },
+    }), 0)
+    const cancelRotationReplayResponse = await cancelRotation(cancelRotationUrl, {
+      baseRevision: secondStageRotationBody.baseRevision,
+    })
+    const cancelRotationReplay = await cancelRotationReplayResponse.json()
+    assert.equal(cancelRotationReplayResponse.status, 200)
+    assert.equal(cancelRotationReplay.data.replayed, true)
+    assert.equal(cancelRotationReplay.data.rotation.id, cancelledRotation.data.rotation.id)
+    assert.equal((await stageRotation(
+      'public-secret-rotation-stage-2',
+      secondStageRotationBody,
+    )).status, 409)
+    assert.equal((await cancelRotation(cancelRotationUrl, {
+      baseRevision: 'a'.repeat(64),
+    })).status, 409)
+    assert.equal((await cancelRotation(
+      `${stageRotationUrl}/${stagedRotation.data.rotation.id}/cancel`,
+      { baseRevision: stageRotationBody.baseRevision },
+    )).status, 409)
     await client.v2WebhookSigningSecretPayload.deleteMany({
       where: { endpointId: createdEndpoint.data.endpoint.id },
     })

@@ -8,6 +8,7 @@ import { createWebhookSubscriptionService } from '../../src/v2/application/creat
 import { provisionWebhookSigningSecretService } from '../../src/v2/application/provision-webhook-signing-secret.ts'
 import { stageWebhookSigningSecretRotationService } from '../../src/v2/application/stage-webhook-signing-secret-rotation.ts'
 import { activateWebhookSigningSecretRotationService } from '../../src/v2/application/activate-webhook-signing-secret-rotation.ts'
+import { cancelWebhookSigningSecretRotationService } from '../../src/v2/application/cancel-webhook-signing-secret-rotation.ts'
 import {
   activateWebhookEndpointConvergentlyService,
   activateWebhookEndpointService,
@@ -360,6 +361,41 @@ test('signing secret rotation rejects inactive endpoint before generating materi
   assert.equal(generated, 0)
 })
 
+test('signing secret rotation rejects a candidate equal to the active key', async () => {
+  const endpoint = createWebhookEndpoint({
+    id: '00000000-0000-4000-8000-000000000170', workspaceId: 'workspace-1',
+    url: 'https://hooks.example.com/apollo', status: 'active', createdByClientId: 'client-1',
+    createdAt: '2026-07-15T22:00:00.000Z', verifiedAt: '2026-07-15T22:01:00.000Z',
+  })
+  const duplicate = Buffer.alloc(32, 45)
+  const activeSecret = createWebhookSigningSecret({
+    id: '00000000-0000-4000-8000-000000000171', workspaceId: 'workspace-1', endpointId: endpoint.id,
+    version: 1, keyRef: 'vault://apollo/webhooks/active',
+    fingerprint: createHash('sha256').update(duplicate).digest('hex'),
+    status: 'active', createdAt: '2026-07-15T22:00:00.000Z',
+  })
+  let persisted = false
+  const stage = stageWebhookSigningSecretRotationService({
+    repository: {
+      async getTarget() { return { endpoint, activeSecret, latestSecretVersion: 1 } },
+      async stageOrReplay() { persisted = true },
+    },
+    secrets: createWebhookSigningSecretProtector(
+      createAesRecipeParameterCipher({ keyId: 'webhook-duplicate-key', key: Buffer.alloc(32, 46) }),
+      () => duplicate,
+    ),
+    clock: () => new Date('2026-07-15T22:02:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000172',
+  })
+  await assert.rejects(() => stage({
+    workspaceId: 'workspace-1', endpointId: endpoint.id, actorClientId: 'client-1',
+    baseRevision: webhookEndpointRevision(endpoint), overlapSeconds: 300,
+    idempotencyKey: 'rotate-duplicate-secret',
+  }), (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
+  assert.equal(persisted, false)
+  assert.equal(duplicate.every((value) => value === 0), true)
+})
+
 test('signing secret rotation activation validates identity before persistence', async () => {
   let effects = 0
   const activate = activateWebhookSigningSecretRotationService({
@@ -376,6 +412,27 @@ test('signing secret rotation activation validates identity before persistence',
     rotationId: 'invalid',
     actorClientId: 'client-1',
     baseRevision: 'a'.repeat(64),
+  }), (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT')
+  assert.equal(effects, 0)
+})
+
+test('signing secret rotation cancellation validates revision before persistence', async () => {
+  let effects = 0
+  const cancel = cancelWebhookSigningSecretRotationService({
+    repository: {
+      async getTarget() { effects += 1 },
+      async stageOrReplay() { effects += 1 },
+      async activateOrReplay() { effects += 1 },
+      async cancelOrReplay() { effects += 1 },
+    },
+    clock: () => new Date('2026-07-15T22:11:00.000Z'),
+  })
+  await assert.rejects(() => cancel({
+    workspaceId: 'workspace-1',
+    endpointId: '00000000-0000-4000-8000-000000000150',
+    rotationId: '00000000-0000-4000-8000-000000000152',
+    actorClientId: 'client-1',
+    baseRevision: 'invalid',
   }), (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT')
   assert.equal(effects, 0)
 })

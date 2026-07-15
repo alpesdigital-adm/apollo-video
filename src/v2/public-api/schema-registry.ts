@@ -1655,6 +1655,30 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('cancel-webhook-signing-secret-rotation-request', 1, 'Cancel webhook signing secret rotation request', {
+    type: 'object', additionalProperties: false, required: ['baseRevision'],
+    properties: { baseRevision: sha256Schema },
+  }),
+  defineSchema('webhook-signing-secret-rotation-cancelled', 1, 'Cancelled webhook signing secret rotation response',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['rotation', 'envelopeDestroyed', 'replayed'],
+      properties: {
+        rotation: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'endpointId', 'status', 'candidateVersion', 'fingerprint', 'cancelledAt'],
+          properties: {
+            id: idSchema, endpointId: idSchema,
+            status: { type: 'string', enum: ['cancelled', 'expired'] },
+            candidateVersion: { type: 'integer', minimum: 2 },
+            fingerprint: sha256Schema, cancelledAt: dateTimeSchema,
+          },
+        },
+        envelopeDestroyed: { type: 'boolean', const: true },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('webhook-subscription-list', 1, 'Webhook subscription list response',
     successSchema({ type: 'object', additionalProperties: false, required: ['subscriptions'], properties: {
       subscriptions: { type: 'array', maxItems: 100, items: webhookSubscriptionSchema },
