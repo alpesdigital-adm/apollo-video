@@ -213,6 +213,11 @@ Material criptográfico que perdeu toda utilidade pode ser removido em lotes por
 preparos vencidos como `expired`, destrói seus envelopes e apaga payloads de
 secrets revogados ou aposentados após o overlap. Metadados históricos permanecem
 consultáveis, e a chave ativa nunca é candidata à higiene.
+Chamadas simultâneas preservam o mesmo lifecycle: stage idempotente cria uma
+única candidata e divulga o secret em apenas uma resposta; activate e cancel do
+mesmo preparo têm um único vencedor; higienes concorrentes convergem sem contar
+ou apagar o mesmo material duas vezes. Retry após perda de resposta nunca
+recupera novamente um secret one-shot.
 
 A ativação é solicitada por
 `POST /v1/webhooks/endpoints/{endpointId}/challenge`, sem body. O Apollo faz um

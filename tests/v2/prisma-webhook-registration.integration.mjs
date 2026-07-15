@@ -673,7 +673,16 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       overlapSeconds: 300,
       idempotencyKey: 'stage-webhook-secret-rotation-1',
     }
-    const stagedRotation = await stageRotation(rotationRequest)
+    const concurrentStages = await Promise.all([
+      stageRotation(rotationRequest),
+      stageRotation(rotationRequest),
+    ])
+    assert.deepEqual(concurrentStages.map((result) => result.replayed).sort(), [false, true])
+    const stagedRotation = concurrentStages.find((result) => !result.replayed)
+    const concurrentStageReplay = concurrentStages.find((result) => result.replayed)
+    assert.equal(concurrentStageReplay.rotation.id, stagedRotation.rotation.id)
+    assert.equal(concurrentStageReplay.secretAvailable, false)
+    assert.equal('secretBase64url' in concurrentStageReplay, false)
     assert.equal(stagedRotation.rotation.status, 'staged')
     assert.equal(stagedRotation.secretAvailable, true)
     assert.equal(stagedRotation.secretBase64url, Buffer.alloc(32, 41).toString('base64url'))
@@ -790,18 +799,40 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_TRANSITION_REJECTED',
     )
     let thirdRotationId = 720
+    const thirdRotationRepository = new PrismaWebhookSigningSecretRotationRepository(client)
+    let loseThirdStageResponse = true
     const stageThirdRotation = stageWebhookSigningSecretRotationService({
-      repository: new PrismaWebhookSigningSecretRotationRepository(client),
+      repository: {
+        getTarget: (...args) => thirdRotationRepository.getTarget(...args),
+        async stageOrReplay(command) {
+          const result = await thirdRotationRepository.stageOrReplay(command)
+          if (loseThirdStageResponse) {
+            loseThirdStageResponse = false
+            throw new Error('simulated response loss after rotation commit')
+          }
+          return result
+        },
+        activateOrReplay: (...args) => thirdRotationRepository.activateOrReplay(...args),
+        cancelOrReplay: (...args) => thirdRotationRepository.cancelOrReplay(...args),
+      },
       secrets: createWebhookSigningSecretProtector(endpointCipher, () => Buffer.alloc(32, 43)),
       clock: () => new Date(rotationActivationAt.getTime() + 2_000),
       createId: (kind) => kind === 'idempotency-record'
         ? `webhook-rotation-idempotency-${thirdRotationId++}`
         : `00000000-0000-4000-8000-${String(thirdRotationId++).padStart(12, '0')}`,
     })
-    const thirdStagedRotation = await stageThirdRotation({
+    const thirdRotationRequest = {
       ...secondRotationRequest,
       idempotencyKey: 'stage-webhook-secret-rotation-3',
-    })
+    }
+    await assert.rejects(
+      () => stageThirdRotation(thirdRotationRequest),
+      /simulated response loss after rotation commit/,
+    )
+    const thirdStagedRotation = await stageThirdRotation(thirdRotationRequest)
+    assert.equal(thirdStagedRotation.replayed, true)
+    assert.equal(thirdStagedRotation.secretAvailable, false)
+    assert.equal('secretBase64url' in thirdStagedRotation, false)
     assert.equal(thirdStagedRotation.rotation.candidateVersion, 4)
     const activateThirdRotation = activateWebhookSigningSecretRotationService({
       repository: new PrismaWebhookSigningSecretRotationRepository(client),
@@ -838,7 +869,14 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       repository: new PrismaWebhookSigningSecretHygieneRepository(client),
       clock: () => hygieneAt,
     })
-    const hygiene = await runHygiene({ workspaceId, limitPerKind: 1 })
+    const concurrentHygiene = await Promise.all([
+      runHygiene({ workspaceId, limitPerKind: 1 }),
+      runHygiene({ workspaceId, limitPerKind: 1 }),
+    ])
+    const hygiene = concurrentHygiene.find((result) => result.expiredRotations === 1)
+    assert.equal(concurrentHygiene.reduce((total, result) => total + result.expiredRotations, 0), 1)
+    assert.equal(concurrentHygiene.reduce((total, result) => total + result.destroyedRotationEnvelopes, 0), 1)
+    assert.equal(concurrentHygiene.reduce((total, result) => total + result.destroyedSigningSecretPayloads, 0), 1)
     assert.equal(hygiene.expiredRotations, 1)
     assert.equal(hygiene.destroyedRotationEnvelopes, 1)
     assert.equal(hygiene.destroyedSigningSecretPayloads, 1)
@@ -859,6 +897,70 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       asOf: hygieneAt.toISOString(), expiredRotations: 0, destroyedRotationEnvelopes: 0,
       destroyedSigningSecretPayloads: 0, hasMore: false,
     })
+    const raceEndpointId = '00000000-0000-4000-8000-000000000740'
+    const raceSecretId = '00000000-0000-4000-8000-000000000741'
+    const raceAt = new Date(hygieneAt.getTime() + 1_000)
+    await client.v2WebhookEndpoint.create({ data: {
+      id: raceEndpointId, workspaceId, url: 'https://race-hooks.example.com/apollo',
+      status: 'active', createdByClientId: clientId,
+      createdAt: raceAt, updatedAt: raceAt, verifiedAt: raceAt,
+    } })
+    await client.v2WebhookSigningSecret.create({ data: {
+      id: raceSecretId, workspaceId, endpointId: raceEndpointId, version: 1,
+      keyRef: 'vault://apollo/webhooks/race-active', fingerprint: 'a'.repeat(64),
+      status: 'active', createdAt: raceAt,
+    } })
+    const raceEndpoint = createWebhookEndpoint({
+      id: raceEndpointId, workspaceId, url: 'https://race-hooks.example.com/apollo',
+      status: 'active', createdByClientId: clientId,
+      createdAt: raceAt.toISOString(), updatedAt: raceAt.toISOString(), verifiedAt: raceAt.toISOString(),
+    })
+    let raceId = 742
+    const raceRepository = new PrismaWebhookSigningSecretRotationRepository(client)
+    const stageRace = stageWebhookSigningSecretRotationService({
+      repository: raceRepository,
+      secrets: createWebhookSigningSecretProtector(endpointCipher, () => Buffer.alloc(32, 46)),
+      clock: () => new Date(raceAt.getTime() + 100),
+      createId: (kind) => kind === 'idempotency-record'
+        ? `webhook-rotation-idempotency-${raceId++}`
+        : `00000000-0000-4000-8000-${String(raceId++).padStart(12, '0')}`,
+    })
+    const stagedRace = await stageRace({
+      workspaceId, endpointId: raceEndpointId, actorClientId: clientId,
+      baseRevision: webhookEndpointRevision(raceEndpoint), overlapSeconds: 300,
+      idempotencyKey: 'stage-webhook-secret-rotation-race',
+    })
+    const raceCommand = {
+      workspaceId, endpointId: raceEndpointId, rotationId: stagedRace.rotation.id,
+      actorClientId: clientId, baseRevision: webhookEndpointRevision(raceEndpoint),
+    }
+    const activateRace = activateWebhookSigningSecretRotationService({
+      repository: raceRepository, clock: () => new Date(raceAt.getTime() + 200),
+    })
+    const cancelRace = cancelWebhookSigningSecretRotationService({
+      repository: raceRepository, clock: () => new Date(raceAt.getTime() + 200),
+    })
+    const raceResults = await Promise.allSettled([
+      activateRace(raceCommand),
+      cancelRace(raceCommand),
+    ])
+    assert.equal(raceResults.filter((result) => result.status === 'fulfilled').length, 1)
+    assert.equal(raceResults.filter((result) => result.status === 'rejected').length, 1)
+    const persistedRace = await client.v2WebhookSigningSecretRotation.findUniqueOrThrow({
+      where: { id: stagedRace.rotation.id },
+    })
+    assert.equal(['activated', 'cancelled'].includes(persistedRace.status), true)
+    assert.equal(await client.v2WebhookSigningSecret.count({
+      where: { workspaceId, endpointId: raceEndpointId, status: 'active' },
+    }), 1)
+    assert.equal(await client.v2WebhookSigningSecret.count({
+      where: { workspaceId, endpointId: raceEndpointId, version: 2 },
+    }), persistedRace.status === 'activated' ? 1 : 0)
+    await client.v2WebhookSigningSecretRotation.delete({ where: { id: stagedRace.rotation.id } })
+    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId, key: 'stage-webhook-secret-rotation-race' } })
+    await client.v2WebhookSigningSecretPayload.deleteMany({ where: { workspaceId, endpointId: raceEndpointId } })
+    await client.v2WebhookSigningSecret.deleteMany({ where: { workspaceId, endpointId: raceEndpointId } })
+    await client.v2WebhookEndpoint.delete({ where: { id: raceEndpointId } })
     await assert.rejects(
       () => security.getPendingTarget(workspaceId, endpoint.id),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_NOT_FOUND',

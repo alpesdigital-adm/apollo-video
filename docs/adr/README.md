@@ -49,3 +49,4 @@ Estados usados:
 - [ADR-045 — Cancelamento terminal e descarte do envelope HMAC](./ADR-045-terminal-webhook-rotation-cancellation.md)
 - [ADR-046 — Consulta redigida de rotações de signing secret](./ADR-046-redacted-webhook-rotation-administration.md)
 - [ADR-047 — Higiene limitada de material criptográfico de webhook](./ADR-047-bounded-webhook-secret-hygiene.md)
+- [ADR-048 — Concorrência e perda de resposta nos comandos de secret de webhook](./ADR-048-concurrent-webhook-secret-commands.md)

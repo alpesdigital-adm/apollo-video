@@ -7,11 +7,8 @@ import { DomainError } from '../../domain/errors.ts'
 
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 
-function persistenceConflict(error: unknown): never {
-  if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034') {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook signing secret hygiene conflicted with another transaction')
-  }
-  throw error
+function isSerializationConflict(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
 }
 
 export class PrismaWebhookSigningSecretHygieneRepository implements WebhookSigningSecretHygieneRepository {
@@ -26,8 +23,9 @@ export class PrismaWebhookSigningSecretHygieneRepository implements WebhookSigni
       !Number.isSafeInteger(command.limitPerKind) || command.limitPerKind < 1 || command.limitPerKind > 100
     ) throw new DomainError('INVALID_WEBHOOK', 'Webhook signing secret hygiene command is invalid')
 
-    try {
-      return await this.client.$transaction(async (transaction) => {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await this.client.$transaction(async (transaction) => {
         const rotations = await transaction.v2WebhookSigningSecretRotation.findMany({
           where: { workspaceId: command.workspaceId, status: 'staged', expiresAt: { lte: asOf } },
           orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
@@ -73,7 +71,15 @@ export class PrismaWebhookSigningSecretHygieneRepository implements WebhookSigni
           destroyedSigningSecretPayloads,
           hasMore: rotations.length > command.limitPerKind || secrets.length > command.limitPerKind,
         })
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
-    } catch (error) { persistenceConflict(error) }
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      } catch (error) {
+        if (isSerializationConflict(error) && attempt < 3) continue
+        if (isSerializationConflict(error)) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook signing secret hygiene conflicted with another transaction')
+        }
+        throw error
+      }
+    }
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook signing secret hygiene could not complete')
   }
 }

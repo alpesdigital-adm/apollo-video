@@ -506,7 +506,7 @@
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
-- [ ] Criar property tests de requests simultâneas e timeout após commit.
+- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; os demais commands externos continuam abertos.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
@@ -4297,7 +4297,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-058 — Higiene limitada de material criptográfico de webhook
 
-**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL/HTTP na publicação.
+**Status:** publicado em `main` nos commits `8d370d7` e `c57cc93`; CI hospedada `29456713529` aprovada em 15 de julho de 2026.
 
 Entregas:
 
@@ -4328,4 +4328,33 @@ Limites explícitos desta slice:
 - a API não agenda recorrência; um scheduler futuro pode chamá-la até `hasMore=false`;
 - o lote máximo é por categoria e pode afetar até 200 registros em uma chamada;
 - metadata histórica não é apagada;
-- confirmação PostgreSQL e jornada HTTP completas ficam para a CI hospedada da publicação.
+- PostgreSQL e jornada HTTP completos foram confirmados pela CI hospedada da publicação.
+
+### Slice F0-059 — Concorrência externa e resposta perdida no ciclo HMAC
+
+**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+
+Entregas:
+
+- preparação simultânea com a mesma chave idempotente converge para um rotation ID e apenas uma resposta com secret one-shot;
+- a chamada concorrente recebe replay redigido, sem `secretBase64url`;
+- perda simulada da resposta depois do commit é recuperada por retry idempotente, sem reabrir o plaintext;
+- candidate versions consideram rotações canceladas/expiradas e não reutilizam números reservados;
+- corrida real entre ativação e cancelamento exige exatamente um vencedor terminal e preserva exatamente uma chave ativa;
+- duas higienes concorrentes contabilizam cada expiração, envelope e payload uma única vez;
+- conflitos de serialização da higiene são repetidos até três vezes antes de retornar conflito explícito;
+- ADR-048 formaliza os invariantes aceitos independentemente do vencedor da corrida.
+
+Regressões e evidências locais:
+
+- integração real de webhook passou cinco execuções SQLite consecutivas com os novos interleavings;
+- suíte continua com 124 testes gerais e 56 contratos de webhook;
+- contratos públicos permanecem em 47 capabilities, 61 schemas, 82 exemplos e 41 paths;
+- schema permanece com 28 tabelas, 110 índices e 59 chaves estrangeiras;
+- nenhuma capability muda: esta slice endurece garantias já publicadas.
+
+Limites explícitos desta slice:
+
+- property/concurrency tests dos demais commands externos continuam abertos;
+- retry automático cobre apenas conflito serializável da higiene; stage/activate/cancel preservam seus conflitos específicos e idempotência existente;
+- confirmação do mesmo comportamento no PostgreSQL fica para a CI hospedada da publicação.
