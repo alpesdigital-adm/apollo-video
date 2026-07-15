@@ -124,6 +124,19 @@ const webhookAttemptExample = {
   responseStatus: 204,
   responseBodyHash: 'e'.repeat(64),
 }
+const webhookReplayDeliveryExample = {
+  schemaVersion: webhookDeliveryExample.schemaVersion,
+  id: webhookDeliveryExample.id,
+  endpointId: webhookDeliveryExample.endpointId,
+  subscriptionId: webhookDeliveryExample.subscriptionId,
+  eventId: webhookDeliveryExample.eventId,
+  status: 'retry-scheduled',
+  attemptCount: webhookDeliveryExample.attemptCount,
+  maxAttempts: webhookDeliveryExample.maxAttempts,
+  nextAttemptAt: '2026-07-12T20:00:02.001Z',
+  createdAt: webhookDeliveryExample.createdAt,
+  attempts: [webhookAttemptExample],
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -615,6 +628,16 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           delivery: { ...webhookDeliveryExample, attempts: [webhookAttemptExample] },
         },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/webhook-delivery-replay-result/v1': [
+      {
+        data: { delivery: webhookReplayDeliveryExample, replayed: false },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: { delivery: webhookReplayDeliveryExample, replayed: true },
         meta: { apiVersion: 'v1' },
       },
     ],

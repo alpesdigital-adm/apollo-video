@@ -26,6 +26,7 @@ import {
 } from '../../src/v2/application/discover-webhook-workspaces.ts'
 import { listWebhookDeliveriesService } from '../../src/v2/application/list-webhook-deliveries.ts'
 import { readWebhookDeliveryService } from '../../src/v2/application/read-webhook-delivery.ts'
+import { replayWebhookDeliveryService } from '../../src/v2/application/replay-webhook-delivery.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -34,6 +35,7 @@ import {
   createWebhookEventFilter,
   createWebhookSigningSecret,
   normalizeWebhookUrl,
+  replayWebhookDelivery,
   webhookEventMatchesFilter,
 } from '../../src/v2/domain/webhook.ts'
 import {
@@ -857,6 +859,95 @@ test('webhook delivery diagnostic is workspace-scoped and preserves ordered atte
   await assert.rejects(
     () => read({ workspaceId: 'workspace-2', deliveryId }),
     (error) => error instanceof DomainError && error.code === 'WEBHOOK_DELIVERY_NOT_FOUND',
+  )
+})
+
+test('webhook delivery replay reopens only terminal state within the absolute attempt limit', () => {
+  const terminal = createWebhookDelivery({
+    id: '00000000-0000-4000-8000-000000000831',
+    workspaceId: 'workspace-1',
+    subscriptionId: '00000000-0000-4000-8000-000000000832',
+    eventId: '00000000-0000-4000-8000-000000000833',
+    status: 'dead-lettered',
+    attemptCount: 8,
+    maxAttempts: 8,
+    nextAttemptAt: '2026-07-15T01:20:00.000Z',
+    createdAt: '2026-07-15T01:00:00.000Z',
+    completedAt: '2026-07-15T01:20:00.000Z',
+    deadLetteredAt: '2026-07-15T01:20:00.000Z',
+  })
+  const replayed = replayWebhookDelivery(
+    terminal,
+    '2026-07-15T01:21:00.000Z',
+    '2026-07-15T01:21:00.001Z',
+  )
+  assert.equal(replayed.status, 'retry-scheduled')
+  assert.equal(replayed.maxAttempts, 9)
+  assert.equal(replayed.completedAt, undefined)
+  assert.equal(replayed.deadLetteredAt, undefined)
+  assert.throws(
+    () => replayWebhookDelivery(
+      { ...terminal, status: 'retry-scheduled', completedAt: undefined, deadLetteredAt: undefined },
+      '2026-07-15T01:21:00.000Z',
+      '2026-07-15T01:21:00.001Z',
+    ),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_DELIVERY_REPLAY_REJECTED',
+  )
+  assert.throws(
+    () => replayWebhookDelivery(
+      { ...terminal, attemptCount: 20, maxAttempts: 20 },
+      '2026-07-15T01:21:00.000Z',
+      '2026-07-15T01:21:00.001Z',
+    ),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_DELIVERY_REPLAY_REJECTED',
+  )
+})
+
+test('webhook replay service binds client and delivery into required idempotency', async () => {
+  let command
+  const diagnostic = {
+    delivery: createWebhookDelivery({
+      id: '00000000-0000-4000-8000-000000000841',
+      workspaceId: 'workspace-1',
+      subscriptionId: '00000000-0000-4000-8000-000000000842',
+      eventId: '00000000-0000-4000-8000-000000000843',
+      status: 'retry-scheduled',
+      attemptCount: 1,
+      maxAttempts: 8,
+      nextAttemptAt: '2026-07-15T01:30:00.001Z',
+      createdAt: '2026-07-15T01:00:00.000Z',
+    }),
+    endpointId: '00000000-0000-4000-8000-000000000844',
+    attempts: [],
+  }
+  const replay = replayWebhookDeliveryService({
+    deliveries: {
+      async replay(value) {
+        command = value
+        return { diagnostic, replayed: false }
+      },
+    },
+    clock: () => new Date('2026-07-15T01:30:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000845',
+  })
+  const result = await replay({
+    workspaceId: 'workspace-1',
+    clientId: 'client-1',
+    deliveryId: diagnostic.delivery.id,
+    idempotencyKey: 'replay-request-1',
+  })
+  assert.equal(result.diagnostic.delivery.id, diagnostic.delivery.id)
+  assert.equal(command.nextAttemptAt, '2026-07-15T01:30:00.001Z')
+  assert.equal(command.expiresAt, '2026-07-16T01:30:00.000Z')
+  assert.match(command.requestFingerprint, /^[a-f0-9]{64}$/)
+  await assert.rejects(
+    () => replay({
+      workspaceId: 'workspace-1',
+      clientId: 'client-1',
+      deliveryId: diagnostic.delivery.id,
+      idempotencyKey: '',
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
 })
 

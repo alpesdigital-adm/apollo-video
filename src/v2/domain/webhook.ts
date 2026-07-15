@@ -381,6 +381,42 @@ export function createWebhookDelivery(
   })
 }
 
+export function replayWebhookDelivery(
+  delivery: Readonly<WebhookDelivery>,
+  requestedAtValue: string,
+  nextAttemptAtValue: string,
+): Readonly<WebhookDelivery> {
+  const requestedAt = canonicalUtc(requestedAtValue, 'requestedAt')
+  const nextAttemptAt = canonicalUtc(nextAttemptAtValue, 'nextAttemptAt')
+  assertDomain(
+    ['succeeded', 'dead-lettered'].includes(delivery.status),
+    'WEBHOOK_DELIVERY_REPLAY_REJECTED',
+    'Only a terminal webhook delivery can be replayed',
+  )
+  assertDomain(
+    delivery.attemptCount < 20,
+    'WEBHOOK_DELIVERY_REPLAY_REJECTED',
+    'Webhook delivery reached the absolute attempt limit',
+  )
+  assertDomain(
+    Date.parse(requestedAt) >= Date.parse(delivery.createdAt) &&
+      Date.parse(nextAttemptAt) > Date.parse(requestedAt),
+    'WEBHOOK_DELIVERY_REPLAY_REJECTED',
+    'Webhook delivery replay schedule is invalid',
+  )
+  return createWebhookDelivery({
+    id: delivery.id,
+    workspaceId: delivery.workspaceId,
+    subscriptionId: delivery.subscriptionId,
+    eventId: delivery.eventId,
+    status: 'retry-scheduled',
+    attemptCount: delivery.attemptCount,
+    maxAttempts: Math.max(delivery.maxAttempts, delivery.attemptCount + 1),
+    nextAttemptAt,
+    createdAt: delivery.createdAt,
+  })
+}
+
 export function createWebhookDeliveryAttempt(
   input: Omit<WebhookDeliveryAttempt, 'schemaVersion'>,
 ): Readonly<WebhookDeliveryAttempt> {

@@ -495,9 +495,9 @@
 - [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
-- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-041: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem fan-out, claim/lease, dispatch assinado, transporte DNS-pinado, heartbeat orquestrado, discovery paginada, sharding determinístico, backoff e dead-letter. Adapter concreto do secret provider, coordenação de rebalanceamento e replay administrativo continuam abertos.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042: API externa lista deliveries com cursor/filtros e lê histórico redigido de attempts; UI, endpoints/subscriptions e rotação de secret continuam abertos.
-- [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Parcial F0-035/F0-039: assinatura adulterada, replay durável, timeout absoluto, DNS misto, rebinding, claim concorrente, lease incorreto, reclaim, worker obsoleto, retry e dead-letter estão cobertos. Dispatcher cobre bytes/headers assinados, fingerprint, DNS privado e settlement integrado; falta replay administrativo ponta a ponta.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Parcial F0-031/F0-043: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem fan-out, claim/lease, dispatch assinado, transporte DNS-pinado, heartbeat, discovery/sharding, backoff, dead-letter e replay individual idempotente. Adapter concreto do secret provider, coordenação de rebalanceamento e replay por evento/intervalo continuam abertos.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-043: API externa lista/lê diagnostics e executa replay individual controlado; UI, endpoints/subscriptions e rotação de secret continuam abertos.
+- [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
 
@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [ ] Criar administração de clients, scopes, secrets, environments e status.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042: capabilities `apollo.webhooks.deliveries.list/read` entregam diagnóstico workspace-scoped; administração de endpoints/subscriptions, mutações e UI continuam abertas.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-043: capabilities `apollo.webhooks.deliveries.list/read/replay` entregam diagnóstico e replay workspace-scoped; administração de endpoints/subscriptions, rotação e UI continuam abertas.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
@@ -3733,7 +3733,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-042 — API administrativa de webhook delivery diagnostics
 
-**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+**Status:** concluído e publicado em 14 de julho de 2026 no commit `12ca917`.
 
 Entregas:
 
@@ -3765,4 +3765,43 @@ Limites explícitos desta slice:
 - UI administrativa ainda não foi iniciada;
 - retenção e purge de attempts permanecem para política operacional posterior;
 - rate limit, quotas, circuit breaker e métricas continuam abertos;
+- hosted CI `29381735068` aprovou PostgreSQL, 93 testes, contratos, API, FFmpeg, Remotion real, build e auditorias.
+
+### Slice F0-043 — Replay administrativo controlado de webhook delivery
+
+**Status:** concluído localmente em 14 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability `apollo.webhooks.deliveries.replay` expõe replay individual sob `webhooks:admin` e confirmação humana;
+- `Idempotency-Key` é obrigatório e o fingerprint vincula ação, workspace, cliente e delivery;
+- ledger e transição da delivery são persistidos na mesma transação;
+- primeira aceitação retorna 202 e repetição idempotente devolve o snapshot original com 200;
+- mesma chave com outro alvo falha por payload mismatch;
+- apenas `succeeded` e `dead-lettered` podem ser reabertas, exigindo endpoint e subscription ativos;
+- attempts anteriores são preservados e a próxima tentativa continua sendo criada pelo claim normal do worker;
+- replay limpa terminal/lease, agenda retry e concede uma tentativa adicional somente quando o teto anterior foi consumido;
+- limite absoluto de 20 attempts não pode ser ampliado;
+- CAS por status+`updatedAt` impede replays concorrentes de agendarem duas execuções;
+- presenter reutiliza o diagnóstico redigido, sem URL, payload, assinatura, secret, lease ou body;
+- ADR-032 formaliza idempotência, estados aceitos, tentativa adicional e composição futura em lote.
+
+Regressões e evidências locais:
+
+- suíte global passa com 95 testes; 27 são contratos de webhook;
+- domínio cobre estado terminal, limpeza de terminal e teto absoluto;
+- service contract cobre chave obrigatória, fingerprint, TTL e agenda canônica;
+- integração Prisma cobre target inativo, replay dead-letter, aumento único do teto, snapshot idempotente, mismatch de alvo e segunda chave rejeitada;
+- jornada HTTP cobre OpenAPI, 422 sem chave, 202 inicial, 200 idempotente, 409 para segundo replay e 403 sem scope;
+- contratos públicos passam com 30 capabilities, 36 schemas, 45 exemplos e 27 paths;
+- build registra `/v1/webhooks/deliveries/{deliveryId}/replay`.
+- migration permanece válida com 25 tabelas, 95 índices e 55 chaves estrangeiras;
+- auditorias sem vulnerabilidades, FFmpeg, todas as integrações SQLite, bundle e render real do Remotion passam.
+
+Limites explícitos desta slice:
+
+- replay por event ID, intervalo ou lote ainda não foi implementado;
+- não há cancelamento de replay já aceito além das regras normais do worker;
+- rotação de secret, mutações de endpoint/subscription e UI continuam abertas;
+- política de retenção/purge do ledger e attempts permanece operacional;
 - hosted CI desta slice será registrado após publicação no próximo ciclo.

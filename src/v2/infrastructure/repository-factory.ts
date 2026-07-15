@@ -12,6 +12,7 @@ import {
 import { dispatchWebhookDeliveryService } from '../application/dispatch-webhook-delivery.ts'
 import { runNextWebhookDeliveryService } from '../application/run-webhook-delivery-worker.ts'
 import { discoverRunnableWebhookWorkspacesService } from '../application/discover-webhook-workspaces.ts'
+import { replayWebhookDeliveryService } from '../application/replay-webhook-delivery.ts'
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
 import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
@@ -41,6 +42,9 @@ import type {
 import type {
   WebhookDeliveryQueryRepository,
 } from '../application/ports/webhook-delivery-query-repository.ts'
+import type {
+  WebhookDeliveryReplayRepository,
+} from '../application/ports/webhook-delivery-replay-repository.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
@@ -118,12 +122,26 @@ export function createWebhookFanoutRepository(): WebhookFanoutRepository {
 export function createWebhookDeliveryRepository(): WebhookDeliveryRepository &
   WebhookDeliveryDispatchTargetRepository &
   WebhookWorkspaceDiscoveryRepository &
-  WebhookDeliveryQueryRepository {
+  WebhookDeliveryQueryRepository &
+  WebhookDeliveryReplayRepository {
   return new PrismaWebhookDeliveryRepository(resolveV2Client())
 }
 
 export function createWebhookDeliveryQueryRepository(): WebhookDeliveryQueryRepository {
   return new PrismaWebhookDeliveryRepository(resolveV2Client())
+}
+
+export function createWebhookDeliveryReplayRepository(): WebhookDeliveryReplayRepository {
+  return new PrismaWebhookDeliveryRepository(resolveV2Client())
+}
+
+export function createWebhookDeliveryReplay(
+  clock: () => Date = () => new Date(),
+) {
+  return replayWebhookDeliveryService({
+    deliveries: createWebhookDeliveryReplayRepository(),
+    clock,
+  })
 }
 
 export function createWebhookWorkspaceDiscovery(

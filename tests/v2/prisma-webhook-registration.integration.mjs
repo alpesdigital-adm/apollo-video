@@ -27,6 +27,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { discoverRunnableWebhookWorkspacesService } = await import(
     '../../src/v2/application/discover-webhook-workspaces.ts'
   )
+  const { replayWebhookDeliveryService } = await import(
+    '../../src/v2/application/replay-webhook-delivery.ts'
+  )
   const {
     issueWebhookChallengeService,
     verifyWebhookChallengeService,
@@ -635,6 +638,79 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         exhaustedClaim.delivery.id,
       ),
       null,
+    )
+    const replayDelivery = replayWebhookDeliveryService({
+      deliveries: deliveryRepository,
+      clock: () => new Date(fanoutAt.getTime() + 7_000),
+      createId: () => '00000000-0000-4000-8000-000000000612',
+    })
+    await client.v2WebhookEndpoint.update({
+      where: { id: endpoint.id },
+      data: {
+        status: 'suspended',
+        suspendedAt: new Date(fanoutAt.getTime() + 6_900),
+      },
+    })
+    await assert.rejects(
+      () => replayDelivery({
+        workspaceId,
+        clientId,
+        deliveryId: exhaustedClaim.delivery.id,
+        idempotencyKey: 'webhook-replay-inactive-target',
+      }),
+      (error) =>
+        error instanceof DomainError && error.code === 'WEBHOOK_DELIVERY_REPLAY_REJECTED',
+    )
+    await client.v2WebhookEndpoint.update({
+      where: { id: endpoint.id },
+      data: { status: 'active', suspendedAt: null },
+    })
+    const firstReplay = await replayDelivery({
+      workspaceId,
+      clientId,
+      deliveryId: exhaustedClaim.delivery.id,
+      idempotencyKey: 'webhook-replay-integration-1',
+    })
+    assert.equal(firstReplay.replayed, false)
+    assert.equal(firstReplay.diagnostic.delivery.status, 'retry-scheduled')
+    assert.equal(firstReplay.diagnostic.delivery.maxAttempts, 2)
+    assert.deepEqual(
+      firstReplay.diagnostic.attempts.map((attempt) => attempt.attemptNumber),
+      [1],
+    )
+    const idempotentReplay = await replayDelivery({
+      workspaceId,
+      clientId,
+      deliveryId: exhaustedClaim.delivery.id,
+      idempotencyKey: 'webhook-replay-integration-1',
+    })
+    assert.equal(idempotentReplay.replayed, true)
+    assert.deepEqual(idempotentReplay.diagnostic, firstReplay.diagnostic)
+    await assert.rejects(
+      () => replayDelivery({
+        workspaceId,
+        clientId,
+        deliveryId: firstClaim.delivery.id,
+        idempotencyKey: 'webhook-replay-integration-1',
+      }),
+      (error) =>
+        error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    await assert.rejects(
+      () => replayDelivery({
+        workspaceId,
+        clientId,
+        deliveryId: exhaustedClaim.delivery.id,
+        idempotencyKey: 'webhook-replay-integration-2',
+      }),
+      (error) =>
+        error instanceof DomainError && error.code === 'WEBHOOK_DELIVERY_REPLAY_REJECTED',
+    )
+    assert.equal(
+      await client.v2IdempotencyRecord.count({
+        where: { workspaceId, clientId, key: { startsWith: 'webhook-replay-integration-' } },
+      }),
+      1,
     )
 
     const corruptedEventId = '00000000-0000-4000-8000-000000000304'

@@ -33,3 +33,4 @@ Estados usados:
 - [ADR-029 — Orquestração do worker de webhook deliveries](./ADR-029-webhook-delivery-worker-orchestration.md)
 - [ADR-030 — Descoberta e sharding de workspaces com webhook executável](./ADR-030-webhook-workspace-discovery-and-sharding.md)
 - [ADR-031 — Diagnóstico público e redigido de webhook deliveries](./ADR-031-public-webhook-delivery-diagnostics.md)
+- [ADR-032 — Replay controlado e idempotente de webhook delivery](./ADR-032-controlled-webhook-delivery-replay.md)

@@ -1423,6 +1423,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { delivery: webhookDeliveryDiagnosticSchema },
     }),
   ),
+  defineSchema('webhook-delivery-replay-result', 1, 'Webhook delivery replay response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['delivery', 'replayed'],
+      properties: {
+        delivery: webhookDeliveryDiagnosticSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('create-project-request', 1, 'Create project request', {
     type: 'object',
     additionalProperties: false,

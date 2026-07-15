@@ -20,6 +20,9 @@ import type {
 import type {
   WebhookDeliveryQueryRepository,
 } from '../../application/ports/webhook-delivery-query-repository.ts'
+import type {
+  WebhookDeliveryReplayRepository,
+} from '../../application/ports/webhook-delivery-replay-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
@@ -28,6 +31,7 @@ import {
   createWebhookDeliveryAttempt,
   createWebhookSigningSecret,
   normalizeWebhookUrl,
+  replayWebhookDelivery,
   type WebhookDelivery,
   type WebhookDeliveryAttempt,
 } from '../../domain/webhook.ts'
@@ -36,6 +40,11 @@ const CLAIM_SCAN_LIMIT = 32
 const EXPIRED_LEASE_ERROR = 'lease_expired'
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const SHA256_PATTERN = /^[a-f0-9]{64}$/
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
+}
 
 function hydrateDelivery(row: V2WebhookDelivery): Readonly<WebhookDelivery> {
   return createWebhookDelivery({
@@ -101,12 +110,83 @@ function persistenceConflict(message: string): never {
   throw new DomainError('PERSISTENCE_CONFLICT', message)
 }
 
+function parseReplayDiagnostic(
+  responseJson: string | null,
+  workspaceId: string,
+  deliveryId: string,
+) {
+  try {
+    const parsed = JSON.parse(responseJson ?? '') as Record<string, unknown>
+    const rawDelivery = parsed.delivery as Record<string, unknown>
+    const rawAttempts = parsed.attempts as Record<string, unknown>[]
+    const endpointId = parsed.endpointId
+    const delivery = createWebhookDelivery({
+      id: String(rawDelivery.id),
+      workspaceId: String(rawDelivery.workspaceId),
+      subscriptionId: String(rawDelivery.subscriptionId),
+      eventId: String(rawDelivery.eventId),
+      status: rawDelivery.status as WebhookDelivery['status'],
+      attemptCount: Number(rawDelivery.attemptCount),
+      maxAttempts: Number(rawDelivery.maxAttempts),
+      nextAttemptAt: String(rawDelivery.nextAttemptAt),
+      createdAt: String(rawDelivery.createdAt),
+      ...(rawDelivery.completedAt ? { completedAt: String(rawDelivery.completedAt) } : {}),
+      ...(rawDelivery.deadLetteredAt
+        ? { deadLetteredAt: String(rawDelivery.deadLetteredAt) }
+        : {}),
+    })
+    if (
+      delivery.workspaceId !== workspaceId ||
+      delivery.id !== deliveryId ||
+      typeof endpointId !== 'string' ||
+      !UUID_V4_PATTERN.test(endpointId) ||
+      !Array.isArray(rawAttempts)
+    ) {
+      persistenceConflict('Stored webhook replay response is invalid')
+    }
+    const attempts = rawAttempts.map((attempt) => createWebhookDeliveryAttempt({
+      id: String(attempt.id),
+      workspaceId: String(attempt.workspaceId),
+      deliveryId: String(attempt.deliveryId),
+      attemptNumber: Number(attempt.attemptNumber),
+      status: attempt.status as WebhookDeliveryAttempt['status'],
+      scheduledAt: String(attempt.scheduledAt),
+      createdAt: String(attempt.createdAt),
+      ...(attempt.startedAt ? { startedAt: String(attempt.startedAt) } : {}),
+      ...(attempt.completedAt ? { completedAt: String(attempt.completedAt) } : {}),
+      ...(attempt.responseStatus !== undefined
+        ? { responseStatus: Number(attempt.responseStatus) }
+        : {}),
+      ...(attempt.responseBodyHash
+        ? { responseBodyHash: String(attempt.responseBodyHash) }
+        : {}),
+      ...(attempt.errorCode ? { errorCode: String(attempt.errorCode) } : {}),
+    }))
+    if (
+      attempts.length !== delivery.attemptCount ||
+      attempts.some((attempt) =>
+        attempt.workspaceId !== workspaceId || attempt.deliveryId !== deliveryId)
+    ) {
+      persistenceConflict('Stored webhook replay attempts are invalid')
+    }
+    return Object.freeze({
+      delivery,
+      endpointId,
+      attempts: Object.freeze(attempts),
+    })
+  } catch (error) {
+    if (error instanceof DomainError) throw error
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored webhook replay response is invalid')
+  }
+}
+
 export class PrismaWebhookDeliveryRepository
   implements
     WebhookDeliveryRepository,
     WebhookDeliveryDispatchTargetRepository,
     WebhookWorkspaceDiscoveryRepository,
-    WebhookDeliveryQueryRepository {
+    WebhookDeliveryQueryRepository,
+    WebhookDeliveryReplayRepository {
   private readonly client: PrismaClient
 
   constructor(client: PrismaClient = prisma) {
@@ -321,6 +401,149 @@ export class PrismaWebhookDeliveryRepository
       endpointId: row.subscription.endpointId,
       attempts: Object.freeze(row.attempts.map(hydrateAttempt)),
     })
+  }
+
+  async replay(command: Parameters<WebhookDeliveryReplayRepository['replay']>[0]) {
+    const requestedAt = new Date(command.requestedAt)
+    const nextAttemptAt = new Date(command.nextAttemptAt)
+    const expiresAt = new Date(command.expiresAt)
+    if (
+      !UUID_V4_PATTERN.test(command.idempotencyId) ||
+      !SAFE_ID_PATTERN.test(command.workspaceId) ||
+      !SAFE_ID_PATTERN.test(command.clientId) ||
+      !UUID_V4_PATTERN.test(command.deliveryId) ||
+      !SHA256_PATTERN.test(command.requestFingerprint) ||
+      command.idempotencyKey.length < 1 ||
+      command.idempotencyKey.length > 128 ||
+      Number.isNaN(requestedAt.getTime()) ||
+      Number.isNaN(nextAttemptAt.getTime()) ||
+      Number.isNaN(expiresAt.getTime()) ||
+      nextAttemptAt <= requestedAt ||
+      expiresAt <= requestedAt
+    ) {
+      throw new DomainError('INVALID_WEBHOOK', 'Webhook replay command is invalid')
+    }
+
+    const key = {
+      workspaceId_clientId_key: {
+        workspaceId: command.workspaceId,
+        clientId: command.clientId,
+        key: command.idempotencyKey,
+      },
+    }
+    const readReplay = (record: {
+      requestFingerprint: string
+      status: string
+      responseJson: string | null
+    }) => {
+      if (record.requestFingerprint !== command.requestFingerprint) {
+        throw new DomainError(
+          'IDEMPOTENCY_PAYLOAD_MISMATCH',
+          'Idempotency key was already used with a different request',
+        )
+      }
+      if (record.status !== 'completed') {
+        persistenceConflict('Webhook replay idempotency record is incomplete')
+      }
+      return Object.freeze({
+        diagnostic: parseReplayDiagnostic(
+          record.responseJson,
+          command.workspaceId,
+          command.deliveryId,
+        ),
+        replayed: true,
+      })
+    }
+
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
+        if (existing && existing.expiresAt > requestedAt) return readReplay(existing)
+        if (existing) await transaction.v2IdempotencyRecord.delete({ where: { id: existing.id } })
+
+        const stored = await transaction.v2WebhookDelivery.findFirst({
+          where: { id: command.deliveryId, workspaceId: command.workspaceId },
+          include: {
+            subscription: {
+              select: { status: true, endpointId: true, endpoint: { select: { status: true } } },
+            },
+            attempts: { orderBy: { attemptNumber: 'asc' } },
+          },
+        })
+        if (!stored) return null
+        if (stored.subscription.status !== 'active' || stored.subscription.endpoint.status !== 'active') {
+          throw new DomainError(
+            'WEBHOOK_DELIVERY_REPLAY_REJECTED',
+            'Webhook delivery target is not active',
+          )
+        }
+        const replayedDelivery = replayWebhookDelivery(
+          hydrateDelivery(stored),
+          requestedAt.toISOString(),
+          nextAttemptAt.toISOString(),
+        )
+        await transaction.v2IdempotencyRecord.create({
+          data: {
+            id: command.idempotencyId,
+            workspaceId: command.workspaceId,
+            clientId: command.clientId,
+            key: command.idempotencyKey,
+            requestFingerprint: command.requestFingerprint,
+            status: 'processing',
+            expiresAt,
+          },
+        })
+        const updated = await transaction.v2WebhookDelivery.updateMany({
+          where: {
+            id: command.deliveryId,
+            workspaceId: command.workspaceId,
+            status: stored.status,
+            updatedAt: stored.updatedAt,
+          },
+          data: {
+            status: replayedDelivery.status,
+            maxAttempts: replayedDelivery.maxAttempts,
+            nextAttemptAt,
+            completedAt: null,
+            deadLetteredAt: null,
+            leaseOwner: null,
+            leaseTokenHash: null,
+            leaseExpiresAt: null,
+            heartbeatAt: null,
+            updatedAt: requestedAt,
+          },
+        })
+        if (updated.count !== 1) persistenceConflict('Webhook delivery replay collided')
+        const persisted = await transaction.v2WebhookDelivery.findFirst({
+          where: { id: command.deliveryId, workspaceId: command.workspaceId },
+          include: {
+            subscription: { select: { endpointId: true } },
+            attempts: { orderBy: { attemptNumber: 'asc' } },
+          },
+        })
+        if (!persisted) persistenceConflict('Replayed webhook delivery is missing')
+        const diagnostic = Object.freeze({
+          delivery: hydrateDelivery(persisted),
+          endpointId: persisted.subscription.endpointId,
+          attempts: Object.freeze(persisted.attempts.map(hydrateAttempt)),
+        })
+        await transaction.v2IdempotencyRecord.update({
+          where: { id: command.idempotencyId },
+          data: {
+            status: 'completed',
+            responseStatus: 202,
+            responseJson: JSON.stringify(diagnostic),
+          },
+        })
+        return Object.freeze({ diagnostic, replayed: false })
+      })
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        const existing = await this.client.v2IdempotencyRecord.findUnique({ where: key })
+        if (existing && existing.expiresAt > requestedAt) return readReplay(existing)
+      }
+      throw error
+    }
   }
 
   async getDispatchTarget(
