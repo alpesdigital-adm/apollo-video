@@ -1313,6 +1313,22 @@ test('authenticated public API manages projects, clients and artifact inspection
     const retiredSecret = await client.v2WebhookSigningSecret.findFirstOrThrow({
       where: { endpointId: webhookEndpointId, status: 'retired' },
     })
+    await client.v2WebhookSigningSecretPayload.upsert({
+      where: { secretId: retiredSecret.id },
+      create: {
+        secretId: retiredSecret.id,
+        workspaceId,
+        endpointId: webhookEndpointId,
+        secretVersion: retiredSecret.version,
+        algorithm: 'aes-256-gcm',
+        keyId: 'hygiene-test-key',
+        nonce: 'A'.repeat(16),
+        ciphertext: 'B'.repeat(16),
+        authTag: 'C'.repeat(16),
+        createdAt: new Date(hygieneNow.getTime() - 2_000),
+      },
+      update: {},
+    })
     await client.v2WebhookSigningSecret.update({
       where: { id: retiredSecret.id },
       data: {
