@@ -7,6 +7,7 @@ import type {
   WebhookDeliveryDiagnosticRecord,
   WebhookDeliverySummaryRecord,
 } from '../application/ports/webhook-delivery-query-repository.ts'
+import type { WebhookEventReplayItem } from '../application/ports/webhook-event-replay-repository.ts'
 
 export const PUBLIC_API_VERSION = 'v1' as const
 
@@ -172,5 +173,12 @@ export function presentWebhookDeliveryDiagnostic(record: WebhookDeliveryDiagnost
       ...(attempt.responseBodyHash ? { responseBodyHash: attempt.responseBodyHash } : {}),
       ...(attempt.errorCode ? { errorCode: attempt.errorCode } : {}),
     })),
+  }
+}
+
+export function presentWebhookEventReplayItem(item: Readonly<WebhookEventReplayItem>) {
+  return {
+    status: item.status,
+    delivery: presentWebhookDeliverySummary(item.delivery),
   }
 }

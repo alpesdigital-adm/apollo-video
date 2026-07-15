@@ -27,6 +27,7 @@ import {
 import { listWebhookDeliveriesService } from '../../src/v2/application/list-webhook-deliveries.ts'
 import { readWebhookDeliveryService } from '../../src/v2/application/read-webhook-delivery.ts'
 import { replayWebhookDeliveryService } from '../../src/v2/application/replay-webhook-delivery.ts'
+import { replayWebhookEventService } from '../../src/v2/application/replay-webhook-event.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createWebhookDelivery,
@@ -947,6 +948,45 @@ test('webhook replay service binds client and delivery into required idempotency
       deliveryId: diagnostic.delivery.id,
       idempotencyKey: '',
     }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+})
+
+test('webhook event replay service binds the exact event and bounded batch into idempotency', async () => {
+  let command
+  const eventId = '00000000-0000-4000-8000-000000000851'
+  const replay = replayWebhookEventService({
+    replays: {
+      async replayEvent(value) {
+        command = value
+        return { eventId, items: [], replayed: false }
+      },
+    },
+    clock: () => new Date('2026-07-15T01:40:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000852',
+    maxDeliveries: 100,
+  })
+  assert.equal((await replay({
+    workspaceId: 'workspace-1',
+    clientId: 'client-1',
+    eventId,
+    idempotencyKey: 'event-replay-request-1',
+  })).eventId, eventId)
+  assert.equal(command.maxDeliveries, 100)
+  assert.equal(command.nextAttemptAt, '2026-07-15T01:40:00.001Z')
+  assert.equal(command.expiresAt, '2026-07-16T01:40:00.000Z')
+  assert.match(command.requestFingerprint, /^[a-f0-9]{64}$/)
+  await assert.rejects(
+    () => replay({
+      workspaceId: 'workspace-1',
+      clientId: 'client-1',
+      eventId,
+      idempotencyKey: '',
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+  assert.throws(
+    () => replayWebhookEventService({ replays: {}, maxDeliveries: 101 }),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
 })

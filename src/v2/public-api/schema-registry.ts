@@ -409,6 +409,22 @@ const webhookDeliveryDiagnosticSchema = {
     attempts: { type: 'array', maxItems: 20, items: webhookDeliveryAttemptSchema },
   },
 }
+const webhookEventReplayItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['status', 'delivery'],
+  properties: {
+    status: {
+      enum: [
+        'scheduled',
+        'skipped-non-terminal',
+        'skipped-target-inactive',
+        'skipped-attempt-limit',
+      ],
+    },
+    delivery: webhookDeliverySummarySchema,
+  },
+}
 const renderInputAssetSchema = {
   type: 'object',
   additionalProperties: false,
@@ -1430,6 +1446,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['delivery', 'replayed'],
       properties: {
         delivery: webhookDeliveryDiagnosticSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('webhook-event-replay-result', 1, 'Webhook event replay response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['eventId', 'items', 'replayed'],
+      properties: {
+        eventId: webhookUuidSchema,
+        items: { type: 'array', maxItems: 100, items: webhookEventReplayItemSchema },
         replayed: { type: 'boolean' },
       },
     }),

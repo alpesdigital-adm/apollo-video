@@ -13,6 +13,7 @@ import { dispatchWebhookDeliveryService } from '../application/dispatch-webhook-
 import { runNextWebhookDeliveryService } from '../application/run-webhook-delivery-worker.ts'
 import { discoverRunnableWebhookWorkspacesService } from '../application/discover-webhook-workspaces.ts'
 import { replayWebhookDeliveryService } from '../application/replay-webhook-delivery.ts'
+import { replayWebhookEventService } from '../application/replay-webhook-event.ts'
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
 import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
@@ -46,6 +47,9 @@ import type {
   WebhookDeliveryReplayRepository,
 } from '../application/ports/webhook-delivery-replay-repository.ts'
 import type {
+  WebhookEventReplayRepository,
+} from '../application/ports/webhook-event-replay-repository.ts'
+import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
   WebhookReplayReceiptRepository,
@@ -67,6 +71,7 @@ import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
 import { PrismaWebhookFanoutRepository } from './prisma/webhook-fanout-repository.ts'
 import { PrismaWebhookDeliveryRepository } from './prisma/webhook-delivery-repository.ts'
+import { PrismaWebhookEventReplayRepository } from './prisma/webhook-event-replay-repository.ts'
 import { PrismaWebhookSecurityRepository } from './prisma/webhook-security-repository.ts'
 import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-transport.ts'
 import { SafeWebhookDeliveryTransport } from './webhook/safe-webhook-delivery-transport.ts'
@@ -140,6 +145,19 @@ export function createWebhookDeliveryReplay(
 ) {
   return replayWebhookDeliveryService({
     deliveries: createWebhookDeliveryReplayRepository(),
+    clock,
+  })
+}
+
+export function createWebhookEventReplayRepository(): WebhookEventReplayRepository {
+  return new PrismaWebhookEventReplayRepository(resolveV2Client())
+}
+
+export function createWebhookEventReplay(
+  clock: () => Date = () => new Date(),
+) {
+  return replayWebhookEventService({
+    replays: createWebhookEventReplayRepository(),
     clock,
   })
 }

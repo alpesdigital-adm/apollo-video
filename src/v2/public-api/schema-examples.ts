@@ -124,7 +124,7 @@ const webhookAttemptExample = {
   responseStatus: 204,
   responseBodyHash: 'e'.repeat(64),
 }
-const webhookReplayDeliveryExample = {
+const webhookReplayDeliverySummaryExample = {
   schemaVersion: webhookDeliveryExample.schemaVersion,
   id: webhookDeliveryExample.id,
   endpointId: webhookDeliveryExample.endpointId,
@@ -135,6 +135,9 @@ const webhookReplayDeliveryExample = {
   maxAttempts: webhookDeliveryExample.maxAttempts,
   nextAttemptAt: '2026-07-12T20:00:02.001Z',
   createdAt: webhookDeliveryExample.createdAt,
+}
+const webhookReplayDeliveryExample = {
+  ...webhookReplayDeliverySummaryExample,
   attempts: [webhookAttemptExample],
 }
 
@@ -638,6 +641,24 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
       {
         data: { delivery: webhookReplayDeliveryExample, replayed: true },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/webhook-event-replay-result/v1': [
+      {
+        data: {
+          eventId: webhookDeliveryExample.eventId,
+          items: [{ status: 'scheduled', delivery: webhookReplayDeliverySummaryExample }],
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          eventId: webhookDeliveryExample.eventId,
+          items: [{ status: 'scheduled', delivery: webhookReplayDeliverySummaryExample }],
+          replayed: true,
+        },
         meta: { apiVersion: 'v1' },
       },
     ],

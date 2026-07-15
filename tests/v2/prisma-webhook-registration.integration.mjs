@@ -30,6 +30,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { replayWebhookDeliveryService } = await import(
     '../../src/v2/application/replay-webhook-delivery.ts'
   )
+  const { replayWebhookEventService } = await import(
+    '../../src/v2/application/replay-webhook-event.ts'
+  )
   const {
     issueWebhookChallengeService,
     verifyWebhookChallengeService,
@@ -56,6 +59,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   )
   const { PrismaWebhookDeliveryRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-delivery-repository.ts'
+  )
+  const { PrismaWebhookEventReplayRepository } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-event-replay-repository.ts'
   )
   const { PrismaWebhookSecurityRepository } = await import(
     '../../src/v2/infrastructure/prisma/webhook-security-repository.ts'
@@ -712,6 +718,131 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       }),
       1,
     )
+
+    const pausedReplaySubscriptionId = '00000000-0000-4000-8000-000000000614'
+    const activeReplaySubscriptionId = '00000000-0000-4000-8000-000000000615'
+    await client.v2WebhookSubscription.createMany({
+      data: [
+        {
+          id: pausedReplaySubscriptionId,
+          workspaceId,
+          endpointId: endpoint.id,
+          status: 'paused',
+          filterEventTypesJson: '["project.created"]',
+          filterHash: '1'.repeat(64),
+          createdByClientId: clientId,
+          createdAt: fanoutAt,
+          pausedAt: fanoutAt,
+        },
+        {
+          id: activeReplaySubscriptionId,
+          workspaceId,
+          endpointId: endpoint.id,
+          status: 'active',
+          filterEventTypesJson: '["project.created"]',
+          filterHash: '2'.repeat(64),
+          createdByClientId: clientId,
+          createdAt: fanoutAt,
+        },
+      ],
+    })
+    const skippedReplayDeliveryIds = [
+      '00000000-0000-4000-8000-000000000616',
+      '00000000-0000-4000-8000-000000000617',
+    ]
+    await client.v2WebhookDelivery.createMany({
+      data: [
+        {
+          id: skippedReplayDeliveryIds[0],
+          workspaceId,
+          subscriptionId: pausedReplaySubscriptionId,
+          eventId: firstClaim.delivery.eventId,
+          status: 'succeeded',
+          attemptCount: 1,
+          maxAttempts: 8,
+          nextAttemptAt: fanoutAt,
+          createdAt: fanoutAt,
+          completedAt: new Date(fanoutAt.getTime() + 1),
+        },
+        {
+          id: skippedReplayDeliveryIds[1],
+          workspaceId,
+          subscriptionId: activeReplaySubscriptionId,
+          eventId: firstClaim.delivery.eventId,
+          status: 'pending',
+          attemptCount: 0,
+          maxAttempts: 8,
+          nextAttemptAt: fanoutAt,
+          createdAt: fanoutAt,
+        },
+      ],
+    })
+    const replayEvent = replayWebhookEventService({
+      replays: new PrismaWebhookEventReplayRepository(client),
+      clock: () => new Date(fanoutAt.getTime() + 7_100),
+      createId: () => '00000000-0000-4000-8000-000000000613',
+    })
+    const firstEventReplay = await replayEvent({
+      workspaceId,
+      clientId,
+      eventId: firstClaim.delivery.eventId,
+      idempotencyKey: 'webhook-event-replay-integration-1',
+    })
+    assert.equal(firstEventReplay.replayed, false)
+    assert.deepEqual(
+      firstEventReplay.items.map((item) => item.status),
+      ['scheduled', 'skipped-target-inactive', 'skipped-non-terminal'],
+    )
+    assert.equal(firstEventReplay.items[0].delivery.delivery.status, 'retry-scheduled')
+    assert.equal(firstEventReplay.items[0].delivery.delivery.attemptCount, 3)
+    const repeatedEventReplay = await replayEvent({
+      workspaceId,
+      clientId,
+      eventId: firstClaim.delivery.eventId,
+      idempotencyKey: 'webhook-event-replay-integration-1',
+    })
+    assert.equal(repeatedEventReplay.replayed, true)
+    assert.deepEqual(repeatedEventReplay.items, firstEventReplay.items)
+    await assert.rejects(
+      () => replayEvent({
+        workspaceId,
+        clientId,
+        eventId: exhaustedEventId,
+        idempotencyKey: 'webhook-event-replay-integration-1',
+      }),
+      (error) =>
+        error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    await assert.rejects(
+      () => replayEvent({
+        workspaceId,
+        clientId,
+        eventId: firstClaim.delivery.eventId,
+        idempotencyKey: 'webhook-event-replay-integration-2',
+      }),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_EVENT_REPLAY_REJECTED',
+    )
+    await assert.rejects(
+      () => replayEvent({
+        workspaceId,
+        clientId,
+        eventId: '00000000-0000-4000-8000-000000000699',
+        idempotencyKey: 'webhook-event-replay-missing',
+      }),
+      (error) => error instanceof DomainError && error.code === 'WEBHOOK_EVENT_NOT_FOUND',
+    )
+    assert.equal(
+      await client.v2IdempotencyRecord.count({
+        where: { workspaceId, clientId, key: { startsWith: 'webhook-event-replay-' } },
+      }),
+      1,
+    )
+    await client.v2WebhookDelivery.deleteMany({
+      where: { id: { in: skippedReplayDeliveryIds } },
+    })
+    await client.v2WebhookSubscription.deleteMany({
+      where: { id: { in: [pausedReplaySubscriptionId, activeReplaySubscriptionId] } },
+    })
 
     const corruptedEventId = '00000000-0000-4000-8000-000000000304'
     await client.$transaction([

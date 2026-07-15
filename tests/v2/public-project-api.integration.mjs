@@ -80,6 +80,9 @@ test('authenticated public API manages projects, clients and artifact inspection
   const webhookEventId = '00000000-0000-4000-8000-000000000903'
   const webhookDeliveryId = '00000000-0000-4000-8000-000000000904'
   const webhookAttemptId = '00000000-0000-4000-8000-000000000905'
+  const webhookReplayEventId = '00000000-0000-4000-8000-000000000906'
+  const webhookReplayDeliveryId = '00000000-0000-4000-8000-000000000907'
+  const webhookReplayAttemptId = '00000000-0000-4000-8000-000000000908'
   const sha = (character) => character.repeat(64)
   let server
 
@@ -255,6 +258,51 @@ test('authenticated public API manages projects, clients and artifact inspection
         responseStatus: 204,
         responseBodyHash: sha('e'),
         createdAt: webhookCreatedAt,
+      },
+    })
+    const webhookReplayCreatedAt = new Date(webhookCreatedAt.getTime() + 2_000)
+    await client.v2PublicEventOutbox.create({
+      data: {
+        id: webhookReplayEventId,
+        workspaceId,
+        type: 'project.created',
+        version: '1.0.0',
+        occurredAt: webhookReplayCreatedAt,
+        actorClientId: apiClientId,
+        resourceType: 'project',
+        resourceId: 'public-api-webhook-replay-project',
+        dataJson: '{}',
+        publishedAt: webhookReplayCreatedAt,
+        createdAt: webhookReplayCreatedAt,
+      },
+    })
+    await client.v2WebhookDelivery.create({
+      data: {
+        id: webhookReplayDeliveryId,
+        workspaceId,
+        subscriptionId: webhookSubscriptionId,
+        eventId: webhookReplayEventId,
+        status: 'succeeded',
+        attemptCount: 1,
+        maxAttempts: 8,
+        nextAttemptAt: webhookReplayCreatedAt,
+        createdAt: webhookReplayCreatedAt,
+        completedAt: new Date(webhookReplayCreatedAt.getTime() + 1_000),
+      },
+    })
+    await client.v2WebhookDeliveryAttempt.create({
+      data: {
+        id: webhookReplayAttemptId,
+        workspaceId,
+        deliveryId: webhookReplayDeliveryId,
+        attemptNumber: 1,
+        status: 'succeeded',
+        scheduledAt: webhookReplayCreatedAt,
+        startedAt: webhookReplayCreatedAt,
+        completedAt: new Date(webhookReplayCreatedAt.getTime() + 1_000),
+        responseStatus: 204,
+        responseBodyHash: sha('f'),
+        createdAt: webhookReplayCreatedAt,
       },
     })
 
@@ -534,6 +582,18 @@ test('authenticated public API manages projects, clients and artifact inspection
       ),
       true,
     )
+    assert.equal(
+      openApi.paths['/v1/webhooks/events/{eventId}/replay'].post[
+        'x-apollo-capability-id'
+      ],
+      'apollo.webhooks.events.replay',
+    )
+    assert.equal(
+      openApi.paths['/v1/webhooks/events/{eventId}/replay'].post.parameters.some(
+        (parameter) => parameter.name === 'Idempotency-Key' && parameter.required,
+      ),
+      true,
+    )
 
     const schemaResponse = await fetch(
       `${baseUrl}/v1/schemas/create-project-request/v1`,
@@ -626,6 +686,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.webhooks.deliveries.list',
         'apollo.webhooks.deliveries.read',
         'apollo.webhooks.deliveries.replay',
+        'apollo.webhooks.events.replay',
         'apollo.contracts.openapi.read',
         'apollo.contracts.schemas.read',
         'apollo.projects.create',
@@ -698,6 +759,45 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(duplicateReplayResponse.status, 409)
     assert.equal(duplicateReplay.error.code, 'WEBHOOK_DELIVERY_REPLAY_REJECTED')
 
+    const webhookEventReplayUrl =
+      `${baseUrl}/v1/webhooks/events/${webhookReplayEventId}/replay`
+    const missingEventReplayKeyResponse = await fetch(webhookEventReplayUrl, {
+      method: 'POST',
+      headers: { authorization },
+    })
+    assert.equal(missingEventReplayKeyResponse.status, 422)
+    const replayWebhookEventRequest = (idempotencyKey) => fetch(webhookEventReplayUrl, {
+      method: 'POST',
+      headers: { authorization, 'idempotency-key': idempotencyKey },
+    })
+    const webhookEventReplayResponse = await replayWebhookEventRequest(
+      'public-webhook-event-replay-1',
+    )
+    const webhookEventReplay = await webhookEventReplayResponse.json()
+    assert.equal(webhookEventReplayResponse.status, 202)
+    assert.equal(webhookEventReplay.data.eventId, webhookReplayEventId)
+    assert.equal(webhookEventReplay.data.replayed, false)
+    assert.equal(webhookEventReplay.data.items.length, 1)
+    assert.equal(webhookEventReplay.data.items[0].status, 'scheduled')
+    assert.equal(webhookEventReplay.data.items[0].delivery.id, webhookReplayDeliveryId)
+    assert.equal(webhookEventReplay.data.items[0].delivery.status, 'retry-scheduled')
+    assert.equal('workspaceId' in webhookEventReplay.data.items[0].delivery, false)
+    const webhookEventReplayAgainResponse = await replayWebhookEventRequest(
+      'public-webhook-event-replay-1',
+    )
+    const webhookEventReplayAgain = await webhookEventReplayAgainResponse.json()
+    assert.equal(webhookEventReplayAgainResponse.status, 200)
+    assert.equal(webhookEventReplayAgain.data.replayed, true)
+    assert.deepEqual(webhookEventReplayAgain.data.items, webhookEventReplay.data.items)
+    const duplicateEventReplayResponse = await replayWebhookEventRequest(
+      'public-webhook-event-replay-2',
+    )
+    assert.equal(duplicateEventReplayResponse.status, 409)
+    assert.equal(
+      (await duplicateEventReplayResponse.json()).error.code,
+      'WEBHOOK_EVENT_REPLAY_REJECTED',
+    )
+
     const createChildRequest = () =>
       fetch(`${baseUrl}/v1/workspaces/${workspaceId}/clients`, {
         method: 'POST',
@@ -759,6 +859,17 @@ test('authenticated public API manages projects, clients and artifact inspection
       },
     )
     assert.equal(childWebhookReplayResponse.status, 403)
+    const childWebhookEventReplayResponse = await fetch(
+      `${baseUrl}/v1/webhooks/events/${webhookReplayEventId}/replay`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: childAuthorization,
+          'idempotency-key': 'child-webhook-event-replay-1',
+        },
+      },
+    )
+    assert.equal(childWebhookEventReplayResponse.status, 403)
 
     const childArtifactResponse = await fetch(
       `${baseUrl}/v1/artifacts/${derivedArtifactId}`,

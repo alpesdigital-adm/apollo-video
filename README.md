@@ -156,6 +156,12 @@ administrativo público. Eventos pendentes já são materializados atomicamente 
 deliveries deduplicadas conforme workspace e filtros; o dispatcher HTTPS,
 retries e administração externa virão nas próximas slices.
 
+Deliveries terminais podem ser reabertas de forma idempotente pela API externa,
+individualmente ou por um event ID exato. O replay por evento avalia no máximo
+100 deliveries, informa separadamente itens reagendados e ignorados e preserva
+todo o histórico de attempts; replay por intervalo continua reservado para uma
+operação durável com preflight.
+
 ## Formatos
 
 - **Vertical (9:16)** — Shorts, Reels, TikTok
