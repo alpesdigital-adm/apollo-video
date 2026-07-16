@@ -72,3 +72,4 @@ Estados usados:
 - [ADR-068 — Catálogo externo de tools para agentes](./ADR-068-external-agent-tool-catalog.md)
 - [ADR-069 — Filtro contextual deny-only de capabilities](./ADR-069-contextual-deny-only-capability-filter.md)
 - [ADR-070 — Gate confiável para tools de risco](./ADR-070-trusted-agent-tool-safety-gate.md)
+- [ADR-071 — Adapter MCP stdio sobre a Public API](./ADR-071-mcp-stdio-public-api-adapter.md)

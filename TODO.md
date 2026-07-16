@@ -513,7 +513,7 @@
 - [x] Definir tool names, descriptions, input/output schemas e structured errors. Evidência F0-079: `GET /v1/tools` expõe catálogo scope-filtered derivado do registry, com nomes MCP-safe, descrições, input schema composto de path/query/headers/body, output schema, error envelope v2, annotations e metadata de custo/confirmation. Contract e HTTP tests comprovam paridade com capabilities, deny-by-default e ausência de valores internos.
 - [x] Filtrar tools/capabilities por client, scope, environment e policy. Evidência F0-080: descoberta compartilhada exige client autenticado/ativo no environment correto, intersecta scopes, `availableIn` e policy deny-only global/por environment/workspace/client; configuração inválida falha fechada. Unit tests cobrem as quatro dimensões e a jornada HTTP prova paridade exata entre `/v1/capabilities` e `/v1/tools`, inclusive deny específico por client sem afetar o catálogo anônimo.
 - [x] Exigir preflight/approval em tools caras, amplas ou destrutivas. Evidência F0-081: registry de segurança classifica exaustivamente as 21 tools mutáveis em `bounded/broad/destructive`; impacto amplo/destrutivo ou custo high/variable exige gate. Evidência confiável é vinculada à capability, fingerprint e expiry; ausência, mismatch e expiração falham antes da execução. Descriptors anunciam o gate, mas não oferecem `approval/confirmed/preflightToken` gravável pelo modelo.
-- [ ] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno.
+- [x] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno. Evidência F0-082: servidor MCP stdio baseado no SDK estável descobre `/v1/tools` uma vez por sessão, valida input/output schemas, traduz namespaces para HTTP autenticado e bloqueia redirects. E2E com client MCP oficial comprova list/call via API fake; testes garantem gate confiável, catálogo scope-filtered, output malformado bloqueado e ausência de repositories/banco/storage/workers no adapter.
 - [ ] Expor resources paginados de capabilities, projects, operations e reports autorizados.
 - [ ] Delimitar transcript/OCR/media metadata como untrusted data em tool inputs/results.
 - [ ] Criar E2E por agente para jornada válida, prompt injection e tool não autorizada.
@@ -5015,7 +5015,7 @@ Incidente de publicação:
 
 ### Slice F0-081 — Gate confiável para tools de risco
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+**Status:** publicado em 16 de julho de 2026 no commit `f1848cb`; CI hospedada `29535583000` aprovada integralmente em 23 estágios.
 
 Entregas:
 
@@ -5043,3 +5043,37 @@ Limites explícitos desta slice:
 - o gate é o núcleo obrigatório do futuro adapter; o adapter MCP será implementado na próxima microtarefa;
 - emissão e validação criptográfica de commit token pertencem à F0.042;
 - endpoints REST continuam aplicando autenticação, scope, concorrência e regras próprias independentemente da metadata da tool.
+
+### Slice F0-082 — Adapter MCP stdio sobre a Public API
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- dependências oficiais `@modelcontextprotocol/sdk` estável e `zod` foram fixadas no lockfile;
+- pacote-base `ai` foi adicionado conforme preparação da camada futura de agente, sem acoplar provider ao MCP;
+- `ApolloMcpPublicApiClient` exige bearer opaco, HTTPS ou HTTP loopback e timeout limitado;
+- redirects, credentials na base URL, respostas não JSON e payloads acima de 4 MiB são rejeitados;
+- catálogo autenticado é carregado uma vez e permanece imutável durante a sessão MCP;
+- servidor low-level do SDK expõe dinamicamente os JSON Schemas publicados sem reconstruí-los em Zod;
+- input inválido é bloqueado antes do HTTP e output inválido é bloqueado antes do host;
+- path, query, `Idempotency-Key`, `If-Match` e body são traduzidos para o endpoint declarado;
+- erros HTTP viram MCP `isError` preservando o JSON público; erros internos não incluem bearer ou payload rejeitado;
+- aprovação humana usa elicitation do host e o gate fingerprint-bound da F0-081;
+- entrypoint `npm run mcp:v2` usa stdio sem logs em stdout;
+- E2E sobe um fake da Public API, inicia o processo stdio real e usa o client MCP oficial para list/call;
+- ADR-071 registra snapshot por sessão, fronteira HTTP e transporte inicial.
+
+Regressões e evidências locais:
+
+- 6 testes MCP direcionados cobrem transporte HTTP, snapshot, schema input/output, approval, configuração e stdio real;
+- typecheck aprovado após a implementação;
+- CI da F0-081 publicada permaneceu verde em 23 estágios;
+- regressão completa aprovada: 160/160 testes gerais; contratos 48 capabilities/63 schemas/84 examples/42 paths; schema v2 com 29 tabelas/112 índices/61 FKs; integrações de mídia, Prisma, artefatos, operações, webhooks, Public API, MCP stdio e render real verdes; build e typecheck aprovados; auditorias principal e Remotion com zero vulnerabilidades.
+
+Limites explícitos desta slice:
+
+- o transporte inicial é stdio; Streamable HTTP remoto será adicionado sem mudar o cliente da Public API;
+- resources paginados pertencem à próxima microtarefa da F0.040;
+- tools `preflight-token` dependerão da emissão/validação assinada prevista na F0.042;
+- o adapter não executa modelo nem escolhe provider; ele apenas expõe a superfície MCP autorizada.

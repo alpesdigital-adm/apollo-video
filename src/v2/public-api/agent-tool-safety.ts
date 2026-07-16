@@ -191,7 +191,7 @@ export function agentToolSafetyFor(
 }
 
 export function requireAgentToolExecutionGate(
-  capability: Readonly<PublicCapability>,
+  capability: Readonly<Pick<PublicCapability, 'id'>>,
   rule: Readonly<AgentToolSafetyRule>,
   inputFingerprint: string,
   evidence: Readonly<TrustedAgentToolGateEvidence> | undefined,

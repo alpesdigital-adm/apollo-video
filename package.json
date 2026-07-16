@@ -22,6 +22,7 @@
     "test:integration:webhooks": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-webhook-registration.integration.mjs",
     "worker:v2:render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env scripts/run-v2-render-worker.mjs",
     "worker:v2:webhook": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env scripts/run-v2-webhook-worker.mjs",
+    "mcp:v2": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env scripts/run-v2-mcp.mjs",
     "test:integration:api": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/public-project-api.integration.mjs",
     "api:v1:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-public-contracts.mjs",
     "api:v1:baseline:update": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/update-public-contract-baseline.mjs",
@@ -38,8 +39,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.39.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@prisma/client": "^5.22.0",
     "@remotion/player": "4.0.489",
+    "ai": "^7.0.30",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "ffmpeg-static": "^5.3.0",
@@ -50,7 +53,8 @@
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "tailwindcss": "3.4.1",
-    "uuid": "11.1.1"
+    "uuid": "11.1.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/formidable": "^3.4.5",

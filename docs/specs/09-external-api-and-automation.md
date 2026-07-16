@@ -543,6 +543,14 @@ O MCP oficial:
 - respeita preflight/confirmation e retorna operation IDs;
 - versiona sua compatibilidade com a API.
 
+A implementação inicial usa stdio e o SDK MCP estável. Ao abrir a sessão, busca
+`GET /v1/tools` com o bearer do host e fixa um snapshot imutável; list/call nunca
+consultam domínio, banco ou storage. Argumentos são validados contra inputSchema,
+traduzidos para path/query/headers/body e enviados à URL base fixa com redirects
+bloqueados. Respostas de sucesso só chegam ao host após validar outputSchema.
+Erros públicos preservam o envelope JSON em `isError`; falhas internas do adapter
+retornam mensagem limitada sem bearer ou payload rejeitado.
+
 MCP é adapter, não substituto da API. Outras ferramentas podem usar REST/SDK diretamente.
 
 ## 22. Segurança específica de agentes

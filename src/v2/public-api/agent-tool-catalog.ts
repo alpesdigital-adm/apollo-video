@@ -65,6 +65,8 @@ function headerSchema(capability: PublicCapability) {
 }
 
 export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
+  const toolName = capability.toolName
+  if (!toolName) throw new Error('Agent tool descriptor requires a tool name')
   const safety = agentToolSafetyFor(capability, FOUNDATION_AGENT_TOOL_SAFETY)
   const path = pathSchema(capability)
   const query = querySchema(capability)
@@ -82,7 +84,7 @@ export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
     ...(body && (capability.requestBodyRequired ?? true) ? ['body'] : []),
   ]
   return Object.freeze({
-    name: capability.toolName,
+    name: toolName,
     title: capability.title,
     description:
       safety.confirmation === 'human-approval'
@@ -117,6 +119,8 @@ export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
     }),
   })
 }
+
+export type AgentToolDescriptor = ReturnType<typeof agentToolDescriptor>
 
 export function agentToolsForCapabilities(
   capabilities: readonly PublicCapability[],

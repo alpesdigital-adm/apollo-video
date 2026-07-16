@@ -107,6 +107,28 @@ evidência é vinculada à capability, fingerprint exato do input e validade
 temporal. Aprovação pertence ao host confiável e nunca aparece como booleano ou
 token gravável pelo modelo no input schema.
 
+## Adapter MCP
+
+O adapter MCP v2 usa exclusivamente a Public API. Configure no `.env`:
+
+```dotenv
+APOLLO_API_BASE_URL=http://127.0.0.1:3333
+APOLLO_API_TOKEN=token_emitido_pela_public_api
+APOLLO_MCP_API_TIMEOUT_MS=30000
+```
+
+Com a API em execução, inicie o servidor stdio com `npm run mcp:v2`. O host MCP
+é responsável por iniciar esse processo; stdout fica reservado ao protocolo.
+O adapter busca `/v1/tools` uma vez por sessão, valida inputs e outputs pelos
+schemas publicados, encaminha path/query/headers/body por HTTP e nunca importa
+repositories, banco, storage ou workers. Redirects são rejeitados para impedir
+que o bearer token seja encaminhado a outra origem.
+
+Tools com `human-approval` usam elicitation do host e falham fechadas quando o
+client não oferece esse canal. Aprovação é vinculada ao fingerprint do input e
+expira em cinco minutos. Tools futuras com `preflight-token` dependerão do commit
+token assinado previsto na F0.042.
+
 ## Limites dos processos de mídia
 
 As chamadas a FFmpeg e ffprobe possuem cancelamento por `AbortSignal`, limite de
