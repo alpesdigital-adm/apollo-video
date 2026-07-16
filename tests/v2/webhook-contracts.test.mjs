@@ -95,6 +95,8 @@ import { PrismaWebhookEndpointCreationRepository } from '../../src/v2/infrastruc
 import { PrismaWebhookSubscriptionCreationRepository } from '../../src/v2/infrastructure/prisma/webhook-subscription-creation-repository.ts'
 import { PrismaWebhookDeliveryRepository } from '../../src/v2/infrastructure/prisma/webhook-delivery-repository.ts'
 import { PrismaWebhookEventReplayRepository } from '../../src/v2/infrastructure/prisma/webhook-event-replay-repository.ts'
+import { PrismaWebhookEndpointCommandRepository } from '../../src/v2/infrastructure/prisma/webhook-endpoint-command-repository.ts'
+import { PrismaWebhookSubscriptionCommandRepository } from '../../src/v2/infrastructure/prisma/webhook-subscription-command-repository.ts'
 import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
 import {
   createWebhookSigningSecretProtector,
@@ -1716,6 +1718,53 @@ test('webhook subscription status command validates revision and scopes reposito
     () => setStatus({ workspaceId: 'workspace-1', subscriptionId: subscription.id, status: 'pending-verification', baseRevision }),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
+})
+
+test('webhook status repositories retry serialization conflicts before returning revision mismatch', async () => {
+  const conflictingClient = () => {
+    let attempts = 0
+    return {
+      client: {
+        async $transaction() {
+          attempts += 1
+          const error = new Error('serialization conflict')
+          error.code = 'P2034'
+          throw error
+        },
+      },
+      attempts: () => attempts,
+    }
+  }
+
+  const endpointConflict = conflictingClient()
+  const endpointRepository = new PrismaWebhookEndpointCommandRepository(endpointConflict.client)
+  await assert.rejects(
+    () => endpointRepository.setStatus({
+      workspaceId: 'workspace-1',
+      endpointId: '00000000-0000-4000-8000-000000000925',
+      targetStatus: 'suspended',
+      baseRevision: 'a'.repeat(64),
+      changedAt: '2026-07-16T13:10:00.000Z',
+    }),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
+  )
+  assert.equal(endpointConflict.attempts(), 3)
+
+  const subscriptionConflict = conflictingClient()
+  const subscriptionRepository = new PrismaWebhookSubscriptionCommandRepository(
+    subscriptionConflict.client,
+  )
+  await assert.rejects(
+    () => subscriptionRepository.setStatus({
+      workspaceId: 'workspace-1',
+      subscriptionId: '00000000-0000-4000-8000-000000000926',
+      targetStatus: 'paused',
+      baseRevision: 'b'.repeat(64),
+      changedAt: '2026-07-16T13:10:00.000Z',
+    }),
+    (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
+  )
+  assert.equal(subscriptionConflict.attempts(), 3)
 })
 
 test('webhook delivery diagnostics paginate with filters bound into the cursor', async () => {

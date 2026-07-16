@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 
 import type {
   SetWebhookSubscriptionStatusCommand,
+  SetWebhookSubscriptionStatusResult,
   WebhookSubscriptionCommandRepository,
 } from '../../application/ports/webhook-subscription-command-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -56,7 +57,10 @@ export class PrismaWebhookSubscriptionCommandRepository
     this.client = client
   }
 
-  async setStatus(command: Readonly<SetWebhookSubscriptionStatusCommand>) {
+  async setStatus(
+    command: Readonly<SetWebhookSubscriptionStatusCommand>,
+    serializationAttempt = 1,
+  ): Promise<Readonly<SetWebhookSubscriptionStatusResult> | null> {
     try {
       return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
         const row = await transaction.v2WebhookSubscription.findFirst({
@@ -119,6 +123,9 @@ export class PrismaWebhookSubscriptionCommandRepository
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034') {
+        if (serializationAttempt < 3) {
+          return this.setStatus(command, serializationAttempt + 1)
+        }
         throw new DomainError(
           'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
           'Webhook subscription changed concurrently',

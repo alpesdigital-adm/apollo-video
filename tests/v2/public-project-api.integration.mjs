@@ -1683,12 +1683,25 @@ test('authenticated public API manages projects, clients and artifact inspection
       },
     )
     assert.equal(missingSubscriptionStatusResponse.status, 404)
-    const pauseSubscriptionResponse = await setWebhookSubscriptionStatus(
-      'paused',
-      webhookSubscriptionRead.data.subscription.revision,
+    const pauseSubscriptionResponses = await Promise.all([
+      setWebhookSubscriptionStatus(
+        'paused',
+        webhookSubscriptionRead.data.subscription.revision,
+      ),
+      setWebhookSubscriptionStatus(
+        'paused',
+        webhookSubscriptionRead.data.subscription.revision,
+      ),
+    ])
+    assert.deepEqual(pauseSubscriptionResponses.map((response) => response.status), [200, 200])
+    const pauseSubscriptionBodies = await Promise.all(
+      pauseSubscriptionResponses.map((response) => response.json()),
     )
-    const pausedSubscription = await pauseSubscriptionResponse.json()
-    assert.equal(pauseSubscriptionResponse.status, 200)
+    const pausedSubscription = pauseSubscriptionBodies[0]
+    assert.deepEqual(
+      pauseSubscriptionBodies[1].data.subscription,
+      pausedSubscription.data.subscription,
+    )
     assert.equal(pausedSubscription.data.subscription.status, 'paused')
     assert.notEqual(
       pausedSubscription.data.subscription.revision,
@@ -1709,12 +1722,17 @@ test('authenticated public API manages projects, clients and artifact inspection
       (await staleResumeResponse.json()).error.code,
       'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
     )
-    const resumeSubscriptionResponse = await setWebhookSubscriptionStatus(
+    const discardedResumeSubscriptionResponse = await setWebhookSubscriptionStatus(
       'active',
       pausedSubscription.data.subscription.revision,
     )
-    const resumedSubscription = await resumeSubscriptionResponse.json()
-    assert.equal(resumeSubscriptionResponse.status, 200)
+    assert.equal(discardedResumeSubscriptionResponse.status, 200)
+    const recoveredResumeSubscriptionResponse = await setWebhookSubscriptionStatus(
+      'active',
+      pausedSubscription.data.subscription.revision,
+    )
+    const resumedSubscription = await recoveredResumeSubscriptionResponse.json()
+    assert.equal(recoveredResumeSubscriptionResponse.status, 200)
     assert.equal(resumedSubscription.data.subscription.status, 'active')
     assert.equal('pausedAt' in resumedSubscription.data.subscription, false)
     let currentSubscription = resumedSubscription.data.subscription
@@ -1724,18 +1742,27 @@ test('authenticated public API manages projects, clients and artifact inspection
     )
     assert.equal(invalidSubscriptionStatusResponse.status, 422)
 
-    const suspendEndpointResponse = await setWebhookEndpointStatus(
-      'suspended',
-      activatedRotation.data.endpoint.revision,
+    const suspendEndpointResponses = await Promise.all([
+      setWebhookEndpointStatus('suspended', activatedRotation.data.endpoint.revision),
+      setWebhookEndpointStatus('suspended', activatedRotation.data.endpoint.revision),
+    ])
+    assert.deepEqual(suspendEndpointResponses.map((response) => response.status), [200, 200])
+    const suspendEndpointBodies = await Promise.all(
+      suspendEndpointResponses.map((response) => response.json()),
     )
-    const suspendedEndpoint = await suspendEndpointResponse.json()
-    assert.equal(suspendEndpointResponse.status, 200)
+    const suspendedEndpoint = suspendEndpointBodies.find((body) => body.data.replayed === false)
+    const suspendedEndpointConcurrentReplay = suspendEndpointBodies.find(
+      (body) => body.data.replayed === true,
+    )
+    assert.ok(suspendedEndpoint)
+    assert.ok(suspendedEndpointConcurrentReplay)
     assert.equal(suspendedEndpoint.data.endpoint.status, 'suspended')
     assert.equal(suspendedEndpoint.data.effects.pausedSubscriptions, 1)
     assert.equal(suspendedEndpoint.data.effects.revokedSubscriptions, 0)
     assert.equal(suspendedEndpoint.data.replayed, false)
     assert.equal(JSON.stringify(suspendedEndpoint).includes('/public-api'), false)
     assert.equal(JSON.stringify(suspendedEndpoint).includes('keyRef'), false)
+    assert.equal(suspendedEndpointConcurrentReplay.data.effects.pausedSubscriptions, 0)
     const suspendEndpointAgainResponse = await setWebhookEndpointStatus(
       'suspended',
       activatedRotation.data.endpoint.revision,
@@ -1761,12 +1788,18 @@ test('authenticated public API manages projects, clients and artifact inspection
       cascadePausedSubscription.data.subscription.revision,
     )
     assert.equal(resumeWhileEndpointSuspendedResponse.status, 409)
-    const resumeEndpointResponse = await setWebhookEndpointStatus(
+    const discardedResumeEndpointResponse = await setWebhookEndpointStatus(
       'active',
       suspendedEndpoint.data.endpoint.revision,
     )
-    const resumedEndpoint = await resumeEndpointResponse.json()
-    assert.equal(resumeEndpointResponse.status, 200)
+    assert.equal(discardedResumeEndpointResponse.status, 200)
+    const recoveredResumeEndpointResponse = await setWebhookEndpointStatus(
+      'active',
+      suspendedEndpoint.data.endpoint.revision,
+    )
+    const resumedEndpoint = await recoveredResumeEndpointResponse.json()
+    assert.equal(recoveredResumeEndpointResponse.status, 200)
+    assert.equal(resumedEndpoint.data.replayed, true)
     assert.equal(resumedEndpoint.data.endpoint.status, 'active')
     assert.equal(resumedEndpoint.data.effects.pausedSubscriptions, 0)
     const stillPausedSubscriptionResponse = await fetch(

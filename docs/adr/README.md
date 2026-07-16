@@ -61,3 +61,4 @@ Estados usados:
 - [ADR-057 — Concorrência no replay de webhook delivery](./ADR-057-concurrent-webhook-delivery-replay.md)
 - [ADR-058 — Concorrência no replay de webhook por evento](./ADR-058-concurrent-webhook-event-replay.md)
 - [ADR-059 — Concorrência natural no cancelamento e retry de operações](./ADR-059-natural-concurrency-public-operation-cancel-retry.md)
+- [ADR-060 — Concorrência revisionada no status de webhooks](./ADR-060-revisioned-webhook-status-concurrency.md)

@@ -292,6 +292,11 @@ atomicamente suas subscriptions ativas; retomá-lo não as religa automaticament
 Revogar é terminal e revoga, na mesma transação, todas as subscriptions ainda
 abertas e o signing secret ativo. A resposta informa os totais afetados sem
 expor URL completa ou referência do secret.
+Nos dois endpoints de status, requests simultâneos para o mesmo estado
+convergem após até três retries de conflito serializável. Se os estados pedidos
+forem diferentes, somente a revisão vencedora é aceita; a outra chamada recebe
+conflito de revisão. Repetir o mesmo estado após perder a resposta recupera o
+recurso persistido sem repetir cascatas.
 
 Deliveries terminais podem ser reabertas de forma idempotente pela API externa,
 individualmente ou por um event ID exato. O replay por evento avalia no máximo

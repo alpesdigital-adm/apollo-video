@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 
 import type {
   SetWebhookEndpointStatusCommand,
+  SetWebhookEndpointStatusResult,
   WebhookEndpointCommandRepository,
 } from '../../application/ports/webhook-endpoint-command-repository.ts'
 import type {
@@ -78,7 +79,10 @@ export class PrismaWebhookEndpointCommandRepository implements WebhookEndpointCo
     this.client = client
   }
 
-  async setStatus(command: Readonly<SetWebhookEndpointStatusCommand>) {
+  async setStatus(
+    command: Readonly<SetWebhookEndpointStatusCommand>,
+    serializationAttempt = 1,
+  ): Promise<Readonly<SetWebhookEndpointStatusResult> | null> {
     try {
       return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
         const row = await transaction.v2WebhookEndpoint.findFirst({
@@ -213,6 +217,9 @@ export class PrismaWebhookEndpointCommandRepository implements WebhookEndpointCo
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034') {
+        if (serializationAttempt < 3) {
+          return this.setStatus(command, serializationAttempt + 1)
+        }
         throw new DomainError(
           'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
           'Webhook endpoint changed concurrently',
