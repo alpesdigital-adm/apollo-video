@@ -1980,6 +1980,7 @@ test('webhook replay service binds client and delivery into required idempotency
 test('webhook delivery replay retries serialization conflicts before failing explicitly', async () => {
   let attempts = 0
   const repository = new PrismaWebhookDeliveryRepository({
+    v2IdempotencyRecord: { async findUnique() { return null } },
     async $transaction() {
       attempts += 1
       const error = new Error('serialization conflict')
@@ -2003,6 +2004,68 @@ test('webhook delivery replay retries serialization conflicts before failing exp
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
   assert.equal(attempts, 3)
+})
+
+test('webhook delivery replay recovers a concurrent committed winner after serialization conflict', async () => {
+  const deliveryId = '00000000-0000-4000-8000-000000000848'
+  const requestFingerprint = 'd'.repeat(64)
+  let transactions = 0
+  const responseJson = JSON.stringify({
+    delivery: {
+      id: deliveryId,
+      workspaceId: 'workspace-1',
+      subscriptionId: '00000000-0000-4000-8000-000000000849',
+      eventId: '00000000-0000-4000-8000-00000000084a',
+      status: 'retry-scheduled',
+      attemptCount: 1,
+      maxAttempts: 8,
+      nextAttemptAt: '2026-07-16T08:02:00.001Z',
+      createdAt: '2026-07-16T08:00:00.000Z',
+    },
+    endpointId: '00000000-0000-4000-8000-00000000084b',
+    attempts: [{
+      id: '00000000-0000-4000-8000-00000000084c',
+      workspaceId: 'workspace-1',
+      deliveryId,
+      attemptNumber: 1,
+      status: 'scheduled',
+      scheduledAt: '2026-07-16T08:00:00.000Z',
+      createdAt: '2026-07-16T08:00:00.000Z',
+    }],
+  })
+  const repository = new PrismaWebhookDeliveryRepository({
+    v2IdempotencyRecord: {
+      async findUnique() {
+        return {
+          requestFingerprint,
+          status: 'completed',
+          responseJson,
+          expiresAt: new Date('2026-07-17T08:02:00.000Z'),
+        }
+      },
+    },
+    async $transaction() {
+      transactions += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+  const result = await repository.replay({
+    idempotencyId: '00000000-0000-4000-8000-00000000084d',
+    workspaceId: 'workspace-1',
+    clientId: 'client-1',
+    idempotencyKey: 'replay-concurrent-winner-1',
+    requestFingerprint,
+    deliveryId,
+    requestedAt: '2026-07-16T08:02:00.000Z',
+    nextAttemptAt: '2026-07-16T08:02:00.001Z',
+    expiresAt: '2026-07-17T08:02:00.000Z',
+  })
+  assert.equal(result.replayed, true)
+  assert.equal(result.diagnostic.delivery.id, deliveryId)
+  assert.equal(result.diagnostic.attempts.length, 1)
+  assert.equal(transactions, 1)
 })
 
 test('webhook event replay service binds the exact event and bounded batch into idempotency', async () => {
@@ -2047,6 +2110,7 @@ test('webhook event replay service binds the exact event and bounded batch into 
 test('webhook event replay retries serialization conflicts before failing explicitly', async () => {
   let attempts = 0
   const repository = new PrismaWebhookEventReplayRepository({
+    v2IdempotencyRecord: { async findUnique() { return null } },
     async $transaction() {
       attempts += 1
       const error = new Error('serialization conflict')

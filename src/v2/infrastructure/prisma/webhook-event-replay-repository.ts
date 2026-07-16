@@ -271,6 +271,11 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isSerializationConflict(error)) {
+        await new Promise<void>((resolve) => setTimeout(resolve, serializationAttempt * 10))
+        const committed = await this.client.v2IdempotencyRecord.findUnique({ where: key })
+        if (committed && committed.expiresAt > requestedAt && committed.status === 'completed') {
+          return readReplay(committed)
+        }
         if (serializationAttempt < 3) {
           return this.replayEvent(command, serializationAttempt + 1)
         }
