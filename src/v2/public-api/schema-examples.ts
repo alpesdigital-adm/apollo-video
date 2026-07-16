@@ -901,6 +901,25 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/media-upload-completed/v1': [
       { data: { uploadId: '123e4567-e89b-42d3-a456-426614174001', status: 'verified', verifiedAt: createdAt, replayed: false }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/issue-media-download-grant-request/v1': [
+      { ttlSeconds: 300 },
+    ],
+    'apollo://schemas/media-download-grant-issued/v1': [
+      {
+        data: {
+          grant: { id: '123e4567-e89b-42d3-a456-426614174301', artifactId: 'artifact-example-proxy-1', status: 'active', expiresAt: '2026-07-16T22:35:00.000Z', createdAt },
+          downloadUrl: 'https://downloads.example.com/grants/123e4567-e89b-42d3-a456-426614174301/content?token=opaque',
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-download-grant-revoked/v1': [
+      {
+        data: { grant: { id: '123e4567-e89b-42d3-a456-426614174301', artifactId: 'artifact-example-proxy-1', status: 'revoked', expiresAt: '2026-07-16T22:35:00.000Z', revokedAt: '2026-07-16T22:32:00.000Z' }, replayed: false },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-signing-secret-rotation-list/v1': [
       { data: { rotations: [] }, meta: { apiVersion: 'v1' } },
       { data: { rotations: [webhookSigningSecretRotationExample] }, meta: { apiVersion: 'v1' } },

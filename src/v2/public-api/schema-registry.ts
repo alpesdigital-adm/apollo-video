@@ -1855,6 +1855,35 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('issue-media-download-grant-request', 1, 'Issue media download grant request', {
+    type: 'object', additionalProperties: false,
+    properties: { ttlSeconds: { type: 'integer', minimum: 30, maximum: 900, default: 300 } },
+  }),
+  defineSchema('media-download-grant-issued', 1, 'Issued media download grant response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['grant', 'downloadUrl', 'replayed'],
+      properties: {
+        grant: {
+          type: 'object', additionalProperties: false, required: ['id', 'artifactId', 'status', 'expiresAt', 'createdAt'],
+          properties: { id: { type: 'string', format: 'uuid' }, artifactId: idSchema, status: { const: 'active' }, expiresAt: dateTimeSchema, createdAt: dateTimeSchema },
+        },
+        downloadUrl: { type: 'string', format: 'uri', pattern: '^https?://', maxLength: 8192 },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('media-download-grant-revoked', 1, 'Revoked media download grant response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['grant', 'replayed'],
+      properties: {
+        grant: {
+          type: 'object', additionalProperties: false, required: ['id', 'artifactId', 'status', 'expiresAt', 'revokedAt'],
+          properties: { id: { type: 'string', format: 'uuid' }, artifactId: idSchema, status: { const: 'revoked' }, expiresAt: dateTimeSchema, revokedAt: dateTimeSchema },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',
     successSchema({
       type: 'object',

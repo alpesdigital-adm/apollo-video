@@ -72,6 +72,8 @@ const coverage = Object.freeze({
   },
   'apollo.media.uploads.parts.record': { mode: 'durable-covered', evidence: 'F0-088' },
   'apollo.media.uploads.complete': { mode: 'durable-covered', evidence: 'F0-088' },
+  'apollo.artifacts.download-grants.issue': { mode: 'durable-covered', evidence: 'F0-089' },
+  'apollo.artifacts.download-grants.revoke': { mode: 'durable-covered', evidence: 'F0-089' },
   'apollo.clients.create': {
     mode: 'durable-covered', evidence: 'F0-061',
   },
@@ -110,7 +112,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    25,
+    27,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

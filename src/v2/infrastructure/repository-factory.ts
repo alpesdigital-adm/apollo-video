@@ -24,6 +24,7 @@ import type { ApiClientAdministrationRepository } from '../application/ports/api
 import type { AssetRightsRepository } from '../application/ports/asset-rights-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
+import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
 import type { ProtectedRenderInputStore } from '../application/ports/protected-render-input-store.ts'
 import type { RenderInputAssetResolver } from '../application/ports/render-input-asset-resolver.ts'
@@ -75,6 +76,7 @@ import { PrismaArtifactRenderCheckpointRepository } from './prisma/artifact-rend
 import { PrismaAssetRightsRepository } from './prisma/asset-rights-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
+import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
@@ -109,6 +111,7 @@ import { createFallbackWebhookSigningSecretProvider } from './security/fallback-
 import { createWebhookSigningSecretProtector } from './security/webhook-signing-secret-protector.ts'
 export { createMediaUploadSessionSignerFromEnvironment } from './security/media-upload-session-signer.ts'
 export { createMediaUploadVerifierFromEnvironment } from './media-upload-verifier.ts'
+export { createMediaDownloadGrantSignerFromEnvironment } from './security/media-download-grant-signer.ts'
 
 // The two generated clients expose the same v2 model delegates. This cast is
 // kept at the persistence boundary so application and public API code remain
@@ -143,6 +146,10 @@ export function createMediaArtifactQueryRepository(): MediaArtifactQueryReposito
 
 export function createMediaTransferRepository(): MediaTransferRepository {
   return new PrismaMediaTransferRepository(resolveV2Client())
+}
+
+export function createMediaDownloadGrantRepository(): MediaDownloadGrantRepository {
+  return new PrismaMediaDownloadGrantRepository(resolveV2Client())
 }
 
 export function createPublicOperationRepository(): PublicOperationRepository {

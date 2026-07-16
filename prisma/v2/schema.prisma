@@ -22,6 +22,7 @@ model V2Workspace {
   idempotencyRecords              V2IdempotencyRecord[]
   mediaArtifacts                  V2MediaArtifact[]
   mediaUploads                    V2MediaUpload[]
+  mediaDownloadGrants             V2MediaDownloadGrant[]
   mediaManifests                  V2MediaArtifactManifest[]
   mediaLineage                    V2MediaArtifactLineage[]
   recipeParameters                V2RecipeParameterPayload[]
@@ -63,6 +64,7 @@ model V2ApiClient {
   credentials                 V2ApiCredential[]
   operations                  V2PublicOperation[]
   mediaUploads                V2MediaUpload[]
+  mediaDownloadGrants         V2MediaDownloadGrant[]
   createdWebhookEndpoints     V2WebhookEndpoint[]     @relation("WebhookEndpointCreator")
   createdWebhookSubscriptions V2WebhookSubscription[] @relation("WebhookSubscriptionCreator")
 
@@ -250,6 +252,7 @@ model V2MediaArtifact {
   consentEvidenceFor     V2AssetRightsSnapshot[]          @relation("ConsentDocument")
   materializationTargets V2MaterializationAuthorization[] @relation("MaterializationTarget")
   renderOperationTargets V2ArtifactRenderOperation[]      @relation("ArtifactRenderTarget")
+  downloadGrants         V2MediaDownloadGrant[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -257,6 +260,29 @@ model V2MediaArtifact {
   @@index([workspaceId, mediaType, status])
   @@index([workspaceId, currentRightsSnapshotId])
   @@map("media_artifacts")
+}
+
+model V2MediaDownloadGrant {
+  id                 String    @id @db.Uuid
+  workspaceId        String    @db.VarChar(128)
+  clientId           String    @db.VarChar(80)
+  artifactId         String    @db.VarChar(128)
+  tokenHash          String    @db.Char(64)
+  idempotencyKey     String    @db.VarChar(128)
+  requestFingerprint String    @db.Char(64)
+  status             String    @default("active") @db.VarChar(16)
+  expiresAt          DateTime  @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+  revokedAt          DateTime? @db.Timestamptz(3)
+
+  workspace V2Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  client    V2ApiClient     @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  artifact  V2MediaArtifact @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([workspaceId, clientId, idempotencyKey])
+  @@index([workspaceId, clientId, status, expiresAt])
+  @@index([workspaceId, artifactId, status])
+  @@map("media_download_grants")
 }
 
 model V2MediaArtifactManifest {

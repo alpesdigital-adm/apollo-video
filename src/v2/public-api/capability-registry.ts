@@ -1409,4 +1409,19 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     outputSchemaRef: 'apollo://schemas/media-upload-completed/v1', endpoint: { method: 'POST', path: '/v1/media/uploads/{uploadId}/complete' },
     toolName: 'apollo.media.uploads.complete', supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [200], idempotency: 'natural',
   },
+  {
+    id: 'apollo.artifacts.download-grants.issue', version: '1.0.0', title: 'Issue media artifact download grant',
+    description: 'Issues a short-lived signed download URL for one available workspace artifact.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['artifacts:read'],
+    inputSchemaRef: 'apollo://schemas/issue-media-download-grant-request/v1', outputSchemaRef: 'apollo://schemas/media-download-grant-issued/v1',
+    endpoint: { method: 'POST', path: '/v1/artifacts/{artifactId}/download-grants' }, toolName: 'apollo.artifacts.download-grants.issue',
+    supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [201], idempotency: 'required', requestBodyRequired: false,
+  },
+  {
+    id: 'apollo.artifacts.download-grants.revoke', version: '1.0.0', title: 'Revoke media artifact download grant',
+    description: 'Revokes one short-lived grant issued to the authenticated client.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['artifacts:read'],
+    outputSchemaRef: 'apollo://schemas/media-download-grant-revoked/v1', endpoint: { method: 'POST', path: '/v1/media/download-grants/{grantId}/revoke' },
+    toolName: 'apollo.artifacts.download-grants.revoke', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'natural',
+  },
 ])

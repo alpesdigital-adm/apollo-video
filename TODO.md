@@ -523,7 +523,7 @@
 - [x] Implementar `begin-upload` com kind, size, MIME e checksum esperado. Evidência F0-086: `POST /v1/media/uploads` exige scope e idempotency key, valida coerência kind/MIME, tamanho até 5 TB e SHA-256, persiste sessão workspace/client-scoped e retorna replay convergente sem expor storage.
 - [x] Gerar signed single/multipart sessions curtas com headers obrigatórios. Evidência F0-087: endpoint de sessão escolhe single até 100 MiB ou multipart de 64 MiB/até 10 mil partes, assina autorização HMAC limitada a workspace/client/upload/expiry e exige MIME + checksum em headers.
 - [x] Implementar resume, parts completion e verification antes do ingest. Evidência F0-088: receipts multipart são persistidos/substituídos por número, consulta retorna parts ausentes para resume e completion só converge para `verified` após conferência autoritativa exata de tamanho, MIME e SHA-256; nenhum ingest é iniciado por esta etapa.
-- [ ] Gerar download grants curtos por asset/artifact autorizado.
+- [x] Gerar download grants curtos por asset/artifact autorizado. Evidência F0-089: artifact disponível e workspace-scoped recebe grant HMAC de 30–900 segundos, vinculado ao client e idempotency key; banco retém somente hash do token, e revogação convergente invalida a autorização imediatamente.
 - [ ] Impedir storage path/URI permanente de virar identidade pública. Parcial F0-022: lease interna serializa apenas receipt seguro e paths/URLs vivem somente no `MaterializedRenderInput` em memória; faltam download grants e enforcement nos adapters futuros.
 - [ ] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado.
 
@@ -5205,4 +5205,27 @@ Regressões locais desta slice:
 - 7/7 testes focados de transferência aprovados;
 - contratos aprovados com 53 capabilities, 72 schemas, 93 examples e 47 paths;
 - schema v2 aprovado com 31 tabelas, 118 índices e 64 foreign keys;
+- typecheck e geração dos dois Prisma clients aprovados.
+
+### Slice F0-089 — Download grants curtos e revogáveis
+
+**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+
+Entregas:
+
+- emissão pública exige artifact disponível, scope `artifacts:read` e idempotency key;
+- TTL configurável entre 30 e 900 segundos, com padrão de cinco minutos;
+- assinatura HMAC vincula grant, workspace, client, artifact e expiração;
+- banco persiste somente hash do token, nunca bearer ou URL assinada;
+- replay idempotente reconstrói a mesma URL sem armazenar segredo;
+- revogação pública é client/workspace-scoped, convergente e imediatamente aplicada;
+- artifact ausente, em quarentena ou excluído não recebe grant;
+- URL pública contém apenas grant opaco e token efêmero, sem identidade de storage.
+
+Regressões locais desta slice:
+
+- 3/3 testes focados de emissão, replay, autorização e revogação aprovados;
+- 178/178 testes gerais aprovados;
+- contratos aprovados com 55 capabilities, 75 schemas, 96 examples e 49 paths;
+- schema v2 aprovado com 32 tabelas, 121 índices e 67 foreign keys;
 - typecheck e geração dos dois Prisma clients aprovados.
