@@ -2669,14 +2669,20 @@ test('authenticated public API manages projects, clients and artifact inspection
       `${baseUrl}/v1/operations/${renderOperation.data.operation.id}/cancel`,
       { method: 'POST', headers: { authorization } },
     )
-    const canceledOperationResponse = await cancelOperationRequest()
-    const canceledOperation = await canceledOperationResponse.json()
-    assert.equal(canceledOperationResponse.status, 200)
+    const canceledOperationResponses = await Promise.all([
+      cancelOperationRequest(),
+      cancelOperationRequest(),
+    ])
+    assert.deepEqual(canceledOperationResponses.map((response) => response.status), [200, 200])
+    const [canceledOperation, canceledConcurrentReplay] = await Promise.all(
+      canceledOperationResponses.map((response) => response.json()),
+    )
     assert.equal(canceledOperation.data.operation.status, 'canceled')
     assert.equal(canceledOperation.data.operation.phase, 'canceled')
     assert.equal(canceledOperation.data.operation.cancelable, false)
     assert.equal(canceledOperation.data.operation.retryable, false)
     assert.equal(typeof canceledOperation.data.operation.completedAt, 'string')
+    assert.deepEqual(canceledConcurrentReplay.data.operation, canceledOperation.data.operation)
     const canceledReplayResponse = await cancelOperationRequest()
     const canceledReplay = await canceledReplayResponse.json()
     assert.equal(canceledReplayResponse.status, 200)
@@ -2690,26 +2696,45 @@ test('authenticated public API manages projects, clients and artifact inspection
       `${baseUrl}/v1/operations/${renderOperation.data.operation.id}/retry`,
       { method: 'POST', headers: { authorization } },
     )
-    const retriedOperationResponse = await retryOperationRequest()
-    const retriedOperation = await retriedOperationResponse.json()
-    assert.equal(retriedOperationResponse.status, 200)
+    const retriedOperationResponses = await Promise.all([
+      retryOperationRequest(),
+      retryOperationRequest(),
+    ])
+    assert.deepEqual(retriedOperationResponses.map((response) => response.status), [200, 200])
+    const [retriedOperation, retriedConcurrentReplay] = await Promise.all(
+      retriedOperationResponses.map((response) => response.json()),
+    )
     assert.equal(retriedOperation.data.operation.status, 'queued')
     assert.equal(retriedOperation.data.operation.phase, 'queued')
     assert.equal(retriedOperation.data.operation.attempt, 0)
     assert.equal(retriedOperation.data.operation.cancelable, true)
     assert.equal('completedAt' in retriedOperation.data.operation, false)
+    assert.deepEqual(retriedConcurrentReplay.data.operation, retriedOperation.data.operation)
     const retriedReplayResponse = await retryOperationRequest()
     assert.deepEqual(
       (await retriedReplayResponse.json()).data.operation,
       retriedOperation.data.operation,
     )
+    const discardedCancelOperationResponse = await cancelOperationRequest()
+    assert.equal(discardedCancelOperationResponse.status, 200)
+    const recoveredCancelOperationResponse = await cancelOperationRequest()
+    const recoveredCancelOperation = await recoveredCancelOperationResponse.json()
+    assert.equal(recoveredCancelOperationResponse.status, 200)
+    assert.equal(recoveredCancelOperation.data.operation.status, 'canceled')
+    const discardedRetryOperationResponse = await retryOperationRequest()
+    assert.equal(discardedRetryOperationResponse.status, 200)
+    const recoveredRetryOperationResponse = await retryOperationRequest()
+    const recoveredRetryOperation = await recoveredRetryOperationResponse.json()
+    assert.equal(recoveredRetryOperationResponse.status, 200)
+    assert.equal(recoveredRetryOperation.data.operation.status, 'queued')
+    assert.equal(recoveredRetryOperation.data.operation.attempt, 0)
     const canceledReadResponse = await fetch(
       `${baseUrl}/v1/operations/${renderOperation.data.operation.id}`,
       { headers: { authorization } },
     )
     assert.deepEqual(
       (await canceledReadResponse.json()).data.operation,
-      retriedOperation.data.operation,
+      recoveredRetryOperation.data.operation,
     )
     const discardedSecondRenderOperationResponse = await enqueueRender(
       'render-operation-approved-2',
@@ -2881,15 +2906,30 @@ test('authenticated public API manages projects, clients and artifact inspection
       assert.equal(invalidDeadLetterResponse.status, 422)
       assert.equal((await invalidDeadLetterResponse.json()).error.code, 'INVALID_ARGUMENT')
     }
-    const retriedDeadLetterResponse = await fetch(
+    const retryDeadLetterRequest = () => fetch(
       `${baseUrl}/v1/operations/${firstDeadLetterPage.data.operations[0].id}/retry`,
       { method: 'POST', headers: { authorization } },
     )
-    const retriedDeadLetter = await retriedDeadLetterResponse.json()
-    assert.equal(retriedDeadLetterResponse.status, 200)
+    const retriedDeadLetterResponses = await Promise.all([
+      retryDeadLetterRequest(),
+      retryDeadLetterRequest(),
+    ])
+    assert.deepEqual(retriedDeadLetterResponses.map((response) => response.status), [200, 200])
+    const [retriedDeadLetter, retriedDeadLetterConcurrentReplay] = await Promise.all(
+      retriedDeadLetterResponses.map((response) => response.json()),
+    )
     assert.equal(retriedDeadLetter.data.operation.status, 'retrying')
     assert.equal(retriedDeadLetter.data.operation.attempt, 1)
     assert.equal(retriedDeadLetter.data.operation.maxAttempts, 2)
+    assert.deepEqual(
+      retriedDeadLetterConcurrentReplay.data.operation,
+      retriedDeadLetter.data.operation,
+    )
+    const recoveredDeadLetterRetryResponse = await retryDeadLetterRequest()
+    assert.deepEqual(
+      (await recoveredDeadLetterRetryResponse.json()).data.operation,
+      retriedDeadLetter.data.operation,
+    )
     const remainingDeadLetterResponse = await fetch(
       `${baseUrl}/v1/operations/dead-letter?targetId=${derivedArtifactId}`,
       { headers: { authorization } },

@@ -506,7 +506,7 @@
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
-- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061/F0-062/F0-063/F0-064/F0-065/F0-066/F0-067/F0-068/F0-069: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação e rotação de credenciais de clientes de API cobrem os mesmos interleavings preservando divulgação one-shot do token e overlap único; cadastros de endpoint e subscription de webhook cobrem convergência dos recursos, payload cifrado e filtros canônicos; provisionamento pendente comprova divulgação one-shot concorrente e replay redigido; enqueue de render cobre operação e contexto privado únicos; autorização de materialização cobre receipt e decisões únicos; replays individual e por evento cobrem ampliação/lote únicos e recuperação após resposta perdida; os demais commands externos continuam abertos.
+- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061/F0-062/F0-063/F0-064/F0-065/F0-066/F0-067/F0-068/F0-069/F0-070: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação e rotação de credenciais de clientes de API cobrem os mesmos interleavings preservando divulgação one-shot do token e overlap único; cadastros de endpoint e subscription de webhook cobrem convergência dos recursos, payload cifrado e filtros canônicos; provisionamento pendente comprova divulgação one-shot concorrente e replay redigido; enqueue de render cobre operação e contexto privado únicos; autorização de materialização cobre receipt e decisões únicos; replays individual e por evento cobrem ampliação/lote únicos e recuperação após resposta perdida; cancelamento e retry de operações públicas cobrem transição natural única, recuperação e ampliação única de `maxAttempts`; os demais commands externos continuam abertos.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
@@ -4623,7 +4623,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-069 — Concorrência e resposta perdida no replay de webhook por evento
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+**Status:** publicado em 16 de julho de 2026 no commit `9b07a19`; CI hospedada `29499541045` aprovada integralmente.
 
 Entregas:
 
@@ -4650,6 +4650,36 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- confirmação PostgreSQL fica para a CI hospedada da publicação;
+- concorrência, snapshot e recuperação após resposta perdida foram confirmados no PostgreSQL pela CI hospedada da publicação;
 - o lote permanece limitado a 100 deliveries por request;
 - replay por intervalo continua reservado para uma operação durável futura.
+
+### Slice F0-070 — Concorrência e resposta perdida em cancelamento/retry de operações
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+
+Entregas:
+
+- duas chamadas HTTP simultâneas de cancelamento convergem para a mesma operação `canceled`;
+- duas chamadas HTTP simultâneas de retry convergem para a mesma operação reaberta;
+- repetir cancelamento ou retry após descartar a primeira resposta não reaplica a transição;
+- retry concorrente de operação em dead-letter amplia `maxAttempts` uma única vez;
+- leitura posterior confirma o único estado persistido, sem depender de qual request venceu;
+- ADR-059 formaliza a idempotência natural desses commands e seus limites.
+
+Regressões e evidências locais:
+
+- jornada HTTP real passou cinco execuções SQLite consecutivas com cancelamento e retry simultâneos;
+- cada execução cobriu também perda de resposta e retry concorrente de operação esgotada;
+- suíte geral permanece verde com 133 testes;
+- contratos públicos permanecem compatíveis com 47 capabilities, 61 schemas, 82 examples e 41 paths;
+- schema v2 permanece válido com 28 tabelas, 110 índices e 59 chaves estrangeiras;
+- integrações de mídia, Prisma, artefatos, operações, webhooks e render real permanecem verdes;
+- build de produção, typecheck e bundle Remotion permanecem verdes;
+- auditorias da raiz e do Remotion permanecem sem vulnerabilidades conhecidas.
+
+Limites explícitos desta slice:
+
+- confirmação PostgreSQL fica para a CI hospedada da publicação;
+- idempotência natural garante efeito único, não um snapshot histórico se um worker avançar o estado entre requests;
+- a matriz dos demais commands externos permanece aberta.

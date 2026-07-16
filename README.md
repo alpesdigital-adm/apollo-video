@@ -135,6 +135,10 @@ o estado persistido invalida a lease e impede publicação pela tentativa antiga
 Operações `failed` ou `canceled` podem ser reabertas por
 `POST /v1/operations/{operationId}/retry` com o scope `operations:retry`; uma
 operação bem-sucedida nunca é reaberta.
+Cancelamento e retry possuem idempotência natural: chamadas simultâneas convergem
+para uma única transição, e repetir após uma resposta perdida não cancela nem
+reabre a operação novamente. Em operações que esgotaram as tentativas, o retry
+manual amplia `maxAttempts` apenas uma vez.
 Operações do workspace podem ser descobertas por `GET /v1/operations`, usando
 `limit`, cursor `after` e filtros exatos de `status`, `type` e `targetId`. O
 cursor é opaco, estável e só pode continuar a mesma combinação de workspace e
