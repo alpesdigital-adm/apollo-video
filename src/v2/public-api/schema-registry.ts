@@ -1738,6 +1738,34 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('begin-media-upload-request', 1, 'Begin media upload request', {
+    type: 'object', additionalProperties: false,
+    required: ['kind', 'size', 'mimeType', 'checksum'],
+    properties: {
+      kind: { enum: ['video', 'audio', 'image'] },
+      size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' },
+      mimeType: { type: 'string', pattern: '^(video|audio|image)/[a-z0-9.+-]+$', maxLength: 160 },
+      checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    },
+  }),
+  defineSchema('media-upload-begun', 1, 'Media upload intent response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['upload', 'replayed'],
+      properties: {
+        upload: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'kind', 'size', 'mimeType', 'checksum', 'status', 'expiresAt', 'createdAt'],
+          properties: {
+            id: { type: 'string', format: 'uuid' }, kind: { enum: ['video', 'audio', 'image'] },
+            size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' },
+            mimeType: { type: 'string', maxLength: 160 }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            status: { const: 'pending-session' }, expiresAt: dateTimeSchema, createdAt: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',
     successSchema({
       type: 'object',

@@ -64,6 +64,9 @@ const coverage = Object.freeze({
   'apollo.projects.create': {
     mode: 'durable-covered', evidence: 'F0-060',
   },
+  'apollo.media.uploads.begin': {
+    mode: 'durable-covered', evidence: 'F0-086',
+  },
   'apollo.clients.create': {
     mode: 'durable-covered', evidence: 'F0-061',
   },
@@ -102,7 +105,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    21,
+    22,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

@@ -155,6 +155,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one empty draft project with no provider or external side effect.',
     },
+    'apollo.media.uploads.begin': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Registers one checksum-bound upload intent without transferring bytes or starting ingest.',
+    },
     'apollo.clients.create': {
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Creates a new machine identity with workspace-scoped API permissions.',

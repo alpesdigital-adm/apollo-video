@@ -62,31 +62,32 @@ model V2Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  projects              V2Project[]
-  snapshots             V2ProjectSnapshot[]
-  apiClients            V2ApiClient[]
-  idempotencyRecords    V2IdempotencyRecord[]
-  mediaArtifacts        V2MediaArtifact[]
-  mediaManifests        V2MediaArtifactManifest[]
-  mediaLineage          V2MediaArtifactLineage[]
-  recipeParameters      V2RecipeParameterPayload[]
-  renderInputs          V2RenderInputPayload[]
-  rightsSnapshots       V2AssetRightsSnapshot[]
-  materializations      V2MaterializationAuthorization[]
-  assetUseDecisions     V2AssetUseDecision[]
-  publicOperations      V2PublicOperation[]
-  renderOperations      V2ArtifactRenderOperation[]
-  publicEventOutbox     V2PublicEventOutbox[]
-  webhookEndpoints      V2WebhookEndpoint[]
-  webhookSecrets        V2WebhookSigningSecret[]
-  webhookSubscriptions  V2WebhookSubscription[]
-  webhookSigningSecretPayloads V2WebhookSigningSecretPayload[]
-  webhookSigningSecretRotations V2WebhookSigningSecretRotation[]
-  webhookDeliveries     V2WebhookDelivery[]
-  webhookAttempts       V2WebhookDeliveryAttempt[]
-  webhookChallenges     V2WebhookVerificationChallenge[]
+  projects                        V2Project[]
+  snapshots                       V2ProjectSnapshot[]
+  apiClients                      V2ApiClient[]
+  idempotencyRecords              V2IdempotencyRecord[]
+  mediaArtifacts                  V2MediaArtifact[]
+  mediaUploads                    V2MediaUpload[]
+  mediaManifests                  V2MediaArtifactManifest[]
+  mediaLineage                    V2MediaArtifactLineage[]
+  recipeParameters                V2RecipeParameterPayload[]
+  renderInputs                    V2RenderInputPayload[]
+  rightsSnapshots                 V2AssetRightsSnapshot[]
+  materializations                V2MaterializationAuthorization[]
+  assetUseDecisions               V2AssetUseDecision[]
+  publicOperations                V2PublicOperation[]
+  renderOperations                V2ArtifactRenderOperation[]
+  publicEventOutbox               V2PublicEventOutbox[]
+  webhookEndpoints                V2WebhookEndpoint[]
+  webhookSecrets                  V2WebhookSigningSecret[]
+  webhookSubscriptions            V2WebhookSubscription[]
+  webhookSigningSecretPayloads    V2WebhookSigningSecretPayload[]
+  webhookSigningSecretRotations   V2WebhookSigningSecretRotation[]
+  webhookDeliveries               V2WebhookDelivery[]
+  webhookAttempts                 V2WebhookDeliveryAttempt[]
+  webhookChallenges               V2WebhookVerificationChallenge[]
   webhookEndpointActivationLeases V2WebhookEndpointActivationLease[]
-  webhookReplayReceipts V2WebhookReplayReceipt[]
+  webhookReplayReceipts           V2WebhookReplayReceipt[]
 
   @@map("v2_workspaces")
 }
@@ -107,6 +108,7 @@ model V2ApiClient {
   workspace                   V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   credentials                 V2ApiCredential[]
   operations                  V2PublicOperation[]
+  mediaUploads                V2MediaUpload[]
   createdWebhookEndpoints     V2WebhookEndpoint[]     @relation("V2WebhookEndpointCreator")
   createdWebhookSubscriptions V2WebhookSubscription[] @relation("V2WebhookSubscriptionCreator")
 
@@ -134,6 +136,31 @@ model V2ApiCredential {
   @@index([workspaceId, status])
   @@index([expiresAt])
   @@map("v2_api_credentials")
+}
+
+model V2MediaUpload {
+  id                 String   @id
+  workspaceId        String
+  clientId           String
+  kind               String
+  byteSize           BigInt
+  mimeType           String
+  expectedSha256     String
+  status             String   @default("pending-session")
+  idempotencyKey     String
+  requestFingerprint String
+  expiresAt          DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  client    V2ApiClient @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, clientId, idempotencyKey])
+  @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@index([workspaceId, status, expiresAt])
+  @@map("media_uploads")
 }
 
 model V2Project {
@@ -572,13 +599,13 @@ model V2WebhookEndpoint {
   suspendedAt       DateTime?
   revokedAt         DateTime?
 
-  workspace      V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  createdBy      V2ApiClient                      @relation("V2WebhookEndpointCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  secrets        V2WebhookSigningSecret[]
-  subscriptions  V2WebhookSubscription[]
-  challenges     V2WebhookVerificationChallenge[]
-  activationLease V2WebhookEndpointActivationLease?
-  replayReceipts V2WebhookReplayReceipt[]
+  workspace              V2Workspace                       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy              V2ApiClient                       @relation("V2WebhookEndpointCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  secrets                V2WebhookSigningSecret[]
+  subscriptions          V2WebhookSubscription[]
+  challenges             V2WebhookVerificationChallenge[]
+  activationLease        V2WebhookEndpointActivationLease?
+  replayReceipts         V2WebhookReplayReceipt[]
   signingSecretRotations V2WebhookSigningSecretRotation[]
 
   @@unique([id, workspaceId])
@@ -601,8 +628,8 @@ model V2WebhookSigningSecret {
   usableUntil DateTime?
   revokedAt   DateTime?
 
-  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  endpoint  V2WebhookEndpoint @relation(fields: [endpointId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  endpoint  V2WebhookEndpoint              @relation(fields: [endpointId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   payload   V2WebhookSigningSecretPayload?
 
   @@unique([id, workspaceId])
@@ -636,17 +663,17 @@ model V2WebhookSigningSecretPayload {
 }
 
 model V2WebhookSigningSecretRotation {
-  id                  String   @id
+  id                  String    @id
   workspaceId         String
   endpointId          String
   requestedByClientId String
   previousSecretId    String
   candidateSecretId   String
   candidateVersion    Int
-  algorithm           String   @default("hmac-sha256")
-  keyRef              String   @unique
+  algorithm           String    @default("hmac-sha256")
+  keyRef              String    @unique
   fingerprint         String
-  status              String   @default("staged")
+  status              String    @default("staged")
   overlapSeconds      Int
   payloadAlgorithm    String?
   payloadKeyId        String?
@@ -654,7 +681,7 @@ model V2WebhookSigningSecretRotation {
   payloadCiphertext   String?
   payloadAuthTag      String?
   baseRevision        String
-  createdAt           DateTime @default(now())
+  createdAt           DateTime  @default(now())
   expiresAt           DateTime
   activatedAt         DateTime?
   overlapUntil        DateTime?
@@ -813,16 +840,16 @@ model V2WebhookReplayReceipt {
 }
 
 model V2WebhookWorkerShardLease {
-  id               String   @id
-  poolId           String
-  shardIndex       Int
-  shardCount       Int
-  leaseOwner       String
-  leaseTokenHash   String
-  heartbeatAt      DateTime
-  leaseExpiresAt   DateTime
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id             String   @id
+  poolId         String
+  shardIndex     Int
+  shardCount     Int
+  leaseOwner     String
+  leaseTokenHash String
+  heartbeatAt    DateTime
+  leaseExpiresAt DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@unique([poolId, shardIndex])
   @@unique([poolId, leaseOwner])

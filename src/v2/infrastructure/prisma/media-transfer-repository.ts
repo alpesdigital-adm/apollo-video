@@ -1,0 +1,43 @@
+import type { PrismaClient } from '@prisma/client'
+
+import type { MediaTransferRepository } from '../../application/ports/media-transfer-repository.ts'
+import { DomainError } from '../../domain/errors.ts'
+import { createMediaUpload, type MediaUploadKind, type MediaUploadStatus } from '../../domain/media-transfer.ts'
+
+export class PrismaMediaTransferRepository implements MediaTransferRepository {
+  constructor(private readonly client: PrismaClient) {}
+
+  async createOrReplayUpload(record: Parameters<MediaTransferRepository['createOrReplayUpload']>[0]) {
+    return this.client.$transaction(async (tx) => {
+      const existing = await tx.v2MediaUpload.findUnique({
+        where: { workspaceId_clientId_idempotencyKey: {
+          workspaceId: record.upload.workspaceId, clientId: record.upload.clientId, idempotencyKey: record.idempotencyKey,
+        } },
+      })
+      if (existing) {
+        if (existing.requestFingerprint !== record.requestFingerprint) {
+          throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency-Key was already used with a different upload intent')
+        }
+        return { upload: createMediaUpload({
+          id: existing.id, workspaceId: existing.workspaceId, clientId: existing.clientId,
+          kind: existing.kind as MediaUploadKind, byteSize: existing.byteSize.toString(), mimeType: existing.mimeType,
+          expectedSha256: existing.expectedSha256, status: existing.status as MediaUploadStatus,
+          expiresAt: existing.expiresAt.toISOString(), createdAt: existing.createdAt.toISOString(),
+        }), replayed: true }
+      }
+      const created = await tx.v2MediaUpload.create({ data: {
+        id: record.upload.id, workspaceId: record.upload.workspaceId, clientId: record.upload.clientId,
+        kind: record.upload.kind, byteSize: BigInt(record.upload.byteSize), mimeType: record.upload.mimeType,
+        expectedSha256: record.upload.expectedSha256, status: record.upload.status,
+        idempotencyKey: record.idempotencyKey, requestFingerprint: record.requestFingerprint,
+        expiresAt: new Date(record.upload.expiresAt), createdAt: new Date(record.upload.createdAt),
+      } })
+      return { upload: createMediaUpload({
+        id: created.id, workspaceId: created.workspaceId, clientId: created.clientId,
+        kind: created.kind as MediaUploadKind, byteSize: created.byteSize.toString(), mimeType: created.mimeType,
+        expectedSha256: created.expectedSha256, status: created.status as MediaUploadStatus,
+        expiresAt: created.expiresAt.toISOString(), createdAt: created.createdAt.toISOString(),
+      }), replayed: false }
+    })
+  }
+}

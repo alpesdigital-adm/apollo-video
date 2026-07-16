@@ -520,7 +520,7 @@
 
 ### F0.041 — Transferência externa de mídia [FR-247]
 
-- [ ] Implementar `begin-upload` com kind, size, MIME e checksum esperado.
+- [x] Implementar `begin-upload` com kind, size, MIME e checksum esperado. Evidência F0-086: `POST /v1/media/uploads` exige scope e idempotency key, valida coerência kind/MIME, tamanho até 5 TB e SHA-256, persiste sessão workspace/client-scoped e retorna replay convergente sem expor storage.
 - [ ] Gerar signed single/multipart sessions curtas com headers obrigatórios.
 - [ ] Implementar resume, parts completion e verification antes do ingest.
 - [ ] Gerar download grants curtos por asset/artifact autorizado.
@@ -5139,3 +5139,26 @@ Regressões locais desta slice:
 - 168/168 testes gerais aprovados;
 - 3/3 jornadas E2E do agente aprovadas;
 - typecheck aprovado com a API atual do AI SDK instalada.
+
+### Slice F0-086 — Begin-upload durável e público
+
+**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+
+Entregas:
+
+- capability `apollo.media.uploads.begin` e endpoint `POST /v1/media/uploads`;
+- input exige kind, size decimal, MIME e checksum SHA-256 esperado;
+- coerência kind/MIME, limite de 5 TB, TTL de 15 minutos e formato de checksum falham antes da persistência;
+- sessão inicia em `pending-session` sem URL/path/credential de storage;
+- idempotência é vinculada a workspace, client, key e fingerprint do intent;
+- replay idêntico retorna o registro original; payload divergente é conflito;
+- tabela `media_uploads` possui constraints, relações e índices de expiry/status;
+- adapters SQLite/Postgres compartilham o mesmo port de aplicação;
+- tool de agente é bounded e não transfere bytes nem inicia ingest.
+
+Regressões locais desta slice:
+
+- 170/170 testes gerais aprovados;
+- contratos aprovados com 49 capabilities, 67 schemas, 88 examples e 43 paths;
+- schema v2 aprovado com 30 tabelas, 116 índices e 63 foreign keys;
+- typecheck e geração dos dois Prisma clients aprovados.

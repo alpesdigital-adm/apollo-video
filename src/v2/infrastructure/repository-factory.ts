@@ -23,6 +23,7 @@ import type { ApiClientRepository } from '../application/ports/api-client-reposi
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
 import type { AssetRightsRepository } from '../application/ports/asset-rights-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
+import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
 import type { ProtectedRenderInputStore } from '../application/ports/protected-render-input-store.ts'
 import type { RenderInputAssetResolver } from '../application/ports/render-input-asset-resolver.ts'
@@ -73,6 +74,7 @@ import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaArtifactRenderCheckpointRepository } from './prisma/artifact-render-checkpoint-repository.ts'
 import { PrismaAssetRightsRepository } from './prisma/asset-rights-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
+import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
@@ -135,6 +137,10 @@ export function createMaterializationAuthorizationRepository(): MaterializationA
 
 export function createMediaArtifactQueryRepository(): MediaArtifactQueryRepository {
   return new PrismaMediaArtifactRepository(resolveV2Client())
+}
+
+export function createMediaTransferRepository(): MediaTransferRepository {
+  return new PrismaMediaTransferRepository(resolveV2Client())
 }
 
 export function createPublicOperationRepository(): PublicOperationRepository {

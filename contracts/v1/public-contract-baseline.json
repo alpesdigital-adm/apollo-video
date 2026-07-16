@@ -458,6 +458,32 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.media.uploads.begin": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "media:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/begin-media-upload-request/v1",
+      "outputSchemaRef": "apollo://schemas/media-upload-begun/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/media/uploads"
+      },
+      "toolName": "apollo.media.uploads.begin",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.operations.cancel": {
       "version": "1.0.0",
       "exposure": "public",
@@ -4399,6 +4425,38 @@
         }
       }
     },
+    "apollo://schemas/begin-media-upload-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "size",
+        "mimeType",
+        "checksum"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "video",
+            "audio",
+            "image"
+          ]
+        },
+        "size": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "mimeType": {
+          "type": "string",
+          "pattern": "^(video|audio|image)/[a-z0-9.+-]+$",
+          "maxLength": 160
+        },
+        "checksum": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
     "apollo://schemas/cancel-webhook-signing-secret-rotation-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -5463,6 +5521,91 @@
                   }
                 }
               ]
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/media-upload-begun/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "upload",
+            "replayed"
+          ],
+          "properties": {
+            "upload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "kind",
+                "size",
+                "mimeType",
+                "checksum",
+                "status",
+                "expiresAt",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "kind": {
+                  "enum": [
+                    "video",
+                    "audio",
+                    "image"
+                  ]
+                },
+                "size": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,15}$"
+                },
+                "mimeType": {
+                  "type": "string",
+                  "maxLength": 160
+                },
+                "checksum": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "status": {
+                  "const": "pending-session"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
             }
           }
         },
