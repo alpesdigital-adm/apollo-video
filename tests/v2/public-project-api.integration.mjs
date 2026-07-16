@@ -1900,11 +1900,25 @@ test('authenticated public API manages projects, clients and artifact inspection
       method: 'POST',
       headers: { authorization, 'idempotency-key': idempotencyKey },
     })
-    const webhookEventReplayResponse = await replayWebhookEventRequest(
-      'public-webhook-event-replay-1',
+    const webhookEventReplayConcurrentResponses = await Promise.all([
+      replayWebhookEventRequest('public-webhook-event-replay-1'),
+      replayWebhookEventRequest('public-webhook-event-replay-1'),
+    ])
+    assert.deepEqual(
+      webhookEventReplayConcurrentResponses.map((response) => response.status).sort(),
+      [200, 202],
     )
-    const webhookEventReplay = await webhookEventReplayResponse.json()
-    assert.equal(webhookEventReplayResponse.status, 202)
+    const webhookEventReplayConcurrentBodies = await Promise.all(
+      webhookEventReplayConcurrentResponses.map((response) => response.json()),
+    )
+    const webhookEventReplay = webhookEventReplayConcurrentBodies.find(
+      (body) => body.data.replayed === false,
+    )
+    const webhookEventReplayAgain = webhookEventReplayConcurrentBodies.find(
+      (body) => body.data.replayed === true,
+    )
+    assert.ok(webhookEventReplay)
+    assert.ok(webhookEventReplayAgain)
     assert.equal(webhookEventReplay.data.eventId, webhookReplayEventId)
     assert.equal(webhookEventReplay.data.replayed, false)
     assert.equal(webhookEventReplay.data.items.length, 1)
@@ -1912,11 +1926,6 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(webhookEventReplay.data.items[0].delivery.id, webhookReplayDeliveryId)
     assert.equal(webhookEventReplay.data.items[0].delivery.status, 'retry-scheduled')
     assert.equal('workspaceId' in webhookEventReplay.data.items[0].delivery, false)
-    const webhookEventReplayAgainResponse = await replayWebhookEventRequest(
-      'public-webhook-event-replay-1',
-    )
-    const webhookEventReplayAgain = await webhookEventReplayAgainResponse.json()
-    assert.equal(webhookEventReplayAgainResponse.status, 200)
     assert.equal(webhookEventReplayAgain.data.replayed, true)
     assert.deepEqual(webhookEventReplayAgain.data.items, webhookEventReplay.data.items)
     const duplicateEventReplayResponse = await replayWebhookEventRequest(
@@ -1927,6 +1936,30 @@ test('authenticated public API manages projects, clients and artifact inspection
       (await duplicateEventReplayResponse.json()).error.code,
       'WEBHOOK_EVENT_REPLAY_REJECTED',
     )
+
+    const eventReplayResetAt = new Date()
+    await client.v2WebhookDelivery.update({
+      where: { id: webhookReplayDeliveryId },
+      data: {
+        status: 'dead-lettered',
+        completedAt: eventReplayResetAt,
+        deadLetteredAt: eventReplayResetAt,
+        updatedAt: eventReplayResetAt,
+      },
+    })
+    const discardedEventReplayResponse = await replayWebhookEventRequest(
+      'public-webhook-event-replay-loss-1',
+    )
+    assert.equal(discardedEventReplayResponse.status, 202)
+    const recoveredEventReplayResponse = await replayWebhookEventRequest(
+      'public-webhook-event-replay-loss-1',
+    )
+    const recoveredEventReplay = await recoveredEventReplayResponse.json()
+    assert.equal(recoveredEventReplayResponse.status, 200)
+    assert.equal(recoveredEventReplay.data.replayed, true)
+    assert.equal(recoveredEventReplay.data.eventId, webhookReplayEventId)
+    assert.equal(recoveredEventReplay.data.items.length, 1)
+    assert.equal(recoveredEventReplay.data.items[0].status, 'scheduled')
 
     const revokeEndpointResponse = await setWebhookEndpointStatus(
       'revoked',

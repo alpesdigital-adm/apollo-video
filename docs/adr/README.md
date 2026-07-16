@@ -59,3 +59,4 @@ Estados usados:
 - [ADR-055 — Concorrência no enqueue durável de render](./ADR-055-concurrent-render-enqueue.md)
 - [ADR-056 — Concorrência na autorização de materialização](./ADR-056-concurrent-materialization-authorization.md)
 - [ADR-057 — Concorrência no replay de webhook delivery](./ADR-057-concurrent-webhook-delivery-replay.md)
+- [ADR-058 — Concorrência no replay de webhook por evento](./ADR-058-concurrent-webhook-event-replay.md)

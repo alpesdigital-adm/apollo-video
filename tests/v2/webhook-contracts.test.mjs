@@ -94,6 +94,7 @@ import { PrismaWebhookSigningSecretProvider } from '../../src/v2/infrastructure/
 import { PrismaWebhookEndpointCreationRepository } from '../../src/v2/infrastructure/prisma/webhook-endpoint-creation-repository.ts'
 import { PrismaWebhookSubscriptionCreationRepository } from '../../src/v2/infrastructure/prisma/webhook-subscription-creation-repository.ts'
 import { PrismaWebhookDeliveryRepository } from '../../src/v2/infrastructure/prisma/webhook-delivery-repository.ts'
+import { PrismaWebhookEventReplayRepository } from '../../src/v2/infrastructure/prisma/webhook-event-replay-repository.ts'
 import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
 import {
   createWebhookSigningSecretProtector,
@@ -1991,6 +1992,35 @@ test('webhook event replay service binds the exact event and bounded batch into 
     () => replayWebhookEventService({ replays: {}, maxDeliveries: 101 }),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
+})
+
+test('webhook event replay retries serialization conflicts before failing explicitly', async () => {
+  let attempts = 0
+  const repository = new PrismaWebhookEventReplayRepository({
+    async $transaction() {
+      attempts += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+
+  await assert.rejects(
+    () => repository.replayEvent({
+      idempotencyId: '00000000-0000-4000-8000-000000000853',
+      workspaceId: 'workspace-1',
+      clientId: 'client-1',
+      idempotencyKey: 'event-replay-serialization-retry-1',
+      requestFingerprint: 'f'.repeat(64),
+      eventId: '00000000-0000-4000-8000-000000000854',
+      requestedAt: '2026-07-16T08:03:00.000Z',
+      nextAttemptAt: '2026-07-16T08:03:00.001Z',
+      expiresAt: '2026-07-17T08:03:00.000Z',
+      maxDeliveries: 100,
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
 })
 
 test('webhook filters match event type and optional resource exactly', () => {

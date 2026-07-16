@@ -1,9 +1,10 @@
-import type { PrismaClient, V2WebhookDelivery } from '@prisma/client'
+import { Prisma, type PrismaClient, type V2WebhookDelivery } from '@prisma/client'
 
 import type {
   WebhookEventReplayItem,
   WebhookEventReplayItemStatus,
   WebhookEventReplayRepository,
+  WebhookEventReplayResult,
 } from '../../application/ports/webhook-event-replay-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
@@ -24,6 +25,10 @@ const ITEM_STATUSES: readonly WebhookEventReplayItemStatus[] = [
 
 function isUniqueConstraintError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
+}
+
+function isSerializationConflict(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
 }
 
 function persistenceConflict(message: string): never {
@@ -104,7 +109,10 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
     this.client = client
   }
 
-  async replayEvent(command: Parameters<WebhookEventReplayRepository['replayEvent']>[0]) {
+  async replayEvent(
+    command: Parameters<WebhookEventReplayRepository['replayEvent']>[0],
+    serializationAttempt = 1,
+  ): Promise<Readonly<WebhookEventReplayResult> | null> {
     const requestedAt = new Date(command.requestedAt)
     const nextAttemptAt = new Date(command.nextAttemptAt)
     const expiresAt = new Date(command.expiresAt)
@@ -260,8 +268,17 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
           },
         })
         return Object.freeze({ ...snapshot, replayed: false })
-      })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
+      if (isSerializationConflict(error)) {
+        if (serializationAttempt < 3) {
+          return this.replayEvent(command, serializationAttempt + 1)
+        }
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Webhook event replay conflicted with another transaction',
+        )
+      }
       if (isUniqueConstraintError(error)) {
         const existing = await this.client.v2IdempotencyRecord.findUnique({ where: key })
         if (existing && existing.expiresAt > requestedAt) return readReplay(existing)
