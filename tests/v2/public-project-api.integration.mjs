@@ -2486,19 +2486,33 @@ test('authenticated public API manages projects, clients and artifact inspection
         headers: { authorization, 'content-type': 'application/json' },
         body: JSON.stringify(approvedRightsRequest),
       })
-    const setRightsResponse = await setRights()
-    const setRightsResult = await setRightsResponse.json()
-    assert.equal(setRightsResponse.status, 200)
+    const setRightsResponses = await Promise.all([setRights(), setRights()])
+    assert.deepEqual(setRightsResponses.map((response) => response.status), [200, 200])
+    const setRightsBodies = await Promise.all(setRightsResponses.map((response) => response.json()))
+    const setRightsResult = setRightsBodies.find((body) => body.data.replayed === false)
+    const concurrentRightsReplay = setRightsBodies.find((body) => body.data.replayed === true)
+    assert.ok(setRightsResult)
+    assert.ok(concurrentRightsReplay)
     assert.equal(setRightsResult.data.replayed, false)
     assert.equal(setRightsResult.data.rights.status, 'approved')
     assert.equal(setRightsResult.data.rights.sequence, 1)
     assert.equal(setRightsResult.data.rights.snapshotHash.length, 64)
+    assert.equal(concurrentRightsReplay.data.rights.id, setRightsResult.data.rights.id)
+    assert.equal(concurrentRightsReplay.data.rights.sequence, 1)
 
-    const replayRightsResponse = await setRights()
-    const replayRights = await replayRightsResponse.json()
-    assert.equal(replayRightsResponse.status, 200)
+    const discardedRightsResponse = await setRights()
+    assert.equal(discardedRightsResponse.status, 200)
+    const recoveredRightsResponse = await setRights()
+    const replayRights = await recoveredRightsResponse.json()
+    assert.equal(recoveredRightsResponse.status, 200)
     assert.equal(replayRights.data.replayed, true)
     assert.equal(replayRights.data.rights.id, setRightsResult.data.rights.id)
+    const storedRightsArtifact = await client.v2MediaArtifact.findUniqueOrThrow({
+      where: { id: sourceArtifactId },
+      select: { rightsRevision: true, currentRightsSnapshotId: true },
+    })
+    assert.equal(storedRightsArtifact.rightsRevision, 1)
+    assert.equal(storedRightsArtifact.currentRightsSnapshotId, setRightsResult.data.rights.id)
 
     const currentRightsResponse = await fetch(
       `${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`,

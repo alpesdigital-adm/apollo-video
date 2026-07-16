@@ -1,4 +1,4 @@
-import type { PrismaClient, V2AssetRightsSnapshot } from '@prisma/client'
+import { Prisma, type PrismaClient, type V2AssetRightsSnapshot } from '@prisma/client'
 
 import type {
   AssetRightsRecord,
@@ -17,6 +17,10 @@ import { DomainError } from '../../domain/errors.ts'
 
 function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
+}
+
+function isSerializationConflict(error: unknown): error is { code: 'P2034' } {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
 }
 
 function parseStringArray(value: string | null, field: string): readonly string[] | undefined {
@@ -196,7 +200,11 @@ function rowData(snapshot: AssetRightsSnapshot, sequence: number) {
 }
 
 export class PrismaAssetRightsRepository implements AssetRightsRepository {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) {
+    this.client = client
+  }
 
   async findCurrent(
     workspaceId: string,
@@ -234,7 +242,10 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
     )
   }
 
-  async setCurrent(prototype: AssetRightsSnapshot): Promise<SetAssetRightsResult> {
+  async setCurrent(
+    prototype: AssetRightsSnapshot,
+    serializationAttempt = 1,
+  ): Promise<SetAssetRightsResult> {
     try {
       return await this.client.$transaction(async (transaction) => {
         const artifact = await transaction.v2MediaArtifact.findFirst({
@@ -304,8 +315,17 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
           data: { currentRightsSnapshotId: created.id },
         })
         return { artifactId: artifact.id, snapshot: hydrateRights(created), replayed: false }
-      })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
+      if (isSerializationConflict(error)) {
+        if (serializationAttempt < 3) {
+          return this.setCurrent(prototype, serializationAttempt + 1)
+        }
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Asset rights update conflicted with another transaction',
+        )
+      }
       if (isUniqueConstraintError(error)) {
         const existing = await this.client.v2AssetRightsSnapshot.findUnique({
           where: {

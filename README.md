@@ -99,6 +99,12 @@ isolada por workspace. A gravação é transacional e idempotente pela combinaç
 de canonical key, identidade imutável do conteúdo e `manifestHash`; source
 ausente ou divergente desfaz toda a operação.
 
+Declarações de direitos usam snapshots imutáveis e endereçados pelo hash do
+conteúdo. O `PUT /v1/artifacts/{artifactId}/rights` é serializável: requests
+simultâneos com o mesmo draft convergem para um snapshot, uma sequência e uma
+única revisão do artifact. Conflitos de banco são repetidos até três vezes; uma
+resposta perdida pode ser recuperada sem criar nova revisão.
+
 A autorização pública de materialização também é serializável. Duas avaliações
 simultâneas com artifact, manifest, política de uso e chave idênticos convergem
 para uma autorização e um conjunto de decisões. Se a resposta for perdida, o

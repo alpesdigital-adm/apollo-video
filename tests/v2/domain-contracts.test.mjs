@@ -57,6 +57,7 @@ import { createMaterializationAuthorization } from '../../src/v2/domain/material
 import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from '../../src/v2/infrastructure/prisma/materialization-authorization-repository.ts'
+import { PrismaAssetRightsRepository } from '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
 import { compileApolloVideoRenderProps } from '../../src/v2/application/compile-apollo-video-render-props.ts'
 import { renderAuthorizedInputService } from '../../src/v2/application/render-authorized-input.ts'
 import {
@@ -1164,6 +1165,38 @@ test('asset rights and consent are immutable, content-addressed and fail closed'
     ).reasonCodes,
     ['RIGHTS_MISSING'],
   )
+})
+
+test('asset rights persistence retries serialization conflicts before failing explicitly', async () => {
+  let attempts = 0
+  const repository = new PrismaAssetRightsRepository({
+    async $transaction() {
+      attempts += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+  const prototype = createAssetRightsSnapshot({
+    id: 'rights-serialization-conflict-1',
+    workspaceId: 'workspace-1',
+    artifactId: 'artifact-serialization-conflict-1',
+    sequence: 1,
+    draft: {
+      status: 'approved',
+      allowedUses: ['paid-ad'],
+      prohibitedUses: [],
+      consent: { status: 'not-required', allowedUses: [] },
+    },
+    createdBy: { type: 'api-client', id: 'client-1' },
+    createdAt: '2026-07-16T14:00:00.000Z',
+  })
+
+  await assert.rejects(
+    () => repository.setCurrent(prototype),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
 })
 
 test('materialization authorization evaluates every RenderInput asset and records a bounded decision', async () => {
