@@ -88,6 +88,7 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
 
   async createOrReplay(
     bundle: Readonly<WebhookEndpointCreationBundle>,
+    serializationAttempt = 1,
   ): Promise<Readonly<WebhookEndpointCreationResult>> {
     const { endpoint: candidate, secret: signingSecret, secretPayload, idempotency } = bundle
     if (
@@ -202,6 +203,9 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
       }, { isolationLevel: 'Serializable' })
     } catch (error) {
       if (prismaError(error, 'P2034')) {
+        if (serializationAttempt < 3) {
+          return this.createOrReplay(bundle, serializationAttempt + 1)
+        }
         throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook endpoint creation must be retried')
       }
       if (prismaError(error, 'P2002')) {

@@ -980,12 +980,25 @@ test('authenticated public API manages projects, clients and artifact inspection
       },
     )
     const createEndpointBody = { url: 'https://created-hooks.example.com/apollo' }
-    const createEndpointResponse = await createWebhookEndpointRequest(
-      'public-endpoint-create-1',
-      createEndpointBody,
+    const createEndpointConcurrentResponses = await Promise.all([
+      createWebhookEndpointRequest('public-endpoint-create-1', createEndpointBody),
+      createWebhookEndpointRequest('public-endpoint-create-1', createEndpointBody),
+    ])
+    assert.deepEqual(
+      createEndpointConcurrentResponses.map((response) => response.status).sort(),
+      [200, 201],
     )
-    const createdEndpoint = await createEndpointResponse.json()
-    assert.equal(createEndpointResponse.status, 201)
+    const createEndpointConcurrentBodies = await Promise.all(
+      createEndpointConcurrentResponses.map((response) => response.json()),
+    )
+    const createdEndpoint = createEndpointConcurrentBodies.find(
+      (body) => body.data.replayed === false,
+    )
+    const replayedEndpoint = createEndpointConcurrentBodies.find(
+      (body) => body.data.replayed === true,
+    )
+    assert.ok(createdEndpoint)
+    assert.ok(replayedEndpoint)
     assert.equal(createdEndpoint.data.replayed, false)
     assert.equal(createdEndpoint.data.endpoint.status, 'pending-verification')
     assert.equal(createdEndpoint.data.endpoint.destinationOrigin, 'https://created-hooks.example.com')
@@ -993,12 +1006,6 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(JSON.stringify(createdEndpoint).includes('keyRef'), false)
     assert.equal(JSON.stringify(createdEndpoint).includes('ciphertext'), false)
     assert.equal(JSON.stringify(createdEndpoint).includes('workspaceId'), false)
-    const replayEndpointResponse = await createWebhookEndpointRequest(
-      'public-endpoint-create-1',
-      createEndpointBody,
-    )
-    const replayedEndpoint = await replayEndpointResponse.json()
-    assert.equal(replayEndpointResponse.status, 200)
     assert.equal(replayedEndpoint.data.replayed, true)
     assert.equal(replayedEndpoint.data.endpoint.id, createdEndpoint.data.endpoint.id)
     const mismatchedEndpointResponse = await createWebhookEndpointRequest(
@@ -1013,6 +1020,48 @@ test('authenticated public API manages projects, clients and artifact inspection
     )
     assert.equal(duplicateEndpointResponse.status, 409)
     assert.equal((await duplicateEndpointResponse.json()).error.code, 'WEBHOOK_ENDPOINT_ALREADY_EXISTS')
+
+    const responseLossEndpointBody = {
+      url: 'https://response-loss-hooks.example.com/apollo',
+    }
+    const discardedEndpointResponse = await createWebhookEndpointRequest(
+      'public-endpoint-response-loss-1',
+      responseLossEndpointBody,
+    )
+    assert.equal(discardedEndpointResponse.status, 201)
+    const recoveredEndpointResponse = await createWebhookEndpointRequest(
+      'public-endpoint-response-loss-1',
+      responseLossEndpointBody,
+    )
+    const recoveredEndpoint = await recoveredEndpointResponse.json()
+    assert.equal(recoveredEndpointResponse.status, 200)
+    assert.equal(recoveredEndpoint.data.replayed, true)
+    assert.equal(
+      await client.v2WebhookEndpoint.count({
+        where: { workspaceId, url: responseLossEndpointBody.url },
+      }),
+      1,
+    )
+
+    const mismatchedConcurrentEndpointResponses = await Promise.all([
+      createWebhookEndpointRequest('public-endpoint-concurrent-mismatch-1', {
+        url: 'https://concurrent-hooks-a.example.com/apollo',
+      }),
+      createWebhookEndpointRequest('public-endpoint-concurrent-mismatch-1', {
+        url: 'https://concurrent-hooks-b.example.com/apollo',
+      }),
+    ])
+    assert.deepEqual(
+      mismatchedConcurrentEndpointResponses.map((response) => response.status).sort(),
+      [201, 409],
+    )
+    const mismatchedConcurrentEndpointBodies = await Promise.all(
+      mismatchedConcurrentEndpointResponses.map((response) => response.json()),
+    )
+    assert.equal(
+      mismatchedConcurrentEndpointBodies.find((body) => body.error).error.code,
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
     assert.equal((await createWebhookEndpointRequest('', createEndpointBody)).status, 422)
     const createdEndpointSecret = await client.v2WebhookSigningSecret.findFirstOrThrow({
       where: { endpointId: createdEndpoint.data.endpoint.id, workspaceId },

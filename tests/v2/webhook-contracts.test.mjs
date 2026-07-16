@@ -91,6 +91,7 @@ import { SafeWebhookDeliveryTransport } from '../../src/v2/infrastructure/webhoo
 import { createEnvironmentWebhookSigningSecretProvider } from '../../src/v2/infrastructure/security/environment-webhook-signing-secret-provider.ts'
 import { createFallbackWebhookSigningSecretProvider } from '../../src/v2/infrastructure/security/fallback-webhook-signing-secret-provider.ts'
 import { PrismaWebhookSigningSecretProvider } from '../../src/v2/infrastructure/prisma/webhook-signing-secret-provider.ts'
+import { PrismaWebhookEndpointCreationRepository } from '../../src/v2/infrastructure/prisma/webhook-endpoint-creation-repository.ts'
 import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
 import {
   createWebhookSigningSecretProtector,
@@ -169,6 +170,52 @@ test('webhook endpoint creation rejects idempotency misuse before generating a s
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
   assert.equal(generated, 0)
+})
+
+test('webhook endpoint creation retries serialization conflicts before failing explicitly', async () => {
+  const cipher = createAesRecipeParameterCipher({
+    keyId: 'webhook-retry-test-key',
+    key: Buffer.alloc(32, 6),
+  })
+  const protector = createWebhookSigningSecretProtector(cipher, () => Buffer.alloc(32, 19))
+  const ids = {
+    'webhook-endpoint': '00000000-0000-4000-8000-000000000126',
+    'webhook-secret': '00000000-0000-4000-8000-000000000127',
+    'idempotency-record': 'idempotency-webhook-endpoint-retry-1',
+  }
+  let bundle
+  const create = createWebhookEndpointService({
+    repository: {
+      async createOrReplay(value) {
+        bundle = value
+        return { endpoint: value.endpoint, secret: value.secret, replayed: false }
+      },
+    },
+    secrets: protector,
+    clock: () => new Date('2026-07-15T20:01:00.000Z'),
+    createId: (kind) => ids[kind],
+  })
+  await create({
+    workspaceId: 'workspace-1',
+    url: 'https://retry-hooks.example.com/apollo',
+    createdByClientId: 'client-1',
+    idempotencyKey: 'endpoint-retry-request-1',
+  })
+  let attempts = 0
+  const repository = new PrismaWebhookEndpointCreationRepository({
+    async $transaction() {
+      attempts += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+
+  await assert.rejects(
+    () => repository.createOrReplay(bundle),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
 })
 
 test('pending endpoint provisions a signing secret once and redacts idempotent replay', async () => {

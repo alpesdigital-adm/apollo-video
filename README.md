@@ -189,6 +189,10 @@ informando somente a URL HTTPS e uma `Idempotency-Key`. Apollo gera o signing
 secret internamente, persiste apenas seu envelope AES-256-GCM autenticado e
 devolve metadados redigidos. O endpoint nasce pendente; sua ativação depende do
 challenge explícito, que não é disparado silenciosamente durante o cadastro.
+Cadastros simultâneos idênticos convergem para um endpoint, um secret e um
+payload cifrado. Retry após resposta perdida recupera o mesmo recurso, enquanto
+URLs divergentes sob a mesma chave produzem um único vencedor e conflito de
+idempotência para a chamada perdedora.
 
 Antes do challenge, o administrador deve provisionar a chave de verificação no
 receptor por `POST /v1/webhooks/endpoints/{endpointId}/signing-secrets`, enviando

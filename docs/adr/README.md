@@ -53,3 +53,4 @@ Estados usados:
 - [ADR-049 — Concorrência e perda de resposta na criação de projetos](./ADR-049-concurrent-project-creation.md)
 - [ADR-050 — Concorrência e token one-shot na criação de clientes de API](./ADR-050-concurrent-api-client-creation.md)
 - [ADR-051 — Concorrência e token one-shot na rotação de credenciais](./ADR-051-concurrent-api-credential-rotation.md)
+- [ADR-052 — Concorrência no cadastro de endpoint de webhook](./ADR-052-concurrent-webhook-endpoint-creation.md)
