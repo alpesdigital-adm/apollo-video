@@ -93,6 +93,7 @@ import { createFallbackWebhookSigningSecretProvider } from '../../src/v2/infrast
 import { PrismaWebhookSigningSecretProvider } from '../../src/v2/infrastructure/prisma/webhook-signing-secret-provider.ts'
 import { PrismaWebhookEndpointCreationRepository } from '../../src/v2/infrastructure/prisma/webhook-endpoint-creation-repository.ts'
 import { PrismaWebhookSubscriptionCreationRepository } from '../../src/v2/infrastructure/prisma/webhook-subscription-creation-repository.ts'
+import { PrismaWebhookSigningSecretProvisioningRepository } from '../../src/v2/infrastructure/prisma/webhook-signing-secret-provisioning-repository.ts'
 import { PrismaWebhookDeliveryRepository } from '../../src/v2/infrastructure/prisma/webhook-delivery-repository.ts'
 import { PrismaWebhookEventReplayRepository } from '../../src/v2/infrastructure/prisma/webhook-event-replay-repository.ts'
 import { PrismaWebhookEndpointCommandRepository } from '../../src/v2/infrastructure/prisma/webhook-endpoint-command-repository.ts'
@@ -650,6 +651,91 @@ test('webhook subscription creation retries serialization conflicts before faili
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
   assert.equal(attempts, 3)
+})
+
+test('webhook signing secret provisioning retries serialization conflicts', async () => {
+  let attempts = 0
+  const repository = new PrismaWebhookSigningSecretProvisioningRepository({
+    v2IdempotencyRecord: { async findUnique() { return null } },
+    async $transaction() {
+      attempts += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+  await assert.rejects(
+    () => repository.provisionOrReplay({
+      workspaceId: 'workspace-1',
+      endpointId: '00000000-0000-4000-8000-000000000130',
+      actorClientId: 'client-1',
+      idempotency: {
+        id: 'idempotency-provision-retry-1', key: 'provision-retry-1',
+        requestFingerprint: 'a'.repeat(64), requestedAt: '2026-07-16T21:00:00.000Z',
+        expiresAt: '2026-07-17T21:00:00.000Z',
+      },
+    }),
+    (error) =>
+      error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
+  )
+  assert.equal(attempts, 3)
+})
+
+test('webhook signing secret provisioning recovers a concurrent committed winner', async () => {
+  const endpointId = '00000000-0000-4000-8000-000000000131'
+  const secretId = '00000000-0000-4000-8000-000000000132'
+  const requestFingerprint = 'b'.repeat(64)
+  let attempts = 0
+  const repository = new PrismaWebhookSigningSecretProvisioningRepository({
+    v2IdempotencyRecord: {
+      async findUnique() {
+        return {
+          status: 'completed', requestFingerprint,
+          responseJson: JSON.stringify({ endpointId, secretId }),
+          expiresAt: new Date('2026-07-17T21:00:00.000Z'),
+        }
+      },
+    },
+    v2WebhookEndpoint: {
+      async findFirst() {
+        return {
+          id: endpointId, workspaceId: 'workspace-1', url: 'https://hooks.example.com/apollo',
+          status: 'pending-verification', createdByClientId: 'client-1',
+          createdAt: new Date('2026-07-16T20:00:00.000Z'),
+          updatedAt: new Date('2026-07-16T21:00:00.000Z'),
+          verifiedAt: null, suspendedAt: null, revokedAt: null,
+        }
+      },
+    },
+    v2WebhookSigningSecret: {
+      async findFirst() {
+        return {
+          id: secretId, workspaceId: 'workspace-1', endpointId, version: 2,
+          algorithm: 'hmac-sha256', keyRef: 'vault://winner', fingerprint: 'c'.repeat(64),
+          status: 'active', createdAt: new Date('2026-07-16T21:00:00.000Z'),
+          retiredAt: null, revokedAt: null,
+        }
+      },
+    },
+    async $transaction() {
+      attempts += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+  const result = await repository.provisionOrReplay({
+    workspaceId: 'workspace-1', endpointId, actorClientId: 'client-1',
+    idempotency: {
+      id: 'idempotency-provision-winner-1', key: 'provision-winner-1',
+      requestFingerprint, requestedAt: '2026-07-16T21:00:00.000Z',
+      expiresAt: '2026-07-17T21:00:00.000Z',
+    },
+  })
+  assert.equal(result.replayed, true)
+  assert.equal(result.endpoint.id, endpointId)
+  assert.equal(result.secret.id, secretId)
+  assert.equal(attempts, 1)
 })
 
 const ids = {

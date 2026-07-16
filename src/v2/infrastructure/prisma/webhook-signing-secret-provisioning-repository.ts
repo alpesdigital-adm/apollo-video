@@ -30,6 +30,10 @@ function isPrismaError(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
 
+function waitForConcurrentCommit(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
 function storedResponse(record: V2IdempotencyRecord): StoredProvisioningResponse {
   if (record.status !== 'completed' || !record.responseJson) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotent webhook secret provisioning is incomplete')
@@ -149,8 +153,9 @@ export class PrismaWebhookSigningSecretProvisioningRepository
       return result(endpointRow, secretRow, true)
     }
 
-    try {
-      return await this.client.$transaction(async (transaction) => {
+    for (let serializationAttempt = 1; serializationAttempt <= 3; serializationAttempt += 1) {
+      try {
+        return await this.client.$transaction(async (transaction) => {
         const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
         if (existing && existing.expiresAt > requestedAt) {
           return readReplay(transaction, existing)
@@ -305,19 +310,31 @@ export class PrismaWebhookSigningSecretProvisioningRepository
           where: { id: command.endpointId },
         })
         return result(persistedEndpoint, secretRow, false)
-      }, { isolationLevel: 'Serializable' })
-    } catch (error) {
-      if (isPrismaError(error, 'P2034')) {
+        }, { isolationLevel: 'Serializable' })
+      } catch (error) {
+        if (!isPrismaError(error, 'P2034') && !isPrismaError(error, 'P2002')) throw error
+
+        await waitForConcurrentCommit(serializationAttempt * 10)
         const existing = await this.client.v2IdempotencyRecord.findUnique({ where: key })
-        if (existing && existing.expiresAt > requestedAt) return readReplay(this.client, existing)
-        throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint changed concurrently')
+        if (existing && existing.expiresAt > requestedAt) {
+          if (existing.requestFingerprint !== command.idempotency.requestFingerprint) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Idempotency key was already used with a different request',
+            )
+          }
+          if (existing.status === 'completed') return readReplay(this.client, existing)
+        }
+        if (serializationAttempt < 3) continue
+        throw new DomainError(
+          'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
+          'Webhook endpoint changed concurrently',
+        )
       }
-      if (isPrismaError(error, 'P2002')) {
-        const existing = await this.client.v2IdempotencyRecord.findUnique({ where: key })
-        if (existing && existing.expiresAt > requestedAt) return readReplay(this.client, existing)
-        throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint changed concurrently')
-      }
-      throw error
     }
+    throw new DomainError(
+      'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
+      'Webhook endpoint changed concurrently',
+    )
   }
 }
