@@ -190,6 +190,11 @@ usa compare-and-set atômico. Chamadas simultâneas gravam um único `revokedAt`
 replays devolvem o mesmo estado e o bearer token deixa de autenticar assim que
 a transição vence. Conflitos transitórios de escrita são repetidos até três
 vezes.
+A matriz de concorrência da API é verificada automaticamente contra o registry:
+as 23 capabilities externas não-query precisam ter classificação explícita.
+Vinte commands com escrita durável já possuem evidência de simultaneidade e
+resposta perdida, dois preflights são determinísticos e não fazem commit, e o
+challenge de webhook permanece como a única lacuna de single-flight durável.
 
 Endpoints e subscriptions de webhook possuem modelos duráveis separados, filtros
 exatos pelo catálogo e referências opacas para secrets de assinatura. O núcleo de

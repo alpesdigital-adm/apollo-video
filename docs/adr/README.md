@@ -64,3 +64,4 @@ Estados usados:
 - [ADR-060 — Concorrência revisionada no status de webhooks](./ADR-060-revisioned-webhook-status-concurrency.md)
 - [ADR-061 — Concorrência na declaração de direitos de artifacts](./ADR-061-concurrent-asset-rights-declaration.md)
 - [ADR-062 — Concorrência na revogação de credenciais de API](./ADR-062-concurrent-api-credential-revocation.md)
+- [ADR-063 — Gate exaustivo de concorrência externa](./ADR-063-exhaustive-external-concurrency-gate.md)

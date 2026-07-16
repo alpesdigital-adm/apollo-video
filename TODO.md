@@ -506,7 +506,7 @@
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
-- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061/F0-062/F0-063/F0-064/F0-065/F0-066/F0-067/F0-068/F0-069/F0-070/F0-071/F0-072/F0-073: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação e rotação de credenciais de clientes de API cobrem os mesmos interleavings preservando divulgação one-shot do token e overlap único; revogação de credencial cobre transição e timestamp únicos, recuperação e invalidação imediata; cadastros de endpoint e subscription de webhook cobrem convergência dos recursos, payload cifrado e filtros canônicos; provisionamento pendente comprova divulgação one-shot concorrente e replay redigido; enqueue de render cobre operação e contexto privado únicos; autorização de materialização cobre receipt e decisões únicos; replays individual e por evento cobrem ampliação/lote únicos e recuperação após resposta perdida; cancelamento e retry de operações públicas cobrem transição natural única, recuperação e ampliação única de `maxAttempts`; status revisionado de endpoints e subscriptions cobre convergência, cascata única e retry serializável limitado; declaração de direitos cobre snapshot, sequência e revisão únicos com recuperação após resposta perdida; os demais commands externos continuam abertos.
+- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061/F0-062/F0-063/F0-064/F0-065/F0-066/F0-067/F0-068/F0-069/F0-070/F0-071/F0-072/F0-073/F0-074: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação e rotação de credenciais de clientes de API cobrem os mesmos interleavings preservando divulgação one-shot do token e overlap único; revogação de credencial cobre transição e timestamp únicos, recuperação e invalidação imediata; cadastros de endpoint e subscription de webhook cobrem convergência dos recursos, payload cifrado e filtros canônicos; provisionamento pendente comprova divulgação one-shot concorrente e replay redigido; enqueue de render cobre operação e contexto privado únicos; autorização de materialização cobre receipt e decisões únicos; replays individual e por evento cobrem ampliação/lote únicos e recuperação após resposta perdida; cancelamento e retry de operações públicas cobrem transição natural única, recuperação e ampliação única de `maxAttempts`; status revisionado de endpoints e subscriptions cobre convergência, cascata única e retry serializável limitado; declaração de direitos cobre snapshot, sequência e revisão únicos com recuperação após resposta perdida. O gate F0-074 classifica exaustivamente 23 capabilities: 20 duráveis cobertas, 2 preflights sem commit e somente o challenge de webhook ainda pendente.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
@@ -4751,7 +4751,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-073 — Concorrência na revogação de credenciais de API
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+**Status:** publicado em 16 de julho de 2026 no commit `2d4b43d`; CI hospedada `29512354947` aprovada integralmente.
 
 Entregas:
 
@@ -4777,6 +4777,36 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- confirmação PostgreSQL fica para a CI hospedada da publicação;
+- timestamp único, recuperação e invalidação foram confirmados no PostgreSQL pela CI hospedada da publicação;
 - revogação continua terminal e não permite reativação;
 - a matriz dos demais commands externos permanece aberta.
+
+### Slice F0-074 — Gate exaustivo de concorrência da API externa
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- todas as capabilities externas não-query passam a ter classificação de concorrência testada;
+- o gate compara a matriz com o registry e falha se uma capability for adicionada ou removida sem decisão explícita;
+- 20 commands com escrita durável apontam para a slice que comprova simultaneidade e resposta perdida;
+- dois preflights são classificados como determinísticos e sem commit;
+- o challenge de webhook fica registrado como a única lacuna durável restante;
+- ADR-063 formaliza o gate e impede cobertura implícita ou esquecida.
+
+Regressões e evidências locais:
+
+- dois testes de governança confirmam correspondência exata com as 23 capabilities não-query;
+- o gate confirma exatamente 20 duráveis cobertas, 2 preflights sem commit e 1 pendência;
+- suíte geral permanece verde com 138 testes;
+- contratos públicos permanecem compatíveis com 47 capabilities, 61 schemas, 82 examples e 41 paths;
+- schema v2 permanece válido com 28 tabelas, 110 índices e 59 chaves estrangeiras;
+- integrações de mídia, Prisma, artefatos, operações, webhooks e render real permanecem verdes;
+- build de produção, typecheck e bundle Remotion permanecem verdes;
+- auditorias da raiz e do Remotion permanecem sem vulnerabilidades conhecidas.
+
+Limites explícitos desta slice:
+
+- esta slice torna a cobertura exaustiva e observável, mas não fecha a tarefa enquanto o challenge não possuir single-flight durável;
+- a implementação do challenge concorrente fica isolada para a próxima slice;
+- capabilities futuras não-query terão que declarar cobertura ou pendência para a suíte passar.
