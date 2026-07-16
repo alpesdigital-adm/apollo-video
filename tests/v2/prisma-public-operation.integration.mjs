@@ -145,11 +145,17 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       idempotencyKey: 'operation-render-request',
       requestFingerprint: sha('f'),
     }
-    const created = await repository.createOrReplay(input)
-    const replayed = await repository.createOrReplay({
-      ...input,
-      operation: { ...operation, id: 'operation-ignored-on-replay' },
-    })
+    const concurrentResults = await Promise.all([
+      repository.createOrReplay(input),
+      repository.createOrReplay({
+        ...input,
+        operation: { ...operation },
+      }),
+    ])
+    const created = concurrentResults.find((result) => result.replayed === false)
+    const replayed = concurrentResults.find((result) => result.replayed === true)
+    assert.ok(created)
+    assert.ok(replayed)
     assert.equal(created.replayed, false)
     assert.equal(replayed.replayed, true)
     assert.equal(replayed.operation.id, operationId)

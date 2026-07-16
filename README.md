@@ -108,6 +108,12 @@ executados fora do processo web:
 npm run worker:v2:render
 ```
 
+O enqueue público é serializável e idempotente. Requests simultâneos com o mesmo
+artifact, manifest, autorização e chave convergem para uma única operação e um
+único contexto privado. Se a resposta 202 for perdida, repetir o request devolve
+o mesmo operation ID; reutilizar a chave com outra autorização retorna conflito
+de payload.
+
 O processo exige Postgres e as raízes privadas de artifacts/outputs configuradas.
 Claim, heartbeat e attempt impedem dois workers de concluir a mesma tentativa;
 uma lease expirada pode ser recuperada com segurança por outro processo. O

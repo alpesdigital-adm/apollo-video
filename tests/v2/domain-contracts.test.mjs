@@ -55,6 +55,7 @@ import { authorizeRenderInputMaterializationService } from '../../src/v2/applica
 import { materializeAuthorizedRenderInputService } from '../../src/v2/application/materialize-authorized-render-input.ts'
 import { createMaterializationAuthorization } from '../../src/v2/domain/materialization-authorization.ts'
 import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
+import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { compileApolloVideoRenderProps } from '../../src/v2/application/compile-apollo-video-render-props.ts'
 import { renderAuthorizedInputService } from '../../src/v2/application/render-authorized-input.ts'
 import {
@@ -632,6 +633,44 @@ test('PublicOperation queue invariants fail closed and presenter omits execution
     }),
     'INVALID_PUBLIC_OPERATION',
   )
+})
+
+test('PublicOperation creation retries serialization conflicts before failing explicitly', async () => {
+  const operation = createQueuedPublicOperation({
+    id: 'operation-serialization-retry-1',
+    workspaceId: 'workspace-serialization-retry-1',
+    clientId: 'client-serialization-retry-1',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-serialization-retry-1',
+      manifestId: 'manifest-serialization-retry-1',
+    },
+    createdAt: '2026-07-16T08:00:00.000Z',
+  })
+  let attempts = 0
+  const repository = new PrismaPublicOperationRepository({
+    async $transaction() {
+      attempts += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+
+  await assert.rejects(
+    () => repository.createOrReplay({
+      operation,
+      context: {
+        authorizationId: 'authorization-serialization-retry-1',
+        inputHash: 'a'.repeat(64),
+      },
+      idempotencyKey: 'operation-serialization-retry-key-1',
+      requestFingerprint: 'b'.repeat(64),
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
 })
 
 test('operation listing binds stable opaque cursors to workspace and allowlisted filters', async () => {

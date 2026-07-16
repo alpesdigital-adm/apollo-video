@@ -2502,9 +2502,22 @@ test('authenticated public API manages projects, clients and artifact inspection
           body: JSON.stringify({ authorizationId, ...bodyOverrides }),
         },
       )
-    const renderOperationResponse = await enqueueRender('render-operation-approved-1')
-    const renderOperation = await renderOperationResponse.json()
-    assert.equal(renderOperationResponse.status, 202)
+    const renderOperationConcurrentResponses = await Promise.all([
+      enqueueRender('render-operation-approved-1'),
+      enqueueRender('render-operation-approved-1'),
+    ])
+    assert.ok(renderOperationConcurrentResponses.every((response) => response.status === 202))
+    const renderOperationConcurrentBodies = await Promise.all(
+      renderOperationConcurrentResponses.map((response) => response.json()),
+    )
+    const renderOperation = renderOperationConcurrentBodies.find(
+      (body) => body.data.replayed === false,
+    )
+    const renderOperationReplay = renderOperationConcurrentBodies.find(
+      (body) => body.data.replayed === true,
+    )
+    assert.ok(renderOperation)
+    assert.ok(renderOperationReplay)
     assert.equal(renderOperation.data.replayed, false)
     assert.equal(renderOperation.data.operation.schemaVersion, 'public-operation/v1')
     assert.equal(renderOperation.data.operation.type, 'artifact-render')
@@ -2526,9 +2539,6 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(publicOperationJson.includes(sourceKey), false)
     assert.equal(publicOperationJson.includes('file:'), false)
 
-    const renderOperationReplayResponse = await enqueueRender('render-operation-approved-1')
-    const renderOperationReplay = await renderOperationReplayResponse.json()
-    assert.equal(renderOperationReplayResponse.status, 202)
     assert.equal(renderOperationReplay.data.replayed, true)
     assert.equal(
       renderOperationReplay.data.operation.id,
@@ -2608,9 +2618,14 @@ test('authenticated public API manages projects, clients and artifact inspection
       (await canceledReadResponse.json()).data.operation,
       retriedOperation.data.operation,
     )
+    const discardedSecondRenderOperationResponse = await enqueueRender(
+      'render-operation-approved-2',
+    )
+    assert.equal(discardedSecondRenderOperationResponse.status, 202)
     const secondRenderOperationResponse = await enqueueRender('render-operation-approved-2')
     const secondRenderOperation = await secondRenderOperationResponse.json()
     assert.equal(secondRenderOperationResponse.status, 202)
+    assert.equal(secondRenderOperation.data.replayed, true)
     assert.notEqual(
       secondRenderOperation.data.operation.id,
       renderOperation.data.operation.id,

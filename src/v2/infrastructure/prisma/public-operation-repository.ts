@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from '@prisma/client'
+import { Prisma, type PrismaClient } from '@prisma/client'
 
 import type {
   ArtifactRenderOperationContext,
@@ -100,6 +100,10 @@ function parseCommandDate(value: string, field: string): Date {
 
 function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
+}
+
+function isSerializationConflict(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
 }
 
 function parseResult(value: string | null): PublicOperationResult | undefined {
@@ -544,7 +548,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     context: ArtifactRenderOperationContext
     idempotencyKey: string
     requestFingerprint: string
-  }): Promise<PublicOperationPersistenceResult> {
+  }, serializationAttempt = 1): Promise<PublicOperationPersistenceResult> {
     assertPublicOperation(input.operation)
     if (
       input.operation.status !== 'queued' ||
@@ -620,8 +624,17 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           throw new DomainError('PERSISTENCE_CONFLICT', 'PublicOperation was not persisted')
         }
         return { ...hydrateRecord(created), replayed: false }
-      })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
+      if (isSerializationConflict(error)) {
+        if (serializationAttempt < 3) {
+          return this.createOrReplay(input, serializationAttempt + 1)
+        }
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'PublicOperation creation conflicted with another transaction',
+        )
+      }
       if (isUniqueConstraintError(error)) {
         const replay = await this.findReplay({
           workspaceId: input.operation.workspaceId,
