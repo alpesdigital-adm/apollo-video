@@ -5046,7 +5046,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-082 — Adapter MCP stdio sobre a Public API
 
-**Status:** publicado em 16 de julho de 2026 no commit `0f8e8d8`; CI hospedada iniciada pelo push.
+**Status:** publicado em 16 de julho de 2026 no commit `0f8e8d8`; a primeira CI hospedada falhou antes dos testes por conflito de peer dependency entre `openai@4` e `zod@4`; o lockfile foi corrigido para a linha `zod@3.25`, compatível também com AI SDK e MCP SDK, e reproduzido com `npm ci` local.
 
 Entregas:
 
