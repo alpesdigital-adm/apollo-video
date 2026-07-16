@@ -183,6 +183,15 @@ se persistirem, tornam-se um conflito explícito. As linhas ainda
 permanecem pendentes internamente: dispatcher e entrega externa não fazem parte
 deste incremento.
 
+Commands de edição compartilham um resolver puro de concorrência baseado na
+spec 02. Ele exige `baseVersionId` e `baseHash`, valida uma cadeia completa e
+limitada de versões intermediárias e calcula overlap pelo `EditScope`. Sem
+overlap, devolve preview de auto-rebase apontando para a versão atual; com
+overlap, retorna `VERSION_CONFLICT` com targets canônicos e diff semântico nas
+categorias story, timeline, visual, audio e output. O envelope público v2 inclui
+somente esse resumo, artifacts invalidados e delta estimado de custo; snapshots,
+payloads e grafo interno são removidos por allowlist antes da resposta.
+
 A administração externa de clientes em `POST /v1/workspaces/{workspaceId}/clients`
 também é serializável e idempotente. Duas chamadas simultâneas com a mesma chave
 e payload criam um único cliente e uma única credencial: somente a vencedora

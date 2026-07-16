@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { DomainError, type DomainErrorCode } from '../domain/errors.ts'
+import { presentPublicDomainError } from './error-presenter.ts'
 import { PUBLIC_API_VERSION } from './presenters.ts'
 
 const STATUS_BY_CODE: Partial<Record<DomainErrorCode, number>> = {
@@ -65,28 +66,8 @@ export function publicApiHeaders(requestId: string): Record<string, string> {
 export function respondPublicError(error: unknown, requestId: string) {
   if (error instanceof DomainError) {
     const status = STATUS_BY_CODE[error.code] ?? 422
-    const details =
-      error.code === 'AUTH_SCOPE_REQUIRED'
-        ? { requiredScope: error.details.requiredScope }
-        : undefined
     return NextResponse.json(
-      {
-        error: {
-          code: error.code,
-          message: error.message,
-          category:
-            status === 401 || status === 403
-              ? 'auth'
-              : status === 409 || status === 412
-                ? 'conflict'
-                : status >= 500
-                  ? 'internal'
-                  : 'validation',
-          retryable: error.code === 'WEBHOOK_CHALLENGE_TRANSPORT_FAILED',
-          requestId,
-          details,
-        },
-      },
+      presentPublicDomainError(error, requestId, status),
       { status, headers: publicApiHeaders(requestId) },
     )
   }

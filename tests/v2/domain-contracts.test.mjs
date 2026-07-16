@@ -27,6 +27,8 @@ import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/secu
 import {
   assertCommandMatchesVersion,
   createEditCommand,
+  requireResolvedEditCommand,
+  resolveEditCommandConcurrency,
   validateEditScope,
 } from '../../src/v2/domain/edit-command.ts'
 import {
@@ -1681,6 +1683,120 @@ test('commands accept the exact base and reject stale versions', () => {
         current,
       ),
     'VERSION_CONFLICT',
+  )
+})
+
+test('stale commands auto-rebase only across complete non-overlapping history', () => {
+  const baseVersion = createProjectVersion({
+    id: 'version-rebase-1', workspaceId: 'workspace-1', projectId: 'project-1',
+    sequence: 1, snapshotRefs: { editPlan: 'edit-plan-1', policies: 'policy-1' },
+    baseHash: 'hash-rebase-1', createdBy: 'user-1', createdAt: '2026-07-12T12:00:00.000Z',
+  })
+  const currentVersion = createProjectVersion({
+    id: 'version-rebase-3', workspaceId: 'workspace-1', projectId: 'project-1',
+    sequence: 3, parentVersionId: 'version-rebase-2',
+    snapshotRefs: { editPlan: 'edit-plan-3', policies: 'policy-1' },
+    baseHash: 'hash-rebase-3', createdBy: 'user-2', createdAt: '2026-07-12T12:02:00.000Z',
+  })
+  const command = createEditCommand({
+    id: 'command-rebase', workspaceId: 'workspace-1', projectId: 'project-1',
+    baseVersionId: baseVersion.id, baseHash: baseVersion.baseHash,
+    author: { type: 'api-client', id: 'client-1' }, type: 'TrimClip',
+    scope: { clipIds: ['clip-1'], frameRange: { startFrame: 10, endFrame: 20 } },
+    payload: { endFrame: 18 }, idempotencyKey: 'request-rebase',
+    createdAt: '2026-07-12T12:03:00.000Z',
+  })
+  const interveningEdits = [
+    {
+      versionId: 'version-rebase-2', parentVersionId: baseVersion.id,
+      sequence: 2, commandId: 'command-other-1',
+      scope: { clipIds: ['clip-2'] },
+      changes: [{ category: 'visual', target: 'clip:clip-2', summary: 'Crop adjusted.' }],
+      invalidatedArtifacts: ['artifact-proxy-2'], estimatedCostDelta: 0.25,
+    },
+    {
+      versionId: currentVersion.id, parentVersionId: 'version-rebase-2',
+      sequence: 3, commandId: 'command-other-2',
+      scope: { clipIds: ['clip-3'] },
+      changes: [{ category: 'audio', target: 'clip:clip-3', summary: 'Gain adjusted.' }],
+      invalidatedArtifacts: ['artifact-proxy-3'], estimatedCostDelta: -0.05,
+    },
+  ]
+  const resolution = resolveEditCommandConcurrency({
+    command, baseVersion, currentVersion, interveningEdits,
+  })
+  assert.equal(resolution.status, 'auto-rebase')
+  assert.equal(resolution.command.baseVersionId, currentVersion.id)
+  assert.equal(resolution.command.baseHash, currentVersion.baseHash)
+  assert.equal(resolution.previousBaseVersionId, baseVersion.id)
+  assert.deepEqual(resolution.diff.commands, ['command-other-1', 'command-other-2'])
+  assert.deepEqual(resolution.diff.invalidatedArtifacts, ['artifact-proxy-2', 'artifact-proxy-3'])
+  assert.equal(resolution.diff.estimatedCostDelta, 0.2)
+  assert.equal(requireResolvedEditCommand(resolution), resolution.command)
+  assert.ok(Object.isFrozen(resolution.diff))
+
+  assert.throws(
+    () => resolveEditCommandConcurrency({
+      command, baseVersion, currentVersion, interveningEdits: interveningEdits.slice(1),
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.throws(
+    () => resolveEditCommandConcurrency({
+      command,
+      baseVersion,
+      currentVersion,
+      interveningEdits: [
+        { ...interveningEdits[0], parentVersionId: 'unrelated-version' },
+        interveningEdits[1],
+      ],
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+})
+
+test('overlapping stale commands return semantic targets and bounded diff', () => {
+  const baseVersion = createProjectVersion({
+    id: 'version-conflict-1', workspaceId: 'workspace-1', projectId: 'project-1',
+    sequence: 1, snapshotRefs: { editPlan: 'edit-plan-1', policies: 'policy-1' },
+    baseHash: 'hash-conflict-1', createdBy: 'user-1', createdAt: '2026-07-12T12:00:00.000Z',
+  })
+  const currentVersion = createProjectVersion({
+    id: 'version-conflict-2', workspaceId: 'workspace-1', projectId: 'project-1',
+    sequence: 2, parentVersionId: baseVersion.id,
+    snapshotRefs: { editPlan: 'edit-plan-2', policies: 'policy-1' },
+    baseHash: 'hash-conflict-2', createdBy: 'user-2', createdAt: '2026-07-12T12:01:00.000Z',
+  })
+  const command = createEditCommand({
+    id: 'command-conflict', workspaceId: 'workspace-1', projectId: 'project-1',
+    baseVersionId: baseVersion.id, baseHash: baseVersion.baseHash,
+    author: { type: 'api-client', id: 'client-1' }, type: 'UpdateSubtitleText',
+    scope: { trackId: 'subtitle-track', frameRange: { startFrame: 10, endFrame: 20 } },
+    payload: { text: 'New text' }, idempotencyKey: 'request-conflict',
+    createdAt: '2026-07-12T12:02:00.000Z',
+  })
+  const resolution = resolveEditCommandConcurrency({
+    command, baseVersion, currentVersion,
+    interveningEdits: [{
+      versionId: currentVersion.id, parentVersionId: baseVersion.id,
+      sequence: 2, commandId: 'command-intervening',
+      scope: { trackId: 'subtitle-track', frameRange: { startFrame: 15, endFrame: 25 } },
+      changes: [{
+        category: 'timeline', target: 'track:subtitle-track',
+        summary: 'Subtitle timing and text changed.',
+      }],
+      invalidatedArtifacts: ['artifact-subtitles'], estimatedCostDelta: 0,
+    }],
+  })
+  assert.equal(resolution.status, 'conflict')
+  assert.deepEqual(resolution.conflictingTargets, ['frames:15-20', 'track:subtitle-track'])
+  assert.equal(resolution.diff.timelineChanges[0].summary, 'Subtitle timing and text changed.')
+  assert.throws(
+    () => requireResolvedEditCommand(resolution),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'VERSION_CONFLICT' &&
+      error.details.conflict.currentVersionId === currentVersion.id,
   )
 })
 

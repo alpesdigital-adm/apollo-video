@@ -15,13 +15,16 @@ Usuário, Diretor, API e agentes precisam alterar o mesmo projeto sem estados pa
 - Scope vazio ou contraditório é inválido.
 - Toda mudança confirmada cria `ProjectVersion` imutável.
 - A versão carrega sequência linear dentro do projeto, parent e snapshot refs.
-- Concorrência usa `baseVersionId` + `baseHash`; mismatch retorna conflito até existir rebase seguro explícito.
+- Concorrência usa `baseVersionId` + `baseHash`; o resolver do ADR-067 permite
+  auto-rebase explícito somente sobre histórico completo e sem overlap semântico.
 - Persistência futura gravará command, patch, nova versão e outbox na mesma transação.
 - UI, API REST e MCP usam o mesmo handler.
 
 ## Primeiro slice
 
-O primeiro slice implementa contratos, validação de scope, validação de versão e hashing determinístico. Persistência e rebase automático ficam para slices posteriores.
+O primeiro slice implementou contratos, validação de scope, validação de versão e
+hashing determinístico. O ADR-067 entregou resolução de auto-rebase/conflito;
+persistência transacional de command, patch e nova versão permanece posterior.
 
 ## Consequências
 

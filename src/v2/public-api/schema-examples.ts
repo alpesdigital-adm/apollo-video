@@ -1046,6 +1046,37 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         },
       },
     ],
+    'apollo://schemas/error-envelope/v2': [
+      {
+        error: {
+          code: 'VERSION_CONFLICT',
+          message: 'Command targets changed since its base version',
+          category: 'conflict',
+          retryable: false,
+          requestId: 'request-conflict-example-1',
+          conflict: {
+            currentVersionId: 'project-version-example-2',
+            conflictingTargets: ['clip:clip-example-1'],
+            diff: {
+              commands: ['command-example-intervening-1'],
+              storyChanges: [],
+              timelineChanges: [
+                {
+                  commandId: 'command-example-intervening-1',
+                  target: 'clip:clip-example-1',
+                  summary: 'Clip trim changed from the command base.',
+                },
+              ],
+              visualChanges: [],
+              audioChanges: [],
+              outputChanges: [],
+              invalidatedArtifacts: ['artifact-example-proxy-1'],
+              estimatedCostDelta: 0,
+            },
+          },
+        },
+      },
+    ],
     'apollo://schemas/openapi-document/v1': [
       {
         openapi: '3.1.0',

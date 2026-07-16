@@ -5,6 +5,7 @@ import { DomainError } from '../../src/v2/domain/errors.ts'
 import { PUBLIC_EVENT_CATALOG } from '../../src/v2/domain/public-event.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { createOpenApiDocument } from '../../src/v2/public-api/openapi.ts'
+import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
 import {
   PUBLIC_SCHEMAS,
   getPublicSchema,
@@ -110,4 +111,58 @@ test('OpenAPI derives auth, idempotency and optional request bodies from capabil
   assert.ok(setRights.responses['200'].headers.ETag)
   assert.ok(setRights.responses['412'])
   assert.ok(setRights.responses['428'])
+})
+
+test('version conflicts expose only the bounded semantic diff', async () => {
+  const body = presentPublicDomainError(
+    new DomainError('VERSION_CONFLICT', 'Command targets changed since its base version', {
+      conflict: {
+        currentVersionId: 'version-current-2',
+        conflictingTargets: ['clip:clip-1'],
+        diff: {
+          commands: ['command-intervening-1'],
+          storyChanges: [],
+          timelineChanges: [{
+            commandId: 'command-intervening-1',
+            target: 'clip:clip-1',
+            summary: 'Clip timing changed.',
+            internalPayload: 'must-not-leak',
+          }],
+          visualChanges: [],
+          audioChanges: [],
+          outputChanges: [],
+          invalidatedArtifacts: ['artifact-proxy-1'],
+          estimatedCostDelta: 0,
+          internalGraph: 'must-not-leak',
+        },
+        internalSnapshot: 'must-not-leak',
+      },
+    }),
+    'request-version-conflict-1',
+    409,
+  )
+  assert.deepEqual(body.error.conflict, {
+    currentVersionId: 'version-current-2',
+    conflictingTargets: ['clip:clip-1'],
+    diff: {
+      commands: ['command-intervening-1'],
+      storyChanges: [],
+      timelineChanges: [{
+        commandId: 'command-intervening-1',
+        target: 'clip:clip-1',
+        summary: 'Clip timing changed.',
+      }],
+      visualChanges: [],
+      audioChanges: [],
+      outputChanges: [],
+      invalidatedArtifacts: ['artifact-proxy-1'],
+      estimatedCostDelta: 0,
+    },
+  })
+  assert.equal(JSON.stringify(body).includes('must-not-leak'), false)
+
+  const document = createOpenApiDocument()
+  const errorSchema =
+    document.paths['/v1/projects'].post.responses['409'].content['application/json'].schema
+  assert.deepEqual(errorSchema, { $ref: '#/components/schemas/ErrorEnvelopeV2' })
 })

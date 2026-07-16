@@ -505,7 +505,7 @@
 - [x] Retornar response/operation original em repetição idêntica. Evidência: testes unitário, Prisma e HTTP.
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [x] Exigir `baseVersionId` ou ETag em mutações concorrentes. Evidência F0-048/F0-049/F0-076/F0-077: lifecycle de subscriptions e endpoints exige `baseRevision` opaca; direitos de assets expõem ETag forte e exigem `If-Match`, com 428 ausente, 412 obsoleto, compare-and-set, proteção ABA e replay idêntico convergente. O gate exaustivo classifica as 23 operações externas não-query e impede nova substituição via `PUT`/`PATCH` sem precondição explícita; criações idempotentes, ações de state machine, single-flight e preflights possuem estratégias separadas e testadas.
-- [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
+- [x] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado. Evidência F0-078: resolver puro exige base exata e cadeia intermediária completa/limitada, faz auto-rebase somente sem overlap de `EditScope`, falha fechado em histórico incompleto ou fork inconsistente e produz `VersionDiff` categorizado. Overlap retorna `VERSION_CONFLICT` com targets canônicos; o error envelope v2 publica apenas diff allowlisted e remove payloads/snapshots internos.
 - [x] Criar property tests de requests simultâneas e timeout após commit. Evidência F0-059–F0-075: as 23 capabilities externas não-query possuem classificação exaustiva; 21 commands duráveis cobrem simultaneidade, convergência após resposta perdida e retry serializável quando aplicável; 2 preflights são determinísticos e não fazem commit; nenhuma lacuna permanece. O challenge de webhook usa single-flight durável com exatamente um transporte, follower convergente, takeover após expiração e fencing contra líder obsoleto.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
@@ -4879,7 +4879,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-077 — Gate exaustivo de precondições externas
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+**Status:** publicado em 16 de julho de 2026 no commit `c18c37d`; CI hospedada `29519426024` aprovada integralmente.
 
 Entregas:
 
@@ -4905,3 +4905,35 @@ Limites explícitos desta slice:
 - o gate cobre a superfície pública existente e passa a proteger capabilities futuras;
 - `baseVersionId` será obrigatório quando commands de edição de ProjectVersion forem publicados;
 - auto-rebase e diff estruturado continuam na microtarefa seguinte.
+
+### Slice F0-078 — Auto-rebase seguro e conflito semântico estruturado
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- resolver reutilizável recebe command, versão-base, versão atual e histórico intermediário tipado;
+- base exata segue sem rebase; base stale só é atualizada quando nenhum `EditScope` intermediário se sobrepõe;
+- histórico precisa cobrir sequências contíguas, parents corretos, chegar à versão atual e respeitar janela máxima de 1.000 versões;
+- overlap considera project, story block, track, clips, ranges half-open, locale, formato e recipes, retornando targets canônicos deduplicados;
+- `VersionDiff` agrupa mudanças em story, timeline, visual, audio e output, além de artifacts invalidados e delta de custo;
+- conflito vira `VERSION_CONFLICT` reutilizável por UI, REST e MCP, sem executar last-write-wins;
+- error envelope v2 publica o conflito estruturado por allowlist e remove campos internos mesmo que apareçam no erro de domínio;
+- ADR-067 atualiza a decisão iniciada no ADR-006 e formaliza limites, chain validation e redaction.
+
+Regressões e evidências locais:
+
+- testes cobrem base exata, auto-rebase sem overlap, overlap de track/range, histórico incompleto e parent divergente;
+- contract test confirma redaction do conflito e referência do OpenAPI ao error envelope v2;
+- suíte geral permanece verde com 144 testes;
+- contratos públicos permanecem compatíveis com 47 capabilities, 62 schemas, 83 examples e 41 paths;
+- schema v2 permanece válido com 29 tabelas, 112 índices e 61 chaves estrangeiras;
+- integrações de mídia, Prisma, artefatos, operações, webhooks, API HTTP e render real permanecem verdes;
+- build de produção, typecheck e bundle Remotion permanecem verdes;
+- auditorias da raiz e do Remotion permanecem sem vulnerabilidades conhecidas.
+
+Limites explícitos desta slice:
+
+- o resolver é o núcleo compartilhado; persistência atômica de command, patch, nova ProjectVersion e outbox pertence ao próximo slice de commands;
+- auto-rebase devolve uma resolução explícita para preview/handler e não grava silenciosamente;
+- diffs carregam resumos semânticos já resolvidos, nunca snapshots ou payloads brutos.

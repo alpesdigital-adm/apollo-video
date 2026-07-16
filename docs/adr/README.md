@@ -68,3 +68,4 @@ Estados usados:
 - [ADR-064 — Single-flight durável no challenge de webhook](./ADR-064-durable-webhook-challenge-single-flight.md)
 - [ADR-065 — ETag forte para direitos de assets](./ADR-065-strong-etag-asset-rights.md)
 - [ADR-066 — Gate exaustivo de precondições externas](./ADR-066-exhaustive-external-precondition-gate.md)
+- [ADR-067 — Auto-rebase seguro e conflito semântico](./ADR-067-safe-auto-rebase-and-semantic-conflict.md)

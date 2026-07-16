@@ -388,6 +388,38 @@ const webhookEndpointDetailSchema = {
   required: [...webhookEndpointSummarySchema.required, 'signingSecrets'],
   properties: { ...webhookEndpointSummaryProperties, signingSecrets: { type: 'array', maxItems: 100, items: webhookSigningSecretMetadataSchema } },
 }
+
+const semanticDiffItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['commandId', 'target', 'summary'],
+  properties: {
+    commandId: idSchema,
+    target: { type: 'string', minLength: 1, maxLength: 256 },
+    summary: { type: 'string', minLength: 1, maxLength: 500 },
+  },
+}
+
+const versionDiffSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'commands', 'storyChanges', 'timelineChanges', 'visualChanges', 'audioChanges',
+    'outputChanges', 'invalidatedArtifacts', 'estimatedCostDelta',
+  ],
+  properties: {
+    commands: { type: 'array', maxItems: 1000, uniqueItems: true, items: idSchema },
+    storyChanges: { type: 'array', maxItems: 1000, items: semanticDiffItemSchema },
+    timelineChanges: { type: 'array', maxItems: 1000, items: semanticDiffItemSchema },
+    visualChanges: { type: 'array', maxItems: 1000, items: semanticDiffItemSchema },
+    audioChanges: { type: 'array', maxItems: 1000, items: semanticDiffItemSchema },
+    outputChanges: { type: 'array', maxItems: 1000, items: semanticDiffItemSchema },
+    invalidatedArtifacts: {
+      type: 'array', maxItems: 1024, uniqueItems: true, items: idSchema,
+    },
+    estimatedCostDelta: { type: 'number', minimum: -1000000, maximum: 1000000 },
+  },
+}
 const webhookSigningSecretRotationMetadataSchema = {
   type: 'object', additionalProperties: false,
   required: [
@@ -1898,6 +1930,39 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           retryable: { type: 'boolean' },
           requestId: { type: 'string' },
           details: { type: 'object' },
+        },
+      },
+    },
+  }),
+  defineSchema('error-envelope', 2, 'Public API error envelope with semantic conflict', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['error'],
+    properties: {
+      error: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'message', 'category', 'retryable', 'requestId'],
+        properties: {
+          code: { type: 'string' },
+          message: { type: 'string' },
+          category: { enum: ['auth', 'conflict', 'validation', 'internal'] },
+          retryable: { type: 'boolean' },
+          requestId: { type: 'string' },
+          details: { type: 'object' },
+          conflict: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['currentVersionId', 'conflictingTargets', 'diff'],
+            properties: {
+              currentVersionId: idSchema,
+              conflictingTargets: {
+                type: 'array', minItems: 1, maxItems: 1024, uniqueItems: true,
+                items: { type: 'string', minLength: 1, maxLength: 256 },
+              },
+              diff: versionDiffSchema,
+            },
+          },
         },
       },
     },
