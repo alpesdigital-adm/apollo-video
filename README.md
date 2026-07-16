@@ -110,6 +110,11 @@ revisão obsoleta retorna 412. Drafts idênticos ainda convergem como replay mes
 quando repetidos após uma resposta perdida, enquanto drafts divergentes sobre a
 mesma revisão admitem um único vencedor. O OpenAPI publica request e response
 headers, e a capability de escrita foi elevada para `2.0.0`.
+A matriz de precondições também é verificada contra as 23 operações externas
+não-query: 3 substituições de estado exigem revisão explícita, 4 ações são
+vinculadas a uma revisão, 7 criações usam idempotência durável, 6 ações seguem
+state machines convergentes, 1 ação usa single-flight e 2 preflights não escrevem.
+Qualquer nova capability ou novo `PUT`/`PATCH` sem decisão quebra a regressão.
 
 A autorização pública de materialização também é serializável. Duas avaliações
 simultâneas com artifact, manifest, política de uso e chave idênticos convergem

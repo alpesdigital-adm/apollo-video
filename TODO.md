@@ -504,7 +504,7 @@
 - [x] Implementar ledger por workspace/client/key com request fingerprint. Evidência: `V2IdempotencyRecord` e repository Prisma.
 - [x] Retornar response/operation original em repetição idêntica. Evidência: testes unitário, Prisma e HTTP.
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
-- [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049/F0-076: lifecycle de subscriptions e endpoints exige `baseRevision` opaca; direitos de assets agora expõem ETag forte e exigem `If-Match`, com 428 ausente, 412 obsoleto, compare-and-set e replay idêntico convergente. A regra ainda precisa ser aplicada às demais mutações versionadas.
+- [x] Exigir `baseVersionId` ou ETag em mutações concorrentes. Evidência F0-048/F0-049/F0-076/F0-077: lifecycle de subscriptions e endpoints exige `baseRevision` opaca; direitos de assets expõem ETag forte e exigem `If-Match`, com 428 ausente, 412 obsoleto, compare-and-set, proteção ABA e replay idêntico convergente. O gate exaustivo classifica as 23 operações externas não-query e impede nova substituição via `PUT`/`PATCH` sem precondição explícita; criações idempotentes, ações de state machine, single-flight e preflights possuem estratégias separadas e testadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
 - [x] Criar property tests de requests simultâneas e timeout após commit. Evidência F0-059–F0-075: as 23 capabilities externas não-query possuem classificação exaustiva; 21 commands duráveis cobrem simultaneidade, convergência após resposta perdida e retry serializável quando aplicável; 2 preflights são determinísticos e não fazem commit; nenhuma lacuna permanece. O challenge de webhook usa single-flight durável com exatamente um transporte, follower convergente, takeover após expiração e fencing contra líder obsoleto.
 
@@ -4849,7 +4849,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-076 — ETag forte na declaração de direitos de assets
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na CI hospedada da publicação.
+**Status:** publicado em 16 de julho de 2026 no commit `0471d54`; CI hospedada `29518759210` aprovada integralmente.
 
 Entregas:
 
@@ -4873,6 +4873,35 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- a confirmação no PostgreSQL ocorrerá na CI hospedada quando a slice for publicada;
+- ETag, compare-and-set, conflitos divergentes e proteção ABA foram confirmados no PostgreSQL pela CI hospedada da publicação;
 - a microtarefa de precondições permanece aberta até cobrir as demais mutações versionadas;
 - auto-rebase e diff estruturado pertencem à microtarefa seguinte e não são simulados por esta precondição.
+
+### Slice F0-077 — Gate exaustivo de precondições externas
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- todas as 23 capabilities externas não-query possuem estratégia explícita de precondição e citam evidência;
+- 3 substituições de estado exigem ETag ou `baseRevision` e todo `PUT`/`PATCH` futuro fica sujeito ao mesmo gate;
+- 4 ações dependentes de versão comprovam `baseRevision` obrigatório no schema público;
+- 7 criações exigem idempotência durável, 6 ações usam state machine convergente, 1 challenge usa single-flight e 2 preflights são read-only;
+- o gate compara IDs exatamente com o registry e falha se uma capability for adicionada, removida ou reclassificada sem decisão;
+- ADR-066 formaliza as categorias e fecha a microtarefa sem impor revisão artificial a actions.
+
+Regressões e evidências locais:
+
+- dois testes de governança confirmam correspondência exata, schemas de revisão e contagens das seis categorias;
+- suíte geral permanece verde com 141 testes;
+- contratos públicos permanecem compatíveis com 47 capabilities, 61 schemas, 82 examples e 41 paths;
+- schema v2 permanece válido com 29 tabelas, 112 índices e 61 chaves estrangeiras;
+- integrações de mídia, Prisma, artefatos, operações, webhooks, API HTTP e render real permanecem verdes;
+- build de produção, typecheck e bundle Remotion permanecem verdes;
+- auditorias da raiz e do Remotion permanecem sem vulnerabilidades conhecidas.
+
+Limites explícitos desta slice:
+
+- o gate cobre a superfície pública existente e passa a proteger capabilities futuras;
+- `baseVersionId` será obrigatório quando commands de edição de ProjectVersion forem publicados;
+- auto-rebase e diff estruturado continuam na microtarefa seguinte.

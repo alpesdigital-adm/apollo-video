@@ -8,7 +8,7 @@ const coverage = Object.freeze({
     mode: 'read-only-deterministic', evidence: 'domain reconstruction preflight contracts',
   },
   'apollo.artifacts.rights.set': {
-    mode: 'durable-covered', evidence: 'F0-072',
+    mode: 'durable-covered', evidence: 'F0-072/F0-076',
   },
   'apollo.artifacts.materialization.authorize': {
     mode: 'durable-covered', evidence: 'F0-067',
