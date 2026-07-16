@@ -15,6 +15,7 @@ import {
 } from '../../domain/api-client.ts'
 import {
   createApiCredential,
+  type ApiCredential,
   type ApiCredentialStatus,
 } from '../../domain/api-credential.ts'
 import type {
@@ -465,23 +466,48 @@ export class PrismaApiClientRepository
     clientId: string
     credentialId: string
     revokedAt: string
-  }) {
-    const existing = await this.client.v2ApiCredential.findFirst({
-      where: {
-        id: input.credentialId,
-        clientId: input.clientId,
-        workspaceId: input.workspaceId,
-      },
-    })
-    if (!existing) {
-      throw new DomainError('API_CREDENTIAL_NOT_FOUND', 'API credential was not found')
+  }, concurrentWriteAttempt = 1): Promise<ApiCredential> {
+    try {
+      await this.client.v2ApiCredential.updateMany({
+        where: {
+          id: input.credentialId,
+          clientId: input.clientId,
+          workspaceId: input.workspaceId,
+          status: 'active',
+        },
+        data: { status: 'revoked', revokedAt: new Date(input.revokedAt) },
+      })
+      const persisted = await this.client.v2ApiCredential.findFirst({
+        where: {
+          id: input.credentialId,
+          clientId: input.clientId,
+          workspaceId: input.workspaceId,
+        },
+      })
+      if (!persisted) {
+        throw new DomainError('API_CREDENTIAL_NOT_FOUND', 'API credential was not found')
+      }
+      if (persisted.status === 'revoked') return hydrateCredential(persisted)
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'API credential revocation collided with another write',
+      )
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'P2034'
+      ) {
+        if (concurrentWriteAttempt < 3) {
+          return this.revokeCredential(input, concurrentWriteAttempt + 1)
+        }
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'API credential revocation conflicted with another write',
+        )
+      }
+      throw error
     }
-    if (existing.status === 'revoked') return hydrateCredential(existing)
-
-    const row = await this.client.v2ApiCredential.update({
-      where: { id_clientId: { id: input.credentialId, clientId: input.clientId } },
-      data: { status: 'revoked', revokedAt: new Date(input.revokedAt) },
-    })
-    return hydrateCredential(row)
   }
 }

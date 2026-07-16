@@ -3320,13 +3320,35 @@ test('authenticated public API manages projects, clients and artifact inspection
     )
     assert.equal(selfRevokeResponse.status, 409)
 
-    const revokeResponse = await fetch(
+    const revokeCredentialRequest = () => fetch(
       `${baseUrl}/v1/workspaces/${workspaceId}/clients/${childCreated.data.client.id}/credentials/${rotated.data.credential.id}`,
       { method: 'DELETE', headers: { authorization } },
     )
-    const revoked = await revokeResponse.json()
-    assert.equal(revokeResponse.status, 200)
+    const revokeResponses = await Promise.all([
+      revokeCredentialRequest(),
+      revokeCredentialRequest(),
+    ])
+    assert.deepEqual(revokeResponses.map((response) => response.status), [200, 200])
+    const [revoked, concurrentRevoked] = await Promise.all(
+      revokeResponses.map((response) => response.json()),
+    )
     assert.equal(revoked.data.credential.status, 'revoked')
+    assert.deepEqual(concurrentRevoked.data.credential, revoked.data.credential)
+    const discardedRevokeResponse = await revokeCredentialRequest()
+    assert.equal(discardedRevokeResponse.status, 200)
+    const recoveredRevokeResponse = await revokeCredentialRequest()
+    const recoveredRevoked = await recoveredRevokeResponse.json()
+    assert.equal(recoveredRevokeResponse.status, 200)
+    assert.deepEqual(recoveredRevoked.data.credential, revoked.data.credential)
+    const storedRevokedCredential = await client.v2ApiCredential.findUniqueOrThrow({
+      where: {
+        id_clientId: {
+          id: rotated.data.credential.id,
+          clientId: childCreated.data.client.id,
+        },
+      },
+    })
+    assert.equal(storedRevokedCredential.revokedAt.toISOString(), revoked.data.credential.revokedAt)
 
     const revokedTokenResponse = await fetch(`${baseUrl}/v1/projects`, {
       headers: { authorization: rotatedAuthorization },

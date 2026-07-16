@@ -63,3 +63,4 @@ Estados usados:
 - [ADR-059 — Concorrência natural no cancelamento e retry de operações](./ADR-059-natural-concurrency-public-operation-cancel-retry.md)
 - [ADR-060 — Concorrência revisionada no status de webhooks](./ADR-060-revisioned-webhook-status-concurrency.md)
 - [ADR-061 — Concorrência na declaração de direitos de artifacts](./ADR-061-concurrent-asset-rights-declaration.md)
+- [ADR-062 — Concorrência na revogação de credenciais de API](./ADR-062-concurrent-api-credential-revocation.md)

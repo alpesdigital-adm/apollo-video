@@ -184,6 +184,12 @@ segue os mesmos invariantes: chamadas simultâneas idênticas criam uma única
 credencial, aplicam o overlap uma única vez e divulgam somente um novo token.
 Retry após resposta perdida devolve apenas metadados redigidos, e mudar o
 overlap reutilizando a mesma chave é rejeitado como payload divergente.
+A revogação em
+`DELETE /v1/workspaces/{workspaceId}/clients/{clientId}/credentials/{credentialId}`
+usa compare-and-set atômico. Chamadas simultâneas gravam um único `revokedAt`,
+replays devolvem o mesmo estado e o bearer token deixa de autenticar assim que
+a transição vence. Conflitos transitórios de escrita são repetidos até três
+vezes.
 
 Endpoints e subscriptions de webhook possuem modelos duráveis separados, filtros
 exatos pelo catálogo e referências opacas para secrets de assinatura. O núcleo de

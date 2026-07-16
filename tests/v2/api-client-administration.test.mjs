@@ -171,6 +171,31 @@ test('API credential rotation retries concurrent write conflicts before failing 
   assert.equal(attempts, 3)
 })
 
+test('API credential revocation retries serialization conflicts before failing explicitly', async () => {
+  let attempts = 0
+  const repository = new PrismaApiClientRepository({
+    v2ApiCredential: {
+      async updateMany() {
+        attempts += 1
+        const error = new Error('serialization conflict')
+        error.code = 'P2034'
+        throw error
+      },
+    },
+  })
+
+  await assert.rejects(
+    () => repository.revokeCredential({
+      workspaceId: 'workspace-1',
+      clientId: 'target-client',
+      credentialId: 'target-credential',
+      revokedAt: '2026-07-16T15:00:00.000Z',
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
+})
+
 test('credential used by the current request cannot revoke itself', async () => {
   const execute = revokeApiCredentialService({
     repository: new InMemoryAdministrationRepository(),
