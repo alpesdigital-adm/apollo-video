@@ -1884,6 +1884,20 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('preflight-result', 1, 'Canonical preflight result', {
+    type: 'object', additionalProperties: false,
+    required: ['schemaVersion', 'eligible', 'fingerprint', 'evaluatedAt', 'targets', 'conflicts', 'invalidations', 'jobs', 'cost', 'quota', 'warnings'],
+    properties: {
+      schemaVersion: { const: 'preflight-result/v1' }, eligible: { type: 'boolean' }, fingerprint: sha256Schema, evaluatedAt: dateTimeSchema,
+      targets: { type: 'array', maxItems: 1024, items: { type: 'object', additionalProperties: false, required: ['kind', 'id'], properties: { kind: { type: 'string', minLength: 1, maxLength: 64 }, id: { type: 'string', minLength: 1, maxLength: 256 }, version: { type: 'string', minLength: 1, maxLength: 128 } } } },
+      conflicts: { type: 'array', maxItems: 1024, items: { type: 'object', additionalProperties: false, required: ['code', 'target', 'message'], properties: { code: { type: 'string', minLength: 1, maxLength: 80 }, target: { type: 'string', minLength: 1, maxLength: 256 }, message: { type: 'string', minLength: 1, maxLength: 1000 } } } },
+      invalidations: { type: 'array', maxItems: 4096, items: { type: 'object', additionalProperties: false, required: ['kind', 'id', 'reason'], properties: { kind: { enum: ['artifact', 'analysis', 'proxy', 'render'] }, id: { type: 'string', minLength: 1, maxLength: 256 }, reason: { type: 'string', minLength: 1, maxLength: 500 } } } },
+      jobs: { type: 'array', maxItems: 256, items: { type: 'object', additionalProperties: false, required: ['kind', 'count'], properties: { kind: { type: 'string', minLength: 1, maxLength: 80 }, count: { type: 'integer', minimum: 1, maximum: 100000 }, estimatedDurationMs: { type: 'integer', minimum: 0, maximum: 604800000 } } } },
+      cost: { type: 'object', additionalProperties: false, required: ['currency', 'estimatedMinorUnits', 'maximumMinorUnits'], properties: { currency: { const: 'USD' }, estimatedMinorUnits: { type: 'integer', minimum: 0, maximum: 100000000 }, maximumMinorUnits: { type: 'integer', minimum: 0, maximum: 100000000 } } },
+      quota: { type: 'object', additionalProperties: false, required: ['unit', 'required', 'remaining', 'allowed'], properties: { unit: { type: 'string', minLength: 1, maxLength: 64 }, required: { type: 'integer', minimum: 0 }, remaining: { type: 'integer', minimum: 0 }, allowed: { type: 'boolean' }, resetsAt: dateTimeSchema } },
+      warnings: { type: 'array', maxItems: 1024, items: { type: 'object', additionalProperties: false, required: ['code', 'message'], properties: { code: { type: 'string', minLength: 1, maxLength: 80 }, message: { type: 'string', minLength: 1, maxLength: 1000 }, target: { type: 'string', minLength: 1, maxLength: 256 } } } },
+    },
+  }),
   defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',
     successSchema({
       type: 'object',

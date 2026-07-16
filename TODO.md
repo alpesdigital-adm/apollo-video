@@ -529,7 +529,7 @@
 
 ### F0.042 — Preflight e lote externo [FR-248]
 
-- [ ] Definir `PreflightResult` com targets, conflicts, invalidations, jobs, custo, quota e warnings.
+- [x] Definir `PreflightResult` com targets, conflicts, invalidations, jobs, custo, quota e warnings. Evidência F0-092: contrato canônico `preflight-result/v1` possui limites explícitos, elegibilidade derivada de conflitos/quota, custo em minor units e schema/exemplo acessíveis por `GET /v1/schemas/preflight-result/v1`.
 - [ ] Gerar commit token vinculado a client, workspace, fingerprint, snapshot e expiry.
 - [ ] Invalidar token quando versão, input ou custo material mudar.
 - [ ] Exigir preflight para batch, final matrix, geração variável e ações destrutivas.
@@ -5272,3 +5272,26 @@ Regressões locais desta slice:
 - 1/1 jornada E2E integrada aprovada;
 - cenários unitários anteriores continuam cobrindo limites, replay e isolamento;
 - typecheck e regressão geral permanecem gates obrigatórios.
+
+### Slice F0-092 — PreflightResult canônico e público
+
+**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+
+Entregas:
+
+- modelo versionado `preflight-result/v1` com fingerprint e instante de avaliação;
+- targets identificam kind, ID e versão opcional;
+- conflicts são bloqueios estruturados e tornam `eligible` falso;
+- invalidations enumeram artifact, analysis, proxy ou render afetado;
+- jobs informam tipo, quantidade e duração estimada limitada;
+- custo usa USD em minor units, com estimativa e teto sem ponto flutuante;
+- quota explicita unidade, consumo, saldo, decisão e reset opcional;
+- warnings são estruturados, limitados e podem apontar um target;
+- schema e exemplo são acessíveis pela Public API de contratos.
+
+Regressões locais desta slice:
+
+- 3/3 testes focados de contrato, consistência e descoberta aprovados;
+- 185/185 testes gerais aprovados;
+- contratos aprovados com 55 capabilities, 76 schemas, 97 examples e 49 paths;
+- schema v2, typecheck e regressão geral aprovados.

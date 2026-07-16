@@ -920,6 +920,17 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/preflight-result/v1': [
+      {
+        schemaVersion: 'preflight-result/v1', eligible: true, fingerprint: 'f'.repeat(64), evaluatedAt: createdAt,
+        targets: [{ kind: 'project-version', id: 'project-version-example-2', version: '2' }], conflicts: [],
+        invalidations: [{ kind: 'proxy', id: 'artifact-example-proxy-1', reason: 'Timeline trim changes proxy frames.' }],
+        jobs: [{ kind: 'render-proxy', count: 1, estimatedDurationMs: 45000 }],
+        cost: { currency: 'USD', estimatedMinorUnits: 12, maximumMinorUnits: 20 },
+        quota: { unit: 'render-minute', required: 1, remaining: 120, allowed: true },
+        warnings: [{ code: 'CAPTION_REFLOW', message: 'Caption line breaks may change.', target: 'track:captions' }],
+      },
+    ],
     'apollo://schemas/webhook-signing-secret-rotation-list/v1': [
       { data: { rotations: [] }, meta: { apiVersion: 'v1' } },
       { data: { rotations: [webhookSigningSecretRotationExample] }, meta: { apiVersion: 'v1' } },
