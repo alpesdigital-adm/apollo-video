@@ -511,6 +511,13 @@ Regras para tools de IA:
 - tool result contém structured error, não texto solto apenas;
 - execução é registrada como actor client e, se aplicável, delegated user.
 
+Toda tool `command` ou `job` possui classificação explícita de impacto. Tools
+`broad`, `destructive`, `high` ou `variable` não podem ser executadas sem gate
+confiável compatível. Aprovação humana vem do host fora dos argumentos do
+modelo; preflight é validado e convertido em evidência confiável antes do gate.
+Ambos são vinculados à capability, fingerprint canônico do input e expiração.
+Ausência, mismatch e expiração produzem erro estruturado sem executar a tool.
+
 O catálogo canônico é exposto por `GET /v1/tools`. Ele compõe automaticamente
 path, query, headers e body de cada capability autorizada, incorpora os schemas
 públicos de output e erro e carrega custo/confirmation como metadata. REST e o

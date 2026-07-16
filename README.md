@@ -100,6 +100,13 @@ IDs não registrados, selectors inválidos e duplicatas fazem a descoberta falha
 fechada com `INVALID_CAPABILITY_POLICY`. `/v1/capabilities` e `/v1/tools`
 consomem a mesma lista já autorizada, evitando divergência entre catálogos.
 
+Tools mutáveis também passam por um registry de segurança exaustivo. Cada uma é
+classificada como `bounded`, `broad` ou `destructive`; impacto amplo/destrutivo
+e custo `high`/`variable` exigem `human-approval` ou `preflight-token`. A
+evidência é vinculada à capability, fingerprint exato do input e validade
+temporal. Aprovação pertence ao host confiável e nunca aparece como booleano ou
+token gravável pelo modelo no input schema.
+
 ## Limites dos processos de mídia
 
 As chamadas a FFmpeg e ffprobe possuem cancelamento por `AbortSignal`, limite de

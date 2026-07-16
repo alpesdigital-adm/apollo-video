@@ -49,6 +49,8 @@ const STATUS_BY_CODE: Partial<Record<DomainErrorCode, number>> = {
   PERSISTENCE_NOT_CONFIGURED: 503,
   INVALID_CAPABILITY_POLICY: 503,
   VERSION_CONFLICT: 409,
+  TOOL_CONFIRMATION_REQUIRED: 409,
+  TOOL_CONFIRMATION_INVALID: 409,
 }
 
 export function resolveRequestId(request: NextRequest): string {

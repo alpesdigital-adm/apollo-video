@@ -1,5 +1,9 @@
 import type { PublicCapability } from './capability-registry.ts'
 import { getPublicSchema } from './schema-registry.ts'
+import {
+  FOUNDATION_AGENT_TOOL_SAFETY,
+  agentToolSafetyFor,
+} from './agent-tool-safety.ts'
 
 function embeddedSchema(ref: string) {
   const { $schema: _schema, $id: _id, title: _title, examples: _examples, ...schema } =
@@ -61,6 +65,7 @@ function headerSchema(capability: PublicCapability) {
 }
 
 export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
+  const safety = agentToolSafetyFor(capability, FOUNDATION_AGENT_TOOL_SAFETY)
   const path = pathSchema(capability)
   const query = querySchema(capability)
   const headers = headerSchema(capability)
@@ -79,7 +84,12 @@ export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
   return Object.freeze({
     name: capability.toolName,
     title: capability.title,
-    description: capability.description,
+    description:
+      safety.confirmation === 'human-approval'
+        ? `${capability.description} Requires trusted human approval from the host before execution.`
+        : safety.confirmation === 'preflight-token'
+          ? `${capability.description} Requires a valid bound preflight token before execution.`
+          : capability.description,
     inputSchema: Object.freeze({
       type: 'object', additionalProperties: false,
       ...(required.length > 0 ? { required: Object.freeze(required) } : {}),
@@ -102,7 +112,7 @@ export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
       requiredScopes: Object.freeze([...capability.requiredScopes]),
       endpoint: capability.endpoint ? Object.freeze({ ...capability.endpoint }) : undefined,
       costClass: capability.costClass,
-      confirmation: capability.confirmation,
+      confirmation: safety.confirmation,
       supportsDryRun: capability.supportsDryRun,
     }),
   })

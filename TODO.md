@@ -512,7 +512,7 @@
 
 - [x] Definir tool names, descriptions, input/output schemas e structured errors. Evidência F0-079: `GET /v1/tools` expõe catálogo scope-filtered derivado do registry, com nomes MCP-safe, descrições, input schema composto de path/query/headers/body, output schema, error envelope v2, annotations e metadata de custo/confirmation. Contract e HTTP tests comprovam paridade com capabilities, deny-by-default e ausência de valores internos.
 - [x] Filtrar tools/capabilities por client, scope, environment e policy. Evidência F0-080: descoberta compartilhada exige client autenticado/ativo no environment correto, intersecta scopes, `availableIn` e policy deny-only global/por environment/workspace/client; configuração inválida falha fechada. Unit tests cobrem as quatro dimensões e a jornada HTTP prova paridade exata entre `/v1/capabilities` e `/v1/tools`, inclusive deny específico por client sem afetar o catálogo anônimo.
-- [ ] Exigir preflight/approval em tools caras, amplas ou destrutivas.
+- [x] Exigir preflight/approval em tools caras, amplas ou destrutivas. Evidência F0-081: registry de segurança classifica exaustivamente as 21 tools mutáveis em `bounded/broad/destructive`; impacto amplo/destrutivo ou custo high/variable exige gate. Evidência confiável é vinculada à capability, fingerprint e expiry; ausência, mismatch e expiração falham antes da execução. Descriptors anunciam o gate, mas não oferecem `approval/confirmed/preflightToken` gravável pelo modelo.
 - [ ] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno.
 - [ ] Expor resources paginados de capabilities, projects, operations e reports autorizados.
 - [ ] Delimitar transcript/OCR/media metadata como untrusted data em tool inputs/results.
@@ -4977,7 +4977,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-080 — Filtro contextual deny-only para capabilities e tools
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+**Status:** publicado em 16 de julho de 2026 no commit `67122ae`, estabilizado pelo commit `e2d5bcc`; CI hospedada final `29535012927` aprovada integralmente.
 
 Entregas:
 
@@ -5005,3 +5005,41 @@ Limites explícitos desta slice:
 - a policy controla descoberta de capabilities/tools e não substitui autenticação/scope nos endpoints REST;
 - persistência e administração externa da policy serão adicionadas por capability pública, sem acesso direto ao banco;
 - preflight/approval para operações caras ou destrutivas pertence à próxima microtarefa.
+
+Incidente de publicação:
+
+- a CI inicial `29534507668` passou por 21 estágios e revelou uma corrida no provisioning idempotente de signing secret;
+- o perdedor de uma serialização consultava o ledger antes do commit vencedor e retornava falso `WEBHOOK_ENDPOINT_REVISION_MISMATCH`;
+- `e2d5bcc` adicionou retry limitado, backoff e recuperação do winner commitado, com regressões específicas para conflito persistente e replay concorrente;
+- a CI `29535012927` confirmou o reparo no PostgreSQL e aprovou integralmente os 23 estágios.
+
+### Slice F0-081 — Gate confiável para tools de risco
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- registry de segurança cobre explicitamente todas as 21 tools mutáveis atuais;
+- impacto é classificado como `bounded`, `broad` ou `destructive` com razão operacional limitada;
+- broad/destructive e custo high/variable são rejeitados no boot se não houver confirmation gate;
+- direitos, cancelamentos, revogações e troca ativa de secrets exigem aprovação humana;
+- criação de clients/endpoints/subscriptions, credenciais e fan-out amplo exigem aprovação humana;
+- evidência confiável carrega kind, capability, fingerprint do input, emissão e expiração;
+- gate rejeita ausência com `TOOL_CONFIRMATION_REQUIRED` e mismatch/expiry com `TOOL_CONFIRMATION_INVALID`;
+- evidência não entra no schema gravável pelo modelo; o host ou futuro adapter MCP a fornece por canal confiável;
+- descriptor explica o requisito e publica a confirmation efetiva sem alterar o contrato v1;
+- ADR-070 formaliza separação entre argumentos não confiáveis e autorização do host.
+
+Regressões e evidências locais:
+
+- testes direcionados comprovam cobertura exaustiva, rejeição de regra perigosa sem gate e bindings de capability/input/tempo;
+- descriptors de rights e credential revoke exigem aprovação mesmo onde a API REST continua protegida por scope próprio;
+- testes garantem ausência de campos model-writable `approval`, `confirmed` e `preflightToken` no envelope da tool;
+- typecheck, contratos direcionados e integração de webhooks após o hotfix estão verdes;
+- regressão completa aprovada: 154/154 testes gerais; contratos 48 capabilities/63 schemas/84 examples/42 paths; schema v2 com 29 tabelas/112 índices/61 FKs; integrações de mídia, Prisma, artefatos, operações, webhooks, Public API e render real verdes; build e typecheck aprovados; auditorias principal e Remotion com zero vulnerabilidades.
+
+Limites explícitos desta slice:
+
+- o gate é o núcleo obrigatório do futuro adapter; o adapter MCP será implementado na próxima microtarefa;
+- emissão e validação criptográfica de commit token pertencem à F0.042;
+- endpoints REST continuam aplicando autenticação, scope, concorrência e regras próprias independentemente da metadata da tool.

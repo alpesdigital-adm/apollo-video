@@ -984,6 +984,15 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.deepEqual(rightsTool.inputSchema.required, ['path', 'headers', 'body'])
     assert.deepEqual(rightsTool.inputSchema.properties.headers.required, ['ifMatch'])
     assert.equal(rightsTool.errorSchema.properties.error.properties.conflict.type, 'object')
+    assert.equal(rightsTool.apollo.confirmation, 'human-approval')
+    assert.match(rightsTool.description, /trusted human approval from the host/)
+    assert.equal(Object.hasOwn(rightsTool.inputSchema.properties, 'approval'), false)
+    assert.equal(
+      tools.data.tools.find(
+        (tool) => tool.name === 'apollo.clients.credentials.revoke',
+      ).apollo.confirmation,
+      'human-approval',
+    )
     assert.equal(JSON.stringify(tools).includes('vault://'), false)
     assert.equal(JSON.stringify(tools).includes('"keyRef"'), false)
     assert.equal(webhookChallenge.data.endpoint.id, webhookEndpointId)

@@ -11,6 +11,11 @@ import { createOpenApiDocument } from '../../src/v2/public-api/openapi.ts'
 import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
 import { agentToolsForCapabilities } from '../../src/v2/public-api/agent-tool-catalog.ts'
 import {
+  FOUNDATION_AGENT_TOOL_SAFETY,
+  defineAgentToolSafetyRegistry,
+  requireAgentToolExecutionGate,
+} from '../../src/v2/public-api/agent-tool-safety.ts'
+import {
   PUBLIC_SCHEMAS,
   getPublicSchema,
   getPublicSchemaByRoute,
@@ -218,4 +223,96 @@ test('agent tool discovery is deny-by-default for unavailable scopes', () => {
     'apollo.contracts.openapi.read',
     'apollo.contracts.schemas.read',
   ])
+})
+
+test('mutable agent tools have exhaustive trusted safety gates', () => {
+  const mutable = FOUNDATION_CAPABILITIES.filter(
+    (capability) =>
+      capability.toolName &&
+      (capability.operationKind === 'command' || capability.operationKind === 'job'),
+  )
+  assert.equal(Object.keys(FOUNDATION_AGENT_TOOL_SAFETY).length, mutable.length)
+  for (const capability of mutable) {
+    const rule = FOUNDATION_AGENT_TOOL_SAFETY[capability.id]
+    assert.ok(rule)
+    if (
+      rule.impact !== 'bounded' ||
+      capability.costClass === 'high' ||
+      capability.costClass === 'variable'
+    ) {
+      assert.notEqual(rule.confirmation, 'none')
+    }
+  }
+
+  assert.throws(
+    () => defineAgentToolSafetyRegistry([mutable[0]], {}),
+    (error) => error instanceof DomainError && error.code === 'INVALID_CAPABILITY',
+  )
+  assert.throws(
+    () => defineAgentToolSafetyRegistry([mutable[0]], {
+      [mutable[0].id]: {
+        impact: 'destructive', confirmation: 'none',
+        reason: 'This destructive operation has no trusted execution gate.',
+      },
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_CAPABILITY',
+  )
+})
+
+test('agent gate rejects model-supplied absence, mismatch and expired evidence', () => {
+  const capability = FOUNDATION_CAPABILITIES.find(
+    (candidate) => candidate.id === 'apollo.artifacts.rights.set',
+  )
+  const rule = FOUNDATION_AGENT_TOOL_SAFETY[capability.id]
+  const fingerprint = 'a'.repeat(64)
+  const now = new Date('2026-07-16T21:00:00.000Z')
+
+  assert.throws(
+    () => requireAgentToolExecutionGate(capability, rule, fingerprint, undefined, now),
+    (error) => error instanceof DomainError && error.code === 'TOOL_CONFIRMATION_REQUIRED',
+  )
+  assert.throws(
+    () => requireAgentToolExecutionGate(capability, rule, fingerprint, {
+      kind: 'human-approval', capabilityId: capability.id,
+      inputFingerprint: 'b'.repeat(64),
+      issuedAt: '2026-07-16T20:59:00.000Z', expiresAt: '2026-07-16T21:05:00.000Z',
+    }, now),
+    (error) => error instanceof DomainError && error.code === 'TOOL_CONFIRMATION_INVALID',
+  )
+  assert.throws(
+    () => requireAgentToolExecutionGate(capability, rule, fingerprint, {
+      kind: 'human-approval', capabilityId: capability.id, inputFingerprint: fingerprint,
+      issuedAt: '2026-07-16T20:50:00.000Z', expiresAt: '2026-07-16T20:59:59.000Z',
+    }, now),
+    (error) => error instanceof DomainError && error.code === 'TOOL_CONFIRMATION_INVALID',
+  )
+  assert.deepEqual(
+    requireAgentToolExecutionGate(capability, rule, fingerprint, {
+      kind: 'human-approval', capabilityId: capability.id, inputFingerprint: fingerprint,
+      issuedAt: '2026-07-16T20:59:00.000Z', expiresAt: '2026-07-16T21:05:00.000Z',
+    }, now),
+    {
+      confirmation: 'human-approval',
+      issuedAt: '2026-07-16T20:59:00.000Z',
+      expiresAt: '2026-07-16T21:05:00.000Z',
+    },
+  )
+})
+
+test('agent descriptors announce host approval without writable self-approval arguments', () => {
+  const tools = agentToolsForCapabilities(FOUNDATION_CAPABILITIES)
+  for (const tool of tools.filter((candidate) => candidate.apollo.confirmation !== 'none')) {
+    assert.match(tool.description, /Requires trusted human approval|Requires a valid bound preflight/)
+    assert.equal(Object.hasOwn(tool.inputSchema.properties, 'approval'), false)
+    assert.equal(Object.hasOwn(tool.inputSchema.properties, 'confirmed'), false)
+    assert.equal(Object.hasOwn(tool.inputSchema.properties, 'preflightToken'), false)
+  }
+  assert.equal(
+    tools.find((tool) => tool.name === 'apollo.artifacts.rights.set').apollo.confirmation,
+    'human-approval',
+  )
+  assert.equal(
+    tools.find((tool) => tool.name === 'apollo.clients.credentials.revoke').apollo.confirmation,
+    'human-approval',
+  )
 })

@@ -71,3 +71,4 @@ Estados usados:
 - [ADR-067 — Auto-rebase seguro e conflito semântico](./ADR-067-safe-auto-rebase-and-semantic-conflict.md)
 - [ADR-068 — Catálogo externo de tools para agentes](./ADR-068-external-agent-tool-catalog.md)
 - [ADR-069 — Filtro contextual deny-only de capabilities](./ADR-069-contextual-deny-only-capability-filter.md)
+- [ADR-070 — Gate confiável para tools de risco](./ADR-070-trusted-agent-tool-safety-gate.md)
