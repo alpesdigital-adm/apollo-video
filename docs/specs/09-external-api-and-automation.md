@@ -579,6 +579,12 @@ classificação `untrusted-data` e política `never-execute`; structuredContent
 mantém o contrato público original e recebe a mesma marca em `_meta`. A marca é
 emitida pelo adapter/host e não existe como argumento gravável pelo modelo.
 
+O runner inicial do diretor usa `ToolLoopAgent` e constrói dynamic tools apenas
+a partir do snapshot autenticado. Cada execução volta ao cliente da Public API;
+tool ausente permanece invalid call local e tool com confirmation diferente de
+`none` falha antes do HTTP enquanto não houver evidência confiável integrada ao
+runner. Model fake oficial cobre a política sem custo de provider.
+
 ## 23. Rate limits, quotas e budgets
 
 Limites independentes:

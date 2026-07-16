@@ -516,7 +516,7 @@
 - [x] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno. Evidência F0-082: servidor MCP stdio baseado no SDK estável descobre `/v1/tools` uma vez por sessão, valida input/output schemas, traduz namespaces para HTTP autenticado e bloqueia redirects. E2E com client MCP oficial comprova list/call via API fake; testes garantem gate confiável, catálogo scope-filtered, output malformado bloqueado e ausência de repositories/banco/storage/workers no adapter.
 - [x] Expor resources paginados de capabilities, projects, operations e reports autorizados. Evidência F0-083: MCP lista collections e templates derivados exclusivamente das capabilities autorizadas, pagina descriptors e payloads com cursores opacos e bloqueia URI/query desconhecida. Projects ganhou paginação keyset pública versionada; reports só aparecem quando a capability correspondente existir no snapshot.
 - [x] Delimitar transcript/OCR/media metadata como untrusted data em tool inputs/results. Evidência F0-084: descriptors v2 publicam paths de transcript/OCR/media metadata e política `never-execute`; resultados MCP textuais carregam envelope explícito e `_meta`, preservando structuredContent validado sem promover conteúdo de mídia a instrução.
-- [ ] Criar E2E por agente para jornada válida, prompt injection e tool não autorizada.
+- [x] Criar E2E por agente para jornada válida, prompt injection e tool não autorizada. Evidência F0-085: `ToolLoopAgent` recebe somente descriptors do snapshot autorizado e executa pela Public API; E2E determinístico com model fake cobre chamada válida, transcript adversarial preservado como data-only e tool ausente convertida em invalid call sem execução.
 
 ### F0.041 — Transferência externa de mídia [FR-247]
 
@@ -5119,3 +5119,23 @@ Regressões locais desta slice:
 - 165/165 testes gerais aprovados;
 - contratos aprovados com 48 capabilities, 65 schemas, 86 examples e 42 paths;
 - typecheck e 21 testes direcionados de MCP/contratos aprovados.
+
+### Slice F0-085 — Agente diretor mínimo e E2E de segurança
+
+**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+
+Entregas:
+
+- factory assíncrona cria `ToolLoopAgent` apenas com o snapshot retornado por `/v1/tools`;
+- JSON Schemas dinâmicos usam `jsonSchema` do AI SDK e não são reconstruídos manualmente;
+- execução de tool continua atravessando `ApolloMcpPublicApiClient`/Public API;
+- tools que exigem approval/preflight falham fechadas neste runner até receberem canal confiável;
+- system instruction fixa conteúdo de mídia como data-only e proíbe invenção de capabilities;
+- model fake oficial torna as três jornadas determinísticas e sem custo externo;
+- tentativa de tool fora do catálogo vira invalid tool call e nunca alcança o cliente HTTP.
+
+Regressões locais desta slice:
+
+- 168/168 testes gerais aprovados;
+- 3/3 jornadas E2E do agente aprovadas;
+- typecheck aprovado com a API atual do AI SDK instalada.
