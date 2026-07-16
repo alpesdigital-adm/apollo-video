@@ -159,6 +159,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Registers one checksum-bound upload intent without transferring bytes or starting ingest.',
     },
+    'apollo.media.uploads.session.issue': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Issues a short-lived upload authorization for one existing checksum-bound intent.',
+    },
     'apollo.clients.create': {
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Creates a new machine identity with workspace-scoped API permissions.',

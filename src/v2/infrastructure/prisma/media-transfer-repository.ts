@@ -40,4 +40,46 @@ export class PrismaMediaTransferRepository implements MediaTransferRepository {
       }), replayed: false }
     })
   }
+
+  private present(row: {
+    id: string; workspaceId: string; clientId: string; kind: string; byteSize: bigint; mimeType: string;
+    expectedSha256: string; status: string; expiresAt: Date; createdAt: Date;
+    sessionMode: string | null; partSize: bigint | null; sessionExpiresAt: Date | null;
+  }) {
+    return createMediaUpload({
+      id: row.id, workspaceId: row.workspaceId, clientId: row.clientId,
+      kind: row.kind as MediaUploadKind, byteSize: row.byteSize.toString(), mimeType: row.mimeType,
+      expectedSha256: row.expectedSha256, status: row.status as MediaUploadStatus,
+      expiresAt: row.expiresAt.toISOString(), createdAt: row.createdAt.toISOString(),
+      ...(row.sessionMode ? { sessionMode: row.sessionMode as 'single' | 'multipart' } : {}),
+      ...(row.partSize ? { partSize: row.partSize.toString() } : {}),
+      ...(row.sessionExpiresAt ? { sessionExpiresAt: row.sessionExpiresAt.toISOString() } : {}),
+    })
+  }
+
+  async findUpload(input: { workspaceId: string; clientId: string; uploadId: string }) {
+    const row = await this.client.v2MediaUpload.findFirst({ where: {
+      id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId,
+    } })
+    return row ? this.present(row) : undefined
+  }
+
+  async markSessionIssued(input: {
+    workspaceId: string; clientId: string; uploadId: string; mode: 'single' | 'multipart';
+    partSize?: string; sessionExpiresAt: string;
+  }) {
+    const updated = await this.client.v2MediaUpload.updateMany({
+      where: { id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId, status: { in: ['pending-session', 'uploading'] } },
+      data: {
+        status: 'uploading', sessionMode: input.mode,
+        partSize: input.partSize ? BigInt(input.partSize) : null,
+        sessionExpiresAt: new Date(input.sessionExpiresAt),
+      },
+    })
+    if (updated.count !== 1) throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Upload cannot issue a signed session in its current state')
+    const row = await this.client.v2MediaUpload.findFirstOrThrow({ where: {
+      id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId,
+    } })
+    return this.present(row)
+  }
 }

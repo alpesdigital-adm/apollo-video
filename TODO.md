@@ -521,7 +521,7 @@
 ### F0.041 — Transferência externa de mídia [FR-247]
 
 - [x] Implementar `begin-upload` com kind, size, MIME e checksum esperado. Evidência F0-086: `POST /v1/media/uploads` exige scope e idempotency key, valida coerência kind/MIME, tamanho até 5 TB e SHA-256, persiste sessão workspace/client-scoped e retorna replay convergente sem expor storage.
-- [ ] Gerar signed single/multipart sessions curtas com headers obrigatórios.
+- [x] Gerar signed single/multipart sessions curtas com headers obrigatórios. Evidência F0-087: endpoint de sessão escolhe single até 100 MiB ou multipart de 64 MiB/até 10 mil partes, assina autorização HMAC limitada a workspace/client/upload/expiry e exige MIME + checksum em headers.
 - [ ] Implementar resume, parts completion e verification antes do ingest.
 - [ ] Gerar download grants curtos por asset/artifact autorizado.
 - [ ] Impedir storage path/URI permanente de virar identidade pública. Parcial F0-022: lease interna serializa apenas receipt seguro e paths/URLs vivem somente no `MaterializedRenderInput` em memória; faltam download grants e enforcement nos adapters futuros.
@@ -5162,3 +5162,24 @@ Regressões locais desta slice:
 - contratos aprovados com 49 capabilities, 67 schemas, 88 examples e 43 paths;
 - schema v2 aprovado com 30 tabelas, 116 índices e 63 foreign keys;
 - typecheck e geração dos dois Prisma clients aprovados.
+
+### Slice F0-087 — Sessões assinadas single e multipart
+
+**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+
+Entregas:
+
+- capability `apollo.media.uploads.session.issue` e endpoint workspace/client-scoped;
+- seleção determinística single até 100 MiB e multipart com parts de 64 MiB;
+- limite de 10 mil parts e TTL assinado máximo de 15 minutos;
+- autorização HMAC vincula upload, workspace, client, modo, maxParts e expiry;
+- HTTPS obrigatório fora de loopback e secret mínimo de 256 bits;
+- headers `Content-Type` e `X-Apollo-Content-Sha256` são obrigatórios e vinculados ao intent;
+- resposta multipart usa template de partNumber sem revelar bucket ou object key;
+- estado durável registra apenas modo, part size e expiry, nunca token ou signing secret.
+
+Regressões locais desta slice:
+
+- 171/171 testes gerais aprovados;
+- contratos aprovados com 50 capabilities, 68 schemas, 89 examples e 44 paths;
+- typecheck, migration/schema e testes single/multipart aprovados.

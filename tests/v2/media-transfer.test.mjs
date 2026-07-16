@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { beginMediaUploadService } from '../../src/v2/application/begin-media-upload.ts'
+import { issueMediaUploadSessionService } from '../../src/v2/application/issue-media-upload-session.ts'
+import { HmacMediaUploadSessionSigner } from '../../src/v2/infrastructure/security/media-upload-session-signer.ts'
 
 function repository() {
   const records = new Map()
@@ -51,4 +53,30 @@ test('begin-upload rejects kind/MIME mismatch, unsafe size and malformed checksu
   await assert.rejects(() => begin({ ...base, mimeType: 'audio/mpeg' }), /MIME does not match/)
   await assert.rejects(() => begin({ ...base, size: '0' }), /size must be a positive/)
   await assert.rejects(() => begin({ ...base, checksum: 'not-a-sha' }), /checksum must be lowercase/)
+})
+
+test('signed upload sessions choose single or multipart and bind mandatory headers', async () => {
+  const uploads = new Map([
+    ['single', { id: 'single', workspaceId: 'workspace-upload-1', clientId: 'client-upload-1', kind: 'video', byteSize: '1048576', mimeType: 'video/mp4', expectedSha256: 'a'.repeat(64), status: 'pending-session', createdAt: '2026-07-16T22:00:00.000Z', expiresAt: '2026-07-16T22:30:00.000Z' }],
+    ['multi', { id: 'multi', workspaceId: 'workspace-upload-1', clientId: 'client-upload-1', kind: 'video', byteSize: String(200 * 1024 * 1024), mimeType: 'video/mp4', expectedSha256: 'b'.repeat(64), status: 'pending-session', createdAt: '2026-07-16T22:00:00.000Z', expiresAt: '2026-07-16T22:30:00.000Z' }],
+  ])
+  const repository = {
+    async findUpload({ uploadId }) { return uploads.get(uploadId) },
+    async markSessionIssued(input) {
+      const value = { ...uploads.get(input.uploadId), status: 'uploading', sessionMode: input.mode, partSize: input.partSize, sessionExpiresAt: input.sessionExpiresAt }
+      uploads.set(input.uploadId, value); return value
+    },
+  }
+  const signer = new HmacMediaUploadSessionSigner({ baseUrl: 'https://uploads.example.com/', secret: 's'.repeat(32) })
+  const issue = issueMediaUploadSessionService({ repository, signer, clock: () => new Date('2026-07-16T22:10:00.000Z') })
+  const single = await issue({ workspaceId: 'workspace-upload-1', clientId: 'client-upload-1', uploadId: 'single' })
+  const multi = await issue({ workspaceId: 'workspace-upload-1', clientId: 'client-upload-1', uploadId: 'multi' })
+  assert.equal(single.session.mode, 'single')
+  assert.match(single.session.uploadUrl, /^https:\/\/uploads\.example\.com\//)
+  assert.equal(single.session.requiredHeaders['x-apollo-content-sha256'], 'a'.repeat(64))
+  assert.equal(multi.session.mode, 'multipart')
+  assert.equal(multi.session.partSize, String(64 * 1024 * 1024))
+  assert.equal(multi.session.maxParts, 4)
+  assert.match(multi.session.partUrlTemplate, /partNumber=\{partNumber\}/)
+  assert.equal(JSON.stringify({ single, multi }).includes('ssssssss'), false)
 })

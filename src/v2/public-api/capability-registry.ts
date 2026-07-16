@@ -1376,4 +1376,15 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'required',
     requestBodyRequired: true,
   },
+  {
+    id: 'apollo.media.uploads.session.issue',
+    version: '1.0.0',
+    title: 'Issue signed media upload session',
+    description: 'Issues one short-lived single or multipart upload session with mandatory MIME and checksum headers.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['media:write'],
+    outputSchemaRef: 'apollo://schemas/media-upload-session/v1',
+    endpoint: { method: 'POST', path: '/v1/media/uploads/{uploadId}/session' },
+    toolName: 'apollo.media.uploads.session.issue', supportsDryRun: false, costClass: 'low',
+    confirmation: 'none', successStatuses: [200], idempotency: 'natural',
+  },
 ])

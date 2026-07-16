@@ -1766,6 +1766,33 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('media-upload-session', 1, 'Signed media upload session',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['uploadId', 'session'],
+      properties: {
+        uploadId: { type: 'string', format: 'uuid' },
+        session: {
+          type: 'object', additionalProperties: false,
+          required: ['mode', 'expiresAt', 'maxParts', 'requiredHeaders'],
+          properties: {
+            mode: { enum: ['single', 'multipart'] }, expiresAt: dateTimeSchema,
+            maxParts: { type: 'integer', minimum: 1, maximum: 10000 },
+            requiredHeaders: {
+              type: 'object', additionalProperties: false,
+              required: ['content-type', 'x-apollo-content-sha256'],
+              properties: {
+                'content-type': { type: 'string', maxLength: 160 },
+                'x-apollo-content-sha256': { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              },
+            },
+            uploadUrl: { type: 'string', format: 'uri', maxLength: 4096 },
+            partSize: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' },
+            partUrlTemplate: { type: 'string', pattern: '^https?://', maxLength: 4096 },
+          },
+        },
+      },
+    }),
+  ),
   defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',
     successSchema({
       type: 'object',

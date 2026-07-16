@@ -484,6 +484,29 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.media.uploads.session.issue": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "media:write"
+      ],
+      "outputSchemaRef": "apollo://schemas/media-upload-session/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/media/uploads/{uploadId}/session"
+      },
+      "toolName": "apollo.media.uploads.session.issue",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
     "apollo.operations.cancel": {
       "version": "1.0.0",
       "exposure": "public",
@@ -5606,6 +5629,101 @@
             },
             "replayed": {
               "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/media-upload-session/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "uploadId",
+            "session"
+          ],
+          "properties": {
+            "uploadId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "session": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "expiresAt",
+                "maxParts",
+                "requiredHeaders"
+              ],
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "single",
+                    "multipart"
+                  ]
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "maxParts": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000
+                },
+                "requiredHeaders": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "content-type",
+                    "x-apollo-content-sha256"
+                  ],
+                  "properties": {
+                    "content-type": {
+                      "type": "string",
+                      "maxLength": 160
+                    },
+                    "x-apollo-content-sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "uploadUrl": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 4096
+                },
+                "partSize": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,15}$"
+                },
+                "partUrlTemplate": {
+                  "type": "string",
+                  "pattern": "^https?://",
+                  "maxLength": 4096
+                }
+              }
             }
           }
         },

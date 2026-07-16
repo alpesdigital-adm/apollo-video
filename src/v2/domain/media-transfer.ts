@@ -21,6 +21,9 @@ export interface MediaUpload {
   status: MediaUploadStatus
   expiresAt: string
   createdAt: string
+  sessionMode?: 'single' | 'multipart'
+  partSize?: string
+  sessionExpiresAt?: string
 }
 
 export function createMediaUpload(input: MediaUpload): Readonly<MediaUpload> {
@@ -34,5 +37,11 @@ export function createMediaUpload(input: MediaUpload): Readonly<MediaUpload> {
   const createdAt = new Date(input.createdAt)
   const expiresAt = new Date(input.expiresAt)
   assertDomain(!Number.isNaN(createdAt.getTime()) && !Number.isNaN(expiresAt.getTime()) && expiresAt > createdAt, 'INVALID_ARGUMENT', 'upload expiry is invalid')
+  if (input.sessionMode) assertDomain(['single', 'multipart'].includes(input.sessionMode), 'INVALID_ARGUMENT', 'upload session mode is invalid')
+  if (input.partSize) assertDomain(/^[1-9][0-9]{0,15}$/.test(input.partSize), 'INVALID_ARGUMENT', 'part size is invalid')
+  if (input.sessionExpiresAt) {
+    const sessionExpiry = new Date(input.sessionExpiresAt)
+    assertDomain(!Number.isNaN(sessionExpiry.getTime()) && sessionExpiry > createdAt && sessionExpiry <= expiresAt, 'INVALID_ARGUMENT', 'signed session expiry is invalid')
+  }
   return Object.freeze({ ...input, mimeType, createdAt: createdAt.toISOString(), expiresAt: expiresAt.toISOString() })
 }

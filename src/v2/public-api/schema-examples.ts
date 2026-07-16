@@ -866,6 +866,19 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/media-upload-session/v1': [
+      {
+        data: {
+          uploadId: '123e4567-e89b-42d3-a456-426614174001',
+          session: {
+            mode: 'single', expiresAt: '2026-07-16T22:25:00.000Z', maxParts: 1,
+            requiredHeaders: { 'content-type': 'video/mp4', 'x-apollo-content-sha256': 'a'.repeat(64) },
+            uploadUrl: 'https://uploads.example.com/v1/media/uploads/123e4567-e89b-42d3-a456-426614174001/content?token=opaque',
+          },
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-signing-secret-rotation-list/v1': [
       { data: { rotations: [] }, meta: { apiVersion: 'v1' } },
       { data: { rotations: [webhookSigningSecretRotationExample] }, meta: { apiVersion: 'v1' } },

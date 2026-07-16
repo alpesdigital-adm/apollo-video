@@ -93,19 +93,22 @@ model V2ApiCredential {
 }
 
 model V2MediaUpload {
-  id                 String   @id @db.Uuid
-  workspaceId        String   @db.VarChar(128)
-  clientId           String   @db.VarChar(80)
-  kind               String   @db.VarChar(16)
+  id                 String    @id @db.Uuid
+  workspaceId        String    @db.VarChar(128)
+  clientId           String    @db.VarChar(80)
+  kind               String    @db.VarChar(16)
   byteSize           BigInt
-  mimeType           String   @db.VarChar(160)
-  expectedSha256     String   @db.Char(64)
-  status             String   @default("pending-session") @db.VarChar(32)
-  idempotencyKey     String   @db.VarChar(128)
-  requestFingerprint String   @db.Char(64)
-  expiresAt          DateTime @db.Timestamptz(3)
-  createdAt          DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt          DateTime @updatedAt @db.Timestamptz(3)
+  mimeType           String    @db.VarChar(160)
+  expectedSha256     String    @db.Char(64)
+  status             String    @default("pending-session") @db.VarChar(32)
+  idempotencyKey     String    @db.VarChar(128)
+  requestFingerprint String    @db.Char(64)
+  sessionMode        String?   @db.VarChar(16)
+  partSize           BigInt?
+  sessionExpiresAt   DateTime? @db.Timestamptz(3)
+  expiresAt          DateTime  @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
 
   workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   client    V2ApiClient @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
