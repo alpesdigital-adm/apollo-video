@@ -515,7 +515,7 @@
 - [x] Exigir preflight/approval em tools caras, amplas ou destrutivas. Evidência F0-081: registry de segurança classifica exaustivamente as 21 tools mutáveis em `bounded/broad/destructive`; impacto amplo/destrutivo ou custo high/variable exige gate. Evidência confiável é vinculada à capability, fingerprint e expiry; ausência, mismatch e expiração falham antes da execução. Descriptors anunciam o gate, mas não oferecem `approval/confirmed/preflightToken` gravável pelo modelo.
 - [x] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno. Evidência F0-082: servidor MCP stdio baseado no SDK estável descobre `/v1/tools` uma vez por sessão, valida input/output schemas, traduz namespaces para HTTP autenticado e bloqueia redirects. E2E com client MCP oficial comprova list/call via API fake; testes garantem gate confiável, catálogo scope-filtered, output malformado bloqueado e ausência de repositories/banco/storage/workers no adapter.
 - [x] Expor resources paginados de capabilities, projects, operations e reports autorizados. Evidência F0-083: MCP lista collections e templates derivados exclusivamente das capabilities autorizadas, pagina descriptors e payloads com cursores opacos e bloqueia URI/query desconhecida. Projects ganhou paginação keyset pública versionada; reports só aparecem quando a capability correspondente existir no snapshot.
-- [ ] Delimitar transcript/OCR/media metadata como untrusted data em tool inputs/results.
+- [x] Delimitar transcript/OCR/media metadata como untrusted data em tool inputs/results. Evidência F0-084: descriptors v2 publicam paths de transcript/OCR/media metadata e política `never-execute`; resultados MCP textuais carregam envelope explícito e `_meta`, preservando structuredContent validado sem promover conteúdo de mídia a instrução.
 - [ ] Criar E2E por agente para jornada válida, prompt injection e tool não autorizada.
 
 ### F0.041 — Transferência externa de mídia [FR-247]
@@ -5099,3 +5099,23 @@ Regressões locais desta slice:
 - 163/163 testes gerais aprovados;
 - contratos aprovados com 48 capabilities, 64 schemas, 85 examples e 42 paths;
 - typecheck e 9 testes MCP/listagem direcionados aprovados.
+
+### Slice F0-084 — Fronteira de dados não confiáveis para agentes
+
+**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+
+Entregas:
+
+- walker determinístico identifica paths de transcript, OCR, texto reconhecido, captions, subtitles e media metadata;
+- descriptor `agent-tool-list/v2` publica classificação, paths e política `never-execute`;
+- schema v1 do catálogo permanece imutável;
+- tool results textuais são envelopados com aviso de fronteira, enquanto `structuredContent` continua validado pelo output schema;
+- `_meta['apollo/data-boundary']` permite enforcement pelo host sem aceitar flags graváveis pelo modelo;
+- resources também recebem envelope data-only;
+- fixture adversarial preserva literalmente uma falsa instrução dentro do transcript e comprova sua classificação como dado.
+
+Regressões locais desta slice:
+
+- 165/165 testes gerais aprovados;
+- contratos aprovados com 48 capabilities, 65 schemas, 86 examples e 42 paths;
+- typecheck e 21 testes direcionados de MCP/contratos aprovados.

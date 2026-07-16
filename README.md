@@ -135,6 +135,11 @@ leitura correspondente está autorizada. `limit` e `after` são allowlisted;
 resources de reports só aparecem quando `apollo.reports.list` fizer parte do
 catálogo autenticado. O adapter nunca consulta banco ou storage diretamente.
 
+Descriptors e resultados carregam uma fronteira de confiança explícita:
+transcript, OCR, captions, subtitles e metadata extraída de mídia são sempre
+`untrusted-data` com política `never-execute`. O texto é preservado como dado;
+qualquer “instrução” encontrada dentro dele deve ser ignorada pelo host/agente.
+
 ## Limites dos processos de mídia
 
 As chamadas a FFmpeg e ffprobe possuem cancelamento por `AbortSignal`, limite de

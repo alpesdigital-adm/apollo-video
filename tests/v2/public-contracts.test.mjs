@@ -9,7 +9,10 @@ import {
 } from '../../src/v2/public-api/capability-registry.ts'
 import { createOpenApiDocument } from '../../src/v2/public-api/openapi.ts'
 import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
-import { agentToolsForCapabilities } from '../../src/v2/public-api/agent-tool-catalog.ts'
+import {
+  agentDataBoundaryForSchemas,
+  agentToolsForCapabilities,
+} from '../../src/v2/public-api/agent-tool-catalog.ts'
 import {
   FOUNDATION_AGENT_TOOL_SAFETY,
   defineAgentToolSafetyRegistry,
@@ -223,6 +226,36 @@ test('agent tool discovery is deny-by-default for unavailable scopes', () => {
     'apollo.contracts.openapi.read',
     'apollo.contracts.schemas.read',
   ])
+})
+
+test('agent data boundary identifies transcript, OCR and media metadata as data-only paths', () => {
+  const boundary = agentDataBoundaryForSchemas(
+    {
+      type: 'object',
+      properties: {
+        body: {
+          type: 'object',
+          properties: { transcript: { type: 'string' }, title: { type: 'string' } },
+        },
+      },
+    },
+    {
+      type: 'object',
+      properties: {
+        data: {
+          type: 'object',
+          properties: {
+            ocr: { type: 'string' },
+            frames: { type: 'array', items: { type: 'object', properties: { mediaMetadata: { type: 'object' } } } },
+          },
+        },
+      },
+    },
+  )
+  assert.deepEqual(boundary.inputPaths, ['/body/transcript'])
+  assert.deepEqual(boundary.outputPaths, ['/data/frames/*/mediaMetadata', '/data/ocr'])
+  assert.equal(boundary.mediaContentClassification, 'untrusted-data')
+  assert.equal(boundary.instructionPolicy, 'never-execute')
 })
 
 test('mutable agent tools have exhaustive trusted safety gates', () => {

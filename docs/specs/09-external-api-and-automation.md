@@ -573,6 +573,12 @@ MCP é adapter, não substituto da API. Outras ferramentas podem usar REST/SDK d
 9. Prompt/tool arguments sensíveis seguem redaction/retention.
 10. Workspace pode desativar tools sintéticas, export ou admin por client.
 
+O catálogo `agent-tool-list/v2` publica `dataBoundary` com JSON Pointer paths
+para campos de mídia reconhecidos. Resultados textuais MCP são envelopados com
+classificação `untrusted-data` e política `never-execute`; structuredContent
+mantém o contrato público original e recebe a mesma marca em `_meta`. A marca é
+emitida pelo adapter/host e não existe como argumento gravável pelo modelo.
+
 ## 23. Rate limits, quotas e budgets
 
 Limites independentes:

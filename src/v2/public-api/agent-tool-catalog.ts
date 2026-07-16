@@ -11,6 +11,41 @@ function embeddedSchema(ref: string) {
   return { ...schema }
 }
 
+const UNTRUSTED_MEDIA_FIELDS = new Set([
+  'transcript', 'transcripts', 'ocr', 'detectedText', 'recognizedText',
+  'mediaMetadata', 'captions', 'subtitles', 'speakerLabels',
+])
+
+function untrustedPaths(schema: unknown, prefix = ''): readonly string[] {
+  if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) return Object.freeze([])
+  const record = schema as Record<string, unknown>
+  const paths: string[] = []
+  if (typeof record.properties === 'object' && record.properties !== null && !Array.isArray(record.properties)) {
+    for (const [name, child] of Object.entries(record.properties as Record<string, unknown>)) {
+      const path = `${prefix}/${name.replace(/~/g, '~0').replace(/\//g, '~1')}`
+      if (UNTRUSTED_MEDIA_FIELDS.has(name)) paths.push(path)
+      paths.push(...untrustedPaths(child, path))
+    }
+  }
+  if (record.items) paths.push(...untrustedPaths(record.items, `${prefix}/*`))
+  for (const keyword of ['allOf', 'anyOf', 'oneOf']) {
+    if (Array.isArray(record[keyword])) {
+      for (const child of record[keyword] as unknown[]) paths.push(...untrustedPaths(child, prefix))
+    }
+  }
+  return Object.freeze([...new Set(paths)].sort())
+}
+
+export function agentDataBoundaryForSchemas(inputSchema: unknown, outputSchema: unknown) {
+  return Object.freeze({
+    structureClassification: 'trusted-contract' as const,
+    mediaContentClassification: 'untrusted-data' as const,
+    instructionPolicy: 'never-execute' as const,
+    inputPaths: untrustedPaths(inputSchema),
+    outputPaths: untrustedPaths(outputSchema),
+  })
+}
+
 function pathSchema(capability: PublicCapability) {
   const names = [...(capability.endpoint?.path.matchAll(/\{([^}]+)\}/g) ?? [])]
     .map((match) => match[1])
@@ -83,6 +118,13 @@ export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
     ...(headers ? ['headers'] : []),
     ...(body && (capability.requestBodyRequired ?? true) ? ['body'] : []),
   ]
+  const inputSchema = Object.freeze({
+    type: 'object', additionalProperties: false,
+    ...(required.length > 0 ? { required: Object.freeze(required) } : {}),
+    properties: Object.freeze(properties),
+  })
+  const outputSchema = Object.freeze(embeddedSchema(capability.outputSchemaRef))
+  const dataBoundary = agentDataBoundaryForSchemas(inputSchema, outputSchema)
   return Object.freeze({
     name: toolName,
     title: capability.title,
@@ -92,12 +134,8 @@ export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
         : safety.confirmation === 'preflight-token'
           ? `${capability.description} Requires a valid bound preflight token before execution.`
           : capability.description,
-    inputSchema: Object.freeze({
-      type: 'object', additionalProperties: false,
-      ...(required.length > 0 ? { required: Object.freeze(required) } : {}),
-      properties: Object.freeze(properties),
-    }),
-    outputSchema: Object.freeze(embeddedSchema(capability.outputSchemaRef)),
+    inputSchema,
+    outputSchema,
     errorSchema: Object.freeze(embeddedSchema('apollo://schemas/error-envelope/v2')),
     annotations: Object.freeze({
       readOnlyHint:
@@ -116,6 +154,7 @@ export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
       costClass: capability.costClass,
       confirmation: safety.confirmation,
       supportsDryRun: capability.supportsDryRun,
+      dataBoundary,
     }),
   })
 }
