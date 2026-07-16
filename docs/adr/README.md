@@ -54,3 +54,4 @@ Estados usados:
 - [ADR-050 — Concorrência e token one-shot na criação de clientes de API](./ADR-050-concurrent-api-client-creation.md)
 - [ADR-051 — Concorrência e token one-shot na rotação de credenciais](./ADR-051-concurrent-api-credential-rotation.md)
 - [ADR-052 — Concorrência no cadastro de endpoint de webhook](./ADR-052-concurrent-webhook-endpoint-creation.md)
+- [ADR-053 — Concorrência na criação de subscriptions de webhook](./ADR-053-concurrent-webhook-subscription-creation.md)

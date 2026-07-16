@@ -80,6 +80,7 @@ export class PrismaWebhookSubscriptionCreationRepository
 
   async createOrReplay(
     bundle: Readonly<WebhookSubscriptionCreationBundle>,
+    serializationAttempt = 1,
   ): Promise<Readonly<WebhookSubscriptionCreationResult>> {
     const { subscription, idempotency } = bundle
     if (
@@ -206,6 +207,9 @@ export class PrismaWebhookSubscriptionCreationRepository
       }, { isolationLevel: 'Serializable' })
     } catch (error) {
       if (isPrismaError(error, 'P2034')) {
+        if (serializationAttempt < 3) {
+          return this.createOrReplay(bundle, serializationAttempt + 1)
+        }
         throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook subscription creation must be retried')
       }
       if (isPrismaError(error, 'P2002')) {

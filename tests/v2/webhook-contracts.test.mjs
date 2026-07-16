@@ -92,6 +92,7 @@ import { createEnvironmentWebhookSigningSecretProvider } from '../../src/v2/infr
 import { createFallbackWebhookSigningSecretProvider } from '../../src/v2/infrastructure/security/fallback-webhook-signing-secret-provider.ts'
 import { PrismaWebhookSigningSecretProvider } from '../../src/v2/infrastructure/prisma/webhook-signing-secret-provider.ts'
 import { PrismaWebhookEndpointCreationRepository } from '../../src/v2/infrastructure/prisma/webhook-endpoint-creation-repository.ts'
+import { PrismaWebhookSubscriptionCreationRepository } from '../../src/v2/infrastructure/prisma/webhook-subscription-creation-repository.ts'
 import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
 import {
   createWebhookSigningSecretProtector,
@@ -604,6 +605,46 @@ test('webhook subscription creation rejects unusable idempotency keys before per
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
   assert.equal(writes, 0)
+})
+
+test('webhook subscription creation retries serialization conflicts before failing explicitly', async () => {
+  const retryIds = {
+    'webhook-subscription': '00000000-0000-4000-8000-000000000128',
+    'idempotency-record': 'idempotency-webhook-subscription-retry-1',
+  }
+  let bundle
+  const create = createWebhookSubscriptionService({
+    repository: {
+      async createOrReplay(value) {
+        bundle = value
+        return { subscription: value.subscription, replayed: false }
+      },
+    },
+    clock: () => new Date('2026-07-15T13:01:00.000Z'),
+    createId: (kind) => retryIds[kind],
+  })
+  await create({
+    workspaceId: 'workspace-1',
+    endpointId: '00000000-0000-4000-8000-000000000129',
+    eventTypes: ['project.created'],
+    createdByClientId: 'client-1',
+    idempotencyKey: 'subscription-retry-request-1',
+  })
+  let attempts = 0
+  const repository = new PrismaWebhookSubscriptionCreationRepository({
+    async $transaction() {
+      attempts += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+
+  await assert.rejects(
+    () => repository.createOrReplay(bundle),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
 })
 
 const ids = {

@@ -506,7 +506,7 @@
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
-- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061/F0-062/F0-063: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação e rotação de credenciais de clientes de API cobrem os mesmos interleavings preservando divulgação one-shot do token e overlap único; cadastro de endpoint de webhook cobre convergência do endpoint, secret e payload cifrado; os demais commands externos continuam abertos.
+- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061/F0-062/F0-063/F0-064: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação e rotação de credenciais de clientes de API cobrem os mesmos interleavings preservando divulgação one-shot do token e overlap único; cadastros de endpoint e subscription de webhook cobrem convergência dos recursos, payload cifrado e filtros canônicos; os demais commands externos continuam abertos.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
@@ -4446,7 +4446,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-063 — Concorrência e resposta perdida no cadastro de endpoint de webhook
 
-**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+**Status:** publicado em 15 de julho de 2026 no commit `a38fe11`; CI hospedada `29461372848` aprovada integralmente em PostgreSQL.
 
 Entregas:
 
@@ -4469,6 +4469,35 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- confirmação PostgreSQL fica para a CI hospedada da publicação;
+- os interleavings de endpoint, secret e payload cifrado foram confirmados no PostgreSQL pela CI hospedada da publicação;
 - o cadastro não divulga o signing secret; provisionamento one-shot permanece um command separado;
 - subscriptions de webhook ainda precisam da mesma regressão concorrente.
+
+### Slice F0-064 — Concorrência e resposta perdida na criação de subscriptions
+
+**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+
+Entregas:
+
+- conflitos serializáveis na criação de subscription são repetidos até três vezes antes de `PERSISTENCE_CONFLICT` explícito;
+- dois requests HTTP simultâneos com endpoint e filtro idênticos convergem para uma única subscription;
+- a resposta vencedora retorna 201 e o replay concorrente retorna 200 para o mesmo recurso;
+- primeira resposta descartada após commit é recuperada sem duplicar a subscription;
+- filtros divergentes sob a mesma chave produzem um vencedor e `IDEMPOTENCY_PAYLOAD_MISMATCH`;
+- filtro idêntico recriado com outra chave continua retornando `WEBHOOK_SUBSCRIPTION_ALREADY_EXISTS`;
+- ADR-053 formaliza concorrência, canonicalização e unicidade do filtro.
+
+Regressões e evidências locais:
+
+- jornada HTTP real passou cinco execuções SQLite consecutivas com os novos interleavings;
+- contratos de webhook permanecem verdes com 58 testes;
+- teste unitário comprova três tentativas diante de `P2034` persistente;
+- suíte geral permanece verde com 129 testes, além de Prisma, artifacts, operations, webhooks, FFmpeg e render real;
+- build de produção, typecheck, bundle Remotion e auditorias sem vulnerabilidades permanecem verdes;
+- contratos permanecem em 47 capabilities, 61 schemas, 82 exemplos e 41 paths; schema permanece com 28 tabelas, 110 índices e 59 chaves estrangeiras.
+
+Limites explícitos desta slice:
+
+- confirmação PostgreSQL fica para a CI hospedada da publicação;
+- lifecycle de pause/revoke já é revisionado, mas não faz parte desta criação idempotente;
+- commands externos restantes continuam abertos na microtarefa F0.039.

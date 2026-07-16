@@ -1502,22 +1502,29 @@ test('authenticated public API manages projects, clients and artifact inspection
       eventTypes: ['artifact.ready'],
       resourceIds: ['public-api-artifact'],
     }
-    const createSubscriptionResponse = await createWebhookSubscriptionRequest(
-      'public-subscription-create-1',
-      createSubscriptionBody,
+    const createSubscriptionConcurrentResponses = await Promise.all([
+      createWebhookSubscriptionRequest('public-subscription-create-1', createSubscriptionBody),
+      createWebhookSubscriptionRequest('public-subscription-create-1', createSubscriptionBody),
+    ])
+    assert.deepEqual(
+      createSubscriptionConcurrentResponses.map((response) => response.status).sort(),
+      [200, 201],
     )
-    const createdSubscription = await createSubscriptionResponse.json()
-    assert.equal(createSubscriptionResponse.status, 201)
+    const createSubscriptionConcurrentBodies = await Promise.all(
+      createSubscriptionConcurrentResponses.map((response) => response.json()),
+    )
+    const createdSubscription = createSubscriptionConcurrentBodies.find(
+      (body) => body.data.replayed === false,
+    )
+    const replayedCreatedSubscription = createSubscriptionConcurrentBodies.find(
+      (body) => body.data.replayed === true,
+    )
+    assert.ok(createdSubscription)
+    assert.ok(replayedCreatedSubscription)
     assert.equal(createdSubscription.data.replayed, false)
     assert.equal(createdSubscription.data.subscription.status, 'active')
     assert.deepEqual(createdSubscription.data.subscription.eventTypes, ['artifact.ready'])
     assert.equal('workspaceId' in createdSubscription.data.subscription, false)
-    const replaySubscriptionResponse = await createWebhookSubscriptionRequest(
-      'public-subscription-create-1',
-      createSubscriptionBody,
-    )
-    const replayedCreatedSubscription = await replaySubscriptionResponse.json()
-    assert.equal(replaySubscriptionResponse.status, 200)
     assert.equal(replayedCreatedSubscription.data.replayed, true)
     assert.equal(
       replayedCreatedSubscription.data.subscription.id,
@@ -1541,9 +1548,59 @@ test('authenticated public API manages projects, clients and artifact inspection
       (await duplicateSubscriptionResponse.json()).error.code,
       'WEBHOOK_SUBSCRIPTION_ALREADY_EXISTS',
     )
+
+    const responseLossSubscriptionBody = {
+      endpointId: webhookEndpointId,
+      eventTypes: ['quality.report.created'],
+      resourceIds: ['response-loss-resource'],
+    }
+    const discardedSubscriptionResponse = await createWebhookSubscriptionRequest(
+      'public-subscription-response-loss-1',
+      responseLossSubscriptionBody,
+    )
+    assert.equal(discardedSubscriptionResponse.status, 201)
+    const recoveredSubscriptionResponse = await createWebhookSubscriptionRequest(
+      'public-subscription-response-loss-1',
+      responseLossSubscriptionBody,
+    )
+    const recoveredSubscription = await recoveredSubscriptionResponse.json()
+    assert.equal(recoveredSubscriptionResponse.status, 200)
+    assert.equal(recoveredSubscription.data.replayed, true)
+
+    const mismatchedConcurrentSubscriptionResponses = await Promise.all([
+      createWebhookSubscriptionRequest('public-subscription-concurrent-mismatch-1', {
+        endpointId: webhookEndpointId,
+        eventTypes: ['operation.succeeded'],
+      }),
+      createWebhookSubscriptionRequest('public-subscription-concurrent-mismatch-1', {
+        endpointId: webhookEndpointId,
+        eventTypes: ['operation.failed'],
+      }),
+    ])
+    assert.deepEqual(
+      mismatchedConcurrentSubscriptionResponses.map((response) => response.status).sort(),
+      [201, 409],
+    )
+    const mismatchedConcurrentSubscriptionBodies = await Promise.all(
+      mismatchedConcurrentSubscriptionResponses.map((response) => response.json()),
+    )
+    const mismatchedConcurrentSubscriptionWinner =
+      mismatchedConcurrentSubscriptionBodies.find((body) => body.data)
+    assert.equal(
+      mismatchedConcurrentSubscriptionBodies.find((body) => body.error).error.code,
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
     assert.equal((await createWebhookSubscriptionRequest('', createSubscriptionBody)).status, 422)
-    await client.v2WebhookSubscription.delete({
-      where: { id: createdSubscription.data.subscription.id },
+    await client.v2WebhookSubscription.deleteMany({
+      where: {
+        id: {
+          in: [
+            createdSubscription.data.subscription.id,
+            recoveredSubscription.data.subscription.id,
+            mismatchedConcurrentSubscriptionWinner.data.subscription.id,
+          ],
+        },
+      },
     })
     await client.v2IdempotencyRecord.deleteMany({
       where: { workspaceId, key: { startsWith: 'public-subscription-create-' } },

@@ -183,6 +183,10 @@ e filtro idênticos com a mesma chave devolve o recurso original, enquanto reuti
 a chave para outro filtro ou tentar duplicar o filtro com outra chave retorna
 conflito explícito. A criação nasce ativa somente quando o endpoint está ativo;
 endpoints ainda em challenge produzem uma subscription pendente.
+Chamadas simultâneas com o mesmo endpoint e filtro convergem para uma única
+subscription; resposta perdida pode ser repetida sem duplicação. Filtros
+divergentes sob a mesma chave admitem somente um vencedor e retornam mismatch
+para a chamada perdedora.
 
 Endpoints também podem ser cadastrados por `POST /v1/webhooks/endpoints`,
 informando somente a URL HTTPS e uma `Idempotency-Key`. Apollo gera o signing
