@@ -1837,9 +1837,25 @@ test('authenticated public API manages projects, clients and artifact inspection
       method: 'POST',
       headers: { authorization, 'idempotency-key': idempotencyKey },
     })
-    const webhookReplayResponse = await replayWebhookRequest('public-webhook-replay-1')
-    const webhookReplay = await webhookReplayResponse.json()
-    assert.equal(webhookReplayResponse.status, 202)
+    const webhookReplayConcurrentResponses = await Promise.all([
+      replayWebhookRequest('public-webhook-replay-1'),
+      replayWebhookRequest('public-webhook-replay-1'),
+    ])
+    assert.deepEqual(
+      webhookReplayConcurrentResponses.map((response) => response.status).sort(),
+      [200, 202],
+    )
+    const webhookReplayConcurrentBodies = await Promise.all(
+      webhookReplayConcurrentResponses.map((response) => response.json()),
+    )
+    const webhookReplay = webhookReplayConcurrentBodies.find(
+      (body) => body.data.replayed === false,
+    )
+    const webhookReplayAgain = webhookReplayConcurrentBodies.find(
+      (body) => body.data.replayed === true,
+    )
+    assert.ok(webhookReplay)
+    assert.ok(webhookReplayAgain)
     assert.equal(webhookReplay.data.replayed, false)
     assert.equal(webhookReplay.data.delivery.status, 'retry-scheduled')
     assert.equal('completedAt' in webhookReplay.data.delivery, false)
@@ -1847,15 +1863,31 @@ test('authenticated public API manages projects, clients and artifact inspection
       webhookReplay.data.delivery.attempts.map((attempt) => attempt.attemptNumber),
       [1],
     )
-    const webhookReplayAgainResponse = await replayWebhookRequest('public-webhook-replay-1')
-    const webhookReplayAgain = await webhookReplayAgainResponse.json()
-    assert.equal(webhookReplayAgainResponse.status, 200)
     assert.equal(webhookReplayAgain.data.replayed, true)
     assert.deepEqual(webhookReplayAgain.data.delivery, webhookReplay.data.delivery)
     const duplicateReplayResponse = await replayWebhookRequest('public-webhook-replay-2')
     const duplicateReplay = await duplicateReplayResponse.json()
     assert.equal(duplicateReplayResponse.status, 409)
     assert.equal(duplicateReplay.error.code, 'WEBHOOK_DELIVERY_REPLAY_REJECTED')
+
+    const replayResetAt = new Date()
+    await client.v2WebhookDelivery.update({
+      where: { id: webhookDeliveryId },
+      data: {
+        status: 'dead-lettered',
+        completedAt: replayResetAt,
+        deadLetteredAt: replayResetAt,
+        updatedAt: replayResetAt,
+      },
+    })
+    const discardedReplayResponse = await replayWebhookRequest('public-webhook-replay-loss-1')
+    assert.equal(discardedReplayResponse.status, 202)
+    const recoveredReplayResponse = await replayWebhookRequest('public-webhook-replay-loss-1')
+    const recoveredReplay = await recoveredReplayResponse.json()
+    assert.equal(recoveredReplayResponse.status, 200)
+    assert.equal(recoveredReplay.data.replayed, true)
+    assert.equal(recoveredReplay.data.delivery.id, webhookDeliveryId)
+    assert.equal(recoveredReplay.data.delivery.status, 'retry-scheduled')
 
     const webhookEventReplayUrl =
       `${baseUrl}/v1/webhooks/events/${webhookReplayEventId}/replay`

@@ -295,6 +295,11 @@ individualmente ou por um event ID exato. O replay por evento avalia no máximo
 todo o histórico de attempts; replay por intervalo continua reservado para uma
 operação durável com preflight.
 
+O replay individual de delivery é serializável. Chamadas simultâneas com a
+mesma chave ampliam o limite de tentativas apenas uma vez e devolvem o mesmo
+diagnóstico. Se a resposta 202 for perdida, o retry recupera esse diagnóstico
+sem reabrir novamente a delivery nem consumir outra tentativa permitida.
+
 O worker de entrega pode ser iniciado com `npm run worker:v2:webhook`. Ele exige
 Postgres e a chave mestra de payload protegido no ambiente de produção. Secrets
 gerados pelo cadastro público são abertos diretamente do envelope cifrado no

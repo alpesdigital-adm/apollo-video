@@ -1,7 +1,8 @@
-import type {
-  PrismaClient,
-  V2WebhookDelivery,
-  V2WebhookDeliveryAttempt,
+import {
+  Prisma,
+  type PrismaClient,
+  type V2WebhookDelivery,
+  type V2WebhookDeliveryAttempt,
 } from '@prisma/client'
 
 import { prisma } from '../../../lib/db.ts'
@@ -22,6 +23,7 @@ import type {
 } from '../../application/ports/webhook-delivery-query-repository.ts'
 import type {
   WebhookDeliveryReplayRepository,
+  WebhookDeliveryReplayResult,
 } from '../../application/ports/webhook-delivery-replay-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -44,6 +46,10 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/
 
 function isUniqueConstraintError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
+}
+
+function isSerializationConflict(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
 }
 
 function hydrateDelivery(row: V2WebhookDelivery): Readonly<WebhookDelivery> {
@@ -403,7 +409,10 @@ export class PrismaWebhookDeliveryRepository
     })
   }
 
-  async replay(command: Parameters<WebhookDeliveryReplayRepository['replay']>[0]) {
+  async replay(
+    command: Parameters<WebhookDeliveryReplayRepository['replay']>[0],
+    serializationAttempt = 1,
+  ): Promise<Readonly<WebhookDeliveryReplayResult> | null> {
     const requestedAt = new Date(command.requestedAt)
     const nextAttemptAt = new Date(command.nextAttemptAt)
     const expiresAt = new Date(command.expiresAt)
@@ -536,8 +545,17 @@ export class PrismaWebhookDeliveryRepository
           },
         })
         return Object.freeze({ diagnostic, replayed: false })
-      })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
+      if (isSerializationConflict(error)) {
+        if (serializationAttempt < 3) {
+          return this.replay(command, serializationAttempt + 1)
+        }
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Webhook delivery replay conflicted with another transaction',
+        )
+      }
       if (isUniqueConstraintError(error)) {
         const existing = await this.client.v2IdempotencyRecord.findUnique({ where: key })
         if (existing && existing.expiresAt > requestedAt) return readReplay(existing)

@@ -93,6 +93,7 @@ import { createFallbackWebhookSigningSecretProvider } from '../../src/v2/infrast
 import { PrismaWebhookSigningSecretProvider } from '../../src/v2/infrastructure/prisma/webhook-signing-secret-provider.ts'
 import { PrismaWebhookEndpointCreationRepository } from '../../src/v2/infrastructure/prisma/webhook-endpoint-creation-repository.ts'
 import { PrismaWebhookSubscriptionCreationRepository } from '../../src/v2/infrastructure/prisma/webhook-subscription-creation-repository.ts'
+import { PrismaWebhookDeliveryRepository } from '../../src/v2/infrastructure/prisma/webhook-delivery-repository.ts'
 import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
 import {
   createWebhookSigningSecretProtector,
@@ -1923,6 +1924,34 @@ test('webhook replay service binds client and delivery into required idempotency
     }),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
+})
+
+test('webhook delivery replay retries serialization conflicts before failing explicitly', async () => {
+  let attempts = 0
+  const repository = new PrismaWebhookDeliveryRepository({
+    async $transaction() {
+      attempts += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+
+  await assert.rejects(
+    () => repository.replay({
+      idempotencyId: '00000000-0000-4000-8000-000000000846',
+      workspaceId: 'workspace-1',
+      clientId: 'client-1',
+      idempotencyKey: 'replay-serialization-retry-1',
+      requestFingerprint: 'e'.repeat(64),
+      deliveryId: '00000000-0000-4000-8000-000000000847',
+      requestedAt: '2026-07-16T08:02:00.000Z',
+      nextAttemptAt: '2026-07-16T08:02:00.001Z',
+      expiresAt: '2026-07-17T08:02:00.000Z',
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
 })
 
 test('webhook event replay service binds the exact event and bounded batch into idempotency', async () => {

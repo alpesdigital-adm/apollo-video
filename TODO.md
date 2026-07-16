@@ -506,7 +506,7 @@
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
-- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061/F0-062/F0-063/F0-064/F0-065/F0-066/F0-067: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação e rotação de credenciais de clientes de API cobrem os mesmos interleavings preservando divulgação one-shot do token e overlap único; cadastros de endpoint e subscription de webhook cobrem convergência dos recursos, payload cifrado e filtros canônicos; provisionamento pendente comprova divulgação one-shot concorrente e replay redigido; enqueue de render cobre operação e contexto privado únicos; autorização de materialização cobre receipt e decisões únicos com recuperação após resposta perdida; os demais commands externos continuam abertos.
+- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061/F0-062/F0-063/F0-064/F0-065/F0-066/F0-067/F0-068: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação e rotação de credenciais de clientes de API cobrem os mesmos interleavings preservando divulgação one-shot do token e overlap único; cadastros de endpoint e subscription de webhook cobrem convergência dos recursos, payload cifrado e filtros canônicos; provisionamento pendente comprova divulgação one-shot concorrente e replay redigido; enqueue de render cobre operação e contexto privado únicos; autorização de materialização cobre receipt e decisões únicos; replay individual de delivery cobre ampliação única do limite e recuperação após resposta perdida; os demais commands externos continuam abertos.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
@@ -4563,7 +4563,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-067 — Concorrência e resposta perdida na autorização de materialização
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+**Status:** publicado em 16 de julho de 2026 no commit `1322884`; CI hospedada `29495168109` aprovada integralmente em PostgreSQL.
 
 Entregas:
 
@@ -4587,6 +4587,36 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- confirmação PostgreSQL fica para a CI hospedada da publicação;
+- autorização, decisões e retry serializável foram confirmados no PostgreSQL pela CI hospedada da publicação;
 - rights snapshots permanecem imutáveis e podem exigir nova autorização quando mudam;
 - materialização no worker continua revalidando direitos no momento do uso.
+
+### Slice F0-068 — Concorrência e resposta perdida no replay de webhook delivery
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+
+Entregas:
+
+- replay individual de delivery passa a usar isolamento serializável;
+- conflitos `P2034` são repetidos até três vezes antes de `PERSISTENCE_CONFLICT` explícito;
+- duas chamadas HTTP simultâneas com delivery e chave idênticas convergem para uma reabertura;
+- a vencedora retorna 202 e `replayed=false`; a concorrente retorna 200 e o mesmo diagnóstico;
+- `maxAttempts` é ampliado uma única vez e o histórico de attempts não é duplicado;
+- primeira resposta descartada é recuperada como replay sem nova ampliação do limite;
+- nova chave contra delivery já reaberta continua retornando `WEBHOOK_DELIVERY_REPLAY_REJECTED`;
+- ADR-057 formaliza concorrência e limite absoluto do replay.
+
+Regressões e evidências locais:
+
+- jornada HTTP real passou cinco execuções SQLite consecutivas com dois ciclos de replay;
+- contratos de webhook permanecem verdes com 59 testes;
+- teste unitário comprova três tentativas diante de `P2034` persistente;
+- suíte geral permanece verde com 132 testes, além de Prisma, artifacts, operations, webhooks, FFmpeg e render real;
+- build de produção, typecheck, bundle Remotion e auditorias sem vulnerabilidades permanecem verdes;
+- contratos permanecem em 47 capabilities, 61 schemas, 82 exemplos e 41 paths; schema permanece com 28 tabelas, 110 índices e 59 chaves estrangeiras.
+
+Limites explícitos desta slice:
+
+- confirmação PostgreSQL fica para a CI hospedada da publicação;
+- replay por evento possui lote e ledger próprios e permanece para incremento separado;
+- o limite absoluto de attempts nunca é contornado por retries de transporte.
