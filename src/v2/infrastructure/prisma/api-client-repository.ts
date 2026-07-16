@@ -348,8 +348,11 @@ export class PrismaApiClientRepository
     })
   }
 
-  async rotateOrReplay(bundle: RotateApiCredentialBundle): Promise<ApiCredentialMutationResult> {
-    return this.client.$transaction(async (transaction) => {
+  async rotateOrReplay(
+    bundle: RotateApiCredentialBundle,
+    concurrentWriteAttempt = 1,
+  ): Promise<ApiCredentialMutationResult> {
+    const result = this.client.$transaction(async (transaction) => {
       const key = {
         workspaceId_clientId_key: {
           workspaceId: bundle.idempotency.workspaceId,
@@ -443,6 +446,17 @@ export class PrismaApiClientRepository
         credential: hydrateCredential(credentialRow),
         replayed: false,
       }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+
+    return result.catch((error: unknown) => {
+      if (!isConcurrentWriteConflict(error)) throw error
+      if (concurrentWriteAttempt < 3) {
+        return this.rotateOrReplay(bundle, concurrentWriteAttempt + 1)
+      }
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'API credential rotation conflicted with another transaction',
+      )
     })
   }
 

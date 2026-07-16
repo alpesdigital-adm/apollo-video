@@ -157,6 +157,11 @@ recebe o bearer token one-shot, enquanto todos os replays são redigidos. Se a
 primeira resposta for perdida, repetir a chamada recupera apenas os metadados;
 o token não pode ser reaberto. Reutilizar a chave com outro payload produz um
 único vencedor e conflito explícito para a chamada divergente.
+A rotação em `POST /v1/workspaces/{workspaceId}/clients/{clientId}/credentials`
+segue os mesmos invariantes: chamadas simultâneas idênticas criam uma única
+credencial, aplicam o overlap uma única vez e divulgam somente um novo token.
+Retry após resposta perdida devolve apenas metadados redigidos, e mudar o
+overlap reutilizando a mesma chave é rejeitado como payload divergente.
 
 Endpoints e subscriptions de webhook possuem modelos duráveis separados, filtros
 exatos pelo catálogo e referências opacas para secrets de assinatura. O núcleo de

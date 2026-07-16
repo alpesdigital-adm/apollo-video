@@ -506,7 +506,7 @@
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
-- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação de cliente de API cobre os mesmos interleavings preservando divulgação one-shot do token; os demais commands externos continuam abertos.
+- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061/F0-062: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação e rotação de credenciais de clientes de API cobrem os mesmos interleavings preservando divulgação one-shot do token e overlap único; os demais commands externos continuam abertos.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
@@ -4388,7 +4388,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-061 — Concorrência e token one-shot na criação de clientes de API
 
-**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+**Status:** publicado em 15 de julho de 2026 no commit `ddb6b7a`; CI hospedada `29459177029` aprovada integralmente em PostgreSQL.
 
 Entregas:
 
@@ -4410,6 +4410,36 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- confirmação PostgreSQL fica para a CI hospedada da publicação;
+- os interleavings e a divulgação one-shot foram confirmados no PostgreSQL pela CI hospedada da publicação;
 - rotação de credencial continua com idempotência sequencial e receberá regressão concorrente própria;
 - token perdido depois da primeira resposta não é recuperável; o administrador deve criar ou rotacionar outra credencial.
+
+### Slice F0-062 — Concorrência, overlap e token one-shot na rotação de credenciais
+
+**Status:** implementado localmente em 15 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na publicação.
+
+Entregas:
+
+- rotação administrativa passa a usar isolamento serializável;
+- conflitos concorrentes `P2002` e `P2034` são repetidos até três vezes antes de `PERSISTENCE_CONFLICT` explícito;
+- duas rotações HTTP simultâneas com a mesma chave e overlap convergem para uma única nova credencial;
+- a credencial anterior recebe o mesmo limite de overlap uma única vez;
+- exatamente uma resposta retorna 201 e o novo bearer token; o replay 200 omite o token;
+- primeira resposta descartada após commit é recuperada apenas como replay redigido;
+- a mesma chave usada simultaneamente com overlaps diferentes produz um vencedor e `IDEMPOTENCY_PAYLOAD_MISMATCH`;
+- ADR-051 formaliza concorrência, overlap e divulgação one-shot da rotação.
+
+Regressões e evidências locais:
+
+- jornada HTTP real passou cinco execuções SQLite consecutivas com criação e rotação concorrentes;
+- teste unitário alterna `P2034` e `P2002`, comprova três tentativas e conflito explícito ao final;
+- todos os ledgers administrativos inspecionados permanecem sem bearer token ou secret;
+- suíte geral permanece verde com 127 testes, além de Prisma, artifacts, operations, webhooks, FFmpeg e render real;
+- build de produção, typecheck, bundle Remotion e auditorias sem vulnerabilidades permanecem verdes;
+- contratos permanecem em 47 capabilities, 61 schemas, 82 exemplos e 41 paths; schema permanece com 28 tabelas, 110 índices e 59 chaves estrangeiras.
+
+Limites explícitos desta slice:
+
+- confirmação PostgreSQL fica para a CI hospedada da publicação;
+- token perdido não é recuperável por replay; uma nova rotação com outra chave idempotente é necessária;
+- revogação não usa ledger idempotente e permanece fora deste recorte.

@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   createApiClientAdministrationService,
   revokeApiCredentialService,
+  rotateApiCredentialService,
 } from '../../src/v2/application/administer-api-clients.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { PrismaApiClientRepository } from '../../src/v2/infrastructure/prisma/api-client-repository.ts'
@@ -32,8 +33,21 @@ class InMemoryAdministrationRepository {
     return result
   }
 
-  async rotateOrReplay() {
-    throw new Error('not used')
+  async rotateOrReplay(bundle) {
+    this.lastRotateBundle = bundle
+    return {
+      client: {
+        id: bundle.targetClientId,
+        workspaceId: bundle.workspaceId,
+        name: 'Target client',
+        status: 'active',
+        environment: 'sandbox',
+        scopes: ['projects:read'],
+        createdAt: bundle.credential.createdAt,
+      },
+      credential: bundle.credential,
+      replayed: false,
+    }
   }
 
   async revokeCredential() {
@@ -125,6 +139,33 @@ test('API client creation retries concurrent write conflicts before failing expl
 
   await assert.rejects(
     () => repository.createOrReplay(source.lastCreateBundle),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
+})
+
+test('API credential rotation retries concurrent write conflicts before failing explicitly', async () => {
+  const source = new InMemoryAdministrationRepository()
+  const execute = rotateApiCredentialService(dependencies(source))
+  await execute({
+    actor: actor(),
+    workspaceId: 'workspace-1',
+    targetClientId: 'target-client',
+    idempotencyKey: 'rotate-read-agent-retry-fixture',
+    overlapSeconds: 30,
+  })
+  let attempts = 0
+  const repository = new PrismaApiClientRepository({
+    async $transaction() {
+      attempts += 1
+      const error = new Error('concurrent write conflict')
+      error.code = attempts % 2 === 0 ? 'P2002' : 'P2034'
+      throw error
+    },
+  })
+
+  await assert.rejects(
+    () => repository.rotateOrReplay(source.lastRotateBundle),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
   assert.equal(attempts, 3)

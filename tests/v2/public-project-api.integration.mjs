@@ -2877,11 +2877,26 @@ test('authenticated public API manages projects, clients and artifact inspection
           body: JSON.stringify({ overlapSeconds: 0 }),
         },
       )
-    const rotatedResponse = await rotateRequest()
-    const rotated = await rotatedResponse.json()
-    assert.equal(rotatedResponse.status, 201)
+    const rotateConcurrentResponses = await Promise.all([
+      rotateRequest(),
+      rotateRequest(),
+    ])
+    assert.deepEqual(
+      rotateConcurrentResponses.map((response) => response.status).sort(),
+      [200, 201],
+    )
+    const rotateConcurrentBodies = await Promise.all(
+      rotateConcurrentResponses.map((response) => response.json()),
+    )
+    const rotated = rotateConcurrentBodies.find((body) => body.data.replayed === false)
+    const rotateReplay = rotateConcurrentBodies.find((body) => body.data.replayed === true)
+    assert.ok(rotated)
+    assert.ok(rotateReplay)
     assert.equal(rotated.data.secretAvailable, true)
     assert.equal(typeof rotated.data.token, 'string')
+    assert.equal(rotateReplay.data.secretAvailable, false)
+    assert.equal('token' in rotateReplay.data, false)
+    assert.equal(rotateReplay.data.credential.id, rotated.data.credential.id)
 
     const expiredOldTokenResponse = await fetch(`${baseUrl}/v1/projects`, {
       headers: { authorization: childAuthorization },
@@ -2894,12 +2909,64 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     assert.equal(rotatedTokenResponse.status, 200)
 
-    const rotateReplayResponse = await rotateRequest()
-    const rotateReplay = await rotateReplayResponse.json()
-    assert.equal(rotateReplayResponse.status, 200)
-    assert.equal(rotateReplay.data.secretAvailable, false)
-    assert.equal('token' in rotateReplay.data, false)
-    assert.equal(rotateReplay.data.credential.id, rotated.data.credential.id)
+    const rotateCredential = (targetClientId, idempotencyKey, overlapSeconds) =>
+      fetch(
+        `${baseUrl}/v1/workspaces/${workspaceId}/clients/${targetClientId}/credentials`,
+        {
+          method: 'POST',
+          headers: {
+            authorization,
+            'content-type': 'application/json',
+            'idempotency-key': idempotencyKey,
+          },
+          body: JSON.stringify({ overlapSeconds }),
+        },
+      )
+    const discardedRotationResponse = await rotateCredential(
+      recovered.data.client.id,
+      'rotate-client-response-loss-1',
+      30,
+    )
+    assert.equal(discardedRotationResponse.status, 201)
+    const recoveredRotationResponse = await rotateCredential(
+      recovered.data.client.id,
+      'rotate-client-response-loss-1',
+      30,
+    )
+    const recoveredRotation = await recoveredRotationResponse.json()
+    assert.equal(recoveredRotationResponse.status, 200)
+    assert.equal(recoveredRotation.data.replayed, true)
+    assert.equal(recoveredRotation.data.secretAvailable, false)
+    assert.equal('token' in recoveredRotation.data, false)
+
+    const mismatchedRotationResponses = await Promise.all([
+      rotateCredential(
+        mismatchedWinner.data.client.id,
+        'rotate-client-concurrent-mismatch-1',
+        30,
+      ),
+      rotateCredential(
+        mismatchedWinner.data.client.id,
+        'rotate-client-concurrent-mismatch-1',
+        60,
+      ),
+    ])
+    assert.deepEqual(
+      mismatchedRotationResponses.map((response) => response.status).sort(),
+      [201, 409],
+    )
+    const mismatchedRotationBodies = await Promise.all(
+      mismatchedRotationResponses.map((response) => response.json()),
+    )
+    const mismatchedRotationWinner = mismatchedRotationBodies.find((body) => body.data)
+    const mismatchedRotationFailure = mismatchedRotationBodies.find((body) => body.error)
+    assert.equal(mismatchedRotationWinner.data.replayed, false)
+    assert.equal(mismatchedRotationWinner.data.secretAvailable, true)
+    assert.equal(typeof mismatchedRotationWinner.data.token, 'string')
+    assert.equal(
+      mismatchedRotationFailure.error.code,
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
 
     const selfRevokeResponse = await fetch(
       `${baseUrl}/v1/workspaces/${workspaceId}/clients/${apiClientId}/credentials/${issued.credential.id}`,
@@ -2923,11 +2990,20 @@ test('authenticated public API manages projects, clients and artifact inspection
     const storedAdminResponses = await client.v2IdempotencyRecord.findMany({
       where: {
         workspaceId,
-        key: { in: ['public-create-child-client-1', 'rotate-child-client-1'] },
+        key: {
+          in: [
+            'public-create-child-client-1',
+            'public-create-client-response-loss-1',
+            'public-create-client-concurrent-mismatch-1',
+            'rotate-child-client-1',
+            'rotate-client-response-loss-1',
+            'rotate-client-concurrent-mismatch-1',
+          ],
+        },
       },
       select: { responseJson: true },
     })
-    assert.equal(storedAdminResponses.length, 2)
+    assert.equal(storedAdminResponses.length, 6)
     for (const record of storedAdminResponses) {
       assert.equal(record.responseJson.includes('apollo_v2.'), false)
       assert.equal(record.responseJson.includes('secret'), false)
