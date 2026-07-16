@@ -514,7 +514,7 @@
 - [x] Filtrar tools/capabilities por client, scope, environment e policy. Evidência F0-080: descoberta compartilhada exige client autenticado/ativo no environment correto, intersecta scopes, `availableIn` e policy deny-only global/por environment/workspace/client; configuração inválida falha fechada. Unit tests cobrem as quatro dimensões e a jornada HTTP prova paridade exata entre `/v1/capabilities` e `/v1/tools`, inclusive deny específico por client sem afetar o catálogo anônimo.
 - [x] Exigir preflight/approval em tools caras, amplas ou destrutivas. Evidência F0-081: registry de segurança classifica exaustivamente as 21 tools mutáveis em `bounded/broad/destructive`; impacto amplo/destrutivo ou custo high/variable exige gate. Evidência confiável é vinculada à capability, fingerprint e expiry; ausência, mismatch e expiração falham antes da execução. Descriptors anunciam o gate, mas não oferecem `approval/confirmed/preflightToken` gravável pelo modelo.
 - [x] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno. Evidência F0-082: servidor MCP stdio baseado no SDK estável descobre `/v1/tools` uma vez por sessão, valida input/output schemas, traduz namespaces para HTTP autenticado e bloqueia redirects. E2E com client MCP oficial comprova list/call via API fake; testes garantem gate confiável, catálogo scope-filtered, output malformado bloqueado e ausência de repositories/banco/storage/workers no adapter.
-- [ ] Expor resources paginados de capabilities, projects, operations e reports autorizados.
+- [x] Expor resources paginados de capabilities, projects, operations e reports autorizados. Evidência F0-083: MCP lista collections e templates derivados exclusivamente das capabilities autorizadas, pagina descriptors e payloads com cursores opacos e bloqueia URI/query desconhecida. Projects ganhou paginação keyset pública versionada; reports só aparecem quando a capability correspondente existir no snapshot.
 - [ ] Delimitar transcript/OCR/media metadata como untrusted data em tool inputs/results.
 - [ ] Criar E2E por agente para jornada válida, prompt injection e tool não autorizada.
 
@@ -5046,7 +5046,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-082 — Adapter MCP stdio sobre a Public API
 
-**Status:** publicado em 16 de julho de 2026 no commit `0f8e8d8`; a primeira CI hospedada falhou antes dos testes por conflito de peer dependency entre `openai@4` e `zod@4`; o lockfile foi corrigido para a linha `zod@3.25`, compatível também com AI SDK e MCP SDK, e reproduzido com `npm ci` local.
+**Status:** publicado em 16 de julho de 2026 no commit `0f8e8d8`; reparo de dependências `fdb04fd` aprovado pela CI hospedada `29537283832` em 23 estágios.
 
 Entregas:
 
@@ -5077,3 +5077,25 @@ Limites explícitos desta slice:
 - resources paginados pertencem à próxima microtarefa da F0.040;
 - tools `preflight-token` dependerão da emissão/validação assinada prevista na F0.042;
 - o adapter não executa modelo nem escolhe provider; ele apenas expõe a superfície MCP autorizada.
+
+### Slice F0-083 — Resources MCP paginados e autorizados
+
+**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+
+Entregas:
+
+- `resources/list` pagina descriptors autorizados com cursor opaco;
+- templates permitem somente queries declaradas por collection;
+- `resources/read` aceita apenas o scheme `apollo://` e collections presentes no snapshot de capabilities;
+- capabilities são paginadas localmente sobre a resposta autenticada da Public API;
+- projects e operations preservam os cursores da Public API;
+- project list passou a contrato `project-list/v2`, mantendo `v1` imutável;
+- paginação de projects usa keyset `createdAt + id` e vincula cursor ao workspace;
+- reports permanecem invisíveis enquanto `apollo.reports.list` não estiver autorizada;
+- testes com client MCP oficial cobrem paginação, templates, leitura e negação de report não autorizado.
+
+Regressões locais desta slice:
+
+- 163/163 testes gerais aprovados;
+- contratos aprovados com 48 capabilities, 64 schemas, 85 examples e 42 paths;
+- typecheck e 9 testes MCP/listagem direcionados aprovados.

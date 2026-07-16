@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { createProjectService } from '@/v2/application/create-project'
+import { listProjectsService } from '@/v2/application/list-projects'
 import { DomainError } from '@/v2/domain/errors'
 import {
   createProjectCreationRepository,
@@ -42,18 +43,22 @@ export async function GET(request: NextRequest) {
   try {
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'projects:read')
-    const rawLimit = request.nextUrl.searchParams.get('limit') ?? '20'
-    const limit = Number(rawLimit)
-    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-      throw new DomainError('INVALID_ARGUMENT', 'limit must be an integer from 1 to 100')
+    const params = request.nextUrl.searchParams
+    for (const name of params.keys()) {
+      if (!['limit', 'after'].includes(name) || params.getAll(name).length > 1) {
+        throw new DomainError('INVALID_ARGUMENT', `${name} is not a supported project list parameter`)
+      }
     }
-
-    const projects = await createProjectQueryRepository().listByWorkspace(
-      actor.workspaceId,
-      limit,
-    )
+    const result = await listProjectsService({ projects: createProjectQueryRepository() })({
+      workspaceId: actor.workspaceId,
+      ...(params.has('limit') ? { limit: Number(params.get('limit')) } : {}),
+      ...(params.has('after') ? { after: params.get('after') ?? '' } : {}),
+    })
     return NextResponse.json(
-      presentSuccess({ projects: projects.map(presentProject) }),
+      presentSuccess({
+        projects: result.projects.map(presentProject),
+        ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+      }),
       { headers: publicApiHeaders(requestId) },
     )
   } catch (error) {

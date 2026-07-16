@@ -1,5 +1,9 @@
 import type { Project } from '../../domain/project.ts'
 
 export interface ProjectQueryRepository {
-  listByWorkspace(workspaceId: string, limit: number): Promise<readonly Project[]>
+  listByWorkspace(input: {
+    workspaceId: string
+    limit: number
+    after?: { createdAt: string; id: string }
+  }): Promise<readonly Project[]>
 }

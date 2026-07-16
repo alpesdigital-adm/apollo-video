@@ -543,6 +543,13 @@ O MCP oficial:
 - respeita preflight/confirmation e retorna operation IDs;
 - versiona sua compatibilidade com a API.
 
+Resources de collection são derivados do mesmo snapshot autorizado das tools.
+`resources/list` possui cursor próprio, e cada URI de collection aceita apenas
+queries allowlisted com `limit`/`after` opacos. Projects e operations delegam a
+paginação à Public API; capabilities são paginadas sobre a resposta autenticada
+sem encaminhar o cursor interno do adapter. Collections sem capability visível,
+inclusive reports ainda não publicados, não são anunciadas nem legíveis.
+
 A implementação inicial usa stdio e o SDK MCP estável. Ao abrir a sessão, busca
 `GET /v1/tools` com o bearer do host e fixa um snapshot imutável; list/call nunca
 consultam domínio, banco ou storage. Argumentos são validados contra inputSchema,

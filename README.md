@@ -129,6 +129,12 @@ client não oferece esse canal. Aprovação é vinculada ao fingerprint do input
 expira em cinco minutos. Tools futuras com `preflight-token` dependerão do commit
 token assinado previsto na F0.042.
 
+O servidor anuncia também collections `apollo://capabilities`,
+`apollo://projects` e `apollo://operations` somente quando a capability de
+leitura correspondente está autorizada. `limit` e `after` são allowlisted;
+resources de reports só aparecem quando `apollo.reports.list` fizer parte do
+catálogo autenticado. O adapter nunca consulta banco ou storage diretamente.
+
 ## Limites dos processos de mídia
 
 As chamadas a FFmpeg e ffprobe possuem cancelamento por `AbortSignal`, limite de

@@ -12,11 +12,25 @@ export class PrismaProjectQueryRepository implements ProjectQueryRepository {
     this.client = client
   }
 
-  async listByWorkspace(workspaceId: string, limit: number): Promise<readonly Project[]> {
+  async listByWorkspace(input: {
+    workspaceId: string
+    limit: number
+    after?: { createdAt: string; id: string }
+  }): Promise<readonly Project[]> {
     const rows = await this.client.v2Project.findMany({
-      where: { workspaceId },
+      where: {
+        workspaceId: input.workspaceId,
+        ...(input.after
+          ? {
+              OR: [
+                { createdAt: { lt: new Date(input.after.createdAt) } },
+                { createdAt: new Date(input.after.createdAt), id: { lt: input.after.id } },
+              ],
+            }
+          : {}),
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: limit,
+      take: input.limit,
     })
 
     return rows.map((row) =>

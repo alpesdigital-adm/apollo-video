@@ -67,6 +67,28 @@ test('MCP Public API client discovers tools and maps transport namespaces to HTT
   assert.equal(requests.every((request) => request.init.redirect === 'error'), true)
 })
 
+test('MCP Public API client paginates authorized capabilities without forwarding adapter cursors', async () => {
+  const requests = []
+  const fetchImplementation = async (url, init) => {
+    requests.push({ url: String(url), init })
+    return jsonResponse({
+      data: { capabilities: Array.from({ length: 3 }, (_, index) => ({ id: `apollo.test.${index}` })) },
+      meta: { apiVersion: 'v1' },
+    })
+  }
+  const api = new ApolloMcpPublicApiClient({
+    baseUrl: 'http://127.0.0.1:3333',
+    token: 'c'.repeat(32),
+    fetchImplementation,
+  })
+  const first = await api.readResourceCollection('capabilities', { limit: '2' })
+  assert.deepEqual(first.payload.data.capabilities.map(({ id }) => id), ['apollo.test.0', 'apollo.test.1'])
+  assert.ok(first.payload.data.nextCursor)
+  const second = await api.readResourceCollection('capabilities', { limit: '2', after: first.payload.data.nextCursor })
+  assert.deepEqual(second.payload.data.capabilities.map(({ id }) => id), ['apollo.test.2'])
+  assert.equal(requests.every(({ url }) => url === 'http://127.0.0.1:3333/v1/capabilities'), true)
+})
+
 test('MCP server snapshots authorized tools, validates input and proxies structured output', async () => {
   const healthTool = descriptor('apollo.health.read')
   let discoveries = 0
@@ -108,6 +130,46 @@ test('MCP server snapshots authorized tools, validates input and proxies structu
     const unknown = await client.callTool({ name: 'apollo.hidden.call', arguments: {} })
     assert.equal(unknown.isError, true)
     assert.equal(calls, 1)
+  } finally {
+    await client.close()
+    await server.close()
+  }
+})
+
+test('MCP resources are authorized, paginated and read only through the Public API client', async () => {
+  const authorized = [
+    descriptor('apollo.capabilities.list'),
+    descriptor('apollo.projects.list'),
+    descriptor('apollo.operations.list'),
+  ]
+  const reads = []
+  const api = {
+    async listTools() { return authorized },
+    async readResourceCollection(collection, query) {
+      reads.push({ collection, query })
+      return { ok: true, status: 200, payload: { data: { [collection]: [] }, meta: { apiVersion: 'v1' } } }
+    },
+  }
+  const { server } = await createApolloMcpServer({ api })
+  const client = new Client({ name: 'resource-test', version: '1.0.0' })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  await server.connect(serverTransport)
+  await client.connect(clientTransport)
+  try {
+    const first = await client.listResources()
+    assert.deepEqual(first.resources.map(({ name }) => name), ['capabilities', 'projects'])
+    assert.ok(first.nextCursor)
+    const second = await client.listResources({ cursor: first.nextCursor })
+    assert.deepEqual(second.resources.map(({ name }) => name), ['operations'])
+    const templates = await client.listResourceTemplates()
+    assert.deepEqual(templates.resourceTemplates.map(({ name }) => name), ['capabilities', 'projects', 'operations'])
+    const result = await client.readResource({ uri: 'apollo://projects?limit=10&after=cursor-safe-1' })
+    assert.equal(JSON.parse(result.contents[0].text).data.projects.length, 0)
+    assert.deepEqual(reads, [{ collection: 'projects', query: { limit: '10', after: 'cursor-safe-1' } }])
+    await assert.rejects(
+      () => client.readResource({ uri: 'apollo://reports?limit=10' }),
+      /Unknown or unauthorized Apollo resource/,
+    )
   } finally {
     await client.close()
     await server.close()

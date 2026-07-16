@@ -252,6 +252,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/project-list/v1': [
       { data: { projects: [] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/project-list/v2': [
+      { data: { projects: [] }, meta: { apiVersion: 'v1' } },
       {
         data: {
           projects: [
@@ -264,6 +267,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               createdAt,
             },
           ],
+          nextCursor: Buffer.from('project-page-example').toString('base64url'),
         },
         meta: { apiVersion: 'v1' },
       },

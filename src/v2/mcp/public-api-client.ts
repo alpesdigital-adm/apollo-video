@@ -16,6 +16,50 @@ export interface ApolloMcpApiResult {
   payload: unknown
 }
 
+export type ApolloMcpResourceCollection = 'capabilities' | 'projects' | 'operations' | 'reports'
+
+const RESOURCE_PATHS: Readonly<Record<ApolloMcpResourceCollection, string>> = Object.freeze({
+  capabilities: '/v1/capabilities',
+  projects: '/v1/projects',
+  operations: '/v1/operations',
+  reports: '/v1/reports',
+})
+
+function paginateCapabilities(payload: unknown, query: Readonly<Record<string, string>>): unknown {
+  const data = typeof payload === 'object' && payload !== null && !Array.isArray(payload)
+    ? (payload as Record<string, unknown>).data
+    : undefined
+  const capabilities = typeof data === 'object' && data !== null && !Array.isArray(data)
+    ? (data as Record<string, unknown>).capabilities
+    : undefined
+  if (!Array.isArray(capabilities)) throw new Error('Apollo capability resource response is invalid')
+  const limit = query.limit === undefined ? 20 : Number(query.limit)
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('Resource limit must be an integer from 1 to 100')
+  let offset = 0
+  if (query.after) {
+    try {
+      const cursor = JSON.parse(Buffer.from(query.after, 'base64url').toString('utf8')) as Record<string, unknown>
+      if (cursor.v !== 1 || !Number.isInteger(cursor.offset) || Number(cursor.offset) < 0 || Number(cursor.offset) > capabilities.length) throw new Error()
+      offset = Number(cursor.offset)
+    } catch {
+      throw new Error('Invalid capability resource cursor')
+    }
+  }
+  const page = capabilities.slice(offset, offset + limit)
+  const nextOffset = offset + page.length
+  return Object.freeze({
+    data: Object.freeze({
+      capabilities: Object.freeze(page),
+      ...(nextOffset < capabilities.length
+        ? { nextCursor: Buffer.from(JSON.stringify({ v: 1, offset: nextOffset }), 'utf8').toString('base64url') }
+        : {}),
+    }),
+    ...(typeof payload === 'object' && payload !== null && !Array.isArray(payload) && (payload as Record<string, unknown>).meta
+      ? { meta: (payload as Record<string, unknown>).meta }
+      : {}),
+  })
+}
+
 function validatedBaseUrl(value: string): URL {
   const url = new URL(value)
   const localHttp =
@@ -175,6 +219,19 @@ export class ApolloMcpPublicApiClient {
       headers,
       ...(body !== undefined ? { body } : {}),
     })
+  }
+
+  async readResourceCollection(
+    collection: ApolloMcpResourceCollection,
+    query: Readonly<Record<string, string>>,
+  ): Promise<ApolloMcpApiResult> {
+    const url = new URL(RESOURCE_PATHS[collection].replace(/^\//, ''), this.baseUrl)
+    if (collection !== 'capabilities') {
+      for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value)
+    }
+    const result = await this.request(url, { method: 'GET' })
+    if (collection !== 'capabilities' || !result.ok) return result
+    return Object.freeze({ ...result, payload: paginateCapabilities(result.payload, query) })
   }
 
   private async request(url: URL, init: RequestInit): Promise<ApolloMcpApiResult> {

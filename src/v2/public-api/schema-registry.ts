@@ -802,6 +802,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { projects: { type: 'array', items: projectSchema } },
     }),
   ),
+  defineSchema('project-list', 2, 'Paginated project list response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['projects'],
+      properties: {
+        projects: { type: 'array', items: projectSchema },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+      },
+    }),
+  ),
   defineSchema('artifact-detail', 1, 'Media artifact detail response',
     successSchema({
       type: 'object',
