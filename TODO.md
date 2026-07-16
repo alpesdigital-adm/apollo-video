@@ -5080,7 +5080,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-083 — Resources MCP paginados e autorizados
 
-**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+**Status:** publicado em 16 de julho de 2026 no commit `04a6f8f`; CI hospedada `29538064494` aprovada em 23 estágios.
 
 Entregas:
 
