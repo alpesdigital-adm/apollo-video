@@ -525,7 +525,7 @@
 - [x] Implementar resume, parts completion e verification antes do ingest. Evidência F0-088: receipts multipart são persistidos/substituídos por número, consulta retorna parts ausentes para resume e completion só converge para `verified` após conferência autoritativa exata de tamanho, MIME e SHA-256; nenhum ingest é iniciado por esta etapa.
 - [x] Gerar download grants curtos por asset/artifact autorizado. Evidência F0-089: artifact disponível e workspace-scoped recebe grant HMAC de 30–900 segundos, vinculado ao client e idempotency key; banco retém somente hash do token, e revogação convergente invalida a autorização imediatamente.
 - [x] Impedir storage path/URI permanente de virar identidade pública. Evidência F0-090: presenters convertem chaves internas em referências lógicas `artifact:<id>`; um gate recursivo rejeita storage path/URI/bucket/object key e valida todos os exemplos públicos, enquanto URLs efêmeras permanecem limitadas aos grants/sessions.
-- [ ] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado.
+- [x] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado. Evidência F0-091: jornada determinística cobre 256 MiB/4 parts, retomada após sessão expirada, preservação de receipts, bloqueio de checksum divergente, conclusão verificada e invalidação imediata do grant revogado.
 
 ### F0.042 — Preflight e lote externo [FR-248]
 
@@ -5251,3 +5251,24 @@ Regressões locais desta slice:
 - 181/181 testes gerais aprovados;
 - contratos aprovados com 55 capabilities, 75 schemas, 96 examples e 49 paths;
 - typecheck aprovado.
+
+### Slice F0-091 — Gate E2E da transferência externa de mídia
+
+**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+
+Entregas:
+
+- jornada integrada inicia upload de 256 MiB e seleciona quatro parts de 64 MiB;
+- interrupção após duas parts preserva receipts e lista exatamente as duas ausentes;
+- sessão expirada rejeita nova part até emissão de autorização renovada;
+- renovação mantém o mesmo intent e permite completar somente as parts ausentes;
+- verifier com SHA-256 divergente impede transição para `verified`;
+- verificação exata conclui o upload sem iniciar ingest implícito;
+- artifact resultante recebe download grant curto;
+- revogação invalida a autorização antes de qualquer entrega de bytes.
+
+Regressões locais desta slice:
+
+- 1/1 jornada E2E integrada aprovada;
+- cenários unitários anteriores continuam cobrindo limites, replay e isolamento;
+- typecheck e regressão geral permanecem gates obrigatórios.
