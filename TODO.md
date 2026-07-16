@@ -5046,7 +5046,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-082 — Adapter MCP stdio sobre a Public API
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+**Status:** publicado em 16 de julho de 2026 no commit `0f8e8d8`; CI hospedada iniciada pelo push.
 
 Entregas:
 
