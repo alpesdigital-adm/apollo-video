@@ -160,23 +160,36 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     },
   ]
 
-  const cleanup = async () => {
-    await client.v2WebhookWorkerShardLease.deleteMany({
-      where: { poolId: 'webhook-integration-pool' },
-    })
-    await client.v2WebhookReplayReceipt.deleteMany({ where: { workspaceId } })
-    await client.v2WebhookVerificationChallenge.deleteMany({ where: { workspaceId } })
-    await client.v2WebhookDeliveryAttempt.deleteMany({ where: { workspaceId } })
-    await client.v2WebhookDelivery.deleteMany({ where: { workspaceId } })
-    await client.v2WebhookSubscription.deleteMany({ where: { workspaceId } })
-    await client.v2WebhookSigningSecretRotation.deleteMany({ where: { workspaceId } })
-    await client.v2WebhookSigningSecretPayload.deleteMany({ where: { workspaceId } })
-    await client.v2WebhookSigningSecret.deleteMany({ where: { workspaceId } })
-    await client.v2WebhookEndpoint.deleteMany({ where: { workspaceId } })
-    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+  const cleanup = async (attempt = 1) => {
+    try {
+      await client.$transaction(async (transaction) => {
+        await transaction.v2WebhookWorkerShardLease.deleteMany({
+          where: { poolId: 'webhook-integration-pool' },
+        })
+        await transaction.v2WebhookReplayReceipt.deleteMany({ where: { workspaceId } })
+        await transaction.v2WebhookVerificationChallenge.deleteMany({ where: { workspaceId } })
+        await transaction.v2WebhookDeliveryAttempt.deleteMany({ where: { workspaceId } })
+        await transaction.v2WebhookDelivery.deleteMany({ where: { workspaceId } })
+        await transaction.v2WebhookSubscription.deleteMany({ where: { workspaceId } })
+        await transaction.v2WebhookSigningSecretRotation.deleteMany({ where: { workspaceId } })
+        await transaction.v2WebhookSigningSecretPayload.deleteMany({ where: { workspaceId } })
+        await transaction.v2WebhookSigningSecret.deleteMany({ where: { workspaceId } })
+        await transaction.v2WebhookEndpoint.deleteMany({ where: { workspaceId } })
+        await transaction.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
+        await transaction.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
+        await transaction.v2ApiClient.deleteMany({ where: { workspaceId } })
+        await transaction.v2Workspace.deleteMany({ where: { id: workspaceId } })
+      }, { isolationLevel: 'Serializable' })
+    } catch (error) {
+      if (
+        attempt < 3 && typeof error === 'object' && error !== null &&
+        'code' in error && (error.code === 'P2003' || error.code === 'P2034')
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 10))
+        return cleanup(attempt + 1)
+      }
+      throw error
+    }
   }
 
   try {
