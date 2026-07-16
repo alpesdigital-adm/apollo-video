@@ -6,6 +6,7 @@ import { PUBLIC_EVENT_CATALOG } from '../../src/v2/domain/public-event.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { createOpenApiDocument } from '../../src/v2/public-api/openapi.ts'
 import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
+import { agentToolsForScopes } from '../../src/v2/public-api/agent-tool-catalog.ts'
 import {
   PUBLIC_SCHEMAS,
   getPublicSchema,
@@ -165,4 +166,49 @@ test('version conflicts expose only the bounded semantic diff', async () => {
   const errorSchema =
     document.paths['/v1/projects'].post.responses['409'].content['application/json'].schema
   assert.deepEqual(errorSchema, { $ref: '#/components/schemas/ErrorEnvelopeV2' })
+})
+
+test('agent tools compose transport inputs and structured outputs from capabilities', () => {
+  const grantedScopes = new Set(
+    FOUNDATION_CAPABILITIES.flatMap((capability) => capability.requiredScopes),
+  )
+  const tools = agentToolsForScopes(FOUNDATION_CAPABILITIES, grantedScopes)
+  assert.equal(tools.length, FOUNDATION_CAPABILITIES.length)
+  assert.equal(new Set(tools.map((tool) => tool.name)).size, tools.length)
+  assert.ok(tools.every((tool) => Object.isFrozen(tool)))
+
+  const rights = tools.find((tool) => tool.name === 'apollo.artifacts.rights.set')
+  assert.deepEqual(rights.inputSchema.required, ['path', 'headers', 'body'])
+  assert.deepEqual(rights.inputSchema.properties.path.required, ['artifactId'])
+  assert.deepEqual(rights.inputSchema.properties.headers.required, ['ifMatch'])
+  assert.equal(rights.inputSchema.properties.body.required.includes('status'), true)
+  assert.equal(rights.errorSchema.properties.error.properties.conflict.type, 'object')
+  assert.equal(rights.annotations.readOnlyHint, false)
+  assert.equal(rights.annotations.idempotentHint, true)
+
+  const createProject = tools.find((tool) => tool.name === 'apollo.projects.create')
+  assert.deepEqual(createProject.inputSchema.properties.headers.required, ['idempotencyKey'])
+  assert.equal(createProject.inputSchema.required.includes('body'), true)
+
+  const rotateCredential = tools.find(
+    (tool) => tool.name === 'apollo.clients.credentials.rotate',
+  )
+  assert.equal(rotateCredential.inputSchema.required.includes('body'), false)
+
+  const listProjects = tools.find((tool) => tool.name === 'apollo.projects.list')
+  assert.ok(listProjects.inputSchema.properties.query.properties.limit)
+  assert.equal(listProjects.annotations.readOnlyHint, true)
+  assert.equal(listProjects.annotations.idempotentHint, true)
+})
+
+test('agent tool discovery is deny-by-default for unavailable scopes', () => {
+  const tools = agentToolsForScopes(FOUNDATION_CAPABILITIES, new Set())
+  assert.deepEqual(tools.map((tool) => tool.name), [
+    'apollo.health.read',
+    'apollo.capabilities.list',
+    'apollo.tools.list',
+    'apollo.events.catalog.read',
+    'apollo.contracts.openapi.read',
+    'apollo.contracts.schemas.read',
+  ])
 })

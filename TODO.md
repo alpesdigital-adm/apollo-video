@@ -510,7 +510,7 @@
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
-- [ ] Definir tool names, descriptions, input/output schemas e structured errors.
+- [x] Definir tool names, descriptions, input/output schemas e structured errors. Evidência F0-079: `GET /v1/tools` expõe catálogo scope-filtered derivado do registry, com nomes MCP-safe, descrições, input schema composto de path/query/headers/body, output schema, error envelope v2, annotations e metadata de custo/confirmation. Contract e HTTP tests comprovam paridade com capabilities, deny-by-default e ausência de valores internos.
 - [ ] Filtrar tools/capabilities por client, scope, environment e policy.
 - [ ] Exigir preflight/approval em tools caras, amplas ou destrutivas.
 - [ ] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno.
@@ -4908,7 +4908,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-078 — Auto-rebase seguro e conflito semântico estruturado
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+**Status:** publicado em 16 de julho de 2026 no commit `e1e7b04`, estabilizado pelos commits `68a8a89` e `790355e`; CI hospedada final `29530429361` aprovada integralmente.
 
 Entregas:
 
@@ -4937,3 +4937,40 @@ Limites explícitos desta slice:
 - o resolver é o núcleo compartilhado; persistência atômica de command, patch, nova ProjectVersion e outbox pertence ao próximo slice de commands;
 - auto-rebase devolve uma resolução explícita para preview/handler e não grava silenciosamente;
 - diffs carregam resumos semânticos já resolvidos, nunca snapshots ou payloads brutos.
+
+Incidente de publicação:
+
+- a CI inicial `29529523179` revelou que replay concorrente podia esgotar `P2034` antes de observar o ledger commitado;
+- o hotfix `68a8a89` passou a recuperar o winner após backoff limitado no replay individual e por evento;
+- a CI seguinte revelou teardown não atômico da integração; `790355e` tornou cleanup FK-ordered, serializável e retryable;
+- a CI `29530429361` confirmou os dois reparos no PostgreSQL e toda a regressão.
+
+### Slice F0-079 — Catálogo externo de tools para agentes
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- nova capability pública opcional `apollo.tools.list` e rota `GET /v1/tools`;
+- tool names são validados por padrão estável, limitado e MCP-safe;
+- descriptor compõe parâmetros de path, query, `Idempotency-Key`, `If-Match` e body sem duplicar schemas;
+- request body opcional continua opcional e propriedades desconhecidas são fechadas;
+- output usa o schema público da capability e erros usam sempre `error-envelope/v2`;
+- annotations indicam leitura e idempotência; metadata inclui capability/version, scopes, endpoint, custo, confirmação e dry-run;
+- catálogo anônimo expõe somente seis tools públicas; catálogo autenticado usa exatamente o filtro server-side de scopes;
+- schema, exemplo, OpenAPI, contract tests e jornada HTTP foram atualizados de forma aditiva;
+- ADR-068 formaliza o catálogo como source of truth do futuro adapter MCP.
+
+Regressões e evidências locais:
+
+- testes unitários comprovam composição de path/query/header/body, output/error, unicidade e deny-by-default;
+- jornada HTTP confirma paridade exata entre `/v1/tools` e `/v1/capabilities` para o client autenticado;
+- build de produção inclui `/v1/tools` e a jornada API permanece verde;
+- contratos públicos permanecem compatíveis com 48 capabilities, 63 schemas, 84 examples e 42 paths;
+- regressão completa aprovada: 147/147 testes gerais; contratos 48 capabilities/63 schemas/84 examples/42 paths; schema v2 com 29 tabelas/112 índices/61 FKs; integrações de mídia, Prisma, artefatos, operações, webhooks, render real e Public API verdes; build e typecheck aprovados; auditorias principal e Remotion com zero vulnerabilidades.
+
+Limites explícitos desta slice:
+
+- o catálogo define tools; execução ainda ocorre pelas rotas REST declaradas no descriptor;
+- o adapter MCP transportará essas definições em slice posterior e não acessará internals;
+- filtragem por environment/policy além dos scopes pertence à próxima microtarefa.

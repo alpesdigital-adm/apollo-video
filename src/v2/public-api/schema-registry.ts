@@ -1727,6 +1727,67 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['tools'],
+      properties: {
+        tools: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: [
+              'name', 'title', 'description', 'inputSchema', 'outputSchema',
+              'errorSchema', 'annotations', 'apollo',
+            ],
+            properties: {
+              name: { type: 'string', pattern: '^[a-z][a-z0-9_.-]{2,127}$' },
+              title: { type: 'string', minLength: 1, maxLength: 160 },
+              description: { type: 'string', minLength: 1, maxLength: 1000 },
+              inputSchema: { type: 'object' },
+              outputSchema: { type: 'object' },
+              errorSchema: { type: 'object' },
+              annotations: {
+                type: 'object', additionalProperties: false,
+                required: ['readOnlyHint', 'idempotentHint'],
+                properties: {
+                  readOnlyHint: { type: 'boolean' },
+                  idempotentHint: { type: 'boolean' },
+                },
+              },
+              apollo: {
+                type: 'object', additionalProperties: false,
+                required: [
+                  'capabilityId', 'capabilityVersion', 'operationKind',
+                  'requiredScopes', 'endpoint', 'costClass', 'confirmation', 'supportsDryRun',
+                ],
+                properties: {
+                  capabilityId: { type: 'string', pattern: '^apollo\\.' },
+                  capabilityVersion: { type: 'string', pattern: '^\\d+\\.\\d+\\.\\d+$' },
+                  operationKind: { enum: ['query', 'command', 'preflight', 'job'] },
+                  requiredScopes: {
+                    type: 'array', uniqueItems: true, items: { type: 'string' },
+                  },
+                  endpoint: {
+                    type: 'object', additionalProperties: false, required: ['method', 'path'],
+                    properties: {
+                      method: { enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
+                      path: { type: 'string', pattern: '^/v1/' },
+                    },
+                  },
+                  costClass: { enum: ['free', 'low', 'medium', 'high', 'variable'] },
+                  confirmation: { enum: ['none', 'preflight-token', 'human-approval'] },
+                  supportsDryRun: { type: 'boolean' },
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+  ),
   defineSchema('webhook-signing-secret-rotation-list', 1, 'Webhook signing secret rotation list response',
     successSchema({
       type: 'object', additionalProperties: false, required: ['rotations'],

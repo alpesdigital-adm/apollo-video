@@ -160,6 +160,14 @@ function validateCapability(capability: PublicCapability): void {
       { capabilityId: capability.id, path: capability.endpoint.path },
     )
   }
+  if (capability.toolName) {
+    assertDomain(
+      /^[a-z][a-z0-9_.-]{2,127}$/.test(capability.toolName),
+      'INVALID_CAPABILITY',
+      'Tool name must be stable, bounded and MCP-safe',
+      { capabilityId: capability.id, toolName: capability.toolName },
+    )
+  }
 
   if (capability.costClass === 'high' || capability.costClass === 'variable') {
     assertDomain(
@@ -303,6 +311,24 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     outputSchemaRef: 'apollo://schemas/capability-list/v1',
     endpoint: { method: 'GET', path: '/v1/capabilities' },
     toolName: 'apollo.capabilities.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.tools.list',
+    version: '1.0.0',
+    title: 'List available agent tools',
+    description: 'Returns scope-filtered tool descriptors with composed input, output and structured error schemas.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'optional',
+    requiredScopes: [],
+    outputSchemaRef: 'apollo://schemas/agent-tool-list/v1',
+    endpoint: { method: 'GET', path: '/v1/tools' },
+    toolName: 'apollo.tools.list',
     supportsDryRun: false,
     costClass: 'free',
     confirmation: 'none',

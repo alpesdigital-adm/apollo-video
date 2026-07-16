@@ -68,6 +68,20 @@ Para executar a auditoria localmente:
 npm run security:audit
 ```
 
+## Catálogo externo para agentes
+
+`GET /v1/tools` publica descriptors de tools derivados do mesmo registry da
+Public API. Sem autenticação, retorna apenas operações públicas sem scope; com
+bearer token, aplica exatamente os scopes do client. Cada descriptor contém nome
+estável, descrição, input schema composto de path/query/headers/body, output
+schema, error envelope v2 e metadados de custo, confirmação e idempotência.
+
+Headers HTTP são traduzidos para argumentos explícitos: `Idempotency-Key` vira
+`headers.idempotencyKey` e `If-Match` vira `headers.ifMatch`. Schemas fecham
+propriedades desconhecidas e nunca incluem valores de secrets, storage keys ou
+configuração interna. O futuro adapter MCP consumirá esse catálogo e chamará a
+Public API; não terá acesso direto ao banco ou aos workers.
+
 ## Limites dos processos de mídia
 
 As chamadas a FFmpeg e ffprobe possuem cancelamento por `AbortSignal`, limite de

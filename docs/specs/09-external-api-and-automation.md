@@ -511,6 +511,11 @@ Regras para tools de IA:
 - tool result contém structured error, não texto solto apenas;
 - execução é registrada como actor client e, se aplicável, delegated user.
 
+O catálogo canônico é exposto por `GET /v1/tools`. Ele compõe automaticamente
+path, query, headers e body de cada capability autorizada, incorpora os schemas
+públicos de output e erro e carrega custo/confirmation como metadata. REST e o
+adapter MCP consomem o mesmo descriptor; nenhum catálogo paralelo é mantido.
+
 ## 21. Adapter MCP
 
 O MCP oficial:

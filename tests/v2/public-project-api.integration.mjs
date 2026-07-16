@@ -859,6 +859,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       [
         'apollo.health.read',
         'apollo.capabilities.list',
+        'apollo.tools.list',
         'apollo.events.catalog.read',
         'apollo.projects.list',
         'apollo.artifacts.read',
@@ -954,6 +955,22 @@ test('authenticated public API manages projects, clients and artifact inspection
     const [webhookChallenge, concurrentWebhookChallengeReplay] = await Promise.all(
       webhookChallengeResponses.map((response) => response.json()),
     )
+
+    const toolsResponse = await fetch(`${baseUrl}/v1/tools`, { headers: { authorization } })
+    const tools = await toolsResponse.json()
+    assert.equal(toolsResponse.status, 200)
+    assert.deepEqual(
+      tools.data.tools.map((tool) => tool.apollo.capabilityId),
+      capabilities.data.capabilities.map((capability) => capability.id),
+    )
+    const rightsTool = tools.data.tools.find(
+      (tool) => tool.name === 'apollo.artifacts.rights.set',
+    )
+    assert.deepEqual(rightsTool.inputSchema.required, ['path', 'headers', 'body'])
+    assert.deepEqual(rightsTool.inputSchema.properties.headers.required, ['ifMatch'])
+    assert.equal(rightsTool.errorSchema.properties.error.properties.conflict.type, 'object')
+    assert.equal(JSON.stringify(tools).includes('vault://'), false)
+    assert.equal(JSON.stringify(tools).includes('"keyRef"'), false)
     assert.equal(webhookChallenge.data.endpoint.id, webhookEndpointId)
     assert.equal(webhookChallenge.data.endpoint.status, 'active')
     assert.equal(webhookChallenge.data.effects.activatedSubscriptions, 0)
@@ -2146,6 +2163,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       [
         'apollo.health.read',
         'apollo.capabilities.list',
+        'apollo.tools.list',
         'apollo.events.catalog.read',
         'apollo.projects.list',
         'apollo.contracts.openapi.read',

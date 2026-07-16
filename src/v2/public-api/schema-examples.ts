@@ -865,6 +865,32 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/agent-tool-list/v1': [
+      {
+        data: {
+          tools: [{
+            name: 'apollo.health.read',
+            title: 'Read API health',
+            description: 'Returns API liveness.',
+            inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+            outputSchema: { type: 'object' },
+            errorSchema: { type: 'object' },
+            annotations: { readOnlyHint: true, idempotentHint: true },
+            apollo: {
+              capabilityId: 'apollo.health.read',
+              capabilityVersion: '1.0.0',
+              operationKind: 'query',
+              requiredScopes: [],
+              endpoint: { method: 'GET', path: '/v1/health' },
+              costClass: 'free',
+              confirmation: 'none',
+              supportsDryRun: false,
+            },
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-subscription-list/v1': [
       { data: { subscriptions: [] }, meta: { apiVersion: 'v1' } },
       { data: { subscriptions: [webhookSubscriptionExample] }, meta: { apiVersion: 'v1' } },
