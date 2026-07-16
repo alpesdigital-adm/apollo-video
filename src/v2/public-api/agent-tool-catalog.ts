@@ -1,5 +1,4 @@
 import type { PublicCapability } from './capability-registry.ts'
-import { capabilitiesForScopes } from './capability-registry.ts'
 import { getPublicSchema } from './schema-registry.ts'
 
 function embeddedSchema(ref: string) {
@@ -109,13 +108,10 @@ export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
   })
 }
 
-export function agentToolsForScopes(
+export function agentToolsForCapabilities(
   capabilities: readonly PublicCapability[],
-  grantedScopes: ReadonlySet<string>,
 ) {
   return Object.freeze(
-    capabilitiesForScopes(capabilities, grantedScopes)
-      .filter((capability) => capability.toolName)
-      .map(agentToolDescriptor),
+    capabilities.filter((capability) => capability.toolName).map(agentToolDescriptor),
   )
 }

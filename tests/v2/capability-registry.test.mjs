@@ -5,7 +5,9 @@ import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   FOUNDATION_CAPABILITIES,
   assertCapabilityParity,
+  capabilitiesForAccess,
   capabilitiesForScopes,
+  defineCapabilityAccessPolicy,
   defineCapabilityRegistry,
 } from '../../src/v2/public-api/capability-registry.ts'
 
@@ -53,6 +55,67 @@ test('scope filtering is deny-by-default', () => {
 
   assert.equal(capabilitiesForScopes(registry, new Set()).length, 0)
   assert.equal(capabilitiesForScopes(registry, new Set(['projects:read'])).length, 1)
+})
+
+test('capability discovery intersects scopes, environment and deny-only policy', () => {
+  const scopes = new Set(
+    FOUNDATION_CAPABILITIES.flatMap((capability) => capability.requiredScopes),
+  )
+  const policy = defineCapabilityAccessPolicy(
+    {
+      disabled: ['apollo.contracts.schemas.read'],
+      byEnvironment: { production: ['apollo.contracts.openapi.read'] },
+      byWorkspace: { 'workspace-policy-1': ['apollo.clients.list'] },
+      byClient: { 'client-policy-1': ['apollo.events.catalog.read'] },
+    },
+    FOUNDATION_CAPABILITIES,
+  )
+  const visible = capabilitiesForAccess(FOUNDATION_CAPABILITIES, {
+    environment: 'production',
+    actor: {
+      clientId: 'client-policy-1',
+      workspaceId: 'workspace-policy-1',
+      environment: 'production',
+      scopes,
+    },
+    policy,
+  })
+  const ids = new Set(visible.map((capability) => capability.id))
+
+  assert.equal(ids.has('apollo.projects.create'), true)
+  assert.equal(ids.has('apollo.contracts.schemas.read'), false)
+  assert.equal(ids.has('apollo.contracts.openapi.read'), false)
+  assert.equal(ids.has('apollo.clients.list'), false)
+  assert.equal(ids.has('apollo.events.catalog.read'), false)
+})
+
+test('capability availability is environment-bound and policy configuration fails closed', () => {
+  const registry = defineCapabilityRegistry([
+    {
+      ...FOUNDATION_CAPABILITIES[0],
+      id: 'apollo.sandbox.health.read',
+      endpoint: { method: 'GET', path: '/v1/sandbox-health' },
+      toolName: 'apollo.sandbox.health.read',
+      availableIn: ['sandbox'],
+    },
+  ])
+
+  assert.equal(
+    capabilitiesForAccess(registry, { environment: 'sandbox' }).length,
+    1,
+  )
+  assert.equal(
+    capabilitiesForAccess(registry, { environment: 'production' }).length,
+    0,
+  )
+  expectDomainError(
+    () => defineCapabilityAccessPolicy({ byClient: { client: ['apollo.missing'] } }, registry),
+    'INVALID_CAPABILITY_POLICY',
+  )
+  expectDomainError(
+    () => defineCapabilityAccessPolicy({ allow: ['apollo.sandbox.health.read'] }, registry),
+    'INVALID_CAPABILITY_POLICY',
+  )
 })
 
 test('registry rejects duplicate capabilities and unsafe high-cost actions', () => {

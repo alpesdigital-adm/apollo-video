@@ -82,6 +82,24 @@ propriedades desconhecidas e nunca incluem valores de secrets, storage keys ou
 configuração interna. O futuro adapter MCP consumirá esse catálogo e chamará a
 Public API; não terá acesso direto ao banco ou aos workers.
 
+A descoberta aplica a interseção entre scopes do client, environment atual,
+`availableIn` da capability e uma policy deny-only opcional. A configuração de
+bootstrap usa `APOLLO_API_CAPABILITY_POLICY_JSON`:
+
+```json
+{
+  "disabled": [],
+  "byEnvironment": { "sandbox": [] },
+  "byWorkspace": { "workspace-id": [] },
+  "byClient": { "client-id": ["apollo.events.catalog.read"] }
+}
+```
+
+A policy somente remove capabilities; não concede scopes. Campos desconhecidos,
+IDs não registrados, selectors inválidos e duplicatas fazem a descoberta falhar
+fechada com `INVALID_CAPABILITY_POLICY`. `/v1/capabilities` e `/v1/tools`
+consomem a mesma lista já autorizada, evitando divergência entre catálogos.
+
 ## Limites dos processos de mídia
 
 As chamadas a FFmpeg e ffprobe possuem cancelamento por `AbortSignal`, limite de

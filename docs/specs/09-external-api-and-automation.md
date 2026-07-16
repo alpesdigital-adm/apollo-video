@@ -516,6 +516,13 @@ path, query, headers e body de cada capability autorizada, incorpora os schemas
 públicos de output e erro e carrega custo/confirmation como metadata. REST e o
 adapter MCP consomem o mesmo descriptor; nenhum catálogo paralelo é mantido.
 
+A lista visível é a interseção deny-by-default entre client ativo, scopes,
+environment, `availableIn` da capability e policy deny-only global/por
+environment/workspace/client. Policy nunca concede uma capability ausente nos
+scopes. Configuração inválida falha fechada e a lista resolvida uma única vez é
+reutilizada por capabilities e tools. A configuração de bootstrap vem do
+ambiente; sua administração persistente futura deverá ocorrer pela Public API.
+
 ## 21. Adapter MCP
 
 O MCP oficial:

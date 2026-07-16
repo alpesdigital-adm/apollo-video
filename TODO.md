@@ -511,7 +511,7 @@
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
 - [x] Definir tool names, descriptions, input/output schemas e structured errors. Evidência F0-079: `GET /v1/tools` expõe catálogo scope-filtered derivado do registry, com nomes MCP-safe, descrições, input schema composto de path/query/headers/body, output schema, error envelope v2, annotations e metadata de custo/confirmation. Contract e HTTP tests comprovam paridade com capabilities, deny-by-default e ausência de valores internos.
-- [ ] Filtrar tools/capabilities por client, scope, environment e policy.
+- [x] Filtrar tools/capabilities por client, scope, environment e policy. Evidência F0-080: descoberta compartilhada exige client autenticado/ativo no environment correto, intersecta scopes, `availableIn` e policy deny-only global/por environment/workspace/client; configuração inválida falha fechada. Unit tests cobrem as quatro dimensões e a jornada HTTP prova paridade exata entre `/v1/capabilities` e `/v1/tools`, inclusive deny específico por client sem afetar o catálogo anônimo.
 - [ ] Exigir preflight/approval em tools caras, amplas ou destrutivas.
 - [ ] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno.
 - [ ] Expor resources paginados de capabilities, projects, operations e reports autorizados.
@@ -4947,7 +4947,7 @@ Incidente de publicação:
 
 ### Slice F0-079 — Catálogo externo de tools para agentes
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+**Status:** publicado em 16 de julho de 2026 no commit `3d98cf3`; CI hospedada `29533637866` aprovada integralmente em 23 estágios.
 
 Entregas:
 
@@ -4974,3 +4974,34 @@ Limites explícitos desta slice:
 - o catálogo define tools; execução ainda ocorre pelas rotas REST declaradas no descriptor;
 - o adapter MCP transportará essas definições em slice posterior e não acessará internals;
 - filtragem por environment/policy além dos scopes pertence à próxima microtarefa.
+
+### Slice F0-080 — Filtro contextual deny-only para capabilities e tools
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+
+Entregas:
+
+- capability pode declarar disponibilidade explícita em `sandbox` e/ou `production`;
+- descoberta compartilhada resolve uma única lista para `/v1/capabilities` e `/v1/tools`;
+- client autenticado precisa estar ativo e vinculado ao environment atual antes da descoberta;
+- scopes continuam deny-by-default e são intersectados com disponibilidade e policy;
+- policy somente nega, com dimensões global, environment, workspace e client;
+- configuração de bootstrap usa `APOLLO_API_CAPABILITY_POLICY_JSON` estrito;
+- campos, selectors, duplicatas ou capability IDs inválidos produzem `INVALID_CAPABILITY_POLICY` e HTTP 503 sem detalhes da configuração;
+- tool catalog recebe capabilities já resolvidas e não implementa autorização paralela;
+- ADR-069 registra a precedência, os limites e a evolução para administração persistente via Public API.
+
+Regressões e evidências locais:
+
+- 149/149 testes gerais aprovados;
+- contratos permanecem compatíveis com 48 capabilities, 63 schemas, 84 examples e 42 paths;
+- schema v2 permanece válido com 29 tabelas, 112 índices e 61 FKs;
+- build de produção e jornada HTTP autenticada aprovados;
+- jornada prova deny específico por client em capabilities e tools, preservando a capability no catálogo anônimo;
+- regressão completa aprovada: integrações de mídia, Prisma, artefatos, operações, webhooks, Public API e render real verdes; build e typecheck aprovados; auditorias principal e Remotion com zero vulnerabilidades.
+
+Limites explícitos desta slice:
+
+- a policy controla descoberta de capabilities/tools e não substitui autenticação/scope nos endpoints REST;
+- persistência e administração externa da policy serão adicionadas por capability pública, sem acesso direto ao banco;
+- preflight/approval para operações caras ou destrutivas pertence à próxima microtarefa.

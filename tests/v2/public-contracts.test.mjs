@@ -3,10 +3,13 @@ import test from 'node:test'
 
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { PUBLIC_EVENT_CATALOG } from '../../src/v2/domain/public-event.ts'
-import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+import {
+  FOUNDATION_CAPABILITIES,
+  capabilitiesForScopes,
+} from '../../src/v2/public-api/capability-registry.ts'
 import { createOpenApiDocument } from '../../src/v2/public-api/openapi.ts'
 import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
-import { agentToolsForScopes } from '../../src/v2/public-api/agent-tool-catalog.ts'
+import { agentToolsForCapabilities } from '../../src/v2/public-api/agent-tool-catalog.ts'
 import {
   PUBLIC_SCHEMAS,
   getPublicSchema,
@@ -172,7 +175,9 @@ test('agent tools compose transport inputs and structured outputs from capabilit
   const grantedScopes = new Set(
     FOUNDATION_CAPABILITIES.flatMap((capability) => capability.requiredScopes),
   )
-  const tools = agentToolsForScopes(FOUNDATION_CAPABILITIES, grantedScopes)
+  const tools = agentToolsForCapabilities(
+    capabilitiesForScopes(FOUNDATION_CAPABILITIES, grantedScopes),
+  )
   assert.equal(tools.length, FOUNDATION_CAPABILITIES.length)
   assert.equal(new Set(tools.map((tool) => tool.name)).size, tools.length)
   assert.ok(tools.every((tool) => Object.isFrozen(tool)))
@@ -202,7 +207,9 @@ test('agent tools compose transport inputs and structured outputs from capabilit
 })
 
 test('agent tool discovery is deny-by-default for unavailable scopes', () => {
-  const tools = agentToolsForScopes(FOUNDATION_CAPABILITIES, new Set())
+  const tools = agentToolsForCapabilities(
+    capabilitiesForScopes(FOUNDATION_CAPABILITIES, new Set()),
+  )
   assert.deepEqual(tools.map((tool) => tool.name), [
     'apollo.health.read',
     'apollo.capabilities.list',

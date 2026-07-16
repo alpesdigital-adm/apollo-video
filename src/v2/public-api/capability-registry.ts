@@ -1,4 +1,5 @@
 import { assertDomain } from '../domain/errors.ts'
+import { API_ENVIRONMENTS, type ApiEnvironment } from '../domain/api-client.ts'
 
 export type CapabilityExposure = 'public' | 'workspace-admin' | 'internal-only'
 export type CapabilityOperationKind = 'query' | 'command' | 'preflight' | 'job'
@@ -48,6 +49,27 @@ export interface PublicCapability {
   queryParameters?: readonly CapabilityQueryParameter[]
   requestBodyRequired?: boolean
   responseMediaType?: 'application/json' | 'application/schema+json'
+  availableIn?: readonly ApiEnvironment[]
+}
+
+export interface CapabilityAccessActor {
+  clientId: string
+  workspaceId: string
+  environment: ApiEnvironment
+  scopes: ReadonlySet<string>
+}
+
+export interface CapabilityAccessPolicy {
+  disabled: readonly string[]
+  byEnvironment: Readonly<Record<string, readonly string[]>>
+  byWorkspace: Readonly<Record<string, readonly string[]>>
+  byClient: Readonly<Record<string, readonly string[]>>
+}
+
+export interface CapabilityAccessContext {
+  environment: ApiEnvironment
+  actor?: CapabilityAccessActor
+  policy?: CapabilityAccessPolicy
 }
 
 export interface UiActionDescriptor {
@@ -122,6 +144,15 @@ function validateCapability(capability: PublicCapability): void {
     'INVALID_CAPABILITY',
     'requestBodyRequired is only valid when an input schema exists',
     { capabilityId: capability.id },
+  )
+  assertDomain(
+    capability.availableIn === undefined ||
+      (capability.availableIn.length > 0 &&
+        new Set(capability.availableIn).size === capability.availableIn.length &&
+        capability.availableIn.every((environment) => API_ENVIRONMENTS.includes(environment))),
+    'INVALID_CAPABILITY',
+    'Capability environments must be non-empty, unique and supported',
+    { capabilityId: capability.id, availableIn: capability.availableIn },
   )
   assertDomain(
     capability.precondition === undefined || capability.operationKind !== 'query',
@@ -233,10 +264,129 @@ export function defineCapabilityRegistry(
             ),
           )
         : undefined,
+      availableIn: capability.availableIn
+        ? Object.freeze([...capability.availableIn])
+        : undefined,
     })
   })
 
   return Object.freeze(registry)
+}
+
+function normalizePolicyCapabilityIds(
+  value: unknown,
+  registryIds: ReadonlySet<string>,
+  field: string,
+): readonly string[] {
+  assertDomain(Array.isArray(value), 'INVALID_CAPABILITY_POLICY', `${field} must be an array`)
+  const values = value as unknown[]
+  assertDomain(
+    values.every((item) => typeof item === 'string' && registryIds.has(item)),
+    'INVALID_CAPABILITY_POLICY',
+    `${field} must contain only registered capability ids`,
+  )
+  assertDomain(
+    new Set(values).size === values.length,
+    'INVALID_CAPABILITY_POLICY',
+    `${field} cannot contain duplicate capability ids`,
+  )
+  return Object.freeze([...(values as string[])].sort())
+}
+
+function normalizePolicyMap(
+  value: unknown,
+  registryIds: ReadonlySet<string>,
+  field: string,
+  validateKey: (key: string) => boolean,
+): Readonly<Record<string, readonly string[]>> {
+  assertDomain(
+    typeof value === 'object' && value !== null && !Array.isArray(value),
+    'INVALID_CAPABILITY_POLICY',
+    `${field} must be an object`,
+  )
+  const entries = Object.entries(value as Record<string, unknown>)
+  assertDomain(
+    entries.every(([key]) => validateKey(key)),
+    'INVALID_CAPABILITY_POLICY',
+    `${field} contains an invalid selector`,
+  )
+  return Object.freeze(
+    Object.fromEntries(
+      entries
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, capabilityIds]) => [
+          key,
+          normalizePolicyCapabilityIds(capabilityIds, registryIds, `${field}.${key}`),
+        ]),
+    ),
+  )
+}
+
+export function defineCapabilityAccessPolicy(
+  input: unknown,
+  registry: readonly PublicCapability[],
+): Readonly<CapabilityAccessPolicy> {
+  assertDomain(
+    typeof input === 'object' && input !== null && !Array.isArray(input),
+    'INVALID_CAPABILITY_POLICY',
+    'Capability policy must be an object',
+  )
+  const value = input as Record<string, unknown>
+  const allowedFields = new Set(['disabled', 'byEnvironment', 'byWorkspace', 'byClient'])
+  assertDomain(
+    Object.keys(value).every((field) => allowedFields.has(field)),
+    'INVALID_CAPABILITY_POLICY',
+    'Capability policy contains an unknown field',
+  )
+  const registryIds = new Set(registry.map((capability) => capability.id))
+  const safeIdentity = (key: string) => /^[A-Za-z0-9_-]{3,128}$/.test(key)
+  return Object.freeze({
+    disabled: normalizePolicyCapabilityIds(value.disabled ?? [], registryIds, 'disabled'),
+    byEnvironment: normalizePolicyMap(
+      value.byEnvironment ?? {},
+      registryIds,
+      'byEnvironment',
+      (key) => API_ENVIRONMENTS.includes(key as ApiEnvironment),
+    ),
+    byWorkspace: normalizePolicyMap(
+      value.byWorkspace ?? {}, registryIds, 'byWorkspace', safeIdentity,
+    ),
+    byClient: normalizePolicyMap(
+      value.byClient ?? {}, registryIds, 'byClient', safeIdentity,
+    ),
+  })
+}
+
+export function capabilitiesForAccess(
+  registry: readonly PublicCapability[],
+  context: CapabilityAccessContext,
+): readonly PublicCapability[] {
+  assertDomain(
+    API_ENVIRONMENTS.includes(context.environment),
+    'INVALID_CAPABILITY_POLICY',
+    'Capability access environment is invalid',
+  )
+  assertDomain(
+    !context.actor || context.actor.environment === context.environment,
+    'INVALID_CAPABILITY_POLICY',
+    'Authenticated client environment does not match capability discovery',
+  )
+  const policy = context.policy ?? defineCapabilityAccessPolicy({}, registry)
+  const denied = new Set([
+    ...policy.disabled,
+    ...(policy.byEnvironment[context.environment] ?? []),
+    ...(context.actor ? policy.byWorkspace[context.actor.workspaceId] ?? [] : []),
+    ...(context.actor ? policy.byClient[context.actor.clientId] ?? [] : []),
+  ])
+  const scopes = context.actor?.scopes ?? new Set<string>()
+
+  return registry.filter(
+    (capability) =>
+      capability.exposure !== 'internal-only' &&
+      (capability.availableIn ?? API_ENVIRONMENTS).includes(context.environment) &&
+      capability.requiredScopes.every((scope) => scopes.has(scope)) &&
+      !denied.has(capability.id),
+  )
 }
 
 export function capabilitiesForScopes(

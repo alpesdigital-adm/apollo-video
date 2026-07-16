@@ -459,6 +459,9 @@ test('authenticated public API manages projects, clients and artifact inspection
           ...process.env,
           NODE_ENV: 'production',
           APOLLO_API_ENVIRONMENT: apiEnvironment,
+          APOLLO_API_CAPABILITY_POLICY_JSON: JSON.stringify({
+            byClient: { [apiClientId]: ['apollo.events.catalog.read'] },
+          }),
           APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'public-api-recipe-key-v1',
           APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 9).toString('base64url'),
           APOLLO_RENDERER_DIGEST: sha('8'),
@@ -849,6 +852,15 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(unauthorized.status, 401)
 
     const authorization = `Bearer ${issued.token}`
+    const anonymousCapabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`)
+    const anonymousCapabilities = await anonymousCapabilitiesResponse.json()
+    assert.equal(anonymousCapabilitiesResponse.status, 200)
+    assert.equal(
+      anonymousCapabilities.data.capabilities.some(
+        (capability) => capability.id === 'apollo.events.catalog.read',
+      ),
+      true,
+    )
     const capabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`, {
       headers: { authorization },
     })
@@ -860,7 +872,6 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.health.read',
         'apollo.capabilities.list',
         'apollo.tools.list',
-        'apollo.events.catalog.read',
         'apollo.projects.list',
         'apollo.artifacts.read',
         'apollo.artifacts.lineage.diagnose',
@@ -962,6 +973,10 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.deepEqual(
       tools.data.tools.map((tool) => tool.apollo.capabilityId),
       capabilities.data.capabilities.map((capability) => capability.id),
+    )
+    assert.equal(
+      tools.data.tools.some((tool) => tool.name === 'apollo.events.catalog.read'),
+      false,
     )
     const rightsTool = tools.data.tools.find(
       (tool) => tool.name === 'apollo.artifacts.rights.set',
