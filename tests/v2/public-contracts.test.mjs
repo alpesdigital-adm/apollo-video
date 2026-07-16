@@ -97,4 +97,17 @@ test('OpenAPI derives auth, idempotency and optional request bodies from capabil
 
   const capabilities = document.paths['/v1/capabilities'].get
   assert.deepEqual(capabilities.security, [{}, { bearerAuth: [] }])
+
+  const readRights = document.paths['/v1/artifacts/{artifactId}/rights'].get
+  assert.ok(readRights.responses['200'].headers.ETag)
+  const setRights = document.paths['/v1/artifacts/{artifactId}/rights'].put
+  assert.ok(
+    setRights.parameters.some(
+      (parameter) =>
+        parameter.in === 'header' && parameter.name === 'If-Match' && parameter.required,
+    ),
+  )
+  assert.ok(setRights.responses['200'].headers.ETag)
+  assert.ok(setRights.responses['412'])
+  assert.ok(setRights.responses['428'])
 })

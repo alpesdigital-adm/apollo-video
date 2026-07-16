@@ -104,6 +104,12 @@ conteúdo. O `PUT /v1/artifacts/{artifactId}/rights` é serializável: requests
 simultâneos com o mesmo draft convergem para um snapshot, uma sequência e uma
 única revisão do artifact. Conflitos de banco são repetidos até três vezes; uma
 resposta perdida pode ser recuperada sem criar nova revisão.
+O `GET` devolve um `ETag` forte derivado da revisão monotônica do artifact e o
+`PUT` exige esse valor em `If-Match`. Ausência da precondição retorna 428;
+revisão obsoleta retorna 412. Drafts idênticos ainda convergem como replay mesmo
+quando repetidos após uma resposta perdida, enquanto drafts divergentes sobre a
+mesma revisão admitem um único vencedor. O OpenAPI publica request e response
+headers, e a capability de escrita foi elevada para `2.0.0`.
 
 A autorização pública de materialização também é serializável. Duas avaliações
 simultâneas com artifact, manifest, política de uso e chave idênticos convergem

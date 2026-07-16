@@ -66,3 +66,4 @@ Estados usados:
 - [ADR-062 — Concorrência na revogação de credenciais de API](./ADR-062-concurrent-api-credential-revocation.md)
 - [ADR-063 — Gate exaustivo de concorrência externa](./ADR-063-exhaustive-external-concurrency-gate.md)
 - [ADR-064 — Single-flight durável no challenge de webhook](./ADR-064-durable-webhook-challenge-single-flight.md)
+- [ADR-065 — ETag forte para direitos de assets](./ADR-065-strong-etag-asset-rights.md)

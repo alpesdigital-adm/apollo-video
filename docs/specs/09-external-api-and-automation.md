@@ -194,7 +194,8 @@ Possuir scope não implica autorização final: resource ownership, role, rights
 - Concorrência usa `If-Match`, `baseVersionId` ou precondition documentada.
 - Sucesso síncrono: 200/201/204.
 - Operação aceita: 202 com `operation`.
-- Validation error: 422; conflict: 409; rate limit: 429.
+- Validation error: 422; conflict: 409; `If-Match` obsoleto: 412;
+  precondição obrigatória ausente: 428; rate limit: 429.
 
 ## 10. Error envelope
 

@@ -12,6 +12,8 @@ const STATUS_BY_CODE: Partial<Record<DomainErrorCode, number>> = {
   API_CREDENTIAL_NOT_FOUND: 404,
   MEDIA_ARTIFACT_NOT_FOUND: 404,
   MEDIA_ARTIFACT_MANIFEST_NOT_FOUND: 404,
+  ASSET_RIGHTS_REVISION_MISMATCH: 412,
+  PRECONDITION_REQUIRED: 428,
   MATERIALIZATION_AUTHORIZATION_NOT_FOUND: 404,
   PUBLIC_OPERATION_NOT_FOUND: 404,
   WEBHOOK_DELIVERY_NOT_FOUND: 404,
@@ -75,7 +77,7 @@ export function respondPublicError(error: unknown, requestId: string) {
           category:
             status === 401 || status === 403
               ? 'auth'
-              : status === 409
+              : status === 409 || status === 412
                 ? 'conflict'
                 : status >= 500
                   ? 'internal'

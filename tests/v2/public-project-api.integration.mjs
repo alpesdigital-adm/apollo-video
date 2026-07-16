@@ -2448,6 +2448,8 @@ test('authenticated public API manages projects, clients and artifact inspection
     )
     const unconfiguredRights = await unconfiguredRightsResponse.json()
     assert.equal(unconfiguredRightsResponse.status, 200)
+    const unconfiguredRightsEtag = unconfiguredRightsResponse.headers.get('etag')
+    assert.match(unconfiguredRightsEtag, /^"[a-f0-9]{64}"$/)
     assert.deepEqual(unconfiguredRights.data, {
       artifactId: sourceArtifactId,
       configured: false,
@@ -2490,9 +2492,37 @@ test('authenticated public API manages projects, clients and artifact inspection
     const setRights = () =>
       fetch(`${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`, {
         method: 'PUT',
-        headers: { authorization, 'content-type': 'application/json' },
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'if-match': unconfiguredRightsEtag,
+        },
         body: JSON.stringify(approvedRightsRequest),
       })
+    const missingRightsIfMatchResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`,
+      {
+        method: 'PUT',
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify(approvedRightsRequest),
+      },
+    )
+    assert.equal(missingRightsIfMatchResponse.status, 428)
+    assert.equal((await missingRightsIfMatchResponse.json()).error.code, 'PRECONDITION_REQUIRED')
+    const malformedRightsIfMatchResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`,
+      {
+        method: 'PUT',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'if-match': 'not-a-strong-etag',
+        },
+        body: JSON.stringify(approvedRightsRequest),
+      },
+    )
+    assert.equal(malformedRightsIfMatchResponse.status, 422)
+    assert.equal((await malformedRightsIfMatchResponse.json()).error.code, 'INVALID_ARGUMENT')
     const setRightsResponses = await Promise.all([setRights(), setRights()])
     assert.deepEqual(setRightsResponses.map((response) => response.status), [200, 200])
     const setRightsBodies = await Promise.all(setRightsResponses.map((response) => response.json()))
@@ -2500,6 +2530,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     const concurrentRightsReplay = setRightsBodies.find((body) => body.data.replayed === true)
     assert.ok(setRightsResult)
     assert.ok(concurrentRightsReplay)
+    assert.equal(setRightsResponses[0].headers.get('etag'), setRightsResponses[1].headers.get('etag'))
     assert.equal(setRightsResult.data.replayed, false)
     assert.equal(setRightsResult.data.rights.status, 'approved')
     assert.equal(setRightsResult.data.rights.sequence, 1)
@@ -2527,8 +2558,75 @@ test('authenticated public API manages projects, clients and artifact inspection
     )
     const currentRights = await currentRightsResponse.json()
     assert.equal(currentRightsResponse.status, 200)
+    const currentRightsEtag = currentRightsResponse.headers.get('etag')
+    assert.equal(currentRightsEtag, setRightsResponses[0].headers.get('etag'))
     assert.equal(currentRights.data.configured, true)
     assert.equal(currentRights.data.rights.id, setRightsResult.data.rights.id)
+
+    const setDivergentRights = (sourceNote) =>
+      fetch(`${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`, {
+        method: 'PUT',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'if-match': currentRightsEtag,
+        },
+        body: JSON.stringify({ ...approvedRightsRequest, sourceNote }),
+      })
+    const divergentRightsResponses = await Promise.all([
+      setDivergentRights('Concurrent legal revision A'),
+      setDivergentRights('Concurrent legal revision B'),
+    ])
+    assert.deepEqual(
+      divergentRightsResponses.map((response) => response.status).sort(),
+      [200, 412],
+    )
+    const divergentRightsBodies = await Promise.all(
+      divergentRightsResponses.map((response) => response.json()),
+    )
+    assert.equal(
+      divergentRightsBodies.find((body) => body.error)?.error.code,
+      'ASSET_RIGHTS_REVISION_MISMATCH',
+    )
+    const divergentWinner = divergentRightsResponses.find((response) => response.status === 200)
+    assert.ok(divergentWinner)
+    assert.notEqual(divergentWinner.headers.get('etag'), currentRightsEtag)
+    const afterDivergentRightsArtifact = await client.v2MediaArtifact.findUniqueOrThrow({
+      where: { id: sourceArtifactId },
+      select: { rightsRevision: true },
+    })
+    assert.equal(afterDivergentRightsArtifact.rightsRevision, 2)
+
+    const divergentWinnerEtag = divergentWinner.headers.get('etag')
+    const restoreHistoricalRights = () =>
+      fetch(`${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`, {
+        method: 'PUT',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'if-match': divergentWinnerEtag,
+        },
+        body: JSON.stringify(approvedRightsRequest),
+      })
+    const restoredHistoricalRightsResponse = await restoreHistoricalRights()
+    const restoredHistoricalRights = await restoredHistoricalRightsResponse.json()
+    assert.equal(restoredHistoricalRightsResponse.status, 200)
+    assert.equal(restoredHistoricalRights.data.replayed, false)
+    assert.equal(restoredHistoricalRights.data.rights.id, setRightsResult.data.rights.id)
+    assert.notEqual(restoredHistoricalRightsResponse.headers.get('etag'), divergentWinnerEtag)
+    const restoredHistoricalReplayResponse = await restoreHistoricalRights()
+    const restoredHistoricalReplay = await restoredHistoricalReplayResponse.json()
+    assert.equal(restoredHistoricalReplayResponse.status, 200)
+    assert.equal(restoredHistoricalReplay.data.replayed, true)
+    assert.equal(
+      restoredHistoricalReplayResponse.headers.get('etag'),
+      restoredHistoricalRightsResponse.headers.get('etag'),
+    )
+    const afterHistoricalRestoreArtifact = await client.v2MediaArtifact.findUniqueOrThrow({
+      where: { id: sourceArtifactId },
+      select: { rightsRevision: true },
+    })
+    assert.equal(afterHistoricalRestoreArtifact.rightsRevision, 3)
 
     const createMaterializationAuthorization = (key, body = { use: 'paid-ad', market: 'BR' }) =>
       fetch(

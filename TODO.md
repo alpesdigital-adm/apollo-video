@@ -504,7 +504,7 @@
 - [x] Implementar ledger por workspace/client/key com request fingerprint. Evidência: `V2IdempotencyRecord` e repository Prisma.
 - [x] Retornar response/operation original em repetição idêntica. Evidência: testes unitário, Prisma e HTTP.
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
-- [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
+- [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049/F0-076: lifecycle de subscriptions e endpoints exige `baseRevision` opaca; direitos de assets agora expõem ETag forte e exigem `If-Match`, com 428 ausente, 412 obsoleto, compare-and-set e replay idêntico convergente. A regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
 - [x] Criar property tests de requests simultâneas e timeout após commit. Evidência F0-059–F0-075: as 23 capabilities externas não-query possuem classificação exaustiva; 21 commands duráveis cobrem simultaneidade, convergência após resposta perdida e retry serializável quando aplicável; 2 preflights são determinísticos e não fazem commit; nenhuma lacuna permanece. O challenge de webhook usa single-flight durável com exatamente um transporte, follower convergente, takeover após expiração e fencing contra líder obsoleto.
 
@@ -4816,7 +4816,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-075 — Single-flight durável no challenge de webhook
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na CI hospedada da publicação.
+**Status:** publicado em 16 de julho de 2026 no commit `0264de3`; CI hospedada `29517090013` aprovada integralmente.
 
 Entregas:
 
@@ -4843,6 +4843,36 @@ Regressões e evidências locais:
 
 Limites explícitos desta slice:
 
-- a confirmação no PostgreSQL ocorrerá na CI hospedada quando a slice for publicada;
+- single-flight, fencing, takeover e limpeza transacional foram confirmados no PostgreSQL pela CI hospedada da publicação;
 - duração do lease e espera de followers são limitadas e derivadas do timeout configurado do challenge;
 - nenhuma transação de banco permanece aberta durante a chamada HTTPS.
+
+### Slice F0-076 — ETag forte na declaração de direitos de assets
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na CI hospedada da publicação.
+
+Entregas:
+
+- `GET /v1/artifacts/{artifactId}/rights` devolve ETag forte, inclusive quando os direitos ainda não foram configurados;
+- `PUT` exige `If-Match`, retorna 428 quando ausente, 422 quando malformado e 412 quando a revisão ficou obsoleta;
+- a revisão é derivada do contador monotônico `rightsRevision`, evitando ABA ao reutilizar um snapshot histórico;
+- replay do mesmo draft converge mesmo com a revisão anterior, preservando recuperação após resposta perdida;
+- drafts divergentes sobre a mesma base admitem exatamente um vencedor e nunca usam last-write-wins;
+- OpenAPI declara `If-Match`, ETag e erros 412/428; a capability de escrita passa a `2.0.0` e o baseline público é atualizado explicitamente;
+- ADR-065 formaliza a precondição, os códigos HTTP e a compatibilidade.
+
+Regressões e evidências locais:
+
+- suíte geral permanece verde com 139 testes;
+- cinco jornadas HTTP SQLite consecutivas confirmam um vencedor, um conflito e incremento único da revisão;
+- contratos públicos, build de produção e typecheck permanecem verdes;
+- schema v2 permanece válido com 29 tabelas, 112 índices e 61 chaves estrangeiras;
+- integrações de mídia, Prisma, artefatos, operações, webhooks e render real permanecem verdes;
+- build de produção, typecheck e bundle Remotion permanecem verdes;
+- auditorias da raiz e do Remotion permanecem sem vulnerabilidades conhecidas.
+
+Limites explícitos desta slice:
+
+- a confirmação no PostgreSQL ocorrerá na CI hospedada quando a slice for publicada;
+- a microtarefa de precondições permanece aberta até cobrir as demais mutações versionadas;
+- auto-rebase e diff estruturado pertencem à microtarefa seguinte e não são simulados por esta precondição.

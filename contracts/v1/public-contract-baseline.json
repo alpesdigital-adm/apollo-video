@@ -212,10 +212,11 @@
         200
       ],
       "idempotency": "not-applicable",
+      "responseEtag": true,
       "responseMediaType": "application/json"
     },
     "apollo.artifacts.rights.set": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
@@ -236,6 +237,8 @@
         200
       ],
       "idempotency": "natural",
+      "precondition": "if-match",
+      "responseEtag": true,
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
@@ -761,9 +764,682 @@
       "idempotency": "natural",
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.deliveries.list": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-delivery-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/webhooks/deliveries"
+      },
+      "toolName": "apollo.webhooks.deliveries.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum number of deliveries to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        {
+          "name": "after",
+          "description": "Opaque cursor returned by the previous page with the same filters.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 1024
+          }
+        },
+        {
+          "name": "status",
+          "description": "Exact webhook delivery status.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in-flight",
+              "retry-scheduled",
+              "succeeded",
+              "dead-lettered"
+            ]
+          }
+        },
+        {
+          "name": "endpointId",
+          "description": "Exact webhook endpoint UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          }
+        },
+        {
+          "name": "eventId",
+          "description": "Exact public event UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.deliveries.read": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-delivery-detail/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/webhooks/deliveries/{deliveryId}"
+      },
+      "toolName": "apollo.webhooks.deliveries.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.deliveries.replay": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-delivery-replay-result/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/webhooks/deliveries/{deliveryId}/replay"
+      },
+      "toolName": "apollo.webhooks.deliveries.replay",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        202,
+        200
+      ],
+      "idempotency": "required",
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.challenge": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-endpoint-challenge-result/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/webhooks/endpoints/{endpointId}/challenge"
+      },
+      "toolName": "apollo.webhooks.endpoints.challenge",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.create": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-webhook-endpoint-request/v1",
+      "outputSchemaRef": "apollo://schemas/webhook-endpoint-created/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/webhooks/endpoints"
+      },
+      "toolName": "apollo.webhooks.endpoints.create",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.list": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-endpoint-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/webhooks/endpoints"
+      },
+      "toolName": "apollo.webhooks.endpoints.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Page size from 1 to 100.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        {
+          "name": "after",
+          "description": "Opaque cursor bound to the filters.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 1024
+          }
+        },
+        {
+          "name": "status",
+          "description": "Exact endpoint status.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "pending-verification",
+              "active",
+              "suspended",
+              "revoked"
+            ]
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.read": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-endpoint-detail/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/webhooks/endpoints/{endpointId}"
+      },
+      "toolName": "apollo.webhooks.endpoints.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.signing-secrets.provision": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/provision-webhook-signing-secret-request/v1",
+      "outputSchemaRef": "apollo://schemas/webhook-signing-secret-provisioned/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/webhooks/endpoints/{endpointId}/signing-secrets"
+      },
+      "toolName": "apollo.webhooks.endpoints.signing-secrets.provision",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.signing-secrets.rotations.activate": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/activate-webhook-signing-secret-rotation-request/v1",
+      "outputSchemaRef": "apollo://schemas/webhook-signing-secret-rotation-activated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/activate"
+      },
+      "toolName": "apollo.webhooks.endpoints.signing-secrets.rotations.activate",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.signing-secrets.rotations.cancel": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/cancel-webhook-signing-secret-rotation-request/v1",
+      "outputSchemaRef": "apollo://schemas/webhook-signing-secret-rotation-cancelled/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/cancel"
+      },
+      "toolName": "apollo.webhooks.endpoints.signing-secrets.rotations.cancel",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.signing-secrets.rotations.list": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-signing-secret-rotation-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations"
+      },
+      "toolName": "apollo.webhooks.endpoints.signing-secrets.rotations.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Page size from 1 to 100.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        {
+          "name": "after",
+          "description": "Opaque cursor bound to this endpoint and status filter.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 1024
+          }
+        },
+        {
+          "name": "status",
+          "description": "Exact rotation status.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "staged",
+              "activated",
+              "cancelled",
+              "expired"
+            ]
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.signing-secrets.rotations.read": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-signing-secret-rotation-detail/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}"
+      },
+      "toolName": "apollo.webhooks.endpoints.signing-secrets.rotations.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.signing-secrets.rotations.stage": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/stage-webhook-signing-secret-rotation-request/v1",
+      "outputSchemaRef": "apollo://schemas/webhook-signing-secret-rotation-staged/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations"
+      },
+      "toolName": "apollo.webhooks.endpoints.signing-secrets.rotations.stage",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.endpoints.status.set": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/set-webhook-endpoint-status-request/v1",
+      "outputSchemaRef": "apollo://schemas/webhook-endpoint-status-result/v1",
+      "endpoint": {
+        "method": "PUT",
+        "path": "/v1/webhooks/endpoints/{endpointId}/status"
+      },
+      "toolName": "apollo.webhooks.endpoints.status.set",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.events.replay": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-event-replay-result/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/webhooks/events/{eventId}/replay"
+      },
+      "toolName": "apollo.webhooks.events.replay",
+      "supportsDryRun": false,
+      "costClass": "high",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        202,
+        200
+      ],
+      "idempotency": "required",
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.signing-secrets.hygiene.run": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/run-webhook-signing-secret-hygiene-request/v1",
+      "outputSchemaRef": "apollo://schemas/webhook-signing-secret-hygiene-result/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/webhooks/signing-secrets/hygiene"
+      },
+      "toolName": "apollo.webhooks.signing-secrets.hygiene.run",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.subscriptions.create": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-webhook-subscription-request/v1",
+      "outputSchemaRef": "apollo://schemas/webhook-subscription-created/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/webhooks/subscriptions"
+      },
+      "toolName": "apollo.webhooks.subscriptions.create",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.subscriptions.list": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-subscription-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/webhooks/subscriptions"
+      },
+      "toolName": "apollo.webhooks.subscriptions.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Page size from 1 to 100.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        {
+          "name": "after",
+          "description": "Opaque cursor bound to the filters.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 1024
+          }
+        },
+        {
+          "name": "status",
+          "description": "Exact subscription status.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "pending-verification",
+              "active",
+              "paused",
+              "revoked"
+            ]
+          }
+        },
+        {
+          "name": "endpointId",
+          "description": "Exact endpoint UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.subscriptions.read": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/webhook-subscription-detail/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/webhooks/subscriptions/{subscriptionId}"
+      },
+      "toolName": "apollo.webhooks.subscriptions.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.webhooks.subscriptions.status.set": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "webhooks:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/set-webhook-subscription-status-request/v1",
+      "outputSchemaRef": "apollo://schemas/webhook-subscription-detail/v1",
+      "endpoint": {
+        "method": "PUT",
+        "path": "/v1/webhooks/subscriptions/{subscriptionId}/status"
+      },
+      "toolName": "apollo.webhooks.subscriptions.status.set",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
     }
   },
   "schemas": {
+    "apollo://schemas/activate-webhook-signing-secret-rotation-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
     "apollo://schemas/api-client-created/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -3313,6 +3989,19 @@
         }
       }
     },
+    "apollo://schemas/cancel-webhook-signing-secret-rotation-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
     "apollo://schemas/capability-list/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -3526,6 +4215,73 @@
           "type": "string",
           "minLength": 2,
           "maxLength": 120
+        }
+      }
+    },
+    "apollo://schemas/create-webhook-endpoint-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "minLength": 12,
+          "maxLength": 2048
+        }
+      }
+    },
+    "apollo://schemas/create-webhook-subscription-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpointId",
+        "eventTypes"
+      ],
+      "properties": {
+        "endpointId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "eventTypes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "project.created",
+              "project.version.created",
+              "project.status.changed",
+              "operation.status.changed",
+              "operation.succeeded",
+              "operation.failed",
+              "annotation.created",
+              "annotation.resolved",
+              "quality.report.created",
+              "approval.changed",
+              "artifact.ready",
+              "artifact.rejected",
+              "budget.threshold.reached",
+              "client.suspended"
+            ]
+          }
+        },
+        "resourceIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
         }
       }
     },
@@ -4271,6 +5027,19 @@
               "const": "v1"
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/provision-webhook-signing-secret-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
         }
       }
     },
@@ -5268,6 +6037,20 @@
         }
       }
     },
+    "apollo://schemas/run-webhook-signing-secret-hygiene-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "limitPerKind"
+      ],
+      "properties": {
+        "limitPerKind": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
     "apollo://schemas/set-asset-rights-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -5415,6 +6198,2571 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2000
+        }
+      }
+    },
+    "apollo://schemas/set-webhook-endpoint-status-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "baseRevision"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "active",
+            "suspended",
+            "revoked"
+          ]
+        },
+        "baseRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/set-webhook-subscription-status-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "baseRevision"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "active",
+            "paused",
+            "revoked"
+          ]
+        },
+        "baseRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/stage-webhook-signing-secret-rotation-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision",
+        "overlapSeconds"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "overlapSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        }
+      }
+    },
+    "apollo://schemas/webhook-delivery-detail/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "delivery"
+          ],
+          "properties": {
+            "delivery": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "endpointId",
+                "subscriptionId",
+                "eventId",
+                "status",
+                "attemptCount",
+                "maxAttempts",
+                "nextAttemptAt",
+                "createdAt",
+                "attempts"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "webhook-delivery/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "endpointId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "subscriptionId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "eventId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "in-flight",
+                    "retry-scheduled",
+                    "succeeded",
+                    "dead-lettered"
+                  ]
+                },
+                "attemptCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 20
+                },
+                "maxAttempts": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 20
+                },
+                "nextAttemptAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "deadLetteredAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "attempts": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "attemptNumber",
+                      "status",
+                      "scheduledAt",
+                      "createdAt"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "webhook-delivery-attempt/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                      },
+                      "attemptNumber": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20
+                      },
+                      "status": {
+                        "enum": [
+                          "scheduled",
+                          "in-flight",
+                          "succeeded",
+                          "failed"
+                        ]
+                      },
+                      "scheduledAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "startedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "completedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "responseStatus": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 599
+                      },
+                      "responseBodyHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "errorCode": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-delivery-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "deliveries"
+          ],
+          "properties": {
+            "deliveries": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "endpointId",
+                  "subscriptionId",
+                  "eventId",
+                  "status",
+                  "attemptCount",
+                  "maxAttempts",
+                  "nextAttemptAt",
+                  "createdAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "webhook-delivery/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "endpointId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "subscriptionId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "eventId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "in-flight",
+                      "retry-scheduled",
+                      "succeeded",
+                      "dead-lettered"
+                    ]
+                  },
+                  "attemptCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "maxAttempts": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20
+                  },
+                  "nextAttemptAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deadLetteredAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1024,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-delivery-replay-result/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "delivery",
+            "replayed"
+          ],
+          "properties": {
+            "delivery": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "endpointId",
+                "subscriptionId",
+                "eventId",
+                "status",
+                "attemptCount",
+                "maxAttempts",
+                "nextAttemptAt",
+                "createdAt",
+                "attempts"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "webhook-delivery/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "endpointId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "subscriptionId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "eventId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "in-flight",
+                    "retry-scheduled",
+                    "succeeded",
+                    "dead-lettered"
+                  ]
+                },
+                "attemptCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 20
+                },
+                "maxAttempts": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 20
+                },
+                "nextAttemptAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "deadLetteredAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "attempts": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "attemptNumber",
+                      "status",
+                      "scheduledAt",
+                      "createdAt"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "webhook-delivery-attempt/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                      },
+                      "attemptNumber": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20
+                      },
+                      "status": {
+                        "enum": [
+                          "scheduled",
+                          "in-flight",
+                          "succeeded",
+                          "failed"
+                        ]
+                      },
+                      "scheduledAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "startedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "completedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "responseStatus": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 599
+                      },
+                      "responseBodyHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "errorCode": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-endpoint-challenge-result/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "endpoint",
+            "effects",
+            "replayed"
+          ],
+          "properties": {
+            "endpoint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "status",
+                "destinationOrigin",
+                "urlFingerprint",
+                "createdByClientId",
+                "createdAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "webhook-endpoint/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "status": {
+                  "enum": [
+                    "pending-verification",
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "destinationOrigin": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 255
+                },
+                "urlFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "verifiedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "suspendedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "currentSigningSecret": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "version",
+                    "fingerprint",
+                    "status",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "fingerprint": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "enum": [
+                        "active",
+                        "retired",
+                        "revoked"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "retiredAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "revokedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            },
+            "effects": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "activatedSubscriptions"
+              ],
+              "properties": {
+                "activatedSubscriptions": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-endpoint-created/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "endpoint",
+            "replayed"
+          ],
+          "properties": {
+            "endpoint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "status",
+                "destinationOrigin",
+                "urlFingerprint",
+                "createdByClientId",
+                "createdAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "webhook-endpoint/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "status": {
+                  "enum": [
+                    "pending-verification",
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "destinationOrigin": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 255
+                },
+                "urlFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "verifiedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "suspendedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "currentSigningSecret": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "version",
+                    "fingerprint",
+                    "status",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "fingerprint": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "enum": [
+                        "active",
+                        "retired",
+                        "revoked"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "retiredAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "revokedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-endpoint-detail/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "endpoint"
+          ],
+          "properties": {
+            "endpoint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "status",
+                "destinationOrigin",
+                "urlFingerprint",
+                "createdByClientId",
+                "createdAt",
+                "signingSecrets"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "webhook-endpoint/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "status": {
+                  "enum": [
+                    "pending-verification",
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "destinationOrigin": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 255
+                },
+                "urlFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "verifiedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "suspendedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "currentSigningSecret": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "version",
+                    "fingerprint",
+                    "status",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "fingerprint": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "enum": [
+                        "active",
+                        "retired",
+                        "revoked"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "retiredAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "revokedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "signingSecrets": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "version",
+                      "fingerprint",
+                      "status",
+                      "createdAt"
+                    ],
+                    "properties": {
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "fingerprint": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "status": {
+                        "enum": [
+                          "active",
+                          "retired",
+                          "revoked"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "retiredAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "revokedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-endpoint-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "endpoints"
+          ],
+          "properties": {
+            "endpoints": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "status",
+                  "destinationOrigin",
+                  "urlFingerprint",
+                  "createdByClientId",
+                  "createdAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "webhook-endpoint/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "status": {
+                    "enum": [
+                      "pending-verification",
+                      "active",
+                      "suspended",
+                      "revoked"
+                    ]
+                  },
+                  "revision": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "destinationOrigin": {
+                    "type": "string",
+                    "format": "uri",
+                    "maxLength": 255
+                  },
+                  "urlFingerprint": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "createdByClientId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "verifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "suspendedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "revokedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "currentSigningSecret": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "version",
+                      "fingerprint",
+                      "status",
+                      "createdAt"
+                    ],
+                    "properties": {
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "fingerprint": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "status": {
+                        "enum": [
+                          "active",
+                          "retired",
+                          "revoked"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "retiredAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "revokedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1024,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-endpoint-status-result/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "endpoint",
+            "effects",
+            "replayed"
+          ],
+          "properties": {
+            "endpoint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "status",
+                "destinationOrigin",
+                "urlFingerprint",
+                "createdByClientId",
+                "createdAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "webhook-endpoint/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "status": {
+                  "enum": [
+                    "pending-verification",
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "destinationOrigin": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 255
+                },
+                "urlFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "verifiedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "suspendedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "currentSigningSecret": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "version",
+                    "fingerprint",
+                    "status",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "fingerprint": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "enum": [
+                        "active",
+                        "retired",
+                        "revoked"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "retiredAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "revokedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            },
+            "effects": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "pausedSubscriptions",
+                "revokedSubscriptions",
+                "revokedSigningSecrets"
+              ],
+              "properties": {
+                "pausedSubscriptions": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "revokedSubscriptions": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "revokedSigningSecrets": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-event-replay-result/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventId",
+            "items",
+            "replayed"
+          ],
+          "properties": {
+            "eventId": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "items": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "delivery"
+                ],
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "scheduled",
+                      "skipped-non-terminal",
+                      "skipped-target-inactive",
+                      "skipped-attempt-limit"
+                    ]
+                  },
+                  "delivery": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "endpointId",
+                      "subscriptionId",
+                      "eventId",
+                      "status",
+                      "attemptCount",
+                      "maxAttempts",
+                      "nextAttemptAt",
+                      "createdAt"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "webhook-delivery/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                      },
+                      "endpointId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                      },
+                      "subscriptionId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                      },
+                      "eventId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                      },
+                      "status": {
+                        "enum": [
+                          "pending",
+                          "in-flight",
+                          "retry-scheduled",
+                          "succeeded",
+                          "dead-lettered"
+                        ]
+                      },
+                      "attemptCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 20
+                      },
+                      "maxAttempts": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20
+                      },
+                      "nextAttemptAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "completedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "deadLetteredAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-signing-secret-hygiene-result/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "asOf",
+            "expiredRotations",
+            "destroyedRotationEnvelopes",
+            "destroyedSigningSecretPayloads",
+            "hasMore"
+          ],
+          "properties": {
+            "asOf": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "expiredRotations": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "destroyedRotationEnvelopes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "destroyedSigningSecretPayloads": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "hasMore": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-signing-secret-provisioned/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "endpoint",
+            "secretAvailable",
+            "replayed"
+          ],
+          "properties": {
+            "endpoint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "status",
+                "destinationOrigin",
+                "urlFingerprint",
+                "createdByClientId",
+                "createdAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "webhook-endpoint/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "status": {
+                  "enum": [
+                    "pending-verification",
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "destinationOrigin": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 255
+                },
+                "urlFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "verifiedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "suspendedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "currentSigningSecret": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "version",
+                    "fingerprint",
+                    "status",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "fingerprint": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "enum": [
+                        "active",
+                        "retired",
+                        "revoked"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "retiredAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "revokedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            },
+            "secretBase64url": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            },
+            "secretAvailable": {
+              "type": "boolean"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "secretAvailable": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "secretAvailable"
+                ]
+              },
+              "then": {
+                "required": [
+                  "secretBase64url"
+                ],
+                "properties": {
+                  "secretBase64url": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "secretBase64url": false
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-signing-secret-rotation-activated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "endpoint",
+            "rotation",
+            "signing",
+            "replayed"
+          ],
+          "properties": {
+            "endpoint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "status",
+                "revision"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "type": "string",
+                  "const": "active"
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "rotation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "status",
+                "candidateVersion",
+                "fingerprint",
+                "overlapSeconds",
+                "activatedAt",
+                "overlapUntil"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "type": "string",
+                  "const": "activated"
+                },
+                "candidateVersion": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "fingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "overlapSeconds": {
+                  "type": "integer",
+                  "minimum": 60,
+                  "maximum": 86400
+                },
+                "activatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "overlapUntil": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "signing": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "activeVersion",
+                "activeFingerprint",
+                "previousVersion",
+                "previousFingerprint",
+                "previousUsableUntil"
+              ],
+              "properties": {
+                "activeVersion": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "activeFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "previousVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "previousFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "previousUsableUntil": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-signing-secret-rotation-cancelled/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rotation",
+            "envelopeDestroyed",
+            "replayed"
+          ],
+          "properties": {
+            "rotation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "endpointId",
+                "status",
+                "candidateVersion",
+                "fingerprint",
+                "cancelledAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "endpointId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "cancelled",
+                    "expired"
+                  ]
+                },
+                "candidateVersion": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "fingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "cancelledAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "envelopeDestroyed": {
+              "type": "boolean",
+              "const": true
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-signing-secret-rotation-detail/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rotation"
+          ],
+          "properties": {
+            "rotation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "endpointId",
+                "candidateVersion",
+                "fingerprint",
+                "status",
+                "overlapSeconds",
+                "baseRevision",
+                "createdAt",
+                "expiresAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "webhook-signing-secret-rotation/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "endpointId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "candidateVersion": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "fingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "status": {
+                  "enum": [
+                    "staged",
+                    "activated",
+                    "cancelled",
+                    "expired"
+                  ]
+                },
+                "overlapSeconds": {
+                  "type": "integer",
+                  "minimum": 60,
+                  "maximum": 86400
+                },
+                "baseRevision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "activatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "overlapUntil": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "cancelledAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-signing-secret-rotation-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rotations"
+          ],
+          "properties": {
+            "rotations": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "endpointId",
+                  "candidateVersion",
+                  "fingerprint",
+                  "status",
+                  "overlapSeconds",
+                  "baseRevision",
+                  "createdAt",
+                  "expiresAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "webhook-signing-secret-rotation/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "endpointId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "candidateVersion": {
+                    "type": "integer",
+                    "minimum": 2
+                  },
+                  "fingerprint": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "status": {
+                    "enum": [
+                      "staged",
+                      "activated",
+                      "cancelled",
+                      "expired"
+                    ]
+                  },
+                  "overlapSeconds": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 86400
+                  },
+                  "baseRevision": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "activatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "overlapUntil": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "cancelledAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1024,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-signing-secret-rotation-staged/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rotation",
+            "secretAvailable",
+            "replayed"
+          ],
+          "properties": {
+            "rotation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "endpointId",
+                "candidateVersion",
+                "fingerprint",
+                "status",
+                "overlapSeconds",
+                "createdAt",
+                "expiresAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "endpointId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "candidateVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "fingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "status": {
+                  "type": "string",
+                  "const": "staged"
+                },
+                "overlapSeconds": {
+                  "type": "integer",
+                  "minimum": 60,
+                  "maximum": 86400
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "secretBase64url": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            },
+            "secretAvailable": {
+              "type": "boolean"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "secretAvailable": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "secretAvailable"
+                ]
+              },
+              "then": {
+                "required": [
+                  "secretBase64url"
+                ],
+                "properties": {
+                  "secretBase64url": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "secretBase64url": false
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-subscription-created/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subscription",
+            "replayed"
+          ],
+          "properties": {
+            "subscription": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "endpointId",
+                "status",
+                "eventTypes",
+                "createdByClientId",
+                "createdAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "webhook-subscription/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "endpointId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "status": {
+                  "enum": [
+                    "pending-verification",
+                    "active",
+                    "paused",
+                    "revoked"
+                  ]
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "eventTypes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "resourceIds": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 128,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "pausedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-subscription-detail/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subscription"
+          ],
+          "properties": {
+            "subscription": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "endpointId",
+                "status",
+                "eventTypes",
+                "createdByClientId",
+                "createdAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "webhook-subscription/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "endpointId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "status": {
+                  "enum": [
+                    "pending-verification",
+                    "active",
+                    "paused",
+                    "revoked"
+                  ]
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "eventTypes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "resourceIds": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 128,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "pausedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/webhook-subscription-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subscriptions"
+          ],
+          "properties": {
+            "subscriptions": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "endpointId",
+                  "status",
+                  "eventTypes",
+                  "createdByClientId",
+                  "createdAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "webhook-subscription/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "endpointId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "status": {
+                    "enum": [
+                      "pending-verification",
+                      "active",
+                      "paused",
+                      "revoked"
+                    ]
+                  },
+                  "revision": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "eventTypes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 64,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  },
+                  "resourceIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 128,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  },
+                  "createdByClientId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "pausedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "revokedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1024,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     }

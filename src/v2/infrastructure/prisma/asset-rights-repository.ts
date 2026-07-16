@@ -6,6 +6,7 @@ import type {
   SetAssetRightsResult,
 } from '../../application/ports/asset-rights-repository.ts'
 import {
+  assetRightsRevision,
   createAssetRightsSnapshot,
   type AssetRightsDraft,
   type AssetRightsSnapshot,
@@ -217,6 +218,7 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
     if (!artifact) return null
     return {
       artifactId: artifact.id,
+      revision: assetRightsRevision(artifact.id, artifact.rightsRevision),
       snapshot: artifact.currentRightsSnapshot
         ? hydrateRights(artifact.currentRightsSnapshot)
         : null,
@@ -244,6 +246,7 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
 
   async setCurrent(
     prototype: AssetRightsSnapshot,
+    baseRevision: string,
     serializationAttempt = 1,
   ): Promise<SetAssetRightsResult> {
     try {
@@ -256,6 +259,29 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
         }
         if (artifact.status === 'deleted') {
           throw new DomainError('INVALID_ARGUMENT', 'Deleted media artifact cannot receive rights')
+        }
+        const existing = await transaction.v2AssetRightsSnapshot.findUnique({
+          where: {
+            artifactId_snapshotHash: {
+              artifactId: prototype.artifactId,
+              snapshotHash: prototype.snapshotHash,
+            },
+          },
+        })
+        const currentRevision = assetRightsRevision(artifact.id, artifact.rightsRevision)
+        if (existing && artifact.currentRightsSnapshotId === existing.id) {
+          return {
+            artifactId: artifact.id,
+            revision: currentRevision,
+            snapshot: hydrateRights(existing),
+            replayed: true,
+          }
+        }
+        if (currentRevision !== baseRevision) {
+          throw new DomainError(
+            'ASSET_RIGHTS_REVISION_MISMATCH',
+            'Asset rights revision does not match',
+          )
         }
         if (prototype.consent.documentArtifactId) {
           const evidence = await transaction.v2MediaArtifact.findFirst({
@@ -273,36 +299,40 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
             )
           }
         }
-        const existing = await transaction.v2AssetRightsSnapshot.findUnique({
+
+        const revisionUpdate = await transaction.v2MediaArtifact.updateMany({
           where: {
-            artifactId_snapshotHash: {
-              artifactId: prototype.artifactId,
-              snapshotHash: prototype.snapshotHash,
-            },
+            id: artifact.id,
+            workspaceId: prototype.workspaceId,
+            rightsRevision: artifact.rightsRevision,
+          },
+          data: {
+            rightsRevision: { increment: 1 },
+            ...(existing ? { currentRightsSnapshotId: existing.id } : {}),
           },
         })
+        if (revisionUpdate.count !== 1) {
+          throw new DomainError(
+            'ASSET_RIGHTS_REVISION_MISMATCH',
+            'Asset rights revision changed during update',
+          )
+        }
+        const nextRevisionNumber = artifact.rightsRevision + 1
+
         if (existing) {
-          await transaction.v2MediaArtifact.update({
-            where: { id: artifact.id },
-            data: { currentRightsSnapshotId: existing.id },
-          })
           return {
             artifactId: artifact.id,
+            revision: assetRightsRevision(artifact.id, nextRevisionNumber),
             snapshot: hydrateRights(existing),
-            replayed: true,
+            replayed: false,
           }
         }
 
-        const revision = await transaction.v2MediaArtifact.update({
-          where: { id: artifact.id },
-          data: { rightsRevision: { increment: 1 } },
-          select: { rightsRevision: true },
-        })
         const snapshot = createAssetRightsSnapshot({
           id: prototype.id,
           workspaceId: prototype.workspaceId,
           artifactId: prototype.artifactId,
-          sequence: revision.rightsRevision,
+          sequence: nextRevisionNumber,
           draft: draftFromSnapshot(prototype),
           createdBy: prototype.createdBy,
           createdAt: prototype.createdAt,
@@ -314,12 +344,17 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
           where: { id: artifact.id },
           data: { currentRightsSnapshotId: created.id },
         })
-        return { artifactId: artifact.id, snapshot: hydrateRights(created), replayed: false }
+        return {
+          artifactId: artifact.id,
+          revision: assetRightsRevision(artifact.id, nextRevisionNumber),
+          snapshot: hydrateRights(created),
+          replayed: false,
+        }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isSerializationConflict(error)) {
         if (serializationAttempt < 3) {
-          return this.setCurrent(prototype, serializationAttempt + 1)
+          return this.setCurrent(prototype, baseRevision, serializationAttempt + 1)
         }
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
@@ -335,13 +370,18 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
             },
           },
         })
-        if (existing && existing.workspaceId === prototype.workspaceId) {
-          await this.client.v2MediaArtifact.updateMany({
-            where: { id: prototype.artifactId, workspaceId: prototype.workspaceId },
-            data: { currentRightsSnapshotId: existing.id },
-          })
+        const artifact = await this.client.v2MediaArtifact.findFirst({
+          where: { id: prototype.artifactId, workspaceId: prototype.workspaceId },
+          select: { id: true, rightsRevision: true, currentRightsSnapshotId: true },
+        })
+        if (
+          existing &&
+          existing.workspaceId === prototype.workspaceId &&
+          artifact?.currentRightsSnapshotId === existing.id
+        ) {
           return {
             artifactId: prototype.artifactId,
+            revision: assetRightsRevision(artifact.id, artifact.rightsRevision),
             snapshot: hydrateRights(existing),
             replayed: true,
           }

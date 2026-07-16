@@ -79,6 +79,31 @@ function parseDraft(body: unknown): AssetRightsDraft {
   return body as AssetRightsDraft
 }
 
+function strongEtag(revision: string): string {
+  return `"${revision}"`
+}
+
+function parseIfMatch(request: NextRequest): string {
+  const value = request.headers.get('if-match')?.trim()
+  if (!value) {
+    throw new DomainError(
+      'PRECONDITION_REQUIRED',
+      'If-Match is required for asset rights updates',
+    )
+  }
+  if (!/^"[a-f0-9]{64}"$/.test(value)) {
+    throw new DomainError(
+      'INVALID_ARGUMENT',
+      'If-Match must contain the strong ETag returned by the latest rights read',
+    )
+  }
+  return value.slice(1, -1)
+}
+
+function rightsHeaders(requestId: string, revision: string): Record<string, string> {
+  return { ...publicApiHeaders(requestId), ETag: strongEtag(revision) }
+}
+
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ artifactId: string }> },
@@ -96,7 +121,7 @@ export async function GET(
         configured: result.snapshot !== null,
         ...(result.snapshot ? { rights: presentRights(result.snapshot) } : {}),
       }),
-      { headers: publicApiHeaders(requestId) },
+      { headers: rightsHeaders(requestId, result.revision) },
     )
   } catch (error) {
     return respondPublicError(error, requestId)
@@ -111,6 +136,7 @@ export async function PUT(
   try {
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'artifacts:rights')
+    const baseRevision = parseIfMatch(request)
     let body: unknown
     try {
       body = await request.json()
@@ -126,6 +152,7 @@ export async function PUT(
     const result = await setRights({
       workspaceId: actor.workspaceId,
       artifactId,
+      baseRevision,
       draft: parseDraft(body),
       actor: { type: 'api-client', id: actor.clientId },
     })
@@ -135,7 +162,7 @@ export async function PUT(
         rights: presentRights(result.snapshot),
         replayed: result.replayed,
       }),
-      { headers: publicApiHeaders(requestId) },
+      { headers: rightsHeaders(requestId, result.revision) },
     )
   } catch (error) {
     return respondPublicError(error, requestId)

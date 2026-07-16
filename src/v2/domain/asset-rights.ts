@@ -20,6 +20,24 @@ export const ASSET_CONSENT_STATUSES = [
 ] as const
 export type AssetConsentStatus = (typeof ASSET_CONSENT_STATUSES)[number]
 
+export function assetRightsRevision(artifactId: string, revision: number): string {
+  assertDomain(
+    artifactId.trim().length >= 3 && artifactId.trim().length <= 128,
+    'INVALID_MEDIA_ARTIFACT',
+    'Asset rights revision requires a valid artifact id',
+  )
+  assertDomain(
+    Number.isSafeInteger(revision) && revision >= 0,
+    'INVALID_MEDIA_ARTIFACT',
+    'Asset rights revision counter is invalid',
+  )
+  return calculateCanonicalHash({
+    schemaVersion: 'asset-rights-revision/v1',
+    artifactId: artifactId.trim(),
+    revision,
+  })
+}
+
 export interface AssetConsentScope {
   status: AssetConsentStatus
   allowedUses: readonly string[]

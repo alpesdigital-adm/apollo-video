@@ -26,6 +26,8 @@ function snapshotCapability(capability: PublicCapability) {
     confirmation: capability.confirmation,
     successStatuses: [...capability.successStatuses],
     idempotency: capability.idempotency,
+    ...(capability.precondition ? { precondition: capability.precondition } : {}),
+    ...(capability.responseEtag ? { responseEtag: true } : {}),
     queryParameters: capability.queryParameters?.map((parameter) => ({
       ...parameter,
       schema: { ...parameter.schema },

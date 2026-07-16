@@ -1193,7 +1193,7 @@ test('asset rights persistence retries serialization conflicts before failing ex
   })
 
   await assert.rejects(
-    () => repository.setCurrent(prototype),
+    () => repository.setCurrent(prototype, 'a'.repeat(64)),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
   assert.equal(attempts, 3)

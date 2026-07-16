@@ -7,6 +7,7 @@ export type CapabilityConfirmation = 'none' | 'preflight-token' | 'human-approva
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type CapabilityAuthMode = 'none' | 'optional' | 'required'
 export type CapabilityIdempotency = 'not-applicable' | 'required' | 'natural'
+export type CapabilityPrecondition = 'if-match'
 export type CapabilitySuccessStatus = 200 | 201 | 202 | 204
 
 export interface CapabilityQueryParameter {
@@ -42,6 +43,8 @@ export interface PublicCapability {
   confirmation: CapabilityConfirmation
   successStatuses: readonly CapabilitySuccessStatus[]
   idempotency: CapabilityIdempotency
+  precondition?: CapabilityPrecondition
+  responseEtag?: boolean
   queryParameters?: readonly CapabilityQueryParameter[]
   requestBodyRequired?: boolean
   responseMediaType?: 'application/json' | 'application/schema+json'
@@ -118,6 +121,18 @@ function validateCapability(capability: PublicCapability): void {
     capability.inputSchemaRef || capability.requestBodyRequired === undefined,
     'INVALID_CAPABILITY',
     'requestBodyRequired is only valid when an input schema exists',
+    { capabilityId: capability.id },
+  )
+  assertDomain(
+    capability.precondition === undefined || capability.operationKind !== 'query',
+    'INVALID_CAPABILITY',
+    'Query capabilities cannot require mutation preconditions',
+    { capabilityId: capability.id },
+  )
+  assertDomain(
+    capability.precondition === undefined || capability.responseEtag === true,
+    'INVALID_CAPABILITY',
+    'If-Match capabilities must return the resulting ETag',
     { capabilityId: capability.id },
   )
 
@@ -478,12 +493,13 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     confirmation: 'none',
     successStatuses: [200],
     idempotency: 'not-applicable',
+    responseEtag: true,
   },
   {
     id: 'apollo.artifacts.rights.set',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Set current asset rights',
-    description: 'Creates or reuses an immutable rights and consent snapshot and makes it current for one workspace artifact.',
+    description: 'Creates or reuses an immutable rights and consent snapshot under the strong If-Match ETag returned by the latest rights read.',
     exposure: 'public',
     operationKind: 'command',
     authMode: 'required',
@@ -497,6 +513,8 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     confirmation: 'none',
     successStatuses: [200],
     idempotency: 'natural',
+    precondition: 'if-match',
+    responseEtag: true,
     requestBodyRequired: true,
   },
   {

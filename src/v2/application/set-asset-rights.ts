@@ -16,9 +16,16 @@ export function setAssetRightsService(dependencies: {
   return async function setAssetRights(request: {
     workspaceId: string
     artifactId: string
+    baseRevision: string
     draft: AssetRightsDraft
     actor: { type: 'api-client' | 'user' | 'system'; id: string }
   }): Promise<SetAssetRightsResult> {
+    const baseRevision = request.baseRevision.trim().toLowerCase()
+    assertDomain(
+      /^[a-f0-9]{64}$/.test(baseRevision),
+      'INVALID_ARGUMENT',
+      'Asset rights base revision is invalid',
+    )
     const now = dependencies.clock()
     assertDomain(!Number.isNaN(now.getTime()), 'INVALID_ARGUMENT', 'clock returned an invalid date')
     const snapshot = createAssetRightsSnapshot({
@@ -30,6 +37,6 @@ export function setAssetRightsService(dependencies: {
       createdBy: request.actor,
       createdAt: now.toISOString(),
     })
-    return dependencies.repository.setCurrent(snapshot)
+    return dependencies.repository.setCurrent(snapshot, baseRevision)
   }
 }

@@ -2,11 +2,13 @@ import type { AssetRightsSnapshot } from '../../domain/asset-rights.ts'
 
 export interface AssetRightsRecord {
   artifactId: string
+  revision: string
   snapshot: AssetRightsSnapshot | null
 }
 
 export interface SetAssetRightsResult {
   artifactId: string
+  revision: string
   snapshot: AssetRightsSnapshot
   replayed: boolean
 }
@@ -17,5 +19,5 @@ export interface AssetRightsRepository {
     workspaceId: string,
     artifactIds: readonly string[],
   ): Promise<ReadonlyMap<string, AssetRightsSnapshot | null>>
-  setCurrent(snapshot: AssetRightsSnapshot): Promise<SetAssetRightsResult>
+  setCurrent(snapshot: AssetRightsSnapshot, baseRevision: string): Promise<SetAssetRightsResult>
 }

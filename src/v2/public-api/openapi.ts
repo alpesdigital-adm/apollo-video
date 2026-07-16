@@ -55,6 +55,15 @@ function parametersFor(capability: PublicCapability) {
       schema: { type: 'string', minLength: 1, maxLength: 128 },
     })
   }
+  if (capability.precondition === 'if-match') {
+    parameters.push({
+      name: 'If-Match',
+      in: 'header',
+      required: true,
+      description: 'Strong ETag returned by the latest read or successful mutation.',
+      schema: { type: 'string', pattern: '^"[a-f0-9]{64}"$' },
+    })
+  }
   return parameters
 }
 
@@ -66,6 +75,14 @@ function responsesFor(capability: PublicCapability) {
       headers: {
         'Apollo-API-Version': { schema: { type: 'string', const: 'v1' } },
         'Apollo-Request-Id': { schema: { type: 'string' } },
+        ...(capability.responseEtag
+          ? {
+              ETag: {
+                description: 'Strong revision validator for the returned resource state.',
+                schema: { type: 'string', pattern: '^"[a-f0-9]{64}"$' },
+              },
+            }
+          : {}),
       },
       content: {
         [capability.responseMediaType ?? 'application/json']: {
@@ -84,6 +101,10 @@ function responsesFor(capability: PublicCapability) {
   }
   for (const status of [401, 403, 404, 409, 422, 500, 502]) {
     responses[String(status)] = errorResponse
+  }
+  if (capability.precondition === 'if-match') {
+    responses['412'] = errorResponse
+    responses['428'] = errorResponse
   }
   return responses
 }
