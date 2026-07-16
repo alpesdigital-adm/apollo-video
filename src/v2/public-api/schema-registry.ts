@@ -1793,6 +1793,68 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('record-media-upload-part-request', 1, 'Record multipart upload receipt request', {
+    type: 'object', additionalProperties: false, required: ['byteSize', 'etag', 'checksum'],
+    properties: {
+      byteSize: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' },
+      etag: { type: 'string', pattern: '^\"[A-Za-z0-9+/=_-]{8,256}\"$' },
+      checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    },
+  }),
+  defineSchema('media-upload-part-recorded', 1, 'Recorded multipart upload receipt response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['part'],
+      properties: {
+        part: {
+          type: 'object', additionalProperties: false,
+          required: ['uploadId', 'partNumber', 'byteSize', 'etag', 'checksum', 'recordedAt'],
+          properties: {
+            uploadId: { type: 'string', format: 'uuid' }, partNumber: { type: 'integer', minimum: 1, maximum: 10000 },
+            byteSize: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' }, etag: { type: 'string', maxLength: 258 },
+            checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' }, recordedAt: dateTimeSchema,
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema('media-upload-detail', 1, 'Resumable media upload detail response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['upload', 'parts', 'missingPartNumbers'],
+      properties: {
+        upload: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'kind', 'size', 'mimeType', 'checksum', 'status', 'expiresAt', 'createdAt'],
+          properties: {
+            id: { type: 'string', format: 'uuid' }, kind: { enum: ['video', 'audio', 'image'] },
+            size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' }, mimeType: { type: 'string', maxLength: 160 },
+            checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            status: { enum: ['pending-session', 'uploading', 'uploaded', 'verified', 'expired', 'aborted'] },
+            expiresAt: dateTimeSchema, createdAt: dateTimeSchema,
+          },
+        },
+        parts: {
+          type: 'array', maxItems: 10000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['uploadId', 'partNumber', 'byteSize', 'etag', 'checksum', 'recordedAt'],
+            properties: {
+              uploadId: { type: 'string', format: 'uuid' }, partNumber: { type: 'integer', minimum: 1, maximum: 10000 },
+              byteSize: { type: 'string' }, etag: { type: 'string' }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' }, recordedAt: dateTimeSchema,
+            },
+          },
+        },
+        missingPartNumbers: { type: 'array', maxItems: 10000, items: { type: 'integer', minimum: 1, maximum: 10000 }, uniqueItems: true },
+      },
+    }),
+  ),
+  defineSchema('media-upload-completed', 1, 'Verified media upload completion response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['uploadId', 'status', 'verifiedAt', 'replayed'],
+      properties: {
+        uploadId: { type: 'string', format: 'uuid' }, status: { const: 'verified' }, verifiedAt: dateTimeSchema, replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',
     successSchema({
       type: 'object',

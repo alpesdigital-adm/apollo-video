@@ -152,18 +152,39 @@ model V2MediaUpload {
   sessionMode        String?
   partSize           BigInt?
   sessionExpiresAt   DateTime?
+  actualSha256       String?
+  actualByteSize     BigInt?
+  verifiedAt         DateTime?
   expiresAt          DateTime
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  client    V2ApiClient @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  client    V2ApiClient         @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  parts     V2MediaUploadPart[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
   @@index([workspaceId, status, createdAt(sort: Desc)])
   @@index([workspaceId, status, expiresAt])
   @@map("media_uploads")
+}
+
+model V2MediaUploadPart {
+  id          String   @id
+  workspaceId String
+  uploadId    String
+  partNumber  Int
+  byteSize    BigInt
+  etag        String
+  checksum    String
+  recordedAt  DateTime
+
+  upload V2MediaUpload @relation(fields: [uploadId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([uploadId, partNumber])
+  @@index([workspaceId, uploadId, partNumber])
+  @@map("media_upload_parts")
 }
 
 model V2Project {

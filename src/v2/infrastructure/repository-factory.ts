@@ -108,6 +108,7 @@ import { createEnvironmentWebhookSigningSecretProvider } from './security/enviro
 import { createFallbackWebhookSigningSecretProvider } from './security/fallback-webhook-signing-secret-provider.ts'
 import { createWebhookSigningSecretProtector } from './security/webhook-signing-secret-protector.ts'
 export { createMediaUploadSessionSignerFromEnvironment } from './security/media-upload-session-signer.ts'
+export { createMediaUploadVerifierFromEnvironment } from './media-upload-verifier.ts'
 
 // The two generated clients expose the same v2 model delegates. This cast is
 // kept at the persistence boundary so application and public API code remain

@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import type { PrismaClient } from '@prisma/client'
 
 import type { MediaTransferRepository } from '../../application/ports/media-transfer-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
-import { createMediaUpload, type MediaUploadKind, type MediaUploadStatus } from '../../domain/media-transfer.ts'
+import { createMediaUpload, createMediaUploadPart, type MediaUploadKind, type MediaUploadStatus } from '../../domain/media-transfer.ts'
 
 export class PrismaMediaTransferRepository implements MediaTransferRepository {
   constructor(private readonly client: PrismaClient) {}
@@ -45,6 +46,7 @@ export class PrismaMediaTransferRepository implements MediaTransferRepository {
     id: string; workspaceId: string; clientId: string; kind: string; byteSize: bigint; mimeType: string;
     expectedSha256: string; status: string; expiresAt: Date; createdAt: Date;
     sessionMode: string | null; partSize: bigint | null; sessionExpiresAt: Date | null;
+    actualSha256: string | null; actualByteSize: bigint | null; verifiedAt: Date | null;
   }) {
     return createMediaUpload({
       id: row.id, workspaceId: row.workspaceId, clientId: row.clientId,
@@ -54,6 +56,9 @@ export class PrismaMediaTransferRepository implements MediaTransferRepository {
       ...(row.sessionMode ? { sessionMode: row.sessionMode as 'single' | 'multipart' } : {}),
       ...(row.partSize ? { partSize: row.partSize.toString() } : {}),
       ...(row.sessionExpiresAt ? { sessionExpiresAt: row.sessionExpiresAt.toISOString() } : {}),
+      ...(row.actualSha256 ? { actualSha256: row.actualSha256 } : {}),
+      ...(row.actualByteSize ? { actualByteSize: row.actualByteSize.toString() } : {}),
+      ...(row.verifiedAt ? { verifiedAt: row.verifiedAt.toISOString() } : {}),
     })
   }
 
@@ -80,6 +85,37 @@ export class PrismaMediaTransferRepository implements MediaTransferRepository {
     const row = await this.client.v2MediaUpload.findFirstOrThrow({ where: {
       id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId,
     } })
+    return this.present(row)
+  }
+
+  async listUploadParts(input: { workspaceId: string; clientId: string; uploadId: string }) {
+    const upload = await this.client.v2MediaUpload.findFirst({ where: { id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId }, select: { id: true } })
+    if (!upload) throw new DomainError('MEDIA_UPLOAD_NOT_FOUND', 'Upload was not found')
+    const rows = await this.client.v2MediaUploadPart.findMany({ where: { workspaceId: input.workspaceId, uploadId: input.uploadId }, orderBy: { partNumber: 'asc' } })
+    return Object.freeze(rows.map((row) => createMediaUploadPart({
+      uploadId: row.uploadId, partNumber: row.partNumber, byteSize: row.byteSize.toString(),
+      etag: row.etag, checksum: row.checksum, recordedAt: row.recordedAt.toISOString(),
+    })))
+  }
+
+  async recordUploadPart(input: { workspaceId: string; clientId: string; part: ReturnType<typeof createMediaUploadPart> }) {
+    const upload = await this.client.v2MediaUpload.findFirst({ where: { id: input.part.uploadId, workspaceId: input.workspaceId, clientId: input.clientId, status: 'uploading' } })
+    if (!upload) throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Upload cannot accept parts')
+    const row = await this.client.v2MediaUploadPart.upsert({
+      where: { uploadId_partNumber: { uploadId: input.part.uploadId, partNumber: input.part.partNumber } },
+      create: { id: randomUUID(), workspaceId: input.workspaceId, uploadId: input.part.uploadId, partNumber: input.part.partNumber, byteSize: BigInt(input.part.byteSize), etag: input.part.etag, checksum: input.part.checksum, recordedAt: new Date(input.part.recordedAt) },
+      update: { byteSize: BigInt(input.part.byteSize), etag: input.part.etag, checksum: input.part.checksum, recordedAt: new Date(input.part.recordedAt) },
+    })
+    return createMediaUploadPart({ uploadId: row.uploadId, partNumber: row.partNumber, byteSize: row.byteSize.toString(), etag: row.etag, checksum: row.checksum, recordedAt: row.recordedAt.toISOString() })
+  }
+
+  async markUploadVerified(input: { workspaceId: string; clientId: string; uploadId: string; actualByteSize: string; actualSha256: string; verifiedAt: string }) {
+    const updated = await this.client.v2MediaUpload.updateMany({
+      where: { id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId, status: 'uploading' },
+      data: { status: 'verified', actualByteSize: BigInt(input.actualByteSize), actualSha256: input.actualSha256, verifiedAt: new Date(input.verifiedAt) },
+    })
+    if (updated.count !== 1) throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Upload cannot be completed')
+    const row = await this.client.v2MediaUpload.findFirstOrThrow({ where: { id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId } })
     return this.present(row)
   }
 }

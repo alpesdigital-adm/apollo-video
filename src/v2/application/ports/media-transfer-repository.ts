@@ -1,4 +1,4 @@
-import type { MediaUpload } from '../../domain/media-transfer.ts'
+import type { MediaUpload, MediaUploadPart } from '../../domain/media-transfer.ts'
 
 export interface BeginMediaUploadRecord {
   upload: Readonly<MediaUpload>
@@ -17,6 +17,18 @@ export interface MediaTransferRepository {
     partSize?: string
     sessionExpiresAt: string
   }): Promise<Readonly<MediaUpload>>
+  listUploadParts(input: { workspaceId: string; clientId: string; uploadId: string }): Promise<readonly Readonly<MediaUploadPart>[]>
+  recordUploadPart(input: { workspaceId: string; clientId: string; part: Readonly<MediaUploadPart> }): Promise<Readonly<MediaUploadPart>>
+  markUploadVerified(input: {
+    workspaceId: string; clientId: string; uploadId: string; actualByteSize: string; actualSha256: string; verifiedAt: string
+  }): Promise<Readonly<MediaUpload>>
+}
+
+export interface MediaUploadVerifier {
+  verify(input: {
+    upload: Readonly<MediaUpload>
+    parts: readonly Readonly<MediaUploadPart>[]
+  }): Promise<Readonly<{ byteSize: string; mimeType: string; sha256: string }>>
 }
 
 export interface MediaUploadSessionSigner {

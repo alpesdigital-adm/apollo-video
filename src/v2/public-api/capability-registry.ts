@@ -1387,4 +1387,26 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     toolName: 'apollo.media.uploads.session.issue', supportsDryRun: false, costClass: 'low',
     confirmation: 'none', successStatuses: [200], idempotency: 'natural',
   },
+  {
+    id: 'apollo.media.uploads.read', version: '1.0.0', title: 'Read resumable media upload',
+    description: 'Returns safe upload state, recorded multipart parts and missing part numbers.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['media:write'],
+    outputSchemaRef: 'apollo://schemas/media-upload-detail/v1', endpoint: { method: 'GET', path: '/v1/media/uploads/{uploadId}' },
+    toolName: 'apollo.media.uploads.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.media.uploads.parts.record', version: '1.0.0', title: 'Record uploaded media part',
+    description: 'Records or replaces one multipart receipt before authoritative completion verification.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['media:write'],
+    inputSchemaRef: 'apollo://schemas/record-media-upload-part-request/v1', outputSchemaRef: 'apollo://schemas/media-upload-part-recorded/v1',
+    endpoint: { method: 'POST', path: '/v1/media/uploads/{uploadId}/parts/{partNumber}' }, toolName: 'apollo.media.uploads.parts.record',
+    supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [200], idempotency: 'natural', requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.media.uploads.complete', version: '1.0.0', title: 'Complete and verify media upload',
+    description: 'Completes one upload only after storage verifies exact size, MIME and SHA-256 checksum.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['media:write'],
+    outputSchemaRef: 'apollo://schemas/media-upload-completed/v1', endpoint: { method: 'POST', path: '/v1/media/uploads/{uploadId}/complete' },
+    toolName: 'apollo.media.uploads.complete', supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [200], idempotency: 'natural',
+  },
 ])

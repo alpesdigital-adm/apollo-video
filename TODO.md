@@ -522,7 +522,7 @@
 
 - [x] Implementar `begin-upload` com kind, size, MIME e checksum esperado. Evidência F0-086: `POST /v1/media/uploads` exige scope e idempotency key, valida coerência kind/MIME, tamanho até 5 TB e SHA-256, persiste sessão workspace/client-scoped e retorna replay convergente sem expor storage.
 - [x] Gerar signed single/multipart sessions curtas com headers obrigatórios. Evidência F0-087: endpoint de sessão escolhe single até 100 MiB ou multipart de 64 MiB/até 10 mil partes, assina autorização HMAC limitada a workspace/client/upload/expiry e exige MIME + checksum em headers.
-- [ ] Implementar resume, parts completion e verification antes do ingest.
+- [x] Implementar resume, parts completion e verification antes do ingest. Evidência F0-088: receipts multipart são persistidos/substituídos por número, consulta retorna parts ausentes para resume e completion só converge para `verified` após conferência autoritativa exata de tamanho, MIME e SHA-256; nenhum ingest é iniciado por esta etapa.
 - [ ] Gerar download grants curtos por asset/artifact autorizado.
 - [ ] Impedir storage path/URI permanente de virar identidade pública. Parcial F0-022: lease interna serializa apenas receipt seguro e paths/URLs vivem somente no `MaterializedRenderInput` em memória; faltam download grants e enforcement nos adapters futuros.
 - [ ] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado.
@@ -5183,3 +5183,26 @@ Regressões locais desta slice:
 - 171/171 testes gerais aprovados;
 - contratos aprovados com 50 capabilities, 68 schemas, 89 examples e 44 paths;
 - typecheck, migration/schema e testes single/multipart aprovados.
+
+### Slice F0-088 — Resume e verificação autoritativa de upload
+
+**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+
+Entregas:
+
+- capabilities públicas para consultar upload, registrar receipt de part e concluir;
+- receipts multipart duráveis, ordenados e substituíveis naturalmente por número;
+- consulta workspace/client-scoped calcula parts ausentes sem emitir nova identidade;
+- conclusão multipart exige a sequência completa antes de consultar o storage;
+- adapter de verificação usa origem fixa HTTPS, bearer de serviço, redirect bloqueado,
+  timeout e resposta limitada;
+- tamanho, MIME e SHA-256 observados precisam coincidir exatamente com o intent;
+- conclusão convergente evita uma segunda verificação depois do estado `verified`;
+- nenhuma etapa de ingest é iniciada antes da verificação autoritativa.
+
+Regressões locais desta slice:
+
+- 7/7 testes focados de transferência aprovados;
+- contratos aprovados com 53 capabilities, 72 schemas, 93 examples e 47 paths;
+- schema v2 aprovado com 31 tabelas, 118 índices e 64 foreign keys;
+- typecheck e geração dos dois Prisma clients aprovados.

@@ -879,6 +879,28 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/record-media-upload-part-request/v1': [
+      { byteSize: '67108864', etag: '"partetag001"', checksum: 'b'.repeat(64) },
+    ],
+    'apollo://schemas/media-upload-part-recorded/v1': [
+      {
+        data: { part: { uploadId: '123e4567-e89b-42d3-a456-426614174001', partNumber: 1, byteSize: '67108864', etag: '"partetag001"', checksum: 'b'.repeat(64), recordedAt: createdAt } },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-upload-detail/v1': [
+      {
+        data: {
+          upload: { id: '123e4567-e89b-42d3-a456-426614174001', kind: 'video', size: '134217728', mimeType: 'video/mp4', checksum: 'a'.repeat(64), status: 'uploading', expiresAt: '2026-07-16T22:30:00.000Z', createdAt },
+          parts: [{ uploadId: '123e4567-e89b-42d3-a456-426614174001', partNumber: 1, byteSize: '67108864', etag: '"partetag001"', checksum: 'b'.repeat(64), recordedAt: createdAt }],
+          missingPartNumbers: [2],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-upload-completed/v1': [
+      { data: { uploadId: '123e4567-e89b-42d3-a456-426614174001', status: 'verified', verifiedAt: createdAt, replayed: false }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/webhook-signing-secret-rotation-list/v1': [
       { data: { rotations: [] }, meta: { apiVersion: 'v1' } },
       { data: { rotations: [webhookSigningSecretRotationExample] }, meta: { apiVersion: 'v1' } },

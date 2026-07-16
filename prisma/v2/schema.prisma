@@ -106,18 +106,39 @@ model V2MediaUpload {
   sessionMode        String?   @db.VarChar(16)
   partSize           BigInt?
   sessionExpiresAt   DateTime? @db.Timestamptz(3)
+  actualSha256       String?   @db.Char(64)
+  actualByteSize     BigInt?
+  verifiedAt         DateTime? @db.Timestamptz(3)
   expiresAt          DateTime  @db.Timestamptz(3)
   createdAt          DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
 
-  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  client    V2ApiClient @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  client    V2ApiClient         @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  parts     V2MediaUploadPart[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
   @@index([workspaceId, status, createdAt(sort: Desc)])
   @@index([workspaceId, status, expiresAt])
   @@map("media_uploads")
+}
+
+model V2MediaUploadPart {
+  id          String   @id @db.Uuid
+  workspaceId String   @db.VarChar(128)
+  uploadId    String   @db.Uuid
+  partNumber  Int
+  byteSize    BigInt
+  etag        String   @db.VarChar(258)
+  checksum    String   @db.Char(64)
+  recordedAt  DateTime @db.Timestamptz(3)
+
+  upload V2MediaUpload @relation(fields: [uploadId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([uploadId, partNumber])
+  @@index([workspaceId, uploadId, partNumber])
+  @@map("media_upload_parts")
 }
 
 model V2Project {

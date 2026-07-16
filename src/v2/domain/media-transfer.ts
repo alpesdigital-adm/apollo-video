@@ -24,6 +24,27 @@ export interface MediaUpload {
   sessionMode?: 'single' | 'multipart'
   partSize?: string
   sessionExpiresAt?: string
+  actualSha256?: string
+  actualByteSize?: string
+  verifiedAt?: string
+}
+
+export interface MediaUploadPart {
+  uploadId: string
+  partNumber: number
+  byteSize: string
+  etag: string
+  checksum: string
+  recordedAt: string
+}
+
+export function createMediaUploadPart(input: MediaUploadPart): Readonly<MediaUploadPart> {
+  assertDomain(Number.isInteger(input.partNumber) && input.partNumber >= 1 && input.partNumber <= 10_000, 'INVALID_ARGUMENT', 'partNumber must be from 1 to 10000')
+  assertDomain(/^[1-9][0-9]{0,15}$/.test(input.byteSize), 'INVALID_ARGUMENT', 'part size must be positive')
+  assertDomain(/^"[A-Za-z0-9+/=_-]{8,256}"$/.test(input.etag), 'INVALID_ARGUMENT', 'part ETag is invalid')
+  assertDomain(/^[a-f0-9]{64}$/.test(input.checksum), 'INVALID_ARGUMENT', 'part checksum must be SHA-256')
+  assertDomain(!Number.isNaN(Date.parse(input.recordedAt)), 'INVALID_ARGUMENT', 'part timestamp is invalid')
+  return Object.freeze({ ...input, recordedAt: new Date(input.recordedAt).toISOString() })
 }
 
 export function createMediaUpload(input: MediaUpload): Readonly<MediaUpload> {
@@ -43,5 +64,8 @@ export function createMediaUpload(input: MediaUpload): Readonly<MediaUpload> {
     const sessionExpiry = new Date(input.sessionExpiresAt)
     assertDomain(!Number.isNaN(sessionExpiry.getTime()) && sessionExpiry > createdAt && sessionExpiry <= expiresAt, 'INVALID_ARGUMENT', 'signed session expiry is invalid')
   }
+  if (input.actualSha256) assertDomain(/^[a-f0-9]{64}$/.test(input.actualSha256), 'INVALID_ARGUMENT', 'actual checksum is invalid')
+  if (input.actualByteSize) assertDomain(/^[1-9][0-9]{0,15}$/.test(input.actualByteSize), 'INVALID_ARGUMENT', 'actual size is invalid')
+  if (input.verifiedAt) assertDomain(!Number.isNaN(Date.parse(input.verifiedAt)), 'INVALID_ARGUMENT', 'verifiedAt is invalid')
   return Object.freeze({ ...input, mimeType, createdAt: createdAt.toISOString(), expiresAt: expiresAt.toISOString() })
 }

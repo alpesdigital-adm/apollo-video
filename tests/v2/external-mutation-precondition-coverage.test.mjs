@@ -71,6 +71,8 @@ const coverage = Object.freeze({
   'apollo.media.uploads.session.issue': {
     mode: 'state-machine-action', evidence: 'F0-087',
   },
+  'apollo.media.uploads.parts.record': { mode: 'state-machine-action', evidence: 'F0-088' },
+  'apollo.media.uploads.complete': { mode: 'state-machine-action', evidence: 'F0-088' },
   'apollo.clients.create': {
     mode: 'idempotent-create', evidence: 'F0-061',
   },
@@ -146,7 +148,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'read-only-preflight': 2,
     'explicit-precondition': 3,
     'idempotent-create': 8,
-    'state-machine-action': 7,
+    'state-machine-action': 9,
     'single-flight-action': 1,
     'revision-bound-action': 4,
   })
