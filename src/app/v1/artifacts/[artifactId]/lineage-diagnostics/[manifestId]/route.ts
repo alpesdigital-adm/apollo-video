@@ -10,6 +10,7 @@ import {
   respondPublicError,
 } from '@/v2/public-api/errors'
 import { presentSuccess } from '@/v2/public-api/presenters'
+import { publicArtifactReference } from '@/v2/public-api/public-media-identity'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +30,7 @@ export async function GET(
     const diagnostic = await diagnoseLineage(actor.workspaceId, artifactId, manifestId)
 
     return NextResponse.json(
-      presentSuccess(diagnostic),
+      presentSuccess({ ...diagnostic, nodes: diagnostic.nodes.map((node) => ({ ...node, artifactKey: publicArtifactReference(node.artifactId) })) }),
       { headers: publicApiHeaders(requestId) },
     )
   } catch (error) {

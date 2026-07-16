@@ -524,7 +524,7 @@
 - [x] Gerar signed single/multipart sessions curtas com headers obrigatórios. Evidência F0-087: endpoint de sessão escolhe single até 100 MiB ou multipart de 64 MiB/até 10 mil partes, assina autorização HMAC limitada a workspace/client/upload/expiry e exige MIME + checksum em headers.
 - [x] Implementar resume, parts completion e verification antes do ingest. Evidência F0-088: receipts multipart são persistidos/substituídos por número, consulta retorna parts ausentes para resume e completion só converge para `verified` após conferência autoritativa exata de tamanho, MIME e SHA-256; nenhum ingest é iniciado por esta etapa.
 - [x] Gerar download grants curtos por asset/artifact autorizado. Evidência F0-089: artifact disponível e workspace-scoped recebe grant HMAC de 30–900 segundos, vinculado ao client e idempotency key; banco retém somente hash do token, e revogação convergente invalida a autorização imediatamente.
-- [ ] Impedir storage path/URI permanente de virar identidade pública. Parcial F0-022: lease interna serializa apenas receipt seguro e paths/URLs vivem somente no `MaterializedRenderInput` em memória; faltam download grants e enforcement nos adapters futuros.
+- [x] Impedir storage path/URI permanente de virar identidade pública. Evidência F0-090: presenters convertem chaves internas em referências lógicas `artifact:<id>`; um gate recursivo rejeita storage path/URI/bucket/object key e valida todos os exemplos públicos, enquanto URLs efêmeras permanecem limitadas aos grants/sessions.
 - [ ] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado.
 
 ### F0.042 — Preflight e lote externo [FR-248]
@@ -5229,3 +5229,25 @@ Regressões locais desta slice:
 - contratos aprovados com 55 capabilities, 75 schemas, 96 examples e 49 paths;
 - schema v2 aprovado com 32 tabelas, 121 índices e 67 foreign keys;
 - typecheck e geração dos dois Prisma clients aprovados.
+
+### Slice F0-090 — Identidade pública sem localização de storage
+
+**Status:** implementação local concluída em 16 de julho de 2026; aguardando publicação.
+
+Entregas:
+
+- artifacts e fontes são apresentados como referência lógica `artifact:<id>`;
+- chaves internas continuam disponíveis apenas nos ports e adapters de materialização;
+- lineage diagnostics também substituem a chave interna antes da resposta HTTP;
+- gate recursivo bloqueia `storagePath`, `storageUri`, `bucket`, `objectKey`,
+  `filesystemPath`, `filePath` e `permanentUrl` em payload público;
+- qualquer `artifactKey` público com slash, backslash ou formato de path falha fechado;
+- todos os exemplos versionados da API são verificados pelo mesmo gate;
+- URLs assinadas continuam explícitas como autorizações efêmeras, não identidades.
+
+Regressões locais desta slice:
+
+- 3/3 testes focados de identidade pública aprovados;
+- 181/181 testes gerais aprovados;
+- contratos aprovados com 55 capabilities, 75 schemas, 96 examples e 49 paths;
+- typecheck aprovado.

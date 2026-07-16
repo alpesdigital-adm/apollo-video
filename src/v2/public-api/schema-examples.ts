@@ -67,7 +67,7 @@ const renderInputRequestExample = {
     {
       id: 'asset-primary-video',
       artifactId,
-      artifactKey: 'workspace-example-1/masters/source.mp4',
+      artifactKey: 'artifact:artifact-example-source-1',
       kind: 'video',
       role: 'primary',
       ordinal: 0,
@@ -278,7 +278,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           artifact: {
             id: artifactId,
             workspaceId,
-            artifactKey: 'workspace-example-1/derived/final.mp4',
+            artifactKey: 'artifact:artifact-example-final-1',
             sha256: 'b'.repeat(64),
             byteSize: '2849012',
             mediaType: 'video',
@@ -300,7 +300,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               sources: [
                 {
                   artifactId: 'artifact-source-example-1',
-                  artifactKey: 'workspace-example-1/raw/source.mov',
+                  artifactKey: 'artifact:artifact-example-source-1',
                   sha256: 'a'.repeat(64),
                   role: 'primary',
                   ordinal: 0,
@@ -322,7 +322,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           nodes: [
             {
               artifactId: 'artifact-source-example-1',
-              artifactKey: 'workspace-example-1/raw/source.mov',
+              artifactKey: 'artifact:artifact-example-source-1',
               sha256: 'a'.repeat(64),
               status: 'available',
               manifestCount: 1,
@@ -339,7 +339,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             },
             {
               artifactId,
-              artifactKey: 'workspace-example-1/derived/final.mp4',
+              artifactKey: 'artifact:artifact-example-final-1',
               sha256: 'b'.repeat(64),
               status: 'available',
               manifestCount: 1,

@@ -4,6 +4,7 @@ import type { PublicCapability } from './capability-registry.ts'
 import type { ApiClient } from '../domain/api-client.ts'
 import type { ApiCredential } from '../domain/api-credential.ts'
 import type { MediaArtifactRecord } from '../application/ports/media-artifact-query-repository.ts'
+import { publicArtifactReference } from './public-media-identity.ts'
 import type { PublicOperation } from '../domain/public-operation.ts'
 import type {
   WebhookDeliveryDiagnosticRecord,
@@ -96,7 +97,7 @@ export function presentMediaArtifact(artifact: MediaArtifactRecord) {
     artifact: {
       id: artifact.id,
       workspaceId: artifact.workspaceId,
-      artifactKey: artifact.artifactKey,
+      artifactKey: publicArtifactReference(artifact.id),
       sha256: artifact.sha256,
       byteSize: artifact.byteSize.toString(),
       mediaType: artifact.mediaType,
@@ -116,7 +117,7 @@ export function presentMediaArtifact(artifact: MediaArtifactRecord) {
       ...(manifest.probe ? { probe: { ...manifest.probe } } : {}),
       sources: manifest.sources.map((source) => ({
         artifactId: source.artifactId,
-        artifactKey: source.artifactKey,
+        artifactKey: publicArtifactReference(source.artifactId),
         sha256: source.sha256,
         role: source.role,
         ordinal: source.ordinal,
