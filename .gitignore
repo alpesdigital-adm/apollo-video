@@ -36,7 +36,7 @@ yarn-error.log*
 /generated/
 
 # project specific
-uploads/
+/uploads/
 renders/
 !src/app/v1/**/renders/
 !src/app/v1/**/renders/**
