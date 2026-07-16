@@ -57,3 +57,4 @@ Estados usados:
 - [ADR-053 — Concorrência na criação de subscriptions de webhook](./ADR-053-concurrent-webhook-subscription-creation.md)
 - [ADR-054 — Concorrência no provisionamento HMAC pendente](./ADR-054-concurrent-pending-webhook-secret-provisioning.md)
 - [ADR-055 — Concorrência no enqueue durável de render](./ADR-055-concurrent-render-enqueue.md)
+- [ADR-056 — Concorrência na autorização de materialização](./ADR-056-concurrent-materialization-authorization.md)

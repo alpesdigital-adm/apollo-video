@@ -56,6 +56,7 @@ import { materializeAuthorizedRenderInputService } from '../../src/v2/applicatio
 import { createMaterializationAuthorization } from '../../src/v2/domain/materialization-authorization.ts'
 import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
+import { PrismaMaterializationAuthorizationRepository } from '../../src/v2/infrastructure/prisma/materialization-authorization-repository.ts'
 import { compileApolloVideoRenderProps } from '../../src/v2/application/compile-apollo-video-render-props.ts'
 import { renderAuthorizedInputService } from '../../src/v2/application/render-authorized-input.ts'
 import {
@@ -1265,6 +1266,43 @@ test('materialization authorization evaluates every RenderInput asset and record
   assert.equal(recorded.requestFingerprint.length, 64)
   assert.equal(JSON.stringify(result).includes('must-not-leak'), false)
   assert.equal(JSON.stringify(result).includes('workspaces/1/source.mp4'), false)
+})
+
+test('materialization authorization retries serialization conflicts before failing explicitly', async () => {
+  const authorization = createMaterializationAuthorization({
+    id: 'authorization-serialization-retry-1',
+    workspaceId: 'workspace-serialization-retry-1',
+    artifactId: 'artifact-serialization-retry-1',
+    manifestId: 'manifest-serialization-retry-1',
+    inputHash: 'c'.repeat(64),
+    use: 'paid-ad',
+    locale: 'pt-BR',
+    syntheticOperations: [],
+    issues: [],
+    decisions: [],
+    evaluatedAt: '2026-07-16T08:01:00.000Z',
+    actor: { type: 'api-client', id: 'client-serialization-retry-1' },
+  })
+  let attempts = 0
+  const repository = new PrismaMaterializationAuthorizationRepository({
+    async $transaction() {
+      attempts += 1
+      const error = new Error('serialization conflict')
+      error.code = 'P2034'
+      throw error
+    },
+  })
+
+  await assert.rejects(
+    () => repository.createOrReplay({
+      authorization,
+      clientId: 'client-serialization-retry-1',
+      idempotencyKey: 'authorization-serialization-retry-key-1',
+      requestFingerprint: 'd'.repeat(64),
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
 })
 
 test('authorized worker materialization revalidates rights and keeps locations internal', async () => {

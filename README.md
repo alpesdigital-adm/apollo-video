@@ -99,6 +99,12 @@ isolada por workspace. A gravação é transacional e idempotente pela combinaç
 de canonical key, identidade imutável do conteúdo e `manifestHash`; source
 ausente ou divergente desfaz toda a operação.
 
+A autorização pública de materialização também é serializável. Duas avaliações
+simultâneas com artifact, manifest, política de uso e chave idênticos convergem
+para uma autorização e um conjunto de decisões. Se a resposta for perdida, o
+retry devolve o mesmo receipt; mudar uso, mercado ou locale com a mesma chave
+retorna conflito de payload.
+
 ## Worker de render v2
 
 Renders solicitados pela API pública permanecem em uma operação durável e são

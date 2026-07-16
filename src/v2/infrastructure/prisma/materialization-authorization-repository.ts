@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from '@prisma/client'
+import { Prisma, type PrismaClient } from '@prisma/client'
 
 import type {
   MaterializationAuthorizationRepository,
@@ -23,6 +23,10 @@ type StoredAuthorization = Prisma.V2MaterializationAuthorizationGetPayload<{
 
 function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
+}
+
+function isSerializationConflict(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
 }
 
 function parseArray(value: string, field: string): unknown[] {
@@ -200,7 +204,7 @@ export class PrismaMaterializationAuthorizationRepository
     clientId: string
     idempotencyKey: string
     requestFingerprint: string
-  }): Promise<MaterializationAuthorizationResult> {
+  }, serializationAttempt = 1): Promise<MaterializationAuthorizationResult> {
     try {
       return await this.client.$transaction(async (transaction) => {
         const existing = await transaction.v2MaterializationAuthorization.findUnique({
@@ -275,8 +279,17 @@ export class PrismaMaterializationAuthorizationRepository
           )
         }
         return { authorization: hydrateAuthorization(created), replayed: false }
-      })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
+      if (isSerializationConflict(error)) {
+        if (serializationAttempt < 3) {
+          return this.createOrReplay(input, serializationAttempt + 1)
+        }
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Materialization authorization conflicted with another transaction',
+        )
+      }
       if (isUniqueConstraintError(error)) {
         const replay = await this.findReplay({
           workspaceId: input.authorization.workspaceId,

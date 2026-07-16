@@ -2424,11 +2424,25 @@ test('authenticated public API manages projects, clients and artifact inspection
           body: JSON.stringify(body),
         },
       )
-    const materializationResponse = await createMaterializationAuthorization(
-      'materialization-approved-1',
+    const materializationConcurrentResponses = await Promise.all([
+      createMaterializationAuthorization('materialization-approved-1'),
+      createMaterializationAuthorization('materialization-approved-1'),
+    ])
+    assert.deepEqual(
+      materializationConcurrentResponses.map((response) => response.status).sort(),
+      [200, 201],
     )
-    const materialization = await materializationResponse.json()
-    assert.equal(materializationResponse.status, 201)
+    const materializationConcurrentBodies = await Promise.all(
+      materializationConcurrentResponses.map((response) => response.json()),
+    )
+    const materialization = materializationConcurrentBodies.find(
+      (body) => body.data.replayed === false,
+    )
+    const materializationReplay = materializationConcurrentBodies.find(
+      (body) => body.data.replayed === true,
+    )
+    assert.ok(materialization)
+    assert.ok(materializationReplay)
     assert.equal(materialization.data.authorization.status, 'authorized')
     assert.equal(materialization.data.authorization.locale, 'pt-BR')
     assert.equal(materialization.data.authorization.revalidationRequired, true)
@@ -2440,15 +2454,29 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(JSON.stringify(materialization).includes(sourceKey), false)
     assert.equal(JSON.stringify(materialization).includes('Internal legal note'), false)
 
-    const materializationReplayResponse = await createMaterializationAuthorization(
-      'materialization-approved-1',
-    )
-    const materializationReplay = await materializationReplayResponse.json()
-    assert.equal(materializationReplayResponse.status, 200)
     assert.equal(materializationReplay.data.replayed, true)
     assert.equal(
       materializationReplay.data.authorization.id,
       materialization.data.authorization.id,
+    )
+    const discardedMaterializationResponse = await createMaterializationAuthorization(
+      'materialization-response-loss-1',
+    )
+    assert.equal(discardedMaterializationResponse.status, 201)
+    const recoveredMaterializationResponse = await createMaterializationAuthorization(
+      'materialization-response-loss-1',
+    )
+    const recoveredMaterialization = await recoveredMaterializationResponse.json()
+    assert.equal(recoveredMaterializationResponse.status, 200)
+    assert.equal(recoveredMaterialization.data.replayed, true)
+    assert.equal(
+      await client.v2MaterializationAuthorization.count({
+        where: {
+          workspaceId,
+          id: recoveredMaterialization.data.authorization.id,
+        },
+      }),
+      1,
     )
     const materializationMismatchResponse = await createMaterializationAuthorization(
       'materialization-approved-1',
