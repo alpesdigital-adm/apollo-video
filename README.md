@@ -208,6 +208,10 @@ metadados, mas nunca repete a chave (`secretAvailable: false`). Se a primeira
 resposta for perdida, deve-se consultar a nova revisão do endpoint e provisionar
 outra versão com uma nova chave idempotente. A versão anterior é aposentada na
 mesma transação. Esse command só aceita endpoint ainda pendente.
+Duas chamadas simultâneas idênticas também convergem: somente a vencedora recebe
+`secretBase64url`; a concorrente recebe replay redigido. Quando a resposta
+vencedora é perdida depois do commit, repetir a mesma chave confirma a versão
+persistida, mas não reabre o material one-shot.
 
 Para endpoint ativo, a rotação começa por
 `POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations`, com

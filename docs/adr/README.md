@@ -55,3 +55,4 @@ Estados usados:
 - [ADR-051 — Concorrência e token one-shot na rotação de credenciais](./ADR-051-concurrent-api-credential-rotation.md)
 - [ADR-052 — Concorrência no cadastro de endpoint de webhook](./ADR-052-concurrent-webhook-endpoint-creation.md)
 - [ADR-053 — Concorrência na criação de subscriptions de webhook](./ADR-053-concurrent-webhook-subscription-creation.md)
+- [ADR-054 — Concorrência no provisionamento HMAC pendente](./ADR-054-concurrent-pending-webhook-secret-provisioning.md)

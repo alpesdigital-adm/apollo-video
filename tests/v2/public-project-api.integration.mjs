@@ -1072,8 +1072,8 @@ test('authenticated public API manages projects, clients and artifact inspection
 
     const signingSecretProvisioningUrl =
       `${baseUrl}/v1/webhooks/endpoints/${createdEndpoint.data.endpoint.id}/signing-secrets`
-    const provisionSigningSecret = (idempotencyKey, body) => fetch(
-      signingSecretProvisioningUrl,
+    const provisionSigningSecretFor = (endpointId, idempotencyKey, body) => fetch(
+      `${baseUrl}/v1/webhooks/endpoints/${endpointId}/signing-secrets`,
       {
         method: 'POST',
         headers: {
@@ -1084,15 +1084,30 @@ test('authenticated public API manages projects, clients and artifact inspection
         body: JSON.stringify(body),
       },
     )
+    const provisionSigningSecret = (idempotencyKey, body) =>
+      provisionSigningSecretFor(createdEndpoint.data.endpoint.id, idempotencyKey, body)
     const provisionSecretBody = {
       baseRevision: createdEndpoint.data.endpoint.revision,
     }
-    const provisionSecretResponse = await provisionSigningSecret(
-      'public-secret-provision-1',
-      provisionSecretBody,
+    const provisionSecretConcurrentResponses = await Promise.all([
+      provisionSigningSecret('public-secret-provision-1', provisionSecretBody),
+      provisionSigningSecret('public-secret-provision-1', provisionSecretBody),
+    ])
+    assert.deepEqual(
+      provisionSecretConcurrentResponses.map((response) => response.status).sort(),
+      [200, 201],
     )
-    const provisionedSecret = await provisionSecretResponse.json()
-    assert.equal(provisionSecretResponse.status, 201)
+    const provisionSecretConcurrentBodies = await Promise.all(
+      provisionSecretConcurrentResponses.map((response) => response.json()),
+    )
+    const provisionedSecret = provisionSecretConcurrentBodies.find(
+      (body) => body.data.replayed === false,
+    )
+    const provisionSecretReplay = provisionSecretConcurrentBodies.find(
+      (body) => body.data.replayed === true,
+    )
+    assert.ok(provisionedSecret)
+    assert.ok(provisionSecretReplay)
     assert.equal(provisionedSecret.data.secretAvailable, true)
     assert.equal(provisionedSecret.data.replayed, false)
     assert.match(provisionedSecret.data.secretBase64url, /^[A-Za-z0-9_-]{43}$/)
@@ -1121,18 +1136,48 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(await client.v2WebhookSigningSecretPayload.count({
       where: { secretId: persistedProvisionedSecret.id },
     }), 1)
-    const provisionSecretReplayResponse = await provisionSigningSecret(
-      'public-secret-provision-1',
-      provisionSecretBody,
-    )
-    const provisionSecretReplay = await provisionSecretReplayResponse.json()
-    assert.equal(provisionSecretReplayResponse.status, 200)
     assert.equal(provisionSecretReplay.data.secretAvailable, false)
     assert.equal(provisionSecretReplay.data.replayed, true)
     assert.equal('secretBase64url' in provisionSecretReplay.data, false)
     assert.equal(
       provisionSecretReplay.data.endpoint.currentSigningSecret.fingerprint,
       provisionedSecret.data.endpoint.currentSigningSecret.fingerprint,
+    )
+
+    const responseLossProvisionBody = {
+      baseRevision: recoveredEndpoint.data.endpoint.revision,
+    }
+    const discardedProvisionResponse = await provisionSigningSecretFor(
+      recoveredEndpoint.data.endpoint.id,
+      'public-secret-provision-response-loss-1',
+      responseLossProvisionBody,
+    )
+    assert.equal(discardedProvisionResponse.status, 201)
+    const recoveredProvisionResponse = await provisionSigningSecretFor(
+      recoveredEndpoint.data.endpoint.id,
+      'public-secret-provision-response-loss-1',
+      responseLossProvisionBody,
+    )
+    const recoveredProvision = await recoveredProvisionResponse.json()
+    assert.equal(recoveredProvisionResponse.status, 200)
+    assert.equal(recoveredProvision.data.replayed, true)
+    assert.equal(recoveredProvision.data.secretAvailable, false)
+    assert.equal('secretBase64url' in recoveredProvision.data, false)
+    assert.equal(
+      await client.v2WebhookSigningSecret.count({
+        where: { workspaceId, endpointId: recoveredEndpoint.data.endpoint.id },
+      }),
+      2,
+    )
+    assert.equal(
+      await client.v2WebhookSigningSecret.count({
+        where: {
+          workspaceId,
+          endpointId: recoveredEndpoint.data.endpoint.id,
+          status: 'active',
+        },
+      }),
+      1,
     )
     assert.equal(
       (await provisionSigningSecret(
