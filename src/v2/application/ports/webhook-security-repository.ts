@@ -9,6 +9,7 @@ export interface VerifyWebhookChallengeCommand {
   challengeId: string
   responseHash: string
   verifiedAt: string
+  activationLeaseTokenHash?: string
 }
 
 export interface VerifyWebhookChallengeResult {
@@ -48,4 +49,25 @@ export interface WebhookEndpointActivationStateRepository {
     workspaceId: string,
     endpointId: string,
   ): Promise<Readonly<WebhookEndpointActivationState>>
+}
+
+export type WebhookEndpointActivationLeaseClaim =
+  | Readonly<{ status: 'leader'; workspaceId: string; endpointId: string; url: string }>
+  | Readonly<{ status: 'follower'; workspaceId: string; endpointId: string }>
+  | Readonly<{ status: 'active'; workspaceId: string; endpointId: string }>
+  | Readonly<{ status: 'blocked'; workspaceId: string; endpointId: string }>
+
+export interface WebhookEndpointActivationLeaseRepository {
+  claimActivationLease(command: Readonly<{
+    workspaceId: string
+    endpointId: string
+    leaseTokenHash: string
+    claimedAt: string
+    leaseExpiresAt: string
+  }>): Promise<Readonly<WebhookEndpointActivationLeaseClaim>>
+  releaseActivationLease(command: Readonly<{
+    workspaceId: string
+    endpointId: string
+    leaseTokenHash: string
+  }>): Promise<boolean>
 }

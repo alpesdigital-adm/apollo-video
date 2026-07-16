@@ -32,7 +32,7 @@ const coverage = Object.freeze({
     mode: 'durable-covered', evidence: 'F0-071',
   },
   'apollo.webhooks.endpoints.challenge': {
-    mode: 'pending-concurrency', evidence: 'response-loss covered; durable simultaneous single-flight pending',
+    mode: 'durable-covered', evidence: 'F0-075',
   },
   'apollo.webhooks.endpoints.signing-secrets.provision': {
     mode: 'durable-covered', evidence: 'F0-065',
@@ -95,14 +95,14 @@ test('every external non-query capability has an explicit concurrency classifica
   }
 })
 
-test('the concurrency audit keeps the remaining durable gap explicit and singular', () => {
+test('the concurrency audit has no unclassified durable gap', () => {
   const pending = Object.entries(coverage)
     .filter(([, entry]) => entry.mode === 'pending-concurrency')
     .map(([capabilityId]) => capabilityId)
-  assert.deepEqual(pending, ['apollo.webhooks.endpoints.challenge'])
+  assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    20,
+    21,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

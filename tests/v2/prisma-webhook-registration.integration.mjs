@@ -620,18 +620,86 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       })).attemptCount,
       1,
     )
-    const challengeResult = await verifyChallenge({
+    const firstActivationLeaseHash = createHash('sha256').update('activation-lease-1').digest('hex')
+    const secondActivationLeaseHash = createHash('sha256').update('activation-lease-2').digest('hex')
+    const takeoverActivationLeaseHash = createHash('sha256').update('activation-lease-3').digest('hex')
+    const firstLeaseClaim = await security.claimActivationLease({
       workspaceId,
       endpointId: endpoint.id,
-      challengeId: issued.challenge.id,
-      echoedToken: issued.token,
+      leaseTokenHash: firstActivationLeaseHash,
+      claimedAt: new Date(now.getTime() + 1_001).toISOString(),
+      leaseExpiresAt: new Date(now.getTime() + 1_011).toISOString(),
     })
-    assert.equal(challengeResult.challenge.status, 'verified')
-    assert.equal(challengeResult.activatedSubscriptions, 1)
+    assert.equal(firstLeaseClaim.status, 'leader')
+    const followerLeaseClaim = await security.claimActivationLease({
+      workspaceId,
+      endpointId: endpoint.id,
+      leaseTokenHash: secondActivationLeaseHash,
+      claimedAt: new Date(now.getTime() + 1_005).toISOString(),
+      leaseExpiresAt: new Date(now.getTime() + 1_015).toISOString(),
+    })
+    assert.equal(followerLeaseClaim.status, 'follower')
+    const takeoverLeaseClaim = await security.claimActivationLease({
+      workspaceId,
+      endpointId: endpoint.id,
+      leaseTokenHash: takeoverActivationLeaseHash,
+      claimedAt: new Date(now.getTime() + 1_012).toISOString(),
+      leaseExpiresAt: new Date(now.getTime() + 1_022).toISOString(),
+    })
+    assert.equal(takeoverLeaseClaim.status, 'leader')
+    assert.equal(await security.releaseActivationLease({
+      workspaceId,
+      endpointId: endpoint.id,
+      leaseTokenHash: firstActivationLeaseHash,
+    }), false)
+    assert.equal(await security.releaseActivationLease({
+      workspaceId,
+      endpointId: endpoint.id,
+      leaseTokenHash: takeoverActivationLeaseHash,
+    }), true)
+    let activationTransportCount = 0
+    let activationChallengeId = 290
+    let activationLeaseByte = 31
+    const concurrentActivation = activateWebhookEndpointConvergentlyService({
+      repository: security,
+      transport: {
+        async send(challenge) {
+          activationTransportCount += 1
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          return { echoedToken: challenge.token }
+        },
+      },
+      clock: () => new Date(now.getTime() + 2_000),
+      createId: () =>
+        `00000000-0000-4000-8000-${String(activationChallengeId++).padStart(12, '0')}`,
+      issueActivationLeaseToken: () =>
+        issueWebhookChallengeToken(() => Buffer.alloc(32, activationLeaseByte++)),
+      activationLeaseMs: 100,
+      followerPollMs: 1,
+      followerMaxWaitMs: 1_000,
+    })
+    const concurrentActivationResults = await Promise.all([
+      concurrentActivation({ workspaceId, endpointId: endpoint.id }),
+      concurrentActivation({ workspaceId, endpointId: endpoint.id }),
+    ])
+    assert.deepEqual(
+      concurrentActivationResults.map((result) => result.replayed).sort(),
+      [false, true],
+    )
+    assert.deepEqual(
+      concurrentActivationResults
+        .map((result) => result.activatedSubscriptions)
+        .sort((left, right) => left - right),
+      [0, 1],
+    )
+    assert.equal(activationTransportCount, 1)
     assert.equal(
       (await client.v2WebhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } })).status,
       'active',
     )
+    assert.equal(await client.v2WebhookEndpointActivationLease.count({
+      where: { endpointId: endpoint.id, workspaceId },
+    }), 0)
     const convergentActivation = activateWebhookEndpointConvergentlyService({
       repository: security,
       transport: { async send() { throw new Error('active replay must not use network') } },

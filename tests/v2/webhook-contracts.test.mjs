@@ -97,6 +97,7 @@ import { PrismaWebhookDeliveryRepository } from '../../src/v2/infrastructure/pri
 import { PrismaWebhookEventReplayRepository } from '../../src/v2/infrastructure/prisma/webhook-event-replay-repository.ts'
 import { PrismaWebhookEndpointCommandRepository } from '../../src/v2/infrastructure/prisma/webhook-endpoint-command-repository.ts'
 import { PrismaWebhookSubscriptionCommandRepository } from '../../src/v2/infrastructure/prisma/webhook-subscription-command-repository.ts'
+import { PrismaWebhookSecurityRepository } from '../../src/v2/infrastructure/prisma/webhook-security-repository.ts'
 import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
 import {
   createWebhookSigningSecretProtector,
@@ -2470,6 +2471,8 @@ test('public endpoint challenge activates once and converges after a lost respon
   let state = 'pending'
   let issues = 0
   let transports = 0
+  let activationLeaseTokenHash
+  let activationLeaseByte = 22
   const issued = issueWebhookChallengeToken(() => Buffer.alloc(32, 21))
   const repository = {
     async getActivationState(workspaceId, endpointId) {
@@ -2477,10 +2480,30 @@ test('public endpoint challenge activates once and converges after a lost respon
         ? { status: 'active', workspaceId, endpointId }
         : { status: 'pending', workspaceId, endpointId, url: 'https://hooks.example.com/apollo' }
     },
+    async claimActivationLease(command) {
+      if (state === 'active') {
+        return { status: 'active', workspaceId: command.workspaceId, endpointId: command.endpointId }
+      }
+      if (activationLeaseTokenHash) {
+        return { status: 'follower', workspaceId: command.workspaceId, endpointId: command.endpointId }
+      }
+      activationLeaseTokenHash = command.leaseTokenHash
+      return {
+        status: 'leader', workspaceId: command.workspaceId, endpointId: command.endpointId,
+        url: 'https://hooks.example.com/apollo',
+      }
+    },
+    async releaseActivationLease(command) {
+      if (activationLeaseTokenHash !== command.leaseTokenHash) return false
+      activationLeaseTokenHash = undefined
+      return true
+    },
     async issue(challenge) { issues += 1; return challenge },
     async verify(command) {
       assert.equal(command.responseHash, issued.tokenHash)
+      assert.equal(command.activationLeaseTokenHash, activationLeaseTokenHash)
       state = 'active'
+      activationLeaseTokenHash = undefined
       return { challenge: {}, activatedSubscriptions: 3 }
     },
   }
@@ -2489,21 +2512,68 @@ test('public endpoint challenge activates once and converges after a lost respon
     transport: {
       async send(request) {
         transports += 1
+        await new Promise((resolve) => setTimeout(resolve, 10))
         return { echoedToken: request.token }
       },
     },
     clock: () => new Date('2026-07-15T21:00:00.000Z'),
     createId: () => '00000000-0000-4000-8000-000000000126',
     issueToken: () => issued,
+    issueActivationLeaseToken: () =>
+      issueWebhookChallengeToken(() => Buffer.alloc(32, activationLeaseByte++)),
+    activationLeaseMs: 100,
+    followerPollMs: 1,
+    followerMaxWaitMs: 1_000,
   })
   const request = {
     workspaceId: 'workspace-1',
     endpointId: '00000000-0000-4000-8000-000000000127',
   }
-  assert.deepEqual(await activate(request), { activatedSubscriptions: 3, replayed: false })
+  const concurrent = await Promise.all([activate(request), activate(request)])
+  assert.deepEqual(concurrent.map((result) => result.replayed).sort(), [false, true])
+  assert.deepEqual(
+    concurrent.map((result) => result.activatedSubscriptions).sort((left, right) => left - right),
+    [0, 3],
+  )
   assert.deepEqual(await activate(request), { activatedSubscriptions: 0, replayed: true })
   assert.equal(issues, 1)
   assert.equal(transports, 1)
+})
+
+test('webhook activation lease retries concurrent write conflicts before failing explicitly', async () => {
+  let attempts = 0
+  const repository = new PrismaWebhookSecurityRepository({
+    v2WebhookEndpoint: {
+      async findFirst() {
+        return {
+          id: '00000000-0000-4000-8000-000000000130',
+          workspaceId: 'workspace-1',
+          url: 'https://hooks.example.com/apollo',
+          status: 'pending-verification',
+        }
+      },
+    },
+    v2WebhookEndpointActivationLease: {
+      async updateMany() {
+        attempts += 1
+        const error = new Error('serialization conflict')
+        error.code = 'P2034'
+        throw error
+      },
+    },
+  })
+
+  await assert.rejects(
+    () => repository.claimActivationLease({
+      workspaceId: 'workspace-1',
+      endpointId: '00000000-0000-4000-8000-000000000130',
+      leaseTokenHash: 'a'.repeat(64),
+      claimedAt: '2026-07-16T16:00:00.000Z',
+      leaseExpiresAt: '2026-07-16T16:00:10.000Z',
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(attempts, 3)
 })
 
 test('public endpoint challenge cannot bypass suspended or revoked lifecycle', async () => {
@@ -2513,6 +2583,10 @@ test('public endpoint challenge cannot bypass suspended or revoked lifecycle', a
       async getActivationState(workspaceId, endpointId) {
         return { status: 'blocked', workspaceId, endpointId }
       },
+      async claimActivationLease(command) {
+        return { status: 'blocked', workspaceId: command.workspaceId, endpointId: command.endpointId }
+      },
+      async releaseActivationLease() { effects += 1; return false },
       async issue() { effects += 1 },
       async verify() { effects += 1 },
     },

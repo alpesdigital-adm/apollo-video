@@ -192,9 +192,9 @@ a transição vence. Conflitos transitórios de escrita são repetidos até trê
 vezes.
 A matriz de concorrência da API é verificada automaticamente contra o registry:
 as 23 capabilities externas não-query precisam ter classificação explícita.
-Vinte commands com escrita durável já possuem evidência de simultaneidade e
-resposta perdida, dois preflights são determinísticos e não fazem commit, e o
-challenge de webhook permanece como a única lacuna de single-flight durável.
+Vinte e um commands com escrita durável possuem evidência de simultaneidade e
+resposta perdida, dois preflights são determinísticos e não fazem commit, e não
+há lacuna de concorrência pendente no gate.
 
 Endpoints e subscriptions de webhook possuem modelos duráveis separados, filtros
 exatos pelo catálogo e referências opacas para secrets de assinatura. O núcleo de
@@ -295,6 +295,12 @@ loopback, redirect, resposta grande ou ambígua são rejeitados. Após a prova, 
 endpoint e suas subscriptions pendentes ficam ativos atomicamente. Repetir o
 command depois da ativação retorna sucesso com `replayed: true` sem nova chamada
 externa; endpoints suspensos ou revogados não podem ser ativados.
+Ativações simultâneas usam um lease durável separado da revisão pública do
+endpoint: somente o líder emite o challenge e realiza o POST HTTPS, enquanto os
+seguidores aguardam de forma limitada e convergem para o estado ativado. O lease
+expira para permitir takeover após falha, usa token de fencing na verificação e é
+removido pelo próprio líder em falha ou na mesma transação da ativação. Nenhuma
+transação de banco permanece aberta durante a chamada de rede.
 
 O status de uma subscription pode ser alterado por
 `PUT /v1/webhooks/subscriptions/{subscriptionId}/status`. A resposta de consulta

@@ -62,6 +62,7 @@ import type { WebhookSigningSecretHygieneRepository } from '../application/ports
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
+  WebhookEndpointActivationLeaseRepository,
   WebhookEndpointActivationStateRepository,
   WebhookReplayReceiptRepository,
 } from '../application/ports/webhook-security-repository.ts'
@@ -373,6 +374,7 @@ export function createWebhookFanoutMaterializer(
 
 export function createWebhookSecurityRepository(): WebhookChallengeRepository &
   WebhookChallengeTargetRepository &
+  WebhookEndpointActivationLeaseRepository &
   WebhookEndpointActivationStateRepository &
   WebhookReplayReceiptRepository {
   return new PrismaWebhookSecurityRepository(resolveV2Client())
@@ -383,6 +385,10 @@ export function createWebhookEndpointActivator(
   clock: () => Date = () => new Date(),
 ) {
   const configuredTimeout = Number(environment.APOLLO_V2_WEBHOOK_CHALLENGE_TIMEOUT_MS)
+  const effectiveTimeout =
+    Number.isSafeInteger(configuredTimeout) && configuredTimeout >= 1_000 && configuredTimeout <= 10_000
+      ? configuredTimeout
+      : 5_000
   const transport = new SafeWebhookChallengeTransport({
     ...(Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0
       ? { timeoutMs: configuredTimeout }
@@ -393,6 +399,8 @@ export function createWebhookEndpointActivator(
     transport,
     clock,
     createId: randomUUID,
+    activationLeaseMs: effectiveTimeout + 5_000,
+    followerMaxWaitMs: effectiveTimeout + 6_000,
   })
 }
 

@@ -174,6 +174,8 @@ const requiredChecks = [
   'webhook_verification_challenges_attempt_check',
   'webhook_verification_challenges_dates_check',
   'webhook_verification_challenges_state_check',
+  'webhook_endpoint_activation_leases_token_check',
+  'webhook_endpoint_activation_leases_dates_check',
   'webhook_replay_receipts_dates_check',
   'webhook_worker_shard_leases_coordinates_check',
   'webhook_worker_shard_leases_identity_check',

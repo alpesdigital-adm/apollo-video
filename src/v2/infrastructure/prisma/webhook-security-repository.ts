@@ -7,6 +7,8 @@ import type {
   VerifyWebhookChallengeCommand,
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
+  WebhookEndpointActivationLeaseClaim,
+  WebhookEndpointActivationLeaseRepository,
   WebhookEndpointActivationStateRepository,
   WebhookReplayReceiptRepository,
 } from '../../application/ports/webhook-security-repository.ts'
@@ -48,6 +50,7 @@ export class PrismaWebhookSecurityRepository
   implements
     WebhookChallengeRepository,
     WebhookChallengeTargetRepository,
+    WebhookEndpointActivationLeaseRepository,
     WebhookEndpointActivationStateRepository,
     WebhookReplayReceiptRepository {
   private readonly client: PrismaClient
@@ -84,6 +87,162 @@ export class PrismaWebhookSecurityRepository
       workspaceId: endpoint.workspaceId,
       endpointId: endpoint.id,
     })
+  }
+
+  async claimActivationLease(command: {
+    workspaceId: string
+    endpointId: string
+    leaseTokenHash: string
+    claimedAt: string
+    leaseExpiresAt: string
+  }, concurrentWriteAttempt = 1): Promise<Readonly<WebhookEndpointActivationLeaseClaim>> {
+    if (!/^[a-f0-9]{64}$/.test(command.leaseTokenHash)) {
+      throw new DomainError('INVALID_WEBHOOK', 'Webhook activation lease token hash is invalid')
+    }
+    const claimedAt = new Date(command.claimedAt)
+    const leaseExpiresAt = new Date(command.leaseExpiresAt)
+    if (
+      Number.isNaN(claimedAt.getTime()) ||
+      Number.isNaN(leaseExpiresAt.getTime()) ||
+      leaseExpiresAt <= claimedAt
+    ) {
+      throw new DomainError('INVALID_WEBHOOK', 'Webhook activation lease dates are invalid')
+    }
+    try {
+      const initialEndpoint = await this.client.v2WebhookEndpoint.findFirst({
+        where: {
+          id: command.endpointId,
+          workspaceId: command.workspaceId,
+        },
+        select: { id: true, workspaceId: true, url: true, status: true },
+      })
+      if (!initialEndpoint) {
+        throw new DomainError('WEBHOOK_CHALLENGE_NOT_FOUND', 'Webhook endpoint was not found')
+      }
+      if (initialEndpoint.status === 'active') {
+        return Object.freeze({
+          status: 'active' as const,
+          workspaceId: initialEndpoint.workspaceId,
+          endpointId: initialEndpoint.id,
+        })
+      }
+      if (initialEndpoint.status !== 'pending-verification') {
+        return Object.freeze({
+          status: 'blocked' as const,
+          workspaceId: initialEndpoint.workspaceId,
+          endpointId: initialEndpoint.id,
+        })
+      }
+
+      await this.client.v2WebhookEndpointActivationLease.updateMany({
+        where: {
+          endpointId: command.endpointId,
+          workspaceId: command.workspaceId,
+          leaseExpiresAt: { lte: claimedAt },
+        },
+        data: {
+          leaseTokenHash: command.leaseTokenHash,
+          claimedAt,
+          leaseExpiresAt,
+        },
+      })
+      const existingLease = await this.client.v2WebhookEndpointActivationLease.findUnique({
+        where: { endpointId: command.endpointId },
+      })
+      if (!existingLease) {
+        try {
+          await this.client.v2WebhookEndpointActivationLease.create({
+            data: {
+              endpointId: command.endpointId,
+              workspaceId: command.workspaceId,
+              leaseTokenHash: command.leaseTokenHash,
+              claimedAt,
+              leaseExpiresAt,
+            },
+          })
+        } catch (error) {
+          if (!isUniqueConstraintError(error)) throw error
+        }
+      }
+      const [endpoint, lease] = await Promise.all([
+        this.client.v2WebhookEndpoint.findFirst({
+          where: { id: command.endpointId, workspaceId: command.workspaceId },
+          select: { id: true, workspaceId: true, url: true, status: true },
+        }),
+        this.client.v2WebhookEndpointActivationLease.findUnique({
+          where: { endpointId: command.endpointId },
+        }),
+      ])
+      if (!endpoint) {
+        throw new DomainError('WEBHOOK_CHALLENGE_NOT_FOUND', 'Webhook endpoint was not found')
+      }
+      if (endpoint.status !== 'pending-verification') {
+        await this.client.v2WebhookEndpointActivationLease.deleteMany({
+          where: { endpointId: endpoint.id, workspaceId: endpoint.workspaceId },
+        })
+        return Object.freeze({
+          status: endpoint.status === 'active' ? 'active' as const : 'blocked' as const,
+          workspaceId: endpoint.workspaceId,
+          endpointId: endpoint.id,
+        })
+      }
+      if (lease?.leaseTokenHash === command.leaseTokenHash) {
+        return Object.freeze({
+          status: 'leader' as const,
+          workspaceId: endpoint.workspaceId,
+          endpointId: endpoint.id,
+          url: endpoint.url,
+        })
+      }
+      if (lease && lease.leaseExpiresAt > claimedAt) {
+        return Object.freeze({
+          status: 'follower' as const,
+          workspaceId: endpoint.workspaceId,
+          endpointId: endpoint.id,
+        })
+      }
+      if (concurrentWriteAttempt < 3) {
+        return this.claimActivationLease(command, concurrentWriteAttempt + 1)
+      }
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Webhook activation lease state is inconsistent',
+      )
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'P2034'
+      ) {
+        if (concurrentWriteAttempt < 3) {
+          return this.claimActivationLease(command, concurrentWriteAttempt + 1)
+        }
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Webhook activation lease conflicted with another write',
+        )
+      }
+      throw error
+    }
+  }
+
+  async releaseActivationLease(command: {
+    workspaceId: string
+    endpointId: string
+    leaseTokenHash: string
+  }): Promise<boolean> {
+    if (!/^[a-f0-9]{64}$/.test(command.leaseTokenHash)) {
+      throw new DomainError('INVALID_WEBHOOK', 'Webhook activation lease token hash is invalid')
+    }
+    const released = await this.client.v2WebhookEndpointActivationLease.deleteMany({
+      where: {
+        endpointId: command.endpointId,
+        workspaceId: command.workspaceId,
+        leaseTokenHash: command.leaseTokenHash,
+      },
+    })
+    return released.count === 1
   }
 
   async getPendingTarget(workspaceId: string, endpointId: string) {
@@ -185,6 +344,24 @@ export class PrismaWebhookSecurityRepository
         return { kind: 'rejected' as const }
       }
 
+      if (command.activationLeaseTokenHash) {
+        const activationLease = await transaction.v2WebhookEndpointActivationLease.findFirst({
+          where: {
+            endpointId: command.endpointId,
+            workspaceId: command.workspaceId,
+            leaseTokenHash: command.activationLeaseTokenHash,
+            leaseExpiresAt: { gte: verifiedAt },
+          },
+          select: { endpointId: true },
+        })
+        if (!activationLease) {
+          throw new DomainError(
+            'PERSISTENCE_CONFLICT',
+            'Webhook activation lease was lost before verification',
+          )
+        }
+      }
+
       const verified = await transaction.v2WebhookVerificationChallenge.updateMany({
         where: {
           id: stored.id,
@@ -215,6 +392,15 @@ export class PrismaWebhookSecurityRepository
         },
         data: { status: 'active' },
       })
+      if (command.activationLeaseTokenHash) {
+        await transaction.v2WebhookEndpointActivationLease.deleteMany({
+          where: {
+            endpointId: command.endpointId,
+            workspaceId: command.workspaceId,
+            leaseTokenHash: command.activationLeaseTokenHash,
+          },
+        })
+      }
       const challenge = await transaction.v2WebhookVerificationChallenge.findUniqueOrThrow({
         where: { id: stored.id },
       })

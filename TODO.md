@@ -506,7 +506,7 @@
 - [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
 - [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Parcial F0-048/F0-049: lifecycle de subscriptions e endpoints exige `baseRevision` opaca, compare-and-set e isolamento serializável; a regra ainda precisa ser aplicada às demais mutações versionadas.
 - [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado.
-- [ ] Criar property tests de requests simultâneas e timeout após commit. Parcial F0-059/F0-060/F0-061/F0-062/F0-063/F0-064/F0-065/F0-066/F0-067/F0-068/F0-069/F0-070/F0-071/F0-072/F0-073/F0-074: rotação de webhook cobre stage idempotente simultâneo, resposta perdida após commit, monotonicidade após cancelamento, activate-vs-cancel e higiene concorrente; criação de projeto cobre requests idênticos e divergentes simultâneos, resposta perdida após commit e retry serializável limitado; criação e rotação de credenciais de clientes de API cobrem os mesmos interleavings preservando divulgação one-shot do token e overlap único; revogação de credencial cobre transição e timestamp únicos, recuperação e invalidação imediata; cadastros de endpoint e subscription de webhook cobrem convergência dos recursos, payload cifrado e filtros canônicos; provisionamento pendente comprova divulgação one-shot concorrente e replay redigido; enqueue de render cobre operação e contexto privado únicos; autorização de materialização cobre receipt e decisões únicos; replays individual e por evento cobrem ampliação/lote únicos e recuperação após resposta perdida; cancelamento e retry de operações públicas cobrem transição natural única, recuperação e ampliação única de `maxAttempts`; status revisionado de endpoints e subscriptions cobre convergência, cascata única e retry serializável limitado; declaração de direitos cobre snapshot, sequência e revisão únicos com recuperação após resposta perdida. O gate F0-074 classifica exaustivamente 23 capabilities: 20 duráveis cobertas, 2 preflights sem commit e somente o challenge de webhook ainda pendente.
+- [x] Criar property tests de requests simultâneas e timeout após commit. Evidência F0-059–F0-075: as 23 capabilities externas não-query possuem classificação exaustiva; 21 commands duráveis cobrem simultaneidade, convergência após resposta perdida e retry serializável quando aplicável; 2 preflights são determinísticos e não fazem commit; nenhuma lacuna permanece. O challenge de webhook usa single-flight durável com exatamente um transporte, follower convergente, takeover após expiração e fencing contra líder obsoleto.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
@@ -4783,7 +4783,7 @@ Limites explícitos desta slice:
 
 ### Slice F0-074 — Gate exaustivo de concorrência da API externa
 
-**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado.
+**Status:** publicado em 16 de julho de 2026 no commit `a7f865e`; CI hospedada `29513252682` aprovada integralmente.
 
 Entregas:
 
@@ -4793,6 +4793,9 @@ Entregas:
 - dois preflights são classificados como determinísticos e sem commit;
 - o challenge de webhook fica registrado como a única lacuna durável restante;
 - ADR-063 formaliza o gate e impede cobertura implícita ou esquecida.
+
+Atualização: a lacuna registrada por esta slice foi fechada na F0-075; o gate
+agora exige 21 duráveis cobertas, 2 preflights e nenhuma pendência.
 
 Regressões e evidências locais:
 
@@ -4810,3 +4813,36 @@ Limites explícitos desta slice:
 - esta slice torna a cobertura exaustiva e observável, mas não fecha a tarefa enquanto o challenge não possuir single-flight durável;
 - a implementação do challenge concorrente fica isolada para a próxima slice;
 - capabilities futuras não-query terão que declarar cobertura ou pendência para a suíte passar.
+
+### Slice F0-075 — Single-flight durável no challenge de webhook
+
+**Status:** implementado localmente em 16 de julho de 2026; ainda não commitado e aguardando confirmação PostgreSQL na CI hospedada da publicação.
+
+Entregas:
+
+- tabela própria de activation lease coordena réplicas sem alterar revisão ou `updatedAt` público do endpoint;
+- somente o líder emite o challenge e realiza o POST HTTPS; followers aguardam de forma limitada e convergem para replay;
+- token hash de fencing impede que um líder atrasado ative após perder o lease;
+- expiração permite takeover, falha libera somente o lease do líder e ativação o remove na mesma transação;
+- suspensão ou revogação também limpa o lease, sem manter transação de banco aberta durante a rede;
+- o gate das 23 capabilities passa a exigir 21 commands duráveis cobertos, 2 preflights e zero pendências;
+- ADR-064 formaliza single-flight, fencing, takeover e separação da revisão pública.
+
+Regressões e evidências locais:
+
+- contratos de webhook permanecem verdes com 62 testes, incluindo duas ativações simultâneas e exatamente um transporte;
+- integração Prisma comprova leader/follower, expiração, takeover, release protegido e remoção transacional do lease;
+- jornada HTTP concorrente passou cinco execuções SQLite consecutivas com respostas convergentes;
+- teste unitário comprova três tentativas diante de `P2034` persistente;
+- migration v2 permanece válida com 29 tabelas, 112 índices e 61 chaves estrangeiras;
+- suíte geral permanece verde com 139 testes;
+- contratos públicos permanecem compatíveis com 47 capabilities, 61 schemas, 82 examples e 41 paths;
+- integrações de mídia, Prisma, artefatos, operações, webhooks, API HTTP e render real permanecem verdes;
+- build de produção, typecheck e bundle Remotion permanecem verdes;
+- auditorias da raiz e do Remotion permanecem sem vulnerabilidades conhecidas.
+
+Limites explícitos desta slice:
+
+- a confirmação no PostgreSQL ocorrerá na CI hospedada quando a slice for publicada;
+- duração do lease e espera de followers são limitadas e derivadas do timeout configurado do challenge;
+- nenhuma transação de banco permanece aberta durante a chamada HTTPS.

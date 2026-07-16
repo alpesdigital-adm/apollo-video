@@ -85,6 +85,7 @@ model V2Workspace {
   webhookDeliveries     V2WebhookDelivery[]
   webhookAttempts       V2WebhookDeliveryAttempt[]
   webhookChallenges     V2WebhookVerificationChallenge[]
+  webhookEndpointActivationLeases V2WebhookEndpointActivationLease[]
   webhookReplayReceipts V2WebhookReplayReceipt[]
 
   @@map("v2_workspaces")
@@ -576,6 +577,7 @@ model V2WebhookEndpoint {
   secrets        V2WebhookSigningSecret[]
   subscriptions  V2WebhookSubscription[]
   challenges     V2WebhookVerificationChallenge[]
+  activationLease V2WebhookEndpointActivationLease?
   replayReceipts V2WebhookReplayReceipt[]
   signingSecretRotations V2WebhookSigningSecretRotation[]
 
@@ -773,6 +775,23 @@ model V2WebhookVerificationChallenge {
   @@index([endpointId, status, createdAt])
   @@index([status, expiresAt])
   @@map("v2_webhook_verification_challenges")
+}
+
+model V2WebhookEndpointActivationLease {
+  endpointId     String   @id
+  workspaceId    String
+  leaseTokenHash String
+  claimedAt      DateTime
+  leaseExpiresAt DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  endpoint  V2WebhookEndpoint @relation(fields: [endpointId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([endpointId, workspaceId])
+  @@index([workspaceId, leaseExpiresAt])
+  @@map("v2_webhook_endpoint_activation_leases")
 }
 
 model V2WebhookReplayReceipt {

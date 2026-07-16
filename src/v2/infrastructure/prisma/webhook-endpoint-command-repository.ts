@@ -161,6 +161,9 @@ export class PrismaWebhookEndpointCommandRepository implements WebhookEndpointCo
             'Webhook endpoint changed concurrently',
           )
         }
+        await transaction.v2WebhookEndpointActivationLease.deleteMany({
+          where: { endpointId: current.id, workspaceId: current.workspaceId },
+        })
         let pausedSubscriptions = 0
         let revokedSubscriptions = 0
         let revokedSigningSecrets = 0

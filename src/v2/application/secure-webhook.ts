@@ -10,7 +10,7 @@ import { DomainError, assertDomain } from '../domain/errors.ts'
 import type {
   WebhookChallengeRepository,
   WebhookChallengeTargetRepository,
-  WebhookEndpointActivationStateRepository,
+  WebhookEndpointActivationLeaseRepository,
   WebhookReplayReceiptRepository,
 } from './ports/webhook-security-repository.ts'
 import type { WebhookChallengeTransport } from './ports/webhook-challenge-transport.ts'
@@ -70,6 +70,7 @@ export function verifyWebhookChallengeService(dependencies: {
     endpointId: string
     challengeId: string
     echoedToken: string
+    activationLeaseTokenHash?: string
   }) {
     return dependencies.repository.verify({
       workspaceId: request.workspaceId,
@@ -77,6 +78,9 @@ export function verifyWebhookChallengeService(dependencies: {
       challengeId: request.challengeId,
       responseHash: hashWebhookChallengeToken(request.echoedToken),
       verifiedAt: dependencies.clock().toISOString(),
+      ...(request.activationLeaseTokenHash
+        ? { activationLeaseTokenHash: request.activationLeaseTokenHash }
+        : {}),
     })
   }
 }
@@ -118,14 +122,45 @@ export function activateWebhookEndpointService(dependencies: {
 }
 
 export function activateWebhookEndpointConvergentlyService(dependencies: {
-  repository: WebhookChallengeRepository & WebhookEndpointActivationStateRepository
+  repository: WebhookChallengeRepository & WebhookEndpointActivationLeaseRepository
   transport: WebhookChallengeTransport
   clock: () => Date
   createId: () => string
   issueToken?: () => Readonly<{ token: string; tokenHash: string }>
+  issueActivationLeaseToken?: () => Readonly<{ token: string; tokenHash: string }>
+  wait?: (milliseconds: number) => Promise<void>
+  activationLeaseMs?: number
+  followerPollMs?: number
+  followerMaxWaitMs?: number
 }) {
   const issue = issueWebhookChallengeService(dependencies)
   const verify = verifyWebhookChallengeService(dependencies)
+  const issueActivationLeaseToken =
+    dependencies.issueActivationLeaseToken ?? issueWebhookChallengeToken
+  const wait = dependencies.wait ?? ((milliseconds: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, milliseconds)))
+  const activationLeaseMs = dependencies.activationLeaseMs ?? 15_000
+  const followerPollMs = dependencies.followerPollMs ?? 50
+  const followerMaxWaitMs = dependencies.followerMaxWaitMs ?? 16_000
+  assertDomain(
+    Number.isSafeInteger(activationLeaseMs) &&
+      activationLeaseMs >= 100 &&
+      activationLeaseMs <= 60_000,
+    'INVALID_WEBHOOK',
+    'Webhook activation lease must be between 100 and 60000 milliseconds',
+  )
+  assertDomain(
+    Number.isSafeInteger(followerPollMs) && followerPollMs >= 1 && followerPollMs <= 1_000,
+    'INVALID_WEBHOOK',
+    'Webhook activation follower poll must be between 1 and 1000 milliseconds',
+  )
+  assertDomain(
+    Number.isSafeInteger(followerMaxWaitMs) &&
+      followerMaxWaitMs >= activationLeaseMs &&
+      followerMaxWaitMs <= 65_000,
+    'INVALID_WEBHOOK',
+    'Webhook activation follower wait must cover the lease and remain bounded',
+  )
 
   return async function execute(request: {
     workspaceId: string
@@ -133,55 +168,66 @@ export function activateWebhookEndpointConvergentlyService(dependencies: {
     ttlSeconds?: number
     maxAttempts?: number
   }) {
-    const activate = async () => {
-      const state = await dependencies.repository.getActivationState(
-        request.workspaceId,
-        request.endpointId,
+    const startedWaitingAt = Date.now()
+    while (Date.now() - startedWaitingAt <= followerMaxWaitMs) {
+      const claimedAt = dependencies.clock()
+      assertDomain(
+        !Number.isNaN(claimedAt.getTime()),
+        'INVALID_WEBHOOK',
+        'clock returned an invalid webhook activation date',
       )
-      if (state.status === 'active') {
+      const activationLease = issueActivationLeaseToken()
+      const claim = await dependencies.repository.claimActivationLease({
+        workspaceId: request.workspaceId,
+        endpointId: request.endpointId,
+        leaseTokenHash: activationLease.tokenHash,
+        claimedAt: claimedAt.toISOString(),
+        leaseExpiresAt: new Date(claimedAt.getTime() + activationLeaseMs).toISOString(),
+      })
+      if (claim.status === 'active') {
         return Object.freeze({ activatedSubscriptions: 0, replayed: true })
       }
       assertDomain(
-        state.status === 'pending',
+        claim.status !== 'blocked',
         'WEBHOOK_CHALLENGE_REJECTED',
         'Webhook endpoint cannot be activated from its current state',
       )
-      const issued = await issue(request)
-      const response = await dependencies.transport.send({
-        url: state.url,
-        challengeId: issued.challenge.id,
-        token: issued.token,
-        expiresAt: issued.challenge.expiresAt,
-      })
-      const verified = await verify({
-        workspaceId: request.workspaceId,
-        endpointId: request.endpointId,
-        challengeId: issued.challenge.id,
-        echoedToken: response.echoedToken,
-      })
-      return Object.freeze({
-        activatedSubscriptions: verified.activatedSubscriptions,
-        replayed: false,
-      })
-    }
-
-    try {
-      return await activate()
-    } catch (error) {
-      if (
-        error instanceof DomainError &&
-        ['WEBHOOK_CHALLENGE_NOT_FOUND', 'WEBHOOK_CHALLENGE_REJECTED'].includes(error.code)
-      ) {
-        const current = await dependencies.repository.getActivationState(
-          request.workspaceId,
-          request.endpointId,
-        )
-        if (current.status === 'active') {
-          return Object.freeze({ activatedSubscriptions: 0, replayed: true })
-        }
+      if (claim.status === 'follower') {
+        await wait(followerPollMs)
+        continue
       }
-      throw error
+      try {
+        const issued = await issue(request)
+        const response = await dependencies.transport.send({
+          url: claim.url,
+          challengeId: issued.challenge.id,
+          token: issued.token,
+          expiresAt: issued.challenge.expiresAt,
+        })
+        const verified = await verify({
+          workspaceId: request.workspaceId,
+          endpointId: request.endpointId,
+          challengeId: issued.challenge.id,
+          echoedToken: response.echoedToken,
+          activationLeaseTokenHash: activationLease.tokenHash,
+        })
+        return Object.freeze({
+          activatedSubscriptions: verified.activatedSubscriptions,
+          replayed: false,
+        })
+      } catch (error) {
+        await dependencies.repository.releaseActivationLease({
+          workspaceId: request.workspaceId,
+          endpointId: request.endpointId,
+          leaseTokenHash: activationLease.tokenHash,
+        }).catch(() => false)
+        throw error
+      }
     }
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Webhook endpoint activation is still in progress',
+    )
   }
 }
 

@@ -942,16 +942,23 @@ test('authenticated public API manages projects, clients and artifact inspection
 
     const webhookChallengeUrl =
       `${baseUrl}/v1/webhooks/endpoints/${webhookEndpointId}/challenge`
-    const webhookChallengeResponse = await fetch(webhookChallengeUrl, {
+    const challengeReplayRequest = () => fetch(webhookChallengeUrl, {
       method: 'POST',
       headers: { authorization },
     })
-    const webhookChallenge = await webhookChallengeResponse.json()
-    assert.equal(webhookChallengeResponse.status, 200)
+    const webhookChallengeResponses = await Promise.all([
+      challengeReplayRequest(),
+      challengeReplayRequest(),
+    ])
+    assert.deepEqual(webhookChallengeResponses.map((response) => response.status), [200, 200])
+    const [webhookChallenge, concurrentWebhookChallengeReplay] = await Promise.all(
+      webhookChallengeResponses.map((response) => response.json()),
+    )
     assert.equal(webhookChallenge.data.endpoint.id, webhookEndpointId)
     assert.equal(webhookChallenge.data.endpoint.status, 'active')
     assert.equal(webhookChallenge.data.effects.activatedSubscriptions, 0)
     assert.equal(webhookChallenge.data.replayed, true)
+    assert.deepEqual(concurrentWebhookChallengeReplay.data, webhookChallenge.data)
     assert.equal(JSON.stringify(webhookChallenge).includes('keyRef'), false)
     assert.equal(JSON.stringify(webhookChallenge).includes('/public-api'), false)
 
