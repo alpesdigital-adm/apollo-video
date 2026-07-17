@@ -23,6 +23,12 @@ export interface Asset {
   duration?: number
   codec?: string
   status?: 'usable' | 'quarantined'
+  person?: string
+  theme?: string
+  origin?: 'upload' | 'generated' | 'derived'
+  rightsStatus?: 'eligible' | 'review' | 'restricted' | 'expired'
+  thumbnailPath?: string
+  waveformPath?: string
   addedAt: string
 }
 
@@ -90,6 +96,12 @@ function sanitizeAsset(raw: any): Asset | null {
   if (Number.isFinite(raw.duration) && raw.duration > 0) asset.duration = raw.duration
   if (typeof raw.codec === 'string' && raw.codec) asset.codec = raw.codec
   asset.status = raw.status === 'quarantined' ? 'quarantined' : 'usable'
+  if (typeof raw.person === 'string' && raw.person.trim()) asset.person = raw.person.trim()
+  if (typeof raw.theme === 'string' && raw.theme.trim()) asset.theme = raw.theme.trim()
+  asset.origin = raw.origin === 'generated' || raw.origin === 'derived' ? raw.origin : 'upload'
+  asset.rightsStatus = ['review', 'restricted', 'expired'].includes(raw.rightsStatus) ? raw.rightsStatus : 'eligible'
+  if (typeof raw.thumbnailPath === 'string') asset.thumbnailPath = raw.thumbnailPath
+  if (typeof raw.waveformPath === 'string') asset.waveformPath = raw.waveformPath
   return asset
 }
 

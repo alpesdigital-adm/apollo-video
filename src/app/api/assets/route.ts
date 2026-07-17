@@ -18,8 +18,21 @@ function makeAssetId(): string {
   return `a_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-export async function GET() {
-  return NextResponse.json({ assets: listAssets() })
+export async function GET(request: NextRequest) {
+  const params = request.nextUrl.searchParams
+  const limit = Math.min(Math.max(Number(params.get('limit') || 24), 1), 100)
+  const offset = Math.max(Number(params.get('offset') || 0), 0)
+  const kind = params.get('kind')
+  const person = params.get('person')?.toLocaleLowerCase()
+  const theme = params.get('theme')?.toLocaleLowerCase()
+  const rights = params.get('rights')
+  const filtered = listAssets().filter((asset) =>
+    (!kind || asset.kind === kind) &&
+    (!person || asset.person?.toLocaleLowerCase() === person) &&
+    (!theme || asset.theme?.toLocaleLowerCase().includes(theme) || asset.tags.some((tag) => tag.toLocaleLowerCase().includes(theme))) &&
+    (!rights || asset.rightsStatus === rights)
+  )
+  return NextResponse.json({ assets: filtered.slice(offset, offset + limit), page: { offset, limit, total: filtered.length, nextOffset: offset + limit < filtered.length ? offset + limit : null } })
 }
 
 export async function POST(request: NextRequest) {

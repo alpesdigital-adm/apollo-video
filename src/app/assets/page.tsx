@@ -12,6 +12,9 @@ interface Asset {
   width?: number
   height?: number
   addedAt: string
+  status?: 'usable' | 'quarantined'
+  rightsStatus?: 'eligible' | 'review' | 'restricted' | 'expired'
+  origin?: 'upload' | 'generated' | 'derived'
 }
 
 type SaveState = 'idle' | 'saving' | 'error'
@@ -26,18 +29,28 @@ export default function AssetsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadAbortRef = useRef<AbortController | null>(null)
   const [retryFiles, setRetryFiles] = useState<File[]>([])
+  const [kindFilter, setKindFilter] = useState('')
+  const [themeFilter, setThemeFilter] = useState('')
+  const [rightsFilter, setRightsFilter] = useState('')
+  const [nextOffset, setNextOffset] = useState<number | null>(null)
 
   useEffect(() => {
     loadAssets()
   }, [])
 
-  async function loadAssets() {
+  async function loadAssets(offset = 0) {
     try {
       setLoading(true)
-      const response = await fetch('/api/assets')
+      const params = new URLSearchParams({ offset: String(offset), limit: '24' })
+      if (kindFilter) params.set('kind', kindFilter)
+      if (themeFilter.trim()) params.set('theme', themeFilter.trim())
+      if (rightsFilter) params.set('rights', rightsFilter)
+      const response = await fetch(`/api/assets?${params}`)
       if (response.ok) {
         const data = await response.json()
-        setAssets(Array.isArray(data.assets) ? data.assets : [])
+        const loaded = Array.isArray(data.assets) ? data.assets : []
+        setAssets((current) => offset === 0 ? loaded : [...current, ...loaded])
+        setNextOffset(typeof data.page?.nextOffset === 'number' ? data.page.nextOffset : null)
       }
     } catch (error) {
       console.error('Failed to load assets:', error)
@@ -134,6 +147,17 @@ export default function AssetsPage() {
           b-roll de evento). Marque com tags e a IA usa nos seus vídeos.
         </p>
 
+        <section aria-label="Filtros da biblioteca" className="mb-8 grid gap-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 md:grid-cols-[160px_1fr_180px_auto]">
+          <select aria-label="Tipo de mídia" value={kindFilter} onChange={(event) => setKindFilter(event.target.value)} className="input-field">
+            <option value="">Todos os tipos</option><option value="video">Vídeo</option><option value="audio">Áudio</option><option value="image">Imagem</option>
+          </select>
+          <input aria-label="Tema" value={themeFilter} onChange={(event) => setThemeFilter(event.target.value)} placeholder="Buscar tema ou tag" className="input-field" />
+          <select aria-label="Direitos" value={rightsFilter} onChange={(event) => setRightsFilter(event.target.value)} className="input-field">
+            <option value="">Todos os direitos</option><option value="eligible">Liberado</option><option value="review">Revisar</option><option value="restricted">Restrito</option><option value="expired">Expirado</option>
+          </select>
+          <button type="button" onClick={() => loadAssets(0)} className="rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300">Aplicar filtros</button>
+        </section>
+
         {/* Upload zone */}
         <div className="mb-12">
           <div className="mb-3">
@@ -226,6 +250,7 @@ export default function AssetsPage() {
             <p className="text-sm text-zinc-500">Suba fotos e clipes para a IA usar nos vídeos</p>
           </div>
         )}
+        {!loading && nextOffset !== null ? <button type="button" onClick={() => loadAssets(nextOffset)} className="mx-auto mt-8 block rounded-lg border border-zinc-700 px-5 py-2 text-sm text-zinc-200 hover:border-amber-400">Carregar mais</button> : null}
       </main>
     </div>
   )
@@ -286,6 +311,9 @@ function AssetCardItem({
         )}
         <span className="absolute top-2 left-2 text-[10px] font-mono uppercase px-2 py-1 rounded bg-black/70 text-zinc-300">
           {asset.kind === 'video' ? '▶ vídeo' : asset.kind === 'audio' ? '♪ áudio' : 'imagem'}
+        </span>
+        <span className={`absolute bottom-2 left-2 rounded px-2 py-1 text-[10px] font-medium ${asset.rightsStatus === 'restricted' || asset.rightsStatus === 'expired' ? 'bg-red-950/90 text-red-300' : asset.rightsStatus === 'review' ? 'bg-amber-950/90 text-amber-300' : 'bg-emerald-950/90 text-emerald-300'}`}>
+          {asset.rightsStatus === 'restricted' ? 'Uso restrito' : asset.rightsStatus === 'expired' ? 'Direito expirado' : asset.rightsStatus === 'review' ? 'Revisar direito' : 'Uso liberado'}
         </span>
         <button
           type="button"

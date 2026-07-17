@@ -37,6 +37,7 @@ model Project {
   desiredActionJson String?
   briefingJson      String?
   overridesJson     String?
+  assetRefsJson     String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

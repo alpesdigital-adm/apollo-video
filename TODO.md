@@ -637,11 +637,11 @@
 
 ### F1.012 — Media Library v1 [FR-040]
 
-- [ ] Criar listagem paginada de assets e segments do workspace.
-- [ ] Implementar detalhes, thumbnail/waveform, status, origem e rights.
-- [ ] Permitir inserir asset elegível no projeto sem duplicar bytes.
-- [ ] Implementar filtros mínimos por kind, pessoa, tema e status de direito.
-- [ ] Testar navegação, reuso e bloqueio de asset restrito.
+- [x] Criar listagem paginada de assets e segments do workspace. Evidência F1-012: consulta por cursor no domínio e paginação externa por offset/limit na biblioteca legada.
+- [x] Implementar detalhes, thumbnail/waveform, status, origem e rights. Evidência F1-012: item canônico separa preview, condição técnica, origem e elegibilidade jurídica.
+- [x] Permitir inserir asset elegível no projeto sem duplicar bytes. Evidência F1-012: endpoint `POST /api/assets/{id}/attach` persiste somente referência deduplicada no projeto.
+- [x] Implementar filtros mínimos por kind, pessoa, tema e status de direito. Evidência F1-012: filtros são server-side e isolados pelo workspace no domínio.
+- [x] Testar navegação, reuso e bloqueio de asset restrito. Evidência F1-012/T-FR-040: regressão cobre páginas, filtros, isolamento, referência sem cópia e bloqueio de rights.
 
 ### F1.013 — MediaSegment [FR-042]
 
