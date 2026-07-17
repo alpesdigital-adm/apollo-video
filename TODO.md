@@ -531,7 +531,7 @@
 
 - [x] Definir `PreflightResult` com targets, conflicts, invalidations, jobs, custo, quota e warnings. Evidência F0-092: contrato canônico `preflight-result/v1` possui limites explícitos, elegibilidade derivada de conflitos/quota, custo em minor units e schema/exemplo acessíveis por `GET /v1/schemas/preflight-result/v1`.
 - [x] Gerar commit token vinculado a client, workspace, fingerprint, snapshot e expiry. Evidência F0-093: token HMAC v1 carrega claims assinadas de client/workspace/fingerprint/snapshot/cost/expiry, usa comparação timing-safe e possui schema público de evidência sem expor claims em texto claro.
-- [ ] Invalidar token quando versão, input ou custo material mudar.
+- [x] Invalidar token quando versão, input ou custo material mudar. Evidência F0-094: validação reabre claims assinadas e rejeita expiry, client/workspace diferente e qualquer divergência de fingerprint, snapshot ou cost fingerprint antes do commit.
 - [ ] Exigir preflight para batch, final matrix, geração variável e ações destrutivas.
 - [ ] Expor resultado/status/retry por item sem resposta monolítica.
 - [ ] Criar E2E de dry-run, token expirado, partial retry e budget block.
