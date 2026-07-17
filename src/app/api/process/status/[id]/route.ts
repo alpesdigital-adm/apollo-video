@@ -3,6 +3,9 @@ import { prisma } from '@/lib/db'
 import { isRenderActive } from '@/lib/services/remotion-render'
 import { hasSnapshot } from '@/lib/project-director'
 import { pickMusicForProject } from '@/lib/audio-assets'
+import { readCreatorProfile } from '@/lib/creator-profile'
+import { readStylePrefs } from '@/lib/style-prefs'
+import { normalizeProjectOverrides, resolveProjectOverrides } from '@/v2/domain/project-overrides'
 
 const ORPHAN_RENDER_THRESHOLD_MS = 3 * 60000
 
@@ -72,6 +75,9 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
 
     // Get latest render job if any
     const latestRenderJob = project.renderJobs[0] || null
+    const profile = readCreatorProfile()
+    const style = readStylePrefs()
+    const policyResolution = resolveProjectOverrides({ logo: profile.avatarPath, instagramHandle: profile.handle ? `@${profile.handle}` : null, professionalName: profile.name, subtitleStyle: style.subtitleStyle, gradePreset: style.gradePreset }, project.overridesJson ? normalizeProjectOverrides(JSON.parse(project.overridesJson)) : {})
 
     return NextResponse.json({
       id: project.id,
@@ -81,6 +87,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       format: project.format,
       engineKind: project.engineKind,
       stylePreset: project.stylePreset,
+      policyResolution,
       videoDuration: project.videoDuration,
       videoWidth: project.videoWidth,
       videoHeight: project.videoHeight,

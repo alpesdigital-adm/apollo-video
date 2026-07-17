@@ -16,6 +16,7 @@ interface ProjectData {
   format: '9:16' | '16:9'
   engineKind?: 'narrative' | 'visual'
   stylePreset?: string
+  policyResolution?: Record<string, { value: unknown; origin: 'workspace' | 'project-none' | 'project-custom' }>
   editPlan?: {
     durationFrames: number
     cuts: unknown[]
@@ -612,6 +613,7 @@ export default function EditorPage() {
                 {project.engineKind === 'narrative' ? 'Narrative Engine' : 'Visual Engine'}
               </span>
             )}
+            {project.policyResolution ? <span className="hidden xl:inline text-[11px] text-zinc-500" title="Valores resolvidos por workspace e projeto">Marca: {project.policyResolution.logo?.origin === 'project-none' ? 'logo desativado' : project.policyResolution.logo?.origin === 'project-custom' ? 'logo do projeto' : 'logo do workspace'} · @{project.policyResolution.instagramHandle?.origin === 'project-none' ? 'desativado' : project.policyResolution.instagramHandle?.origin === 'project-custom' ? 'projeto' : 'workspace'}</span> : null}
           </div>
           <div className="flex items-center gap-4">
             {(project.status === 'ready' ||

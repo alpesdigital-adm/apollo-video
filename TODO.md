@@ -622,10 +622,10 @@
 
 ### F1.010 — Override por projeto [FR-021]
 
-- [ ] Modelar `inherit`, `none` e `custom` para cada elemento de marca/guardrail permitido.
-- [ ] Mostrar valor resolvido e origem no editor.
-- [ ] Persistir override no Policy Snapshot da versão.
-- [ ] Testar desativação de logo/handles em um projeto sem alterar o workspace.
+- [x] Modelar `inherit`, `none` e `custom` para cada elemento de marca/guardrail permitido. Evidência F1-010: dez elementos allowlisted compartilham união discriminada e API rejeita chave/modo desconhecido.
+- [x] Mostrar valor resolvido e origem no editor. Evidência F1-010: status resolve workspace/projeto e header do editor identifica origem ou desativação sem inventar valor.
+- [x] Persistir override no Policy Snapshot da versão. Evidência F1-010: snapshot version-bound armazena overrides normalizados com hash SHA-256; endpoint por projeto persiste configuração.
+- [x] Testar desativação de logo/handles em um projeto sem alterar o workspace. Evidência F1-010: regressão prova `project-none`, `project-custom`, herança e imutabilidade do workspace.
 
 ### F1.011 — Tipos de entrada [FR-030]
 
