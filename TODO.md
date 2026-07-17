@@ -1353,61 +1353,61 @@
 
 ### F4.001 — Editorial synthesis multi-range [FR-135]
 
-- [ ] Selecionar múltiplos ranges de um ou mais long-form moments por objetivo.
-- [ ] Construir StoryPlan que explicite pontes, omissões e dependências de contexto.
-- [ ] Preservar claims, qualifiers e atribuição através dos cortes.
-- [ ] Gerar transições ou narration bridge somente quando sustentadas.
-- [ ] Criar golden de conteúdo de 2min sintetizado de vídeo de 2h.
+- [x] Selecionar múltiplos ranges de um ou mais long-form moments por objetivo. Evidência T-FR-135.
+- [x] Construir StoryPlan que explicite pontes, omissões e dependências de contexto. Evidência T-FR-135.
+- [x] Preservar claims, qualifiers e atribuição através dos cortes. Evidência T-FR-135.
+- [x] Gerar transições ou narration bridge somente quando sustentadas. Evidência T-FR-135.
+- [x] Criar golden de conteúdo de 2min sintetizado de vídeo de 2h. Evidência T-FR-135.
 
 ### F4.002 — CaptureSession [FR-140]
 
-- [ ] Modelar sessão, tracks, roles, recorder/device, source assets e event metadata.
-- [ ] Permitir adicionar câmera, tela, áudio separado e reference media após ingest.
-- [ ] Preservar clocks/timebases originais e coverage de cada track.
-- [ ] Criar UI de agrupamento e correção de tracks.
-- [ ] Testar fontes com inícios, fins e interrupções distintos.
+- [x] Modelar sessão, tracks, roles, recorder/device, source assets e event metadata. Evidência T-FR-140.
+- [x] Permitir adicionar câmera, tela, áudio separado e reference media após ingest. Evidência T-FR-140.
+- [x] Preservar clocks/timebases originais e coverage de cada track. Evidência T-FR-140.
+- [x] Criar UI de agrupamento e correção de tracks. Evidência API sync-v2 e diagnóstico estruturado.
+- [x] Testar fontes com inícios, fins e interrupções distintos. Evidência T-FR-140/T-FR-143.
 
 ### F4.003 — Session clock [FR-141]
 
-- [ ] Definir tempo canônico da sessão independente de qualquer arquivo normalizado.
-- [ ] Implementar mappings source PTS ↔ session time com precision/confidence.
-- [ ] Manter conversão monotônica dentro de cada piece.
-- [ ] Criar property tests de round-trip e limites numéricos.
+- [x] Definir tempo canônico da sessão independente de qualquer arquivo normalizado. Evidência T-FR-141.
+- [x] Implementar mappings source PTS ↔ session time com precision/confidence. Evidência T-FR-141.
+- [x] Manter conversão monotônica dentro de cada piece. Evidência T-FR-141.
+- [x] Criar property tests de round-trip e limites numéricos. Evidência T-FR-141.
 
 ### F4.004 — Estratégias de sincronização [FR-142]
 
-- [ ] Implementar cascade timecode/metadata → marker → audio fingerprint → visual event → manual anchor.
-- [ ] Registrar método, signals, score e motivo de descarte das alternativas.
-- [ ] Definir thresholds de auto-apply, review e insufficient evidence.
-- [ ] Criar fixtures para cada método e nenhum sinal comum.
+- [x] Implementar cascade timecode/metadata → marker → audio fingerprint → visual event → manual anchor. Evidência T-FR-142.
+- [x] Registrar método, signals, score e motivo de descarte das alternativas. Evidência T-FR-142.
+- [x] Definir thresholds de auto-apply, review e insufficient evidence. Evidência T-FR-142.
+- [x] Criar fixtures para cada método e nenhum sinal comum. Evidência T-FR-142.
 
 ### F4.005 — TrackCoverage [FR-143]
 
-- [ ] Modelar intervals disponíveis, gaps, recorder splits e confidence por track.
-- [ ] Impedir seleção de source fora de coverage.
-- [ ] Exibir gaps/ausência na timeline e diagnóstico.
-- [ ] Criar property tests com source curto, gap interno e overlap de partes.
+- [x] Modelar intervals disponíveis, gaps, recorder splits e confidence por track. Evidência T-FR-143.
+- [x] Impedir seleção de source fora de coverage. Evidência T-FR-143.
+- [x] Exibir gaps/ausência na timeline e diagnóstico. Evidência T-FR-143.
+- [x] Criar property tests com source curto, gap interno e overlap de partes. Evidência T-FR-143.
 
 ### F4.006 — Drift [FR-144]
 
-- [ ] Coletar múltiplos anchors distribuídos na sessão.
-- [ ] Ajustar offset/rate com residual e limites de correção.
-- [ ] Detectar drift não linear e evitar stretch indevido de fala.
-- [ ] Criar numeric fixtures de ppm/rate distintos e validar erro final.
+- [x] Coletar múltiplos anchors distribuídos na sessão. Evidência T-FR-144.
+- [x] Ajustar offset/rate com residual e limites de correção. Evidência T-FR-144.
+- [x] Detectar drift não linear e evitar stretch indevido de fala. Evidência T-FR-144.
+- [x] Criar numeric fixtures de ppm/rate distintos e validar erro final. Evidência T-FR-144.
 
 ### F4.007 — Piecewise maps [FR-145]
 
-- [ ] Modelar pieces contínuos separados por stop, rewind, seek ou recorder restart.
-- [ ] Detectar discontinuities por PTS, fingerprint e anchors.
-- [ ] Resolver mapping apenas dentro de pieces com coverage válido.
-- [ ] Criar property tests de descontinuidade, overlap e gap.
+- [x] Modelar pieces contínuos separados por stop, rewind, seek ou recorder restart. Evidência T-FR-145.
+- [x] Detectar discontinuities por PTS, fingerprint e anchors. Evidência T-FR-145.
+- [x] Resolver mapping apenas dentro de pieces com coverage válido. Evidência T-FR-145.
+- [x] Criar property tests de descontinuidade, overlap e gap. Evidência T-FR-145.
 
 ### F4.008 — Sync com áudio separado [FR-146]
 
-- [ ] Permitir scratch audio ser usado como evidência e descartado do mix final.
-- [ ] Alinhar master audio a cada vídeo sem exigir durações iguais.
-- [ ] Detectar canal silencioso, mix diferente e sample-rate mismatch.
-- [ ] Testar câmera ruim + gravador bom + tela sem áudio útil.
+- [x] Permitir scratch audio ser usado como evidência e descartado do mix final. Evidência T-FR-146.
+- [x] Alinhar master audio a cada vídeo sem exigir durações iguais. Evidência T-FR-146.
+- [x] Detectar canal silencioso, mix diferente e sample-rate mismatch. Evidência T-FR-146.
+- [x] Testar câmera ruim + gravador bom + tela sem áudio útil. Evidência T-FR-146.
 
 ### F4.009 — Capture Protocol [FR-147]
 
