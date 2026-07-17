@@ -690,11 +690,11 @@
 
 ### F1.019 — TreatmentPlan [FR-060]
 
-- [ ] Implementar schema de objetivo, energia, densidade, gramática, pattern breaks, proof e CTA policy.
-- [ ] Gerar TreatmentPlan a partir de rubrica, Policy Snapshot e Perception summary.
-- [ ] Validar limites determinísticos antes de aceitar plano.
-- [ ] Persistir assumptions, alternatives e decisions log.
-- [ ] Criar golden plans para os oito objetivos e dois modos de produção.
+- [x] Implementar schema de objetivo, energia, densidade, gramática, pattern breaks, proof e CTA policy. Evidência F1-019: `TreatmentPlan/v1` tipa todas as dimensões editoriais.
+- [x] Gerar TreatmentPlan a partir de rubrica, Policy Snapshot e Perception summary. Evidência F1-019: factory usa versões e evidências das três entradas, sem seletor manual de estilo.
+- [x] Validar limites determinísticos antes de aceitar plano. Evidência F1-019: energia/densidade, budget, prova e CTA falham fora de política.
+- [x] Persistir assumptions, alternatives e decisions log. Evidência F1-019: projeto guarda plano integral e API externa permite criar/consultar.
+- [x] Criar golden plans para os oito objetivos e dois modos de produção. Evidência F1-019/T-FR-060: matriz gera 16 combinações únicas e validadas.
 
 ### F1.020 — Gramática editorial do tratamento [FR-060]
 
