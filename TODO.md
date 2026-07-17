@@ -698,12 +698,12 @@
 
 ### F1.020 — Gramática editorial do tratamento [FR-060]
 
-- [ ] Codificar condições de entrada e saída de B-roll por conclusão semântica, obstrução e duração.
-- [ ] Definir zoom/pan/tilt simulados com motivo, amplitude, velocidade e cooldown.
-- [ ] Implementar curva de energia por ato e densidade adaptativa por objetivo.
-- [ ] Aplicar pattern-break budget por janela, tipo e grupo semântico.
-- [ ] Validar continuidade de olhar, movimento, posição, cor, áudio e argumento.
-- [ ] Criar golden timelines para excesso, escassez e distribuição adequada de estímulos.
+- [x] Codificar condições de entrada e saída de B-roll por conclusão semântica, obstrução e duração. Evidência F1-020: placement respeita janela, conclusão, range protegido e bounds.
+- [x] Definir zoom/pan/tilt simulados com motivo, amplitude, velocidade e cooldown. Evidência F1-020: motion validator rejeita gesto sem razão, excessivo, instantâneo ou sem respiro.
+- [x] Implementar curva de energia por ato e densidade adaptativa por objetivo. Evidência F1-020: hook/body/proof/CTA recebem energia e density target específicos para awareness/conversion.
+- [x] Aplicar pattern-break budget por janela, tipo e grupo semântico. Evidência F1-020: validator emite excessos localizados nas três dimensões.
+- [x] Validar continuidade de olhar, movimento, posição, cor, áudio e argumento. Evidência F1-020: seis campos geram issues entre frames adjacentes.
+- [x] Criar golden timelines para excesso, escassez e distribuição adequada de estímulos. Evidência F1-020/T-FR-060: fixtures e endpoint externo exercitam as três distribuições.
 
 ### F1.021 — StoryPlan [FR-061]
 
