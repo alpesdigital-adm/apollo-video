@@ -916,6 +916,8 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.clients.create',
         'apollo.clients.credentials.rotate',
         'apollo.clients.credentials.revoke',
+        'apollo.artifacts.download-grants.issue',
+        'apollo.artifacts.download-grants.revoke',
       ],
     )
 
