@@ -91,6 +91,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       policyResolution,
       directorUncertainty: project.confidenceJson ? relevantUncertainty(JSON.parse(project.confidenceJson)) : [],
       directorDecisions: project.directorDecisionsJson ? JSON.parse(project.directorDecisionsJson) : [],
+      directorBudget: project.directorBudgetJson ? JSON.parse(project.directorBudgetJson) : null,
       videoDuration: project.videoDuration,
       videoWidth: project.videoWidth,
       videoHeight: project.videoHeight,

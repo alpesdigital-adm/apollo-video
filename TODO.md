@@ -744,56 +744,56 @@
 
 ### F1.026 — Budget do Diretor [FR-066]
 
-- [ ] Modelar limites de custo, tempo, tokens, gerações, candidates e critic rounds.
-- [ ] Estimar consumo antes de operações pagas e reservar budget atomicamente.
-- [ ] Encerrar com melhor resultado válido ou estado `budget_exhausted` recuperável.
-- [ ] Mostrar estimado versus realizado por run e projeto.
-- [ ] Testar concorrência, overrun de provider e cancelamento.
+- [x] Modelar limites de custo, tempo, tokens, gerações, candidates e critic rounds. Evidência F1-026: estado versionado cobre seis dimensões.
+- [x] Estimar consumo antes de operações pagas e reservar budget atomicamente. Evidência F1-026: CAS com revision reserva antes do handler pago.
+- [x] Encerrar com melhor resultado válido ou estado `budget_exhausted` recuperável. Evidência F1-026: conclusão escolhe maior score válido ou saída recuperável.
+- [x] Mostrar estimado versus realizado por run e projeto. Evidência F1-026: state separa limites, reservado e actual; API externa devolve o snapshot.
+- [x] Testar concorrência, overrun de provider e cancelamento. Evidência F1-026/T-FR-066: fake CAS, settlement acima do limite e cancel com liberação.
 
 ### F1.027 — Talking head [FR-090]
 
-- [ ] Criar template narrativo para pessoa real como fonte principal.
-- [ ] Detectar e remover silêncios/retakes preservando naturalidade e contexto.
-- [ ] Planejar B-roll, legendas, reframe, movimentos e pattern breaks.
-- [ ] Renderizar proxy e final com áudio sincronizado.
-- [ ] Criar E2E de 30s, 60s e 120s com golden de timing.
+- [x] Criar template narrativo para pessoa real como fonte principal. Evidência F1-027: talking-head mantém speaker como gramática base.
+- [x] Detectar e remover silêncios/retakes preservando naturalidade e contexto. Evidência F1-027: silêncio mínimo e handles de 120ms; retake mantém take selecionado.
+- [x] Planejar B-roll, legendas, reframe, movimentos e pattern breaks. Evidência F1-027: plano inclui todas as camadas em beats canônicos.
+- [x] Renderizar proxy e final com áudio sincronizado. Evidência F1-027: receitas compartilham hash exato da timeline de áudio.
+- [x] Criar E2E de 30s, 60s e 120s com golden de timing. Evidência F1-027/T-FR-090: três planos determinísticos preservam duração e sync.
 
 ### F1.028 — Visual montage/voiceover [FR-091]
 
-- [ ] Aceitar áudio como narrativa principal sem exigir pessoa visível.
-- [ ] Segmentar áudio em beats e gerar AssetBriefs para cobertura visual.
-- [ ] Montar imagens, vídeos, cards e movimentos sem telas vazias indevidas.
-- [ ] Validar cobertura, repetição, ritmo e legibilidade.
-- [ ] Criar E2E de vídeo totalmente sem pessoas.
+- [x] Aceitar áudio como narrativa principal sem exigir pessoa visível. Evidência F1-028: visual montage exige apenas sourceAudioId e mídia visual.
+- [x] Segmentar áudio em beats e gerar AssetBriefs para cobertura visual. Evidência F1-028: boundaries produzem beat e brief por faixa.
+- [x] Montar imagens, vídeos, cards e movimentos sem telas vazias indevidas. Evidência F1-028: coverage contígua alterna três tipos visuais.
+- [x] Validar cobertura, repetição, ritmo e legibilidade. Evidência F1-028: validator retorna cinco sinais independentes.
+- [x] Criar E2E de vídeo totalmente sem pessoas. Evidência F1-028/T-FR-091: jornada de áudio a proxy/final não inclui speaker visual.
 
 ### F1.029 — Formatos obrigatórios [FR-160]
 
-- [ ] Cadastrar 9:16, 16:9, 4:5, 1:1 e 21:9 como presets versionados.
-- [ ] Definir resoluções, safe areas e defaults de export por preset.
-- [ ] Permitir customização validada sem alterar o aspect ratio nominal.
-- [ ] Criar schema e render smoke para os cinco formatos.
+- [x] Cadastrar 9:16, 16:9, 4:5, 1:1 e 21:9 como presets versionados. Evidência F1-029: registry v1 contém os cinco ratios.
+- [x] Definir resoluções, safe areas e defaults de export por preset. Evidência F1-029: cada spec liga canvas, insets, fps e H.264/AAC.
+- [x] Permitir customização validada sem alterar o aspect ratio nominal. Evidência F1-029: custom preset passa pelo validator de razão/tamanho.
+- [x] Criar schema e render smoke para os cinco formatos. Evidência F1-029/T-FR-160: cinco manifests são compilados e exercitados.
 
 ### F1.030 — Responsive placement [FR-163]
 
-- [ ] Implementar anchors, constraints, min/max size, safe areas e collision avoidance.
-- [ ] Resolver placement por formato sem coordenada absoluta compartilhada.
-- [ ] Gerar warning quando constraints forem impossíveis.
-- [ ] Criar visual goldens de legendas, logo, CTA e insert nos cinco canvases.
+- [x] Implementar anchors, constraints, min/max size, safe areas e collision avoidance. Evidência F1-030: solver priorizado aplica bounds e colisão.
+- [x] Resolver placement por formato sem coordenada absoluta compartilhada. Evidência F1-030: cada execução recebe OutputSpec próprio.
+- [x] Gerar warning quando constraints forem impossíveis. Evidência F1-030: elemento não posicionável gera `IMPOSSIBLE_CONSTRAINTS`.
+- [x] Criar visual goldens de legendas, logo, CTA e insert nos cinco canvases. Evidência F1-030/T-FR-163: matriz contém 20 placements determinísticos.
 
 ### F1.031 — Reframe [FR-164]
 
-- [ ] Implementar crop plan baseado em face/object/region of interest por frame/range.
-- [ ] Suavizar trajetória respeitando velocidade e margem de segurança.
-- [ ] Permitir keyframes/override manual por formato.
-- [ ] Emitir issue quando sujeito não couber ou percepção estiver incerta.
-- [ ] Criar fixtures de uma pessoa, duas pessoas, tela e objeto móvel.
+- [x] Implementar crop plan baseado em face/object/region of interest por frame/range. Evidência F1-031: ROI tipa face, object e screen por timestamp.
+- [x] Suavizar trajetória respeitando velocidade e margem de segurança. Evidência F1-031: delta entre keyframes é limitado por segundo.
+- [x] Permitir keyframes/override manual por formato. Evidência F1-031: override vence observação apenas no timestamp/variant.
+- [x] Emitir issue quando sujeito não couber ou percepção estiver incerta. Evidência F1-031: dois reason codes localizados por tempo.
+- [x] Criar fixtures de uma pessoa, duas pessoas, tela e objeto móvel. Evidência F1-031/T-FR-164: tipos e múltiplos ROIs exercitam tracking, override e bounds.
 
 ### F1.032 — Crítica por formato [FR-165]
 
-- [ ] Avaliar clipping, safe area, subject visibility, subtitle collision e densidade por output.
-- [ ] Localizar issue em format, frame range e element IDs.
-- [ ] Reprovar apenas variante afetada quando o plano canônico estiver válido.
-- [ ] Criar visual eval específico para 9:16 e 16:9 no MVP.
+- [x] Avaliar clipping, safe area, subject visibility, subtitle collision e densidade por output. Evidência F1-032: critic usa geometria, subject e density por variant.
+- [x] Localizar issue em format, frame range e element IDs. Evidência F1-032: cada issue carrega as três coordenadas de revisão.
+- [x] Reprovar apenas variante afetada quando o plano canônico estiver válido. Evidência F1-032: reports são independentes e não alteram StoryPlan.
+- [x] Criar visual eval específico para 9:16 e 16:9 no MVP. Evidência F1-032/T-FR-165: fixture reprova vertical e aprova horizontal separadamente.
 
 ### F1.033 — Estilos iniciais de legenda [FR-170]
 

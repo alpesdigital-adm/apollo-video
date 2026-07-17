@@ -19,6 +19,7 @@ interface ProjectData {
   policyResolution?: Record<string, { value: unknown; origin: 'workspace' | 'project-none' | 'project-custom' }>
   directorUncertainty?: Array<{ id: string; label: string; band: 'review' | 'block'; confidence: { value: number; reasonCodes: string[] } }>
   directorDecisions?: Array<{ id: string; summary: string; decision: string; confidence: number; score: number; cost: { actual: number; currency: string }; actor: { type: string; id: string }; candidates: Array<{ id: string; outcome: string; reason: string }>; evidence: Array<{ ref: string }> }>
+  directorBudget?: { status: string; limits: { cost: number }; reserved: { cost: number }; actual: { cost: number } } | null
   editPlan?: {
     durationFrames: number
     cuts: unknown[]
@@ -1108,6 +1109,7 @@ export default function EditorPage() {
                 {project.directorDecisions.slice(0, 3).map((item) => <details key={item.id} className="rounded-lg border border-zinc-800 bg-black/20 px-3 py-2 text-xs"><summary className="cursor-pointer text-zinc-300"><span className="mr-2 text-emerald-300">{Math.round(item.confidence * 100)}%</span>{item.summary}</summary><div className="mt-2 grid gap-1 border-t border-zinc-800 pt-2 text-zinc-500"><span>Decisão: {item.decision}</span><span>Score: {item.score.toFixed(2)} · custo: {item.cost.actual} {item.cost.currency}</span><span>Actor: {item.actor.type}/{item.actor.id}</span><span>Evidências: {item.evidence.map((evidence) => evidence.ref).join(', ')}</span><span>Alternativas: {item.candidates.map((candidate) => `${candidate.id} (${candidate.outcome})`).join(', ')}</span></div></details>)}
               </div>
             ) : null}
+            {project.directorBudget ? <div className="mb-4 flex items-center gap-3 rounded-lg border border-zinc-800 bg-black/20 px-3 py-2 text-xs text-zinc-400" aria-label="Orçamento do Diretor"><span className="text-zinc-200">Orçamento desta execução</span><span>reservado {project.directorBudget.reserved.cost.toFixed(2)}</span><span>usado {project.directorBudget.actual.cost.toFixed(2)}</span><span>limite {project.directorBudget.limits.cost.toFixed(2)}</span><span className={project.directorBudget.status === 'budget_exhausted' ? 'text-red-300' : 'text-emerald-300'}>{project.directorBudget.status}</span></div> : null}
             <div className="flex gap-3">
               <input
                 type="text"
