@@ -543,7 +543,7 @@
 - [x] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace. Evidência F0-100: evaluator único e fail-closed recebe scope duplo, limites/uso inteiros e retorna decisão conjunta com reasons explícitos e saldo de requests, concorrência, quota e spend.
 - [x] Criar usage e audit queries paginadas com redaction. Evidência F0-101: `GET /v1/governance/usage-audit` reutiliza paginação estável de operações, exige `clients:admin` e retorna somente identidade, client, ação, status, target e unidade de uso, omitindo payload/erro/lease/provider/secrets.
 - [x] Criar sandbox isolado com provider fakes e custos simulados. Evidência F0-102: adapter determinístico aceita apenas environment sandbox, produz receipt SHA-256 e custo inteiro simulado, reporta zero chamadas externas e falha fechado em production.
-- [ ] Implementar anomaly alerts e kill switch operacional.
+- [x] Implementar anomaly alerts e kill switch operacional. Evidência F0-103: gate pré-execução bloqueia quando `APOLLO_OPERATIONAL_KILL_SWITCH=true`; error-rate/spend/request spikes acima do threshold emitem alerta bounded por workspace/client e negam execução.
 - [ ] Criar E2E administrativo sem permitir que client autoeleve seus scopes.
 
 ---

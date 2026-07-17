@@ -79,6 +79,7 @@ export const DOMAIN_ERROR_CODES = [
   'PREFLIGHT_TOKEN_INVALID',
   'PREFLIGHT_TOKEN_EXPIRED',
   'PREFLIGHT_TOKEN_STALE',
+  'OPERATIONAL_KILL_SWITCH_ACTIVE',
 ] as const
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number]
