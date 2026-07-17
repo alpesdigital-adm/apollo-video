@@ -1266,84 +1266,84 @@
 
 ### F3.010 — TransformationBrief [FR-110]
 
-- [ ] Modelar intent, source range, preserve list, allowed changes, novelty, safety e fallback ladder.
-- [ ] Gerar brief a partir do StoryPlan sem enviar conteúdo irrelevante ao provider.
-- [ ] Validar direitos, identidade e elementos que não podem mudar.
-- [ ] Persistir brief, candidates e resultado no decisions log.
-- [ ] Criar contract examples simples e “gestão de tráfego medieval”.
+- [x] Modelar intent, source range, preserve list, allowed changes, novelty, safety e fallback ladder. Evidência T-FR-110.
+- [x] Gerar brief a partir do StoryPlan sem enviar conteúdo irrelevante ao provider. Evidência T-FR-110.
+- [x] Validar direitos, identidade e elementos que não podem mudar. Evidência T-FR-110/T-FR-116.
+- [x] Persistir brief, candidates e resultado no decisions log. Evidência API transformations-v2.
+- [x] Criar contract examples simples e “gestão de tráfego medieval”. Evidência T-FR-110.
 
 ### F3.011 — Modos de transformação [FR-111]
 
-- [ ] Registrar background replacement, stylization, cutaway, camera motion, relight e object/environment change.
-- [ ] Definir inputs, outputs, preserves e riscos de cada modo.
-- [ ] Declarar capabilities no registry em vez de `if provider` no domínio.
-- [ ] Criar contract fixture e fallback válido para cada modo.
+- [x] Registrar background replacement, stylization, cutaway, camera motion, relight e object/environment change. Evidência T-FR-111.
+- [x] Definir inputs, outputs, preserves e riscos de cada modo. Evidência T-FR-111.
+- [x] Declarar capabilities no registry em vez de `if provider` no domínio. Evidência T-FR-111.
+- [x] Criar contract fixture e fallback válido para cada modo. Evidência T-FR-111.
 
 ### F3.012 — Provider Registry [FR-112]
 
-- [ ] Persistir provider, capability, health, limits, regions, pricing e credentials reference.
-- [ ] Implementar routing por requisitos, policy, custo, qualidade e disponibilidade.
-- [ ] Registrar razão da seleção e alternativas descartadas.
-- [ ] Criar health check/circuit breaker sem apagar jobs em andamento.
-- [ ] Testar troca de provider sem alterar `TransformationBrief`.
+- [x] Persistir provider, capability, health, limits, regions, pricing e credentials reference. Evidência T-FR-112.
+- [x] Implementar routing por requisitos, policy, custo, qualidade e disponibilidade. Evidência T-FR-112.
+- [x] Registrar razão da seleção e alternativas descartadas. Evidência T-FR-112.
+- [x] Criar health check/circuit breaker sem apagar jobs em andamento. Evidência T-FR-112.
+- [x] Testar troca de provider sem alterar `TransformationBrief`. Evidência T-FR-112.
 
 ### F3.013 — Jobs duráveis API/MCP [FR-113]
 
-- [ ] Criar transport adapters separados para API, webhook/polling e MCP.
-- [ ] Normalizar submit/result/cancel/resume em `ProviderJob`.
-- [ ] Verificar assinatura, replay e correlação de callbacks.
-- [ ] Retomar polling/callback wait após restart.
-- [ ] Simular timeout, duplicate callback, rate limit e artifact ausente.
+- [x] Criar transport adapters separados para API, webhook/polling e MCP. Evidência T-FR-113.
+- [x] Normalizar submit/result/cancel/resume em `ProviderJob`. Evidência T-FR-113.
+- [x] Verificar assinatura, replay e correlação de callbacks. Evidência T-FR-113.
+- [x] Retomar polling/callback wait após restart. Evidência T-FR-113.
+- [x] Simular timeout, duplicate callback, rate limit e artifact ausente. Evidência T-FR-113.
 
 ### F3.014 — Novelty budget [FR-114]
 
-- [ ] Modelar custo de novidade por transformação, duração e janela narrativa.
-- [ ] Penalizar excesso antes de enviar ao provider.
-- [ ] Aplicar cooldown e diversidade de grupos de efeito.
-- [ ] Expor consumo no TreatmentPlan/QualityReport.
-- [ ] Criar golden de vídeo sóbrio, equilibrado e exagerado.
+- [x] Modelar custo de novidade por transformação, duração e janela narrativa. Evidência T-FR-114.
+- [x] Penalizar excesso antes de enviar ao provider. Evidência T-FR-114.
+- [x] Aplicar cooldown e diversidade de grupos de efeito. Evidência T-FR-114.
+- [x] Expor consumo no TreatmentPlan/QualityReport. Evidência T-FR-114.
+- [x] Criar golden de vídeo sóbrio, equilibrado e exagerado. Evidência T-FR-114.
 
 ### F3.015 — Fallback de transformação [FR-115]
 
-- [ ] Implementar ladder v2v → composite/background → cutaway/B-roll → source unchanged.
-- [ ] Verificar se cada fallback ainda cumpre a intenção do AssetBrief.
-- [ ] Preservar melhor artifact válido e custo já incorrido.
-- [ ] Mostrar fallback aplicado e permitir revisão.
-- [ ] Testar falha transitória, capability ausente e resultado reprovado.
+- [x] Implementar ladder v2v → composite/background → cutaway/B-roll → source unchanged. Evidência T-FR-115.
+- [x] Verificar se cada fallback ainda cumpre a intenção do AssetBrief. Evidência T-FR-115.
+- [x] Preservar melhor artifact válido e custo já incorrido. Evidência T-FR-115.
+- [x] Mostrar fallback aplicado e permitir revisão. Evidência T-FR-115.
+- [x] Testar falha transitória, capability ausente e resultado reprovado. Evidência T-FR-115.
 
 ### F3.016 — Crítico de transformação [FR-116]
 
-- [ ] Avaliar intenção, preserve list, identidade, temporal coherence, artefatos e risco.
-- [ ] Comparar source/result por regiões e ranges relevantes.
-- [ ] Rejeitar resultado que muda conteúdo protegido mesmo se visualmente bom.
-- [ ] Emitir issue e acionar ladder conforme confidence/budget.
-- [ ] Criar eval set com transformações aceitáveis e violações sutis.
+- [x] Avaliar intenção, preserve list, identidade, temporal coherence, artefatos e risco. Evidência T-FR-116.
+- [x] Comparar source/result por regiões e ranges relevantes. Evidência T-FR-116.
+- [x] Rejeitar resultado que muda conteúdo protegido mesmo se visualmente bom. Evidência T-FR-116.
+- [x] Emitir issue e acionar ladder conforme confidence/budget. Evidência T-FR-116.
+- [x] Criar eval set com transformações aceitáveis e violações sutis. Evidência T-FR-116.
 
 ### F3.017 — Limpeza avançada [FR-123]
 
-- [ ] Integrar separation/inpaint por adapter como opções após limpeza MVP.
-- [ ] Definir máscara, preserve regions e quality threshold antes do job.
-- [ ] Salvar resultado como derivative e nunca substituir source publicado.
-- [ ] Comparar custo/qualidade com crop/cover/reject.
-- [ ] Criar visual eval para legenda queimada, logo e fundo complexo.
+- [x] Integrar separation/inpaint por adapter como opções após limpeza MVP. Evidência T-FR-123.
+- [x] Definir máscara, preserve regions e quality threshold antes do job. Evidência T-FR-123.
+- [x] Salvar resultado como derivative e nunca substituir source publicado. Evidência T-FR-123.
+- [x] Comparar custo/qualidade com crop/cover/reject. Evidência T-FR-123.
+- [x] Criar visual eval para legenda queimada, logo e fundo complexo. Evidência T-FR-123.
 
 ### F3.018 — Mask a partir da revisão [FR-218]
 
-- [ ] Converter região de annotation em coordenadas normalizadas e tracking range.
-- [ ] Permitir refino da máscara antes de operação paga.
-- [ ] Vincular mask input ao PatchSet/TransformationBrief.
-- [ ] Tratar tracking incerto e mudança de formato explicitamente.
-- [ ] Criar E2E de selecionar região, remover/alterar e revisar resultado.
+- [x] Converter região de annotation em coordenadas normalizadas e tracking range. Evidência T-FR-218.
+- [x] Permitir refino da máscara antes de operação paga. Evidência T-FR-218.
+- [x] Vincular mask input ao PatchSet/TransformationBrief. Evidência T-FR-218.
+- [x] Tratar tracking incerto e mudança de formato explicitamente. Evidência T-FR-218.
+- [x] Criar E2E de selecionar região, remover/alterar e revisar resultado. Evidência T-FR-218.
 
 ### F3.019 — Gate sintético
 
-- [ ] Produzir áudio via ElevenLabs a partir de texto com alignment utilizável.
-- [ ] Produzir avatar via HeyGen a partir de áudio pronto e de áudio gerado.
-- [ ] Salvar blocos aprovados em estado bruto e catalogá-los.
-- [ ] Reutilizar pelo menos um bloco em outro vídeo com zero regeneração.
-- [ ] Transformar uma cena por adapter e demonstrar fallback após reprovação.
-- [ ] Trocar fake/provider sem alterar domínio, EditPlan ou renderer.
-- [ ] Registrar evidências e aprovar gate da fase.
+- [x] Produzir áudio via ElevenLabs a partir de texto com alignment utilizável. Evidência T-FR-101.
+- [x] Produzir avatar via HeyGen a partir de áudio pronto e de áudio gerado. Evidência T-FR-101.
+- [x] Salvar blocos aprovados em estado bruto e catalogá-los. Evidência T-FR-104.
+- [x] Reutilizar pelo menos um bloco em outro vídeo com zero regeneração. Evidência T-FR-104.
+- [x] Transformar uma cena por adapter e demonstrar fallback após reprovação. Evidência T-F3-GATE.
+- [x] Trocar fake/provider sem alterar domínio, EditPlan ou renderer. Evidência T-F3-GATE.
+- [x] Registrar evidências e aprovar gate da fase. Evidência T-F3-GATE e ADR-129.
 
 ---
 
