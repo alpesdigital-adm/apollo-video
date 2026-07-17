@@ -13,6 +13,7 @@ import {
   extractThumbnail,
   generatePreviewProxy,
   getVideoInfo,
+  getMediaProbe,
   MediaOutputError,
   MediaProcessError,
   normalizeVideo,
@@ -22,6 +23,7 @@ import {
   inspectLocalMediaArtifact,
   writeLocalMediaArtifactManifest,
 } from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
+import { evaluateMediaProbe, sniffMediaInput } from '../../src/v2/domain/media-input.ts'
 
 const execFileAsync = promisify(execFile)
 const executableSuffix = process.platform === 'win32' ? '.exe' : ''
@@ -218,6 +220,12 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
   assert.equal(proxy.height, 240)
 
   await extractAudio(sourcePath, audioPath)
+  const videoHeader = await readFile(sourcePath)
+  const videoDetected = sniffMediaInput({ filename: 'source.mp4', declaredMime: 'video/mp4', bytes: videoHeader.subarray(0, 64), byteSize: videoHeader.length })
+  assert.equal(evaluateMediaProbe(videoDetected, await getMediaProbe(sourcePath)).status, 'usable')
+  const audioHeader = await readFile(audioPath)
+  const audioDetected = sniffMediaInput({ filename: 'audio.wav', declaredMime: 'audio/wav', bytes: audioHeader.subarray(0, 64), byteSize: audioHeader.length })
+  assert.equal(evaluateMediaProbe(audioDetected, await getMediaProbe(audioPath)).status, 'usable')
   await assert.rejects(
     () => detectSilences(audioPath, -35, 0.5, { maxBufferBytes: 64 }),
     hasMediaFailureCode('MEDIA_PROCESS_OUTPUT_LIMIT'),
@@ -234,6 +242,9 @@ test('direct FFmpeg adapter preserves the characterized media flow', { timeout: 
 
   await extractThumbnail(sourcePath, 1.5, thumbnailPath, 180)
   assert.ok((await stat(thumbnailPath)).size > 0)
+  const imageHeader = await readFile(thumbnailPath)
+  const imageDetected = sniffMediaInput({ filename: 'thumbnail.jpg', declaredMime: 'image/jpeg', bytes: imageHeader.subarray(0, 64), byteSize: imageHeader.length })
+  assert.equal(evaluateMediaProbe(imageDetected, await getMediaProbe(thumbnailPath)).status, 'usable')
 
   const partials = (await readdir(directory)).filter((entry) => entry.includes('.partial'))
   assert.deepEqual(partials, [])

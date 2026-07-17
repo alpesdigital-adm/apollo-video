@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 
-export type AssetKind = 'image' | 'video'
+export type AssetKind = 'image' | 'video' | 'audio'
 
 export interface Asset {
   id: string
@@ -20,6 +20,9 @@ export interface Asset {
   path: string // public URL, ex.: /assets/<id>.<ext>
   width?: number
   height?: number
+  duration?: number
+  codec?: string
+  status?: 'usable' | 'quarantined'
   addedAt: string
 }
 
@@ -70,7 +73,7 @@ function sanitizeTags(raw: unknown): string[] {
 function sanitizeAsset(raw: any): Asset | null {
   if (!raw || typeof raw !== 'object') return null
   const id = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : null
-  const kind: AssetKind = raw.kind === 'video' ? 'video' : 'image'
+  const kind: AssetKind = raw.kind === 'video' ? 'video' : raw.kind === 'audio' ? 'audio' : 'image'
   const assetPath = typeof raw.path === 'string' && raw.path.trim() ? raw.path.trim() : null
   if (!id || !assetPath) return null
 
@@ -84,6 +87,9 @@ function sanitizeAsset(raw: any): Asset | null {
   }
   if (Number.isFinite(raw.width) && raw.width > 0) asset.width = Math.round(raw.width)
   if (Number.isFinite(raw.height) && raw.height > 0) asset.height = Math.round(raw.height)
+  if (Number.isFinite(raw.duration) && raw.duration > 0) asset.duration = raw.duration
+  if (typeof raw.codec === 'string' && raw.codec) asset.codec = raw.codec
+  asset.status = raw.status === 'quarantined' ? 'quarantined' : 'usable'
   return asset
 }
 
@@ -197,6 +203,13 @@ export function resolveAssetsInScenes<T extends { type?: string; assetId?: strin
       const { assetId: _drop, ...rest } = scene as any
       console.warn(`assetId inválido removido de cena ${scene.type}: ${assetId}`)
       out.push(rest as T)
+      continue
+    }
+
+    if (asset.kind === 'audio') {
+      const { assetId: _drop, ...rest } = scene as any
+      console.warn(`assetId de áudio não pode preencher cena visual ${scene.type}: ${assetId}`)
+      if (scene.type !== 'AssetCard') out.push(rest as T)
       continue
     }
 

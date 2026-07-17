@@ -705,3 +705,30 @@ export async function getVideoInfo(
     rethrowMediaError('Failed to get video info', error)
   }
 }
+
+export async function getMediaProbe(
+  mediaPath: string,
+  options: MediaExecutionOptions = {}
+): Promise<{ codec: string; duration?: number; width?: number; height?: number }> {
+  try {
+    const { stdout } = await runFfprobe([
+      '-v', 'error', '-show_entries',
+      'stream=codec_type,codec_name,width,height,duration:format=duration',
+      '-of', 'json', mediaPath
+    ], options)
+    const data = JSON.parse(stdout)
+    const stream = data.streams?.find((candidate: any) => candidate.codec_type === 'video' || candidate.codec_type === 'audio')
+    if (!stream?.codec_name) throw new Error('No supported media stream found')
+    const duration = Number(stream.duration || data.format?.duration)
+    const width = Number(stream.width)
+    const height = Number(stream.height)
+    return {
+      codec: String(stream.codec_name).toLowerCase(),
+      ...(Number.isFinite(duration) && duration > 0 ? { duration } : {}),
+      ...(Number.isFinite(width) && width > 0 ? { width } : {}),
+      ...(Number.isFinite(height) && height > 0 ? { height } : {})
+    }
+  } catch (error) {
+    rethrowMediaError('Failed to probe media', error)
+  }
+}

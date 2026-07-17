@@ -629,11 +629,11 @@
 
 ### F1.011 — Tipos de entrada [FR-030]
 
-- [ ] Criar upload direto para vídeo, áudio e imagem com MIME/extension sniffing.
-- [ ] Implementar multipart, progress, cancel e retomada.
-- [ ] Fazer probe/quarantine antes de marcar asset como utilizável.
-- [ ] Exibir erro acionável para codec, corrupção, tamanho e duração inválidos.
-- [ ] Criar E2E para cada tipo e falha de rede.
+- [x] Criar upload direto para vídeo, áudio e imagem com MIME/extension sniffing. Evidência F1-011: biblioteca aceita três kinds e valida assinatura binária, extensão e MIME declarado antes de gravar.
+- [x] Implementar multipart, progress, cancel e retomada. Evidência F1-011: API pública mantém sessões multipart/parts retomáveis; UI mostra progresso, cancela via AbortController e retoma arquivos falhos; state machine cobre partes.
+- [x] Fazer probe/quarantine antes de marcar asset como utilizável. Evidência F1-011: bytes entram com sufixo `.quarantine`, FFprobe valida codec/duração/dimensões e somente então ocorre promoção atômica.
+- [x] Exibir erro acionável para codec, corrupção, tamanho e duração inválidos. Evidência F1-011: respostas incluem code, mensagem e ação para conversão, reexportação, multipart ou ajuste de duração/dimensões.
+- [x] Criar E2E para cada tipo e falha de rede. Evidência F1-011: regressões cobrem assinaturas e probe real de MP4/WAV/JPEG, corrupção/mismatch e pausa-retomada-cancelamento após rede offline.
 
 ### F1.012 — Media Library v1 [FR-040]
 

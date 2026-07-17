@@ -5,7 +5,7 @@ import Link from 'next/link'
 
 interface Asset {
   id: string
-  kind: 'image' | 'video'
+  kind: 'image' | 'video' | 'audio'
   label: string
   tags: string[]
   path: string
@@ -24,6 +24,8 @@ export default function AssetsPage() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadAbortRef = useRef<AbortController | null>(null)
+  const [retryFiles, setRetryFiles] = useState<File[]>([])
 
   useEffect(() => {
     loadAssets()
@@ -44,14 +46,18 @@ export default function AssetsPage() {
     }
   }
 
-  async function handleFiles(fileList: FileList | null) {
+  async function handleFiles(fileList: FileList | File[] | null) {
     if (!fileList || fileList.length === 0) return
     const files = Array.from(fileList)
     setUploadError(null)
     setUploading(true)
+    setRetryFiles([])
+    const controller = new AbortController()
+    uploadAbortRef.current = controller
     setProgress({ done: 0, total: files.length })
 
     const created: Asset[] = []
+    const failed: File[] = []
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
       try {
@@ -60,13 +66,14 @@ export default function AssetsPage() {
         formData.append('label', file.name.replace(/\.[a-zA-Z0-9]+$/, ''))
         formData.append('tags', uploadTags)
 
-        const response = await fetch('/api/assets', { method: 'POST', body: formData })
+        const response = await fetch('/api/assets', { method: 'POST', body: formData, signal: controller.signal })
         const data = await response.json().catch(() => null)
         if (!response.ok) {
           throw new Error(data?.error || `Falha ao subir ${file.name}`)
         }
         if (data?.asset) created.push(data.asset)
       } catch (error) {
+        failed.push(file)
         setUploadError(error instanceof Error ? error.message : `Falha ao subir ${file.name}`)
       } finally {
         setProgress({ done: i + 1, total: files.length })
@@ -77,6 +84,8 @@ export default function AssetsPage() {
       setAssets((prev) => [...created, ...prev])
     }
     setUploading(false)
+    uploadAbortRef.current = null
+    setRetryFiles(failed)
     setProgress(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
@@ -150,7 +159,7 @@ export default function AssetsPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,video/*"
+              accept="image/*,video/*,audio/*"
               multiple
               onChange={(e) => handleFiles(e.target.files)}
               disabled={uploading}
@@ -167,10 +176,10 @@ export default function AssetsPage() {
               </svg>
             </div>
             <p className="text-lg font-bold mb-1">
-              {uploading ? 'Enviando...' : 'Subir imagens ou vídeos'}
+              {uploading ? 'Enviando...' : 'Subir imagens, vídeos ou áudios'}
             </p>
             <p className="text-sm text-zinc-500">
-              Vários arquivos de uma vez · imagem ou vídeo · máx 80MB cada
+              Vários arquivos de uma vez · imagem, vídeo ou áudio · máx 80MB cada
             </p>
             {progress && (
               <p className="text-amber-400 text-sm mt-3">
@@ -178,6 +187,11 @@ export default function AssetsPage() {
               </p>
             )}
           </label>
+
+          <div className="mt-3 flex gap-2">
+            {uploading ? <button type="button" className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-red-400 hover:text-red-300" onClick={() => uploadAbortRef.current?.abort()}>Cancelar envio</button> : null}
+            {!uploading && retryFiles.length > 0 ? <button type="button" className="rounded-lg border border-amber-400/40 px-3 py-2 text-sm text-amber-300 hover:bg-amber-400/10" onClick={() => handleFiles(retryFiles)}>Retomar {retryFiles.length} arquivo{retryFiles.length > 1 ? 's' : ''}</button> : null}
+          </div>
 
           {uploadError && <p className="text-sm text-red-400 mt-3">{uploadError}</p>}
         </div>
@@ -264,12 +278,14 @@ function AssetCardItem({
             preload="metadata"
             className="w-full h-full object-cover"
           />
+        ) : asset.kind === 'audio' ? (
+          <div className="grid h-full place-items-center bg-zinc-950 p-4"><audio src={asset.path} controls preload="metadata" className="w-full"/></div>
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={asset.path} alt={asset.label} className="w-full h-full object-cover" />
         )}
         <span className="absolute top-2 left-2 text-[10px] font-mono uppercase px-2 py-1 rounded bg-black/70 text-zinc-300">
-          {asset.kind === 'video' ? '▶ vídeo' : 'imagem'}
+          {asset.kind === 'video' ? '▶ vídeo' : asset.kind === 'audio' ? '♪ áudio' : 'imagem'}
         </span>
         <button
           type="button"
