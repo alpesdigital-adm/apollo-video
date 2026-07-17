@@ -600,10 +600,10 @@
 
 ### F1.007 — Briefing livre opcional [FR-012]
 
-- [ ] Adicionar briefing opcional sem bloquear avanço quando vazio.
-- [ ] Tratar briefing como dado autorizado do owner e manter conteúdo ingerido separado.
-- [ ] Exibir resumo estruturado e assumptions antes de geração cara.
-- [ ] Criar E2E com briefing completo, parcial e ausente.
+- [x] Adicionar briefing opcional sem bloquear avanço quando vazio. Evidência F1-007: nova produção contém textarea opcional e o domínio produz estado válido na ausência.
+- [x] Tratar briefing como dado autorizado do owner e manter conteúdo ingerido separado. Evidência F1-007: owner text recebe trust `owner-authorized`; mídia ingerida entra apenas por ref `untrusted-media-derived`.
+- [x] Exibir resumo estruturado e assumptions antes de geração cara. Evidência F1-007: painel mostra resumo e lacunas antes do upload; estado mantém `readyForExpensiveGeneration: false`.
+- [x] Criar E2E com briefing completo, parcial e ausente. Evidência F1-007: regressão valida os três caminhos, trust boundary e assumptions explícitas.
 
 ### F1.008 — Brief Compiler [FR-013]
 
