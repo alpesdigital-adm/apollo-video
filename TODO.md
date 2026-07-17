@@ -1005,68 +1005,68 @@
 
 ### F2.007 — ProductionBatch [FR-080]
 
-- [ ] Modelar batch, items, source groups, recipes, variants, budget e status agregado.
-- [ ] Manter estado, erro, retry e artifacts independentes por item.
-- [ ] Criar UI de criação, acompanhamento e filtro do lote.
-- [ ] Calcular progresso a partir de steps/items reais.
-- [ ] Testar batch parcialmente concluído, cancelado e retomado.
+- [x] Modelar batch, items, source groups, recipes, variants, budget e status agregado. Evidência T-FR-080.
+- [x] Manter estado, erro, retry e artifacts independentes por item. Evidência T-FR-080/T-FR-087.
+- [x] Criar UI de criação, acompanhamento e filtro do lote. Evidência: `/batches` com filtros e seleção em massa.
+- [x] Calcular progresso a partir de steps/items reais. Evidência T-FR-080.
+- [x] Testar batch parcialmente concluído, cancelado e retomado. Evidência T-FR-080.
 
 ### F2.008 — Importação e script alignment [FR-081]
 
-- [ ] Importar roteiro com hooks, corpos, provas e CTAs identificáveis.
-- [ ] Normalizar blocos sem apagar texto original ou ordem do documento.
-- [ ] Alinhar bloco → transcript words → source range com confidence/evidence.
-- [ ] Classificar exact, near, partial, missing e extra take.
-- [ ] Criar UI de revisão dos alinhamentos incertos.
-- [ ] Construir golden set com paráfrase, repetição, erro e gravação fora de ordem.
+- [x] Importar roteiro com hooks, corpos, provas e CTAs identificáveis. Evidência T-FR-081.
+- [x] Normalizar blocos sem apagar texto original ou ordem do documento. Evidência T-FR-081.
+- [x] Alinhar bloco → transcript words → source range com confidence/evidence. Evidência T-FR-081.
+- [x] Classificar exact, near, partial, missing e extra take. Evidência T-FR-081.
+- [x] Criar UI de revisão dos alinhamentos incertos. Evidência: estado `review` e ação Revisar por item em `/batches`.
+- [x] Construir golden set com paráfrase, repetição, erro e gravação fora de ordem. Evidência T-FR-081.
 
 ### F2.009 — Biblioteca de takes [FR-082]
 
-- [ ] Agrupar takes pelo ScriptBlock previsto ou intenção inferida.
-- [ ] Separar takes consecutivos dentro do mesmo arquivo por retake boundaries.
-- [ ] Avaliar completude, performance, áudio, vídeo e integridade.
-- [ ] Marcar primary, alternate, rejected e needs-review sem apagar source.
-- [ ] Permitir seleção manual e proteção do take escolhido.
+- [x] Agrupar takes pelo ScriptBlock previsto ou intenção inferida. Evidência T-FR-082.
+- [x] Separar takes consecutivos dentro do mesmo arquivo por retake boundaries. Evidência: `retakeBoundaryId` obrigatório.
+- [x] Avaliar completude, performance, áudio, vídeo e integridade. Evidência T-FR-082.
+- [x] Marcar primary, alternate, rejected e needs-review sem apagar source. Evidência T-FR-082.
+- [x] Permitir seleção manual e proteção do take escolhido. Evidência T-FR-082.
 
 ### F2.010 — Compatibility graph [FR-083]
 
-- [ ] Criar nós para hooks, corpos, provas e CTAs elegíveis.
-- [ ] Implementar hard incompatibilities de oferta, audiência, claim, persona, locale, CTA e continuidade obrigatória.
-- [ ] Calcular soft score de narrativa, tom, energia, duração, visual e experimento.
-- [ ] Persistir reason codes e evidence por edge.
-- [ ] Criar golden graph com combinações aceitas, bloqueadas e limítrofes.
+- [x] Criar nós para hooks, corpos, provas e CTAs elegíveis. Evidência T-FR-083.
+- [x] Implementar hard incompatibilities de oferta, audiência, claim, persona, locale, CTA e continuidade obrigatória. Evidência T-FR-083.
+- [x] Calcular soft score de narrativa, tom, energia, duração, visual e experimento. Evidência T-FR-083.
+- [x] Persistir reason codes e evidence por edge. Evidência T-FR-083.
+- [x] Criar golden graph com combinações aceitas, bloqueadas e limítrofes. Evidência T-FR-083.
 
 ### F2.011 — VariantRecipe [FR-084]
 
-- [ ] Modelar seleção H+B+proof+CTA, ordem, source segments, assumptions e scores.
-- [ ] Compilar recipe em StoryPlan/EditPlan sem duplicar masters.
-- [ ] Registrar lineage até cada ScriptBlock e take.
-- [ ] Permitir recipe sem proof somente quando objetivo/policy permitirem.
-- [ ] Testar recipe completa, curta, sem prova e com cold open.
+- [x] Modelar seleção H+B+proof+CTA, ordem, source segments, assumptions e scores. Evidência T-FR-084.
+- [x] Compilar recipe em StoryPlan/EditPlan sem duplicar masters. Evidência T-FR-084.
+- [x] Registrar lineage até cada ScriptBlock e take. Evidência T-FR-084.
+- [x] Permitir recipe sem proof somente quando objetivo/policy permitirem. Evidência T-FR-084.
+- [x] Testar recipe completa, curta, sem prova e com cold open. Evidência T-FR-084.
 
 ### F2.012 — Anti-explosão combinatória [FR-085]
 
-- [ ] Calcular espaço teórico e elegível antes de criar jobs.
-- [ ] Aplicar hard filters, threshold, dedupe e top-N com diversidade.
-- [ ] Definir cobertura mínima de hooks/corpos/CTAs dentro do budget.
-- [ ] Exibir preflight de quantidade, custo, tempo e reutilização esperada.
-- [ ] Exigir confirmação para expansão acima do default do workspace.
-- [ ] Testar que produto cartesiano não é materializado sem controle.
+- [x] Calcular espaço teórico e elegível antes de criar jobs. Evidência T-FR-085.
+- [x] Aplicar hard filters, threshold, dedupe e top-N com diversidade. Evidência T-FR-085.
+- [x] Definir cobertura mínima de hooks/corpos/CTAs dentro do budget. Evidência T-FR-085.
+- [x] Exibir preflight de quantidade, custo, tempo e reutilização esperada. Evidência T-FR-085.
+- [x] Exigir confirmação para expansão acima do default do workspace. Evidência T-FR-085.
+- [x] Testar que produto cartesiano não é materializado sem controle. Evidência: `productMaterialized=false`.
 
 ### F2.013 — Edição em lote [FR-086]
 
-- [ ] Implementar seleção explícita de recipes, formatos e targets.
-- [ ] Gerar impact preview com protected conflicts, invalidations e custo.
-- [ ] Aplicar command transaction por política all-or-nothing/skip failures.
-- [ ] Exibir diff amostrado antes do commit e resultado por item depois.
-- [ ] Criar E2E de troca de CTA, legenda e Brand Kit em lote.
+- [x] Implementar seleção explícita de recipes, formatos e targets. Evidência T-FR-086 e UI `/batches`.
+- [x] Gerar impact preview com protected conflicts, invalidations e custo. Evidência T-FR-086.
+- [x] Aplicar command transaction por política all-or-nothing/skip failures. Evidência T-FR-086.
+- [x] Exibir diff amostrado antes do commit e resultado por item depois. Evidência T-FR-086.
+- [x] Criar E2E de troca de CTA, legenda e Brand Kit em lote. Evidência T-FR-086.
 
 ### F2.014 — Partial retry [FR-087]
 
-- [ ] Reenfileirar somente item/step falho com a mesma idempotency lineage.
-- [ ] Preservar items concluídos e artifacts válidos.
-- [ ] Recalcular progresso/custo sem cobrar cache hits como nova geração.
-- [ ] Testar retry de provider, render e validator em um lote misto.
+- [x] Reenfileirar somente item/step falho com a mesma idempotency lineage. Evidência T-FR-087.
+- [x] Preservar items concluídos e artifacts válidos. Evidência T-FR-087.
+- [x] Recalcular progresso/custo sem cobrar cache hits como nova geração. Evidência T-FR-087.
+- [x] Testar retry de provider, render e validator em um lote misto. Evidência T-FR-087.
 
 ### F2.015 — Source Deconstruction [FR-120]
 
