@@ -1898,6 +1898,10 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       warnings: { type: 'array', maxItems: 1024, items: { type: 'object', additionalProperties: false, required: ['code', 'message'], properties: { code: { type: 'string', minLength: 1, maxLength: 80 }, message: { type: 'string', minLength: 1, maxLength: 1000 }, target: { type: 'string', minLength: 1, maxLength: 256 } } } },
     },
   }),
+  defineSchema('preflight-commit-token', 1, 'Trusted preflight commit token evidence', {
+    type: 'object', additionalProperties: false, required: ['token', 'expiresAt'],
+    properties: { token: { type: 'string', pattern: '^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$', minLength: 80, maxLength: 4096 }, expiresAt: dateTimeSchema },
+  }),
   defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',
     successSchema({
       type: 'object',

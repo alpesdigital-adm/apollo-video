@@ -931,6 +931,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         warnings: [{ code: 'CAPTION_REFLOW', message: 'Caption line breaks may change.', target: 'track:captions' }],
       },
     ],
+    'apollo://schemas/preflight-commit-token/v1': [
+      { token: `${'e'.repeat(80)}.${'s'.repeat(43)}`, expiresAt: '2026-07-16T23:35:00.000Z' },
+    ],
     'apollo://schemas/webhook-signing-secret-rotation-list/v1': [
       { data: { rotations: [] }, meta: { apiVersion: 'v1' } },
       { data: { rotations: [webhookSigningSecretRotationExample] }, meta: { apiVersion: 'v1' } },
