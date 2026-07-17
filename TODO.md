@@ -668,11 +668,11 @@
 
 ### F1.016 — PerceptionTimeline v1 [FR-050]
 
-- [ ] Unificar transcript words, speakers, silence, faces, objects, shots, motion e OCR em tempo canônico.
-- [ ] Registrar source/model/version/confidence por observação.
-- [ ] Criar API por range para Director, subtitles, reframe e editor.
-- [ ] Representar ausência e cobertura parcial sem preencher dados inventados.
-- [ ] Criar golden fixtures de talking head, áudio e imagens inseridas.
+- [x] Unificar transcript words, speakers, silence, faces, objects, shots, motion e OCR em tempo canônico. Evidência F1-016: nove tipos compartilham intervalo em milissegundos e ordenação estável.
+- [x] Registrar source/model/version/confidence por observação. Evidência F1-016: provenance obrigatória é validada junto com cada intervalo.
+- [x] Criar API por range para Director, subtitles, reframe e editor. Evidência F1-016: `GET/PUT /api/projects/{id}/perception` persiste e consulta kinds/range.
+- [x] Representar ausência e cobertura parcial sem preencher dados inventados. Evidência F1-016: resposta inclui coverage absent/partial/complete e `inventedValues: 0`.
+- [x] Criar golden fixtures de talking head, áudio e imagens inseridas. Evidência F1-016/T-FR-050: três timelines determinísticas cobrem os modos essenciais.
 
 ### F1.017 — EditorialBeat [FR-051]
 
