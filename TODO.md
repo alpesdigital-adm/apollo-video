@@ -660,11 +660,11 @@
 
 ### F1.015 — Catalogação automática [FR-049]
 
-- [ ] Definir quais outputs aprovados viram assets ou segments pesquisáveis.
-- [ ] Executar catalogação idempotente após promoção do artifact.
-- [ ] Herdar rights/consent e registrar geração/parent no lineage.
-- [ ] Evitar indexar temporários, falhas e outputs rejeitados.
-- [ ] Testar reprocessamento sem duplicação de catálogo.
+- [x] Definir quais outputs aprovados viram assets ou segments pesquisáveis. Evidência F1-015: final/proxy viram asset e deepfake bruto reaproveitável vira segment.
+- [x] Executar catalogação idempotente após promoção do artifact. Evidência F1-015: application service usa chave workspace/artifact/manifest e converge em replay.
+- [x] Herdar rights/consent e registrar geração/parent no lineage. Evidência F1-015: item guarda snapshot jurídico e relação `generated-from` com provider/model quando existente.
+- [x] Evitar indexar temporários, falhas e outputs rejeitados. Evidência F1-015: eligibility gate exige promoção aprovada e kind não temporário.
+- [x] Testar reprocessamento sem duplicação de catálogo. Evidência F1-015/T-FR-049: fake repository confirma um único registro e estados cataloged/already-cataloged.
 
 ### F1.016 — PerceptionTimeline v1 [FR-050]
 
