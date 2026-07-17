@@ -13,3 +13,16 @@ test('client governance covers listing, scoped creation, environments and secret
   assert.equal(create.properties.scopes.maxItems, 64)
   for (const id of ['apollo.clients.list', 'apollo.clients.create', 'apollo.clients.credentials.rotate', 'apollo.clients.credentials.revoke']) assert.deepEqual(capabilities.get(id).requiredScopes, ['clients:admin'])
 })
+
+test('webhook governance covers endpoint, subscription, lifecycle, delivery and diagnostics', () => {
+  const required = [
+    'apollo.webhooks.endpoints.create', 'apollo.webhooks.endpoints.list', 'apollo.webhooks.endpoints.read', 'apollo.webhooks.endpoints.status.set',
+    'apollo.webhooks.endpoints.challenge', 'apollo.webhooks.subscriptions.create', 'apollo.webhooks.subscriptions.list', 'apollo.webhooks.subscriptions.read',
+    'apollo.webhooks.subscriptions.status.set', 'apollo.webhooks.deliveries.list', 'apollo.webhooks.deliveries.read', 'apollo.webhooks.deliveries.replay',
+  ]
+  for (const id of required) {
+    assert.equal(capabilities.has(id), true, id)
+    assert.equal(capabilities.get(id).authMode, 'required')
+  }
+  assert.equal(capabilities.get('apollo.webhooks.deliveries.list').queryParameters.some((parameter) => parameter.name === 'cursor'), true)
+})

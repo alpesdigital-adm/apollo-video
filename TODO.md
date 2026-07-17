@@ -539,7 +539,7 @@
 ### F0.043 — Governança da API [FR-249]
 
 - [x] Criar administração de clients, scopes, secrets, environments e status. Evidência F0-098: Public API administrativa lista/cria clients com scopes e sandbox/production, retorna secret somente uma vez, rotaciona com overlap, revoga credentials/status e exige `clients:admin`; gate exaustivo fixa a superfície.
-- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057/F0-058: capabilities entregam cadastro idempotente, provisionamento one-shot, rotação ativa em duas fases com cancelamento, consulta e higiene segura, challenge/ativação, lifecycle com cascatas e replay workspace-scoped; UI continua aberta.
+- [x] Criar administração de webhooks, subscriptions e delivery diagnostics. Evidência F0-099: API externa cobre endpoint create/list/read/status/challenge, subscription create/list/read/status, signing-secret lifecycle, delivery list/read/replay e paginação diagnóstica; gate de governança fixa autenticação e catálogo completo. UI administrativa entra na fase visual.
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
