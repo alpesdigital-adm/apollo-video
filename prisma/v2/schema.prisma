@@ -148,6 +148,10 @@ model V2Project {
   workspaceId      String   @db.VarChar(128)
   name             String   @db.VarChar(120)
   status           String   @default("draft") @db.VarChar(32)
+  objective        String?  @db.VarChar(64)
+  format           String?  @db.VarChar(16)
+  locale           String?  @db.VarChar(35)
+  ownerId          String?  @db.VarChar(128)
   currentVersionId String?  @db.VarChar(128)
   createdByType    String   @db.VarChar(32)
   createdById      String   @db.VarChar(128)
@@ -162,6 +166,10 @@ model V2Project {
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([workspaceId, status])
+  @@index([workspaceId, objective])
+  @@index([workspaceId, format])
+  @@index([workspaceId, locale])
+  @@index([workspaceId, ownerId])
   @@map("projects")
 }
 

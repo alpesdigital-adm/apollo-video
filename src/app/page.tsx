@@ -6,9 +6,14 @@ import { deriveDashboardProject } from '@/v2/domain/project-dashboard'
 
 interface ProjectSummary {
   id: string; name: string; format: string; stylePreset: string; status: string; error?: string | null
+  objective?: string | null; locale?: string | null; ownerId?: string | null
   createdAt: string; updatedAt: string; currentVersion: number | null; reviewIssueCount: number | null; outputCount: number
   job?: { id: string; status: string; completed: number | null; total: number | null } | null
 }
+
+interface ProjectFilters { text: string; status: string; objective: string; format: string; locale: string; createdFrom: string; createdTo: string; ownerId: string }
+const EMPTY_FILTERS: ProjectFilters = { text: '', status: '', objective: '', format: '', locale: '', createdFrom: '', createdTo: '', ownerId: '' }
+const FILTER_KEYS = Object.keys(EMPTY_FILTERS) as (keyof ProjectFilters)[]
 
 const STATE_LABELS = { draft: 'Rascunho', processing: 'Em produção', 'awaiting-review': 'Aguardando revisão', failed: 'Precisa de atenção', completed: 'Concluído', archived: 'Arquivado' } as const
 
@@ -18,6 +23,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [filters, setFilters] = useState<ProjectFilters>(EMPTY_FILTERS)
+  const [filtersReady, setFiltersReady] = useState(false)
   const [isNavigating, startNavigation] = useTransition()
 
   async function loadProjects(signal?: AbortSignal) {
@@ -35,6 +42,23 @@ export default function Dashboard() {
     return () => { controller.abort(); window.removeEventListener('apollo:project-updated', refresh) }
   }, [])
 
+  useEffect(() => {
+    const saved = sessionStorage.getItem('apollo:project-filters')
+    let stored: Partial<ProjectFilters> = {}
+    try { stored = saved ? JSON.parse(saved) as Partial<ProjectFilters> : {} } catch { sessionStorage.removeItem('apollo:project-filters') }
+    const params = new URLSearchParams(window.location.search)
+    setFilters(Object.fromEntries(FILTER_KEYS.map((key) => [key, params.get(key) ?? stored[key] ?? ''])) as unknown as ProjectFilters)
+    setFiltersReady(true)
+  }, [])
+
+  useEffect(() => {
+    if (!filtersReady) return
+    sessionStorage.setItem('apollo:project-filters', JSON.stringify(filters))
+    const params = new URLSearchParams()
+    for (const key of FILTER_KEYS) if (filters[key]) params.set(key, filters[key])
+    window.history.replaceState(null, '', `${window.location.pathname}${params.size ? `?${params}` : ''}`)
+  }, [filters, filtersReady])
+
   async function upload(file: File) {
     if (!file.type.startsWith('video/')) { setMessage('Escolha um arquivo de vídeo válido.'); return }
     setUploading(true); setMessage('Enviando e preparando o vídeo…')
@@ -48,7 +72,21 @@ export default function Dashboard() {
     finally { setUploading(false) }
   }
 
-  const counts = projects.reduce((result, project) => {
+  const normalizedText = filters.text.trim().toLocaleLowerCase('pt-BR')
+  const visibleProjects = projects.filter((project) => {
+    if (normalizedText && !project.name.toLocaleLowerCase('pt-BR').includes(normalizedText)) return false
+    if (filters.status && deriveDashboardProject({ status: project.status }).state !== filters.status) return false
+    if (filters.objective && project.objective !== filters.objective) return false
+    if (filters.format && project.format !== filters.format) return false
+    if (filters.locale && project.locale !== filters.locale) return false
+    if (filters.ownerId && project.ownerId !== filters.ownerId) return false
+    const created = Date.parse(project.createdAt)
+    if (filters.createdFrom && created < Date.parse(`${filters.createdFrom}T00:00:00`)) return false
+    if (filters.createdTo && created > Date.parse(`${filters.createdTo}T23:59:59.999`)) return false
+    return true
+  })
+
+  const counts = visibleProjects.reduce((result, project) => {
     const state = deriveDashboardProject({ status: project.status }).state
     result[state] = (result[state] ?? 0) + 1
     return result
@@ -77,10 +115,17 @@ export default function Dashboard() {
           <div className="col-span-2 bg-[#0d0f15] px-5 py-4"><p className="text-sm font-medium">{message ?? (uploading ? 'Preparando vídeo…' : 'Sistema pronto')}</p><p className="mt-1 text-xs text-[#8e93a3]">Atualizações entram por evento, sem percentual estimado.</p></div>
         </section>
 
-        <section><div className="mb-5 flex items-end justify-between"><div><p className="text-xs uppercase tracking-[0.2em] text-[#777d8e]">Projetos</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Em andamento e concluídos</h2></div><span className="text-sm text-[#777d8e]">{projects.length} projetos</span></div>
+        <section><div className="mb-5 flex items-end justify-between"><div><p className="text-xs uppercase tracking-[0.2em] text-[#777d8e]">Projetos</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Em andamento e concluídos</h2></div><span className="text-sm text-[#777d8e]">{visibleProjects.length} projetos</span></div>
+          <div className="mb-5 grid gap-3 rounded-2xl border border-white/10 bg-[#0d0f15] p-4 md:grid-cols-[minmax(0,1fr)_180px_140px_auto]">
+            <label><span className="sr-only">Buscar projetos</span><input className="h-11 w-full rounded-xl border border-white/10 bg-[#08090d] px-4 text-sm outline-none placeholder:text-[#666b7b] focus:border-[#7167ff]" placeholder="Buscar por nome" value={filters.text} onChange={(event) => setFilters({ ...filters, text: event.target.value })}/></label>
+            <label><span className="sr-only">Filtrar por status</span><select className="h-11 w-full rounded-xl border border-white/10 bg-[#08090d] px-3 text-sm text-[#c4c7d1] outline-none focus:border-[#7167ff]" value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}><option value="">Todos os status</option>{Object.entries(STATE_LABELS).map(([value,label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+            <label><span className="sr-only">Filtrar por formato</span><select className="h-11 w-full rounded-xl border border-white/10 bg-[#08090d] px-3 text-sm text-[#c4c7d1] outline-none focus:border-[#7167ff]" value={filters.format} onChange={(event) => setFilters({ ...filters, format: event.target.value })}><option value="">Formatos</option>{['9:16','16:9','4:5','1:1','21:9'].map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
+            <button className="h-11 rounded-xl px-4 text-sm text-[#aaaee0] hover:bg-white/5 disabled:opacity-40" disabled={!FILTER_KEYS.some((key) => filters[key])} onClick={() => setFilters(EMPTY_FILTERS)}>Limpar</button>
+            <details className="md:col-span-4"><summary className="cursor-pointer text-xs text-[#8e93a3]">Filtros avançados</summary><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><input aria-label="Objetivo" className="h-10 rounded-lg border border-white/10 bg-[#08090d] px-3 text-sm" placeholder="Objetivo" value={filters.objective} onChange={(event) => setFilters({ ...filters, objective: event.target.value })}/><input aria-label="Idioma" className="h-10 rounded-lg border border-white/10 bg-[#08090d] px-3 text-sm" placeholder="Idioma (pt-BR)" value={filters.locale} onChange={(event) => setFilters({ ...filters, locale: event.target.value })}/><input aria-label="Responsável" className="h-10 rounded-lg border border-white/10 bg-[#08090d] px-3 text-sm" placeholder="Responsável" value={filters.ownerId} onChange={(event) => setFilters({ ...filters, ownerId: event.target.value })}/><input aria-label="Criado a partir de" type="date" className="h-10 rounded-lg border border-white/10 bg-[#08090d] px-3 text-sm" value={filters.createdFrom} onChange={(event) => setFilters({ ...filters, createdFrom: event.target.value })}/><input aria-label="Criado até" type="date" className="h-10 rounded-lg border border-white/10 bg-[#08090d] px-3 text-sm" value={filters.createdTo} onChange={(event) => setFilters({ ...filters, createdTo: event.target.value })}/></div></details>
+          </div>
           {loading ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[0,1,2,3,4,5].map((item) => <div className="h-64 animate-pulse rounded-2xl bg-white/5" key={item}/>)}</div> : projects.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-white/15 px-8 py-20 text-center"><p className="text-xl font-semibold">Sua primeira produção começa aqui.</p><p className="mx-auto mt-2 max-w-md text-[#9297a7]">Envie um vídeo bruto. O Apollo organiza o material e mostra o próximo passo.</p></div>
-          ) : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{projects.map((project) => {
+          ) : visibleProjects.length === 0 ? <div className="rounded-3xl border border-dashed border-white/15 px-8 py-16 text-center"><p className="text-lg font-semibold">Nenhum projeto corresponde aos filtros.</p><p className="mt-2 text-sm text-[#9297a7]">Ajuste ou limpe os filtros para ver outras produções.</p></div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{visibleProjects.map((project) => {
             const view = deriveDashboardProject({ status: project.status, completed: project.job?.completed, total: project.job?.total })
             return <article className="group overflow-hidden rounded-2xl border border-white/10 bg-[#0d0f15] transition hover:-translate-y-0.5 hover:border-[#7167ff]/55" key={project.id}>
               <button className="w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#7167ff]" onClick={() => startNavigation(() => router.push(`/project/${project.id}`))}>

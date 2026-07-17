@@ -111,6 +111,7 @@ export function createProjectService(dependencies: CreateProjectDependencies) {
       workspaceId,
       name,
       status: 'draft',
+      ownerId: request.actor.id,
       currentVersionId: versionId,
       createdBy: request.actor,
       createdAt,

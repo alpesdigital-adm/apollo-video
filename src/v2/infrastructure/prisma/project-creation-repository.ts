@@ -65,6 +65,10 @@ function hydrateResult(
     workspaceId: projectRow.workspaceId,
     name: projectRow.name,
     status: projectRow.status as ProjectStatus,
+    objective: projectRow.objective ?? undefined,
+    format: projectRow.format ?? undefined,
+    locale: projectRow.locale ?? undefined,
+    ownerId: projectRow.ownerId ?? undefined,
     currentVersionId: projectRow.currentVersionId ?? undefined,
     createdBy: {
       type: projectRow.createdByType as CommandActorType,
@@ -175,6 +179,7 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
             workspaceId: bundle.project.workspaceId,
             name: bundle.project.name,
             status: bundle.project.status,
+            ownerId: bundle.project.ownerId,
             createdByType: bundle.project.createdBy.type,
             createdById: bundle.project.createdBy.id,
             createdAt: new Date(bundle.project.createdAt),

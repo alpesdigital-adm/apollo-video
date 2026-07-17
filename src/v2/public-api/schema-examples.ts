@@ -850,6 +850,20 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-list/v3': [
+      { data: { projects: [] }, meta: { apiVersion: 'v1' } },
+      {
+        data: {
+          projects: [{
+            id: projectId, workspaceId, name: 'Anúncio de descoberta', status: 'draft',
+            currentVersionId: 'project-version-example-1', objective: 'discovery', format: '9:16',
+            locale: 'pt-BR', ownerId: 'client-example-1', createdAt,
+          }],
+          nextCursor: Buffer.from('project-search-page-example').toString('base64url'),
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/begin-media-upload-request/v1': [
       { kind: 'video', size: '104857600', mimeType: 'video/mp4', checksum: 'a'.repeat(64) },
     ],

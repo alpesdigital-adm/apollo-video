@@ -26,7 +26,7 @@ const RESOURCE_PAGE_SIZE = 2
 
 const RESOURCE_DEFINITIONS = Object.freeze([
   { collection: 'capabilities', capabilityId: 'apollo.capabilities.list', title: 'Authorized capabilities', description: 'Scope-filtered Apollo Public API capabilities.', query: ['limit', 'after'] },
-  { collection: 'projects', capabilityId: 'apollo.projects.list', title: 'Projects', description: 'Projects in the authenticated workspace.', query: ['limit', 'after'] },
+  { collection: 'projects', capabilityId: 'apollo.projects.list', title: 'Projects', description: 'Projects in the authenticated workspace.', query: ['limit', 'after', 'text', 'status', 'objective', 'format', 'locale', 'createdFrom', 'createdTo', 'ownerId'] },
   { collection: 'operations', capabilityId: 'apollo.operations.list', title: 'Operations', description: 'Durable operations in the authenticated workspace.', query: ['limit', 'after', 'status', 'type', 'targetId'] },
   { collection: 'reports', capabilityId: 'apollo.reports.list', title: 'Reports', description: 'Reports authorized for the authenticated client.', query: ['limit', 'after'] },
 ] as const)

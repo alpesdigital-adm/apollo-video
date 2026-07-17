@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
         return {
           id: project.id, name: project.name, format: project.format, stylePreset: project.stylePreset,
           status: project.status, error: project.error, createdAt: project.createdAt, updatedAt: project.updatedAt,
+          objective: null, locale: null, ownerId: null,
           currentVersion: null,
           job: latestJob ? { id: latestJob.id, status: latestJob.status, completed: Number.isFinite(latestJob.progress) ? latestJob.progress : null, total: Number.isFinite(latestJob.progress) ? 100 : null, updatedAt: latestJob.updatedAt } : null,
           reviewIssueCount: null,

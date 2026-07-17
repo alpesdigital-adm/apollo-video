@@ -194,6 +194,10 @@ model V2Project {
   workspaceId      String
   name             String
   status           String   @default("draft")
+  objective        String?
+  format           String?
+  locale           String?
+  ownerId          String?
   currentVersionId String?
   createdByType    String
   createdById      String
@@ -208,6 +212,10 @@ model V2Project {
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
+  @@index([workspaceId, objective])
+  @@index([workspaceId, format])
+  @@index([workspaceId, locale])
+  @@index([workspaceId, ownerId])
   @@map("v2_projects")
 }
 

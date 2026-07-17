@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     requireScope(actor, 'projects:read')
     const params = request.nextUrl.searchParams
     for (const name of params.keys()) {
-      if (!['limit', 'after'].includes(name) || params.getAll(name).length > 1) {
+      if (!['limit', 'after', 'text', 'status', 'objective', 'format', 'locale', 'createdFrom', 'createdTo', 'ownerId'].includes(name) || params.getAll(name).length > 1) {
         throw new DomainError('INVALID_ARGUMENT', `${name} is not a supported project list parameter`)
       }
     }
@@ -53,6 +53,14 @@ export async function GET(request: NextRequest) {
       workspaceId: actor.workspaceId,
       ...(params.has('limit') ? { limit: Number(params.get('limit')) } : {}),
       ...(params.has('after') ? { after: params.get('after') ?? '' } : {}),
+      ...(params.has('text') ? { text: params.get('text') ?? '' } : {}),
+      ...(params.has('status') ? { status: params.get('status') ?? '' } : {}),
+      ...(params.has('objective') ? { objective: params.get('objective') ?? '' } : {}),
+      ...(params.has('format') ? { format: params.get('format') ?? '' } : {}),
+      ...(params.has('locale') ? { locale: params.get('locale') ?? '' } : {}),
+      ...(params.has('createdFrom') ? { createdFrom: params.get('createdFrom') ?? '' } : {}),
+      ...(params.has('createdTo') ? { createdTo: params.get('createdTo') ?? '' } : {}),
+      ...(params.has('ownerId') ? { ownerId: params.get('ownerId') ?? '' } : {}),
     })
     return NextResponse.json(
       presentSuccess({

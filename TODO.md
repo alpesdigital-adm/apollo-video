@@ -562,10 +562,10 @@
 
 ### F1.002 — Busca e filtros [FR-003]
 
-- [ ] Definir filtros por texto, status, objetivo, formato, locale, data e owner.
-- [ ] Implementar busca paginada, ordenação estável e combinação de filtros.
-- [ ] Persistir filtros durante a sessão e refletir estado na URL quando adequado.
-- [ ] Testar isolamento de workspace, paginação e zero results.
+- [x] Definir filtros por texto, status, objetivo, formato, locale, data e owner. Evidência F1-002: query pública tipada e dashboard oferecem as oito facetas, com validação de status, formato, locale, objetivo, owner e intervalo.
+- [x] Implementar busca paginada, ordenação estável e combinação de filtros. Evidência F1-002: `listProjectsService` combina filtros, ordena por `createdAt/id` e vincula cursor opaco ao workspace e ao fingerprint exato da consulta.
+- [x] Persistir filtros durante a sessão e refletir estado na URL quando adequado. Evidência F1-002: dashboard recupera filtros do `sessionStorage`, prioriza parâmetros explícitos da URL e mantém ambos sincronizados.
+- [x] Testar isolamento de workspace, paginação e zero results. Evidência F1-002: regressões cobrem cursor entre workspaces/consultas, combinação normalizada, página vazia e rejeição anterior ao acesso ao storage.
 
 ### F1.003 — Ações rápidas [FR-004]
 

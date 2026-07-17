@@ -88,6 +88,17 @@ const projectSchema = {
   },
 }
 
+const searchableProjectSchema = {
+  ...projectSchema,
+  properties: {
+    ...projectSchema.properties,
+    objective: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,63}$' },
+    format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+    locale: { type: 'string', minLength: 2, maxLength: 35 },
+    ownerId: idSchema,
+  },
+}
+
 const apiClientSchema = {
   type: 'object',
   additionalProperties: false,
@@ -1735,6 +1746,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         },
         envelopeDestroyed: { type: 'boolean', const: true },
         replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-list', 3, 'Filtered paginated project list response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['projects'],
+      properties: {
+        projects: { type: 'array', items: searchableProjectSchema },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
       },
     }),
   ),
