@@ -615,10 +615,10 @@
 
 ### F1.009 — Modo media-only [FR-014]
 
-- [ ] Detectar ausência de briefing e iniciar análise somente com objetivo, ação e mídia.
-- [ ] Inferir TreatmentPlan com assumptions explícitas e confidence reduzida quando necessário.
-- [ ] Bloquear inferências de oferta/claim não sustentadas pelo material.
-- [ ] Criar E2E do upload ao proxy sem briefing livre.
+- [x] Detectar ausência de briefing e iniciar análise somente com objetivo, ação e mídia. Evidência F1-009: factory media-only rejeita briefing presente e exige ao menos uma referência de mídia.
+- [x] Inferir TreatmentPlan com assumptions explícitas e confidence reduzida quando necessário. Evidência F1-009: plano preliminar carrega assumptions e limita confidence a 0,65.
+- [x] Bloquear inferências de oferta/claim não sustentadas pelo material. Evidência F1-009: qualquer claim proposto fora do conjunto observado falha antes do render.
+- [x] Criar E2E do upload ao proxy sem briefing livre. Evidência F1-009: jornada fake controlada percorre media ref, análise, plano e artifact proxy sem briefing.
 
 ### F1.010 — Override por projeto [FR-021]
 
