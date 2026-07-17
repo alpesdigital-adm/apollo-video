@@ -645,10 +645,10 @@
 
 ### F1.013 — MediaSegment [FR-042]
 
-- [ ] Modelar range semântico, label, description, parent asset e time mapping.
-- [ ] Criar segmento sem recortar fisicamente o master.
-- [ ] Materializar derivative somente quando um consumer exigir.
-- [ ] Testar segmentos sobrepostos, nested e limite exato do asset.
+- [x] Modelar range semântico, label, description, parent asset e time mapping. Evidência F1-013: `MediaSegment` preserva identidade, semântica e mapeamento 1:1 para source time.
+- [x] Criar segmento sem recortar fisicamente o master. Evidência F1-013: criação persiste somente range virtual com `physicalObjectKey: null` e API externa por asset.
+- [x] Materializar derivative somente quando um consumer exigir. Evidência F1-013: materializador retorna `null` para consumo virtual ou receita `extract-range/v1` com source imutável.
+- [x] Testar segmentos sobrepostos, nested e limite exato do asset. Evidência F1-013/T-FR-042: regressão cobre sobreposição, nesting, borda integral e range inválido.
 
 ### F1.014 — Image Library v1 [FR-047]
 
