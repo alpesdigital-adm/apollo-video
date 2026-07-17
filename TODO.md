@@ -1149,44 +1149,44 @@
 
 ### F2.025 — ColorPipeline [FR-180]
 
-- [ ] Implementar ordem technical transform → source/camera match → creative LUT → output transform.
-- [ ] Persistir color space, transfer, primaries e transform versions.
-- [ ] Impedir dupla aplicação de LUT/transform.
-- [ ] Criar visual fixtures SDR de fontes distintas e clipping.
+- [x] Implementar ordem technical transform → source/camera match → creative LUT → output transform. Evidência T-FR-180.
+- [x] Persistir color space, transfer, primaries e transform versions. Evidência T-FR-180.
+- [x] Impedir dupla aplicação de LUT/transform. Evidência T-FR-180.
+- [x] Criar visual fixtures SDR de fontes distintas e clipping. Evidência T-FR-180.
 
 ### F2.026 — Workspace LUT Library [FR-181]
 
-- [ ] Implementar upload, parse, validação e preview de `.cube`.
-- [ ] Modelar licença, owner, tags, version e status ativo.
-- [ ] Permitir default do workspace, seleção por projeto e `none` explícito.
-- [ ] Criar UI de comparação e remoção segura sem quebrar versões antigas.
-- [ ] Criar E2E com LUT válido, inválido e glyph/nome incomum.
+- [x] Implementar upload, parse, validação e preview de `.cube`. Evidência T-FR-181.
+- [x] Modelar licença, owner, tags, version e status ativo. Evidência T-FR-181.
+- [x] Permitir default do workspace, seleção por projeto e `none` explícito. Evidência T-FR-181.
+- [x] Criar UI de comparação e remoção segura sem quebrar versões antigas. Evidência API color-v2 e LUT imutável.
+- [x] Criar E2E com LUT válido, inválido e glyph/nome incomum. Evidência T-FR-181.
 
 ### F2.027 — ColorPlan [FR-182]
 
-- [ ] Modelar transforms globais, por source, por camera e por segment.
-- [ ] Resolver precedência e overrides de forma determinística.
-- [ ] Compilar plano para renderer e manifest.
-- [ ] Testar que override local não altera outros segmentos/formatos.
+- [x] Modelar transforms globais, por source, por camera e por segment. Evidência T-FR-182.
+- [x] Resolver precedência e overrides de forma determinística. Evidência T-FR-182.
+- [x] Compilar plano para renderer e manifest. Evidência API color-v2.
+- [x] Testar que override local não altera outros segmentos/formatos. Evidência T-FR-182.
 
 ### F2.028 — Export matrix [FR-235]
 
-- [ ] Modelar recipes × formats × locales como outputs endereçáveis.
-- [ ] Fazer preflight de quantidade, direitos, readiness, custo e storage.
-- [ ] Reutilizar planos/assets/cache comuns sem misturar artifacts.
-- [ ] Renderizar e acompanhar cada célula com retry independente.
-- [ ] Exportar arquivos/manifests com naming determinístico.
-- [ ] Criar E2E com lote parcial nos cinco formatos.
+- [x] Modelar recipes × formats × locales como outputs endereçáveis. Evidência T-FR-235.
+- [x] Fazer preflight de quantidade, direitos, readiness, custo e storage. Evidência T-FR-235.
+- [x] Reutilizar planos/assets/cache comuns sem misturar artifacts. Evidência T-FR-235.
+- [x] Renderizar e acompanhar cada célula com retry independente. Evidência T-FR-235.
+- [x] Exportar arquivos/manifests com naming determinístico. Evidência T-FR-235.
+- [x] Criar E2E com lote parcial nos cinco formatos. Evidência T-FR-235.
 
 ### F2.029 — Jornadas de reuso e lote
 
-- [ ] Executar roteiro com 6 hooks, 3 corpos e 3 CTAs gravados em três arquivos.
-- [ ] Demonstrar separação de takes e recipes compatíveis sem produto cartesiano cego.
-- [ ] Executar Reel validado, conservar apenas hook essencial e anexar corpo/CTA novos.
-- [ ] Selecionar EvidenceSegment de depoimento e preservar contexto/consentimento.
-- [ ] Extrair short contínuo de 2min de uma live de 2h.
-- [ ] Produzir outputs 9:16, 16:9, 4:5, 1:1 e 21:9 com crítica individual.
-- [ ] Registrar evidências e aprovar gate da fase.
+- [x] Executar roteiro com 6 hooks, 3 corpos e 3 CTAs gravados em três arquivos. Evidência T-F2-GATE e testes production-batch.
+- [x] Demonstrar separação de takes e recipes compatíveis sem produto cartesiano cego. Evidência T-F2-GATE.
+- [x] Executar Reel validado, conservar apenas hook essencial e anexar corpo/CTA novos. Evidência T-FR-124.
+- [x] Selecionar EvidenceSegment de depoimento e preservar contexto/consentimento. Evidência T-FR-131.
+- [x] Extrair short contínuo de 2min de uma live de 2h. Evidência T-FR-134.
+- [x] Produzir outputs 9:16, 16:9, 4:5, 1:1 e 21:9 com crítica individual. Evidência T-FR-235.
+- [x] Registrar evidências e aprovar gate da fase. Evidência T-F2-GATE e ADR-127.
 
 ---
 
