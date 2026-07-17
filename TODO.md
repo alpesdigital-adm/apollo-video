@@ -607,11 +607,11 @@
 
 ### F1.008 — Brief Compiler [FR-013]
 
-- [ ] Definir schema para audience, offer, constraints, must-use, avoid, tone e success criteria.
-- [ ] Compilar texto livre em estrutura com evidence spans, confidence e conflitos.
-- [ ] Validar resultado contra guardrails e solicitar revisão somente em conflito material.
-- [ ] Versionar prompt/model/schema e salvar entrada/saída redigida.
-- [ ] Criar golden set de briefings ambíguos, maliciosos e contraditórios.
+- [x] Definir schema para audience, offer, constraints, must-use, avoid, tone e success criteria. Evidência F1-008: `CompiledBrief/v1` exige os sete campos como coleções delimitadas.
+- [x] Compilar texto livre em estrutura com evidence spans, confidence e conflitos. Evidência F1-008: porta de modelo retorna estrutura validada contra spans exatos da fonte e confidence 0–1.
+- [x] Validar resultado contra guardrails e solicitar revisão somente em conflito material. Evidência F1-008: detector acrescenta conflitos de segurança e `requiresReview` ignora ambiguidades não materiais.
+- [x] Versionar prompt/model/schema e salvar entrada/saída redigida. Evidência F1-008: audit registra versões, hashes e cópias redigidas de e-mail/telefone.
+- [x] Criar golden set de briefings ambíguos, maliciosos e contraditórios. Evidência F1-008: conjunto canônico contém os três casos e regressões impedem evidência fabricada/prompt override.
 
 ### F1.009 — Modo media-only [FR-014]
 
