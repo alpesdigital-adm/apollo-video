@@ -6,6 +6,7 @@ import { pickMusicForProject } from '@/lib/audio-assets'
 import { readCreatorProfile } from '@/lib/creator-profile'
 import { readStylePrefs } from '@/lib/style-prefs'
 import { normalizeProjectOverrides, resolveProjectOverrides } from '@/v2/domain/project-overrides'
+import { relevantUncertainty } from '@/v2/domain/decision-confidence'
 
 const ORPHAN_RENDER_THRESHOLD_MS = 3 * 60000
 
@@ -88,6 +89,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       engineKind: project.engineKind,
       stylePreset: project.stylePreset,
       policyResolution,
+      directorUncertainty: project.confidenceJson ? relevantUncertainty(JSON.parse(project.confidenceJson)) : [],
       videoDuration: project.videoDuration,
       videoWidth: project.videoWidth,
       videoHeight: project.videoHeight,

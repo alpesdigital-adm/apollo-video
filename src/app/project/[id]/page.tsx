@@ -17,6 +17,7 @@ interface ProjectData {
   engineKind?: 'narrative' | 'visual'
   stylePreset?: string
   policyResolution?: Record<string, { value: unknown; origin: 'workspace' | 'project-none' | 'project-custom' }>
+  directorUncertainty?: Array<{ id: string; label: string; band: 'review' | 'block'; confidence: { value: number; reasonCodes: string[] } }>
   editPlan?: {
     durationFrames: number
     cuts: unknown[]
@@ -1096,6 +1097,11 @@ export default function EditorPage() {
               Descreva a mudança em pt-BR. Pode mirar o vídeo todo, uma cena, um trecho da fala ou as cores
               (ex.: &quot;alterar a cor de laranja para dourado nos inserts, no vídeo todo&quot;).
             </p>
+            {project.directorUncertainty && project.directorUncertainty.length > 0 ? (
+              <div className="mb-4 flex flex-wrap gap-2" aria-label="Pontos que precisam de atenção">
+                {project.directorUncertainty.map((item) => <span key={item.id} title={item.confidence.reasonCodes.join(', ')} className={`rounded-full border px-3 py-1 text-xs ${item.band === 'block' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-amber-400/30 bg-amber-400/10 text-amber-200'}`}>{item.band === 'block' ? 'Bloqueado' : 'Revisar'} · {item.label} · {Math.round(item.confidence.value * 100)}%</span>)}
+              </div>
+            ) : null}
             <div className="flex gap-3">
               <input
                 type="text"

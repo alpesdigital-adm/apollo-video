@@ -683,10 +683,10 @@
 
 ### F1.018 — Confidence [FR-052]
 
-- [ ] Padronizar confidence, evidence, reason codes e calibration version.
-- [ ] Definir bandas auto-apply, review e block por tipo de decisão.
-- [ ] Exibir incerteza relevante no Director panel sem poluir a edição.
-- [ ] Medir calibration error no eval set e registrar regressões.
+- [x] Padronizar confidence, evidence, reason codes e calibration version. Evidência F1-018: `DecisionConfidence` exige os quatro elementos e rejeita valor inválido.
+- [x] Definir bandas auto-apply, review e block por tipo de decisão. Evidência F1-018: thresholds diferenciados cobrem seis tipos e rights exige certeza integral.
+- [x] Exibir incerteza relevante no Director panel sem poluir a edição. Evidência F1-018: status e editor mostram apenas review/block como chips compactos.
+- [x] Medir calibration error no eval set e registrar regressões. Evidência F1-018/T-FR-052: ECE determinístico integra fixture e calibration version.
 
 ### F1.019 — TreatmentPlan [FR-060]
 
