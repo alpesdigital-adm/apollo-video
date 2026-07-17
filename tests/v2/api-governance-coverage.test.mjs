@@ -24,5 +24,5 @@ test('webhook governance covers endpoint, subscription, lifecycle, delivery and 
     assert.equal(capabilities.has(id), true, id)
     assert.equal(capabilities.get(id).authMode, 'required')
   }
-  assert.equal(capabilities.get('apollo.webhooks.deliveries.list').queryParameters.some((parameter) => parameter.name === 'cursor'), true)
+  assert.equal(capabilities.get('apollo.webhooks.deliveries.list').queryParameters.some((parameter) => parameter.name === 'after'), true)
 })
