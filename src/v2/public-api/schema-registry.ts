@@ -2187,6 +2187,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       environment: { enum: ['sandbox', 'production'] },
       scopes: {
         type: 'array',
+        maxItems: 64,
         uniqueItems: true,
         items: { type: 'string', pattern: '^[a-z-]+:[a-z-]+$' },
       },
