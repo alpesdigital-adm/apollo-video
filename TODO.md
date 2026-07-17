@@ -584,12 +584,12 @@
 
 ### F1.005 — Rubricas estratégicas [FR-010]
 
-- [ ] Codificar critérios e pesos de descoberta, consciência e aquecimento.
-- [ ] Codificar critérios e pesos de leads, venda, WhatsApp, agendamento e download.
-- [ ] Versionar rubrica e persistir seus scores/evidências no `QualityReport`.
-- [ ] Implementar hard gates comuns para integridade, legibilidade, direitos e CTA quando obrigatório.
-- [ ] Criar dataset de referência com exemplos bom/limítrofe/ruim por objetivo.
-- [ ] Calibrar thresholds iniciais sem misturar performance comercial com causalidade garantida.
+- [x] Codificar critérios e pesos de descoberta, consciência e aquecimento. Evidência F1-005: três rubricas awareness possuem pesos distintos e normalizados por intenção.
+- [x] Codificar critérios e pesos de leads, venda, WhatsApp, agendamento e download. Evidência F1-005: cinco rubricas de conversão ponderam oferta, prova, CTA e fricção conforme o destino.
+- [x] Versionar rubrica e persistir seus scores/evidências no `QualityReport`. Evidência F1-005: relatório imutável guarda rubric id/version, scores e evidências; snapshot recebe JSON canônico e SHA-256.
+- [x] Implementar hard gates comuns para integridade, legibilidade, direitos e CTA quando obrigatório. Evidência F1-005: falha de qualquer gate reprova mesmo score alto; CTA é obrigatório somente nos cinco objetivos de conversão.
+- [x] Criar dataset de referência com exemplos bom/limítrofe/ruim por objetivo. Evidência F1-005: conjunto versionado contém 24 referências, três bandas para cada objetivo.
+- [x] Calibrar thresholds iniciais sem misturar performance comercial com causalidade garantida. Evidência F1-005: thresholds são explícitos e rotulados `editorial-quality-proxy`; referências negam causalidade comercial.
 
 ### F1.006 — Ação desejada [FR-011]
 
