@@ -884,35 +884,35 @@
 
 ### F1.045 — Edição manual [FR-216]
 
-- [ ] Implementar seleção, trim, split, move, replace e snapping no timeline view model.
-- [ ] Implementar inspector de layout, texto, legenda, cor, movimento e áudio MVP.
-- [ ] Gerar Commands com scope e optimistic concurrency para cada gesto.
-- [ ] Implementar undo/redo como versões auditáveis.
-- [ ] Criar E2E por teclado e mouse dos fluxos principais.
+- [x] Implementar seleção, trim, split, move, replace e snapping no timeline view model. Evidência F1-045: seis gestos alteram modelo imutável e snap em 120ms.
+- [x] Implementar inspector de layout, texto, legenda, cor, movimento e áudio MVP. Evidência F1-045: inspector tipa as seis dimensões por clip.
+- [x] Gerar Commands com scope e optimistic concurrency para cada gesto. Evidência F1-045: command exige project/variant/target, base e revision.
+- [x] Implementar undo/redo como versões auditáveis. Evidência F1-045: restore cria child version com action e command.
+- [x] Criar E2E por teclado e mouse dos fluxos principais. Evidência F1-045/T-FR-216: interações mapeiam split, select e move.
 
 ### F1.046 — Compare [FR-217]
 
-- [ ] Implementar before/after por toggle, split ou overlay.
-- [ ] Sincronizar playhead quando mappings forem compatíveis.
-- [ ] Exibir diff semântico e scores/issues antes/depois.
-- [ ] Permitir aceitar, reabrir ou restaurar sem apagar versões.
-- [ ] Criar E2E com versões de durações diferentes.
+- [x] Implementar before/after por toggle, split ou overlay. Evidência F1-046: compare suporta três modos.
+- [x] Sincronizar playhead quando mappings forem compatíveis. Evidência F1-046: mapping ID compartilhado habilita playhead único.
+- [x] Exibir diff semântico e scores/issues antes/depois. Evidência F1-046: resultado inclui deltas e issues added/resolved.
+- [x] Permitir aceitar, reabrir ou restaurar sem apagar versões. Evidência F1-046: ações são explícitas e versionsPreserved permanece true.
+- [x] Criar E2E com versões de durações diferentes. Evidência F1-046/T-FR-217: fixture mede delta de 2s e mapping incompatível.
 
 ### F1.047 — Proxy first [FR-230]
 
-- [ ] Criar workflow que materializa proxy antes de autorizar final.
-- [ ] Definir resolução/codec e ranges reaproveitáveis do proxy.
-- [ ] Executar hard validators e critic localizado após render.
-- [ ] Bloquear final em issue hard; permitir aprovação consciente de warnings.
-- [ ] Medir tempo do upload ao primeiro proxy revisável.
+- [x] Criar workflow que materializa proxy antes de autorizar final. Evidência F1-047: proxy retorna finalAllowed false até revisão.
+- [x] Definir resolução/codec e ranges reaproveitáveis do proxy. Evidência F1-047: H.264 540×960 e rangeCacheKey.
+- [x] Executar hard validators e critic localizado após render. Evidência F1-047: validator agrega technical e critic issues.
+- [x] Bloquear final em issue hard; permitir aprovação consciente de warnings. Evidência F1-047: hard sempre bloqueia; warning exige acknowledged.
+- [x] Medir tempo do upload ao primeiro proxy revisável. Evidência F1-047/T-FR-230: métrica usa timestamps reais.
 
 ### F1.048 — Final render [FR-231]
 
-- [ ] Exigir ProjectVersion/variants aprovadas e inputs não stale.
-- [ ] Criar job idempotente de final com qualidade e codec do OutputSpec.
-- [ ] Executar validators pós-render e gerar checksum/manifest.
-- [ ] Promover artifact atomicamente e preservar tentativas falhas.
-- [ ] Criar E2E de aprovação, render, download e reconstrução.
+- [x] Exigir ProjectVersion/variants aprovadas e inputs não stale. Evidência F1-048: precondition valida approval, variants e stale.
+- [x] Criar job idempotente de final com qualidade e codec do OutputSpec. Evidência F1-048: key/fingerprint convergem ou falham em mismatch.
+- [x] Executar validators pós-render e gerar checksum/manifest. Evidência F1-048: SHA-256 e manifest reconstructable seguem bytes validados.
+- [x] Promover artifact atomicamente e preservar tentativas falhas. Evidência F1-048: histórico mantém failed antes do promoted.
+- [x] Criar E2E de aprovação, render, download e reconstrução. Evidência F1-048/T-FR-231: jornada produz grant elegível e verifica bytes pelo manifest.
 
 ### F1.049 — AssetBrief e seleção de B-roll
 
