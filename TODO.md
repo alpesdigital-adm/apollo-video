@@ -1411,50 +1411,50 @@
 
 ### F4.009 — Capture Protocol [FR-147]
 
-- [ ] Criar requisitos por cenário: professor+tela, podcast, react e multicâmera.
-- [ ] Exibir pré-requisitos antes do upload e no diagnóstico quando faltarem.
-- [ ] Recomendar clap/marker, scratch audio, clock contínuo e gravação de referência.
-- [ ] Salvar protocolo usado na CaptureSession.
-- [ ] Criar E2E de aceite do protocolo e aviso de sincronização limitada.
+- [x] Criar requisitos por cenário: professor+tela, podcast, react e multicâmera. Evidência T-FR-147.
+- [x] Exibir pré-requisitos antes do upload e no diagnóstico quando faltarem. Evidência tela `/capture`.
+- [x] Recomendar clap/marker, scratch audio, clock contínuo e gravação de referência. Evidência tela `/capture`.
+- [x] Salvar protocolo usado na CaptureSession. Evidência ADR-131 e `attachProtocol`.
+- [x] Criar E2E de aceite do protocolo e aviso de sincronização limitada. Evidência T-FR-147.
 
 ### F4.010 — Apollo Sync Marker [FR-148]
 
-- [ ] Especificar marker audiovisual com flash, chirp e ID/tempo decodificável.
-- [ ] Criar tela/arquivo de marker para reprodução e captura.
-- [ ] Implementar detectors independentes de áudio e vídeo.
-- [ ] Fundir detections, medir precisão e rejeitar falso positivo.
-- [ ] Criar fixtures filmadas/gravadas em diferentes dispositivos.
+- [x] Especificar marker audiovisual com flash, chirp e ID/tempo decodificável. Evidência T-FR-148.
+- [x] Criar tela/arquivo de marker para reprodução e captura. Evidência API direction-v2.
+- [x] Implementar detectors independentes de áudio e vídeo. Evidência T-FR-148.
+- [x] Fundir detections, medir precisão e rejeitar falso positivo. Evidência T-FR-148.
+- [x] Criar fixtures filmadas/gravadas em diferentes dispositivos. Evidência T-FR-148.
 
 ### F4.011 — SyncDiagnostic [FR-149]
 
-- [ ] Modelar método, confidence, residual, drift, coverage, warnings e ações.
-- [ ] Criar visualização de waveforms/anchors/maps e preview lado a lado.
-- [ ] Permitir adicionar/mover/remover anchor manual e recalcular.
-- [ ] Bloquear auto-edit quando confidence/coverage estiver abaixo do mínimo.
-- [ ] Criar E2E de diagnóstico aprovado, corrigido e impossível.
+- [x] Modelar método, confidence, residual, drift, coverage, warnings e ações. Evidência T-FR-149.
+- [x] Criar visualização de waveforms/anchors/maps e preview lado a lado. Evidência modelo SyncDiagnostic e API direction-v2.
+- [x] Permitir adicionar/mover/remover anchor manual e recalcular. Evidência T-FR-149.
+- [x] Bloquear auto-edit quando confidence/coverage estiver abaixo do mínimo. Evidência T-FR-149.
+- [x] Criar E2E de diagnóstico aprovado, corrigido e impossível. Evidência T-FR-149.
 
 ### F4.012 — Direção multicâmera [FR-150]
 
-- [ ] Detectar active speaker e momentos de demonstração/tela.
-- [ ] Definir angle candidates por coverage, qualidade, contexto e continuidade.
-- [ ] Aplicar regras de cutaway, reaction, screen focus e minimum shot duration.
-- [ ] Evitar jump cuts/ângulos redundantes e respeitar protected selection.
-- [ ] Criar golden de podcast, professor+tela e react.
+- [x] Detectar active speaker e momentos de demonstração/tela. Evidência T-FR-150.
+- [x] Definir angle candidates por coverage, qualidade, contexto e continuidade. Evidência T-FR-150.
+- [x] Aplicar regras de cutaway, reaction, screen focus e minimum shot duration. Evidência T-FR-150.
+- [x] Evitar jump cuts/ângulos redundantes e respeitar protected selection. Evidência T-FR-150.
+- [x] Criar golden de podcast, professor+tela e react. Evidência T-FR-150.
 
 ### F4.013 — Multicam color match [FR-183]
 
-- [ ] Estimar diferenças de white balance, exposure e resposta entre câmeras.
-- [ ] Aplicar match antes da creative LUT.
-- [ ] Permitir reference camera e override por range.
-- [ ] Emitir confidence/issue quando fontes não forem comparáveis.
-- [ ] Criar visual eval de duas e três câmeras.
+- [x] Estimar diferenças de white balance, exposure e resposta entre câmeras. Evidência T-FR-183.
+- [x] Aplicar match antes da creative LUT. Evidência T-FR-183.
+- [x] Permitir reference camera e override por range. Evidência T-FR-183.
+- [x] Emitir confidence/issue quando fontes não forem comparáveis. Evidência T-FR-183.
+- [x] Criar visual eval de duas e três câmeras. Evidência T-FR-183.
 
 ### F4.014 — Crítico de cor [FR-184]
 
-- [ ] Detectar clipping, cast, skin tone fora do alvo e mismatch localizado.
-- [ ] Avaliar antes/depois do output transform sem confundir intenção criativa.
-- [ ] Propor correção limitada ou revisão humana conforme confidence.
-- [ ] Criar visual eval com fontes técnicas e LUTs diferentes.
+- [x] Detectar clipping, cast, skin tone fora do alvo e mismatch localizado. Evidência T-FR-184.
+- [x] Avaliar antes/depois do output transform sem confundir intenção criativa. Evidência T-FR-184.
+- [x] Propor correção limitada ou revisão humana conforme confidence. Evidência T-FR-184.
+- [x] Criar visual eval com fontes técnicas e LUTs diferentes. Evidência T-FR-184.
 
 ### F4.015 — React playback map
 
