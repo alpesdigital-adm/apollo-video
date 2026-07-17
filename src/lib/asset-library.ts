@@ -29,6 +29,7 @@ export interface Asset {
   rightsStatus?: 'eligible' | 'review' | 'restricted' | 'expired'
   thumbnailPath?: string
   waveformPath?: string
+  imageAnalysis?: Record<string, unknown>
   addedAt: string
 }
 
@@ -102,6 +103,7 @@ function sanitizeAsset(raw: any): Asset | null {
   asset.rightsStatus = ['review', 'restricted', 'expired'].includes(raw.rightsStatus) ? raw.rightsStatus : 'eligible'
   if (typeof raw.thumbnailPath === 'string') asset.thumbnailPath = raw.thumbnailPath
   if (typeof raw.waveformPath === 'string') asset.waveformPath = raw.waveformPath
+  if (raw.imageAnalysis && typeof raw.imageAnalysis === 'object') asset.imageAnalysis = raw.imageAnalysis
   return asset
 }
 
@@ -152,7 +154,7 @@ export function addAsset(asset: Asset): Asset {
 
 export function updateAsset(
   id: string,
-  patch: { label?: string; tags?: string[] | string }
+  patch: { label?: string; tags?: string[] | string; imageAnalysis?: Record<string, unknown> }
 ): Asset | null {
   const library = readAssetLibrary()
   const idx = library.assets.findIndex((asset) => asset.id === id)
@@ -164,6 +166,7 @@ export function updateAsset(
     label: patch.label !== undefined ? String(patch.label).trim() : current.label,
     tags: patch.tags !== undefined ? sanitizeTags(patch.tags) : current.tags
   }
+  if (patch.imageAnalysis !== undefined) next.imageAnalysis = patch.imageAnalysis
   library.assets[idx] = next
   writeAssetLibrary(library)
   return next

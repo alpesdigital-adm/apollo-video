@@ -652,11 +652,11 @@
 
 ### F1.014 — Image Library v1 [FR-047]
 
-- [ ] Extrair dimensões, orientação, cores, faces/objects e OCR regions.
-- [ ] Gerar descrição observada e tags inferidas com provenance/confidence.
-- [ ] Criar thumbnail/derivatives sem alterar original.
-- [ ] Implementar busca e reutilização em B-roll, insert e card.
-- [ ] Criar eval com imagens sem texto, texto pequeno e múltiplos idiomas.
+- [x] Extrair dimensões, orientação, cores, faces/objects e OCR regions. Evidência F1-014: contrato de análise tipa cada observação espacial e visual.
+- [x] Gerar descrição observada e tags inferidas com provenance/confidence. Evidência F1-014: descrição usa somente observações; tags carregam modelo, versão, origem e confidence.
+- [x] Criar thumbnail/derivatives sem alterar original. Evidência F1-014: receitas versionadas declaram original imutável.
+- [x] Implementar busca e reutilização em B-roll, insert e card. Evidência F1-014: busca ranqueada preserva a finalidade pedida e endpoint externo cataloga a imagem.
+- [x] Criar eval com imagens sem texto, texto pequeno e múltiplos idiomas. Evidência F1-014/T-FR-047: três fixtures exercitam ausência, baixa área/confidence e OCR pt-BR/en.
 
 ### F1.015 — Catalogação automática [FR-049]
 
