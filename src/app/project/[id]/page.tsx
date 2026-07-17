@@ -20,6 +20,7 @@ interface ProjectData {
   directorUncertainty?: Array<{ id: string; label: string; band: 'review' | 'block'; confidence: { value: number; reasonCodes: string[] } }>
   directorDecisions?: Array<{ id: string; summary: string; decision: string; confidence: number; score: number; cost: { actual: number; currency: string }; actor: { type: string; id: string }; candidates: Array<{ id: string; outcome: string; reason: string }>; evidence: Array<{ ref: string }> }>
   directorBudget?: { status: string; limits: { cost: number }; reserved: { cost: number }; actual: { cost: number } } | null
+  subtitleConfig?: { mode: 'auto' | 'workspace-default' | 'manual' | 'none'; presetId?: string; origin: string } | null
   editPlan?: {
     durationFrames: number
     cuts: unknown[]
@@ -207,6 +208,11 @@ export default function EditorPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function updateSubtitleMode(mode: 'auto' | 'workspace-default' | 'manual' | 'none') {
+    const response = await fetch(`/api/projects/${projectId}/subtitles-v2`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, workspacePreset: 'kinetic', manualPreset: mode === 'manual' ? (project?.subtitleConfig?.presetId || 'kinetic') : undefined, variantId: project?.format || '9:16' }) })
+    if (response.ok) await loadProject()
   }
 
   async function triggerNormalization() {
@@ -1110,6 +1116,7 @@ export default function EditorPage() {
               </div>
             ) : null}
             {project.directorBudget ? <div className="mb-4 flex items-center gap-3 rounded-lg border border-zinc-800 bg-black/20 px-3 py-2 text-xs text-zinc-400" aria-label="Orçamento do Diretor"><span className="text-zinc-200">Orçamento desta execução</span><span>reservado {project.directorBudget.reserved.cost.toFixed(2)}</span><span>usado {project.directorBudget.actual.cost.toFixed(2)}</span><span>limite {project.directorBudget.limits.cost.toFixed(2)}</span><span className={project.directorBudget.status === 'budget_exhausted' ? 'text-red-300' : 'text-emerald-300'}>{project.directorBudget.status}</span></div> : null}
+            <div className="mb-4 flex flex-wrap items-center gap-2 text-xs" aria-label="Modo de legenda"><span className="text-zinc-500">Legendas</span>{(['auto','workspace-default','manual','none'] as const).map((mode)=><button key={mode} type="button" onClick={()=>updateSubtitleMode(mode)} className={`rounded-full border px-3 py-1 ${project.subtitleConfig?.mode===mode?'border-amber-400/50 bg-amber-400/10 text-amber-200':'border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>{mode==='workspace-default'?'Padrão do workspace':mode==='none'?'Sem legenda':mode==='manual'?'Manual':'Automático'}</button>)}<span className="text-zinc-600">origem: {project.subtitleConfig?.origin||'workspace'}</span></div>
             <div className="flex gap-3">
               <input
                 type="text"

@@ -797,45 +797,45 @@
 
 ### F1.033 — Estilos iniciais de legenda [FR-170]
 
-- [ ] Especificar cinco presets distintos com tokens, animação e limites responsivos.
-- [ ] Implementar renderer de cada preset com fonte licenciada/fallback.
-- [ ] Expor preview rápido sem render final completo.
-- [ ] Criar visual goldens nos formatos MVP e em fundos claros/escuros.
+- [x] Especificar cinco presets distintos com tokens, animação e limites responsivos. Evidência F1-033: registry cobre kinetic, box, pill, caps e clean.
+- [x] Implementar renderer de cada preset com fonte licenciada/fallback. Evidência F1-033: cada schema exige licença, fallback e latin-ext.
+- [x] Expor preview rápido sem render final completo. Evidência F1-033: API retorna preview CSS instantâneo.
+- [x] Criar visual goldens nos formatos MVP e em fundos claros/escuros. Evidência F1-033/T-FR-170: 5×2×2 produz 20 goldens.
 
 ### F1.034 — Modos de legenda [FR-171]
 
-- [ ] Implementar `auto`, `workspace-default`, `manual` e `none`.
-- [ ] Resolver modo por projeto/variant sem alterar transcript.
-- [ ] Exibir origem do preset e permitir override/revert.
-- [ ] Criar E2E para troca de modo e ausência intencional de legendas.
+- [x] Implementar `auto`, `workspace-default`, `manual` e `none`. Evidência F1-034: união fechada e controles no editor.
+- [x] Resolver modo por projeto/variant sem alterar transcript. Evidência F1-034: config preserva hash idêntico do transcript.
+- [x] Exibir origem do preset e permitir override/revert. Evidência F1-034: painel mostra origin e alterna para nível do workspace.
+- [x] Criar E2E para troca de modo e ausência intencional de legendas. Evidência F1-034/T-FR-171: quatro caminhos incluem disabled sem apagar fala.
 
 ### F1.035 — SubtitleStylePreset [FR-172]
 
-- [ ] Modelar tipografia, line breaking, highlight, background, animation, margins e overrides.
-- [ ] Validar contraste, glyph coverage e limites de linhas/caracteres.
-- [ ] Versionar presets para reproduzir renders antigos.
-- [ ] Criar unit tests do schema e golden render por preset.
+- [x] Modelar tipografia, line breaking, highlight, background, animation, margins e overrides. Evidência F1-035: `SubtitleStylePreset` cobre todos os tokens.
+- [x] Validar contraste, glyph coverage e limites de linhas/caracteres. Evidência F1-035: validator bloqueia fonte, contraste e bounds.
+- [x] Versionar presets para reproduzir renders antigos. Evidência F1-035: todos carregam versão imutável 1.
+- [x] Criar unit tests do schema e golden render por preset. Evidência F1-035/T-FR-172: cinco presets são validados e renderizados no golden set.
 
 ### F1.036 — Anchor de legenda por percepção [FR-173]
 
-- [ ] Consultar faces, OCR, CTA, logo e inserts no range da legenda.
-- [ ] Selecionar anchor elegível com estabilidade temporal e safe area.
-- [ ] Evitar saltos frequentes; emitir issue se não existir região segura.
-- [ ] Criar fixtures de rosto inferior, tela cheia e múltiplos overlays.
+- [x] Consultar faces, OCR, CTA, logo e inserts no range da legenda. Evidência F1-036: occupied region tipa cinco blockers.
+- [x] Selecionar anchor elegível com estabilidade temporal e safe area. Evidência F1-036: solver testa cinco faixas e preserva anchor anterior.
+- [x] Evitar saltos frequentes; emitir issue se não existir região segura. Evidência F1-036: stable vence primeiro candidato; full screen gera issue.
+- [x] Criar fixtures de rosto inferior, tela cheia e múltiplos overlays. Evidência F1-036/T-FR-173: três composições exercitam sucesso e bloqueio.
 
 ### F1.037 — Override de legenda por segmento [FR-174]
 
-- [ ] Modelar override de position, style, text e visibility por subtitle segment.
-- [ ] Aplicar override somente à variant e range selecionados.
-- [ ] Preservar override protegido durante recompilação automática.
-- [ ] Testar reset para nível anterior e invalidation mínima.
+- [x] Modelar override de position, style, text e visibility por subtitle segment. Evidência F1-037: override contém quatro dimensões, segment e range.
+- [x] Aplicar override somente à variant e range selecionados. Evidência F1-037: variant/range mismatch é no-op.
+- [x] Preservar override protegido durante recompilação automática. Evidência F1-037: flag protected acompanha o valor aplicado.
+- [x] Testar reset para nível anterior e invalidation mínima. Evidência F1-037/T-FR-174: reset restaura inherited e invalida só o range.
 
 ### F1.038 — Sidecar [FR-175]
 
-- [ ] Exportar SRT e VTT a partir do alignment efetivamente renderizado.
-- [ ] Normalizar timestamps, line breaks e encoding UTF-8.
-- [ ] Validar monotonicidade e ausência de overlaps inválidos.
-- [ ] Criar round-trip fixture com pontuação, acentos e última cue.
+- [x] Exportar SRT e VTT a partir do alignment efetivamente renderizado. Evidência F1-038: exporter recebe `RenderedCue` canônico.
+- [x] Normalizar timestamps, line breaks e encoding UTF-8. Evidência F1-038: BOM, NFC e separadores SRT/VTT corretos.
+- [x] Validar monotonicidade e ausência de overlaps inválidos. Evidência F1-038: range não positivo ou overlap falha antes do arquivo.
+- [x] Criar round-trip fixture com pontuação, acentos e última cue. Evidência F1-038/T-FR-175: fixture preserva `Ação`, quebra e `Última cue.`.
 
 ### F1.039 — Preview interativo [FR-210]
 
