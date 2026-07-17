@@ -940,6 +940,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         { itemId: 'item-2', operationId: 'operation-example-2', status: 'failed', retryable: true, error: { code: 'PROVIDER_TIMEOUT', message: 'Provider timed out.' }, updatedAt: createdAt },
       ] }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/governance-usage-audit-page/v1': [
+      { data: { entries: [{ id: 'operation-example-1', clientId: 'client-example-1', action: 'artifact-render', status: 'succeeded', target: { type: 'artifact', id: 'artifact-example-1' }, usage: { unit: 'operation', quantity: 1 }, createdAt, updatedAt: createdAt }] }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/webhook-signing-secret-rotation-list/v1': [
       { data: { rotations: [] }, meta: { apiVersion: 'v1' } },
       { data: { rotations: [webhookSigningSecretRotationExample] }, meta: { apiVersion: 'v1' } },

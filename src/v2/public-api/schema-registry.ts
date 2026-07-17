@@ -1913,6 +1913,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       nextCursor: { type: 'string', minLength: 16, maxLength: 4096 },
     },
   })),
+  defineSchema('governance-usage-audit-page', 1, 'Redacted governance usage and audit page', successSchema({
+    type: 'object', additionalProperties: false, required: ['entries'], properties: {
+      entries: { type: 'array', maxItems: 100, items: { type: 'object', additionalProperties: false, required: ['id', 'clientId', 'action', 'status', 'target', 'usage', 'createdAt', 'updatedAt'], properties: {
+        id: idSchema, clientId: idSchema, action: { type: 'string', maxLength: 80 }, status: { type: 'string', maxLength: 32 }, target: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { type: 'string' }, id: idSchema } },
+        usage: { type: 'object', additionalProperties: false, required: ['unit', 'quantity'], properties: { unit: { const: 'operation' }, quantity: { const: 1 } } }, createdAt: dateTimeSchema, updatedAt: dateTimeSchema,
+      } } }, nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+    },
+  })),
   defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',
     successSchema({
       type: 'object',

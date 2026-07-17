@@ -485,6 +485,52 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.governance.usage-audit.list": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/governance-usage-audit-page/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/governance/usage-audit"
+      },
+      "toolName": "apollo.governance.usage-audit.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum entries per page.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        {
+          "name": "after",
+          "description": "Opaque cursor from the previous page.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 1024
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.health.read": {
       "version": "1.0.0",
       "exposure": "public",
@@ -5402,6 +5448,122 @@
                   }
                 }
               }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/governance-usage-audit-page/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entries"
+          ],
+          "properties": {
+            "entries": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "clientId",
+                  "action",
+                  "status",
+                  "target",
+                  "usage",
+                  "createdAt",
+                  "updatedAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "action": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "status": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "target": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "id"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "usage": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "unit",
+                      "quantity"
+                    ],
+                    "properties": {
+                      "unit": {
+                        "const": "operation"
+                      },
+                      "quantity": {
+                        "const": 1
+                      }
+                    }
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1024
             }
           }
         },
