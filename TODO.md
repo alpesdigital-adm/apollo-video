@@ -534,7 +534,7 @@
 - [x] Invalidar token quando versão, input ou custo material mudar. Evidência F0-094: validação reabre claims assinadas e rejeita expiry, client/workspace diferente e qualquer divergência de fingerprint, snapshot ou cost fingerprint antes do commit.
 - [x] Exigir preflight para batch, final matrix, geração variável e ações destrutivas. Evidência F0-095: policy central deny-by-default classifica as quatro classes e exige token confiável revalidado; somente ação bounded explicitamente classificada passa sem preflight.
 - [x] Expor resultado/status/retry por item sem resposta monolítica. Evidência F0-096: `batch-item-page/v1` referencia um `operationId` por item, limita páginas a 100, separa resultRef/erro redigido e reutiliza as APIs duráveis `operations.read` e `operations.retry` para acompanhamento/retry individual.
-- [ ] Criar E2E de dry-run, token expirado, partial retry e budget block.
+- [x] Criar E2E de dry-run, token expirado, partial retry e budget block. Evidência F0-097: jornada integrada comprova dry-run sem commit, expiry fail-closed, quota insuficiente bloqueando elegibilidade e seleção de retry somente da operação falha/retryable.
 
 ### F0.043 — Governança da API [FR-249]
 
