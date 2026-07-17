@@ -33,6 +33,7 @@ model Project {
   narrativeFormat   String?
   error             String?
   archivedFromStatus String?
+  objective         String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

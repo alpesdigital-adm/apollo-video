@@ -5,11 +5,13 @@ import { writeFile, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
+import { resolveStrategicObjective } from '@/v2/domain/strategic-objective'
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File
+    const objective = resolveStrategicObjective(String(formData.get('objective') ?? 'discovery'))
     // Seletor de preset removido do produto: o visual é dirigido pelas cores da
     // marca, presets de legenda, grade e leis de direção. Fica o padrão fixo.
     const stylePreset = 'creator-clean'
@@ -54,6 +56,7 @@ export async function POST(request: NextRequest) {
         videoFps: videoInfo.fps,
         format: aspectRatio,
         stylePreset,
+        objective: objective.id,
         status: 'created'
       }
     })

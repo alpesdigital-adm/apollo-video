@@ -576,11 +576,11 @@
 
 ### F1.004 — Objetivo estratégico [FR-010]
 
-- [ ] Modelar descoberta, consciência, aquecimento, leads, venda, WhatsApp, agendamento e download.
-- [ ] Criar formulário inicial com descrição e exemplos de resultado de cada objetivo.
-- [ ] Associar objetivo à rubrica correta no `DirectorRun`.
-- [ ] Impedir troca silenciosa depois da aprovação; gerar nova versão/re-run.
-- [ ] Testar uma fixture por objetivo estratégico.
+- [x] Modelar descoberta, consciência, aquecimento, leads, venda, WhatsApp, agendamento e download. Evidência F1-004: catálogo canônico tipado contém os oito objetivos com identidade estável.
+- [x] Criar formulário inicial com descrição e exemplos de resultado de cada objetivo. Evidência F1-004: nova produção exige seleção visível, mostra orientação contextual e envia o objetivo junto da mídia.
+- [x] Associar objetivo à rubrica correta no `DirectorRun`. Evidência F1-004: `createDirectorRunObjective` resolve `rubricRef` versionada por objetivo.
+- [x] Impedir troca silenciosa depois da aprovação; gerar nova versão/re-run. Evidência F1-004: draft pode mudar na mesma run; approved exige novo id, incrementa versão e registra `supersedesRunId`.
+- [x] Testar uma fixture por objetivo estratégico. Evidência F1-004: regressão percorre os oito objetivos e valida descrição, resultado e rubrica, além do fluxo de rerun.
 
 ### F1.005 — Rubricas estratégicas [FR-010]
 

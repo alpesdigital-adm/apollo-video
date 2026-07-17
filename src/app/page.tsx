@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { deriveDashboardProject } from '@/v2/domain/project-dashboard'
 import { optimisticProjectPatch } from '@/v2/application/project-quick-actions'
+import { STRATEGIC_OBJECTIVES, type StrategicObjectiveId } from '@/v2/domain/strategic-objective'
 
 interface ProjectSummary {
   id: string; name: string; format: string; stylePreset: string; status: string; error?: string | null
@@ -27,6 +28,7 @@ export default function Dashboard() {
   const [filters, setFilters] = useState<ProjectFilters>(EMPTY_FILTERS)
   const [filtersReady, setFiltersReady] = useState(false)
   const [actionProjectId, setActionProjectId] = useState<string | null>(null)
+  const [objective, setObjective] = useState<StrategicObjectiveId>('discovery')
   const [isNavigating, startNavigation] = useTransition()
 
   async function loadProjects(signal?: AbortSignal) {
@@ -65,7 +67,7 @@ export default function Dashboard() {
     if (!file.type.startsWith('video/')) { setMessage('Escolha um arquivo de vídeo válido.'); return }
     setUploading(true); setMessage('Enviando e preparando o vídeo…')
     try {
-      const body = new FormData(); body.append('file', file)
+      const body = new FormData(); body.append('file', file); body.append('objective', objective)
       const response = await fetch('/api/upload', { method: 'POST', body })
       const data = await response.json()
       if (!response.ok || !data.projectId) throw new Error(data.error ?? 'O upload não foi concluído.')
@@ -135,10 +137,14 @@ export default function Dashboard() {
       <div className="mx-auto max-w-[1440px] px-6 py-8 lg:px-10 lg:py-10">
         <section className="grid gap-6 border-b border-white/10 pb-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end xl:grid-cols-[minmax(0,1fr)_420px]">
           <div><p className="mb-3 text-xs font-medium uppercase tracking-[0.22em] text-[#7f86ff]">Fila editorial</p><h2 className="max-w-3xl text-4xl font-semibold leading-[1.04] tracking-[-0.04em] md:text-6xl">Do bruto ao anúncio,<br/><span className="text-[#9da2b4]">sem perder o fio.</span></h2><p className="mt-5 max-w-2xl text-base leading-7 text-[#9da2b4]">Acompanhe decisões do diretor, revisões e saídas finais. O progresso só aparece quando existe medição real.</p></div>
-          <label className="group flex cursor-pointer items-center justify-between rounded-2xl border border-[#7167ff]/50 bg-[#7167ff]/10 p-5 transition hover:border-[#8d85ff] hover:bg-[#7167ff]/15 focus-within:ring-2 focus-within:ring-[#7167ff]">
-            <input className="sr-only" type="file" accept="video/*" disabled={uploading || isNavigating} onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file) }} />
-            <span><span className="block font-semibold">Nova produção</span><span className="mt-1 block text-sm text-[#aaaee0]">Envie o primeiro vídeo bruto</span></span><span className="grid h-11 w-11 place-items-center rounded-full bg-[#7167ff] text-2xl">+</span>
-          </label>
+          <div className="rounded-2xl border border-[#7167ff]/40 bg-[#7167ff]/8 p-4">
+            <label className="block text-[11px] uppercase tracking-[0.16em] text-[#aaaee0]">Objetivo desta produção<select className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b0c12] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#7167ff]" value={objective} onChange={(event) => setObjective(event.target.value as StrategicObjectiveId)}>{STRATEGIC_OBJECTIVES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+            <p className="mt-2 min-h-10 text-xs leading-5 text-[#999ec0]">{STRATEGIC_OBJECTIVES.find((item) => item.id === objective)?.description}</p>
+            <label className="group mt-3 flex cursor-pointer items-center justify-between rounded-xl bg-[#7167ff] px-4 py-3 transition hover:bg-[#8178ff] focus-within:ring-2 focus-within:ring-white/70">
+              <input className="sr-only" type="file" accept="video/*" disabled={uploading || isNavigating} onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file) }} />
+              <span><span className="block font-semibold">Nova produção</span><span className="block text-xs text-white/75">Envie o primeiro vídeo bruto</span></span><span className="text-2xl">+</span>
+            </label>
+          </div>
         </section>
 
         <section aria-label="Resumo dos projetos" className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 md:grid-cols-4 lg:grid-cols-6 my-8">
