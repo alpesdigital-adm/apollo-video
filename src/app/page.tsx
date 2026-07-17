@@ -1,347 +1,98 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import type { VideoFormat, ProjectStatus } from '@/lib/types/project'
+import { deriveDashboardProject } from '@/v2/domain/project-dashboard'
 
-interface Project {
-  id: string
-  name: string
-  format: VideoFormat
-  status: ProjectStatus
-  createdAt: string
-  updatedAt: string
+interface ProjectSummary {
+  id: string; name: string; format: string; stylePreset: string; status: string; error?: string | null
+  createdAt: string; updatedAt: string; currentVersion: number | null; reviewIssueCount: number | null; outputCount: number
+  job?: { id: string; status: string; completed: number | null; total: number | null } | null
 }
+
+const STATE_LABELS = { draft: 'Rascunho', processing: 'Em produção', 'awaiting-review': 'Aguardando revisão', failed: 'Precisa de atenção', completed: 'Concluído', archived: 'Arquivado' } as const
 
 export default function Dashboard() {
   const router = useRouter()
-  const [projects, setProjects] = useState<Project[]>([])
-  const [loading, setLoading] = useState(false)
+  const [projects, setProjects] = useState<ProjectSummary[]>([])
+  const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
-  const [uploadMessage, setUploadMessage] = useState<string | null>(null)
-  const [dragActive, setDragActive] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [isNavigating, startNavigation] = useTransition()
 
-  // Load recent projects
+  async function loadProjects(signal?: AbortSignal) {
+    const response = await fetch('/api/projects', { signal })
+    if (!response.ok) throw new Error('Não foi possível carregar os projetos.')
+    const data = await response.json()
+    setProjects(data.projects ?? [])
+  }
+
   useEffect(() => {
-    loadProjects()
+    const controller = new AbortController()
+    loadProjects(controller.signal).catch((error) => { if (error.name !== 'AbortError') setMessage(error.message) }).finally(() => setLoading(false))
+    const refresh = () => loadProjects().catch(() => setMessage('Um projeto mudou, mas a atualização falhou. Recarregue a página.'))
+    window.addEventListener('apollo:project-updated', refresh)
+    return () => { controller.abort(); window.removeEventListener('apollo:project-updated', refresh) }
   }, [])
 
-  async function loadProjects() {
+  async function upload(file: File) {
+    if (!file.type.startsWith('video/')) { setMessage('Escolha um arquivo de vídeo válido.'); return }
+    setUploading(true); setMessage('Enviando e preparando o vídeo…')
     try {
-      setLoading(true)
-      const response = await fetch('/api/projects')
-      if (response.ok) {
-        const data = await response.json()
-        setProjects(data.projects || [])
-      }
-    } catch (error) {
-      console.error('Failed to load projects:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleUpload(file: File) {
-    if (!file.type.startsWith('video/')) {
-      alert('Please upload a video file')
-      return
-    }
-
-    try {
-      setUploading(true)
-      setUploadMessage('Uploading and reading video metadata...')
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error)
-      }
-
+      const body = new FormData(); body.append('file', file)
+      const response = await fetch('/api/upload', { method: 'POST', body })
       const data = await response.json()
-      if (!data.projectId) {
-        throw new Error('Upload finished but no project id was returned')
-      }
-
-      setUploadMessage('Upload complete. Opening project...')
-      await loadProjects()
-      window.location.assign(`/project/${data.projectId}`)
-    } catch (error) {
-      console.error('Upload failed:', error)
-      setUploadMessage(null)
-      alert(`Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    } finally {
-      setUploading(false)
-    }
+      if (!response.ok || !data.projectId) throw new Error(data.error ?? 'O upload não foi concluído.')
+      startNavigation(() => router.push(`/project/${data.projectId}`))
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'O upload não foi concluído.') }
+    finally { setUploading(false) }
   }
 
-  function handleDrag(e: React.DragEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true)
-    } else if (e.type === 'dragleave') {
-      setDragActive(false)
-    }
-  }
-
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragActive(false)
-
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleUpload(e.dataTransfer.files[0])
-    }
-  }
-
-  function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files && e.target.files[0]) {
-      handleUpload(e.target.files[0])
-    }
-  }
-
-  async function handleDeleteProject(e: React.MouseEvent, project: Project) {
-    e.preventDefault()
-    e.stopPropagation()
-
-    const confirmed = window.confirm(
-      `Excluir o projeto "${project.name}"? Todos os arquivos de vídeo e mídia associados serão apagados permanentemente. Esta ação não pode ser desfeita.`
-    )
-    if (!confirmed) return
-
-    setDeleteError(null)
-    try {
-      setDeletingId(project.id)
-      const response = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' })
-      const data = await response.json().catch(() => null)
-      if (!response.ok) {
-        throw new Error(data?.error || 'Falha ao excluir o projeto')
-      }
-      setProjects((prev) => prev.filter((p) => p.id !== project.id))
-    } catch (error) {
-      console.error('Delete project failed:', error)
-      setDeleteError(error instanceof Error ? error.message : 'Falha ao excluir o projeto')
-    } finally {
-      setDeletingId(null)
-    }
-  }
-
-  function getStatusBadge(status: ProjectStatus) {
-    const statusMap: Record<ProjectStatus, { bg: string; text: string; label: string }> = {
-      created: { bg: 'bg-blue-500/10', text: 'text-blue-400', label: 'Created' },
-      uploading: { bg: 'bg-blue-500/10', text: 'text-blue-400', label: 'Uploading' },
-      normalizing: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', label: 'Normalizing' },
-      transcribing: { bg: 'bg-purple-500/10', text: 'text-purple-400', label: 'Transcribing' },
-      analyzing: { bg: 'bg-cyan-500/10', text: 'text-cyan-400', label: 'Analyzing' },
-      ready: { bg: 'bg-orange-500/10', text: 'text-orange-400', label: 'Ready' },
-      rendering: { bg: 'bg-green-500/10', text: 'text-green-400', label: 'Rendering' },
-      complete: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', label: 'Complete' },
-      error: { bg: 'bg-red-500/10', text: 'text-red-400', label: 'Error' }
-    }
-
-    const badge = statusMap[status]
-    return (
-      <span className={`px-2 py-1 rounded text-xs font-medium ${badge.bg} ${badge.text}`}>
-        {badge.label}
-      </span>
-    )
-  }
+  const counts = projects.reduce((result, project) => {
+    const state = deriveDashboardProject({ status: project.status }).state
+    result[state] = (result[state] ?? 0) + 1
+    return result
+  }, {} as Record<string, number>)
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#050508] to-zinc-900">
-      {/* Header */}
-      <header className="border-b border-zinc-800 bg-black/40 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-6 py-6">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
-                <svg
-                  className="w-6 h-6 text-white"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path d="M2 6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM4 9h12m-6 4v2m-4-2v2m8-2v2" />
-                </svg>
-              </div>
-              <h1 className="text-3xl font-bold">
-                Video Editor <span className="text-amber-400">IA</span>
-              </h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <a
-                href="/assets"
-                className="text-sm text-zinc-400 hover:text-amber-400 transition-colors"
-                title="Biblioteca de assets"
-              >
-                📚 Assets
-              </a>
-              <a
-                href="/settings"
-                className="text-sm text-zinc-400 hover:text-amber-400 transition-colors"
-                title="Configurações"
-              >
-                ⚙ Configurações
-              </a>
-            </div>
-          </div>
+    <main className="min-h-screen bg-[#08090d] text-[#f4f5f7]">
+      <header className="border-b border-white/10 bg-[#08090d]/90 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-[1440px] items-center justify-between px-6 py-5 lg:px-10">
+          <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-[#7167ff] font-black text-white">A</div><div><p className="text-[11px] uppercase tracking-[0.24em] text-[#8f93a3]">Apollo studio</p><h1 className="text-lg font-semibold">Central de produções</h1></div></div>
+          <nav className="flex items-center gap-2 text-sm"><a className="rounded-lg px-3 py-2 text-[#b9bdc9] hover:bg-white/5 hover:text-white" href="/assets">Biblioteca</a><a className="rounded-lg px-3 py-2 text-[#b9bdc9] hover:bg-white/5 hover:text-white" href="/settings">Workspace</a></nav>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-6 py-12">
-        {/* Upload Zone */}
-        <div className="mb-12">
-          <label
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-            className={`block p-12 rounded-2xl border-2 border-dashed transition-all cursor-pointer ${
-              dragActive
-                ? 'border-amber-400 bg-amber-400/5'
-                : 'border-zinc-700 hover:border-amber-400/50 bg-zinc-900/30 hover:bg-zinc-900/50'
-            }`}
-          >
-            <input
-              type="file"
-              accept="video/*"
-              onChange={handleFileInput}
-              disabled={uploading}
-              className="hidden"
-            />
-            <div className="text-center">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-amber-400/20 to-orange-500/20 mb-4">
-                <svg
-                  className="w-8 h-8 text-amber-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                  />
-                </svg>
-              </div>
-              <h2 className="text-2xl font-bold mb-2">Upload your video</h2>
-              <p className="text-zinc-400 mb-2">
-                Drag and drop your video here or click to select
-              </p>
-              <p className="text-sm text-zinc-500">
-                Supports MP4, MOV, AVI and other common video formats
-              </p>
-              {uploading && (
-                <p className="text-amber-400 mt-4">
-                  {uploadMessage || 'Uploading...'}
-                </p>
-              )}
-            </div>
+      <div className="mx-auto max-w-[1440px] px-6 py-8 lg:px-10 lg:py-10">
+        <section className="grid gap-6 border-b border-white/10 pb-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div><p className="mb-3 text-xs font-medium uppercase tracking-[0.22em] text-[#7f86ff]">Fila editorial</p><h2 className="max-w-3xl text-4xl font-semibold leading-[1.04] tracking-[-0.04em] md:text-6xl">Do bruto ao anúncio,<br/><span className="text-[#9da2b4]">sem perder o fio.</span></h2><p className="mt-5 max-w-2xl text-base leading-7 text-[#9da2b4]">Acompanhe decisões do diretor, revisões e saídas finais. O progresso só aparece quando existe medição real.</p></div>
+          <label className="group flex cursor-pointer items-center justify-between rounded-2xl border border-[#7167ff]/50 bg-[#7167ff]/10 p-5 transition hover:border-[#8d85ff] hover:bg-[#7167ff]/15 focus-within:ring-2 focus-within:ring-[#7167ff]">
+            <input className="sr-only" type="file" accept="video/*" disabled={uploading || isNavigating} onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file) }} />
+            <span><span className="block font-semibold">Nova produção</span><span className="mt-1 block text-sm text-[#aaaee0]">Envie o primeiro vídeo bruto</span></span><span className="grid h-11 w-11 place-items-center rounded-full bg-[#7167ff] text-2xl">+</span>
           </label>
-        </div>
+        </section>
 
-        {/* Projects List */}
-        <div>
-          <h2 className="text-2xl font-bold mb-6">Recent Projects</h2>
+        <section aria-label="Resumo dos projetos" className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 md:grid-cols-4 lg:grid-cols-6 my-8">
+          {(['processing','awaiting-review','failed','completed'] as const).map((state) => <div className="bg-[#0d0f15] px-5 py-4" key={state}><p className="text-2xl font-semibold tabular-nums">{counts[state] ?? 0}</p><p className="mt-1 text-xs text-[#8e93a3]">{STATE_LABELS[state]}</p></div>)}
+          <div className="col-span-2 bg-[#0d0f15] px-5 py-4"><p className="text-sm font-medium">{message ?? (uploading ? 'Preparando vídeo…' : 'Sistema pronto')}</p><p className="mt-1 text-xs text-[#8e93a3]">Atualizações entram por evento, sem percentual estimado.</p></div>
+        </section>
 
-          {deleteError && (
-            <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/50 text-sm text-red-400">
-              {deleteError}
-            </div>
-          )}
-
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[...Array(6)].map((_, i) => (
-                <div
-                  key={i}
-                  className="h-32 rounded-xl bg-zinc-800/50 animate-pulse"
-                />
-              ))}
-            </div>
-          ) : projects.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {projects.map((project) => (
-                <div
-                  key={project.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => router.push(`/project/${project.id}`)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      router.push(`/project/${project.id}`)
-                    }
-                  }}
-                  className="group relative text-left p-6 rounded-xl bg-zinc-900/50 border border-zinc-800 hover:border-amber-400/50 transition-all hover:bg-zinc-900/80 cursor-pointer"
-                >
-                  <button
-                    type="button"
-                    onClick={(e) => handleDeleteProject(e, project)}
-                    disabled={deletingId === project.id}
-                    title="Excluir projeto"
-                    aria-label={`Excluir projeto ${project.name}`}
-                    className="absolute top-3 right-3 p-2 rounded-lg text-zinc-500 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50"
-                  >
-                    {deletingId === project.id ? (
-                      <span className="inline-block w-4 h-4 animate-spin rounded-full border-b-2 border-red-400" />
-                    ) : (
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    )}
-                  </button>
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1 pr-6">
-                      <h3 className="font-bold text-lg truncate group-hover:text-amber-400 transition-colors">
-                        {project.name}
-                      </h3>
-                      <p className="text-sm text-zinc-500 mt-1">
-                        {new Date(project.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <span className="ml-2 text-xs font-mono px-2 py-1 rounded bg-zinc-800">
-                      {project.format}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    {getStatusBadge(project.status)}
-                    <svg
-                      className="w-5 h-5 text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <p className="text-zinc-400 mb-4">No projects yet</p>
-              <p className="text-sm text-zinc-500">Upload a video to get started</p>
-            </div>
-          )}
-        </div>
-      </main>
-    </div>
+        <section><div className="mb-5 flex items-end justify-between"><div><p className="text-xs uppercase tracking-[0.2em] text-[#777d8e]">Projetos</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Em andamento e concluídos</h2></div><span className="text-sm text-[#777d8e]">{projects.length} projetos</span></div>
+          {loading ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[0,1,2,3,4,5].map((item) => <div className="h-64 animate-pulse rounded-2xl bg-white/5" key={item}/>)}</div> : projects.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-white/15 px-8 py-20 text-center"><p className="text-xl font-semibold">Sua primeira produção começa aqui.</p><p className="mx-auto mt-2 max-w-md text-[#9297a7]">Envie um vídeo bruto. O Apollo organiza o material e mostra o próximo passo.</p></div>
+          ) : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{projects.map((project) => {
+            const view = deriveDashboardProject({ status: project.status, completed: project.job?.completed, total: project.job?.total })
+            return <article className="group overflow-hidden rounded-2xl border border-white/10 bg-[#0d0f15] transition hover:-translate-y-0.5 hover:border-[#7167ff]/55" key={project.id}>
+              <button className="w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#7167ff]" onClick={() => startNavigation(() => router.push(`/project/${project.id}`))}>
+                <div className="relative aspect-[16/7] overflow-hidden bg-[radial-gradient(circle_at_25%_20%,#36306d_0%,#161827_42%,#0b0c11_100%)] p-5"><span className="rounded-md border border-white/15 bg-black/25 px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-white/80">{project.format}</span><div className="absolute inset-x-5 bottom-5 flex items-end justify-between"><span className="text-xs text-white/55">{project.stylePreset}</span><span className="text-4xl font-light text-white/20">▶</span></div></div>
+                <div className="p-5"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 className="truncate text-lg font-semibold">{project.name}</h3><p className="mt-1 text-xs text-[#777d8e]">Atualizado {new Date(project.updatedAt).toLocaleDateString('pt-BR')}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] ${view.state === 'failed' ? 'bg-red-500/15 text-red-300' : view.state === 'awaiting-review' ? 'bg-amber-400/15 text-amber-200' : view.state === 'completed' ? 'bg-emerald-400/15 text-emerald-200' : 'bg-[#7167ff]/15 text-[#b9b5ff]'}`}>{STATE_LABELS[view.state]}</span></div>
+                  <div className="mt-5 border-t border-white/8 pt-4">{view.progress === null ? <div className="flex items-center gap-2 text-xs text-[#8d92a2]"><span className="h-1.5 w-1.5 rounded-full bg-[#7167ff]"/>Etapa atual: {project.job?.status ?? project.status}</div> : <><div className="mb-2 flex justify-between text-xs text-[#8d92a2]"><span>Progresso medido</span><span>{view.progress}%</span></div><div className="h-1 overflow-hidden rounded-full bg-white/8"><div className="h-full bg-[#7167ff]" style={{ width: `${view.progress}%` }}/></div></>}
+                    <div className="mt-4 flex items-center justify-between text-sm"><span className="text-[#a5a9b7]">{project.outputCount} saídas · {project.reviewIssueCount ?? '—'} pendências</span><span className="font-medium text-[#8e87ff]">{view.action} →</span></div>
+                  </div></div>
+              </button></article>
+          })}</div>}
+        </section>
+      </div>
+    </main>
   )
 }

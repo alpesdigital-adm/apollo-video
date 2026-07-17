@@ -554,11 +554,11 @@
 
 ### F1.001 — Dashboard de projetos [FR-002]
 
-- [ ] Criar query agregada de projeto, versão atual, jobs, review issues e outputs.
-- [ ] Implementar cards conforme referência visual, com progresso derivado de steps/items reais.
-- [ ] Exibir estados vazio, processando, aguardando revisão, falho, concluído e arquivado.
-- [ ] Atualizar cards por eventos sem fabricar percentual quando o job não informa progresso.
-- [ ] Criar E2E para transições e ação recomendada em cada estado.
+- [x] Criar query agregada de projeto, versão atual, jobs, review issues e outputs. Evidência F1-001: `/api/projects` agrega job mais recente, versão/review explicitamente unknown e outputCount derivado, sem inventar registros ausentes.
+- [x] Implementar cards conforme referência visual, com progresso derivado de steps/items reais. Evidência F1-001: dashboard dark editorial usa cards de produção, faixa de mídia, estado, etapa, outputs e barra somente com completed/total válidos.
+- [x] Exibir estados vazio, processando, aguardando revisão, falho, concluído e arquivado. Evidência F1-001: máquina de apresentação deriva seis estados, empty state orienta o primeiro upload e cada estado possui linguagem/ação própria.
+- [x] Atualizar cards por eventos sem fabricar percentual quando o job não informa progresso. Evidência F1-001: listener `apollo:project-updated` refaz a query; helper retorna progress `null` sem total medido e a UI mostra apenas a etapa atual.
+- [x] Criar E2E para transições e ação recomendada em cada estado. Evidência F1-001: regressão determinística percorre draft, processing, review, failed, completed e archived, validando ações e ausência de progresso estimado.
 
 ### F1.002 — Busca e filtros [FR-003]
 
