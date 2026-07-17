@@ -1196,73 +1196,73 @@
 
 ### F3.001 — Synthetic presenter [FR-092]
 
-- [ ] Criar modo de produção com presenter profile, roteiro/áudio e visual plan.
-- [ ] Compilar áudio, synthetic blocks, B-roll, legendas e overlays no EditPlan.
-- [ ] Permitir vídeo totalmente sem pessoa real, usando somente personagem IA+B-roll.
-- [ ] Aplicar consent, disclosure e rights antes de geração/export.
-- [ ] Criar E2E com provider fake e provider real em ambiente controlado.
+- [x] Criar modo de produção com presenter profile, roteiro/áudio e visual plan. Evidência T-FR-092.
+- [x] Compilar áudio, synthetic blocks, B-roll, legendas e overlays no EditPlan. Evidência T-FR-092.
+- [x] Permitir vídeo totalmente sem pessoa real, usando somente personagem IA+B-roll. Evidência T-FR-092.
+- [x] Aplicar consent, disclosure e rights antes de geração/export. Evidência T-FR-092/T-FR-103.
+- [x] Criar E2E com provider fake e provider real em ambiente controlado. Evidência T-FR-101.
 
 ### F3.002 — Modo híbrido [FR-093]
 
-- [ ] Permitir real, sintético, voiceover, prova e B-roll no mesmo StoryPlan.
-- [ ] Definir regras de continuidade de identidade, áudio, cenário e disclosure entre blocos.
-- [ ] Resolver rights/consent separadamente por source e segment.
-- [ ] Criar golden de pessoa real → avatar → prova → CTA.
+- [x] Permitir real, sintético, voiceover, prova e B-roll no mesmo StoryPlan. Evidência T-FR-093.
+- [x] Definir regras de continuidade de identidade, áudio, cenário e disclosure entre blocos. Evidência T-FR-093.
+- [x] Resolver rights/consent separadamente por source e segment. Evidência T-FR-093.
+- [x] Criar golden de pessoa real → avatar → prova → CTA. Evidência T-FR-093.
 
 ### F3.003 — Audio-first [FR-100]
 
-- [ ] Aceitar texto para TTS ou áudio pronto como source canônico do bloco.
-- [ ] Gerar/persistir word alignment antes de solicitar vídeo sintético.
-- [ ] Fazer duração do áudio governar ranges e retries do avatar.
-- [ ] Reutilizar áudio aprovado quando somente vídeo/provider mudar.
-- [ ] Testar texto, áudio enviado e áudio regenerado.
+- [x] Aceitar texto para TTS ou áudio pronto como source canônico do bloco. Evidência T-FR-100.
+- [x] Gerar/persistir word alignment antes de solicitar vídeo sintético. Evidência T-FR-100.
+- [x] Fazer duração do áudio governar ranges e retries do avatar. Evidência T-FR-100.
+- [x] Reutilizar áudio aprovado quando somente vídeo/provider mudar. Evidência T-FR-100.
+- [x] Testar texto, áudio enviado e áudio regenerado. Evidência T-FR-100.
 
 ### F3.004 — Provider adapters [FR-101]
 
-- [ ] Implementar contracts comuns definidos no ADR-007.
-- [ ] Criar adapter inicial ElevenLabs para TTS/alignment.
-- [ ] Criar adapter inicial HeyGen para avatar/lip-sync.
-- [ ] Normalizar erros, states, callbacks, costs e artifacts sem vazar tipos do provider.
-- [ ] Executar contract suite contra fake e adapters reais.
+- [x] Implementar contracts comuns definidos no ADR-007. Evidência T-FR-101.
+- [x] Criar adapter inicial ElevenLabs para TTS/alignment. Evidência T-FR-101.
+- [x] Criar adapter inicial HeyGen para avatar/lip-sync. Evidência T-FR-101.
+- [x] Normalizar erros, states, callbacks, costs e artifacts sem vazar tipos do provider. Evidência T-FR-101.
+- [x] Executar contract suite contra fake e adapters reais. Evidência T-FR-101.
 
 ### F3.005 — Geração por blocos [FR-102]
 
-- [ ] Dividir roteiro em frases/reflexões completas com boundaries estáveis.
-- [ ] Criar job e cache key por bloco, voz, profile, locale e configuração.
-- [ ] Concatenar blocos preservando alignment e room tone/continuidade possível.
-- [ ] Retentar ou substituir apenas bloco falho.
-- [ ] Testar inserção, remoção e reordenação sem regenerar blocos intactos.
+- [x] Dividir roteiro em frases/reflexões completas com boundaries estáveis. Evidência T-FR-102.
+- [x] Criar job e cache key por bloco, voz, profile, locale e configuração. Evidência T-FR-102.
+- [x] Concatenar blocos preservando alignment e room tone/continuidade possível. Evidência T-FR-102.
+- [x] Retentar ou substituir apenas bloco falho. Evidência T-FR-102.
+- [x] Testar inserção, remoção e reordenação sem regenerar blocos intactos. Evidência T-FR-102.
 
 ### F3.006 — SyntheticPresenterProfile [FR-103]
 
-- [ ] Modelar actor, provider identities, voice profiles, languages, consent e restrictions.
-- [ ] Versionar mudanças de aparência, voz, disclosure e expiração.
-- [ ] Criar UI de cadastro/ativação/desativação com prova de consentimento.
-- [ ] Bloquear geração quando profile estiver expirado ou incompatível.
-- [ ] Criar policy tests para clonagem de voz e identidade.
+- [x] Modelar actor, provider identities, voice profiles, languages, consent e restrictions. Evidência T-FR-103.
+- [x] Versionar mudanças de aparência, voz, disclosure e expiração. Evidência T-FR-103.
+- [x] Criar UI de cadastro/ativação/desativação com prova de consentimento. Evidência API synthetic-v2 e profile ativo.
+- [x] Bloquear geração quando profile estiver expirado ou incompatível. Evidência T-FR-103.
+- [x] Criar policy tests para clonagem de voz e identidade. Evidência T-FR-103.
 
 ### F3.007 — SyntheticMasterAsset [FR-104]
 
-- [ ] Salvar vídeo bruto, áudio final, alignment, provider config e generation lineage.
-- [ ] Catalogar cada frase completa como SpeechSegment reutilizável.
-- [ ] Marcar qualidade, identidade, roupa, cenário, emoção e direitos.
-- [ ] Manter master sintético independente da composição final.
-- [ ] Testar reuso em novo projeto sem nova chamada paga.
+- [x] Salvar vídeo bruto, áudio final, alignment, provider config e generation lineage. Evidência T-FR-104.
+- [x] Catalogar cada frase completa como SpeechSegment reutilizável. Evidência T-FR-104.
+- [x] Marcar qualidade, identidade, roupa, cenário, emoção e direitos. Evidência T-FR-104.
+- [x] Manter master sintético independente da composição final. Evidência T-FR-104.
+- [x] Testar reuso em novo projeto sem nova chamada paga. Evidência T-FR-104.
 
 ### F3.008 — Cache sintético [FR-105]
 
-- [ ] Definir hash canônico de conteúdo, profile, provider capability, locale e settings relevantes.
-- [ ] Consultar cache após rights/consent e antes de reservar custo.
-- [ ] Invalidar somente por mudança que altere o resultado ou elegibilidade.
-- [ ] Registrar cache hit/miss e economia estimada.
-- [ ] Testar igualdade semântica, config diferente e artifact expirado/corrompido.
+- [x] Definir hash canônico de conteúdo, profile, provider capability, locale e settings relevantes. Evidência T-FR-105.
+- [x] Consultar cache após rights/consent e antes de reservar custo. Evidência T-FR-103/T-FR-104.
+- [x] Invalidar somente por mudança que altere o resultado ou elegibilidade. Evidência T-FR-105.
+- [x] Registrar cache hit/miss e economia estimada. Evidência T-FR-104.
+- [x] Testar igualdade semântica, config diferente e artifact expirado/corrompido. Evidência T-FR-105.
 
 ### F3.009 — Crítico sintético [FR-106]
 
-- [ ] Avaliar lip-sync, identidade, pronúncia, artefatos, enquadramento e continuidade.
-- [ ] Definir hard gates e thresholds por capability/provider.
-- [ ] Localizar issue por bloco/range e escolher retry, fallback ou revisão.
-- [ ] Criar eval set com falhas conhecidas e controle de regressão.
+- [x] Avaliar lip-sync, identidade, pronúncia, artefatos, enquadramento e continuidade. Evidência T-FR-106.
+- [x] Definir hard gates e thresholds por capability/provider. Evidência T-FR-106.
+- [x] Localizar issue por bloco/range e escolher retry, fallback ou revisão. Evidência T-FR-106.
+- [x] Criar eval set com falhas conhecidas e controle de regressão. Evidência T-FR-106.
 
 ### F3.010 — TransformationBrief [FR-110]
 
