@@ -707,11 +707,11 @@
 
 ### F1.021 — StoryPlan [FR-061]
 
-- [ ] Modelar acts, story blocks, role, intent, dependencies, source candidates e duration target.
-- [ ] Permitir cold open referenciar trecho posterior sem duplicar source.
-- [ ] Preservar qualifiers, claims, proof context e CTA dependencies.
-- [ ] Validar cobertura narrativa e duração antes de compilar EditPlan.
-- [ ] Criar golden stories linear, cold-open e voiceover.
+- [x] Modelar acts, story blocks, role, intent, dependencies, source candidates e duration target. Evidência F1-021: `StoryPlan/v1` cobre estrutura e bounds antes de cortes.
+- [x] Permitir cold open referenciar trecho posterior sem duplicar source. Evidência F1-021: bloco carrega `sourceRangeId` único e presentation de referência.
+- [x] Preservar qualifiers, claims, proof context e CTA dependencies. Evidência F1-021: conteúdo estruturado e dependências são validados por papel.
+- [x] Validar cobertura narrativa e duração antes de compilar EditPlan. Evidência F1-021: validator exige uso exato dos blocos, dependências existentes e duração dentro do target.
+- [x] Criar golden stories linear, cold-open e voiceover. Evidência F1-021/T-FR-061: três histórias passam o gate e preservam suas diferenças de apresentação.
 
 ### F1.022 — Alternativas de montagem [FR-062]
 
