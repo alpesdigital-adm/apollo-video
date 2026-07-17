@@ -569,10 +569,10 @@
 
 ### F1.003 — Ações rápidas [FR-004]
 
-- [ ] Implementar abrir, revisar, duplicar, renomear, arquivar e restaurar projeto.
-- [ ] Aplicar autorização e confirmação conforme impacto de cada ação.
-- [ ] Refletir resultado otimista somente quando houver rollback seguro.
-- [ ] Criar E2E incluindo duplicação copy-on-write e falha recuperável.
+- [x] Implementar abrir, revisar, duplicar, renomear, arquivar e restaurar projeto. Evidência F1-003: cards expõem as seis ações e endpoints internos preservam a etapa anterior ao arquivar, restauram e duplicam por referências compartilhadas.
+- [x] Aplicar autorização e confirmação conforme impacto de cada ação. Evidência F1-003: serviço de aplicação exige `projects:read/write`, isola por workspace; mutações web rejeitam cross-origin e arquivamento exige confirmação explícita.
+- [x] Refletir resultado otimista somente quando houver rollback seguro. Evidência F1-003: rename/archive/restore usam snapshot anterior imutável e rollback exato; duplicação aguarda confirmação do servidor antes de entrar na lista.
+- [x] Criar E2E incluindo duplicação copy-on-write e falha recuperável. Evidência F1-003: regressão percorre abrir/revisar/renomear/duplicar/arquivar/restaurar, prova compartilhamento de snapshots, isolamento, escopos, confirmação e rollback.
 
 ### F1.004 — Objetivo estratégico [FR-010]
 

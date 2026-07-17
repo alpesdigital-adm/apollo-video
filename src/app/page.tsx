@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { deriveDashboardProject } from '@/v2/domain/project-dashboard'
+import { optimisticProjectPatch } from '@/v2/application/project-quick-actions'
 
 interface ProjectSummary {
   id: string; name: string; format: string; stylePreset: string; status: string; error?: string | null
@@ -25,6 +26,7 @@ export default function Dashboard() {
   const [message, setMessage] = useState<string | null>(null)
   const [filters, setFilters] = useState<ProjectFilters>(EMPTY_FILTERS)
   const [filtersReady, setFiltersReady] = useState(false)
+  const [actionProjectId, setActionProjectId] = useState<string | null>(null)
   const [isNavigating, startNavigation] = useTransition()
 
   async function loadProjects(signal?: AbortSignal) {
@@ -70,6 +72,35 @@ export default function Dashboard() {
       startNavigation(() => router.push(`/project/${data.projectId}`))
     } catch (error) { setMessage(error instanceof Error ? error.message : 'O upload não foi concluído.') }
     finally { setUploading(false) }
+  }
+
+  async function runQuickAction(project: ProjectSummary, action: 'duplicate' | 'rename' | 'archive' | 'restore') {
+    let name: string | undefined
+    if (action === 'rename') {
+      const answer = window.prompt('Novo nome do projeto', project.name)
+      if (answer === null) return
+      name = answer.trim()
+      if (!name) { setMessage('O nome do projeto não pode ficar vazio.'); return }
+    }
+    if (action === 'archive' && !window.confirm(`Arquivar “${project.name}”? O projeto poderá ser restaurado depois.`)) return
+    const patch = action === 'rename' ? { name } : action === 'archive' ? { status: 'archived' } : action === 'restore' ? { status: 'created' } : null
+    const optimistic = patch ? optimisticProjectPatch(projects, project.id, patch) : null
+    if (optimistic) setProjects([...optimistic.next])
+    setActionProjectId(project.id); setMessage(null)
+    try {
+      const response = await fetch(action === 'duplicate' ? `/api/projects/${project.id}/duplicate` : `/api/projects/${project.id}`, {
+        method: action === 'duplicate' ? 'POST' : 'PATCH',
+        headers: action === 'duplicate' ? undefined : { 'content-type': 'application/json' },
+        ...(action === 'duplicate' ? {} : { body: JSON.stringify({ action, ...(name ? { name } : {}) }) }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error ?? 'A ação não foi concluída.')
+      await loadProjects()
+      setMessage(action === 'duplicate' ? 'Cópia criada sem duplicar os arquivos de origem.' : 'Projeto atualizado.')
+    } catch (error) {
+      if (optimistic) setProjects([...optimistic.rollback()])
+      setMessage(error instanceof Error ? error.message : 'A ação não foi concluída.')
+    } finally { setActionProjectId(null) }
   }
 
   const normalizedText = filters.text.trim().toLocaleLowerCase('pt-BR')
@@ -134,7 +165,14 @@ export default function Dashboard() {
                   <div className="mt-5 border-t border-white/8 pt-4">{view.progress === null ? <div className="flex items-center gap-2 text-xs text-[#8d92a2]"><span className="h-1.5 w-1.5 rounded-full bg-[#7167ff]"/>Etapa atual: {project.job?.status ?? project.status}</div> : <><div className="mb-2 flex justify-between text-xs text-[#8d92a2]"><span>Progresso medido</span><span>{view.progress}%</span></div><div className="h-1 overflow-hidden rounded-full bg-white/8"><div className="h-full bg-[#7167ff]" style={{ width: `${view.progress}%` }}/></div></>}
                     <div className="mt-4 flex items-center justify-between text-sm"><span className="text-[#a5a9b7]">{project.outputCount} saídas · {project.reviewIssueCount ?? '—'} pendências</span><span className="font-medium text-[#8e87ff]">{view.action} →</span></div>
                   </div></div>
-              </button></article>
+              </button>
+              <div className="flex flex-wrap items-center gap-1 border-t border-white/8 px-4 py-3 text-xs">
+                <button className="rounded-lg px-2.5 py-2 text-[#c4c7d1] hover:bg-white/5" onClick={() => startNavigation(() => router.push(`/project/${project.id}`))}>{view.state === 'awaiting-review' ? 'Revisar' : 'Abrir'}</button>
+                <button className="rounded-lg px-2.5 py-2 text-[#c4c7d1] hover:bg-white/5 disabled:opacity-40" disabled={actionProjectId === project.id} onClick={() => runQuickAction(project, 'duplicate')}>Duplicar</button>
+                <button className="rounded-lg px-2.5 py-2 text-[#c4c7d1] hover:bg-white/5 disabled:opacity-40" disabled={actionProjectId === project.id} onClick={() => runQuickAction(project, 'rename')}>Renomear</button>
+                <button className="ml-auto rounded-lg px-2.5 py-2 text-[#9da2b4] hover:bg-white/5 disabled:opacity-40" disabled={actionProjectId === project.id} onClick={() => runQuickAction(project, view.state === 'archived' ? 'restore' : 'archive')}>{view.state === 'archived' ? 'Restaurar' : 'Arquivar'}</button>
+              </div>
+            </article>
           })}</div>}
         </section>
       </div>

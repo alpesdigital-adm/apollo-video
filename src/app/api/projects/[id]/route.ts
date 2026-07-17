@@ -3,6 +3,42 @@ import { prisma } from '@/lib/db'
 import { deleteProjectFiles } from '@/lib/project-files'
 import { isRenderActive } from '@/lib/services/remotion-render'
 
+function sameOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get('origin')
+  const fetchSite = request.headers.get('sec-fetch-site')
+  return (!origin || origin === request.nextUrl.origin) && (!fetchSite || fetchSite === 'same-origin')
+}
+
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const { id } = await props.params
+  if (!sameOrigin(request)) return NextResponse.json({ error: 'Origem não autorizada' }, { status: 403 })
+  try {
+    const body = await request.json() as { action?: string; name?: string }
+    const project = await prisma.project.findUnique({ where: { id } })
+    if (!project) return NextResponse.json({ error: 'Projeto não encontrado' }, { status: 404 })
+    if (body.action === 'rename') {
+      const name = body.name?.trim().replace(/\s+/g, ' ') ?? ''
+      if (name.length < 1 || name.length > 120) return NextResponse.json({ error: 'O nome deve ter entre 1 e 120 caracteres' }, { status: 400 })
+      const updated = await prisma.project.update({ where: { id }, data: { name } })
+      return NextResponse.json({ project: { id: updated.id, name: updated.name, status: updated.status } })
+    }
+    if (body.action === 'archive') {
+      if (isRenderActive(id)) return NextResponse.json({ error: 'Não é possível arquivar durante um render' }, { status: 409 })
+      if (project.status === 'archived') return NextResponse.json({ project: { id, status: 'archived' } })
+      const updated = await prisma.project.update({ where: { id }, data: { archivedFromStatus: project.status, status: 'archived' } })
+      return NextResponse.json({ project: { id: updated.id, status: updated.status } })
+    }
+    if (body.action === 'restore') {
+      if (project.status !== 'archived') return NextResponse.json({ error: 'O projeto não está arquivado' }, { status: 409 })
+      const updated = await prisma.project.update({ where: { id }, data: { status: project.archivedFromStatus ?? 'created', archivedFromStatus: null } })
+      return NextResponse.json({ project: { id: updated.id, status: updated.status } })
+    }
+    return NextResponse.json({ error: 'Ação não suportada' }, { status: 400 })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Falha ao alterar projeto' }, { status: 500 })
+  }
+}
+
 export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const projectId = params.id
