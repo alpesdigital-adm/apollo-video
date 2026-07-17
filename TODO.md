@@ -916,40 +916,40 @@
 
 ### F1.049 — AssetBrief e seleção de B-roll
 
-- [ ] Implementar `AssetBrief` com intenção, conteúdo, estilo, duração, entrada/saída e elementos proibidos.
-- [ ] Pesquisar biblioteca antes de stock/geração e registrar candidates descartados.
-- [ ] Avaliar relevância, continuidade, qualidade, rights e excesso de novidade.
-- [ ] Permitir decisão “não usar insert” quando nenhum candidate for adequado.
-- [ ] Criar eval de inserts corretos, literais demais, irrelevantes e visualmente conflitantes.
+- [x] Implementar `AssetBrief` com intenção, conteúdo, estilo, duração, entrada/saída e elementos proibidos. Evidência F1-049: contrato tipado e validado em `asset-selection.ts`.
+- [x] Pesquisar biblioteca antes de stock/geração e registrar candidates descartados. Evidência F1-049: ordem determinística e auditId preservam avaliações.
+- [x] Avaliar relevância, continuidade, qualidade, rights e excesso de novidade. Evidência T-FR-218: score multidimensional com motivos explícitos.
+- [x] Permitir decisão “não usar insert” quando nenhum candidate for adequado. Evidência T-FR-218: todos rejeitados retornam `no_insert`.
+- [x] Criar eval de inserts corretos, literais demais, irrelevantes e visualmente conflitantes. Evidência T-FR-218: quatro classes cobertas.
 
 ### F1.050 — Ciclo fechado de qualidade
 
-- [ ] Implementar hard validators técnicos, policy e de integridade.
-- [ ] Implementar asset critic antes de inserir mídia gerada/reutilizada.
-- [ ] Implementar proxy critic por rubrica, formato e range.
-- [ ] Compilar issues em patches elegíveis e rerender mínimo.
-- [ ] Encerrar por aprovação, convergência, budget, issue não corrigível ou revisão humana.
-- [ ] Versionar reports e medir regressão no dataset de referência.
+- [x] Implementar hard validators técnicos, policy e de integridade. Evidência T-FR-219: hard issues bloqueiam final.
+- [x] Implementar asset critic antes de inserir mídia gerada/reutilizada. Evidência T-FR-219: relevância, continuidade, qualidade, direitos e novidade.
+- [x] Implementar proxy critic por rubrica, formato e range. Evidência T-FR-219: crítica localizada por range.
+- [x] Compilar issues em patches elegíveis e rerender mínimo. Evidência T-FR-219: range mínimo agregado.
+- [x] Encerrar por aprovação, convergência, budget, issue não corrigível ou revisão humana. Evidência T-FR-219: cinco razões terminais cobertas.
+- [x] Versionar reports e medir regressão no dataset de referência. Evidência T-FR-219: quality-report/v1 com fingerprint e delta.
 
 ### F1.051 — Gate do MVP Core [AC-001 a AC-015]
 
-- [ ] Executar AC-001: workspace, marca/guardrails opcionais e criação de projeto.
-- [ ] Executar AC-002: objetivo obrigatório e briefing livre vazio.
-- [ ] Executar AC-003: vídeo/áudio persistido como master e proxy derivado.
-- [ ] Executar AC-004: transcript com timestamps e detecção de silêncios/retakes.
-- [ ] Executar AC-005: TreatmentPlan, StoryPlan e EditPlan estruturados.
-- [ ] Executar AC-006: talking head+B-roll e áudio+B-roll sem pessoas.
-- [ ] Executar AC-007: asset gerado avaliado, rejeitado e substituído.
-- [ ] Executar AC-008: proxy com hard validation e crítica localizada.
-- [ ] Executar AC-009: annotation em região/cena aplicada em nova versão.
-- [ ] Executar AC-010: trim, troca de B-roll, texto/legenda/layout e undo.
-- [ ] Executar AC-011: duplicação sem copiar masters.
-- [ ] Executar AC-012: export 9:16 e 16:9 validados separadamente.
-- [ ] Executar AC-013: final reconstruído pelo manifest.
-- [ ] Executar AC-014: restart e retry sem projeto preso.
-- [ ] Executar AC-015: dashboard fiel aos estados do workflow.
-- [ ] Executar AC-016: client/agente externo conclui jornada MVP com paridade de versões, policies, jobs e artifacts.
-- [ ] Registrar evidência automática/manual e aprovar gate da fase.
+- [x] Executar AC-001: workspace, marca/guardrails opcionais e criação de projeto. Evidência T-AC-001.
+- [x] Executar AC-002: objetivo obrigatório e briefing livre vazio. Evidência T-AC-002.
+- [x] Executar AC-003: vídeo/áudio persistido como master e proxy derivado. Evidência T-AC-003.
+- [x] Executar AC-004: transcript com timestamps e detecção de silêncios/retakes. Evidência T-AC-004.
+- [x] Executar AC-005: TreatmentPlan, StoryPlan e EditPlan estruturados. Evidência T-AC-005.
+- [x] Executar AC-006: talking head+B-roll e áudio+B-roll sem pessoas. Evidência T-AC-006.
+- [x] Executar AC-007: asset gerado avaliado, rejeitado e substituído. Evidência T-AC-007.
+- [x] Executar AC-008: proxy com hard validation e crítica localizada. Evidência T-AC-008.
+- [x] Executar AC-009: annotation em região/cena aplicada em nova versão. Evidência T-AC-009.
+- [x] Executar AC-010: trim, troca de B-roll, texto/legenda/layout e undo. Evidência T-AC-010.
+- [x] Executar AC-011: duplicação sem copiar masters. Evidência T-AC-011.
+- [x] Executar AC-012: export 9:16 e 16:9 validados separadamente. Evidência T-AC-012.
+- [x] Executar AC-013: final reconstruído pelo manifest. Evidência T-AC-013.
+- [x] Executar AC-014: restart e retry sem projeto preso. Evidência T-AC-014.
+- [x] Executar AC-015: dashboard fiel aos estados do workflow. Evidência T-AC-015.
+- [x] Executar AC-016: client/agente externo conclui jornada MVP com paridade de versões, policies, jobs e artifacts. Evidência T-AC-016 e endpoint quality-v2.
+- [x] Registrar evidência automática/manual e aprovar gate da fase. Evidência: `docs/quality/mvp-core-gate-v1.md`, gate exige 16/16 automáticos.
 
 ---
 
