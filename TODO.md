@@ -737,10 +737,10 @@
 
 ### F1.025 — Decisions log [FR-065]
 
-- [ ] Persistir decisão, candidates, evidência, confidence, score, custo e actor.
-- [ ] Vincular decisão a run, plan node, command e artifact resultante.
-- [ ] Exibir explicação resumida e detalhe auditável no Director panel.
-- [ ] Testar lineage de decisão até o frame final.
+- [x] Persistir decisão, candidates, evidência, confidence, score, custo e actor. Evidência F1-025: registro validado é deduplicado por ID no projeto e exposto pela API.
+- [x] Vincular decisão a run, plan node, command e artifact resultante. Evidência F1-025: quatro referências são obrigatórias e imutáveis no log.
+- [x] Exibir explicação resumida e detalhe auditável no Director panel. Evidência F1-025: painel mostra confidence/resumo e expande decisão, custo, actor, evidências e alternativas.
+- [x] Testar lineage de decisão até o frame final. Evidência F1-025/T-FR-065: trace cruza plan node/artifact e retorna range exato ou falha sem lineage.
 
 ### F1.026 — Budget do Diretor [FR-066]
 

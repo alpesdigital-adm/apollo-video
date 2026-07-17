@@ -43,6 +43,7 @@ model Project {
   treatmentPlanJson String?
   storyPlanJson     String?
   montageCandidatesJson String?
+  directorDecisionsJson String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
