@@ -2360,7 +2360,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.deepEqual(artifact.data.manifests[0].sources, [
       {
         artifactId: sourceArtifactId,
-        artifactKey: sourceKey,
+        artifactKey: `artifact:${sourceArtifactId}`,
         sha256: sha('a'),
         role: 'primary',
         ordinal: 0,
