@@ -959,49 +959,49 @@
 
 ### F2.001 — SpeechSegment [FR-043]
 
-- [ ] Modelar texto exato, normalized text, word alignment, speaker, range e complete-thought score.
-- [ ] Extrair frases/reflexões sem criar arquivos físicos por segmento.
-- [ ] Catalogar emoção, expressão, roupa, cenário e demais metadados com provenance/confidence.
-- [ ] Implementar busca por fala, intenção, pessoa e características visuais.
-- [ ] Criar fixtures com frase completa, corte incompleto, interrupção e múltiplos speakers.
+- [x] Modelar texto exato, normalized text, word alignment, speaker, range e complete-thought score. Evidência T-FR-043.
+- [x] Extrair frases/reflexões sem criar arquivos físicos por segmento. Evidência: `physicalMaterialized=false` e ranges no master.
+- [x] Catalogar emoção, expressão, roupa, cenário e demais metadados com provenance/confidence. Evidência T-FR-043.
+- [x] Implementar busca por fala, intenção, pessoa e características visuais. Evidência T-FR-048: busca híbrida indexa esses campos.
+- [x] Criar fixtures com frase completa, corte incompleto, interrupção e múltiplos speakers. Evidência T-FR-043.
 
 ### F2.002 — EvidenceSegment [FR-044]
 
-- [ ] Modelar claim, qualifier, subject, attribution, consent, context window e integrity status.
-- [ ] Vincular transcript exato, frames e evidências adjacentes necessárias.
-- [ ] Impedir uso isolado quando qualifier/contexto for obrigatório.
-- [ ] Criar policy tests de testemunho, resultado financeiro, antes/depois e hearsay.
+- [x] Modelar claim, qualifier, subject, attribution, consent, context window e integrity status. Evidência T-FR-044.
+- [x] Vincular transcript exato, frames e evidências adjacentes necessárias. Evidência: `EvidenceSegment` preserva refs e range.
+- [x] Impedir uso isolado quando qualifier/contexto for obrigatório. Evidência T-FR-044.
+- [x] Criar policy tests de testemunho, resultado financeiro, antes/depois e hearsay. Evidência T-FR-044.
 
 ### F2.003 — LongFormMoment [FR-045]
 
-- [ ] Modelar chapter, topic, moment, summary, speakers, ranges e salience.
-- [ ] Indexar momentos hierarquicamente sem exigir um único resumo de duas horas.
-- [ ] Permitir abrir contexto anterior/posterior a partir do resultado.
-- [ ] Testar busca e preview em live/podcast com mudanças de assunto.
+- [x] Modelar chapter, topic, moment, summary, speakers, ranges e salience. Evidência T-FR-045.
+- [x] Indexar momentos hierarquicamente sem exigir um único resumo de duas horas. Evidência: `LongFormIndex` por chapters/moments.
+- [x] Permitir abrir contexto anterior/posterior a partir do resultado. Evidência T-FR-045: preview expandido e limitado ao master.
+- [x] Testar busca e preview em live/podcast com mudanças de assunto. Evidência T-FR-045: fixture de 2h com dois tópicos.
 
 ### F2.004 — ValidatedSegment [FR-046]
 
-- [ ] Modelar validation source, scope, date, performance evidence e expiry.
-- [ ] Separar “hook validado” de “vídeo inteiro validado”.
-- [ ] Criar protected envelope para copy, take, timing e opening conforme escopo.
-- [ ] Impedir alegação de causalidade além da evidência registrada.
-- [ ] Testar uso compatível e incompatível em nova recipe.
+- [x] Modelar validation source, scope, date, performance evidence e expiry. Evidência T-FR-046.
+- [x] Separar “hook validado” de “vídeo inteiro validado”. Evidência: `scope` explícito e `wholeVideoValidated` derivado.
+- [x] Criar protected envelope para copy, take, timing e opening conforme escopo. Evidência T-FR-046.
+- [x] Impedir alegação de causalidade além da evidência registrada. Evidência T-FR-046: causalidade sempre bloqueada.
+- [x] Testar uso compatível e incompatível em nova recipe. Evidência T-FR-046.
 
 ### F2.005 — Busca híbrida [FR-048]
 
-- [ ] Implementar filtros estruturados por rights, kind, pessoa, duração, locale e metadados.
-- [ ] Implementar full-text para transcript/OCR e vector search por intenção/descrição.
-- [ ] Unir candidates, remover duplicatas e reranquear com pesos versionados.
-- [ ] Exibir por que cada resultado correspondeu e por que foi bloqueado.
-- [ ] Criar retrieval eval com precision/recall/nDCG por tipo de consulta.
+- [x] Implementar filtros estruturados por rights, kind, pessoa, duração, locale e metadados. Evidência T-FR-048.
+- [x] Implementar full-text para transcript/OCR e vector search por intenção/descrição. Evidência T-FR-048.
+- [x] Unir candidates, remover duplicatas e reranquear com pesos versionados. Evidência: identidade única e `hybrid-rerank/v1`.
+- [x] Exibir por que cada resultado correspondeu e por que foi bloqueado. Evidência: `matchedBy`/`blockedReasons`.
+- [x] Criar retrieval eval com precision/recall/nDCG por tipo de consulta. Evidência T-FR-048.
 
 ### F2.006 — Processamento hierárquico [FR-053]
 
-- [ ] Dividir long-form em chunks com overlap e time mapping preservado.
-- [ ] Processar sinais baratos antes de visão/LLM caros.
-- [ ] Agregar chunks em moments/chapters sem perder evidence spans.
-- [ ] Reprocessar somente tiers invalidados por nova versão de modelo.
-- [ ] Medir memória, custo e tempo em fixtures de 30min e 2h.
+- [x] Dividir long-form em chunks com overlap e time mapping preservado. Evidência T-FR-053.
+- [x] Processar sinais baratos antes de visão/LLM caros. Evidência: execution order tipada.
+- [x] Agregar chunks em moments/chapters sem perder evidence spans. Evidência T-FR-053.
+- [x] Reprocessar somente tiers invalidados por nova versão de modelo. Evidência T-FR-053: invalidação transitiva.
+- [x] Medir memória, custo e tempo em fixtures de 30min e 2h. Evidência T-FR-053.
 
 ### F2.007 — ProductionBatch [FR-080]
 
