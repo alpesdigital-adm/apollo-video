@@ -730,10 +730,10 @@
 
 ### F1.024 — Ferramentas do Diretor [FR-064]
 
-- [ ] Expor ferramentas tipadas de busca, criação de plano, proposta de asset, avaliação e patch.
-- [ ] Validar argumentos, scope, rights, budget e base version em cada chamada.
-- [ ] Proibir mutação direta de banco/storage pelo modelo.
-- [ ] Criar integration tests com model fake emitindo chamadas válidas e inválidas.
+- [x] Expor ferramentas tipadas de busca, criação de plano, proposta de asset, avaliação e patch. Evidência F1-024: catálogo fixo com cinco tools e endpoint externo de descoberta/execução.
+- [x] Validar argumentos, scope, rights, budget e base version em cada chamada. Evidência F1-024: executor falha antes do handler em cada violação.
+- [x] Proibir mutação direta de banco/storage pelo modelo. Evidência F1-024: dependência aceita somente application services de proposta/consulta, sem adapters de infraestrutura.
+- [x] Criar integration tests com model fake emitindo chamadas válidas e inválidas. Evidência F1-024/T-FR-064: loop fake percorre cinco calls e cinco classes de rejeição sem side effect.
 
 ### F1.025 — Decisions log [FR-065]
 
