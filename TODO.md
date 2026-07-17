@@ -542,7 +542,7 @@
 - [x] Criar administração de webhooks, subscriptions e delivery diagnostics. Evidência F0-099: API externa cobre endpoint create/list/read/status/challenge, subscription create/list/read/status, signing-secret lifecycle, delivery list/read/replay e paginação diagnóstica; gate de governança fixa autenticação e catálogo completo. UI administrativa entra na fase visual.
 - [x] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace. Evidência F0-100: evaluator único e fail-closed recebe scope duplo, limites/uso inteiros e retorna decisão conjunta com reasons explícitos e saldo de requests, concorrência, quota e spend.
 - [x] Criar usage e audit queries paginadas com redaction. Evidência F0-101: `GET /v1/governance/usage-audit` reutiliza paginação estável de operações, exige `clients:admin` e retorna somente identidade, client, ação, status, target e unidade de uso, omitindo payload/erro/lease/provider/secrets.
-- [ ] Criar sandbox isolado com provider fakes e custos simulados.
+- [x] Criar sandbox isolado com provider fakes e custos simulados. Evidência F0-102: adapter determinístico aceita apenas environment sandbox, produz receipt SHA-256 e custo inteiro simulado, reporta zero chamadas externas e falha fechado em production.
 - [ ] Implementar anomaly alerts e kill switch operacional.
 - [ ] Criar E2E administrativo sem permitir que client autoeleve seus scopes.
 
