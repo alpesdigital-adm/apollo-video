@@ -676,10 +676,10 @@
 
 ### F1.017 — EditorialBeat [FR-051]
 
-- [ ] Definir beat semântico independente de linhas de legenda.
-- [ ] Derivar boundaries de frase, intenção, pausa, argumento e mudança visual.
-- [ ] Permitir ajuste do Diretor sem alterar word alignment original.
-- [ ] Testar frases longas, pausas internas e cortes entre subtitle chunks.
+- [x] Definir beat semântico independente de linhas de legenda. Evidência F1-017: beat referencia word IDs e intenção sem adotar subtitle chunks como boundary.
+- [x] Derivar boundaries de frase, intenção, pausa, argumento e mudança visual. Evidência F1-017: derivador versionável combina seis reason codes determinísticos.
+- [x] Permitir ajuste do Diretor sem alterar word alignment original. Evidência F1-017: ajuste retorna novo beat auditado e prova alinhamento imutável.
+- [x] Testar frases longas, pausas internas e cortes entre subtitle chunks. Evidência F1-017/T-FR-051: fixture cruza chunks, força pausa interna e mudança de intenção.
 
 ### F1.018 — Confidence [FR-052]
 
