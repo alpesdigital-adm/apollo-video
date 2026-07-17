@@ -723,10 +723,10 @@
 
 ### F1.023 — Segurança narrativa [FR-063]
 
-- [ ] Detectar claims, qualifiers, negação, causalidade, prazos e dependências de prova.
-- [ ] Impedir trim/reordenação que altere sentido ou atribuição.
-- [ ] Emitir `QualityIssue` localizado com evidência e correção possível.
-- [ ] Criar policy fixtures para promessa, testemunho, comparação e contexto removido.
+- [x] Detectar claims, qualifiers, negação, causalidade, prazos e dependências de prova. Evidência F1-023: statement estrutura seis dimensões de sentido e contexto.
+- [x] Impedir trim/reordenação que altere sentido ou atribuição. Evidência F1-023: validator bloqueia token, prova/contexto, ordem e speaker divergentes antes da montagem.
+- [x] Emitir `QualityIssue` localizado com evidência e correção possível. Evidência F1-023: issue contém code, range, evidence e ação restore tipada.
+- [x] Criar policy fixtures para promessa, testemunho, comparação e contexto removido. Evidência F1-023/T-FR-063: conjunto canônico cobre os quatro casos e uma composição segura.
 
 ### F1.024 — Ferramentas do Diretor [FR-064]
 
