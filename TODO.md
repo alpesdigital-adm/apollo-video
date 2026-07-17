@@ -1070,82 +1070,82 @@
 
 ### F2.015 — Source Deconstruction [FR-120]
 
-- [ ] Detectar conteúdo essencial, hook envelope, corpo/CTA e elementos contaminantes.
-- [ ] Produzir `DeconstructionReport` com clean candidate ranges e confidence.
-- [ ] Preservar fala/contexto necessário ao recortar material publicado.
-- [ ] Permitir comparação source versus range limpo.
-- [ ] Criar golden fixtures de Reel com abertura, legenda queimada, CTA e cauda removível.
+- [x] Detectar conteúdo essencial, hook envelope, corpo/CTA e elementos contaminantes. Evidência T-FR-120.
+- [x] Produzir `DeconstructionReport` com clean candidate ranges e confidence. Evidência T-FR-120.
+- [x] Preservar fala/contexto necessário ao recortar material publicado. Evidência T-FR-120.
+- [x] Permitir comparação source versus range limpo. Evidência T-FR-120.
+- [x] Criar golden fixtures de Reel com abertura, legenda queimada, CTA e cauda removível. Evidência T-FR-120/T-FR-121.
 
 ### F2.016 — Detecção de contaminação [FR-121]
 
-- [ ] Detectar burned captions, logos/watermarks, music, borders e overlays.
-- [ ] Localizar contaminação por região e range com confidence.
-- [ ] Identificar quando remoção destruiria conteúdo essencial.
-- [ ] Expor diagnóstico ao Director e à revisão humana.
-- [ ] Criar fixtures de cada contaminação e combinações sobrepostas.
+- [x] Detectar burned captions, logos/watermarks, music, borders e overlays. Evidência T-FR-121.
+- [x] Localizar contaminação por região e range com confidence. Evidência T-FR-121.
+- [x] Identificar quando remoção destruiria conteúdo essencial. Evidência T-FR-121.
+- [x] Expor diagnóstico ao Director e à revisão humana. Evidência: diagnóstico duplo e flag de revisão.
+- [x] Criar fixtures de cada contaminação e combinações sobrepostas. Evidência T-FR-121.
 
 ### F2.017 — Limpeza MVP [FR-122]
 
-- [ ] Implementar trim, crop/reframe, cover e reject como estratégias explícitas.
-- [ ] Escolher estratégia por qualidade residual, integridade e custo.
-- [ ] Gerar derivative e manter source publicado imutável.
-- [ ] Reavaliar visual/rights após limpeza.
-- [ ] Criar visual goldens de cada estratégia e rejeição correta.
+- [x] Implementar trim, crop/reframe, cover e reject como estratégias explícitas. Evidência T-FR-122.
+- [x] Escolher estratégia por qualidade residual, integridade e custo. Evidência T-FR-122.
+- [x] Gerar derivative e manter source publicado imutável. Evidência T-FR-122.
+- [x] Reavaliar visual/rights após limpeza. Evidência: `postCleanupReview` obrigatório.
+- [x] Criar visual goldens de cada estratégia e rejeição correta. Evidência T-FR-122.
 
 ### F2.018 — Validation envelope [FR-124]
 
-- [ ] Representar quais partes validadas podem ser alteradas: copy, take, framing, timing e opening.
-- [ ] Proteger automaticamente partes dentro do envelope durante reuso.
-- [ ] Solicitar aprovação quando uma composição exigir sair do envelope.
-- [ ] Registrar no decisions log se a validação foi preservada ou perdida.
-- [ ] Testar reuso de hook com corpo/CTA novos sem material excedente.
+- [x] Representar quais partes validadas podem ser alteradas: copy, take, framing, timing e opening. Evidência T-FR-124.
+- [x] Proteger automaticamente partes dentro do envelope durante reuso. Evidência T-FR-124.
+- [x] Solicitar aprovação quando uma composição exigir sair do envelope. Evidência T-FR-124.
+- [x] Registrar no decisions log se a validação foi preservada ou perdida. Evidência T-FR-124.
+- [x] Testar reuso de hook com corpo/CTA novos sem material excedente. Evidência T-FR-124.
 
 ### F2.019 — Proof need [FR-130]
 
-- [ ] Fazer StoryPlan declarar tipo, função e momento de prova necessários.
-- [ ] Consultar EvidenceSegments compatíveis antes de gerar card genérico.
-- [ ] Permitir ausência explícita quando não houver prova adequada.
-- [ ] Criar golden stories que pedem depoimento, dado, demonstração e nenhuma prova.
+- [x] Fazer StoryPlan declarar tipo, função e momento de prova necessários. Evidência T-FR-130.
+- [x] Consultar EvidenceSegments compatíveis antes de gerar card genérico. Evidência T-FR-130.
+- [x] Permitir ausência explícita quando não houver prova adequada. Evidência: `proof-unavailable` sem card fabricado.
+- [x] Criar golden stories que pedem depoimento, dado, demonstração e nenhuma prova. Evidência T-FR-130.
 
 ### F2.020 — Integrity gate de prova [FR-131]
 
-- [ ] Comparar claim, produto, pessoa, período, audience e consent da prova com a recipe.
-- [ ] Bloquear prova descontextualizada, incompatível ou expirada.
-- [ ] Preservar qualifier/attribution nos modos visual e verbal.
-- [ ] Emitir issue acionável sem sugerir fabricação de evidência.
-- [ ] Criar policy eval com falsos positivos e falsos negativos críticos.
+- [x] Comparar claim, produto, pessoa, período, audience e consent da prova com a recipe. Evidência T-FR-131.
+- [x] Bloquear prova descontextualizada, incompatível ou expirada. Evidência T-FR-131.
+- [x] Preservar qualifier/attribution nos modos visual e verbal. Evidência T-FR-131.
+- [x] Emitir issue acionável sem sugerir fabricação de evidência. Evidência T-FR-131.
+- [x] Criar policy eval com falsos positivos e falsos negativos críticos. Evidência T-FR-131.
 
 ### F2.021 — Modos de prova [FR-132]
 
-- [ ] Implementar cutaway, split-screen e proof card.
-- [ ] Definir entrada/saída, duração mínima, identificação e legibilidade por modo.
-- [ ] Escolher modo conforme mídia, formato, ritmo e necessidade de contexto.
-- [ ] Permitir override manual por segmento/formato.
-- [ ] Criar visual goldens nos cinco formatos.
+- [x] Implementar cutaway, split-screen e proof card. Evidência T-FR-132.
+- [x] Definir entrada/saída, duração mínima, identificação e legibilidade por modo. Evidência T-FR-132.
+- [x] Escolher modo conforme mídia, formato, ritmo e necessidade de contexto. Evidência T-FR-132.
+- [x] Permitir override manual por segmento/formato. Evidência T-FR-132.
+- [x] Criar visual goldens nos cinco formatos. Evidência: 15 combinações formato/modo.
 
 ### F2.022 — Long-form indexing [FR-133]
 
-- [ ] Criar workflow background resumível para probe, transcript, diarization, chunks e moments.
-- [ ] Publicar resultados parciais pesquisáveis com tier/status explícito.
-- [ ] Controlar custo e concorrência por duração/tier.
-- [ ] Retomar processamento após restart sem duplicar segments.
-- [ ] Testar vídeo de 2h dentro do orçamento de performance definido.
+- [x] Criar workflow background resumível para probe, transcript, diarization, chunks e moments. Evidência T-FR-133.
+- [x] Publicar resultados parciais pesquisáveis com tier/status explícito. Evidência T-FR-133.
+- [x] Controlar custo e concorrência por duração/tier. Evidência T-FR-133.
+- [x] Retomar processamento após restart sem duplicar segments. Evidência: idempotency por job/tier.
+- [x] Testar vídeo de 2h dentro do orçamento de performance definido. Evidência T-FR-133.
 
 ### F2.023 — Contiguous extraction [FR-134]
 
-- [ ] Buscar janelas contínuas por objetivo, tópico e duração-alvo.
-- [ ] Expandir boundaries para começo/fim semântico e contexto necessário.
-- [ ] Pontuar autocontenção, densidade, integridade, áudio e visual.
-- [ ] Compilar melhor janela em StoryPlan/EditPlan sem síntese multi-range.
-- [ ] Criar golden de conteúdo de 2min extraído de vídeo de 2h.
+- [x] Buscar janelas contínuas por objetivo, tópico e duração-alvo. Evidência T-FR-134.
+- [x] Expandir boundaries para começo/fim semântico e contexto necessário. Evidência T-FR-134.
+- [x] Pontuar autocontenção, densidade, integridade, áudio e visual. Evidência T-FR-134.
+- [x] Compilar melhor janela em StoryPlan/EditPlan sem síntese multi-range. Evidência T-FR-134.
+- [x] Criar golden de conteúdo de 2min extraído de vídeo de 2h. Evidência T-FR-134.
 
 ### F2.024 — Repositório semântico cross-asset [FR-136]
 
-- [ ] Criar índice unificado de assets, segments, moments, speech e evidence.
-- [ ] Restringir consulta por workspace, rights e consent antes do rerank.
-- [ ] Permitir ao Diretor pedir intenção, atmosfera, pessoa, fala e visual.
-- [ ] Registrar candidates reutilizados e motivos de rejeição.
-- [ ] Medir retrieval quality e latência com biblioteca crescente.
+- [x] Criar índice unificado de assets, segments, moments, speech e evidence. Evidência T-FR-136.
+- [x] Restringir consulta por workspace, rights e consent antes do rerank. Evidência T-FR-136.
+- [x] Permitir ao Diretor pedir intenção, atmosfera, pessoa, fala e visual. Evidência T-FR-136.
+- [x] Registrar candidates reutilizados e motivos de rejeição. Evidência T-FR-136.
+- [x] Medir retrieval quality e latência com biblioteca crescente. Evidência T-FR-136.
 
 ### F2.025 — ColorPipeline [FR-180]
 
