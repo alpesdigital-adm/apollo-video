@@ -715,11 +715,11 @@
 
 ### F1.022 — Alternativas de montagem [FR-062]
 
-- [ ] Gerar candidatos variando hook, ordem permitida, assets e pattern breaks.
-- [ ] Aplicar hard gates antes de scoring e custo.
-- [ ] Comparar candidatos na mesma rubrica e registrar diversidade.
-- [ ] Selecionar vencedor e manter alternativas inspecionáveis.
-- [ ] Testar empate, baixa confidence e ausência de candidato elegível.
+- [x] Gerar candidatos variando hook, ordem permitida, assets e pattern breaks. Evidência F1-022: seed canônica registra os quatro eixos de variação.
+- [x] Aplicar hard gates antes de scoring e custo. Evidência F1-022: rejeitado recebe score/custo nulos e callbacks não são executados.
+- [x] Comparar candidatos na mesma rubrica e registrar diversidade. Evidência F1-022: pesos únicos e métricas de hooks, ordens, assets e pattern sets.
+- [x] Selecionar vencedor e manter alternativas inspecionáveis. Evidência F1-022: seleção persiste todos os candidatos, rejection reasons e desempate determinístico.
+- [x] Testar empate, baixa confidence e ausência de candidato elegível. Evidência F1-022/T-FR-062: três saídas review/block são cobertas junto com vencedor normal.
 
 ### F1.023 — Segurança narrativa [FR-063]
 
