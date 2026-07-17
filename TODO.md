@@ -540,7 +540,7 @@
 
 - [x] Criar administração de clients, scopes, secrets, environments e status. Evidência F0-098: Public API administrativa lista/cria clients com scopes e sandbox/production, retorna secret somente uma vez, rotaciona com overlap, revoga credentials/status e exige `clients:admin`; gate exaustivo fixa a superfície.
 - [x] Criar administração de webhooks, subscriptions e delivery diagnostics. Evidência F0-099: API externa cobre endpoint create/list/read/status/challenge, subscription create/list/read/status, signing-secret lifecycle, delivery list/read/replay e paginação diagnóstica; gate de governança fixa autenticação e catálogo completo. UI administrativa entra na fase visual.
-- [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace.
+- [x] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace. Evidência F0-100: evaluator único e fail-closed recebe scope duplo, limites/uso inteiros e retorna decisão conjunta com reasons explícitos e saldo de requests, concorrência, quota e spend.
 - [ ] Criar usage e audit queries paginadas com redaction.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados.
 - [ ] Implementar anomaly alerts e kill switch operacional.
