@@ -1902,6 +1902,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     type: 'object', additionalProperties: false, required: ['token', 'expiresAt'],
     properties: { token: { type: 'string', pattern: '^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$', minLength: 80, maxLength: 4096 }, expiresAt: dateTimeSchema },
   }),
+  defineSchema('batch-item-page', 1, 'Paged batch item operation results', successSchema({
+    type: 'object', additionalProperties: false, required: ['batchId', 'items'],
+    properties: {
+      batchId: idSchema,
+      items: { type: 'array', maxItems: 100, items: { type: 'object', additionalProperties: false, required: ['itemId', 'operationId', 'status', 'retryable', 'updatedAt'], properties: {
+        itemId: idSchema, operationId: idSchema, status: { enum: ['queued', 'running', 'succeeded', 'failed', 'canceled'] }, retryable: { type: 'boolean' }, resultRef: idSchema,
+        error: { type: 'object', additionalProperties: false, required: ['code', 'message'], properties: { code: { type: 'string', maxLength: 80 }, message: { type: 'string', maxLength: 1000 } } }, updatedAt: dateTimeSchema,
+      } } },
+      nextCursor: { type: 'string', minLength: 16, maxLength: 4096 },
+    },
+  })),
   defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',
     successSchema({
       type: 'object',

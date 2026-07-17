@@ -4567,6 +4567,114 @@
         }
       }
     },
+    "apollo://schemas/batch-item-page/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "batchId",
+            "items"
+          ],
+          "properties": {
+            "batchId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "items": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "itemId",
+                  "operationId",
+                  "status",
+                  "retryable",
+                  "updatedAt"
+                ],
+                "properties": {
+                  "itemId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "operationId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "status": {
+                    "enum": [
+                      "queued",
+                      "running",
+                      "succeeded",
+                      "failed",
+                      "canceled"
+                    ]
+                  },
+                  "retryable": {
+                    "type": "boolean"
+                  },
+                  "resultRef": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "error": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "code",
+                      "message"
+                    ],
+                    "properties": {
+                      "code": {
+                        "type": "string",
+                        "maxLength": 80
+                      },
+                      "message": {
+                        "type": "string",
+                        "maxLength": 1000
+                      }
+                    }
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 4096
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/begin-media-upload-request/v1": {
       "type": "object",
       "additionalProperties": false,

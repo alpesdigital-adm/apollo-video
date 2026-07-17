@@ -934,6 +934,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/preflight-commit-token/v1': [
       { token: `${'e'.repeat(80)}.${'s'.repeat(43)}`, expiresAt: '2026-07-16T23:35:00.000Z' },
     ],
+    'apollo://schemas/batch-item-page/v1': [
+      { data: { batchId: 'batch-example-1', items: [
+        { itemId: 'item-1', operationId: 'operation-example-1', status: 'succeeded', retryable: false, resultRef: 'artifact-example-1', updatedAt: createdAt },
+        { itemId: 'item-2', operationId: 'operation-example-2', status: 'failed', retryable: true, error: { code: 'PROVIDER_TIMEOUT', message: 'Provider timed out.' }, updatedAt: createdAt },
+      ] }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/webhook-signing-secret-rotation-list/v1': [
       { data: { rotations: [] }, meta: { apiVersion: 'v1' } },
       { data: { rotations: [webhookSigningSecretRotationExample] }, meta: { apiVersion: 'v1' } },

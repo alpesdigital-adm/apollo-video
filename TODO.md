@@ -533,7 +533,7 @@
 - [x] Gerar commit token vinculado a client, workspace, fingerprint, snapshot e expiry. Evidência F0-093: token HMAC v1 carrega claims assinadas de client/workspace/fingerprint/snapshot/cost/expiry, usa comparação timing-safe e possui schema público de evidência sem expor claims em texto claro.
 - [x] Invalidar token quando versão, input ou custo material mudar. Evidência F0-094: validação reabre claims assinadas e rejeita expiry, client/workspace diferente e qualquer divergência de fingerprint, snapshot ou cost fingerprint antes do commit.
 - [x] Exigir preflight para batch, final matrix, geração variável e ações destrutivas. Evidência F0-095: policy central deny-by-default classifica as quatro classes e exige token confiável revalidado; somente ação bounded explicitamente classificada passa sem preflight.
-- [ ] Expor resultado/status/retry por item sem resposta monolítica.
+- [x] Expor resultado/status/retry por item sem resposta monolítica. Evidência F0-096: `batch-item-page/v1` referencia um `operationId` por item, limita páginas a 100, separa resultRef/erro redigido e reutiliza as APIs duráveis `operations.read` e `operations.retry` para acompanhamento/retry individual.
 - [ ] Criar E2E de dry-run, token expirado, partial retry e budget block.
 
 ### F0.043 — Governança da API [FR-249]
