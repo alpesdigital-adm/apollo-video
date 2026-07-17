@@ -6,12 +6,14 @@ import { existsSync } from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { resolveStrategicObjective } from '@/v2/domain/strategic-objective'
+import { createDesiredAction } from '@/v2/domain/desired-action'
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File
     const objective = resolveStrategicObjective(String(formData.get('objective') ?? 'discovery'))
+    const desiredAction = createDesiredAction({ objective: objective.id, destination: String(formData.get('destination') ?? '').trim() || undefined })
     // Seletor de preset removido do produto: o visual é dirigido pelas cores da
     // marca, presets de legenda, grade e leis de direção. Fica o padrão fixo.
     const stylePreset = 'creator-clean'
@@ -57,6 +59,7 @@ export async function POST(request: NextRequest) {
         format: aspectRatio,
         stylePreset,
         objective: objective.id,
+        desiredActionJson: JSON.stringify(desiredAction),
         status: 'created'
       }
     })

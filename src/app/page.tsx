@@ -16,6 +16,7 @@ interface ProjectSummary {
 interface ProjectFilters { text: string; status: string; objective: string; format: string; locale: string; createdFrom: string; createdTo: string; ownerId: string }
 const EMPTY_FILTERS: ProjectFilters = { text: '', status: '', objective: '', format: '', locale: '', createdFrom: '', createdTo: '', ownerId: '' }
 const FILTER_KEYS = Object.keys(EMPTY_FILTERS) as (keyof ProjectFilters)[]
+const DESTINATION_REQUIRED = new Set<StrategicObjectiveId>(['lead-generation', 'sale', 'whatsapp', 'booking', 'download'])
 
 const STATE_LABELS = { draft: 'Rascunho', processing: 'Em produção', 'awaiting-review': 'Aguardando revisão', failed: 'Precisa de atenção', completed: 'Concluído', archived: 'Arquivado' } as const
 
@@ -29,6 +30,7 @@ export default function Dashboard() {
   const [filtersReady, setFiltersReady] = useState(false)
   const [actionProjectId, setActionProjectId] = useState<string | null>(null)
   const [objective, setObjective] = useState<StrategicObjectiveId>('discovery')
+  const [destination, setDestination] = useState('')
   const [isNavigating, startNavigation] = useTransition()
 
   async function loadProjects(signal?: AbortSignal) {
@@ -67,7 +69,7 @@ export default function Dashboard() {
     if (!file.type.startsWith('video/')) { setMessage('Escolha um arquivo de vídeo válido.'); return }
     setUploading(true); setMessage('Enviando e preparando o vídeo…')
     try {
-      const body = new FormData(); body.append('file', file); body.append('objective', objective)
+      const body = new FormData(); body.append('file', file); body.append('objective', objective); if (destination.trim()) body.append('destination', destination.trim())
       const response = await fetch('/api/upload', { method: 'POST', body })
       const data = await response.json()
       if (!response.ok || !data.projectId) throw new Error(data.error ?? 'O upload não foi concluído.')
@@ -140,8 +142,9 @@ export default function Dashboard() {
           <div className="rounded-2xl border border-[#7167ff]/40 bg-[#7167ff]/8 p-4">
             <label className="block text-[11px] uppercase tracking-[0.16em] text-[#aaaee0]">Objetivo desta produção<select className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b0c12] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#7167ff]" value={objective} onChange={(event) => setObjective(event.target.value as StrategicObjectiveId)}>{STRATEGIC_OBJECTIVES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
             <p className="mt-2 min-h-10 text-xs leading-5 text-[#999ec0]">{STRATEGIC_OBJECTIVES.find((item) => item.id === objective)?.description}</p>
+            {DESTINATION_REQUIRED.has(objective) ? <label className="mt-2 block text-[11px] text-[#aaaee0]">Destino da ação<input className="mt-1 h-10 w-full rounded-lg border border-white/10 bg-[#0b0c12] px-3 text-sm text-white outline-none placeholder:text-[#62677a] focus:border-[#7167ff]" placeholder={objective === 'whatsapp' ? '+55…' : objective === 'booking' ? 'Link ou agenda' : objective === 'download' ? 'Material ou arquivo' : 'https://…'} value={destination} onChange={(event) => setDestination(event.target.value)}/></label> : null}
             <label className="group mt-3 flex cursor-pointer items-center justify-between rounded-xl bg-[#7167ff] px-4 py-3 transition hover:bg-[#8178ff] focus-within:ring-2 focus-within:ring-white/70">
-              <input className="sr-only" type="file" accept="video/*" disabled={uploading || isNavigating} onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file) }} />
+              <input className="sr-only" type="file" accept="video/*" disabled={uploading || isNavigating || (DESTINATION_REQUIRED.has(objective) && !destination.trim())} onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file) }} />
               <span><span className="block font-semibold">Nova produção</span><span className="block text-xs text-white/75">Envie o primeiro vídeo bruto</span></span><span className="text-2xl">+</span>
             </label>
           </div>

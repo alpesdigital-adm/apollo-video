@@ -593,10 +593,10 @@
 
 ### F1.006 — Ação desejada [FR-011]
 
-- [ ] Modelar ação, destino, CTA verbal/visual, URL/handle e requisitos de disclosure.
-- [ ] Validar campos obrigatórios por objetivo sem inventar destino ausente.
-- [ ] Disponibilizar CTA estruturado para StoryPlan, subtitle, overlay e critic.
-- [ ] Testar mismatch entre objetivo, CTA falado e destino configurado.
+- [x] Modelar ação, destino, CTA verbal/visual, URL/handle e requisitos de disclosure. Evidência F1-006: `DesiredAction/v1` tipa ação, cinco destinos, CTAs e disclosures imutáveis.
+- [x] Validar campos obrigatórios por objetivo sem inventar destino ausente. Evidência F1-006: objetivos de conversão falham sem destino explícito; URL exige HTTPS e a interface bloqueia upload incompleto.
+- [x] Disponibilizar CTA estruturado para StoryPlan, subtitle, overlay e critic. Evidência F1-006: os quatro consumers recebem a mesma referência canônica, impedindo divergência entre fala e visual.
+- [x] Testar mismatch entre objetivo, CTA falado e destino configurado. Evidência F1-006: critic determinístico sinaliza action, spoken CTA e destination sem propor valor inventado.
 
 ### F1.007 — Briefing livre opcional [FR-012]
 
