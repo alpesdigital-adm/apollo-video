@@ -46,6 +46,7 @@ model Project {
   directorDecisionsJson String?
   directorBudgetJson String?
   subtitleConfigJson String?
+  reviewAnnotationsJson String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

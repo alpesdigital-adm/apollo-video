@@ -839,48 +839,48 @@
 
 ### F1.039 — Preview interativo [FR-210]
 
-- [ ] Integrar player ao proxy da ProjectVersion ativa.
-- [ ] Implementar play, pause, seek e frame/timecode confiáveis.
-- [ ] Exibir resolução/fps/hash do proxy e banner stale.
-- [ ] Medir primeiro frame, seek p95 e dropped preview frames.
-- [ ] Criar E2E de navegação e troca de versão.
+- [x] Integrar player ao proxy da ProjectVersion ativa. Evidência F1-039: PreviewSession liga version, URL e hash.
+- [x] Implementar play, pause, seek e frame/timecode confiáveis. Evidência F1-039: controle converte segundos/frames pelo fps canônico.
+- [x] Exibir resolução/fps/hash do proxy e banner stale. Evidência F1-039: sessão expõe metadados e stale explicitamente.
+- [x] Medir primeiro frame, seek p95 e dropped preview frames. Evidência F1-039: agregador retorna três métricas reais.
+- [x] Criar E2E de navegação e troca de versão. Evidência F1-039/T-FR-210: fixture controla sessão identificada sem perder timecode.
 
 ### F1.040 — ReviewAnnotation [FR-211]
 
-- [ ] Modelar frame, time range, screenshot, region, target IDs, texto, author e status.
-- [ ] Implementar clique/drag sobre preview com captura do contexto visual.
-- [ ] Persistir annotation sem alterar a versão até aplicação explícita.
-- [ ] Criar E2E de annotation pontual, regional e de cena.
+- [x] Modelar frame, time range, screenshot, region, target IDs, texto, author e status. Evidência F1-040: ReviewAnnotation contém todos os campos.
+- [x] Implementar clique/drag sobre preview com captura do contexto visual. Evidência F1-040: overlay normaliza região e liga screenshot ao frame do proxy.
+- [x] Persistir annotation sem alterar a versão até aplicação explícita. Evidência F1-040: API grava comentário separado de ProjectVersion.
+- [x] Criar E2E de annotation pontual, regional e de cena. Evidência F1-040/T-FR-211: três escopos preservam version ID.
 
 ### F1.041 — Escopos de revisão [FR-212]
 
-- [ ] Implementar frame, region, clip, scene, range, project, formats, locales e recipes.
-- [ ] Definir default restrito ao alvo, formato e locale atuais.
-- [ ] Exigir confirmação para escopo global e mostrar quantidade afetada.
-- [ ] Testar resolução de target e expansão determinística de scope.
+- [x] Implementar frame, region, clip, scene, range, project, formats, locales e recipes. Evidência F1-041: união cobre nove scopes.
+- [x] Definir default restrito ao alvo, formato e locale atuais. Evidência F1-041: resolver usa contexto corrente quando ausente.
+- [x] Exigir confirmação para escopo global e mostrar quantidade afetada. Evidência F1-041: precondition e affectedCount acompanham expansão.
+- [x] Testar resolução de target e expansão determinística de scope. Evidência F1-041/T-FR-212: local/global são exercitados.
 
 ### F1.042 — RenderElementMap [FR-213]
 
-- [ ] Fazer renderer emitir bounds, z-index, element/clip/scene/source IDs por frame.
-- [ ] Implementar hit-test respeitando transparência e priority.
-- [ ] Mostrar chooser quando múltiplos elementos forem elegíveis.
-- [ ] Validar map hash contra proxy hash.
-- [ ] Criar visual/E2E para overlays sobrepostos e canvas redimensionado.
+- [x] Fazer renderer emitir bounds, z-index, element/clip/scene/source IDs por frame. Evidência F1-042: RenderElement contém geometria, ordem e quatro IDs.
+- [x] Implementar hit-test respeitando transparência e priority. Evidência F1-042: opacidade <=.05 é ignorada e priority/z-index ordenam.
+- [x] Mostrar chooser quando múltiplos elementos forem elegíveis. Evidência F1-042: resultado sinaliza chooser e candidates.
+- [x] Validar map hash contra proxy hash. Evidência F1-042: mismatch produz VERSION_CONFLICT.
+- [x] Criar visual/E2E para overlays sobrepostos e canvas redimensionado. Evidência F1-042/T-FR-213: coordenadas de display são convertidas ao canvas.
 
 ### F1.043 — Patch automático [FR-214]
 
-- [ ] Interpretar annotation em proposta tipada de PatchSet, nunca mutação livre.
-- [ ] Resolver ambiguidades, protected elements, policy e budget antes do commit.
-- [ ] Exibir impact preview, custo e ranges invalidados.
-- [ ] Aplicar patch em nova versão e comparar resultado.
-- [ ] Criar E2E para correção válida, ambígua, proibida e falha de render.
+- [x] Interpretar annotation em proposta tipada de PatchSet, nunca mutação livre. Evidência F1-043: seis operações allowlisted compõem patch.
+- [x] Resolver ambiguidades, protected elements, policy e budget antes do commit. Evidência F1-043: quatro gates antecedem versão.
+- [x] Exibir impact preview, custo e ranges invalidados. Evidência F1-043: proposal ready inclui impact estruturado.
+- [x] Aplicar patch em nova versão e comparar resultado. Evidência F1-043: sucesso cria child version e comparison.
+- [x] Criar E2E para correção válida, ambígua, proibida e falha de render. Evidência F1-043/T-FR-214: quatro caminhos testados.
 
 ### F1.044 — Batch review [FR-215]
 
-- [ ] Permitir selecionar múltiplas annotations compatíveis.
-- [ ] Compilar PatchSet único ou explicar conflitos entre comentários.
-- [ ] Aplicar all-or-nothing por default e registrar resultado por annotation.
-- [ ] Testar transação, rollback e retry parcial quando explicitamente escolhido.
+- [x] Permitir selecionar múltiplas annotations compatíveis. Evidência F1-044: batch recebe coleção e propostas.
+- [x] Compilar PatchSet único ou explicar conflitos entre comentários. Evidência F1-044: mesmo target divergente gera conflict IDs.
+- [x] Aplicar all-or-nothing por default e registrar resultado por annotation. Evidência F1-044: conflito marca rolled-back para todos.
+- [x] Testar transação, rollback e retry parcial quando explicitamente escolhido. Evidência F1-044/T-FR-215: atomic e partial-retry cobertos.
 
 ### F1.045 — Edição manual [FR-216]
 

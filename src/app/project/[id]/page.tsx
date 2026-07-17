@@ -21,6 +21,7 @@ interface ProjectData {
   directorDecisions?: Array<{ id: string; summary: string; decision: string; confidence: number; score: number; cost: { actual: number; currency: string }; actor: { type: string; id: string }; candidates: Array<{ id: string; outcome: string; reason: string }>; evidence: Array<{ ref: string }> }>
   directorBudget?: { status: string; limits: { cost: number }; reserved: { cost: number }; actual: { cost: number } } | null
   subtitleConfig?: { mode: 'auto' | 'workspace-default' | 'manual' | 'none'; presetId?: string; origin: string } | null
+  reviewAnnotations?: Array<{ id: string; text: string; status: string; frame: number; region?: { x: number; y: number; width: number; height: number } }>
   editPlan?: {
     durationFrames: number
     cuts: unknown[]
@@ -127,6 +128,11 @@ export default function EditorPage() {
   const [openMenu, setOpenMenu] = useState<number | null>(null)
   const [activeBeat, setActiveBeat] = useState<number | null>(null)
   const seekRef = useRef<{ seekTo: (frame: number) => void } | null>(null)
+  const currentFrameRef = useRef(0)
+  const [annotationMode, setAnnotationMode] = useState(false)
+  const [annotationStart, setAnnotationStart] = useState<{ x: number; y: number } | null>(null)
+  const [annotationRegion, setAnnotationRegion] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const [annotationText, setAnnotationText] = useState('')
 
   // --- Playhead → beat highlight ---
   const [currentBeatIndex, setCurrentBeatIndex] = useState<number | null>(null)
@@ -142,6 +148,7 @@ export default function EditorPage() {
   // falls between beats, keeps the last beat that already started. Throttled upstream by
   // the player (~4x/second), so this only re-renders when the resolved beat actually changes.
   const handleFrameUpdate = useCallback((frame: number) => {
+    currentFrameRef.current = frame
     const list = beatsRef.current
     let matchIndex: number | null = null
     for (const beat of list) {
@@ -155,6 +162,13 @@ export default function EditorPage() {
     }
     setCurrentBeatIndex((prev) => (prev === matchIndex ? prev : matchIndex))
   }, [])
+
+  async function saveReviewAnnotation() {
+    if (!annotationText.trim() || !project) return
+    const fps = project.videoFps || 30; const frame = currentFrameRef.current
+    const response = await fetch(`/api/projects/${projectId}/review-v2`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ annotation: { id: `ann_${Date.now()}`, projectVersionId: 'legacy-active', frame, timeRangeMs: [Math.round(frame / fps * 1000), Math.round(frame / fps * 1000)], screenshotRef: `proxy:${projectId}:frame:${frame}`, ...(annotationRegion ? { region: annotationRegion } : {}), targetIds: [], text: annotationText, author: { id: 'workspace-operator', name: 'Operador' }, status: 'open', createdAt: new Date().toISOString() } }) })
+    if (response.ok) { setAnnotationText(''); setAnnotationRegion(null); setAnnotationMode(false); await loadProject() }
+  }
 
   // Auto-scroll the beats panel to follow playback, unless the user's mouse is over it.
   useEffect(() => {
@@ -782,7 +796,7 @@ export default function EditorPage() {
             {/* Left: Processed video preview */}
             <div className="col-span-5">
               {project.status === 'complete' && project.renderedVideoPath ? (
-                <div className="rounded-xl bg-black/50 border border-zinc-800 overflow-hidden">
+                <div className="relative rounded-xl bg-black/50 border border-zinc-800 overflow-hidden">
                   <video
                     src={`/api/video/${project.id}`}
                     controls
@@ -826,8 +840,11 @@ export default function EditorPage() {
                     seekRef={seekRef}
                     onFrameUpdate={handleFrameUpdate}
                   />
+                  {annotationMode ? <div className="absolute inset-0 z-30 cursor-crosshair bg-amber-400/5" aria-label="Demarcar área da revisão" onPointerDown={(event)=>{const rect=event.currentTarget.getBoundingClientRect();setAnnotationStart({x:(event.clientX-rect.left)/rect.width,y:(event.clientY-rect.top)/rect.height})}} onPointerUp={(event)=>{if(!annotationStart)return;const rect=event.currentTarget.getBoundingClientRect();const end={x:(event.clientX-rect.left)/rect.width,y:(event.clientY-rect.top)/rect.height};setAnnotationRegion({x:Math.min(annotationStart.x,end.x),y:Math.min(annotationStart.y,end.y),width:Math.abs(end.x-annotationStart.x),height:Math.abs(end.y-annotationStart.y)});setAnnotationStart(null)}}>{annotationRegion?<div className="absolute border-2 border-amber-300 bg-amber-300/10" style={{left:`${annotationRegion.x*100}%`,top:`${annotationRegion.y*100}%`,width:`${annotationRegion.width*100}%`,height:`${annotationRegion.height*100}%`}}/>:null}</div>:null}
                 </div>
               )}
+              <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={()=>setAnnotationMode((value)=>!value)} className={`rounded-lg border px-3 py-2 text-xs ${annotationMode?'border-amber-400 bg-amber-400/10 text-amber-200':'border-zinc-800 text-zinc-400'}`}>{annotationMode?'Cancelar marcação':'Anotar preview'}</button>{annotationMode?<><input value={annotationText} onChange={(event)=>setAnnotationText(event.target.value)} placeholder="Explique o ajuste desta área ou cena" className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs"/><button type="button" onClick={saveReviewAnnotation} disabled={!annotationText.trim()} className="rounded-lg bg-amber-400 px-3 py-2 text-xs font-semibold text-black disabled:opacity-40">Salvar comentário</button></>:null}</div>
+              {project.reviewAnnotations?.length ? <p className="mt-2 text-xs text-zinc-500">{project.reviewAnnotations.filter((item)=>item.status==='open').length} comentário(s) aberto(s) nesta versão</p> : null}
 
               <div className="mt-4 grid grid-cols-3 gap-3">
                 <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
