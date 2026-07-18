@@ -689,7 +689,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         issueWebhookChallengeToken(() => Buffer.alloc(32, activationLeaseByte++)),
       activationLeaseMs: 100,
       followerPollMs: 1,
-      followerMaxWaitMs: 1_000,
+      // The integration database may be reached through an SSH tunnel. Keep the
+      // convergence assertion bounded while allowing for real network latency.
+      followerMaxWaitMs: 15_000,
     })
     const concurrentActivationResults = await Promise.all([
       concurrentActivation({ workspaceId, endpointId: endpoint.id }),
