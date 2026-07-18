@@ -1458,21 +1458,21 @@
 
 ### F4.015 — React playback map
 
-- [ ] Detectar no vídeo de reação os intervalos em que o conteúdo de referência toca, pausa, volta ou avança.
-- [ ] Modelar playback pieces entre reference media e session time.
-- [ ] Sincronizar reference video sem presumir duração igual à gravação do react.
-- [ ] Permitir anchors manuais quando interface/player não estiver visível.
-- [ ] Criar fixture com play, pause, rewind e seek.
+- [x] Detectar no vídeo de reação os intervalos em que o conteúdo de referência toca, pausa, volta ou avança. Evidência: T-F4.015 e ADR-135.
+- [x] Modelar playback pieces entre reference media e session time. Evidência: T-F4.015 e ADR-135.
+- [x] Sincronizar reference video sem presumir duração igual à gravação do react. Evidência: T-F4.015 e ADR-135.
+- [x] Permitir anchors manuais quando interface/player não estiver visível. Evidência: T-F4.015 e ADR-135.
+- [x] Criar fixture com play, pause, rewind e seek. Evidência: T-F4.015 e ADR-135.
 
 ### F4.016 — Gate multicâmera/long-form
 
-- [ ] Sincronizar podcast com dois participantes e áudios distintos.
-- [ ] Sincronizar professor e captura de tela com durações diferentes.
-- [ ] Demonstrar diagnóstico insuficiente e requisito escrito de marker/anchor.
-- [ ] Editar react com playback map piecewise.
-- [ ] Produzir montagem por active speaker e foco na demonstração.
-- [ ] Produzir síntese multi-range preservando contexto.
-- [ ] Registrar evidências e aprovar gate da fase.
+- [x] Sincronizar podcast com dois participantes e áudios distintos. Evidência: T-F4.016 e ADR-135.
+- [x] Sincronizar professor e captura de tela com durações diferentes. Evidência: T-F4.016 e ADR-135.
+- [x] Demonstrar diagnóstico insuficiente e requisito escrito de marker/anchor. Evidência: T-F4.016 e ADR-135.
+- [x] Editar react com playback map piecewise. Evidência: T-F4.016 e ADR-135.
+- [x] Produzir montagem por active speaker e foco na demonstração. Evidência: T-F4.016 e ADR-135.
+- [x] Produzir síntese multi-range preservando contexto. Evidência: T-F4.016 e ADR-135.
+- [x] Registrar evidências e aprovar gate da fase. Evidência: T-F4.016 e ADR-135.
 
 ---
 
