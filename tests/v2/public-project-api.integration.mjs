@@ -5,6 +5,8 @@ import { once } from 'node:events'
 import net from 'node:net'
 import test from 'node:test'
 
+import { PrismaClient } from '../../generated/prisma-v2/index.js'
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer()
@@ -32,11 +34,6 @@ async function waitForServer(baseUrl, child) {
 }
 
 test('authenticated public API manages projects, clients and artifact inspection', async () => {
-  const clientPackage =
-    process.env.APOLLO_V2_PERSISTENCE === 'postgres'
-      ? '../../generated/prisma-v2/index.js'
-      : '@prisma/client'
-  const { PrismaClient } = await import(clientPackage)
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
   const {
@@ -66,8 +63,7 @@ test('authenticated public API manages projects, clients and artifact inspection
   )
 
   const client = new PrismaClient()
-  const apiEnvironment =
-    process.env.APOLLO_V2_PERSISTENCE === 'postgres' ? 'production' : 'sandbox'
+  const apiEnvironment = 'production'
   const workspaceId = 'public-api-workspace-v2'
   const otherWorkspaceId = 'public-api-other-workspace-v2'
   const workspaceIds = [workspaceId, otherWorkspaceId]

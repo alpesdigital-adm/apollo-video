@@ -1,13 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { PrismaClient } from '../../generated/prisma-v2/index.js'
+
 test('media artifacts persist atomically with workspace-scoped immutable lineage', async () => {
-  const usesPostgres = process.env.APOLLO_V2_PERSISTENCE === 'postgres'
-  const clientPackage =
-    usesPostgres
-      ? '../../generated/prisma-v2/index.js'
-      : '@prisma/client'
-  const { PrismaClient } = await import(clientPackage)
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
   const {
     createMediaArtifactManifest,
@@ -515,7 +511,7 @@ test('media artifacts persist atomically with workspace-scoped immutable lineage
       0,
     )
 
-    if (usesPostgres) {
+    {
       await assert.rejects(
         client.v2MediaArtifact.create({
           data: {

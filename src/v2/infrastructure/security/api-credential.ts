@@ -31,16 +31,13 @@ export function issueApiCredential(clientId: string, credentialId: string): Issu
 
 export function parseApiCredential(token: string): ParsedApiCredential {
   const parts = token.split('.')
-  const [prefix, clientId] = parts
-  const legacy = parts.length === 3
-  const credentialId = legacy ? clientId : parts[2]
-  const secret = legacy ? parts[2] : parts[3]
+  const [prefix, clientId, credentialId, secret] = parts
   if (
     prefix !== TOKEN_PREFIX ||
     !clientId ||
     !credentialId ||
     !secret ||
-    (parts.length !== 3 && parts.length !== 4) ||
+    parts.length !== 4 ||
     !/^[A-Za-z0-9_-]{3,80}$/.test(clientId) ||
     !/^[A-Za-z0-9_-]{3,80}$/.test(credentialId) ||
     secret.length < 32

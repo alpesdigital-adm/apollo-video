@@ -2,12 +2,9 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
 
+import { PrismaClient } from '../../generated/prisma-v2/index.js'
+
 test('webhook registration is atomic, workspace-scoped and stores only a secret reference', async () => {
-  const clientPackage =
-    process.env.APOLLO_V2_PERSISTENCE === 'postgres'
-      ? '../../generated/prisma-v2/index.js'
-      : '@prisma/client'
-  const { PrismaClient } = await import(clientPackage)
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { registerWebhookService } = await import('../../src/v2/application/register-webhook.ts')
   const { createWebhookEndpointService } = await import(
@@ -301,20 +298,16 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       baseRevision: webhookEndpointRevision(createdEndpoint.endpoint),
       idempotencyKey: 'provision-webhook-secret-1',
     }
-    const provisioningResults = process.env.APOLLO_V2_PERSISTENCE === 'postgres'
-      ? await Promise.all([
-          provisionSecret(provisioningRequest),
-          provisionSecret(provisioningRequest),
-        ])
-      : [await provisionSecret(provisioningRequest)]
+    const provisioningResults = await Promise.all([
+      provisionSecret(provisioningRequest),
+      provisionSecret(provisioningRequest),
+    ])
     const provisioned = provisioningResults.find((item) => !item.replayed)
     assert.ok(provisioned)
-    if (process.env.APOLLO_V2_PERSISTENCE === 'postgres') {
-      assert.deepEqual(
-        provisioningResults.map((item) => item.replayed).sort(),
-        [false, true],
-      )
-    }
+    assert.deepEqual(
+      provisioningResults.map((item) => item.replayed).sort(),
+      [false, true],
+    )
     assert.equal(provisioned.secret.version, 2)
     assert.equal(provisioned.secretAvailable, true)
     assert.equal(provisioned.secretBase64url, Buffer.alloc(32, 31).toString('base64url'))

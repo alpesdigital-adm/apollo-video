@@ -22,7 +22,6 @@ jobs:
     env:
       CI: true
       APOLLO_API_ENVIRONMENT: production
-      APOLLO_V2_PERSISTENCE: postgres
       V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public
 
     services:

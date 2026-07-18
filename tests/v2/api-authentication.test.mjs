@@ -103,6 +103,10 @@ test('invalid token, wrong environment and missing scope are denied', async () =
     () => sandboxAuth('Bearer invalid'),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
   )
+  assert.throws(
+    () => nodeApiCredentialCrypto.parse(`apollo_v2.${issued.client.id}.obsolete-secret-format`),
+    (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+  )
   await assert.rejects(
     () => productionAuth(`Bearer ${issued.token}`),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',

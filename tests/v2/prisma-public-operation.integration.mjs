@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { PrismaClient } from '../../generated/prisma-v2/index.js'
+
 test('PublicOperation persistence is idempotent, workspace-scoped and integrity checked', async () => {
-  const clientPackage =
-    process.env.APOLLO_V2_PERSISTENCE === 'postgres'
-      ? '../../generated/prisma-v2/index.js'
-      : '@prisma/client'
-  const { PrismaClient } = await import(clientPackage)
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
   const { createQueuedPublicOperation } = await import(
     '../../src/v2/domain/public-operation.ts'
@@ -188,12 +185,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
         leaseUntil: '2026-01-01T15:31:30.000Z',
       }),
     )
-    const claims = process.env.APOLLO_V2_PERSISTENCE === 'postgres'
-      ? await Promise.all(claimInputs.map((claim) => repository.claimNext(claim)))
-      : [
-          await repository.claimNext(claimInputs[0]),
-          await repository.claimNext(claimInputs[1]),
-        ]
+    const claims = await Promise.all(claimInputs.map((claim) => repository.claimNext(claim)))
     assert.equal(claims.filter(Boolean).length, 1)
     const firstClaim = claims.find(Boolean)
     const firstOwner = firstClaim.lease.owner
@@ -601,7 +593,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       null,
     )
 
-    if (process.env.APOLLO_V2_PERSISTENCE === 'postgres') {
+    {
       const cancelRaceOperation = createQueuedPublicOperation({
         ...operation,
         id: 'operation-integration-cancel-race',
@@ -753,7 +745,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       canceledAt: '2026-01-01T15:43:01.000Z',
     })
 
-    if (process.env.APOLLO_V2_PERSISTENCE === 'postgres') {
+    {
       const [firstRetry, secondRetry] = await Promise.all([
         repository.retry({
           workspaceId,
