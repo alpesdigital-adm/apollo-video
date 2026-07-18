@@ -55,6 +55,9 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     const request = {
       workspaceId,
       name: 'Projeto integração',
+      objective: 'discovery',
+      format: '9:16',
+      briefing: 'Público: gestores. Oferta: conteúdo. Tom: direto.',
       actor: { type: 'api-client', id: clientId },
       idempotency: { clientId, key: 'integration-create-project' },
     }
@@ -67,7 +70,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     assert.equal(replay.project.id, first.project.id)
     assert.equal(await client.v2Project.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 1)
-    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 2)
+    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 3)
     assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 1)
     const outbox = await client.v2PublicEventOutbox.findMany({
       where: { workspaceId },
@@ -99,7 +102,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     assert.equal(concurrentResults[0].version.id, concurrentResults[1].version.id)
     assert.equal(await client.v2Project.count({ where: { workspaceId } }), 2)
     assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 2)
-    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 4)
+    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 6)
     assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 4)
 
     let discardCommittedResponse = true
@@ -137,7 +140,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     assert.equal(recovered.replayed, true)
     assert.equal(await client.v2Project.count({ where: { workspaceId } }), 3)
     assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 3)
-    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 6)
+    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 9)
     assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 6)
 
     const mismatchedKey = 'integration-create-project-concurrent-mismatch'
@@ -158,7 +161,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     assert.equal(mismatchedFailure?.reason?.code, 'IDEMPOTENCY_PAYLOAD_MISMATCH')
     assert.equal(await client.v2Project.count({ where: { workspaceId } }), 4)
     assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 4)
-    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 8)
+    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 12)
     assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 4)
     assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 8)
 

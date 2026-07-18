@@ -58,6 +58,11 @@ test('authenticated public API manages projects, clients and artifact inspection
   const { nodeApiCredentialCrypto } = await import(
     '../../src/v2/infrastructure/security/api-credential.ts'
   )
+  const {
+    APOLLO_SESSION_COOKIE,
+    createUiPasswordHash,
+    verifyUiPassword,
+  } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { createAesRecipeParameterCipher } = await import(
     '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
   )
@@ -68,6 +73,17 @@ test('authenticated public API manages projects, clients and artifact inspection
   const otherWorkspaceId = 'public-api-other-workspace-v2'
   const workspaceIds = [workspaceId, otherWorkspaceId]
   const apiClientId = 'public-api-client-v2'
+  const uiUsername = 'apollo-e2e'
+  const uiPassword = 'apollo-e2e-password'
+  const uiPasswordHash = createUiPasswordHash(uiPassword, 'public-api-test-salt')
+  const uiSessionSecret = 'public-api-ui-session-secret-with-at-least-32-characters'
+  const uiEnvironment = {
+    APOLLO_UI_API_CLIENT_ID: apiClientId,
+    APOLLO_UI_PASSWORD_HASH: uiPasswordHash,
+    APOLLO_UI_SESSION_SECRET: uiSessionSecret,
+    APOLLO_UI_USERNAME: uiUsername,
+  }
+  assert.equal(verifyUiPassword(uiUsername, uiPassword, uiEnvironment), true)
   const sourceArtifactId = 'public-api-source-artifact-v2'
   const derivedArtifactId = 'public-api-derived-artifact-v2'
   const derivedManifestId = 'public-api-derived-manifest-v2'
@@ -454,6 +470,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         env: {
           ...process.env,
           NODE_ENV: 'production',
+          __NEXT_PROCESSED_ENV: 'true',
           APOLLO_API_ENVIRONMENT: apiEnvironment,
           APOLLO_API_CAPABILITY_POLICY_JSON: JSON.stringify({
             byClient: { [apiClientId]: ['apollo.events.catalog.read'] },
@@ -461,6 +478,7 @@ test('authenticated public API manages projects, clients and artifact inspection
           APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'public-api-recipe-key-v1',
           APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 9).toString('base64url'),
           APOLLO_RENDERER_DIGEST: sha('8'),
+          ...uiEnvironment,
         },
         stdio: 'ignore',
       },
@@ -471,6 +489,29 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(healthResponse.status, 200)
     assert.equal(healthResponse.headers.get('apollo-api-version'), 'v1')
     assert.ok(healthResponse.headers.get('apollo-request-id'))
+
+    const uiLoginResponse = await fetch(`${baseUrl}/v1/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: uiUsername, password: uiPassword, next: '/' }),
+    })
+    const uiLoginPayload = await uiLoginResponse.json()
+    assert.equal(uiLoginResponse.status, 200, JSON.stringify(uiLoginPayload))
+    assert.equal(uiLoginPayload.data.redirectTo, '/')
+    const uiSession = uiLoginResponse.headers
+      .get('set-cookie')
+      ?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
+    assert.ok(uiSession)
+    const uiSessionResponse = await fetch(`${baseUrl}/v1/session`, {
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
+    })
+    const uiSessionPayload = await uiSessionResponse.json()
+    assert.equal(uiSessionResponse.status, 200)
+    assert.equal(uiSessionPayload.data.workspaceId, workspaceId)
+    const uiProjectListResponse = await fetch(`${baseUrl}/v1/projects`, {
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
+    })
+    assert.equal(uiProjectListResponse.status, 200)
 
     const openApiResponse = await fetch(`${baseUrl}/v1/openapi.json`)
     const openApi = await openApiResponse.json()
@@ -789,14 +830,15 @@ test('authenticated public API manages projects, clients and artifact inspection
     )
 
     const schemaResponse = await fetch(
-      `${baseUrl}/v1/schemas/create-project-request/v1`,
+      `${baseUrl}/v1/schemas/create-project-request/v2`,
     )
     const schema = await schemaResponse.json()
     assert.equal(schemaResponse.status, 200)
     assert.match(schemaResponse.headers.get('content-type'), /^application\/schema\+json/)
-    assert.equal(schema.$id, 'apollo://schemas/create-project-request/v1')
-    assert.deepEqual(schema.required, ['name'])
-    assert.deepEqual(schema.examples, [{ name: 'Anúncio de descoberta' }])
+    assert.equal(schema.$id, 'apollo://schemas/create-project-request/v2')
+    assert.deepEqual(schema.required, ['name', 'objective', 'format'])
+    assert.equal(schema.examples[0].objective, 'discovery')
+    assert.equal(schema.examples[0].format, '9:16')
 
     const missingSchemaResponse = await fetch(`${baseUrl}/v1/schemas/missing/v1`)
     assert.equal(missingSchemaResponse.status, 404)
@@ -3532,13 +3574,23 @@ test('authenticated public API manages projects, clients and artifact inspection
           'idempotency-key': 'public-create-project-1',
           'apollo-request-id': 'public-api-test-1',
         },
-        body: JSON.stringify({ name: 'Projeto criado externamente' }),
+        body: JSON.stringify({
+          name: 'Projeto criado externamente',
+          objective: 'discovery',
+          format: '9:16',
+          locale: 'pt-BR',
+          briefing: 'Público: gestores. Oferta: conteúdo. Tom: direto e natural.',
+        }),
       })
     const createdResponse = await createRequest()
     const created = await createdResponse.json()
     assert.equal(createdResponse.status, 201)
     assert.equal(created.data.replayed, false)
     assert.equal(created.data.project.name, 'Projeto criado externamente')
+    assert.equal(created.data.project.objective, 'discovery')
+    assert.equal(created.data.project.format, '9:16')
+    assert.equal(created.data.project.locale, 'pt-BR')
+    assert.ok(created.data.version.snapshotRefs.brief)
     assert.equal(created.data.version.sequence, 1)
 
     const replayResponse = await createRequest()

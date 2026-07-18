@@ -1,6 +1,6 @@
 import { assertDomain } from './errors.ts'
 
-export const PROJECT_SNAPSHOT_KINDS = ['edit-plan', 'policies'] as const
+export const PROJECT_SNAPSHOT_KINDS = ['brief', 'edit-plan', 'policies'] as const
 
 export type ProjectSnapshotKind = (typeof PROJECT_SNAPSHOT_KINDS)[number]
 

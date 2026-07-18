@@ -2172,6 +2172,24 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     required: ['name'],
     properties: { name: { type: 'string', minLength: 2, maxLength: 120 } },
   }),
+  defineSchema('create-project-request', 2, 'Create project request with direction inputs', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['name', 'objective', 'format'],
+    properties: {
+      name: { type: 'string', minLength: 2, maxLength: 120 },
+      objective: {
+        enum: [
+          'discovery', 'awareness', 'warming', 'lead-generation',
+          'sale', 'whatsapp', 'booking', 'download',
+        ],
+      },
+      format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      briefing: { type: 'string', maxLength: 10000 },
+      destination: { type: 'string', minLength: 1, maxLength: 2048 },
+    },
+  }),
   defineSchema('project-created', 1, 'Project creation response',
     successSchema({
       type: 'object',
@@ -2192,6 +2210,34 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               additionalProperties: false,
               required: ['editPlan', 'policies'],
               properties: { editPlan: idSchema, policies: idSchema },
+            },
+            createdAt: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-created', 2, 'Project creation response with direction snapshot',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['project', 'version', 'replayed'],
+      properties: {
+        project: searchableProjectSchema,
+        version: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'sequence', 'baseHash', 'snapshotRefs', 'createdAt'],
+          properties: {
+            id: idSchema,
+            sequence: { type: 'integer', minimum: 1 },
+            baseHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            snapshotRefs: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['brief', 'editPlan', 'policies'],
+              properties: { brief: idSchema, editPlan: idSchema, policies: idSchema },
             },
             createdAt: dateTimeSchema,
           },

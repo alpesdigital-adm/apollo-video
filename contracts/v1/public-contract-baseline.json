@@ -893,15 +893,15 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.create": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
       "requiredScopes": [
         "projects:write"
       ],
-      "inputSchemaRef": "apollo://schemas/create-project-request/v1",
-      "outputSchemaRef": "apollo://schemas/project-created/v1",
+      "inputSchemaRef": "apollo://schemas/create-project-request/v2",
+      "outputSchemaRef": "apollo://schemas/project-created/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/projects"
@@ -5062,6 +5062,57 @@
         }
       }
     },
+    "apollo://schemas/create-project-request/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "objective",
+        "format"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "objective": {
+          "enum": [
+            "discovery",
+            "awareness",
+            "warming",
+            "lead-generation",
+            "sale",
+            "whatsapp",
+            "booking",
+            "download"
+          ]
+        },
+        "format": {
+          "enum": [
+            "9:16",
+            "16:9",
+            "4:5",
+            "1:1",
+            "21:9"
+          ]
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 35
+        },
+        "briefing": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "destination": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      }
+    },
     "apollo://schemas/create-webhook-endpoint-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -6995,6 +7046,161 @@
                     "policies"
                   ],
                   "properties": {
+                    "editPlan": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "policies": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-created/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "version",
+            "replayed"
+          ],
+          "properties": {
+            "project": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "name",
+                "status",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 120
+                },
+                "status": {
+                  "type": "string"
+                },
+                "currentVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "objective": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                },
+                "format": {
+                  "enum": [
+                    "9:16",
+                    "16:9",
+                    "4:5",
+                    "1:1",
+                    "21:9"
+                  ]
+                },
+                "locale": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 35
+                },
+                "ownerId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            },
+            "version": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "sequence",
+                "baseHash",
+                "snapshotRefs",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "baseHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "snapshotRefs": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "brief",
+                    "editPlan",
+                    "policies"
+                  ],
+                  "properties": {
+                    "brief": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
                     "editPlan": {
                       "type": "string",
                       "minLength": 3,

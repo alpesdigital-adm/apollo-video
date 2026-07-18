@@ -5,6 +5,8 @@ import { requireScope } from '@/v2/application/authenticate-api-client'
 import { createProjectService } from '@/v2/application/create-project'
 import { listProjectsService } from '@/v2/application/list-projects'
 import { DomainError } from '@/v2/domain/errors'
+import type { OutputAspectRatio } from '@/v2/domain/output-spec'
+import type { StrategicObjectiveId } from '@/v2/domain/strategic-objective'
 import {
   createProjectCreationRepository,
   createProjectQueryRepository,
@@ -24,6 +26,10 @@ function presentProject(project: {
   workspaceId: string
   name: string
   status: string
+  objective?: string
+  format?: string
+  locale?: string
+  ownerId?: string
   currentVersionId?: string
   createdAt: string
 }) {
@@ -32,6 +38,10 @@ function presentProject(project: {
     workspaceId: project.workspaceId,
     name: project.name,
     status: project.status,
+    objective: project.objective,
+    format: project.format,
+    locale: project.locale,
+    ownerId: project.ownerId,
     currentVersionId: project.currentVersionId,
     createdAt: project.createdAt,
   }
@@ -81,15 +91,36 @@ export async function POST(request: NextRequest) {
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'projects:write')
     const idempotencyKey = request.headers.get('idempotency-key')?.trim() ?? ''
-    let body: { name?: unknown }
+    let body: {
+      name?: unknown
+      objective?: unknown
+      format?: unknown
+      locale?: unknown
+      briefing?: unknown
+      destination?: unknown
+    }
     try {
-      body = (await request.json()) as { name?: unknown }
+      body = (await request.json()) as typeof body
     } catch {
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON')
     }
     if (typeof body.name !== 'string') {
       throw new DomainError('INVALID_ARGUMENT', 'name must be a string')
     }
+    if (typeof body.objective !== 'string') {
+      throw new DomainError('INVALID_ARGUMENT', 'objective must be a string')
+    }
+    if (typeof body.format !== 'string') {
+      throw new DomainError('INVALID_ARGUMENT', 'format must be a string')
+    }
+    for (const field of ['locale', 'briefing', 'destination'] as const) {
+      if (body[field] !== undefined && typeof body[field] !== 'string') {
+        throw new DomainError('INVALID_ARGUMENT', `${field} must be a string`)
+      }
+    }
+    const locale = typeof body.locale === 'string' ? body.locale : undefined
+    const briefing = typeof body.briefing === 'string' ? body.briefing : undefined
+    const destination = typeof body.destination === 'string' ? body.destination : undefined
 
     const createProject = createProjectService({
       repository: createProjectCreationRepository(),
@@ -100,6 +131,11 @@ export async function POST(request: NextRequest) {
     const result = await createProject({
       workspaceId: actor.workspaceId,
       name: body.name,
+      objective: body.objective as StrategicObjectiveId,
+      format: body.format as OutputAspectRatio,
+      ...(locale ? { locale } : {}),
+      ...(briefing ? { briefing } : {}),
+      ...(destination ? { destination } : {}),
       actor: { type: 'api-client', id: actor.clientId },
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
     })

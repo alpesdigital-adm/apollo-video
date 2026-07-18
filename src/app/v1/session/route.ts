@@ -92,20 +92,19 @@ export async function POST(request: NextRequest) {
   }
   const username = typeof body.username === 'string' ? body.username.trim() : ''
   const password = typeof body.password === 'string' ? body.password : ''
-  let valid = false
   let clientId = ''
+  let validCredentials = false
   try {
     clientId = configuredUiApiClientId()
-    valid = verifyUiPassword(username, password)
-    if (valid) valid = Boolean(await createApiClientRepository().findActiveClientById(clientId))
+    validCredentials = verifyUiPassword(username, password)
   } catch {
     return NextResponse.json(
       { error: { code: 'LOGIN_NOT_CONFIGURED', message: 'O acesso ao Apollo ainda não foi configurado.' } },
       { status: 503 },
     )
   }
-  const result = consumeAttempt(key, valid)
-  if (!valid) {
+  const result = consumeAttempt(key, validCredentials)
+  if (!validCredentials) {
     return NextResponse.json(
       {
         error: {
@@ -119,6 +118,26 @@ export async function POST(request: NextRequest) {
         status: result.blocked ? 429 : 401,
         ...(result.retryAfter ? { headers: { 'retry-after': String(result.retryAfter) } } : {}),
       },
+    )
+  }
+
+  try {
+    const client = await createApiClientRepository().findActiveClientById(clientId)
+    if (!client) {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'LOGIN_NOT_CONFIGURED',
+            message: 'O acesso do Apollo não está vinculado a um cliente ativo.',
+          },
+        },
+        { status: 503 },
+      )
+    }
+  } catch {
+    return NextResponse.json(
+      { error: { code: 'LOGIN_NOT_CONFIGURED', message: 'O acesso ao Apollo ainda não foi configurado.' } },
+      { status: 503 },
     )
   }
 

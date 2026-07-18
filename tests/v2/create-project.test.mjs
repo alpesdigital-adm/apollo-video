@@ -89,6 +89,9 @@ function request(overrides = {}) {
   return {
     workspaceId: 'workspace-1',
     name: '  Campanha   Julho  ',
+    objective: 'discovery',
+    format: '9:16',
+    briefing: 'Público: gestores. Oferta: conteúdo. Tom: direto e natural.',
     actor: { type: 'api-client', id: 'client-1' },
     idempotency: { clientId: 'client-1', key: 'create-project-1' },
     ...overrides,
@@ -110,15 +113,23 @@ test('create project persists an initial version and immutable snapshots', async
   assert.equal(result.replayed, false)
   assert.equal(result.project.name, 'Campanha Julho')
   assert.equal(result.project.status, 'draft')
+  assert.equal(result.project.objective, 'discovery')
+  assert.equal(result.project.format, '9:16')
+  assert.equal(result.project.locale, 'pt-BR')
   assert.equal(result.project.currentVersionId, result.version.id)
   assert.equal(result.version.sequence, 1)
-  assert.equal(repository.lastBundle.snapshots.length, 2)
+  assert.equal(repository.lastBundle.snapshots.length, 3)
   assert.deepEqual(
     repository.lastBundle.snapshots.map((snapshot) => snapshot.kind),
-    ['edit-plan', 'policies'],
+    ['brief', 'edit-plan', 'policies'],
   )
   assert.ok(repository.lastBundle.snapshots.every((snapshot) => snapshot.contentHash.length === 64))
-  assert.equal(result.version.snapshotRefs.editPlan, repository.lastBundle.snapshots[0].id)
+  assert.equal(result.version.snapshotRefs.brief, repository.lastBundle.snapshots[0].id)
+  assert.equal(result.version.snapshotRefs.editPlan, repository.lastBundle.snapshots[1].id)
+  const brief = JSON.parse(repository.lastBundle.snapshots[0].contentJson)
+  assert.equal(brief.productionBrief.ownerInput.trust, 'owner-authorized')
+  assert.equal(brief.outputSpec.aspectRatio, '9:16')
+  assert.equal(brief.objective, 'discovery')
   assert.deepEqual(
     repository.lastBundle.events.map((event) => event.type),
     ['project.created', 'project.version.created'],

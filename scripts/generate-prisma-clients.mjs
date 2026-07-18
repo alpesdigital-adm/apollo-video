@@ -4,14 +4,12 @@ import { fileURLToPath } from 'node:url'
 const prismaCli = fileURLToPath(new URL('../node_modules/prisma/build/index.js', import.meta.url))
 const environment = {
   ...process.env,
-  DATABASE_URL: process.env.DATABASE_URL ?? 'file:./dev.db',
   V2_DATABASE_URL:
     process.env.V2_DATABASE_URL ??
     'postgresql://apollo:generate-only@127.0.0.1:5432/apollo_v2?schema=public',
 }
 
 for (const args of [
-  ['prisma', 'generate'],
   ['prisma', 'generate', '--schema', 'prisma/v2/schema.prisma'],
 ]) {
   const result = spawnSync(process.execPath, [prismaCli, ...args.slice(1)], {

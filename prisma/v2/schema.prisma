@@ -186,6 +186,7 @@ model V2ProjectSnapshot {
 
   workspace        V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project          V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  briefVersions    V2ProjectVersion[] @relation("BriefSnapshot")
   editPlanVersions V2ProjectVersion[] @relation("EditPlanSnapshot")
   policyVersions   V2ProjectVersion[] @relation("PoliciesSnapshot")
 
@@ -200,6 +201,7 @@ model V2ProjectVersion {
   projectId          String   @db.VarChar(128)
   sequence           Int
   parentVersionId    String?  @db.VarChar(128)
+  briefSnapshotId    String   @db.VarChar(128)
   editPlanSnapshotId String   @db.VarChar(128)
   policiesSnapshotId String   @db.VarChar(128)
   baseHash           String   @db.Char(64)
@@ -211,6 +213,7 @@ model V2ProjectVersion {
   currentForProjects V2Project[]        @relation("CurrentProjectVersion")
   parent             V2ProjectVersion?  @relation("VersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
   children           V2ProjectVersion[] @relation("VersionParent")
+  briefSnapshot      V2ProjectSnapshot  @relation("BriefSnapshot", fields: [briefSnapshotId], references: [id], onDelete: Restrict)
   editPlanSnapshot   V2ProjectSnapshot  @relation("EditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
   policiesSnapshot   V2ProjectSnapshot  @relation("PoliciesSnapshot", fields: [policiesSnapshotId], references: [id], onDelete: Restrict)
 

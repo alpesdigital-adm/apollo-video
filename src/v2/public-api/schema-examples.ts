@@ -1091,6 +1091,15 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/create-project-request/v1': [
       { name: 'Anúncio de descoberta' },
     ],
+    'apollo://schemas/create-project-request/v2': [
+      {
+        name: 'Anúncio de descoberta',
+        objective: 'discovery',
+        format: '9:16',
+        locale: 'pt-BR',
+        briefing: 'Apresentar a ideia com ritmo natural e sem efeitos gratuitos.',
+      },
+    ],
     'apollo://schemas/project-created/v1': [
       {
         data: {
@@ -1107,6 +1116,37 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             sequence: 1,
             baseHash: 'a'.repeat(64),
             snapshotRefs: {
+              editPlan: 'project-snapshot-edit-plan-1',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-created/v2': [
+      {
+        data: {
+          project: {
+            id: projectId,
+            workspaceId,
+            name: 'Anúncio de descoberta',
+            status: 'draft',
+            objective: 'discovery',
+            format: '9:16',
+            locale: 'pt-BR',
+            ownerId: clientId,
+            currentVersionId: 'project-version-example-1',
+            createdAt,
+          },
+          version: {
+            id: 'project-version-example-1',
+            sequence: 1,
+            baseHash: 'a'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1',
               editPlan: 'project-snapshot-edit-plan-1',
               policies: 'project-snapshot-policies-1',
             },
