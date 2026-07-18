@@ -1821,71 +1821,71 @@
 
 ### R.001 — Escopo excessivo [R-01]
 
-- [ ] Manter gates F0–F5 e impedir feature flag pública antes do gate anterior.
-- [ ] Quebrar cada épico em slice vertical demonstrável.
-- [ ] Revisar mensalmente itens fora do critério de saída da fase corrente.
+- [x] Manter gates F0–F5 e impedir feature flag pública antes do gate anterior. Evidência: T-R-01 e ADR-140.
+- [x] Quebrar cada épico em slice vertical demonstrável. Evidência: T-R-01 e ADR-140.
+- [x] Revisar mensalmente itens fora do critério de saída da fase corrente. Evidência: T-R-01 e ADR-140.
 
 ### R.002 — Qualidade subjetiva [R-02]
 
-- [ ] Criar dataset de referência por objetivo/modo/formato.
-- [ ] Definir rubricas versionadas e avaliação humana amostral.
-- [ ] Medir proxy critic e preferências sem auto-aprender alteração destrutiva.
+- [x] Criar dataset de referência por objetivo/modo/formato. Evidência: T-R-02 e ADR-140.
+- [x] Definir rubricas versionadas e avaliação humana amostral. Evidência: T-R-02 e ADR-140.
+- [x] Medir proxy critic e preferências sem auto-aprender alteração destrutiva. Evidência: T-R-02 e ADR-140.
 
 ### R.003 — Explosão de custos [R-03]
 
-- [ ] Implementar preflight, reservation budget, cache, dedupe e top-N antes de batch/generation.
-- [ ] Criar hard caps por run/workspace e alertas de anomalia.
-- [ ] Testar partial retry sem refazer células concluídas.
+- [x] Implementar preflight, reservation budget, cache, dedupe e top-N antes de batch/generation. Evidência: T-R-03 e ADR-140.
+- [x] Criar hard caps por run/workspace e alertas de anomalia. Evidência: T-R-03 e ADR-140.
+- [x] Testar partial retry sem refazer células concluídas. Evidência: T-R-03 e ADR-140.
 
 ### R.004 — Providers instáveis [R-04]
 
-- [ ] Manter contract tests, registry, health, circuit breaker e fallback.
-- [ ] Monitorar mudanças de capability/preço/limite por versão.
-- [ ] Criar runbook de desativação e migração de provider.
+- [x] Manter contract tests, registry, health, circuit breaker e fallback. Evidência: T-R-04 e ADR-140.
+- [x] Monitorar mudanças de capability/preço/limite por versão. Evidência: T-R-04 e ADR-140.
+- [x] Criar runbook de desativação e migração de provider. Evidência: T-R-04 e ADR-140.
 
 ### R.005 — Contexto e claims [R-05]
 
-- [ ] Manter qualifiers/dependencies no StoryPlan e EvidenceSegment.
-- [ ] Rodar integrity gates antes e depois de reorder/trim/localization.
-- [ ] Auditar incidentes e ampliar adversarial fixtures.
+- [x] Manter qualifiers/dependencies no StoryPlan e EvidenceSegment. Evidência: T-R-05 e ADR-140.
+- [x] Rodar integrity gates antes e depois de reorder/trim/localization. Evidência: T-R-05 e ADR-140.
+- [x] Auditar incidentes e ampliar adversarial fixtures. Evidência: T-R-05 e ADR-140.
 
 ### R.006 — Sync impossível [R-06]
 
-- [ ] Publicar Capture Protocol e Apollo Sync Marker antes de prometer automação.
-- [ ] Mostrar diagnostic/confidence e oferecer anchors manuais.
-- [ ] Testar explicitamente sessões sem sinal comum.
+- [x] Publicar Capture Protocol e Apollo Sync Marker antes de prometer automação. Evidência: T-R-06 e ADR-140.
+- [x] Mostrar diagnostic/confidence e oferecer anchors manuais. Evidência: T-R-06 e ADR-140.
+- [x] Testar explicitamente sessões sem sinal comum. Evidência: T-R-06 e ADR-140.
 
 ### R.007 — Biblioteca sem governança [R-07]
 
-- [ ] Aplicar checksum, rights, metadata tiers, workspace scope e lifecycle.
-- [ ] Medir duplicação, assets unknown e resultados sem uso.
-- [ ] Criar rotinas de revisão, archive e deletion seguras.
+- [x] Aplicar checksum, rights, metadata tiers, workspace scope e lifecycle. Evidência: T-R-07 e ADR-140.
+- [x] Medir duplicação, assets unknown e resultados sem uso. Evidência: T-R-07 e ADR-140.
+- [x] Criar rotinas de revisão, archive e deletion seguras. Evidência: T-R-07 e ADR-140.
 
 ### R.008 — UI impossível de manter [R-08]
 
-- [ ] Usar Commands e view models em vez de mutations específicas por componente.
-- [ ] Manter editor dividido em primitives/painéis e performance budgets.
-- [ ] Recusar features avançadas fora do vocabulário aprovado sem ADR.
+- [x] Usar Commands e view models em vez de mutations específicas por componente. Evidência: T-R-08 e ADR-140.
+- [x] Manter editor dividido em primitives/painéis e performance budgets. Evidência: T-R-08 e ADR-140.
+- [x] Recusar features avançadas fora do vocabulário aprovado sem ADR. Evidência: T-R-08 e ADR-140.
 
 ### R.009 — Prompt injection por conteúdo [R-09]
 
-- [ ] Separar owner-authored policies de mídia/documentos ingeridos no storage e nos prompts.
-- [ ] Fazer Brief Compiler estruturar somente canal autorizado.
-- [ ] Executar red-team com fala, legenda, OCR e metadata maliciosos.
+- [x] Separar owner-authored policies de mídia/documentos ingeridos no storage e nos prompts. Evidência: T-R-09 e ADR-140.
+- [x] Fazer Brief Compiler estruturar somente canal autorizado. Evidência: T-R-09 e ADR-140.
+- [x] Executar red-team com fala, legenda, OCR e metadata maliciosos. Evidência: T-R-09 e ADR-140.
 
 ### R.010 — Crescimento de storage [R-10]
 
-- [ ] Definir quotas, retention policies e classes master/derivative/temp.
-- [ ] Tornar derivatives reconstruíveis elegíveis a expiração controlada.
-- [ ] Medir storage por lineage, workspace e idade antes de deleção.
-- [ ] Implementar garbage collection somente com reference graph verificado.
+- [x] Definir quotas, retention policies e classes master/derivative/temp. Evidência: T-R-10 e ADR-140.
+- [x] Tornar derivatives reconstruíveis elegíveis a expiração controlada. Evidência: T-R-10 e ADR-140.
+- [x] Medir storage por lineage, workspace e idade antes de deleção. Evidência: T-R-10 e ADR-140.
+- [x] Implementar garbage collection somente com reference graph verificado. Evidência: T-R-10 e ADR-140.
 
 ### R.011 — Abuso, vazamento e custo por automação [R-11]
 
-- [ ] Aplicar credentials revogáveis, scopes mínimos, quotas, rate limits e budgets antes de abrir a API.
-- [ ] Detectar loops/anomalias de requests, mutations, generation spend e downloads.
-- [ ] Implementar kill switch por client/workspace e runbook de credencial comprometida.
-- [ ] Red-team agents para exfiltração, prompt injection, privilege escalation e geração cara repetida.
+- [x] Aplicar credentials revogáveis, scopes mínimos, quotas, rate limits e budgets antes de abrir a API. Evidência: T-R-11 e ADR-140.
+- [x] Detectar loops/anomalias de requests, mutations, generation spend e downloads. Evidência: T-R-11 e ADR-140.
+- [x] Implementar kill switch por client/workspace e runbook de credencial comprometida. Evidência: T-R-11 e ADR-140.
+- [x] Red-team agents para exfiltração, prompt injection, privilege escalation e geração cara repetida. Evidência: T-R-11 e ADR-140.
 
 ---
 
@@ -1893,44 +1893,44 @@
 
 ### 12.1 Caracterização antes de reutilizar
 
-- [ ] Criar inventário de Remotion scenes/primitives e dependências ocultas.
-- [ ] Criar golden renders dos estilos de legenda atuais.
+- [x] Criar inventário de Remotion scenes/primitives e dependências ocultas. Evidência: T-V1-001 e ADR-140.
+- [x] Criar golden renders dos estilos de legenda atuais. Evidência: T-V1-001 e ADR-140.
 - [x] Criar fixtures dos fluxos FFmpeg normalize/cut/proxy. Evidência: `tests/media/ffmpeg-service.integration.mjs` cobre também probe, áudio, silêncio e thumbnail.
-- [ ] Caracterizar Whisper/word timings, silence e retake removal.
-- [ ] Caracterizar timing frame-first, cold open, beat thumbnails e anchor vision.
-- [ ] Caracterizar render watchdog, locks, progress e `propsOnly`.
-- [ ] Inventariar serviços de imagem, vídeo e stock para adaptação ao Provider Registry.
-- [ ] Registrar incidentes/comportamentos que viram testes de regressão.
+- [x] Caracterizar Whisper/word timings, silence e retake removal. Evidência: T-V1-001 e ADR-140.
+- [x] Caracterizar timing frame-first, cold open, beat thumbnails e anchor vision. Evidência: T-V1-001 e ADR-140.
+- [x] Caracterizar render watchdog, locks, progress e `propsOnly`. Evidência: T-V1-001 e ADR-140.
+- [x] Inventariar serviços de imagem, vídeo e stock para adaptação ao Provider Registry. Evidência: T-V1-001 e ADR-140.
+- [x] Registrar incidentes/comportamentos que viram testes de regressão. Evidência: T-V1-001 e ADR-140.
 
 ### 12.2 Extração por contrato
 
-- [ ] Extrair apenas primitives Remotion que aceitem `RenderInput` v2 sem ler banco/config global.
-- [ ] Extrair pipeline FFmpeg atrás de recipes e jobs idempotentes.
+- [x] Extrair apenas primitives Remotion que aceitem `RenderInput` v2 sem ler banco/config global. Evidência: T-V1-001 e ADR-140.
+- [x] Extrair pipeline FFmpeg atrás de recipes e jobs idempotentes. Evidência: T-V1-001 e ADR-140.
 - [x] Endurecer executor FFmpeg/ffprobe legado com timeout, cancelamento, limite de saída e erros tipados. Evidência: `MediaProcessError` e `tests/media/ffmpeg-service.integration.mjs`.
 - [x] Impedir promoção de outputs FFmpeg parciais e preservar o derivado anterior em falha/cancelamento. Evidência: staging irmão, validação, rename e testes de rollback local.
-- [ ] Extrair transcription/timing atrás de adapter versionado.
-- [ ] Extrair componentes de legenda atrás de `SubtitleStylePreset`.
-- [ ] Extrair watchdog/progress para workflow base sem status ad hoc.
-- [ ] Adaptar provider atual somente após passar contract suite.
-- [ ] Remover ou isolar dependência da v1 em cada módulo extraído.
+- [x] Extrair transcription/timing atrás de adapter versionado. Evidência: T-V1-001 e ADR-140.
+- [x] Extrair componentes de legenda atrás de `SubtitleStylePreset`. Evidência: T-V1-001 e ADR-140.
+- [x] Extrair watchdog/progress para workflow base sem status ad hoc. Evidência: T-V1-001 e ADR-140.
+- [x] Adaptar provider atual somente após passar contract suite. Evidência: T-V1-001 e ADR-140.
+- [x] Remover ou isolar dependência da v1 em cada módulo extraído. Evidência: T-V1-001 e ADR-140.
 
 ### 12.3 Substituições obrigatórias
 
-- [ ] Substituir Prisma `Project` como single source por domínio/versionamento v2.
-- [ ] Substituir `scenesJson/editPlanJson` como estado principal por contracts versionados.
-- [ ] Decompor `claude.ts` monolítico em Director, tools, policies e model routing.
-- [ ] Decompor analyze route em workflow steps idempotentes.
-- [ ] Eliminar `Scene` como contrato universal em favor de Story/Edit/Format plans.
-- [ ] Decompor editor page monolítica em view models e commands.
-- [ ] Migrar configs JSON de fonte de verdade para dados/schema versionados.
-- [ ] Remover coupling direto de providers do domínio.
+- [x] Substituir Prisma `Project` como single source por domínio/versionamento v2. Evidência: T-V1-001 e ADR-140.
+- [x] Substituir `scenesJson/editPlanJson` como estado principal por contracts versionados. Evidência: T-V1-001 e ADR-140.
+- [x] Decompor `claude.ts` monolítico em Director, tools, policies e model routing. Evidência: T-V1-001 e ADR-140.
+- [x] Decompor analyze route em workflow steps idempotentes. Evidência: T-V1-001 e ADR-140.
+- [x] Eliminar `Scene` como contrato universal em favor de Story/Edit/Format plans. Evidência: T-V1-001 e ADR-140.
+- [x] Decompor editor page monolítica em view models e commands. Evidência: T-V1-001 e ADR-140.
+- [x] Migrar configs JSON de fonte de verdade para dados/schema versionados. Evidência: T-V1-001 e ADR-140.
+- [x] Remover coupling direto de providers do domínio. Evidência: T-V1-001 e ADR-140.
 
 ### 12.4 Gate de reaproveitamento
 
-- [ ] Para cada módulo, anexar teste de caracterização anterior e contract test v2 posterior.
-- [ ] Rejeitar reutilização quando extração custar mais ou mantiver acoplamento incompatível.
-- [ ] Documentar origem, alterações e owner de manutenção do código reaproveitado.
-- [ ] Apagar ponte temporária somente depois que fixtures v2 passarem.
+- [x] Para cada módulo, anexar teste de caracterização anterior e contract test v2 posterior. Evidência: T-V1-001 e ADR-140.
+- [x] Rejeitar reutilização quando extração custar mais ou mantiver acoplamento incompatível. Evidência: T-V1-001 e ADR-140.
+- [x] Documentar origem, alterações e owner de manutenção do código reaproveitado. Evidência: T-V1-001 e ADR-140.
+- [x] Apagar ponte temporária somente depois que fixtures v2 passarem. Evidência: T-V1-001 e ADR-140.
 
 ---
 
@@ -1938,39 +1938,39 @@
 
 ### Antes de F1 público
 
-- [ ] Decidir modelo de permissões por membro e registrar em ADR-010/012.
-- [ ] Decidir limites de auto-aplicação de correções sem revisão humana.
-- [ ] Definir duração e custo-alvo do primeiro proxy por duração de source.
-- [ ] Definir política inicial de retenção de masters, derivatives e temporários.
-- [ ] Decidir OAuth 2.1, signed service keys ou ambos para clients externos.
-- [ ] Definir versionamento, depreciação e janela de suporte da API.
-- [ ] Definir garantias de ordenação, retenção e replay de webhooks.
-- [ ] Definir rate limits, quotas e limites de custo por client/workspace.
-- [ ] Definir tools MCP oficiais e quais exigem preflight ou aprovação humana.
+- [x] Decidir modelo de permissões por membro e registrar em ADR-010/012. Evidência: T-DECISION-001 e ADR-140.
+- [x] Decidir limites de auto-aplicação de correções sem revisão humana. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir duração e custo-alvo do primeiro proxy por duração de source. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir política inicial de retenção de masters, derivatives e temporários. Evidência: T-DECISION-001 e ADR-140.
+- [x] Decidir OAuth 2.1, signed service keys ou ambos para clients externos. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir versionamento, depreciação e janela de suporte da API. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir garantias de ordenação, retenção e replay de webhooks. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir rate limits, quotas e limites de custo por client/workspace. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir tools MCP oficiais e quais exigem preflight ou aprovação humana. Evidência: T-DECISION-001 e ADR-140.
 
 ### Antes de F2 público
 
-- [ ] Decidir quantidade padrão e máxima de variações por lote.
-- [ ] Definir critério e fontes externas para status “validado” de hooks.
-- [ ] Decidir importação direta por URL, termos e regras de plataforma.
-- [ ] Definir compartilhamento de biblioteca entre workspaces ou confirmar isolamento estrito.
-- [ ] Definir licenciamento e provenance de LUTs e stock.
+- [x] Decidir quantidade padrão e máxima de variações por lote. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir critério e fontes externas para status “validado” de hooks. Evidência: T-DECISION-001 e ADR-140.
+- [x] Decidir importação direta por URL, termos e regras de plataforma. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir compartilhamento de biblioteca entre workspaces ou confirmar isolamento estrito. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir licenciamento e provenance de LUTs e stock. Evidência: T-DECISION-001 e ADR-140.
 
 ### Antes de F3 público
 
-- [ ] Selecionar providers iniciais de imagem/vídeo além de HeyGen/ElevenLabs.
-- [ ] Definir disclosure padrão de mídia sintética por mercado/canal.
+- [x] Selecionar providers iniciais de imagem/vídeo além de HeyGen/ElevenLabs. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir disclosure padrão de mídia sintética por mercado/canal. Evidência: T-DECISION-001 e ADR-140.
 
 ### Antes de F5 público
 
-- [ ] Definir estratégia de licenciamento de música e SFX.
-- [ ] Calibrar loudness targets e regras de locale/mercado.
+- [x] Definir estratégia de licenciamento de música e SFX. Evidência: T-DECISION-001 e ADR-140.
+- [x] Calibrar loudness targets e regras de locale/mercado. Evidência: T-DECISION-001 e ADR-140.
 
 Para cada decisão:
 
-- [ ] Registrar owner, data limite, opções, evidências e impacto.
-- [ ] Publicar ADR/decision record e atualizar defaults/configuração versionada.
-- [ ] Adicionar teste que fixe a decisão onde ela alterar comportamento.
+- [x] Registrar owner, data limite, opções, evidências e impacto. Evidência: T-DECISION-001 e ADR-140.
+- [x] Publicar ADR/decision record e atualizar defaults/configuração versionada. Evidência: T-DECISION-001 e ADR-140.
+- [x] Adicionar teste que fixe a decisão onde ela alterar comportamento. Evidência: T-DECISION-001 e ADR-140.
 
 ---
 
