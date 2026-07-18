@@ -20,7 +20,20 @@ export interface MediaIngestOperationContext {
   sourceManifestId: string
 }
 
-export type PublicOperationContext = ArtifactRenderOperationContext | MediaIngestOperationContext
+export interface ProjectProxyRenderOperationContext {
+  kind: 'project-proxy-render'
+  projectId: string
+  projectVersionId: string
+  editPlanSnapshotId: string
+  sourceArtifactId: string
+  sourceManifestId: string
+  inputHash: string
+  outputArtifactId: string
+  outputManifestId: string
+  originalFileName: string
+}
+
+export type PublicOperationContext = ArtifactRenderOperationContext | MediaIngestOperationContext | ProjectProxyRenderOperationContext
 
 export interface PublicOperationRecord {
   operation: Readonly<PublicOperation>

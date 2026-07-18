@@ -8,7 +8,7 @@ import LogoutButton from '@/components/LogoutButton'
 
 interface ApiEnvelope<T> { data?: T; error?: { message?: string } }
 interface MediaRecord {
-  id: string; role: 'source-master' | 'editing-proxy'; originalFileName: string; artifactId: string;
+  id: string; role: 'source-master' | 'editing-proxy' | 'editorial-proxy'; originalFileName: string; artifactId: string;
   manifestId: string; mediaType: string; container: string; byteSize: string; sha256: string; status: string;
   rightsStatus?: string; probe?: { width: number; height: number; duration: number; fps: number }; createdAt: string
 }
@@ -145,7 +145,7 @@ export default function ProjectWorkspacePage() {
     return () => window.clearInterval(timer)
   }, [activeOperation, loadWorkspace])
 
-  const editingProxy = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'editing-proxy'), [workspace])
+  const editingProxy = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'editorial-proxy') ?? [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'editing-proxy'), [workspace])
   const sourceMasters = useMemo(() => (workspace?.media ?? []).filter((item) => item.role === 'source-master'), [workspace])
   const transcript = workspace?.transcripts[0]
 
@@ -376,7 +376,7 @@ export default function ProjectWorkspacePage() {
       <section className="border-t border-white/[0.07] bg-[#080808] px-4 py-5 sm:px-7">
         <div className="flex items-end justify-between"><div><p className="text-[9px] uppercase tracking-[0.18em] text-[#67635c]">Fontes do projeto</p><h2 className="mt-1 text-base font-semibold">Mídia catalogada</h2></div><span className="text-[10px] text-[#615e57]">{sourceMasters.length} master{sourceMasters.length === 1 ? '' : 's'} · {workspace.transcripts.length} transcript{workspace.transcripts.length === 1 ? '' : 's'}</span></div>
         <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
-          {workspace.media.length ? workspace.media.map((media) => <article className="min-w-64 rounded-xl border border-white/[0.07] bg-[#0b0b0b] p-4" key={media.id}><div className="flex items-start justify-between gap-3"><div className="grid h-9 w-9 place-items-center rounded-lg bg-[#d7a638]/[0.07] text-xs text-[#d5ab47]">{media.role === 'source-master' ? 'M' : 'P'}</div><span className="rounded-full border border-[#61ad7a]/15 px-2 py-1 text-[9px] text-[#6fba87]">{media.rightsStatus ?? 'catalogado'}</span></div><p className="mt-3 truncate text-xs font-medium text-[#c8c2b9]">{media.originalFileName}</p><p className="mt-1 text-[10px] text-[#68645e]">{media.role === 'source-master' ? 'Master original' : 'Proxy de edição'} · {readableBytes(media.byteSize)}{media.probe ? ` · ${Math.round(media.probe.duration)}s` : ''}</p></article>) : <div className="w-full rounded-xl border border-dashed border-white/[0.08] px-4 py-8 text-center text-xs text-[#656159]">O primeiro master aparecerá aqui após a verificação.</div>}
+          {workspace.media.length ? workspace.media.map((media) => <article className="min-w-64 rounded-xl border border-white/[0.07] bg-[#0b0b0b] p-4" key={media.id}><div className="flex items-start justify-between gap-3"><div className="grid h-9 w-9 place-items-center rounded-lg bg-[#d7a638]/[0.07] text-xs text-[#d5ab47]">{media.role === 'source-master' ? 'M' : media.role === 'editorial-proxy' ? 'E' : 'P'}</div><span className="rounded-full border border-[#61ad7a]/15 px-2 py-1 text-[9px] text-[#6fba87]">{media.rightsStatus ?? 'catalogado'}</span></div><p className="mt-3 truncate text-xs font-medium text-[#c8c2b9]">{media.originalFileName}</p><p className="mt-1 text-[10px] text-[#68645e]">{media.role === 'source-master' ? 'Master original' : media.role === 'editorial-proxy' ? 'Proxy editorial materializado' : 'Proxy de ingestão'} · {readableBytes(media.byteSize)}{media.probe ? ` · ${Math.round(media.probe.duration)}s` : ''}</p></article>) : <div className="w-full rounded-xl border border-dashed border-white/[0.08] px-4 py-8 text-center text-xs text-[#656159]">O primeiro master aparecerá aqui após a verificação.</div>}
         </div>
       </section>
     </main>

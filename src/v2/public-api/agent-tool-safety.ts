@@ -159,6 +159,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',
     },
+    'apollo.projects.proxy-renders.enqueue': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues one idempotent proxy render for the current immutable project version and EditPlan.',
+    },
     'apollo.media.uploads.begin': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Registers one checksum-bound upload intent without transferring bytes or starting ingest.',

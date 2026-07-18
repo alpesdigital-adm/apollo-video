@@ -16,6 +16,7 @@ import {
   buildRetainedSourceRanges,
   defineEditorialPhraseRules,
   deriveEditorialExclusions,
+  deriveEditorialPhraseMatches,
   type EditorialExclusionRange,
   type SourceTimeRange,
 } from './recovery-project-acceptance.ts'
@@ -32,6 +33,12 @@ export interface RemoveSpokenContentPayload {
   sourceArtifactId: string
   rules: readonly Readonly<RemoveSpokenContentRuleInput>[]
   exclusions: readonly Readonly<EditorialExclusionRange>[]
+  exclusionOverrides?: readonly Readonly<EditorialExclusionOverrideInput>[]
+}
+
+export interface EditorialExclusionOverrideInput extends SourceTimeRange {
+  ruleIds: readonly string[]
+  reason: string
 }
 
 export interface EditorialCutClip {
@@ -114,9 +121,57 @@ export interface ApplyEditorialCutCommandRequest {
   baseHash: string
   sourceTranscriptId: string
   rules: readonly Readonly<RemoveSpokenContentRuleInput>[]
+  exclusionOverrides?: readonly Readonly<EditorialExclusionOverrideInput>[]
   reason?: string
   actor: Readonly<CommandActor>
   idempotency: Readonly<{ clientId: string; key: string }>
+}
+
+function normalizeExclusionOverrides(input: {
+  overrides: readonly Readonly<EditorialExclusionOverrideInput>[]
+  rules: readonly ReturnType<typeof defineEditorialPhraseRules>[number][]
+  transcript: Readonly<MediaTranscript>
+  sourceDurationSeconds: number
+}): readonly Readonly<EditorialExclusionRange>[] {
+  assertDomain(input.overrides.length > 0 && input.overrides.length <= 32, 'INVALID_ARGUMENT', 'exclusionOverrides must contain 1 to 32 entries')
+  const ruleById = new Map(input.rules.map((rule) => [rule.id, rule]))
+  const matches = deriveEditorialPhraseMatches(input.transcript, input.rules)
+  const normalized = [...input.overrides].map((override) => {
+    const reason = override.reason.trim()
+    const ruleIds = [...new Set(override.ruleIds.map((id) => id.trim()))]
+    assertDomain(
+      Number.isFinite(override.sourceStartSeconds) && Number.isFinite(override.sourceEndSeconds) &&
+        override.sourceStartSeconds >= 0 && override.sourceEndSeconds > override.sourceStartSeconds &&
+        override.sourceEndSeconds <= input.sourceDurationSeconds,
+      'INVALID_ARGUMENT',
+      'Editorial exclusion override must be inside the source duration',
+    )
+    assertDomain(reason.length > 0 && reason.length <= 500, 'INVALID_ARGUMENT', 'Editorial exclusion override reason is invalid')
+    assertDomain(ruleIds.length > 0 && ruleIds.every((id) => ruleById.has(id)), 'INVALID_ARGUMENT', 'Editorial exclusion override ruleIds are invalid')
+    const covered = matches.filter((match) =>
+      match.ruleIds.some((id) => ruleIds.includes(id)) &&
+      match.sourceStartSeconds >= override.sourceStartSeconds - 0.001 &&
+      match.sourceEndSeconds <= override.sourceEndSeconds + 0.001,
+    )
+    assertDomain(covered.length > 0, 'INVALID_ARGUMENT', 'Editorial exclusion override must cover detected speech')
+    return Object.freeze({
+      sourceStartSeconds: override.sourceStartSeconds,
+      sourceEndSeconds: override.sourceEndSeconds,
+      ruleIds: Object.freeze(ruleIds),
+      labels: Object.freeze(ruleIds.map((id) => ruleById.get(id)!.label)),
+      matchedText: covered.map((match) => match.matchedText).join(' | '),
+    })
+  }).sort((left, right) => left.sourceStartSeconds - right.sourceStartSeconds)
+  for (let index = 1; index < normalized.length; index += 1) {
+    assertDomain(normalized[index]!.sourceStartSeconds >= normalized[index - 1]!.sourceEndSeconds, 'INVALID_ARGUMENT', 'Editorial exclusion overrides must be disjoint')
+  }
+  const uncovered = matches.filter((match) => !normalized.some((override) =>
+    match.ruleIds.some((id) => override.ruleIds.includes(id)) &&
+    match.sourceStartSeconds >= override.sourceStartSeconds - 0.001 &&
+    match.sourceEndSeconds <= override.sourceEndSeconds + 0.001,
+  ))
+  assertDomain(uncovered.length === 0, 'INVALID_ARGUMENT', 'Editorial exclusion overrides must cover every detected phrase')
+  return Object.freeze(normalized)
 }
 
 export interface ApplyEditorialCutCommandDependencies {
@@ -323,6 +378,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       baseHash: request.baseHash,
       sourceTranscriptId,
       rules: normalizedRules,
+      exclusionOverrides: request.exclusionOverrides ?? null,
       reason: request.reason?.trim() || null,
     })
     const existing = await dependencies.repository.findIdempotentResult({
@@ -344,7 +400,14 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
         currentBaseHash: context.currentVersion.baseHash,
       })
     }
-    const exclusions = deriveEditorialExclusions(context.transcript, rules)
+    const exclusions = request.exclusionOverrides
+      ? normalizeExclusionOverrides({
+          overrides: request.exclusionOverrides,
+          rules,
+          transcript: context.transcript,
+          sourceDurationSeconds: context.sourceDurationSeconds,
+        })
+      : deriveEditorialExclusions(context.transcript, rules)
     const matchedRuleIds = new Set(exclusions.flatMap((range) => range.ruleIds))
     const missingRuleIds = rules.map((rule) => rule.id).filter((ruleId) => !matchedRuleIds.has(ruleId))
     if (missingRuleIds.length > 0) {
@@ -384,6 +447,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
         sourceArtifactId: context.sourceArtifactId,
         rules: Object.freeze(normalizedRules.map((rule) => Object.freeze(rule))),
         exclusions,
+        ...(request.exclusionOverrides ? { exclusionOverrides: Object.freeze(request.exclusionOverrides.map((override) => Object.freeze({ ...override, ruleIds: Object.freeze([...override.ruleIds]) }))) } : {}),
       }),
       ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}),
       idempotencyKey,

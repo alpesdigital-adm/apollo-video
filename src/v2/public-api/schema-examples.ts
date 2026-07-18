@@ -156,6 +156,12 @@ const queuedMediaIngestOperationExample = {
   createdAt,
   updatedAt: createdAt,
 }
+const queuedProjectProxyRenderOperationExample = {
+  ...queuedRenderOperationExample,
+  id: 'operation-project-proxy-example-1',
+  type: 'project-proxy-render',
+  target: { type: 'media-artifact', id: 'artifact-editorial-proxy-example-1', manifestId: 'manifest-editorial-proxy-example-1' },
+}
 const webhookSigningSecretRotationExample = {
   schemaVersion: 'webhook-signing-secret-rotation/v1',
   id: '20000000-0000-4000-8000-000000000010',
@@ -691,6 +697,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v2': [
       { data: { operation: queuedMediaIngestOperationExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v3': [
+      { data: { operation: queuedProjectProxyRenderOperationExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -711,6 +720,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v2': [
       { data: { operations: [queuedMediaIngestOperationExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v3': [
+      { data: { operations: [queuedProjectProxyRenderOperationExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/webhook-delivery-list/v1': [
       {
@@ -985,6 +997,23 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             reason: 'Remover datas e duração obsoletas.', createdAt,
           }],
           media: [], transcripts: [], operationIds: [], operations: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-workspace/v3': [
+      {
+        data: {
+          project: { id: projectId, workspaceId, name: 'Anuncio de descoberta', status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt },
+          version: { id: 'project-version-example-3', sequence: 3, baseHash: 'c'.repeat(64), createdAt },
+          editPlan: { id: 'edit-plan-example-3', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          commands: [],
+          media: [{
+            id: 'project-media-editorial-example-1', role: 'editorial-proxy', originalFileName: 'video-editorial.mp4',
+            artifactId: 'artifact-editorial-proxy-example-1', manifestId: 'manifest-editorial-proxy-example-1', mediaType: 'video', container: 'mp4',
+            byteSize: '1234567', sha256: 'e'.repeat(64), status: 'available', probe: { width: 540, height: 960, duration: 79.3, fps: 30 }, createdAt,
+          }],
+          transcripts: [], operationIds: [queuedProjectProxyRenderOperationExample.id], operations: [queuedProjectProxyRenderOperationExample],
         },
         meta: { apiVersion: 'v1' },
       },
@@ -1316,6 +1345,16 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/apply-project-edit-command-request/v1': [
       {
+        type: 'remove-spoken-content', baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), sourceTranscriptId: 'transcript-example-1',
+        rules: [
+          { id: 'date-january-31', label: '31 de janeiro', alternatives: ['31 de janeiro', 'trinta e um de janeiro'] },
+          { id: 'date-february-1', label: '1 de fevereiro', alternatives: ['1 de fevereiro', 'primeiro de fevereiro'] },
+          { id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] },
+        ],
+      },
+    ],
+    'apollo://schemas/apply-project-edit-command-request/v2': [
+      {
         type: 'remove-spoken-content',
         baseVersionId: 'project-version-example-1',
         baseHash: 'a'.repeat(64),
@@ -1324,6 +1363,10 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           { id: 'date-january-31', label: '31 de janeiro', alternatives: ['31 de janeiro', 'trinta e um de janeiro'] },
           { id: 'date-february-1', label: '1 de fevereiro', alternatives: ['1 de fevereiro', 'primeiro de fevereiro'] },
           { id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] },
+        ],
+        exclusionOverrides: [
+          { sourceStartSeconds: 36.26, sourceEndSeconds: 58.12, ruleIds: ['date-january-31', 'date-february-1'], reason: 'Remover o bloco de agenda sem deixar uma frase quebrada.' },
+          { sourceStartSeconds: 86.58, sourceEndSeconds: 87.76, ruleIds: ['duration-two-days'], reason: 'Remover apenas a duração, preservando o restante da promessa.' },
         ],
         reason: 'Remover informações de data e duração que não pertencem à nova composição.',
       },
@@ -1358,6 +1401,15 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             outputDurationFrames: 2955, fps: 30, automaticZoom: false,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
           },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-proxy-render-operation-accepted/v1': [
+      {
+        data: {
+          operation: queuedProjectProxyRenderOperationExample,
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

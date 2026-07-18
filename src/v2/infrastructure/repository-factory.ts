@@ -19,6 +19,7 @@ import { materializeAuthorizedRenderInputService } from '../application/material
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
 import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
 import { runNextMediaIngestOperationService } from '../application/run-media-ingest-worker.ts'
+import { runNextProjectProxyRenderOperationService } from '../application/run-project-proxy-render-worker.ts'
 import { calculateVersionHash } from '../application/version-hash.ts'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
@@ -36,6 +37,7 @@ import type { ProjectCreationRepository } from '../application/ports/project-cre
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
 import type { EditorialCommandRepository } from '../application/ports/editorial-command-repository.ts'
+import type { ProjectProxyRenderRepository } from '../application/ports/project-proxy-render-repository.ts'
 import type { PublicOperationRepository } from '../application/ports/public-operation-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
 import type { WebhookRegistrationRepository } from '../application/ports/webhook-registration-repository.ts'
@@ -88,6 +90,7 @@ import { PrismaProjectQueryRepository } from './prisma/project-query-repository.
 import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
 import { PrismaProjectMediaRepository } from './prisma/project-media-repository.ts'
 import { PrismaEditorialCommandRepository } from './prisma/editorial-command-repository.ts'
+import { PrismaProjectProxyRenderRepository } from './prisma/project-proxy-render-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
@@ -113,6 +116,7 @@ import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts
 import { createLocalMediaUploadStorageFromEnvironment } from './media/local-media-upload-storage.ts'
 import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
+import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { createMediaTranscriberFromEnvironment } from './media/groq-media-transcriber.ts'
 import { createConfiguredRenderTargetRegistry } from './render-target-registry.ts'
 import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
@@ -155,6 +159,10 @@ export function createArtifactContentStorage(environment: NodeJS.ProcessEnv = pr
 
 export function createProjectMediaRepository(): ProjectMediaRepository {
   return new PrismaProjectMediaRepository(resolveV2Client())
+}
+
+export function createProjectProxyRenderRepository(): ProjectProxyRenderRepository {
+  return new PrismaProjectProxyRenderRepository(resolveV2Client())
 }
 
 export function createMediaTransferRepository(): MediaTransferRepository {
@@ -553,6 +561,27 @@ export function createMediaIngestWorker(
     transcriber: createMediaTranscriberFromEnvironment(environment),
     rights: createAssetRightsRepository(),
     clock,
+    ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
+    ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
+    ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
+    ...(Number.isSafeInteger(configuredRetryMax) && configuredRetryMax > 0 ? { retryMaxDelayMs: configuredRetryMax } : {}),
+  })
+}
+
+export function createProjectProxyRenderWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
+  if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
+  const configuredLease = Number(environment.APOLLO_V2_RENDER_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS)
+  const configuredHeartbeat = Number(environment.APOLLO_V2_RENDER_HEARTBEAT_MS ?? environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
+  const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
+  const configuredRetryMax = Number(environment.APOLLO_V2_WORKER_RETRY_MAX_MS)
+  return runNextProjectProxyRenderOperationService({
+    operations: createPublicOperationRepository(), projects: createProjectProxyRenderRepository(),
+    artifacts: createMediaArtifactPersistenceRepository(), storage: createLocalMediaUploadStorageFromEnvironment(environment),
+    renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment), artifactRoot, clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),

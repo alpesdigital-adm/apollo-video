@@ -45,6 +45,7 @@ type StoredOperation = Prisma.V2PublicOperationGetPayload<{
       }
     }
     mediaIngest: true
+    projectProxyRender: true
   }
 }>
 
@@ -65,6 +66,7 @@ const OPERATION_INCLUDE = {
     },
   },
   mediaIngest: true,
+  projectProxyRender: true,
 } as const
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
@@ -149,9 +151,11 @@ function parseResult(value: string | null): PublicOperationResult | undefined {
 function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   const renderDetail = row.artifactRender
   const ingestDetail = row.mediaIngest
+  const projectRenderDetail = row.projectProxyRender
   const isRender = row.type === 'artifact-render'
   const isIngest = row.type === 'media-ingest'
-  if (row.targetType !== 'media-artifact' || (isRender === isIngest)) {
+  const isProjectRender = row.type === 'project-proxy-render'
+  if (row.targetType !== 'media-artifact' || [isRender, isIngest, isProjectRender].filter(Boolean).length !== 1) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
       'Stored PublicOperation context is invalid',
@@ -159,7 +163,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     )
   }
   if (isRender && (
-    !renderDetail || ingestDetail || row.targetId !== renderDetail.artifactId ||
+    !renderDetail || ingestDetail || projectRenderDetail || row.targetId !== renderDetail.artifactId ||
     row.workspaceId !== renderDetail.workspaceId ||
     renderDetail.manifest.artifactId !== renderDetail.artifactId ||
     renderDetail.authorization.artifactId !== renderDetail.artifactId ||
@@ -172,12 +176,24 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored render operation context is invalid', { operationId: row.id })
   }
   if (isIngest && (
-    !ingestDetail || renderDetail || row.targetId !== ingestDetail.sourceArtifactId ||
+    !ingestDetail || renderDetail || projectRenderDetail || row.targetId !== ingestDetail.sourceArtifactId ||
     row.workspaceId !== ingestDetail.workspaceId ||
     !ID_PATTERN.test(ingestDetail.projectId) || !ID_PATTERN.test(ingestDetail.sourceManifestId) ||
     ingestDetail.originalFileName.trim().length < 1
   )) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored ingest operation context is invalid', { operationId: row.id })
+  }
+  if (isProjectRender && (
+    !projectRenderDetail || renderDetail || ingestDetail ||
+    row.targetId !== projectRenderDetail.outputArtifactId ||
+    row.workspaceId !== projectRenderDetail.workspaceId ||
+    ![projectRenderDetail.projectId, projectRenderDetail.projectVersionId, projectRenderDetail.editPlanSnapshotId,
+      projectRenderDetail.sourceArtifactId, projectRenderDetail.sourceManifestId, projectRenderDetail.outputArtifactId,
+      projectRenderDetail.outputManifestId].every((value) => ID_PATTERN.test(value)) ||
+    !SHA256_PATTERN.test(projectRenderDetail.inputHash) ||
+    projectRenderDetail.originalFileName.trim().length < 1
+  )) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy render context is invalid', { operationId: row.id })
   }
   const outputFields = checkpointFields(renderDetail)
   const hasAnyCheckpoint = outputFields.some((value) => value !== null)
@@ -267,8 +283,8 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       retryable: row.retryable,
       target: {
         type: 'media-artifact',
-        id: isRender ? renderDetail!.artifactId : ingestDetail!.sourceArtifactId,
-        manifestId: isRender ? renderDetail!.manifestId : ingestDetail!.sourceManifestId,
+        id: isRender ? renderDetail!.artifactId : isIngest ? ingestDetail!.sourceArtifactId : projectRenderDetail!.outputArtifactId,
+        manifestId: isRender ? renderDetail!.manifestId : isIngest ? ingestDetail!.sourceManifestId : projectRenderDetail!.outputManifestId,
       },
       ...(row.resultJson !== null ? { result: parseResult(row.resultJson) } : {}),
       ...(hasAnyError
@@ -295,13 +311,24 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         kind: 'artifact-render' as const,
         authorizationId: renderDetail!.authorizationId,
         inputHash: renderDetail!.inputHash,
-      } : {
+      } : isIngest ? {
         kind: 'media-ingest' as const,
         uploadId: ingestDetail!.uploadId,
         projectId: ingestDetail!.projectId,
         originalFileName: ingestDetail!.originalFileName,
         sourceArtifactId: ingestDetail!.sourceArtifactId,
         sourceManifestId: ingestDetail!.sourceManifestId,
+      } : {
+        kind: 'project-proxy-render' as const,
+        projectId: projectRenderDetail!.projectId,
+        projectVersionId: projectRenderDetail!.projectVersionId,
+        editPlanSnapshotId: projectRenderDetail!.editPlanSnapshotId,
+        sourceArtifactId: projectRenderDetail!.sourceArtifactId,
+        sourceManifestId: projectRenderDetail!.sourceManifestId,
+        inputHash: projectRenderDetail!.inputHash,
+        outputArtifactId: projectRenderDetail!.outputArtifactId,
+        outputManifestId: projectRenderDetail!.outputManifestId,
+        originalFileName: projectRenderDetail!.originalFileName,
       }),
     })
   } catch (error) {
@@ -578,15 +605,27 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     const ingestContext = input.operation.type === 'media-ingest' && 'uploadId' in input.context
       ? input.context
       : undefined
+    const projectRenderContext = input.operation.type === 'project-proxy-render' && input.context.kind === 'project-proxy-render'
+      ? input.context
+      : undefined
     if (
       input.operation.status !== 'queued' || !SHA256_PATTERN.test(input.requestFingerprint) ||
-      (!renderContext && !ingestContext) ||
+      (!renderContext && !ingestContext && !projectRenderContext) ||
       (renderContext && (!SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
       (ingestContext && (
         !/^[0-9a-f-]{36}$/.test(ingestContext.uploadId) ||
         ![ingestContext.projectId, ingestContext.sourceArtifactId, ingestContext.sourceManifestId].every((value) => ID_PATTERN.test(value)) ||
         ingestContext.sourceArtifactId !== input.operation.target.id || ingestContext.sourceManifestId !== input.operation.target.manifestId ||
         ingestContext.originalFileName.trim().length < 1 || ingestContext.originalFileName.length > 240
+      )) ||
+      (projectRenderContext && (
+        ![projectRenderContext.projectId, projectRenderContext.projectVersionId, projectRenderContext.editPlanSnapshotId,
+          projectRenderContext.sourceArtifactId, projectRenderContext.sourceManifestId,
+          projectRenderContext.outputArtifactId, projectRenderContext.outputManifestId].every((value) => ID_PATTERN.test(value)) ||
+        !SHA256_PATTERN.test(projectRenderContext.inputHash) ||
+        projectRenderContext.outputArtifactId !== input.operation.target.id ||
+        projectRenderContext.outputManifestId !== input.operation.target.manifestId ||
+        projectRenderContext.originalFileName.trim().length < 1 || projectRenderContext.originalFileName.length > 240
       )) ||
       input.idempotencyKey.length < 1 ||
       input.idempotencyKey.length > 128
@@ -632,6 +671,25 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Verified upload cannot be attached to this ingest operation')
           }
         }
+        if (projectRenderContext) {
+          const source = await transaction.v2Project.findFirst({
+            where: { id: projectRenderContext.projectId, workspaceId: input.operation.workspaceId },
+            include: {
+              versions: {
+                where: { id: projectRenderContext.projectVersionId, editPlanSnapshotId: projectRenderContext.editPlanSnapshotId },
+                take: 1,
+              },
+              mediaAssets: {
+                where: { artifactId: projectRenderContext.sourceArtifactId, role: 'source-master' },
+                include: { artifact: { include: { manifests: { where: { id: projectRenderContext.sourceManifestId }, take: 1 } } } },
+                take: 1,
+              },
+            },
+          })
+          if (!source || source.versions.length !== 1 || source.mediaAssets.length !== 1 || source.mediaAssets[0]!.artifact.manifests.length !== 1) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy render source is not immutable and available')
+          }
+        }
 
         await transaction.v2PublicOperation.create({
           data: {
@@ -667,7 +725,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               inputHash: renderContext.inputHash,
             },
           })
-        } else {
+        } else if (ingestContext) {
           await transaction.v2MediaIngestOperation.create({
             data: {
               operationId: input.operation.id,
@@ -682,6 +740,22 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           await transaction.v2Project.updateMany({
             where: { id: ingestContext!.projectId, workspaceId: input.operation.workspaceId, status: { in: ['draft', 'failed'] } },
             data: { status: 'ingesting' },
+          })
+        } else {
+          await transaction.v2ProjectProxyRenderOperation.create({
+            data: {
+              operationId: input.operation.id,
+              workspaceId: input.operation.workspaceId,
+              projectId: projectRenderContext!.projectId,
+              projectVersionId: projectRenderContext!.projectVersionId,
+              editPlanSnapshotId: projectRenderContext!.editPlanSnapshotId,
+              sourceArtifactId: projectRenderContext!.sourceArtifactId,
+              sourceManifestId: projectRenderContext!.sourceManifestId,
+              inputHash: projectRenderContext!.inputHash,
+              outputArtifactId: projectRenderContext!.outputArtifactId,
+              outputManifestId: projectRenderContext!.outputManifestId,
+              originalFileName: projectRenderContext!.originalFileName,
+            },
           })
         }
         const created = await transaction.v2PublicOperation.findUnique({

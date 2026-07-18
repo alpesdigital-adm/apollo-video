@@ -173,3 +173,72 @@ test('editorial Command rejects stale versions and rules absent from aligned sou
     (error) => error instanceof DomainError && error.code === 'INVALID_COMMAND' && error.details.missingRuleIds.includes('date-march-2'),
   )
 })
+
+test('editorial Command compiles exact reviewed exclusion overrides instead of whole transcript segments', async () => {
+  const { service } = fixture()
+  const result = await service(request({
+    idempotency: { clientId: 'client-1', key: 'reviewed-exclusions-v1' },
+    exclusionOverrides: [
+      {
+        sourceStartSeconds: 38.5,
+        sourceEndSeconds: 58,
+        ruleIds: ['date-january-31', 'date-february-1'],
+        reason: 'Reviewed boundary preserves the sentence before and after both date mentions.',
+      },
+      {
+        sourceStartSeconds: 83,
+        sourceEndSeconds: 85,
+        ruleIds: ['duration-two-days'],
+        reason: 'Reviewed boundary removes only the duration claim.',
+      },
+    ],
+  }))
+
+  assert.deepEqual(result.retainedSourceRanges, [
+    { sourceStartSeconds: 0, sourceEndSeconds: 38.5 },
+    { sourceStartSeconds: 58, sourceEndSeconds: 83 },
+    { sourceStartSeconds: 85, sourceEndSeconds: 102.166 },
+  ])
+  assert.equal(result.editPlan.videoTracks[0].clips.length, 3)
+  assert.equal(result.editPlan.durationFrames, 2417)
+  assert.equal(result.editPlan.movementPolicy.automaticZoom, false)
+  assert.deepEqual(result.command.payload.exclusionOverrides, [
+    {
+      sourceStartSeconds: 38.5,
+      sourceEndSeconds: 58,
+      ruleIds: ['date-january-31', 'date-february-1'],
+      reason: 'Reviewed boundary preserves the sentence before and after both date mentions.',
+    },
+    {
+      sourceStartSeconds: 83,
+      sourceEndSeconds: 85,
+      ruleIds: ['duration-two-days'],
+      reason: 'Reviewed boundary removes only the duration claim.',
+    },
+  ])
+})
+
+test('editorial Command rejects reviewed overrides that leave a detected occurrence behind', async () => {
+  const { service } = fixture()
+  await assert.rejects(
+    () => service(request({
+      idempotency: { clientId: 'client-1', key: 'incomplete-reviewed-exclusions-v1' },
+      exclusionOverrides: [
+        {
+          sourceStartSeconds: 38.5,
+          sourceEndSeconds: 43,
+          ruleIds: ['date-january-31', 'date-february-1'],
+          reason: 'This deliberately misses the second date occurrence.',
+        },
+        {
+          sourceStartSeconds: 83,
+          sourceEndSeconds: 85,
+          ruleIds: ['duration-two-days'],
+          reason: 'Duration claim.',
+        },
+      ],
+    })),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT' &&
+      error.message === 'Editorial exclusion overrides must cover every detected phrase',
+  )
+})

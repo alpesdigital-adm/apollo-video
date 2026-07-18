@@ -18,6 +18,7 @@ interface CommandBody {
   sourceTranscriptId?: unknown
   rules?: unknown
   reason?: unknown
+  exclusionOverrides?: unknown
 }
 
 function parseRules(value: unknown) {
@@ -42,6 +43,18 @@ function parseRules(value: unknown) {
   })
 }
 
+function parseExclusionOverrides(value: unknown) {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new DomainError('INVALID_ARGUMENT', 'exclusionOverrides must be an array')
+  return value.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new DomainError('INVALID_ARGUMENT', `exclusionOverrides[${index}] must be an object`)
+    const record = entry as Record<string, unknown>
+    if (Object.keys(record).some((key) => !['sourceStartSeconds', 'sourceEndSeconds', 'ruleIds', 'reason'].includes(key))) throw new DomainError('INVALID_ARGUMENT', `exclusionOverrides[${index}] contains an unsupported field`)
+    if (typeof record.sourceStartSeconds !== 'number' || typeof record.sourceEndSeconds !== 'number' || !Array.isArray(record.ruleIds) || !record.ruleIds.every((id) => typeof id === 'string') || typeof record.reason !== 'string') throw new DomainError('INVALID_ARGUMENT', `exclusionOverrides[${index}] is invalid`)
+    return { sourceStartSeconds: record.sourceStartSeconds, sourceEndSeconds: record.sourceEndSeconds, ruleIds: record.ruleIds as string[], reason: record.reason }
+  })
+}
+
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ projectId: string }> },
@@ -58,7 +71,7 @@ export async function POST(
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON')
     }
     if (typeof body !== 'object' || body === null) throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
-    if (Object.keys(body).some((key) => !['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'rules', 'reason'].includes(key))) {
+    if (Object.keys(body).some((key) => !['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'rules', 'reason', 'exclusionOverrides'].includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
     if (body.type !== 'remove-spoken-content') throw new DomainError('INVALID_ARGUMENT', 'type must be remove-spoken-content')
@@ -67,6 +80,7 @@ export async function POST(
     }
     if (body.reason !== undefined && typeof body.reason !== 'string') throw new DomainError('INVALID_ARGUMENT', 'reason must be a string')
     const { projectId } = await context.params
+    const exclusionOverrides = parseExclusionOverrides(body.exclusionOverrides)
     const result = await applyEditorialCutCommandService({
       repository: createEditorialCommandRepository(),
       clock: () => new Date(),
@@ -79,6 +93,7 @@ export async function POST(
       baseHash: body.baseHash,
       sourceTranscriptId: body.sourceTranscriptId,
       rules: parseRules(body.rules),
+      ...(exclusionOverrides ? { exclusionOverrides } : {}),
       ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
       actor: { type: 'api-client', id: actor.clientId },
       idempotency: { clientId: actor.clientId, key: idempotencyKey },

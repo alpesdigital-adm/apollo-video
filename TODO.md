@@ -20,16 +20,16 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate de workspace e ingestão V2:
+Estado auditado após o gate de workspace, ingestão e primeiro proxy editorial V2:
 
-- **92 de 1.259 microtarefas verificadas como efetivamente entregues (7,3%)**;
-- **1.167 microtarefas abertas ou aguardando nova comprovação**;
+- **95 de 1.259 microtarefas verificadas como efetivamente entregues (7,5%)**;
+- **1.164 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
 
-Esta porcentagem mede o PRD completo. O workspace e a ingestão reais já são executáveis; o próximo gate vertical continua aberto porque Diretor, compiler, critic e render final ainda não produziram o MP4 de aceite.
+Esta porcentagem mede o PRD completo. Workspace, ingestão, Command editorial e o primeiro proxy materializado já são executáveis; o próximo gate vertical continua aberto porque Diretor, compiler, critic, legendas/transições e render final ainda não produziram o MP4 de aceite.
 
 ---
 
@@ -43,11 +43,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 - [x] Conectar o workspace de edição aos projetos, versões, operações e artifacts V2, sem ler o projeto SQLite legado. Evidência: `/projects/[id]` consome exclusivamente `GET /v1/projects/{projectId}` e exibe operação, master, proxy e transcript persistidos no Postgres.
 - [ ] Impedir punch-in automático nos quatro segundos iniciais e desativar zoom automático por padrão.
 - [ ] Limitar legendas a blocos curtos, respeitar âncora e manter a região de rosto/olhos livre.
-- [ ] Expor corte editorial no modelo de `Command` V2, com nova versão imutável, alinhamento às palavras e retiming da transcrição. Parcial comprovado em 2026-07-18: `POST /v1/projects/{projectId}/commands` persistiu o Command `edit-command-5e7919ef-9758-4637-82d8-f639f5c25116`, criou a versão imutável 3 `project-version-7f9a4403-9b11-4d49-8f6c-99ca89640049` e compilou quatro ranges retidos; permanece aberto até o EditPlan ser materializado e aceito no MP4.
-- [ ] Criar regressões automatizadas para autenticação e cortes editoriais. Parcial: regressões de sessão e cinco testes focados do Command/critério editorial estão aprovados; falta o E2E automatizado do MP4 renderizado.
+- [x] Expor corte editorial no modelo de `Command` V2, com nova versão imutável, alinhamento às palavras e retiming da transcrição. Evidência: `POST /v1/projects/{projectId}/commands` persistiu `edit-command-b57329af-711d-4cf7-8ba7-1625bab110f8`, criou a versão imutável 4 `project-version-1e752a92-7fb6-4a90-81f0-8d4f10a303e2`, compilou três ranges retidos e o worker materializou o EditPlan no artifact `artifact-c400737b-9170-4d74-a38b-cd78a530a5b9`.
+- [x] Criar regressões automatizadas para autenticação e cortes editoriais. Evidência: regressões da sessão/API, cinco testes do Command e critério editorial, duas regressões do worker durável, além do E2E FFmpeg em `tests/v2/ffmpeg-ingest.integration.mjs`, que gera e inspeciona um MP4 vertical real a partir de clips retidos; 447/447 testes gerais e 2/2 integrações de mídia aprovados.
 - [x] Publicar a nova autenticação própria do Apollo exclusivamente pela API `/v1/session`, com capabilities, schemas, OpenAPI e E2E; remover o Basic Auth do proxy. Evidência: `src/app/v1/session/route.ts`, capability registry, OpenAPI e testes de sessão/API.
 - [x] Importar o master do projeto de teste como artifact V2, promovendo bytes imutáveis, proxy, áudio e transcript pela operação pública de ingestão. Evidência: projeto `project-fe932791-32f4-4453-8b85-6ce35a711860`, operação `operation-b3bab0da-ded6-453c-809f-c637268de131` e master de 145.445.848 bytes.
-- [ ] Aplicar via API V2 a remoção das falas que mencionem “31 de janeiro” e “1 de fevereiro”, além de “dois dias”/“dois dias de aula”, preservando continuidade e retiming. Parcial: o Command real excluiu os ranges 39,02–42,68s, 54,82–57,72s e 83,24–89,98s; a validação sobre os ranges persistidos passou, mas continuidade audível e retiming só serão aceitos no MP4.
+- [x] Aplicar via API V2 a remoção das falas que mencionem “31 de janeiro” e “1 de fevereiro”, além de “dois dias”/“dois dias de aula”, preservando continuidade e retiming. Evidência: a versão 4 exclui 36,26–58,12s e 86,58–87,76s; a operação durável `operation-eff0dcdf-f710-46d5-b6e1-43614245ab63` materializou um MP4 540×960 de 79,734s com SHA-256 `12614d44518da714f05b0024836ea60d943c27e7365ec92e46a74bc9d703d432`; a retranscrição do áudio renderizado não contém nenhuma das falas proibidas e preserva continuidade audível nos dois cortes.
 - [ ] Implementar a jornada executável V2: briefing → percepção → `TreatmentPlan` → `StoryPlan` → `EditPlan` → critic → proxy/final.
 - [x] Remover da superfície executável da aplicação todas as chamadas às rotas e serviços legados. Evidência: schema antigo, 68 rotas `/api`, páginas/componentes antigos e `src/lib` removidos; `npm run lint` impede reintrodução e o build lista somente UI e `/v1` novos.
 - [ ] Revisar e corrigir continuidade, transições, enquadramento e posicionamento de legendas no vídeo renderizado.

@@ -26,6 +26,7 @@ model V2Workspace {
   projectMediaAssets              V2ProjectMediaAsset[]
   mediaTranscripts                V2MediaTranscript[]
   mediaIngestOperations           V2MediaIngestOperation[]
+  projectProxyRenderOperations    V2ProjectProxyRenderOperation[]
   mediaDownloadGrants             V2MediaDownloadGrant[]
   mediaManifests                  V2MediaArtifactManifest[]
   mediaLineage                    V2MediaArtifactLineage[]
@@ -178,6 +179,7 @@ model V2Project {
   mediaAssets           V2ProjectMediaAsset[]
   mediaTranscripts      V2MediaTranscript[]
   mediaIngestOperations V2MediaIngestOperation[]
+  proxyRenderOperations V2ProjectProxyRenderOperation[]
   editCommands          V2EditCommand[]
 
   @@unique([id, workspaceId])
@@ -234,6 +236,7 @@ model V2ProjectVersion {
   policiesSnapshot   V2ProjectSnapshot  @relation("PoliciesSnapshot", fields: [policiesSnapshotId], references: [id], onDelete: Restrict)
   command            V2EditCommand?     @relation("CommandResultVersion", fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   commandsBasedOn    V2EditCommand[]    @relation("CommandBaseVersion")
+  proxyRenderOperations V2ProjectProxyRenderOperation[]
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -584,6 +587,7 @@ model V2PublicOperation {
   client         V2ApiClient                @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   artifactRender V2ArtifactRenderOperation?
   mediaIngest    V2MediaIngestOperation?
+  projectProxyRender V2ProjectProxyRenderOperation?
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
@@ -617,6 +621,33 @@ model V2MediaIngestOperation {
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId])
   @@map("media_ingest_operations")
+}
+
+model V2ProjectProxyRenderOperation {
+  operationId       String   @id @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  projectId        String   @db.VarChar(128)
+  projectVersionId String   @db.VarChar(128)
+  editPlanSnapshotId String @db.VarChar(128)
+  sourceArtifactId String   @db.VarChar(128)
+  sourceManifestId String   @db.VarChar(128)
+  inputHash        String   @db.Char(64)
+  outputArtifactId String   @db.VarChar(128)
+  outputManifestId String   @db.VarChar(128)
+  originalFileName String   @db.VarChar(240)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  operation V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  project   V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  version   V2ProjectVersion  @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([operationId, workspaceId])
+  @@unique([workspaceId, projectVersionId, inputHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId])
+  @@index([workspaceId, outputArtifactId])
+  @@map("project_proxy_render_operations")
 }
 
 model V2ProjectMediaAsset {

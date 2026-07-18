@@ -156,7 +156,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(created.replayed, false)
     assert.equal(replayed.replayed, true)
     assert.equal(replayed.operation.id, operationId)
-    assert.deepEqual(replayed.context, input.context)
+    assert.deepEqual(replayed.context, { kind: 'artifact-render', ...input.context })
     assert.equal(await client.v2PublicOperation.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2ArtifactRenderOperation.count({ where: { workspaceId } }), 1)
     assert.equal(await repository.findById('another-workspace', operationId), null)

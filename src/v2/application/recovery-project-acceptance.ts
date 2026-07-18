@@ -48,6 +48,8 @@ export interface EditorialExclusionRange extends SourceTimeRange {
   matchedText: string
 }
 
+export interface EditorialPhraseMatch extends EditorialExclusionRange {}
+
 function normalizeToken(value: string): string {
   return value
     .normalize('NFD')
@@ -127,19 +129,29 @@ export function deriveEditorialExclusions(
   transcript: Readonly<MediaTranscript>,
   rules: readonly Readonly<EditorialPhraseRule>[],
 ): readonly EditorialExclusionRange[] {
+  return mergeRanges(deriveEditorialPhraseMatches(transcript, rules).map((match) => {
+    const expanded = expandToSegments(
+      transcript,
+      match.sourceStartSeconds,
+      match.sourceEndSeconds,
+    )
+    return { ...match, ...expanded }
+  }))
+}
+
+export function deriveEditorialPhraseMatches(
+  transcript: Readonly<MediaTranscript>,
+  rules: readonly Readonly<EditorialPhraseRule>[],
+): readonly Readonly<EditorialPhraseMatch>[] {
   const matches: EditorialExclusionRange[] = []
   for (let wordIndex = 0; wordIndex < transcript.words.length; wordIndex += 1) {
     for (const rule of rules) {
       for (const phrase of rule.alternatives) {
         if (!matchesAt(transcript.words, wordIndex, phrase)) continue
         const matchingWords = transcript.words.slice(wordIndex, wordIndex + phrase.length)
-        const expanded = expandToSegments(
-          transcript,
-          matchingWords[0]!.start,
-          matchingWords.at(-1)!.end,
-        )
         matches.push({
-          ...expanded,
+          sourceStartSeconds: matchingWords[0]!.start,
+          sourceEndSeconds: matchingWords.at(-1)!.end,
           ruleIds: Object.freeze([rule.id]),
           labels: Object.freeze([rule.label]),
           matchedText: matchingWords.map((word) => word.word).join(' '),
@@ -148,7 +160,7 @@ export function deriveEditorialExclusions(
       }
     }
   }
-  return mergeRanges(matches)
+  return Object.freeze(matches.map((match) => Object.freeze(match)))
 }
 
 export function deriveRecoveryEditorialExclusions(

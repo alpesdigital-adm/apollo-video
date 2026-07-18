@@ -185,6 +185,7 @@ const requiredChecks = [
   'edit_commands_actor_type_check',
   'edit_commands_base_hash_check',
   'edit_commands_request_fingerprint_check',
+  'project_proxy_render_operations_hash_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

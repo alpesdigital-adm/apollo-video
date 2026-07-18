@@ -12,11 +12,15 @@ export const PUBLIC_OPERATION_STATUSES = [
 
 export type PublicOperationStatus = (typeof PUBLIC_OPERATION_STATUSES)[number]
 
-export const PUBLIC_OPERATION_TYPES = ['artifact-render', 'media-ingest'] as const
+export const PUBLIC_OPERATION_TYPES = ['artifact-render', 'media-ingest', 'project-proxy-render'] as const
 export type PublicOperationType = (typeof PUBLIC_OPERATION_TYPES)[number]
 
 export function requiresArtifactRenderCheckpoint(type: PublicOperationType): boolean {
   return type === 'artifact-render'
+}
+
+function isRenderOperation(type: PublicOperationType): boolean {
+  return type === 'artifact-render' || type === 'project-proxy-render'
 }
 
 export const PUBLIC_OPERATION_PHASES = [
@@ -112,11 +116,11 @@ export type PublicOperationRunningPhase =
   | (typeof INGEST_PHASE_ORDER)[number]
 
 function runningPhasesFor(type: PublicOperationType): readonly PublicOperationRunningPhase[] {
-  return type === 'artifact-render' ? RENDER_PHASE_ORDER : INGEST_PHASE_ORDER
+  return isRenderOperation(type) ? RENDER_PHASE_ORDER : INGEST_PHASE_ORDER
 }
 
 function progressUnit(type: PublicOperationType): string {
-  return type === 'artifact-render' ? 'render' : 'stage'
+  return isRenderOperation(type) ? 'render' : 'stage'
 }
 
 function validateId(value: string, field: string): string {
@@ -506,7 +510,7 @@ export function startPublicOperationAttempt(
   return freezeOperation({
     ...operation,
     status: 'running',
-    phase: operation.type === 'artifact-render' ? 'materializing' : 'assembling',
+    phase: isRenderOperation(operation.type) ? 'materializing' : 'assembling',
     progress: {
       completed: 0,
       total: runningPhasesFor(operation.type).length,

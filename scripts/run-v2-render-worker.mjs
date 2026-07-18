@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 
-import { createPublicOperationWorker } from '../src/v2/infrastructure/repository-factory.ts'
+import { createProjectProxyRenderWorker, createPublicOperationWorker } from '../src/v2/infrastructure/repository-factory.ts'
 
 const pollIntervalMs = Number(process.env.APOLLO_V2_WORKER_POLL_MS ?? 1_000)
 if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 100) {
@@ -10,6 +10,7 @@ if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 100) {
 
 const workerId = `worker:${hostname().slice(0, 40)}:${process.pid}:${randomUUID()}`
 const runNext = createPublicOperationWorker()
+const runNextProjectProxy = createProjectProxyRenderWorker()
 let stopping = false
 
 process.once('SIGINT', () => { stopping = true })
@@ -17,7 +18,7 @@ process.once('SIGTERM', () => { stopping = true })
 
 while (!stopping) {
   try {
-    const outcome = await runNext(workerId)
+    const outcome = await runNextProjectProxy(workerId) ?? await runNext(workerId)
     if (!outcome) {
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
     }
