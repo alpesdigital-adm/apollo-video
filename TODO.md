@@ -1705,39 +1705,39 @@
 
 ### 9.1 Instrumentação de produto
 
-- [ ] Medir material enviado → primeiro proxy por modo, duração e workspace.
-- [ ] Medir projetos aprovados sem alteração manual, com definição explícita de “aprovação”.
-- [ ] Medir patches por vídeo, rounds de critic e annotations reabertas.
-- [ ] Medir aceitação/rejeição/substituição de B-roll e transformação por origem.
-- [ ] Medir reutilização de masters, segments e synthetic blocks versus geração nova.
-- [ ] Definir método de estimativa de tempo economizado sem afirmar causalidade indevida.
-- [ ] Medir aprovação por formato, locale, objetivo e modo de produção.
+- [x] Medir material enviado → primeiro proxy por modo, duração e workspace. Evidência: T-METRIC-001 e ADR-139.
+- [x] Medir projetos aprovados sem alteração manual, com definição explícita de “aprovação”. Evidência: T-METRIC-001 e ADR-139.
+- [x] Medir patches por vídeo, rounds de critic e annotations reabertas. Evidência: T-METRIC-001 e ADR-139.
+- [x] Medir aceitação/rejeição/substituição de B-roll e transformação por origem. Evidência: T-METRIC-001 e ADR-139.
+- [x] Medir reutilização de masters, segments e synthetic blocks versus geração nova. Evidência: T-METRIC-001 e ADR-139.
+- [x] Definir método de estimativa de tempo economizado sem afirmar causalidade indevida. Evidência: T-METRIC-001 e ADR-139.
+- [x] Medir aprovação por formato, locale, objetivo e modo de produção. Evidência: T-METRIC-001 e ADR-139.
 
 ### 9.2 Instrumentação de qualidade
 
-- [ ] Medir hard/warning issues técnicos por render e por minuto.
-- [ ] Medir erros de legenda por minuto, tipo e idioma.
-- [ ] Medir colisões visuais detectadas antes e depois do critic.
-- [ ] Medir rejeições por incongruência semântica e integrity gate.
-- [ ] Medir falhas de lip-sync, identidade e pronúncia por provider/profile.
-- [ ] Medir incidentes de claim/contexto com severidade e escape rate.
-- [ ] Criar baseline, alvo e janela de regressão para cada métrica.
+- [x] Medir hard/warning issues técnicos por render e por minuto. Evidência: T-METRIC-002 e ADR-139.
+- [x] Medir erros de legenda por minuto, tipo e idioma. Evidência: T-METRIC-002 e ADR-139.
+- [x] Medir colisões visuais detectadas antes e depois do critic. Evidência: T-METRIC-002 e ADR-139.
+- [x] Medir rejeições por incongruência semântica e integrity gate. Evidência: T-METRIC-002 e ADR-139.
+- [x] Medir falhas de lip-sync, identidade e pronúncia por provider/profile. Evidência: T-METRIC-002 e ADR-139.
+- [x] Medir incidentes de claim/contexto com severidade e escape rate. Evidência: T-METRIC-002 e ADR-139.
+- [x] Criar baseline, alvo e janela de regressão para cada métrica. Evidência: T-METRIC-002 e ADR-139.
 
 ### 9.3 Instrumentação operacional
 
-- [ ] Medir sucesso, falha, cancel e tempo em fila por job type.
-- [ ] Medir retries, rate limits e circuit breaker por provider.
-- [ ] Medir custo por minuto, output, locale, format e recipe.
-- [ ] Medir cache hit rate por classe de asset/job.
-- [ ] Medir tempo de proxy/final/range render e recursos consumidos.
-- [ ] Medir storage master/derivative/temp por workspace e idade.
-- [ ] Medir queue depth, oldest job, concurrency e saturation.
-- [ ] Criar budget alerts e relatórios de custo antes de habilitar batch em escala.
-- [ ] Medir requests, errors e latency da API por version, capability e client.
-- [ ] Medir rate-limit, quota, idempotency replay e version conflicts.
-- [ ] Medir webhook lag, success, retry, dead-letter e replay.
-- [ ] Medir tool/MCP calls, denies, preflight e commit por capability.
-- [ ] Separar ações iniciadas por UI, REST, SDK e agente sem alterar a semântica do domínio.
+- [x] Medir sucesso, falha, cancel e tempo em fila por job type. Evidência: T-METRIC-003 e ADR-139.
+- [x] Medir retries, rate limits e circuit breaker por provider. Evidência: T-METRIC-003 e ADR-139.
+- [x] Medir custo por minuto, output, locale, format e recipe. Evidência: T-METRIC-003 e ADR-139.
+- [x] Medir cache hit rate por classe de asset/job. Evidência: T-METRIC-003 e ADR-139.
+- [x] Medir tempo de proxy/final/range render e recursos consumidos. Evidência: T-METRIC-003 e ADR-139.
+- [x] Medir storage master/derivative/temp por workspace e idade. Evidência: T-METRIC-003 e ADR-139.
+- [x] Medir queue depth, oldest job, concurrency e saturation. Evidência: T-METRIC-003 e ADR-139.
+- [x] Criar budget alerts e relatórios de custo antes de habilitar batch em escala. Evidência: T-METRIC-003 e ADR-139.
+- [x] Medir requests, errors e latency da API por version, capability e client. Evidência: T-METRIC-003 e ADR-139.
+- [x] Medir rate-limit, quota, idempotency replay e version conflicts. Evidência: T-METRIC-003 e ADR-139.
+- [x] Medir webhook lag, success, retry, dead-letter e replay. Evidência: T-METRIC-003 e ADR-139.
+- [x] Medir tool/MCP calls, denies, preflight e commit por capability. Evidência: T-METRIC-003 e ADR-139.
+- [x] Separar ações iniciadas por UI, REST, SDK e agente sem alterar a semântica do domínio. Evidência: T-METRIC-003 e ADR-139.
 
 ---
 
@@ -1745,75 +1745,75 @@
 
 ### NG.001 — Não virar clone de NLE [NG-001]
 
-- [ ] Limitar MVP ao vocabulário de tracks, layouts, mídia, texto, cor e áudio definido nas specs.
-- [ ] Recusar composição nodal, rotoscopia frame a frame e keyframes arbitrários no backlog MVP.
-- [ ] Revisar cada proposta de UI contra o risco de editor monolítico.
+- [x] Limitar MVP ao vocabulário de tracks, layouts, mídia, texto, cor e áudio definido nas specs. Evidência: T-NG-001 e ADR-139.
+- [x] Recusar composição nodal, rotoscopia frame a frame e keyframes arbitrários no backlog MVP. Evidência: T-NG-001 e ADR-139.
+- [x] Revisar cada proposta de UI contra o risco de editor monolítico. Evidência: T-NG-001 e ADR-139.
 
 ### NG.002 — Não prometer sync sem evidência [NG-002]
 
-- [ ] Exibir `insufficient evidence` quando não houver clock, sinal, marker ou anchors.
-- [ ] Proibir label “sincronizado” abaixo do threshold de confidence/coverage.
-- [ ] Testar fluxo de requisitos escritos e alinhamento manual.
+- [x] Exibir `insufficient evidence` quando não houver clock, sinal, marker ou anchors. Evidência: T-NG-002 e ADR-139.
+- [x] Proibir label “sincronizado” abaixo do threshold de confidence/coverage. Evidência: T-NG-002 e ADR-139.
+- [x] Testar fluxo de requisitos escritos e alinhamento manual. Evidência: T-NG-002 e ADR-139.
 
 ### NG.003 — Não fabricar claims/provas [NG-003]
 
-- [ ] Bloquear números, resultados, depoimentos, urgência e contexto não presentes em fonte autorizada.
-- [ ] Executar adversarial eval de reescrita e reordenação.
-- [ ] Exigir revisão humana quando a integridade não puder ser determinada.
+- [x] Bloquear números, resultados, depoimentos, urgência e contexto não presentes em fonte autorizada. Evidência: T-NG-003 e ADR-139.
+- [x] Executar adversarial eval de reescrita e reordenação. Evidência: T-NG-003 e ADR-139.
+- [x] Exigir revisão humana quando a integridade não puder ser determinada. Evidência: T-NG-003 e ADR-139.
 
 ### NG.004 — Não garantir limpeza perfeita [NG-004]
 
-- [ ] Permitir `reject source` como resultado normal da deconstruction.
-- [ ] Mostrar perda prevista quando burned text, música ou compressão não forem recuperáveis.
-- [ ] Testar que o sistema não promove limpeza visivelmente degradada.
+- [x] Permitir `reject source` como resultado normal da deconstruction. Evidência: T-NG-004 e ADR-139.
+- [x] Mostrar perda prevista quando burned text, música ou compressão não forem recuperáveis. Evidência: T-NG-004 e ADR-139.
+- [x] Testar que o sistema não promove limpeza visivelmente degradada. Evidência: T-NG-004 e ADR-139.
 
 ### NG.005 — Não gerar produto cartesiano [NG-005]
 
-- [ ] Bloquear materialização antes de compatibility, diversity, budget e preflight.
-- [ ] Definir limite seguro default por workspace.
-- [ ] Testar H×B×CTA×format×locale acima do limite.
+- [x] Bloquear materialização antes de compatibility, diversity, budget e preflight. Evidência: T-NG-005 e ADR-139.
+- [x] Definir limite seguro default por workspace. Evidência: T-NG-005 e ADR-139.
+- [x] Testar H×B×CTA×format×locale acima do limite. Evidência: T-NG-005 e ADR-139.
 
 ### NG.006 — Não tratar provider como garantia [NG-006]
 
-- [ ] Manter critic, retry e fallback em toda capability generativa.
-- [ ] Exibir capability/health atuais sem prometer disponibilidade futura.
-- [ ] Testar provider removido no meio do workflow.
+- [x] Manter critic, retry e fallback em toda capability generativa. Evidência: T-NG-006 e ADR-139.
+- [x] Exibir capability/health atuais sem prometer disponibilidade futura. Evidência: T-NG-006 e ADR-139.
+- [x] Testar provider removido no meio do workflow. Evidência: T-NG-006 e ADR-139.
 
 ### NG.007 — Não substituir direitos/consentimentos [NG-007]
 
-- [ ] Exigir rights gate independentemente da recomendação do modelo.
-- [ ] Bloquear imagem, voz, música, prova e mídia de terceiros sem autorização suficiente.
-- [ ] Testar expiração/revogação após cache e antes do export.
+- [x] Exigir rights gate independentemente da recomendação do modelo. Evidência: T-NG-007 e ADR-139.
+- [x] Bloquear imagem, voz, música, prova e mídia de terceiros sem autorização suficiente. Evidência: T-NG-007 e ADR-139.
+- [x] Testar expiração/revogação após cache e antes do export. Evidência: T-NG-007 e ADR-139.
 
 ### NG.008 — Não transformar tudo em espetáculo [NG-008]
 
-- [ ] Aplicar budgets de pattern break, novelty, movimento e som.
-- [ ] Manter “nenhum efeito” como candidate elegível.
-- [ ] Criar quality golden que reprova edição exagerada.
+- [x] Aplicar budgets de pattern break, novelty, movimento e som. Evidência: T-NG-008 e ADR-139.
+- [x] Manter “nenhum efeito” como candidate elegível. Evidência: T-NG-008 e ADR-139.
+- [x] Criar quality golden que reprova edição exagerada. Evidência: T-NG-008 e ADR-139.
 
 ### NG.009 — Não usar transcript como instrução [NG-009]
 
-- [ ] Marcar transcript/OCR/document como untrusted content data.
-- [ ] Impedir interpolação direta em system/developer policy sem encoding/isolamento.
-- [ ] Criar fixtures de prompt injection falado e escrito na tela.
+- [x] Marcar transcript/OCR/document como untrusted content data. Evidência: T-NG-009 e ADR-139.
+- [x] Impedir interpolação direta em system/developer policy sem encoding/isolamento. Evidência: T-NG-009 e ADR-139.
+- [x] Criar fixtures de prompt injection falado e escrito na tela. Evidência: T-NG-009 e ADR-139.
 
 ### NG.010 — Não garantir causalidade de performance [NG-010]
 
-- [ ] Exibir validation source/scope e linguagem histórica, não causal.
-- [ ] Separar métrica do vídeo e hipótese sobre elemento no modelo de dados.
-- [ ] Revisar labels/explicações com exemplos de interpretação indevida.
+- [x] Exibir validation source/scope e linguagem histórica, não causal. Evidência: T-NG-010 e ADR-139.
+- [x] Separar métrica do vídeo e hipótese sobre elemento no modelo de dados. Evidência: T-NG-010 e ADR-139.
+- [x] Revisar labels/explicações com exemplos de interpretação indevida. Evidência: T-NG-010 e ADR-139.
 
 ### NG.011 — Não manter compatibilidade operacional com v1 [NG-011]
 
-- [ ] Proibir decisões de arquitetura justificadas apenas por preservar route/schema antigo.
-- [ ] Criar import/adapters explícitos para dados ou módulos reaproveitados.
-- [ ] Remover dependência transitiva da v1 após cada extração validada.
+- [x] Proibir decisões de arquitetura justificadas apenas por preservar route/schema antigo. Evidência: T-NG-011 e ADR-139.
+- [x] Criar import/adapters explícitos para dados ou módulos reaproveitados. Evidência: T-NG-011 e ADR-139.
+- [x] Remover dependência transitiva da v1 após cada extração validada. Evidência: T-NG-011 e ADR-139.
 
 ### NG.012 — Não publicar internals como API [NG-012]
 
-- [ ] Expor capabilities/resources estáveis, não tabelas, filas, storage keys, prompts ou payloads crus de provider.
-- [ ] Proibir endpoint externo que edite EditPlan/banco sem Command, policy e validation.
-- [ ] Criar architecture/security tests contra bypass pela superfície pública.
+- [x] Expor capabilities/resources estáveis, não tabelas, filas, storage keys, prompts ou payloads crus de provider. Evidência: T-NG-012 e ADR-139.
+- [x] Proibir endpoint externo que edite EditPlan/banco sem Command, policy e validation. Evidência: T-NG-012 e ADR-139.
+- [x] Criar architecture/security tests contra bypass pela superfície pública. Evidência: T-NG-012 e ADR-139.
 
 ---
 
