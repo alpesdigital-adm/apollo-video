@@ -2,6 +2,10 @@ FROM node:22-bookworm-slim AS dependencies
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
 COPY remotion/package.json remotion/package-lock.json ./remotion/
@@ -12,6 +16,10 @@ FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=dependencies /app/generated ./generated
