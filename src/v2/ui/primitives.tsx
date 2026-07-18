@@ -1,0 +1,19 @@
+import type { ReactNode } from 'react';
+import { STATUS_PRESENTATION } from '../domain/product-governance';
+
+type BoxProps = { title?: string; children: ReactNode; className?: string };
+const box = 'rounded-2xl border border-zinc-800 bg-zinc-900/40';
+export function SidebarShell({ children }: { children: ReactNode }) { return <aside className="min-h-full w-64 border-r border-zinc-800 bg-zinc-950 p-4">{children}</aside>; }
+export function ProjectCard({ title, meta, children }: { title: string; meta: string; children?: ReactNode }) { return <article className={`${box} p-5`}><h3 className="font-medium text-zinc-100">{title}</h3><p className="mt-1 text-sm text-zinc-500">{meta}</p>{children}</article>; }
+export function MediaRail({ children }: { children: ReactNode }) { return <section aria-label="Mídias" className="flex gap-3 overflow-x-auto py-2">{children}</section>; }
+export function PreviewFrame({ children }: { children: ReactNode }) { return <section aria-label="Prévia" className={`${box} aspect-video overflow-hidden bg-black`}>{children}</section>; }
+export function TimelineStrip({ children }: { children: ReactNode }) { return <section aria-label="Linha do tempo" className={`${box} min-h-28 overflow-x-auto p-3`}>{children}</section>; }
+export function InspectorPanel({ title, children }: BoxProps) { return <aside className={`${box} p-5`}><h2 className="text-sm font-semibold">{title ?? 'Ajustes'}</h2><div className="mt-4">{children}</div></aside>; }
+export function DirectorPanel({ children }: { children: ReactNode }) { return <aside aria-label="Diretor IA" className="rounded-2xl border border-amber-400/20 bg-amber-300/[.06] p-5">{children}</aside>; }
+export function WorkflowState({ state }: { state: keyof typeof STATUS_PRESENTATION }) { const item = STATUS_PRESENTATION[state]; return <span data-tone={item.tone} className="rounded-full border border-zinc-700 px-3 py-1 text-xs">{item.label}</span>; }
+export function ImpactPreview({ title, affected, children }: { title: string; affected: string[]; children?: ReactNode }) { return <section className={`${box} p-5`}><h3 className="font-medium">{title}</h3><p className="mt-2 text-sm text-zinc-400">Afeta: {affected.join(', ') || 'nenhum item'}</p>{children}</section>; }
+export function CostConfirmation({ amount, currency = 'BRL' }: { amount: number; currency?: string }) { return <output className="font-mono text-sm text-amber-200">Custo previsto: {amount.toLocaleString('pt-BR', { style: 'currency', currency })}</output>; }
+export function DiffView({ before, after }: { before: ReactNode; after: ReactNode }) { return <div className="grid gap-3 md:grid-cols-2"><section className={`${box} p-4`}><span className="text-xs text-zinc-500">Antes</span>{before}</section><section className={`${box} p-4`}><span className="text-xs text-zinc-500">Depois</span>{after}</section></div>; }
+export function IssueCard({ severity, children }: { severity: 'warning' | 'blocking'; children: ReactNode }) { return <article role={severity === 'blocking' ? 'alert' : 'status'} className={`rounded-xl border p-4 ${severity === 'blocking' ? 'border-rose-400/30 bg-rose-400/[.06]' : 'border-amber-400/30 bg-amber-400/[.06]'}`}>{children}</article>; }
+export function AnnotationBadge({ label }: { label: string }) { return <span className="inline-flex min-h-11 items-center rounded-full bg-sky-300/10 px-4 text-sm text-sky-200">{label}</span>; }
+export function StateBoundary({ state, children }: { state: 'ready' | 'loading' | 'empty' | 'error' | 'conflict'; children?: ReactNode }) { if (state === 'ready') return <>{children}</>; const copy = { loading: 'Carregando…', empty: 'Nada aqui ainda. Adicione o primeiro item.', error: 'Não foi possível concluir. Tente novamente.', conflict: 'Este conteúdo mudou. Compare as versões antes de continuar.' }[state]; return <div role={state === 'error' ? 'alert' : 'status'} className={`${box} min-h-28 p-5 text-sm text-zinc-400`}>{copy}</div>; }

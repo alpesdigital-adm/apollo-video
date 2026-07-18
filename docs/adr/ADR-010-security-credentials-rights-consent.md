@@ -1,5 +1,11 @@
 # ADR-010 — Segurança, credenciais, rights e consent
 
+## Secret store, privacidade e threat model
+
+Produção usa secret store gerenciado ou envelope encryption, menor escopo por worker e rotação sem plaintext em APIs/configuração. Acesso gera audit redigido. Exportação e deleção verificadas incluem inventário, exceções legais, tombstones e recibo.
+
+Uploads entram em quarentena e são sondados fora do processo web. Transcript/OCR é dado não confiável. Fetch externo e webhooks bloqueiam SSRF por DNS/IP; assinaturas vinculam bytes, timestamp e event ID com proteção de replay. Prompt nunca concede rights, consent, scope ou autoridade de rede.
+
 > **Status:** Accepted para autenticação externa e primeiro boundary de rights/consent; enforcement global continua incremental
 >
 > **Data:** 12 de julho de 2026

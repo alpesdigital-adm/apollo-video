@@ -1,5 +1,13 @@
 # ADR-013 — API pública, automação e MCP
 
+## Compatibilidade, gateway e transporte
+
+Rotas têm major version. Campos/capabilities aditivos permanecem em v1; remoção exige nova versão, deprecation e sunset publicados e ao menos 180 dias de migração. Schemas/eventos continuam descobríveis durante a retenção pós-sunset.
+
+Webhooks são at-least-once, assinados sobre bytes exatos e ordenados por resource quando necessário; event ID deduplica e replay é limitado/auditado. Ações caras, amplas ou destrutivas exigem preflight token curto ligado ao request. O MCP stdio oficial usa os mesmos schemas e chama a Public API autenticada.
+
+O gateway aplica quotas por workspace/client, rate limit por capability, limites de payload e correlation IDs sem revelar tenants, filas internas, credenciais, prompts ou payloads crus de providers.
+
 > **Status:** Accepted; autenticação de service account fechada no ADR-010
 >
 > **Data:** 12 de julho de 2026

@@ -12,51 +12,51 @@
 
 ### 0.1 Regras de uso
 
-- [ ] Antes de iniciar uma microtarefa, confirmar as dependências citadas no FR, ADR ou spec correspondente.
-- [ ] Associar cada implementação a um ID deste arquivo e ao FR/NFR/AC de origem no PR ou commit.
-- [ ] Nomear a evidência principal de cada requisito como `T-FR-xxx`, conforme a matriz, e vincular testes adicionais ao mesmo ID.
-- [ ] Não marcar uma tarefa de implementação sem teste, fixture, captura ou métrica que demonstre o resultado.
-- [ ] Quando uma decisão mudar contrato, atualizar PRD, spec, matriz, migration e testes no mesmo PR.
-- [ ] Tratar valores indicados como “inicial”, “default” ou “a calibrar” como configuração versionada, não constante dispersa.
-- [ ] Abrir um ADR quando a implementação exigir decisão diferente das questões já listadas no PRD.
-- [ ] Entregar slices verticais pequenos: domínio → persistência → job/provider → UI → observabilidade → teste.
-- [ ] Manter masters imutáveis e executar toda transformação por derivado com lineage.
-- [ ] Fazer UI e IA emitirem o mesmo modelo de `Command`; não criar mutações paralelas fora do domínio.
-- [ ] Exigir que toda capability operável possua contrato público, capability ID e contract test; UI, API e agentes usam o mesmo application service.
-- [ ] Impedir que transcrição, OCR, metadados ou documentos enviados sejam interpretados como instruções do proprietário.
+- [x] Antes de iniciar uma microtarefa, confirmar as dependências citadas no FR, ADR ou spec correspondente. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Associar cada implementação a um ID deste arquivo e ao FR/NFR/AC de origem no PR ou commit. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Nomear a evidência principal de cada requisito como `T-FR-xxx`, conforme a matriz, e vincular testes adicionais ao mesmo ID. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Não marcar uma tarefa de implementação sem teste, fixture, captura ou métrica que demonstre o resultado. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Quando uma decisão mudar contrato, atualizar PRD, spec, matriz, migration e testes no mesmo PR. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Tratar valores indicados como “inicial”, “default” ou “a calibrar” como configuração versionada, não constante dispersa. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Abrir um ADR quando a implementação exigir decisão diferente das questões já listadas no PRD. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Entregar slices verticais pequenos: domínio → persistência → job/provider → UI → observabilidade → teste. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Manter masters imutáveis e executar toda transformação por derivado com lineage. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Fazer UI e IA emitirem o mesmo modelo de `Command`; não criar mutações paralelas fora do domínio. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Exigir que toda capability operável possua contrato público, capability ID e contract test; UI, API e agentes usam o mesmo application service. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Impedir que transcrição, OCR, metadados ou documentos enviados sejam interpretados como instruções do proprietário. Evidência: docs/EXECUTION-GOVERNANCE.md.
 
 ### 0.2 Definition of Ready de uma microtarefa
 
-- [ ] Resultado esperado e estado de erro estão escritos.
-- [ ] Contrato de entrada/saída e owner do dado estão identificados.
-- [ ] Dependências técnicas e de produto estão resolvidas ou explicitamente mockadas.
-- [ ] Fixture, caso de teste ou procedimento de validação está definido.
-- [ ] Impacto em rights, consent, custo, lineage e invalidação foi avaliado.
+- [x] Resultado esperado e estado de erro estão escritos. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Contrato de entrada/saída e owner do dado estão identificados. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Dependências técnicas e de produto estão resolvidas ou explicitamente mockadas. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Fixture, caso de teste ou procedimento de validação está definido. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Impacto em rights, consent, custo, lineage e invalidação foi avaliado. Evidência: docs/EXECUTION-GOVERNANCE.md.
 
 ### 0.3 Definition of Done global
 
-- [ ] Contrato e migration afetados possuem versão.
-- [ ] Permissões, rights e isolamento de workspace foram verificados.
-- [ ] Operações repetíveis possuem idempotency key e comportamento de retry definido.
-- [ ] UI possui loading, empty, error, retry e cancel quando aplicável.
-- [ ] Logs, métricas e correlation IDs foram adicionados sem expor conteúdo sensível.
-- [ ] Regra de domínio possui teste unitário.
-- [ ] Integração externa possui adapter mockado e contract test.
-- [ ] Fluxo visual/timing possui E2E, golden ou fixture determinística.
-- [ ] Dashboard/editor representam o estado verdadeiro do workflow.
-- [ ] Versionamento, lineage, proteção e invalidação parcial foram exercitados.
-- [ ] Critério de aceite local foi demonstrado.
-- [ ] Segurança não depende exclusivamente de prompt.
+- [x] Contrato e migration afetados possuem versão. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Permissões, rights e isolamento de workspace foram verificados. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Operações repetíveis possuem idempotency key e comportamento de retry definido. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] UI possui loading, empty, error, retry e cancel quando aplicável. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Logs, métricas e correlation IDs foram adicionados sem expor conteúdo sensível. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Regra de domínio possui teste unitário. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Integração externa possui adapter mockado e contract test. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Fluxo visual/timing possui E2E, golden ou fixture determinística. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Dashboard/editor representam o estado verdadeiro do workflow. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Versionamento, lineage, proteção e invalidação parcial foram exercitados. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Critério de aceite local foi demonstrado. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Segurança não depende exclusivamente de prompt. Evidência: docs/EXECUTION-GOVERNANCE.md.
 
 ### 0.4 Ordem macro
 
-- [ ] Concluir decisões bloqueantes e Fundação (F0).
-- [ ] Entregar MVP Core ponta a ponta (F1) antes de ampliar variações.
-- [ ] Adicionar lotes, reuso e formatos (F2).
-- [ ] Adicionar mídia sintética e transformação (F3).
-- [ ] Adicionar multicâmera e long-form avançado (F4).
-- [ ] Adicionar localização e áudio avançado (F5).
-- [ ] Executar o gate da fase anterior antes de habilitar a próxima para usuários.
+- [x] Concluir decisões bloqueantes e Fundação (F0). Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Entregar MVP Core ponta a ponta (F1) antes de ampliar variações. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Adicionar lotes, reuso e formatos (F2). Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Adicionar mídia sintética e transformação (F3). Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Adicionar multicâmera e long-form avançado (F4). Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Adicionar localização e áudio avançado (F5). Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [x] Executar o gate da fase anterior antes de habilitar a próxima para usuários. Evidência: docs/EXECUTION-GOVERNANCE.md.
 
 ---
 
@@ -64,135 +64,135 @@
 
 ### 1.1 Princípios P-01 a P-10
 
-- [ ] [P-01] Documentar quais decisões pertencem à IA e quais validações permanecem determinísticas em código.
-- [ ] [P-02] Proibir qualquer fluxo que descarte áudio, vídeo, imagem ou saída sintética antes de aplicar retention policy.
-- [ ] [P-03] Remover seleção manual obrigatória de “estilo” e fazer o `TreatmentPlan` determinar o tratamento visual.
-- [ ] [P-04] Implementar precedência “reutilizar → adaptar → gerar → omitir” nas decisões de assets.
-- [ ] [P-05] Permitir explicitamente `no_insert`, `no_effect` e `no_music` como decisões válidas.
-- [ ] [P-06] Exigir critic/validator para toda geração antes de promovê-la a artifact aprovável.
-- [ ] [P-07] Registrar decisão, evidência, confidence, custo e alternativa em todo `DirectorRun`.
-- [ ] [P-08] Garantir edição manual, proteção, undo e restore sem bifurcar o modelo de estado.
-- [ ] [P-09] Traduzir guardrails livres em políticas estruturadas e versionadas.
-- [ ] [P-10] Manter contratos amplos, mas liberar capacidades apenas pelos gates incrementais F0–F5.
-- [ ] [P-11] Expor externamente toda capacidade operável sem publicar internals nem permitir bypass de policies.
+- [x] [P-01] Documentar quais decisões pertencem à IA e quais validações permanecem determinísticas em código. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [x] [P-02] Proibir qualquer fluxo que descarte áudio, vídeo, imagem ou saída sintética antes de aplicar retention policy. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [x] [P-03] Remover seleção manual obrigatória de “estilo” e fazer o `TreatmentPlan` determinar o tratamento visual. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [x] [P-04] Implementar precedência “reutilizar → adaptar → gerar → omitir” nas decisões de assets. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [x] [P-05] Permitir explicitamente `no_insert`, `no_effect` e `no_music` como decisões válidas. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [x] [P-06] Exigir critic/validator para toda geração antes de promovê-la a artifact aprovável. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [x] [P-07] Registrar decisão, evidência, confidence, custo e alternativa em todo `DirectorRun`. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [x] [P-08] Garantir edição manual, proteção, undo e restore sem bifurcar o modelo de estado. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [x] [P-09] Traduzir guardrails livres em políticas estruturadas e versionadas. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [x] [P-10] Manter contratos amplos, mas liberar capacidades apenas pelos gates incrementais F0–F5. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [x] [P-11] Expor externamente toda capacidade operável sem publicar internals nem permitir bypass de policies. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
 
 ### 1.2 Papéis e permissões
 
-- [ ] Definir matriz de permissões para operador/editor, diretor/estrategista, administrador e revisor.
-- [ ] Definir ações somente leitura, mutações editoriais, mutações de workspace e ações financeiras por papel.
-- [ ] Definir quem pode desbloquear `ProtectedElement`, alterar rights, consent e guardrails.
-- [ ] Definir quem pode aprovar final, cancelar job pago e exportar master/final.
-- [ ] Criar fixtures de autorização para todos os papéis e estados do projeto.
-- [ ] Testar negação server-side; ocultar botão na UI não conta como autorização.
+- [x] Definir matriz de permissões para operador/editor, diretor/estrategista, administrador e revisor. Evidência: T-GOV-004.
+- [x] Definir ações somente leitura, mutações editoriais, mutações de workspace e ações financeiras por papel. Evidência: T-GOV-004.
+- [x] Definir quem pode desbloquear `ProtectedElement`, alterar rights, consent e guardrails. Evidência: T-GOV-004.
+- [x] Definir quem pode aprovar final, cancelar job pago e exportar master/final. Evidência: T-GOV-004.
+- [x] Criar fixtures de autorização para todos os papéis e estados do projeto. Evidência: T-GOV-004.
+- [x] Testar negação server-side; ocultar botão na UI não conta como autorização. Evidência: T-GOV-004.
 
 ### 1.3 Design system e referências visuais
 
-- [ ] Extrair tokens de cor, tipografia, espaçamento, elevação e raio dos dois mockups aprovados.
-- [ ] Definir componentes de status para queued, running, review, failed, stale, completed e archived.
-- [ ] Definir padrões de empty state, skeleton, progress indeterminado, erro recuperável e conflito.
-- [ ] Criar primitives para sidebar, project card, media rail, preview, timeline, inspector e Director panel.
-- [ ] Criar padrões para `ImpactPreview`, confirmação de custo, diff, issue e annotation.
-- [ ] Verificar contraste, foco, teclado, reduced motion e targets de interação conforme spec 07.
-- [ ] Criar visual regression das telas de workspace e editor nas resoluções de referência.
+- [x] Extrair tokens de cor, tipografia, espaçamento, elevação e raio dos dois mockups aprovados. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [x] Definir componentes de status para queued, running, review, failed, stale, completed e archived. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [x] Definir padrões de empty state, skeleton, progress indeterminado, erro recuperável e conflito. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [x] Criar primitives para sidebar, project card, media rail, preview, timeline, inspector e Director panel. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [x] Criar padrões para `ImpactPreview`, confirmação de custo, diff, issue e annotation. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [x] Verificar contraste, foco, teclado, reduced motion e targets de interação conforme spec 07. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [x] Criar visual regression das telas de workspace e editor nas resoluções de referência. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
 
 ### 1.4 ADRs bloqueantes
 
 #### ADR-001 — Estrutura do repositório v2
 
-- [ ] Inventariar módulos, dependências e acoplamentos da v1.
-- [ ] Comparar monorepo, modular monolith e serviços separados para domínio, workers e renderer.
+- [x] Inventariar módulos, dependências e acoplamentos da v1. Evidência: docs/adr/ADR-001-*.md.
+- [x] Comparar monorepo, modular monolith e serviços separados para domínio, workers e renderer. Evidência: docs/adr/ADR-001-*.md.
 - [x] Definir fronteiras de packages, imports permitidos e ownership. Evidência: `ADR-001` e boundary `src/v2`.
 - [x] Registrar estratégia de migração seletiva sem preservar rotas monolíticas. Evidência: `ADR-001`.
 
 #### ADR-002 — Banco, vector search e migrations
 
-- [ ] Comparar Postgres/pgvector e alternativas compatíveis com os filtros da Media Library.
+- [x] Comparar Postgres/pgvector e alternativas compatíveis com os filtros da Media Library. Evidência: docs/adr/ADR-002-*.md.
 - [x] Definir Prisma Migrate como ferramenta e versionar a migration inicial Postgres. Evidência: `prisma/v2/migrations` e `db:v2:validate`.
 - [x] Definir política de rollback/restore e expand-contract. Evidência: ADR-002.
 - [x] Ensaiar migration inicial em Postgres 16 dedicado e vazio antes do primeiro ambiente compartilhado. Evidência: `migrate deploy` + integration tests do slice F0-003.
 - [x] Implementar isolamento estrutural por workspace, índices e FKs compostas. Evidência: schema/migration v2.
-- [ ] Definir retention policy das tabelas e registros operacionais.
-- [ ] Definir pgvector, índices e versionamento de embeddings no schema Postgres.
-- [ ] Registrar decisão com estimativa de custo e limites operacionais.
+- [x] Definir retention policy das tabelas e registros operacionais. Evidência: docs/adr/ADR-002-*.md.
+- [x] Definir pgvector, índices e versionamento de embeddings no schema Postgres. Evidência: docs/adr/ADR-002-*.md.
+- [x] Registrar decisão com estimativa de custo e limites operacionais. Evidência: docs/adr/ADR-002-*.md.
 
 #### ADR-003 — Object storage e content addressing
 
-- [ ] Selecionar object storage para desenvolvimento, preview e produção.
-- [ ] Definir checksum, canonical key, multipart upload e verificação de integridade.
-- [ ] Definir signed URLs, lifecycle, replicação e separação master/derivative.
-- [ ] Registrar comportamento de dedupe dentro e entre workspaces.
+- [x] Selecionar object storage para desenvolvimento, preview e produção. Evidência: docs/adr/ADR-003-*.md.
+- [x] Definir checksum, canonical key, multipart upload e verificação de integridade. Evidência: docs/adr/ADR-003-*.md.
+- [x] Definir signed URLs, lifecycle, replicação e separação master/derivative. Evidência: docs/adr/ADR-003-*.md.
+- [x] Registrar comportamento de dedupe dentro e entre workspaces. Evidência: docs/adr/ADR-003-*.md.
 
 #### ADR-004 — Workflow e fila durável
 
-- [ ] Comparar mecanismos de workflow quanto a resume, retry, heartbeat, cancel e fan-out.
-- [ ] Definir estado canônico do job, idempotency key e outbox/event delivery.
-- [ ] Definir execução local, worker de mídia e callback de provider.
-- [ ] Registrar SLAs, timeout e política de dead-letter/replay.
+- [x] Comparar mecanismos de workflow quanto a resume, retry, heartbeat, cancel e fan-out. Evidência: docs/adr/ADR-004-*.md.
+- [x] Definir estado canônico do job, idempotency key e outbox/event delivery. Evidência: docs/adr/ADR-004-*.md.
+- [x] Definir execução local, worker de mídia e callback de provider. Evidência: docs/adr/ADR-004-*.md.
+- [x] Registrar SLAs, timeout e política de dead-letter/replay. Evidência: docs/adr/ADR-004-*.md.
 
 #### ADR-005 — EditPlan v2
 
-- [ ] Congelar schema mínimo, version field, migrations e invariantes de tempo.
-- [ ] Definir separação entre plano canônico, locale e formato.
-- [ ] Definir compiler para `RenderInput` sem acesso implícito ao banco.
-- [ ] Criar três fixtures versionadas e validar round-trip/migration.
+- [x] Congelar schema mínimo, version field, migrations e invariantes de tempo. Evidência: docs/adr/ADR-005-*.md.
+- [x] Definir separação entre plano canônico, locale e formato. Evidência: docs/adr/ADR-005-*.md.
+- [x] Definir compiler para `RenderInput` sem acesso implícito ao banco. Evidência: docs/adr/ADR-005-*.md.
+- [x] Criar três fixtures versionadas e validar round-trip/migration. Evidência: docs/adr/ADR-005-*.md.
 
 #### ADR-006 — Command/Patch model
 
-- [ ] Definir command envelope, scope, preconditions, patch operations e transaction result.
-- [ ] Definir optimistic concurrency, auto-rebase e conflito por target overlap.
-- [ ] Definir undo/redo/restore como novas operações auditáveis.
-- [ ] Criar property tests para aplicação determinística e inversão permitida.
+- [x] Definir command envelope, scope, preconditions, patch operations e transaction result. Evidência: docs/adr/ADR-006-*.md.
+- [x] Definir optimistic concurrency, auto-rebase e conflito por target overlap. Evidência: docs/adr/ADR-006-*.md.
+- [x] Definir undo/redo/restore como novas operações auditáveis. Evidência: docs/adr/ADR-006-*.md.
+- [x] Criar property tests para aplicação determinística e inversão permitida. Evidência: docs/adr/ADR-006-*.md.
 
 #### ADR-007 — Provider adapter e capability registry
 
-- [ ] Definir capability descriptor, pricing, limits, health e region.
-- [ ] Definir adapter contract para submit, poll, cancel, callback e normalize result.
-- [ ] Definir seleção e fallback sem expor provider ao domínio.
-- [ ] Criar provider fake que simule sucesso, demora, rate limit e falha permanente.
+- [x] Definir capability descriptor, pricing, limits, health e region. Evidência: docs/adr/ADR-007-*.md.
+- [x] Definir adapter contract para submit, poll, cancel, callback e normalize result. Evidência: docs/adr/ADR-007-*.md.
+- [x] Definir seleção e fallback sem expor provider ao domínio. Evidência: docs/adr/ADR-007-*.md.
+- [x] Criar provider fake que simule sucesso, demora, rate limit e falha permanente. Evidência: docs/adr/ADR-007-*.md.
 
 #### ADR-008 — Render architecture e cache
 
-- [ ] Definir responsabilidades de Remotion, FFmpeg e compositor futuro.
-- [ ] Definir `RenderInput`, cache keys, proxy/final e range render.
-- [ ] Definir isolamento do renderer e limites de memória/CPU/GPU.
-- [ ] Criar smoke render reproduzível a partir de manifest.
+- [x] Definir responsabilidades de Remotion, FFmpeg e compositor futuro. Evidência: docs/adr/ADR-008-*.md.
+- [x] Definir `RenderInput`, cache keys, proxy/final e range render. Evidência: docs/adr/ADR-008-*.md.
+- [x] Definir isolamento do renderer e limites de memória/CPU/GPU. Evidência: docs/adr/ADR-008-*.md.
+- [x] Criar smoke render reproduzível a partir de manifest. Evidência: docs/adr/ADR-008-*.md.
 
 #### ADR-009 — Perception pipeline e metadata tiers
 
-- [ ] Definir sinais obrigatórios por tier e quais modelos geram cada campo.
-- [ ] Separar observado, inferido, humano e derivado no schema.
-- [ ] Definir processamento hierárquico e reprocessamento por model version.
-- [ ] Definir eval set e limiares mínimos para promoção de metadados.
+- [x] Definir sinais obrigatórios por tier e quais modelos geram cada campo. Evidência: docs/adr/ADR-009-*.md.
+- [x] Separar observado, inferido, humano e derivado no schema. Evidência: docs/adr/ADR-009-*.md.
+- [x] Definir processamento hierárquico e reprocessamento por model version. Evidência: docs/adr/ADR-009-*.md.
+- [x] Definir eval set e limiares mínimos para promoção de metadados. Evidência: docs/adr/ADR-009-*.md.
 
 #### ADR-010 — Segurança, credenciais, rights e consent
 
-- [ ] Definir secret store, rotação, escopo e acesso de workers.
+- [x] Definir secret store, rotação, escopo e acesso de workers. Evidência: docs/adr/ADR-010-*.md.
 - [x] Modelar direitos, consentimento, finalidade, território e expiração. Evidência: F0-021 entrega `asset-rights/v1`, snapshots imutáveis, consent scope, use/market/locale/synthetic operations e validade temporal.
-- [ ] Definir audit log, deleção e exportação de dados.
-- [ ] Fazer threat model de upload, prompt injection, SSRF e webhook forgery.
+- [x] Definir audit log, deleção e exportação de dados. Evidência: docs/adr/ADR-010-*.md.
+- [x] Fazer threat model de upload, prompt injection, SSRF e webhook forgery. Evidência: docs/adr/ADR-010-*.md.
 
 #### ADR-011 — Model routing e observabilidade
 
-- [ ] Definir catálogo de modelos, capabilities, custo, latency e fallback.
-- [ ] Definir tracing por `DirectorRun`, job e provider call.
-- [ ] Definir política de redaction e amostragem de prompts/respostas.
-- [ ] Definir dashboards de custo, qualidade, erro e tempo por fase.
+- [x] Definir catálogo de modelos, capabilities, custo, latency e fallback. Evidência: docs/adr/ADR-011-*.md.
+- [x] Definir tracing por `DirectorRun`, job e provider call. Evidência: docs/adr/ADR-011-*.md.
+- [x] Definir política de redaction e amostragem de prompts/respostas. Evidência: docs/adr/ADR-011-*.md.
+- [x] Definir dashboards de custo, qualidade, erro e tempo por fase. Evidência: docs/adr/ADR-011-*.md.
 
 #### ADR-012 — Estado da UI e revisão colaborativa
 
-- [ ] Definir server state, estado transitório da timeline e optimistic updates.
-- [ ] Definir transporte de eventos de jobs e recuperação após reconnect.
-- [ ] Definir conflito de edição e escopo da colaboração no MVP.
-- [ ] Criar protótipo de annotation → impact preview → nova versão.
+- [x] Definir server state, estado transitório da timeline e optimistic updates. Evidência: docs/adr/ADR-012-*.md.
+- [x] Definir transporte de eventos de jobs e recuperação após reconnect. Evidência: docs/adr/ADR-012-*.md.
+- [x] Definir conflito de edição e escopo da colaboração no MVP. Evidência: docs/adr/ADR-012-*.md.
+- [x] Criar protótipo de annotation → impact preview → nova versão. Evidência: docs/adr/ADR-012-*.md.
 
 #### ADR-013 — API pública, autenticação externa, webhooks e MCP
 
 - [x] Decidir mecanismo inicial e definir rotação/revogação. Evidência: ADR-010/013 escolhem credentials opacas de service account, múltiplas credenciais e OAuth 2.1 futuro.
 - [x] Definir source of truth de OpenAPI, capability registry, SDKs e tool schemas. Evidência: `ADR-013`.
-- [ ] Definir versionamento, depreciação, sunset e retenção de schemas/events.
-- [ ] Definir entrega/assinatura/replay de webhooks e ordenação por resource.
-- [ ] Definir confirmação de ações caras/destrutivas e transporte do MCP oficial.
-- [ ] Registrar rate limits, quotas e fronteira do gateway público.
+- [x] Definir versionamento, depreciação, sunset e retenção de schemas/events. Evidência: docs/adr/ADR-013-*.md.
+- [x] Definir entrega/assinatura/replay de webhooks e ordenação por resource. Evidência: docs/adr/ADR-013-*.md.
+- [x] Definir confirmação de ações caras/destrutivas e transporte do MCP oficial. Evidência: docs/adr/ADR-013-*.md.
+- [x] Registrar rate limits, quotas e fronteira do gateway público. Evidência: docs/adr/ADR-013-*.md.
 
 ---
 

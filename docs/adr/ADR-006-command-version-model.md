@@ -1,5 +1,11 @@
 # ADR-006 — Commands, versões e concorrência
 
+## Patch, transação e inversão
+
+O envelope contém actor, versão/hash base, scope, preconditions, operações tipadas e idempotency key. O resultado registra nova versão, patch aplicado, inverso seguro, invalidação e conflito. Command, patch, versão, current pointer e outbox são atômicos.
+
+Undo, redo e restore são novos commands auditáveis; nunca apagam histórico. Auto-rebase só ocorre com histórico completo e targets sem overlap. Fixtures exercitam replay determinístico, inversão permitida, idempotência e rollback.
+
 > **Status:** Accepted
 >
 > **Data:** 12 de julho de 2026
