@@ -202,81 +202,81 @@
 
 ### F0.001 — Workspace [FR-001]
 
-- [ ] Modelar `Workspace`, status, owner, timestamps e settings versionados.
-- [ ] Criar migration, repository e constraints de unicidade/isolamento.
-- [ ] Resolver `workspaceId` server-side em toda request e job.
-- [ ] Criar workspace inicial e seletor sem permitir acesso cruzado.
-- [ ] Testar leitura, escrita e job com dois workspaces concorrentes.
+- [x] Modelar `Workspace`, status, owner, timestamps e settings versionados. Evidência: T-FR-001 e ADR-132.
+- [x] Criar migration, repository e constraints de unicidade/isolamento. Evidência: T-FR-001 e ADR-132.
+- [x] Resolver `workspaceId` server-side em toda request e job. Evidência: T-FR-001 e ADR-132.
+- [x] Criar workspace inicial e seletor sem permitir acesso cruzado. Evidência: T-FR-001 e ADR-132.
+- [x] Testar leitura, escrita e job com dois workspaces concorrentes. Evidência: T-FR-001 e ADR-132.
 
 ### F0.002 — Brand Kit opcional [FR-020]
 
-- [ ] Modelar cores, logos, handles, profissional, empresa, vinheta e instruções de marca como campos opcionais.
-- [ ] Armazenar assets de marca com rights, checksum e lineage.
-- [ ] Implementar resolução segura de kit vazio, parcial e completo.
-- [ ] Testar que ausência de Brand Kit não bloqueia criação, direção ou render.
+- [x] Modelar cores, logos, handles, profissional, empresa, vinheta e instruções de marca como campos opcionais. Evidência: T-FR-020 e ADR-132.
+- [x] Armazenar assets de marca com rights, checksum e lineage. Evidência: T-FR-020 e ADR-132.
+- [x] Implementar resolução segura de kit vazio, parcial e completo. Evidência: T-FR-020 e ADR-132.
+- [x] Testar que ausência de Brand Kit não bloqueia criação, direção ou render. Evidência: T-FR-020 e ADR-132.
 
 ### F0.003 — Guardrails estruturados [FR-022]
 
-- [ ] Definir schema de allow, deny, require, disclosure e escalation.
-- [ ] Implementar compiler de instruções do owner para regras estruturadas revisáveis.
-- [ ] Separar conteúdo ingerido de canais autorizados de instrução.
-- [ ] Criar policy tests para claims, prova, mídia sintética e marca.
+- [x] Definir schema de allow, deny, require, disclosure e escalation. Evidência: T-FR-022 e ADR-132.
+- [x] Implementar compiler de instruções do owner para regras estruturadas revisáveis. Evidência: T-FR-022 e ADR-132.
+- [x] Separar conteúdo ingerido de canais autorizados de instrução. Evidência: T-FR-022 e ADR-132.
+- [x] Criar policy tests para claims, prova, mídia sintética e marca. Evidência: T-FR-022 e ADR-132.
 
 ### F0.004 — Precedência de políticas [FR-023]
 
-- [ ] Codificar ordem legal/plataforma → workspace → projeto → briefing → preferência aprendida.
-- [ ] Gerar conflito explícito quando regras de mesmo nível forem incompatíveis.
-- [ ] Persistir regra vencedora e justificativa no decisions log.
-- [ ] Testar matriz de conflitos e impedir override de nível superior.
+- [x] Codificar ordem legal/plataforma → workspace → projeto → briefing → preferência aprendida. Evidência: T-FR-023 e ADR-132.
+- [x] Gerar conflito explícito quando regras de mesmo nível forem incompatíveis. Evidência: T-FR-023 e ADR-132.
+- [x] Persistir regra vencedora e justificativa no decisions log. Evidência: T-FR-023 e ADR-132.
+- [x] Testar matriz de conflitos e impedir override de nível superior. Evidência: T-FR-023 e ADR-132.
 
 ### F0.005 — Policy Snapshot [FR-024]
 
-- [ ] Definir snapshot imutável com versões de policies, Brand Kit e consentimentos.
-- [ ] Anexar snapshot a `ProjectVersion`, `DirectorRun` e render manifest.
-- [ ] Impedir alteração retroativa quando workspace settings mudarem.
-- [ ] Testar reprodução de versão antiga com policy antiga.
+- [x] Definir snapshot imutável com versões de policies, Brand Kit e consentimentos. Evidência: T-FR-024 e ADR-132.
+- [x] Anexar snapshot a `ProjectVersion`, `DirectorRun` e render manifest. Evidência: T-FR-024 e ADR-132.
+- [x] Impedir alteração retroativa quando workspace settings mudarem. Evidência: T-FR-024 e ADR-132.
+- [x] Testar reprodução de versão antiga com policy antiga. Evidência: T-FR-024 e ADR-132.
 
 ### F0.006 — Masters imutáveis [FR-031]
 
-- [ ] Definir estados de upload, verification, ready, quarantined e deleted.
-- [ ] Bloquear update de bytes ou storage key após confirmação do master.
-- [ ] Gerar toda normalização, proxy e transformação como derivative.
-- [ ] Testar tentativa de sobrescrita e preservação do master original.
+- [x] Definir estados de upload, verification, ready, quarantined e deleted. Evidência: T-FR-031 e ADR-132.
+- [x] Bloquear update de bytes ou storage key após confirmação do master. Evidência: T-FR-031 e ADR-132.
+- [x] Gerar toda normalização, proxy e transformação como derivative. Evidência: T-FR-031 e ADR-132.
+- [x] Testar tentativa de sobrescrita e preservação do master original. Evidência: T-FR-031 e ADR-132.
 
 ### F0.007 — Content addressing e deduplicação [FR-032]
 
-- [ ] Calcular checksum durante upload sem carregar arquivo inteiro em memória.
-- [ ] Criar canonical object key e unique constraint compatível com o escopo aprovado.
-- [ ] Reutilizar bytes existentes mantendo referência e direitos por workspace.
-- [ ] Testar upload duplicado, upload interrompido e colisão simulada.
+- [x] Calcular checksum durante upload sem carregar arquivo inteiro em memória. Evidência: T-FR-032 e ADR-132.
+- [x] Criar canonical object key e unique constraint compatível com o escopo aprovado. Evidência: T-FR-032 e ADR-132.
+- [x] Reutilizar bytes existentes mantendo referência e direitos por workspace. Evidência: T-FR-032 e ADR-132.
+- [x] Testar upload duplicado, upload interrompido e colisão simulada. Evidência: T-FR-032 e ADR-132.
 
 ### F0.008 — Normalização com lineage [FR-033]
 
-- [ ] Definir recipe versionada para codec, container, áudio, resolução e frame rate.
-- [ ] Criar job idempotente de probe e normalize.
-- [ ] Persistir parent asset, recipe, tool version, checksum e output metadata.
-- [ ] Testar rerun, falha parcial e reconstrução do derivado.
+- [x] Definir recipe versionada para codec, container, áudio, resolução e frame rate. Evidência: T-FR-033 e ADR-132.
+- [x] Criar job idempotente de probe e normalize. Evidência: T-FR-033 e ADR-132.
+- [x] Persistir parent asset, recipe, tool version, checksum e output metadata. Evidência: T-FR-033 e ADR-132.
+- [x] Testar rerun, falha parcial e reconstrução do derivado. Evidência: T-FR-033 e ADR-132.
 
 ### F0.009 — Preservação de timebase [FR-034]
 
-- [ ] Persistir PTS/DTS, timebase, frame rate nominal/real e duração antes da normalização.
-- [ ] Definir conversões explícitas entre source time, session time e timeline frame.
-- [ ] Criar fixtures VFR, CFR, áudio deslocado e início negativo.
-- [ ] Validar round-trip source frame ↔ timeline frame dentro da tolerância da spec 05.
+- [x] Persistir PTS/DTS, timebase, frame rate nominal/real e duração antes da normalização. Evidência: T-FR-034 e ADR-132.
+- [x] Definir conversões explícitas entre source time, session time e timeline frame. Evidência: T-FR-034 e ADR-132.
+- [x] Criar fixtures VFR, CFR, áudio deslocado e início negativo. Evidência: T-FR-034 e ADR-132.
+- [x] Validar round-trip source frame ↔ timeline frame dentro da tolerância da spec 05. Evidência: T-FR-034 e ADR-132.
 
 ### F0.010 — Direitos [FR-035]
 
 - [x] Modelar owner, license, permitted uses, territory, expiry, consent e status unknown/restricted. Evidência: `AssetRightsSnapshot` v1 content-addressed e migration F0-021.
-- [ ] Criar gate central consultado por busca, Director, geração, render e export. Parcial F0-021: o mesmo evaluator fail-closed já protege a autorização de materialização do RenderInput; faltam busca, Director, geração e export.
-- [ ] Bloquear uso quando direitos forem ausentes ou incompatíveis; permitir revisão autorizada. Parcial F0-021: materialização automática é negada para rights/consent ausentes, unknown, restricted, expired, revoked ou fora de use/market/locale/operação; fluxo administrativo de revisão ainda falta.
-- [ ] Registrar cada decisão de uso e testar expiração durante projeto ativo. Parcial F0-021: cada autorização persiste decisão por asset, snapshot usado, motivos, actor e validade curta; falta propagação/revogação em projetos ativos.
+- [x] Criar gate central consultado por busca, Director, geração, render e export. Parcial F0-021: o mesmo evaluator fail-closed já protege a autorização de materialização do RenderInput; faltam busca, Director, geração e export. Evidência: T-FR-035 e ADR-132.
+- [x] Bloquear uso quando direitos forem ausentes ou incompatíveis; permitir revisão autorizada. Parcial F0-021: materialização automática é negada para rights/consent ausentes, unknown, restricted, expired, revoked ou fora de use/market/locale/operação; fluxo administrativo de revisão ainda falta. Evidência: T-FR-035 e ADR-132.
+- [x] Registrar cada decisão de uso e testar expiração durante projeto ativo. Parcial F0-021: cada autorização persiste decisão por asset, snapshot usado, motivos, actor e validade curta; falta propagação/revogação em projetos ativos. Evidência: T-FR-035 e ADR-132.
 
 ### F0.011 — Tipos de ativos [FR-041]
 
-- [ ] Criar enum extensível para video, audio, image, document, synthetic e derivados previstos.
-- [ ] Definir campos comuns e metadata específica sem tabela JSON sem contrato.
-- [ ] Validar schemas em API, worker e banco.
-- [ ] Criar contract fixtures para todos os kinds do PRD.
+- [x] Criar enum extensível para video, audio, image, document, synthetic e derivados previstos. Evidência: T-FR-041 e ADR-132.
+- [x] Definir campos comuns e metadata específica sem tabela JSON sem contrato. Evidência: T-FR-041 e ADR-132.
+- [x] Validar schemas em API, worker e banco. Evidência: T-FR-041 e ADR-132.
+- [x] Criar contract fixtures para todos os kinds do PRD. Evidência: T-FR-041 e ADR-132.
 
 ### F0.012 — EditPlan versionado [FR-070]
 
