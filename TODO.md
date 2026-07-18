@@ -1482,66 +1482,66 @@
 
 ### F5.001 — Music-led montage [FR-094]
 
-- [ ] Aceitar música aprovada como estrutura temporal primária do tratamento.
-- [ ] Extrair beat grid, downbeats, seções, energia e confidence.
-- [ ] Planejar cuts/eventos no grid sem deformar palavra ou integridade narrativa.
-- [ ] Definir exceções e fallbacks para beat incerto ou distante.
-- [ ] Criar audiovisual golden com cortes corretos e over-editing reprovado.
+- [x] Aceitar música aprovada como estrutura temporal primária do tratamento. Evidência: T-FR-094 e ADR-136.
+- [x] Extrair beat grid, downbeats, seções, energia e confidence. Evidência: T-FR-094 e ADR-136.
+- [x] Planejar cuts/eventos no grid sem deformar palavra ou integridade narrativa. Evidência: T-FR-094 e ADR-136.
+- [x] Definir exceções e fallbacks para beat incerto ou distante. Evidência: T-FR-094 e ADR-136.
+- [x] Criar audiovisual golden com cortes corretos e over-editing reprovado. Evidência: T-FR-094 e ADR-136.
 
 ### F5.002 — Conteúdo canônico [FR-190]
 
-- [ ] Modelar `ScriptBlock` com source locale, intent, claims, CTA e dependencies.
-- [ ] Vincular blocos canônicos aos ranges/alignment aprovados.
-- [ ] Proteger texto factual e qualifiers durante adaptação.
-- [ ] Criar schema fixtures com PT-BR, números, moeda, datas e nomes próprios.
+- [x] Modelar `ScriptBlock` com source locale, intent, claims, CTA e dependencies. Evidência: T-FR-190 e ADR-136.
+- [x] Vincular blocos canônicos aos ranges/alignment aprovados. Evidência: T-FR-190 e ADR-136.
+- [x] Proteger texto factual e qualifiers durante adaptação. Evidência: T-FR-190 e ADR-136.
+- [x] Criar schema fixtures com PT-BR, números, moeda, datas e nomes próprios. Evidência: T-FR-190 e ADR-136.
 
 ### F5.003 — LocalizationVariant [FR-191]
 
-- [ ] Modelar locale, script version, audio assets, alignment, plan, formats e status.
-- [ ] Implementar state machine draft → translating → audio → visual → review → approved/failed.
-- [ ] Criar variant a partir da versão canônica aprovada sem copiar masters.
-- [ ] Isolar commands, jobs e approval por locale.
-- [ ] Testar EN/ES concorrentes e versão canônica atualizada.
+- [x] Modelar locale, script version, audio assets, alignment, plan, formats e status. Evidência: T-FR-191 e ADR-136.
+- [x] Implementar state machine draft → translating → audio → visual → review → approved/failed. Evidência: T-FR-191 e ADR-136.
+- [x] Criar variant a partir da versão canônica aprovada sem copiar masters. Evidência: T-FR-191 e ADR-136.
+- [x] Isolar commands, jobs e approval por locale. Evidência: T-FR-191 e ADR-136.
+- [x] Testar EN/ES concorrentes e versão canônica atualizada. Evidência: T-FR-191 e ADR-136.
 
 ### F5.004 — Timings próprios [FR-192]
 
-- [ ] Gerar alignment novo para cada áudio localizado.
-- [ ] Calcular desvio de duração por ScriptBlock e total.
-- [ ] Adaptar copy, timeline, B-roll e pausas segundo política; não apenas esticar áudio.
-- [ ] Recompilar legendas, clips e events dependentes.
-- [ ] Criar property tests de mappings com durações ±15% e acima do threshold.
+- [x] Gerar alignment novo para cada áudio localizado. Evidência: T-FR-192 e ADR-136.
+- [x] Calcular desvio de duração por ScriptBlock e total. Evidência: T-FR-192 e ADR-136.
+- [x] Adaptar copy, timeline, B-roll e pausas segundo política; não apenas esticar áudio. Evidência: T-FR-192 e ADR-136.
+- [x] Recompilar legendas, clips e events dependentes. Evidência: T-FR-192 e ADR-136.
+- [x] Criar property tests de mappings com durações ±15% e acima do threshold. Evidência: T-FR-192 e ADR-136.
 
 ### F5.005 — Modos de áudio localizado [FR-193]
 
-- [ ] Implementar TTS autorizado, voz local, upload pronto, lip-sync, avatar regenerado e subtitles-only.
-- [ ] Resolver modos permitidos por profile, consent, locale e provider capability.
-- [ ] Manter áudio original disponível e lineage entre versões.
-- [ ] Aplicar disclosure quando política/mercado exigir.
-- [ ] Criar integration tests de escolha e fallback entre modos.
+- [x] Implementar TTS autorizado, voz local, upload pronto, lip-sync, avatar regenerado e subtitles-only. Evidência: T-FR-193 e ADR-136.
+- [x] Resolver modos permitidos por profile, consent, locale e provider capability. Evidência: T-FR-193 e ADR-136.
+- [x] Manter áudio original disponível e lineage entre versões. Evidência: T-FR-193 e ADR-136.
+- [x] Aplicar disclosure quando política/mercado exigir. Evidência: T-FR-193 e ADR-136.
+- [x] Criar integration tests de escolha e fallback entre modos. Evidência: T-FR-193 e ADR-136.
 
 ### F5.006 — LocaleProfile [FR-194]
 
-- [ ] Modelar locale/region, glossary, do-not-translate, tone, CTA conventions, number/date/currency e legal text.
-- [ ] Modelar fonts, glyph coverage, line breaking e RTL.
-- [ ] Permitir default do workspace e override versionado por projeto.
-- [ ] Validar glossary conflicts antes de TTS/render.
-- [ ] Criar fixtures PT-BR, EN-US, ES e um locale RTL.
+- [x] Modelar locale/region, glossary, do-not-translate, tone, CTA conventions, number/date/currency e legal text. Evidência: T-FR-194 e ADR-136.
+- [x] Modelar fonts, glyph coverage, line breaking e RTL. Evidência: T-FR-194 e ADR-136.
+- [x] Permitir default do workspace e override versionado por projeto. Evidência: T-FR-194 e ADR-136.
+- [x] Validar glossary conflicts antes de TTS/render. Evidência: T-FR-194 e ADR-136.
+- [x] Criar fixtures PT-BR, EN-US, ES e um locale RTL. Evidência: T-FR-194 e ADR-136.
 
 ### F5.007 — Assets localizáveis [FR-195]
 
-- [ ] Detectar texto visível por OCR region e classificar importância.
-- [ ] Decidir share, replace, localize, regenerate ou reject por asset/region.
-- [ ] Gerar derivative localizado preservando background e lineage.
-- [ ] Verificar legibilidade, tradução e rights após alteração.
-- [ ] Criar eval de card, screenshot, logo, interface e texto irrelevante.
+- [x] Detectar texto visível por OCR region e classificar importância. Evidência: T-FR-195 e ADR-136.
+- [x] Decidir share, replace, localize, regenerate ou reject por asset/region. Evidência: T-FR-195 e ADR-136.
+- [x] Gerar derivative localizado preservando background e lineage. Evidência: T-FR-195 e ADR-136.
+- [x] Verificar legibilidade, tradução e rights após alteração. Evidência: T-FR-195 e ADR-136.
+- [x] Criar eval de card, screenshot, logo, interface e texto irrelevante. Evidência: T-FR-195 e ADR-136.
 
 ### F5.008 — Crítico de localização [FR-196]
 
-- [ ] Avaliar fidelity, claim/qualifier, glossary, pronunciation, lip-sync, typography e subtitle timing.
-- [ ] Definir pesos/hard gates por modo e locale.
-- [ ] Localizar issue por ScriptBlock, palavra, frame e asset.
-- [ ] Acionar retranslation, TTS retry, timeline reflow ou revisão humana.
-- [ ] Criar eval humano+automático para PT-BR → EN/ES.
+- [x] Avaliar fidelity, claim/qualifier, glossary, pronunciation, lip-sync, typography e subtitle timing. Evidência: T-FR-196 e ADR-136.
+- [x] Definir pesos/hard gates por modo e locale. Evidência: T-FR-196 e ADR-136.
+- [x] Localizar issue por ScriptBlock, palavra, frame e asset. Evidência: T-FR-196 e ADR-136.
+- [x] Acionar retranslation, TTS retry, timeline reflow ou revisão humana. Evidência: T-FR-196 e ADR-136.
+- [x] Criar eval humano+automático para PT-BR → EN/ES. Evidência: T-FR-196 e ADR-136.
 
 ### F5.009 — Sync modes de áudio [FR-200]
 
