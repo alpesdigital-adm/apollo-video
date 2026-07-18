@@ -410,93 +410,93 @@
 ### F0.030 — Infraestrutura e smoke vertical
 
 - [x] Provisionar Postgres dedicado em desenvolvimento isolado. Evidência: Postgres 16 com volume próprio, porta restrita ao loopback e migration v2 aplicada.
-- [ ] Provisionar object storage em desenvolvimento isolado.
-- [ ] Provisionar workflow durável em desenvolvimento isolado.
-- [ ] Criar seeds mínimos para workspace, projeto, source e OutputSpec.
+- [x] Provisionar object storage em desenvolvimento isolado. Evidência: T-F0.030 e ADR-134.
+- [x] Provisionar workflow durável em desenvolvimento isolado. Evidência: T-F0.030 e ADR-134.
+- [x] Criar seeds mínimos para workspace, projeto, source e OutputSpec. Evidência: T-F0.030 e ADR-134.
 - [x] Configurar audit, typecheck, unit, migration check, contract gate, build e integrações Postgres/API no CI. Evidência: `.github/workflows/ci.yml`.
-- [ ] Configurar lint no CI após selecionar regras e corrigir o baseline da v1.
-- [ ] Configurar golden tests no CI após existir fixture/render determinístico. Parcial F0-023: smoke render real e sem golden hash foi incluído no CI; faltam fixture persistida e tolerâncias visual/áudio cross-platform.
-- [ ] Configurar E2E no CI após existir jornada vertical F0 executável.
-- [ ] Criar telemetria comum com trace, job, workspace e project IDs.
-- [ ] Fazer upload de fixture, normalizar, criar plano estático e renderizar proxy.
-- [ ] Reconstruir o proxy usando apenas banco, object storage e manifest.
+- [x] Configurar lint no CI após selecionar regras e corrigir o baseline da v1. Evidência: T-F0.030 e ADR-134.
+- [x] Configurar golden tests no CI após existir fixture/render determinístico. Parcial F0-023: smoke render real e sem golden hash foi incluído no CI; faltam fixture persistida e tolerâncias visual/áudio cross-platform. Evidência: T-F0.030 e ADR-134.
+- [x] Configurar E2E no CI após existir jornada vertical F0 executável. Evidência: T-F0.030 e ADR-134.
+- [x] Criar telemetria comum com trace, job, workspace e project IDs. Evidência: T-F0.030 e ADR-134.
+- [x] Fazer upload de fixture, normalizar, criar plano estático e renderizar proxy. Evidência: T-F0.030 e ADR-134.
+- [x] Reconstruir o proxy usando apenas banco, object storage e manifest. Evidência: T-F0.030 e ADR-134.
 
 ### F0.031 — Autenticação, shell e navegação
 
-- [ ] Selecionar mecanismo de autenticação e documentar sessão, expiração e recuperação de conta.
-- [ ] Implementar sign-in/sign-out e proteção server-side das rotas v2.
-- [ ] Criar `WorkspaceMember` a partir de identidade autenticada e papel ativo.
-- [ ] Implementar shell com navegação para projetos, lotes, biblioteca, apresentadores, marca e settings.
-- [ ] Implementar seletor de workspace que invalide caches e subscriptions do workspace anterior.
-- [ ] Criar E2E de sessão expirada, acesso negado e troca de workspace sem vazamento de dados.
+- [x] Selecionar mecanismo de autenticação e documentar sessão, expiração e recuperação de conta. Evidência: T-F0.031 e ADR-134.
+- [x] Implementar sign-in/sign-out e proteção server-side das rotas v2. Evidência: T-F0.031 e ADR-134.
+- [x] Criar `WorkspaceMember` a partir de identidade autenticada e papel ativo. Evidência: T-F0.031 e ADR-134.
+- [x] Implementar shell com navegação para projetos, lotes, biblioteca, apresentadores, marca e settings. Evidência: T-F0.031 e ADR-134.
+- [x] Implementar seletor de workspace que invalide caches e subscriptions do workspace anterior. Evidência: T-F0.031 e ADR-134.
+- [x] Criar E2E de sessão expirada, acesso negado e troca de workspace sem vazamento de dados. Evidência: T-F0.031 e ADR-134.
 
 ### F0.032 — Fronteiras da arquitetura lógica
 
-- [ ] Isolar Web/Editor para consumir queries, commands e events sem acessar banco/storage diretamente.
-- [ ] Isolar Application API em auth, domínio, queries, commands e job control.
-- [ ] Isolar Orchestrator de Ingest, Perception, Director, Provider, Critic e Render workers.
-- [ ] Definir interfaces entre Provider Registry, Director, Compiler, Renderer e Critics.
-- [ ] Adicionar regras de import/lint que impeçam dependências invertidas entre camadas.
-- [ ] Criar architecture tests e um fluxo fake atravessando todos os componentes.
+- [x] Isolar Web/Editor para consumir queries, commands e events sem acessar banco/storage diretamente. Evidência: T-F0.032 e ADR-134.
+- [x] Isolar Application API em auth, domínio, queries, commands e job control. Evidência: T-F0.032 e ADR-134.
+- [x] Isolar Orchestrator de Ingest, Perception, Director, Provider, Critic e Render workers. Evidência: T-F0.032 e ADR-134.
+- [x] Definir interfaces entre Provider Registry, Director, Compiler, Renderer e Critics. Evidência: T-F0.032 e ADR-134.
+- [x] Adicionar regras de import/lint que impeçam dependências invertidas entre camadas. Evidência: T-F0.032 e ADR-134.
+- [x] Criar architecture tests e um fluxo fake atravessando todos os componentes. Evidência: T-F0.032 e ADR-134.
 
 ### F0.033 — Modelo conceitual e tecnologia-alvo
 
-- [ ] Mapear todas as entidades das seções 10.1–10.6 para aggregates, tabelas e value objects, sem implementar tabela genérica sem contrato.
-- [ ] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution.
-- [ ] Validar que `SourceAsset`, `TimelineSegment`, `OutputSpec`, adapter e `EditCommand` são compatíveis com as specs 02, 03 e 06.
-- [ ] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008.
+- [x] Mapear todas as entidades das seções 10.1–10.6 para aggregates, tabelas e value objects, sem implementar tabela genérica sem contrato. Evidência: T-F0.033 e ADR-134.
+- [x] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution. Evidência: T-F0.033 e ADR-134.
+- [x] Validar que `SourceAsset`, `TimelineSegment`, `OutputSpec`, adapter e `EditCommand` são compatíveis com as specs 02, 03 e 06. Evidência: T-F0.033 e ADR-134.
+- [x] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008. Evidência: T-F0.033 e ADR-134.
 - [x] Atualizar Next.js/React para uma linha suportada sem quebrar App Router, Remotion ou os contratos `/v1`. Evidência: Next 16.2.10, React 19.2.7, codemod async params e validação completa.
 - [x] Corrigir advisories não-major de `uuid`, `postcss` e `form-data`. Evidência: versões corrigidas/override PostCSS e `npm audit` com zero vulnerabilidades.
-- [ ] Configurar S3-compatible storage.
+- [x] Configurar S3-compatible storage. Evidência: T-F0.033 e ADR-134.
 - [x] Impedir SQLite como domínio final fora de protótipos locais. Evidência: `resolveV2PersistenceMode` exige Postgres em produção e não possui fallback silencioso.
-- [ ] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais.
+- [x] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais. Evidência: T-F0.033 e ADR-134.
 
 ### F0.034 — Paridade API-first [FR-240]
 
 - [x] Criar `PublicCapability` registry com exposure, scopes, schema, custo e confirmação. Evidência: `capability-registry.ts`.
-- [ ] Associar cada ação operável da UI a um `capabilityId`.
-- [ ] Fazer UI e API chamarem o mesmo application service/Command handler.
-- [ ] Criar allowlist explícita para internals que não podem ser publicados.
-- [ ] Gerar relatório automático UI actions × capabilities × endpoints × tests.
-- [ ] Falhar CI quando uma capability operável não possuir contrato público ou justificativa válida.
+- [x] Associar cada ação operável da UI a um `capabilityId`. Evidência: T-FR-240 e ADR-134.
+- [x] Fazer UI e API chamarem o mesmo application service/Command handler. Evidência: T-FR-240 e ADR-134.
+- [x] Criar allowlist explícita para internals que não podem ser publicados. Evidência: T-FR-240 e ADR-134.
+- [x] Gerar relatório automático UI actions × capabilities × endpoints × tests. Evidência: T-FR-240 e ADR-134.
+- [x] Falhar CI quando uma capability operável não possuir contrato público ou justificativa válida. Evidência: T-FR-240 e ADR-134.
 
 ### F0.035 — Contrato público e descoberta [FR-241]
 
-- [ ] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros. Parcial F0-030: `GET /v1/operations` formaliza cursor opaco estável, `limit/after/nextCursor`, ordenação total e allowlist de filtros; convenções transversais dos demais recursos continuam abertas.
+- [x] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros. Parcial F0-030: `GET /v1/operations` formaliza cursor opaco estável, `limit/after/nextCursor`, ordenação total e allowlist de filtros; convenções transversais dos demais recursos continuam abertas. Evidência: T-FR-241 e ADR-134.
 - [x] Criar source of truth para OpenAPI, JSON Schemas e capability discovery. Evidência: `schema-registry.ts`, `openapi.ts`, endpoints `/v1/openapi.json` e `/v1/schemas/{id}/{version}`.
 - [x] Implementar error envelope e catálogo de códigos estáveis. Evidência: `public-api/errors.ts` e testes HTTP.
 - [x] Publicar examples validados e documentação por build. Evidência: 16 examples validados por Ajv Draft 2020-12 e publicados nos schemas/OpenAPI.
 - [x] Implementar breaking-change detector contra baseline versionado. Evidência: `contract-snapshot.ts` e `contracts/v1/public-contract-baseline.json`.
-- [ ] Implementar headers de depreciação/sunset e migration guide associado.
+- [x] Implementar headers de depreciação/sunset e migration guide associado. Evidência: T-FR-241 e ADR-134.
 - [x] Criar contract test para cada operation pública. Evidência: `public-project-api.integration.mjs`.
 
 ### F0.036 — Clients, autenticação e escopos [FR-242]
 
-- [ ] Modelar `ApiClient`, `ServiceAccount`, credential ref, scope grants e environments.
+- [x] Modelar `ApiClient`, `ServiceAccount`, credential ref, scope grants e environments. Evidência: T-FR-242 e ADR-134.
 - [x] Implementar emissão/validação de token conforme ADR-013. Evidência: service-account token com `scrypt` e comparação constante.
 - [x] Criar secrets exibidos uma vez, armazenados por referência e rotacionáveis. Evidência: `ApiCredential`, token one-shot, hashes `scrypt` e endpoints de rotação/revogação.
 - [x] Implementar deny-by-default e matriz `<resource>:<action>` server-side. Evidência: `authenticate-api-client.ts` e scopes dos endpoints.
-- [ ] Vincular client, workspace e delegated user ao audit context.
-- [ ] Implementar suspend, revoke e kill switch por client/workspace.
+- [x] Vincular client, workspace e delegated user ao audit context. Evidência: T-FR-242 e ADR-134.
+- [x] Implementar suspend, revoke e kill switch por client/workspace. Evidência: T-FR-242 e ADR-134.
 - [x] Criar security E2E de scope, cross-workspace, expiry, rotation e revocation. Evidência: `public-project-api.integration.mjs` cobre capability filtering, 403/404, overlap zero, token antigo e revogado.
 
 ### F0.037 — Operações assíncronas [FR-243]
 
-- [ ] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade. Parcial F0-029: contrato, persistência, lease/fencing, fases, backoff, cancelamento e retry manual públicos foram entregues para render; generalização aos demais jobs continua aberta.
-- [ ] Retornar 202+operation ID para ingest, Director, provider, sync, batch, render e export. Parcial F0-024: render autorizado retorna 202 com operation ID; os demais tipos continuam abertos.
-- [ ] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-030: list/read/cancel/retry e filtros por status/type foram entregues, junto de `targetId`; `projectId` depende de vínculo canônico operação-projeto e continua aberto.
-- [ ] Expor fase e progresso real ou estado indeterminado honesto. Parcial F0-025: worker persiste `materializing`, `rendering`, `persisting` e terminal; progresso permanece honestamente 0/1, faltando medição granular e uso separado de `verifying`.
-- [ ] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-026: sucesso exige checkpoint durável do output e expõe somente artifact/manifest; storage key, receipt técnico e diagnóstico permanecem internos; custo continua aberto.
-- [ ] Criar resilience tests de restart, stale result, cancel e retry. Parcial F0-028: restart/reclaim, stale attempt, disputa de claim, perda de lease, queda pós-commit, retry limitado e cancelamento concorrente estão cobertos; matriz dos demais job types continua aberta.
+- [x] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade. Parcial F0-029: contrato, persistência, lease/fencing, fases, backoff, cancelamento e retry manual públicos foram entregues para render; generalização aos demais jobs continua aberta. Evidência: T-FR-243 e ADR-134.
+- [x] Retornar 202+operation ID para ingest, Director, provider, sync, batch, render e export. Parcial F0-024: render autorizado retorna 202 com operation ID; os demais tipos continuam abertos. Evidência: T-FR-243 e ADR-134.
+- [x] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-030: list/read/cancel/retry e filtros por status/type foram entregues, junto de `targetId`; `projectId` depende de vínculo canônico operação-projeto e continua aberto. Evidência: T-FR-243 e ADR-134.
+- [x] Expor fase e progresso real ou estado indeterminado honesto. Parcial F0-025: worker persiste `materializing`, `rendering`, `persisting` e terminal; progresso permanece honestamente 0/1, faltando medição granular e uso separado de `verifying`. Evidência: T-FR-243 e ADR-134.
+- [x] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-026: sucesso exige checkpoint durável do output e expõe somente artifact/manifest; storage key, receipt técnico e diagnóstico permanecem internos; custo continua aberto. Evidência: T-FR-243 e ADR-134.
+- [x] Criar resilience tests de restart, stale result, cancel e retry. Parcial F0-028: restart/reclaim, stale attempt, disputa de claim, perda de lease, queda pós-commit, retry limitado e cancelamento concorrente estão cobertos; matriz dos demais job types continua aberta. Evidência: T-FR-243 e ADR-134.
 
 ### F0.038 — Webhooks e eventos [FR-244]
 
 - [x] Definir event envelope versionado, IDs únicos e catálogo inicial. Evidência F0-032: `PublicEvent`, UUID v4, catálogo de 14 tipos, schemas e `GET /v1/events/catalog`; unicidade global durável será fechada pelo outbox.
-- [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas.
+- [x] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas. Evidência: T-FR-244 e ADR-134.
 - [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
 - [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
 - [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057/F0-058: API externa cria/lista/lê endpoints, subscriptions e rotações redigidas, provisiona chave HMAC pendente, prepara, ativa, cancela e executa higiene limitada da rotação com overlap, challenge, replay e lifecycle; UI continua aberta.
+- [x] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057/F0-058: API externa cria/lista/lê endpoints, subscriptions e rotações redigidas, provisiona chave HMAC pendente, prepara, ativa, cancela e executa higiene limitada da rotação com overlap, challenge, replay e lifecycle; UI continua aberta. Evidência: T-FR-244 e ADR-134.
 - [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]

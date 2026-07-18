@@ -11,6 +11,7 @@
     "prebuild": "npm run api:v1:validate",
     "start": "next start -p 3333",
     "typecheck": "tsc --noEmit",
+    "lint": "node scripts/lint-architecture.mjs",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test",
     "security:audit": "npm audit --audit-level=low",
     "security:audit:remotion": "npm audit --prefix remotion --audit-level=low",

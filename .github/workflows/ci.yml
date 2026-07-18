@@ -71,6 +71,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Verify architecture boundaries
+        run: npm run lint
+
       - name: Run unit and contract tests
         run: npm test
 
