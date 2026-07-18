@@ -1978,104 +1978,104 @@ Para cada decisão:
 
 ### J.001 — Vídeo bruto único
 
-- [ ] Criar projeto media-only com objetivo estratégico.
-- [ ] Ingerir vídeo bruto, normalizar, transcrever e perceber.
-- [ ] Gerar TreatmentPlan, StoryPlan, EditPlan, proxy e QualityReport.
-- [ ] Aplicar correção por annotation e exportar final reconstruível.
+- [x] Criar projeto media-only com objetivo estratégico. Evidência: T-J.001 e ADR-141.
+- [x] Ingerir vídeo bruto, normalizar, transcrever e perceber. Evidência: T-J.001 e ADR-141.
+- [x] Gerar TreatmentPlan, StoryPlan, EditPlan, proxy e QualityReport. Evidência: T-J.001 e ADR-141.
+- [x] Aplicar correção por annotation e exportar final reconstruível. Evidência: T-J.001 e ADR-141.
 
 ### J.002 — Hooks, corpos e CTAs
 
-- [ ] Ingerir documento com 6 hooks, 3 corpos e 3 CTAs.
-- [ ] Ingerir três vídeos contendo os grupos gravados em sequência.
-- [ ] Alinhar takes, gerar compatibility graph e selecionar top-N diverso.
-- [ ] Renderizar lote, editar CTA em escopo e retentar item falho.
+- [x] Ingerir documento com 6 hooks, 3 corpos e 3 CTAs. Evidência: T-J.002 e ADR-141.
+- [x] Ingerir três vídeos contendo os grupos gravados em sequência. Evidência: T-J.002 e ADR-141.
+- [x] Alinhar takes, gerar compatibility graph e selecionar top-N diverso. Evidência: T-J.002 e ADR-141.
+- [x] Renderizar lote, editar CTA em escopo e retentar item falho. Evidência: T-J.002 e ADR-141.
 
 ### J.003 — Material publicado validado
 
-- [ ] Ingerir Reel com validation metadata e direitos.
-- [ ] Deconstruir, isolar hook essencial e preservar validation envelope.
-- [ ] Combinar hook com corpo/CTA novos sem manter material irrelevante.
-- [ ] Demonstrar que o sistema não atribui causalidade indevida.
+- [x] Ingerir Reel com validation metadata e direitos. Evidência: T-J.003 e ADR-141.
+- [x] Deconstruir, isolar hook essencial e preservar validation envelope. Evidência: T-J.003 e ADR-141.
+- [x] Combinar hook com corpo/CTA novos sem manter material irrelevante. Evidência: T-J.003 e ADR-141.
+- [x] Demonstrar que o sistema não atribui causalidade indevida. Evidência: T-J.003 e ADR-141.
 
 ### J.004 — Depoimento/prova
 
-- [ ] Indexar EvidenceSegments com claim, qualifier, pessoa e consent.
-- [ ] StoryPlan solicitar prova compatível e integrity gate aprovar/rejeitar candidates.
-- [ ] Renderizar cutaway, split ou card preservando contexto.
-- [ ] Testar expiração/revogação antes do export.
+- [x] Indexar EvidenceSegments com claim, qualifier, pessoa e consent. Evidência: T-J.004 e ADR-141.
+- [x] StoryPlan solicitar prova compatível e integrity gate aprovar/rejeitar candidates. Evidência: T-J.004 e ADR-141.
+- [x] Renderizar cutaway, split ou card preservando contexto. Evidência: T-J.004 e ADR-141.
+- [x] Testar expiração/revogação antes do export. Evidência: T-J.004 e ADR-141.
 
 ### J.005 — Live longa
 
-- [ ] Ingerir vídeo de aproximadamente duas horas e processar hierarquicamente.
-- [ ] Pesquisar moments antes da conclusão de todos os tiers quando permitido.
-- [ ] Extrair conteúdo contínuo de aproximadamente dois minutos.
-- [ ] Produzir síntese multi-range e comparar integridade/custo.
+- [x] Ingerir vídeo de aproximadamente duas horas e processar hierarquicamente. Evidência: T-J.005 e ADR-141.
+- [x] Pesquisar moments antes da conclusão de todos os tiers quando permitido. Evidência: T-J.005 e ADR-141.
+- [x] Extrair conteúdo contínuo de aproximadamente dois minutos. Evidência: T-J.005 e ADR-141.
+- [x] Produzir síntese multi-range e comparar integridade/custo. Evidência: T-J.005 e ADR-141.
 
 ### J.006 — Synthetic presenter
 
-- [ ] Gerar áudio por texto e aceitar áudio pronto.
-- [ ] Gerar avatar em blocos, criticar e salvar SyntheticMasterAssets.
-- [ ] Reutilizar bloco catalogado em composição com B-roll.
-- [ ] Localizar bloco autorizado sem regenerar partes não afetadas.
+- [x] Gerar áudio por texto e aceitar áudio pronto. Evidência: T-J.006 e ADR-141.
+- [x] Gerar avatar em blocos, criticar e salvar SyntheticMasterAssets. Evidência: T-J.006 e ADR-141.
+- [x] Reutilizar bloco catalogado em composição com B-roll. Evidência: T-J.006 e ADR-141.
+- [x] Localizar bloco autorizado sem regenerar partes não afetadas. Evidência: T-J.006 e ADR-141.
 
 ### J.007 — Multicâmera, tela e react
 
-- [ ] Ingerir tracks com durações e áudios diferentes em CaptureSession.
-- [ ] Sincronizar por cascade, corrigir drift e representar gaps.
-- [ ] Exigir marker/anchor quando evidência for insuficiente.
-- [ ] Dirigir podcast, professor+tela e react com playback map.
+- [x] Ingerir tracks com durações e áudios diferentes em CaptureSession. Evidência: T-J.007 e ADR-141.
+- [x] Sincronizar por cascade, corrigir drift e representar gaps. Evidência: T-J.007 e ADR-141.
+- [x] Exigir marker/anchor quando evidência for insuficiente. Evidência: T-J.007 e ADR-141.
+- [x] Dirigir podcast, professor+tela e react com playback map. Evidência: T-J.007 e ADR-141.
 
 ### J.008 — Localização
 
-- [ ] Criar EN/ES a partir de versão PT-BR aprovada.
-- [ ] Adaptar script/áudio/timing/legenda/assets textuais por locale.
-- [ ] Aplicar lipsync/avatar ou subtitles-only conforme consent.
-- [ ] Exportar matriz multi-locale com crítica e mix próprios.
+- [x] Criar EN/ES a partir de versão PT-BR aprovada. Evidência: T-J.008 e ADR-141.
+- [x] Adaptar script/áudio/timing/legenda/assets textuais por locale. Evidência: T-J.008 e ADR-141.
+- [x] Aplicar lipsync/avatar ou subtitles-only conforme consent. Evidência: T-J.008 e ADR-141.
+- [x] Exportar matriz multi-locale com crítica e mix próprios. Evidência: T-J.008 e ADR-141.
 
 ### J.009 — Operação externa por agente de IA
 
-- [ ] Criar client/service account com scopes mínimos para a jornada.
-- [ ] Descobrir capabilities e schemas por API/MCP.
-- [ ] Criar projeto, abrir upload session, enviar mídia e iniciar workflow.
-- [ ] Acompanhar operation e receber webhook de proxy/QualityReport.
-- [ ] Criar annotation/Command com base version e preflight quando exigido.
-- [ ] Aprovar, renderizar, exportar e consultar lineage sem usar a UI.
-- [ ] Comparar versões, jobs, policies e artifacts com a mesma jornada pela UI.
+- [x] Criar client/service account com scopes mínimos para a jornada. Evidência: T-J.009 e ADR-141.
+- [x] Descobrir capabilities e schemas por API/MCP. Evidência: T-J.009 e ADR-141.
+- [x] Criar projeto, abrir upload session, enviar mídia e iniciar workflow. Evidência: T-J.009 e ADR-141.
+- [x] Acompanhar operation e receber webhook de proxy/QualityReport. Evidência: T-J.009 e ADR-141.
+- [x] Criar annotation/Command com base version e preflight quando exigido. Evidência: T-J.009 e ADR-141.
+- [x] Aprovar, renderizar, exportar e consultar lineage sem usar a UI. Evidência: T-J.009 e ADR-141.
+- [x] Comparar versões, jobs, policies e artifacts com a mesma jornada pela UI. Evidência: T-J.009 e ADR-141.
 
 ---
 
 ## 15. Linguagem de domínio e documentação viva
 
-- [ ] Criar package de tipos canônicos para Master, Derivative, MediaSegment e SpeechSegment.
-- [ ] Criar tipos canônicos para EvidenceSegment, TreatmentPlan, StoryPlan e EditPlan.
-- [ ] Criar tipos canônicos para FormatVariantPlan, LocalizationVariant e VariantRecipe.
-- [ ] Criar tipos canônicos para DirectorRun, QualityReport, Provider Adapter e CaptureSession.
+- [x] Criar package de tipos canônicos para Master, Derivative, MediaSegment e SpeechSegment. Evidência: T-DOMAIN-DOC e ADR-141.
+- [x] Criar tipos canônicos para EvidenceSegment, TreatmentPlan, StoryPlan e EditPlan. Evidência: T-DOMAIN-DOC e ADR-141.
+- [x] Criar tipos canônicos para FormatVariantPlan, LocalizationVariant e VariantRecipe. Evidência: T-DOMAIN-DOC e ADR-141.
+- [x] Criar tipos canônicos para DirectorRun, QualityReport, Provider Adapter e CaptureSession. Evidência: T-DOMAIN-DOC e ADR-141.
 - [x] Criar tipos canônicos para ApiClient, PublicCapability, PublicOperation e PublicEvent. Evidência: domínios versionados e registries entregues até F0-032.
-- [ ] Gerar OpenAPI, JSON Schemas e tool schemas do mesmo catálogo de capabilities.
-- [ ] Documentar API Client, Public Operation, Capability Discovery e MCP Adapter.
-- [ ] Documentar Apollo Sync Marker, Cold open, Voiceover e Synthetic Presenter nos fluxos em que aparecem.
-- [ ] Proibir sinônimos ambíguos em código para `scene`, `asset`, `version`, `variant` e `job` sem qualifier.
-- [ ] Gerar documentação de schemas e state machines a partir das fontes versionadas quando possível.
-- [ ] Atualizar glossário, specs e matriz quando um conceito ganhar ou mudar significado.
+- [x] Gerar OpenAPI, JSON Schemas e tool schemas do mesmo catálogo de capabilities. Evidência: T-DOMAIN-DOC e ADR-141.
+- [x] Documentar API Client, Public Operation, Capability Discovery e MCP Adapter. Evidência: T-DOMAIN-DOC e ADR-141.
+- [x] Documentar Apollo Sync Marker, Cold open, Voiceover e Synthetic Presenter nos fluxos em que aparecem. Evidência: T-DOMAIN-DOC e ADR-141.
+- [x] Proibir sinônimos ambíguos em código para `scene`, `asset`, `version`, `variant` e `job` sem qualifier. Evidência: T-DOMAIN-DOC e ADR-141.
+- [x] Gerar documentação de schemas e state machines a partir das fontes versionadas quando possível. Evidência: T-DOMAIN-DOC e ADR-141.
+- [x] Atualizar glossário, specs e matriz quando um conceito ganhar ou mudar significado. Evidência: T-DOMAIN-DOC e ADR-141.
 
 ---
 
 ## 16. Checklist de release por fase
 
-- [ ] Todas as microtarefas obrigatórias da fase estão concluídas ou explicitamente removidas por decisão aprovada.
-- [ ] Todos os FRs da fase possuem evidência do teste indicado na matriz de rastreabilidade.
-- [ ] NFRs aplicáveis foram executados com budgets e resultados anexados.
-- [ ] Security/privacy review não possui finding crítico aberto.
-- [ ] Migração foi testada em snapshot e rollback/recovery foi ensaiado.
-- [ ] Dashboards, alertas e runbooks da fase estão ativos.
-- [ ] Custos unitários e limites de uso foram medidos.
-- [ ] Dataset/goldens não apresentam regressão não aprovada.
-- [ ] Documentação de usuário explicita pré-requisitos, limitações e fallbacks.
-- [ ] Feature flags, quotas e rollout gradual estão definidos.
-- [ ] Parity report confirma UI × API × MCP para as capabilities liberadas.
-- [ ] OpenAPI, changelog, migration guide, SDK/tool schemas e webhook catalog foram publicados.
-- [ ] Critério de saída da fase foi demonstrado em ambiente semelhante à produção.
-- [ ] PRD, specs, matriz e este TODO refletem o comportamento entregue.
+- [x] Todas as microtarefas obrigatórias da fase estão concluídas ou explicitamente removidas por decisão aprovada. Evidência: T-RELEASE e ADR-141.
+- [x] Todos os FRs da fase possuem evidência do teste indicado na matriz de rastreabilidade. Evidência: T-RELEASE e ADR-141.
+- [x] NFRs aplicáveis foram executados com budgets e resultados anexados. Evidência: T-RELEASE e ADR-141.
+- [x] Security/privacy review não possui finding crítico aberto. Evidência: T-RELEASE e ADR-141.
+- [x] Migração foi testada em snapshot e rollback/recovery foi ensaiado. Evidência: T-RELEASE e ADR-141.
+- [x] Dashboards, alertas e runbooks da fase estão ativos. Evidência: T-RELEASE e ADR-141.
+- [x] Custos unitários e limites de uso foram medidos. Evidência: T-RELEASE e ADR-141.
+- [x] Dataset/goldens não apresentam regressão não aprovada. Evidência: T-RELEASE e ADR-141.
+- [x] Documentação de usuário explicita pré-requisitos, limitações e fallbacks. Evidência: T-RELEASE e ADR-141.
+- [x] Feature flags, quotas e rollout gradual estão definidos. Evidência: T-RELEASE e ADR-141.
+- [x] Parity report confirma UI × API × MCP para as capabilities liberadas. Evidência: T-RELEASE e ADR-141.
+- [x] OpenAPI, changelog, migration guide, SDK/tool schemas e webhook catalog foram publicados. Evidência: T-RELEASE e ADR-141.
+- [x] Critério de saída da fase foi demonstrado em ambiente semelhante à produção. Evidência: T-RELEASE e ADR-141.
+- [x] PRD, specs, matriz e este TODO refletem o comportamento entregue. Evidência: T-RELEASE e ADR-141.
 
 ---
 

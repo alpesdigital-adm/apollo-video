@@ -1,0 +1,20 @@
+export type CanonicalId<T extends string>=string&{readonly __canonical:T};
+export type Master={id:CanonicalId<'master'>;workspaceId:string;checksum:string;storageIdentity:string;rightsSnapshotId:string;state:'uploading'|'verifying'|'ready'|'quarantined'|'deleted'};
+export type Derivative={id:CanonicalId<'derivative'>;masterId:Master['id'];recipeId:string;recipeVersion:string;checksum:string;lineageId:string;reconstructable:boolean};
+export type MediaSegment={id:CanonicalId<'media-segment'>;sourceId:Master['id']|Derivative['id'];sourceRangeMs:[number,number];virtual:boolean};
+export type SpeechSegment=MediaSegment&{exactText:string;normalizedText:string;speakerId?:string;alignment:{word:string;startMs:number;endMs:number}[];completeThought:boolean};
+export type EvidenceSegment=SpeechSegment&{claim:string;qualifier?:string;attribution:string;consentSnapshotId:string;contextRangeMs:[number,number]};
+export type TreatmentPlan={id:CanonicalId<'treatment-plan'>;version:number;objective:string;mode:string;patternBudget:number;noveltyBudget:number;audioMode:string};
+export type StoryPlan={id:CanonicalId<'story-plan'>;version:number;blocks:{id:string;role:'hook'|'body'|'proof'|'cta'|'bridge';sourceRefs:string[];claims:string[]}[]};
+export type EditPlan={id:CanonicalId<'edit-plan'>;schemaVersion:number;storyPlanId:StoryPlan['id'];trackIds:string[];outputSpecId:string};
+export type FormatVariantPlan={id:CanonicalId<'format-variant-plan'>;editPlanId:EditPlan['id'];format:string;cropPlanId:string;protected:boolean};
+export type LocalizationVariant={id:CanonicalId<'localization-variant'>;editPlanId:EditPlan['id'];locale:string;scriptVersion:number;audioId:string;alignmentId:string;status:string};
+export type VariantRecipe={id:CanonicalId<'variant-recipe'>;hookId:string;bodyIds:string[];ctaId:string;proofIds:string[];formatIds:string[];localeIds:string[]};
+export type DirectorRun={id:CanonicalId<'director-run'>;projectVersionId:string;policySnapshotId:string;decisionIds:string[];modelRoute:string;cost:number};
+export type QualityReport={id:CanonicalId<'quality-report'>;artifactId:string;hardIssues:number;warnings:number;criticVersions:string[];passed:boolean};
+export interface ProviderAdapter<Input,Result>{readonly capability:string;submit(input:Input):Promise<{providerJobId:string}>;poll(providerJobId:string):Promise<Result>;cancel(providerJobId:string):Promise<void>}
+export type CaptureSession={id:CanonicalId<'capture-session'>;workspaceId:string;clockRate:number;trackIds:string[];protocolId?:string;syncDiagnosticId?:string};
+export type ApiClient={id:CanonicalId<'api-client'>;workspaceId:string;scopes:string[];environment:string;status:string};
+export type PublicCapability={id:CanonicalId<'public-capability'>;inputSchema:string;outputSchema:string;scopes:string[];preflight:boolean};
+export type PublicOperation={id:CanonicalId<'public-operation'>;capabilityId:PublicCapability['id'];status:string;phase:string;resultRef?:string;errorCode?:string};
+export type PublicEvent={id:CanonicalId<'public-event'>;type:string;version:number;resourceId:string;sequence:number;occurredAt:string};

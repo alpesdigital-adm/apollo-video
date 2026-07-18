@@ -74,6 +74,9 @@ jobs:
       - name: Verify architecture boundaries
         run: npm run lint
 
+      - name: Verify canonical domain language
+        run: npm run domain-language:validate
+
       - name: Run unit and contract tests
         run: npm test
 
