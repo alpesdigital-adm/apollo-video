@@ -1,8 +1,8 @@
 import { timingSafeEqual } from 'node:crypto'
 
-import type { PrismaClient, V2WebhookVerificationChallenge } from '@prisma/client'
+import type { PrismaClient, V2WebhookVerificationChallenge } from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import type {
   VerifyWebhookChallengeCommand,
   WebhookChallengeRepository,
@@ -55,7 +55,7 @@ export class PrismaWebhookSecurityRepository
     WebhookReplayReceiptRepository {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = prisma) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
   }
 

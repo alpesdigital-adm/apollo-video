@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient, type V2WebhookDelivery } from '@prisma/client'
+import { Prisma, type PrismaClient, type V2WebhookDelivery } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   WebhookEventReplayItem,

@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client'
+import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { ProtectedRenderInputStore } from '../../application/ports/protected-render-input-store.ts'
 import type { RecipeParameterCipher } from '../../application/ports/recipe-parameter-cipher.ts'

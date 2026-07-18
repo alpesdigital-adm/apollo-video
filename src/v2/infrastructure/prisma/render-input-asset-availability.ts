@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client'
+import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   RenderAssetAvailability,

@@ -1,5 +1,5 @@
-import type { PrismaClient, V2WebhookSubscription } from '@prisma/client'
-import { Prisma } from '@prisma/client'
+import type { PrismaClient, V2WebhookSubscription } from '../../../../generated/prisma-v2/index.js'
+import { Prisma } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   SetWebhookSubscriptionStatusCommand,

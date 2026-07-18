@@ -4,7 +4,7 @@ import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import type { PrismaClient } from '@prisma/client'
+import type { PrismaClient } from '../../../generated/prisma-v2/index.js'
 
 import type {
   RenderInputAssetResolver,

@@ -4,9 +4,9 @@ import {
   type V2IdempotencyRecord,
   type V2Project,
   type V2ProjectVersion,
-} from '@prisma/client'
+} from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProject, type ProjectStatus } from '../../domain/project.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
@@ -98,7 +98,7 @@ function hydrateResult(
 export class PrismaProjectCreationRepository implements ProjectCreationRepository {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = prisma) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
   }
 

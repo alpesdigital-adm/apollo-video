@@ -1,13 +1,13 @@
-import type { PrismaClient } from '@prisma/client'
+import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { createWorkspace, type Workspace, type WorkspaceStatus } from '../../domain/workspace.ts'
 import type { WorkspaceRepository } from '../../application/ports/workspace-repository.ts'
 
 export class PrismaWorkspaceRepository implements WorkspaceRepository {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = prisma) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
   }
 

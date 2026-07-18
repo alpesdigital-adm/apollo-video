@@ -1,6 +1,6 @@
-import type { PrismaClient } from '@prisma/client'
+import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import type { ProjectQueryRepository } from '../../application/ports/project-query-repository.ts'
 import { createProject, type Project, type ProjectStatus } from '../../domain/project.ts'
 import type { CommandActorType } from '../../domain/edit-command.ts'
@@ -8,7 +8,7 @@ import type { CommandActorType } from '../../domain/edit-command.ts'
 export class PrismaProjectQueryRepository implements ProjectQueryRepository {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = prisma) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
   }
 

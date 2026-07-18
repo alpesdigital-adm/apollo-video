@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient, V2MediaArtifact } from '@prisma/client'
+import type { Prisma, PrismaClient, V2MediaArtifact } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   MediaArtifactPersistenceBundle,

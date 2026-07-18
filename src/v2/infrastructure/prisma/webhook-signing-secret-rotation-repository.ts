@@ -5,9 +5,9 @@ import type {
   V2WebhookEndpoint,
   V2WebhookSigningSecret,
   V2WebhookSigningSecretRotation,
-} from '@prisma/client'
+} from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import type {
   StageWebhookSigningSecretRotationCommand,
   StageWebhookSigningSecretRotationResult,
@@ -104,7 +104,7 @@ function cancellationResult(
 export class PrismaWebhookSigningSecretRotationRepository implements WebhookSigningSecretRotationRepository {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = prisma) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
   }
 

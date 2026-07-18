@@ -12,8 +12,8 @@ import type {
 } from '../application/ports/render-input-renderer.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { MaterializedRenderInputV1 } from '../domain/render-input.ts'
-import { getVideoInfo } from '../../lib/services/ffmpeg.ts'
 import { calculateFileSha256 } from './media/local-artifact-manifest.ts'
+import { probeVideo } from './media/video-probe.ts'
 
 const DEFAULT_TIMEOUT_MS = 20 * 60_000
 const MAX_WORKER_OUTPUT_BYTES = 1024 * 1024
@@ -235,7 +235,7 @@ export class RemotionRenderInputRenderer implements RenderInputRenderer {
     if (!metadata.isFile() || metadata.size <= 0 || !Number.isSafeInteger(metadata.size)) {
       throw new DomainError('RENDER_OUTPUT_INVALID', 'Committed render output is invalid')
     }
-    const probe = await getVideoInfo(finalPath)
+    const probe = await probeVideo(finalPath)
     const expectedDuration = input.output.durationInFrames / input.output.fps
     if (
       probe.width !== input.output.width ||
@@ -330,7 +330,7 @@ export class RemotionRenderInputRenderer implements RenderInputRenderer {
       if (!metadata.isFile() || metadata.size <= 0 || !Number.isSafeInteger(metadata.size)) {
         throw new DomainError('RENDER_OUTPUT_INVALID', 'Remotion produced an invalid output')
       }
-      const probe = await getVideoInfo(partialPath)
+      const probe = await probeVideo(partialPath)
       const expectedDuration = input.output.durationInFrames / input.output.fps
       if (
         probe.width !== input.output.width ||

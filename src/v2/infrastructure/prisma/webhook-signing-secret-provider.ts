@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
-import type { PrismaClient } from '@prisma/client'
+import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import type { RecipeParameterCipher } from '../../application/ports/recipe-parameter-cipher.ts'
 import type { WebhookSigningSecretProvider } from '../../application/ports/webhook-delivery-dispatch.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -25,7 +25,7 @@ export class PrismaWebhookSigningSecretProvider implements WebhookSigningSecretP
   private readonly cipher: RecipeParameterCipher
   private readonly clock: () => Date
 
-  constructor(cipher: RecipeParameterCipher, client: PrismaClient = prisma, clock: () => Date = () => new Date()) {
+  constructor(cipher: RecipeParameterCipher, client: PrismaClient = getV2PostgresClient(), clock: () => Date = () => new Date()) {
     this.cipher = cipher
     this.client = client
     this.clock = clock

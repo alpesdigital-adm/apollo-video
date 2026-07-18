@@ -3,9 +3,9 @@ import type {
   V2IdempotencyRecord,
   V2WebhookEndpoint,
   V2WebhookSigningSecret,
-} from '@prisma/client'
+} from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import type {
   WebhookEndpointCreationBundle,
   WebhookEndpointCreationRepository,
@@ -82,7 +82,7 @@ function result(
 export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointCreationRepository {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = prisma) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
   }
 

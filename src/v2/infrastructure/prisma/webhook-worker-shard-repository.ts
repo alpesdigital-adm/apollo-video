@@ -1,4 +1,4 @@
-import type { PrismaClient, V2WebhookWorkerShardLease } from '@prisma/client'
+import type { PrismaClient, V2WebhookWorkerShardLease } from '../../../../generated/prisma-v2/index.js'
 
 import type { WebhookWorkerShardRepository } from '../../application/ports/webhook-worker-shard-repository.ts'
 import { DomainError } from '../../domain/errors.ts'

@@ -3,7 +3,7 @@ import type {
   V2WebhookEndpoint,
   V2WebhookSigningSecretRotation,
   V2WebhookSubscription,
-} from '@prisma/client'
+} from '../../../../generated/prisma-v2/index.js'
 
 import type {
   WebhookAdministrationQueryRepository,

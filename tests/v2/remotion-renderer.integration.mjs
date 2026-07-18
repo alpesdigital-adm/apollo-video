@@ -14,7 +14,7 @@ import { renderAuthorizedInputService } from '../../src/v2/application/render-au
 import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
 import { RemotionRenderInputRenderer } from '../../src/v2/infrastructure/remotion-render-input-renderer.ts'
 import { calculateFileSha256 } from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
-import { getVideoInfo } from '../../src/lib/services/ffmpeg.ts'
+import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 
 const execFileAsync = promisify(execFile)
 const executableSuffix = process.platform === 'win32' ? '.exe' : ''
@@ -224,7 +224,7 @@ test('authorized materialized lease produces and promotes a real Remotion smoke 
   })
 
   const outputPath = path.join(outputRoot, ...outputKey.split('/'))
-  const probe = await getVideoInfo(outputPath)
+  const probe = await probeVideo(outputPath)
   assert.deepEqual(
     { width: probe.width, height: probe.height, fps: probe.fps },
     { width: 270, height: 480, fps: 30 },

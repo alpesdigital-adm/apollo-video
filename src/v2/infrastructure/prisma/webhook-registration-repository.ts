@@ -1,6 +1,6 @@
-import type { PrismaClient } from '@prisma/client'
+import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import type {
   WebhookRegistrationBundle,
   WebhookRegistrationRepository,
@@ -14,7 +14,7 @@ function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
 export class PrismaWebhookRegistrationRepository implements WebhookRegistrationRepository {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = prisma) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
   }
 

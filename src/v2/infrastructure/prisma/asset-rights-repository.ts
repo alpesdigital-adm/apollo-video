@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient, type V2AssetRightsSnapshot } from '@prisma/client'
+import { Prisma, type PrismaClient, type V2AssetRightsSnapshot } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   AssetRightsRecord,

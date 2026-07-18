@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from '@prisma/client'
+import type { Prisma, PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   ArtifactRenderCheckpoint,

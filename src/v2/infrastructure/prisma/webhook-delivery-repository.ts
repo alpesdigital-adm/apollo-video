@@ -3,9 +3,9 @@ import {
   type PrismaClient,
   type V2WebhookDelivery,
   type V2WebhookDeliveryAttempt,
-} from '@prisma/client'
+} from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import type {
   ClaimedWebhookDelivery,
   SettledWebhookDelivery,
@@ -195,7 +195,7 @@ export class PrismaWebhookDeliveryRepository
     WebhookDeliveryReplayRepository {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = prisma) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
   }
 

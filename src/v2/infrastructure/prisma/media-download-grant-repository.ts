@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client'
+import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { MediaDownloadGrantRepository } from '../../application/ports/media-download-grant-repository.ts'
 import { createMediaDownloadGrant } from '../../domain/media-download-grant.ts'

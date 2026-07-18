@@ -4,9 +4,9 @@ import type {
   PrismaClient,
   V2PublicEventOutbox,
   V2WebhookDelivery,
-} from '@prisma/client'
+} from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import type {
   MaterializeWebhookEventCommand,
   WebhookFanoutRepository,
@@ -90,7 +90,7 @@ export class PrismaWebhookFanoutRepository implements WebhookFanoutRepository {
   private readonly client: PrismaClient
   private readonly createId: () => string
 
-  constructor(client: PrismaClient = prisma, createId: () => string = randomUUID) {
+  constructor(client: PrismaClient = getV2PostgresClient(), createId: () => string = randomUUID) {
     this.client = client
     this.createId = createId
   }

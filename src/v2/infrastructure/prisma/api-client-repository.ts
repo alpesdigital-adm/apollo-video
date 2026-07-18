@@ -4,9 +4,9 @@ import {
   type V2ApiClient,
   type V2ApiCredential,
   type V2IdempotencyRecord,
-} from '@prisma/client'
+} from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import {
   createApiClient,
   type ApiClient,
@@ -114,7 +114,7 @@ export class PrismaApiClientRepository
 {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = prisma) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
   }
 

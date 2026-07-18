@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { PrismaClient as SqlitePrismaClient } from '@prisma/client'
+import type { PrismaClient } from '../../../generated/prisma-v2/index.js'
 
 import { activateWebhookEndpointConvergentlyService } from '../application/secure-webhook.ts'
 import { materializeNextWebhookEventService } from '../application/materialize-webhook-deliveries.ts'
@@ -69,8 +69,6 @@ import type {
   WebhookReplayReceiptRepository,
 } from '../application/ports/webhook-security-repository.ts'
 import { DomainError } from '../domain/errors.ts'
-import { prisma } from '../../lib/db.ts'
-import { resolveV2PersistenceMode } from './persistence-mode.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaArtifactRenderCheckpointRepository } from './prisma/artifact-render-checkpoint-repository.ts'
 import { PrismaAssetRightsRepository } from './prisma/asset-rights-repository.ts'
@@ -113,15 +111,8 @@ export { createMediaUploadSessionSignerFromEnvironment } from './security/media-
 export { createMediaUploadVerifierFromEnvironment } from './media-upload-verifier.ts'
 export { createMediaDownloadGrantSignerFromEnvironment } from './security/media-download-grant-signer.ts'
 
-// The two generated clients expose the same v2 model delegates. This cast is
-// kept at the persistence boundary so application and public API code remain
-// provider-agnostic while the SQLite prototype still exists.
-function resolveV2Client(): SqlitePrismaClient {
-  if (resolveV2PersistenceMode() === 'postgres') {
-    return getV2PostgresClient() as unknown as SqlitePrismaClient
-  }
-
-  return prisma
+function resolveV2Client(): PrismaClient {
+  return getV2PostgresClient()
 }
 
 export function createApiClientRepository(): ApiClientRepository {

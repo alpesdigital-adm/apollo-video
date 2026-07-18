@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { PrismaClient } from '@prisma/client'
+import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { MediaTransferRepository } from '../../application/ports/media-transfer-repository.ts'
 import { DomainError } from '../../domain/errors.ts'

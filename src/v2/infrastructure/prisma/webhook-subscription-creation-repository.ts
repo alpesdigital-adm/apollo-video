@@ -1,6 +1,6 @@
-import type { PrismaClient, V2IdempotencyRecord, V2WebhookSubscription } from '@prisma/client'
+import type { PrismaClient, V2IdempotencyRecord, V2WebhookSubscription } from '../../../../generated/prisma-v2/index.js'
 
-import { prisma } from '../../../lib/db.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import type {
   WebhookSubscriptionCreationBundle,
   WebhookSubscriptionCreationRepository,
@@ -74,7 +74,7 @@ export class PrismaWebhookSubscriptionCreationRepository
   implements WebhookSubscriptionCreationRepository {
   private readonly client: PrismaClient
 
-  constructor(client: PrismaClient = prisma) {
+  constructor(client: PrismaClient = getV2PostgresClient()) {
     this.client = client
   }
 

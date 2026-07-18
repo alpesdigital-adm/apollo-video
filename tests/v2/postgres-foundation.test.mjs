@@ -24,14 +24,19 @@ function withEnvironment(values, callback) {
   }
 }
 
-test('sandbox defaults to SQLite prototype but production requires Postgres', () => {
+test('Apollo V2 requires Postgres in every environment', () => {
   withEnvironment(
     {
       APOLLO_API_ENVIRONMENT: 'sandbox',
       APOLLO_V2_PERSISTENCE: undefined,
       V2_DATABASE_URL: undefined,
     },
-    () => assert.equal(resolveV2PersistenceMode(), 'sqlite-prototype'),
+    () =>
+      assert.throws(
+        resolveV2PersistenceMode,
+        (error) =>
+          error instanceof DomainError && error.code === 'PERSISTENCE_NOT_CONFIGURED',
+      ),
   )
 
   withEnvironment(
@@ -46,6 +51,17 @@ test('sandbox defaults to SQLite prototype but production requires Postgres', ()
         (error) =>
           error instanceof DomainError && error.code === 'PERSISTENCE_NOT_CONFIGURED',
       ),
+  )
+})
+
+test('configured Postgres is the only accepted persistence mode', () => {
+  withEnvironment(
+    {
+      APOLLO_API_ENVIRONMENT: 'sandbox',
+      APOLLO_V2_PERSISTENCE: 'postgres',
+      V2_DATABASE_URL: 'postgresql://apollo:test-only@127.0.0.1:5432/apollo_v2?schema=public',
+    },
+    () => assert.equal(resolveV2PersistenceMode(), 'postgres'),
   )
 })
 
