@@ -1,0 +1,48 @@
+FROM node:22-bookworm-slim AS dependencies
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+COPY scripts/generate-prisma-clients.mjs ./scripts/generate-prisma-clients.mjs
+RUN npm ci
+
+FROM node:22-bookworm-slim AS build
+
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY --from=dependencies /app/generated ./generated
+COPY . .
+RUN npm run build
+
+FROM node:22-bookworm-slim AS runtime
+
+WORKDIR /app
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    HOSTNAME=0.0.0.0 \
+    PORT=3333
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/.next ./.next
+COPY --from=build --chown=node:node /app/public ./public
+COPY --from=build --chown=node:node /app/prisma ./prisma
+COPY --from=build --chown=node:node /app/generated ./generated
+COPY --from=build --chown=node:node /app/scripts ./scripts
+COPY --from=build --chown=node:node /app/src ./src
+COPY --from=build --chown=node:node /app/remotion ./remotion
+
+RUN mkdir -p /app/data /app/uploads /app/renders /app/tmp /app/artifacts /app/render-outputs \
+    && chown -R node:node /app
+
+USER node
+EXPOSE 3333
+
+CMD ["npm", "run", "start"]
