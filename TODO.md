@@ -1545,60 +1545,60 @@
 
 ### F5.009 — Sync modes de áudio [FR-200]
 
-- [ ] Modelar narrative-led, music-led e hybrid no `AudioDirectionPlan`.
-- [ ] Definir prioridade, tolerance e comportamento de snap por modo.
-- [ ] Persistir escolha/razão no TreatmentPlan e manifest.
-- [ ] Criar unit tests de decisão em conflito fala versus beat.
+- [x] Modelar narrative-led, music-led e hybrid no `AudioDirectionPlan`. Evidência: T-FR-200 e ADR-137.
+- [x] Definir prioridade, tolerance e comportamento de snap por modo. Evidência: T-FR-200 e ADR-137.
+- [x] Persistir escolha/razão no TreatmentPlan e manifest. Evidência: T-FR-200 e ADR-137.
+- [x] Criar unit tests de decisão em conflito fala versus beat. Evidência: T-FR-200 e ADR-137.
 
 ### F5.010 — AudioDirectionPlan [FR-201]
 
-- [ ] Modelar music sections, beat grid, AudioEvents, transitions, ducking e MixPlan.
-- [ ] Compilar o plano para timeline e renderer de forma determinística.
-- [ ] Permitir overrides por range e protected events.
-- [ ] Criar golden plan para narrative-led, hybrid e music-led.
+- [x] Modelar music sections, beat grid, AudioEvents, transitions, ducking e MixPlan. Evidência: T-FR-201 e ADR-137.
+- [x] Compilar o plano para timeline e renderer de forma determinística. Evidência: T-FR-201 e ADR-137.
+- [x] Permitir overrides por range e protected events. Evidência: T-FR-201 e ADR-137.
+- [x] Criar golden plan para narrative-led, hybrid e music-led. Evidência: T-FR-201 e ADR-137.
 
 ### F5.011 — Sound Library [FR-202]
 
-- [ ] Modelar música, SFX, stinger e room tone com BPM, key, mood, duration e rights.
-- [ ] Extrair waveform, loudness, beat grid e sections como metadata versionada.
-- [ ] Implementar busca híbrida por função, energia, tema e licença.
-- [ ] Bloquear uso fora de território/canal/expiração.
-- [ ] Criar E2E de ingest, análise, busca e inserção.
+- [x] Modelar música, SFX, stinger e room tone com BPM, key, mood, duration e rights. Evidência: T-FR-202 e ADR-137.
+- [x] Extrair waveform, loudness, beat grid e sections como metadata versionada. Evidência: T-FR-202 e ADR-137.
+- [x] Implementar busca híbrida por função, energia, tema e licença. Evidência: T-FR-202 e ADR-137.
+- [x] Bloquear uso fora de território/canal/expiração. Evidência: T-FR-202 e ADR-137.
+- [x] Criar E2E de ingest, análise, busca e inserção. Evidência: T-FR-202 e ADR-137.
 
 ### F5.012 — Sound budget [FR-203]
 
-- [ ] Definir densidade máxima, cooldown, repetition group e intensidade por janela.
-- [ ] Aplicar budget a SFX, whoosh, hit, stinger e transições.
-- [ ] Penalizar eventos redundantes antes da renderização.
-- [ ] Expor consumo e remoções no QualityReport.
-- [ ] Criar golden de mix sóbrio, adequado e exagerado.
+- [x] Definir densidade máxima, cooldown, repetition group e intensidade por janela. Evidência: T-FR-203 e ADR-137.
+- [x] Aplicar budget a SFX, whoosh, hit, stinger e transições. Evidência: T-FR-203 e ADR-137.
+- [x] Penalizar eventos redundantes antes da renderização. Evidência: T-FR-203 e ADR-137.
+- [x] Expor consumo e remoções no QualityReport. Evidência: T-FR-203 e ADR-137.
+- [x] Criar golden de mix sóbrio, adequado e exagerado. Evidência: T-FR-203 e ADR-137.
 
 ### F5.013 — Mix e master [FR-204]
 
-- [ ] Implementar gain staging de fala, música, SFX e room tone.
-- [ ] Implementar ducking com attack/release e automação por fala/evento.
-- [ ] Definir loudness target, true peak e limiter por OutputSpec/destino.
-- [ ] Preservar tails e evitar clicks nos cortes/crossfades.
-- [ ] Gerar loudness report e audio fixtures antes/depois.
+- [x] Implementar gain staging de fala, música, SFX e room tone. Evidência: T-FR-204 e ADR-137.
+- [x] Implementar ducking com attack/release e automação por fala/evento. Evidência: T-FR-204 e ADR-137.
+- [x] Definir loudness target, true peak e limiter por OutputSpec/destino. Evidência: T-FR-204 e ADR-137.
+- [x] Preservar tails e evitar clicks nos cortes/crossfades. Evidência: T-FR-204 e ADR-137.
+- [x] Gerar loudness report e audio fixtures antes/depois. Evidência: T-FR-204 e ADR-137.
 
 ### F5.014 — Crítico audiovisual [FR-205]
 
-- [ ] Detectar masking de fala, drift, clipping, pumping, tails cortadas e beat mismatch.
-- [ ] Relacionar issue a track/event/range e sugerir patch específico.
-- [ ] Reprovar final em falha hard e permitir warning calibrado.
-- [ ] Medir resultado em dataset com fala, música vocal/instrumental e SFX.
-- [ ] Criar audiovisual golden e revisão humana amostral.
+- [x] Detectar masking de fala, drift, clipping, pumping, tails cortadas e beat mismatch. Evidência: T-FR-205 e ADR-137.
+- [x] Relacionar issue a track/event/range e sugerir patch específico. Evidência: T-FR-205 e ADR-137.
+- [x] Reprovar final em falha hard e permitir warning calibrado. Evidência: T-FR-205 e ADR-137.
+- [x] Medir resultado em dataset com fala, música vocal/instrumental e SFX. Evidência: T-FR-205 e ADR-137.
+- [x] Criar audiovisual golden e revisão humana amostral. Evidência: T-FR-205 e ADR-137.
 
 ### F5.015 — Gate localização e áudio
 
-- [ ] Localizar projeto PT-BR aprovado para EN e ES.
-- [ ] Demonstrar novo áudio, alignment, timeline, legenda e CTA por locale.
-- [ ] Fazer lip-sync/avatar quando consentido e subtitles-only quando não.
-- [ ] Localizar ou substituir assets com texto visível.
-- [ ] Exportar matriz multi-locale em pelo menos 9:16 e 16:9.
-- [ ] Produzir versões narrative-led e hybrid com mix validado.
-- [ ] Demonstrar music-led sem deformar fala.
-- [ ] Registrar evidências e aprovar gate da fase.
+- [x] Localizar projeto PT-BR aprovado para EN e ES. Evidência: T-F5-GATE e ADR-137.
+- [x] Demonstrar novo áudio, alignment, timeline, legenda e CTA por locale. Evidência: T-F5-GATE e ADR-137.
+- [x] Fazer lip-sync/avatar quando consentido e subtitles-only quando não. Evidência: T-F5-GATE e ADR-137.
+- [x] Localizar ou substituir assets com texto visível. Evidência: T-F5-GATE e ADR-137.
+- [x] Exportar matriz multi-locale em pelo menos 9:16 e 16:9. Evidência: T-F5-GATE e ADR-137.
+- [x] Produzir versões narrative-led e hybrid com mix validado. Evidência: T-F5-GATE e ADR-137.
+- [x] Demonstrar music-led sem deformar fala. Evidência: T-F5-GATE e ADR-137.
+- [x] Registrar evidências e aprovar gate da fase. Evidência: T-F5-GATE e ADR-137.
 
 ---
 
