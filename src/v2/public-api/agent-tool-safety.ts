@@ -155,6 +155,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one empty draft project with no provider or external side effect.',
     },
+    'apollo.projects.commands.apply': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',
+    },
     'apollo.media.uploads.begin': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Registers one checksum-bound upload intent without transferring bytes or starting ingest.',

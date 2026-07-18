@@ -970,6 +970,25 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-workspace/v2': [
+      {
+        data: {
+          project: { id: projectId, workspaceId, name: 'Anúncio de descoberta', status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt },
+          version: { id: 'project-version-example-2', sequence: 2, baseHash: 'b'.repeat(64), createdAt },
+          editPlan: {
+            id: 'edit-plan-example-2', state: 'compiled', fps: 30, durationFrames: 2683,
+            clipCount: 4, cutCount: 3, automaticZoom: false, subtitleFaceProtection: true,
+          },
+          commands: [{
+            id: 'edit-command-example-1', type: 'remove-spoken-content',
+            baseVersionId: 'project-version-example-1', resultVersionId: 'project-version-example-2',
+            reason: 'Remover datas e duração obsoletas.', createdAt,
+          }],
+          media: [], transcripts: [], operationIds: [], operations: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/begin-media-upload-request/v2': [
       { projectId, fileName: 'gravacao-bruta.mp4', rightsConfirmed: true, kind: 'video', size: '104857600', mimeType: 'video/mp4', checksum: 'a'.repeat(64) },
     ],
@@ -1289,6 +1308,55 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               policies: 'project-snapshot-policies-1',
             },
             createdAt,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/apply-project-edit-command-request/v1': [
+      {
+        type: 'remove-spoken-content',
+        baseVersionId: 'project-version-example-1',
+        baseHash: 'a'.repeat(64),
+        sourceTranscriptId: 'transcript-example-1',
+        rules: [
+          { id: 'date-january-31', label: '31 de janeiro', alternatives: ['31 de janeiro', 'trinta e um de janeiro'] },
+          { id: 'date-february-1', label: '1 de fevereiro', alternatives: ['1 de fevereiro', 'primeiro de fevereiro'] },
+          { id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] },
+        ],
+        reason: 'Remover informações de data e duração que não pertencem à nova composição.',
+      },
+    ],
+    'apollo://schemas/project-edit-command-applied/v1': [
+      {
+        data: {
+          command: {
+            id: 'edit-command-example-1', type: 'remove-spoken-content',
+            baseVersionId: 'project-version-example-1', resultVersionId: 'project-version-example-2', createdAt,
+          },
+          version: {
+            id: 'project-version-example-2', sequence: 2, parentVersionId: 'project-version-example-1',
+            baseHash: 'b'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', editPlan: 'project-snapshot-edit-plan-2', policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          editorial: {
+            sourceTranscriptId: 'transcript-example-1', sourceArtifactId: artifactId,
+            exclusions: [{
+              sourceStartSeconds: 39.02, sourceEndSeconds: 42.68,
+              ruleIds: ['date-january-31', 'date-february-1'],
+              labels: ['31 de janeiro', '1 de fevereiro'],
+              matchedText: '31 de janeiro | 1 de fevereiro',
+            }],
+            retainedSourceRanges: [
+              { sourceStartSeconds: 0, sourceEndSeconds: 39.02 },
+              { sourceStartSeconds: 42.68, sourceEndSeconds: 102.166 },
+            ],
+            outputDurationFrames: 2955, fps: 30, automaticZoom: false,
+            protectedOpeningFrames: 120, subtitleFaceProtection: true,
           },
           replayed: false,
         },

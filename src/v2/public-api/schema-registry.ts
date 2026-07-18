@@ -1969,6 +1969,70 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('project-workspace', 2, 'Project editing workspace response with immutable Commands and EditPlan status',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['project', 'commands', 'media', 'transcripts', 'operationIds', 'operations'],
+      properties: {
+        project: searchableProjectSchema,
+        version: {
+          type: 'object', additionalProperties: false, required: ['id', 'sequence', 'baseHash', 'createdAt'],
+          properties: { id: idSchema, sequence: { type: 'integer', minimum: 1 }, baseHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, createdAt: dateTimeSchema },
+        },
+        brief: { type: 'object', additionalProperties: true },
+        editPlan: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'state', 'fps', 'durationFrames', 'clipCount', 'cutCount', 'automaticZoom', 'subtitleFaceProtection'],
+          properties: {
+            id: idSchema, state: { type: 'string' }, fps: { type: 'number', minimum: 0 }, durationFrames: { type: 'integer', minimum: 0 },
+            clipCount: { type: 'integer', minimum: 0 }, cutCount: { type: 'integer', minimum: 0 },
+            automaticZoom: { type: 'boolean' }, subtitleFaceProtection: { type: 'boolean' },
+          },
+        },
+        commands: {
+          type: 'array', maxItems: 20,
+          items: {
+            type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'createdAt'],
+            properties: {
+              id: idSchema, type: { type: 'string' }, baseVersionId: idSchema, resultVersionId: idSchema,
+              reason: { type: 'string', maxLength: 1000 }, createdAt: dateTimeSchema,
+            },
+          },
+        },
+        media: {
+          type: 'array', maxItems: 1000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'role', 'originalFileName', 'artifactId', 'manifestId', 'mediaType', 'container', 'byteSize', 'sha256', 'status', 'createdAt'],
+            properties: {
+              id: idSchema, role: { enum: ['source-master', 'editing-proxy'] }, originalFileName: { type: 'string', minLength: 1, maxLength: 255 },
+              artifactId: idSchema, manifestId: idSchema, mediaType: { enum: ['video', 'audio', 'image'] }, container: { type: 'string', minLength: 2, maxLength: 16 },
+              byteSize: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' }, sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' }, status: { enum: ['available', 'quarantined', 'deleted'] },
+              rightsStatus: { type: 'string' },
+              probe: {
+                type: 'object', additionalProperties: false, required: ['width', 'height', 'duration', 'fps'],
+                properties: { width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 }, duration: { type: 'number', exclusiveMinimum: 0 }, fps: { type: 'number', exclusiveMinimum: 0 } },
+              },
+              createdAt: dateTimeSchema,
+            },
+          },
+        },
+        transcripts: {
+          type: 'array', maxItems: 1000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'sourceArtifactId', 'language', 'provider', 'model', 'transcriptHash', 'text', 'wordCount', 'segmentCount', 'createdAt'],
+            properties: {
+              id: idSchema, sourceArtifactId: idSchema, language: { type: 'string', minLength: 2, maxLength: 35 }, provider: { type: 'string' }, model: { type: 'string' },
+              transcriptHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, text: { type: 'string' }, wordCount: { type: 'integer', minimum: 0 }, segmentCount: { type: 'integer', minimum: 0 }, createdAt: dateTimeSchema,
+            },
+          },
+        },
+        operationIds: { type: 'array', maxItems: 1000, items: idSchema, uniqueItems: true },
+        operations: { type: 'array', maxItems: 1000, items: publicOperationSchemaV2 },
+      },
+    }),
+  ),
   defineSchema('begin-media-upload-request', 1, 'Begin media upload request', {
     type: 'object', additionalProperties: false,
     required: ['kind', 'size', 'mimeType', 'checksum'],
@@ -2530,6 +2594,103 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               properties: { brief: idSchema, editPlan: idSchema, policies: idSchema },
             },
             createdAt: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('apply-project-edit-command-request', 1, 'Typed project edit command request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'rules'],
+    properties: {
+      type: { const: 'remove-spoken-content' },
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      sourceTranscriptId: idSchema,
+      rules: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['id', 'label', 'alternatives'],
+          properties: {
+            id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' },
+            label: { type: 'string', minLength: 1, maxLength: 160 },
+            alternatives: {
+              type: 'array', minItems: 1, maxItems: 8, uniqueItems: true,
+              items: { type: 'string', minLength: 1, maxLength: 240 },
+            },
+          },
+        },
+      },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  }),
+  defineSchema('project-edit-command-applied', 1, 'Applied project edit command response',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['command', 'version', 'editorial', 'replayed'],
+      properties: {
+        command: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'],
+          properties: {
+            id: idSchema, type: { const: 'remove-spoken-content' }, baseVersionId: idSchema,
+            resultVersionId: idSchema, createdAt: dateTimeSchema,
+          },
+        },
+        version: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'],
+          properties: {
+            id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema,
+            baseHash: sha256Schema,
+            snapshotRefs: {
+              type: 'object', additionalProperties: false, required: ['brief', 'editPlan', 'policies'],
+              properties: { brief: idSchema, editPlan: idSchema, policies: idSchema },
+            },
+            createdAt: dateTimeSchema,
+          },
+        },
+        editorial: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'sourceTranscriptId', 'sourceArtifactId', 'exclusions', 'retainedSourceRanges',
+            'outputDurationFrames', 'fps', 'automaticZoom', 'protectedOpeningFrames', 'subtitleFaceProtection',
+          ],
+          properties: {
+            sourceTranscriptId: idSchema,
+            sourceArtifactId: idSchema,
+            exclusions: {
+              type: 'array', minItems: 1, maxItems: 128,
+              items: {
+                type: 'object', additionalProperties: false,
+                required: ['sourceStartSeconds', 'sourceEndSeconds', 'ruleIds', 'labels', 'matchedText'],
+                properties: {
+                  sourceStartSeconds: { type: 'number', minimum: 0 },
+                  sourceEndSeconds: { type: 'number', exclusiveMinimum: 0 },
+                  ruleIds: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: { type: 'string' } },
+                  labels: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: { type: 'string' } },
+                  matchedText: { type: 'string', minLength: 1, maxLength: 2000 },
+                },
+              },
+            },
+            retainedSourceRanges: {
+              type: 'array', minItems: 1, maxItems: 129,
+              items: {
+                type: 'object', additionalProperties: false,
+                required: ['sourceStartSeconds', 'sourceEndSeconds'],
+                properties: {
+                  sourceStartSeconds: { type: 'number', minimum: 0 },
+                  sourceEndSeconds: { type: 'number', exclusiveMinimum: 0 },
+                },
+              },
+            },
+            outputDurationFrames: { type: 'integer', minimum: 1 },
+            fps: { type: 'number', exclusiveMinimum: 0 },
+            automaticZoom: { const: false },
+            protectedOpeningFrames: { type: 'integer', minimum: 1 },
+            subtitleFaceProtection: { const: true },
           },
         },
         replayed: { type: 'boolean' },

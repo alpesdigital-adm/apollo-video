@@ -985,6 +985,32 @@
       "idempotency": "natural",
       "responseMediaType": "application/json"
     },
+    "apollo.projects.commands.apply": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/apply-project-edit-command-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-edit-command-applied/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/commands"
+      },
+      "toolName": "apollo.projects.commands.apply",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.create": {
       "version": "2.0.0",
       "exposure": "public",
@@ -1134,6 +1160,29 @@
           }
         }
       ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.workspace.current.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/project-workspace/v2",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/workspace"
+      },
+      "toolName": "apollo.projects.workspace.current.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
     "apollo.projects.workspace.read": {
@@ -2840,6 +2889,77 @@
               "const": "v1"
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/apply-project-edit-command-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "baseVersionId",
+        "baseHash",
+        "sourceTranscriptId",
+        "rules"
+      ],
+      "properties": {
+        "type": {
+          "const": "remove-spoken-content"
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceTranscriptId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "label",
+              "alternatives"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "alternatives": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                }
+              }
+            }
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
         }
       }
     },
@@ -8463,6 +8583,257 @@
         }
       }
     },
+    "apollo://schemas/project-edit-command-applied/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "version",
+            "editorial",
+            "replayed"
+          ],
+          "properties": {
+            "command": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "type",
+                "baseVersionId",
+                "resultVersionId",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "type": {
+                  "const": "remove-spoken-content"
+                },
+                "baseVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "resultVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "version": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "sequence",
+                "parentVersionId",
+                "baseHash",
+                "snapshotRefs",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "parentVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "baseHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "snapshotRefs": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "brief",
+                    "editPlan",
+                    "policies"
+                  ],
+                  "properties": {
+                    "brief": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "editPlan": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "policies": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "editorial": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sourceTranscriptId",
+                "sourceArtifactId",
+                "exclusions",
+                "retainedSourceRanges",
+                "outputDurationFrames",
+                "fps",
+                "automaticZoom",
+                "protectedOpeningFrames",
+                "subtitleFaceProtection"
+              ],
+              "properties": {
+                "sourceTranscriptId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "exclusions": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 128,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "sourceStartSeconds",
+                      "sourceEndSeconds",
+                      "ruleIds",
+                      "labels",
+                      "matchedText"
+                    ],
+                    "properties": {
+                      "sourceStartSeconds": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "sourceEndSeconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "ruleIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "labels": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "matchedText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000
+                      }
+                    }
+                  }
+                },
+                "retainedSourceRanges": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 129,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "sourceStartSeconds",
+                      "sourceEndSeconds"
+                    ],
+                    "properties": {
+                      "sourceStartSeconds": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "sourceEndSeconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    }
+                  }
+                },
+                "outputDurationFrames": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "fps": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "automaticZoom": {
+                  "const": false
+                },
+                "protectedOpeningFrames": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "subtitleFaceProtection": {
+                  "const": true
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/project-list/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -8832,6 +9203,607 @@
             "brief": {
               "type": "object",
               "additionalProperties": true
+            },
+            "media": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "role",
+                  "originalFileName",
+                  "artifactId",
+                  "manifestId",
+                  "mediaType",
+                  "container",
+                  "byteSize",
+                  "sha256",
+                  "status",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "role": {
+                    "enum": [
+                      "source-master",
+                      "editing-proxy"
+                    ]
+                  },
+                  "originalFileName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "artifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "manifestId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "mediaType": {
+                    "enum": [
+                      "video",
+                      "audio",
+                      "image"
+                    ]
+                  },
+                  "container": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 16
+                  },
+                  "byteSize": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "status": {
+                    "enum": [
+                      "available",
+                      "quarantined",
+                      "deleted"
+                    ]
+                  },
+                  "rightsStatus": {
+                    "type": "string"
+                  },
+                  "probe": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "width",
+                      "height",
+                      "duration",
+                      "fps"
+                    ],
+                    "properties": {
+                      "width": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "height": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "duration": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "fps": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    }
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "transcripts": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "sourceArtifactId",
+                  "language",
+                  "provider",
+                  "model",
+                  "transcriptHash",
+                  "text",
+                  "wordCount",
+                  "segmentCount",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sourceArtifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "language": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 35
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "transcriptHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "wordCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "segmentCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "operationIds": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "uniqueItems": true
+            },
+            "operations": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "type",
+                  "status",
+                  "phase",
+                  "cancelable",
+                  "retryable",
+                  "target",
+                  "attempt",
+                  "maxAttempts",
+                  "createdAt",
+                  "updatedAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "public-operation/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "type": {
+                    "enum": [
+                      "artifact-render",
+                      "media-ingest"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "queued",
+                      "running",
+                      "waiting",
+                      "retrying",
+                      "succeeded",
+                      "failed",
+                      "canceled"
+                    ]
+                  },
+                  "phase": {
+                    "enum": [
+                      "queued",
+                      "assembling",
+                      "probing",
+                      "normalizing",
+                      "transcribing",
+                      "materializing",
+                      "rendering",
+                      "verifying",
+                      "persisting",
+                      "waiting",
+                      "retrying",
+                      "completed",
+                      "failed",
+                      "canceled"
+                    ]
+                  },
+                  "progress": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "completed"
+                    ],
+                    "properties": {
+                      "completed": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "total": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "unit": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "cancelable": {
+                    "type": "boolean"
+                  },
+                  "retryable": {
+                    "type": "boolean"
+                  },
+                  "target": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "id",
+                      "manifestId"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "media-artifact"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "manifestId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "result": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "resource"
+                    ],
+                    "properties": {
+                      "resource": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "id",
+                          "manifestId"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "media-artifact"
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "manifestId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "error": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "code",
+                      "message",
+                      "retryable"
+                    ],
+                    "properties": {
+                      "code": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                      },
+                      "message": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "retryable": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "maxAttempts": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "startedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-workspace/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "commands",
+            "media",
+            "transcripts",
+            "operationIds",
+            "operations"
+          ],
+          "properties": {
+            "project": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "name",
+                "status",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 120
+                },
+                "status": {
+                  "type": "string"
+                },
+                "currentVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "objective": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                },
+                "format": {
+                  "enum": [
+                    "9:16",
+                    "16:9",
+                    "4:5",
+                    "1:1",
+                    "21:9"
+                  ]
+                },
+                "locale": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 35
+                },
+                "ownerId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            },
+            "version": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "sequence",
+                "baseHash",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "baseHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "brief": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "editPlan": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "state",
+                "fps",
+                "durationFrames",
+                "clipCount",
+                "cutCount",
+                "automaticZoom",
+                "subtitleFaceProtection"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "state": {
+                  "type": "string"
+                },
+                "fps": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "durationFrames": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "clipCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "cutCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "automaticZoom": {
+                  "type": "boolean"
+                },
+                "subtitleFaceProtection": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "commands": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "type",
+                  "baseVersionId",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "baseVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "resultVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
             },
             "media": {
               "type": "array",

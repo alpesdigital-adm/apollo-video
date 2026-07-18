@@ -65,6 +65,9 @@ const coverage = Object.freeze({
   'apollo.projects.create': {
     mode: 'idempotent-create', evidence: 'F0-060',
   },
+  'apollo.projects.commands.apply': {
+    mode: 'base-version-bound-action', evidence: 'request binds immutable baseVersionId and baseHash before transactional mutation',
+  },
   'apollo.media.uploads.begin': {
     mode: 'idempotent-create', evidence: 'F0-086',
   },
@@ -102,6 +105,15 @@ function requiresBodyRevision(capability) {
   assert.ok(schema.properties?.baseRevision, `${capability.id} must define baseRevision`)
 }
 
+function requiresImmutableBase(capability) {
+  assert.ok(capability.inputSchemaRef, `${capability.id} must publish an input schema`)
+  const schema = getPublicSchema(capability.inputSchemaRef).schema
+  assert.ok(schema.required?.includes('baseVersionId'), `${capability.id} must require baseVersionId`)
+  assert.ok(schema.required?.includes('baseHash'), `${capability.id} must require baseHash`)
+  assert.ok(schema.properties?.baseVersionId, `${capability.id} must define baseVersionId`)
+  assert.ok(schema.properties?.baseHash, `${capability.id} must define baseHash`)
+}
+
 test('every external mutation has an explicit precondition strategy', () => {
   assert.deepEqual(
     Object.keys(coverage).sort(),
@@ -135,6 +147,10 @@ test('every external mutation has an explicit precondition strategy', () => {
     if (decision.mode === 'revision-bound-action') {
       requiresBodyRevision(capability)
     }
+    if (decision.mode === 'base-version-bound-action') {
+      requiresImmutableBase(capability)
+      assert.equal(capability.idempotency, 'required')
+    }
     if (decision.mode === 'idempotent-create') {
       assert.equal(capability.idempotency, 'required')
     }
@@ -159,5 +175,6 @@ test('the current public surface has no unguarded state replacement', () => {
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,
+    'base-version-bound-action': 1,
   })
 })

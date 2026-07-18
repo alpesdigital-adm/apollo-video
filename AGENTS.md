@@ -168,7 +168,7 @@ O primeiro E2E deve usar o master bruto já preservado do projeto de boas-vindas
 Critérios obrigatórios:
 
 - informar e respeitar briefing e formato antes da direção;
-- remover todas as falas sobre data/dia 8, dias de aula e duração de dois dias;
+- remover todas as falas que mencionem as datas “31 de janeiro” e “1 de fevereiro”, além de referências à duração de dois dias/dois dias de aula;
 - preservar sentido e continuidade do discurso após os cortes;
 - esconder cortes difíceis com decisão editorial justificável, não efeito gratuito;
 - não aplicar zoom, pan, tilt ou punch-in sem razão registrada pelo Diretor;

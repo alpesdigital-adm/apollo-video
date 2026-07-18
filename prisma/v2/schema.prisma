@@ -47,6 +47,7 @@ model V2Workspace {
   webhookChallenges               V2WebhookVerificationChallenge[]
   webhookEndpointActivationLeases V2WebhookEndpointActivationLease[]
   webhookReplayReceipts           V2WebhookReplayReceipt[]
+  editCommands                    V2EditCommand[]
 
   @@map("workspaces")
 }
@@ -177,6 +178,7 @@ model V2Project {
   mediaAssets           V2ProjectMediaAsset[]
   mediaTranscripts      V2MediaTranscript[]
   mediaIngestOperations V2MediaIngestOperation[]
+  editCommands          V2EditCommand[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -230,11 +232,43 @@ model V2ProjectVersion {
   briefSnapshot      V2ProjectSnapshot  @relation("BriefSnapshot", fields: [briefSnapshotId], references: [id], onDelete: Restrict)
   editPlanSnapshot   V2ProjectSnapshot  @relation("EditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
   policiesSnapshot   V2ProjectSnapshot  @relation("PoliciesSnapshot", fields: [policiesSnapshotId], references: [id], onDelete: Restrict)
+  command            V2EditCommand?     @relation("CommandResultVersion", fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  commandsBasedOn    V2EditCommand[]    @relation("CommandBaseVersion")
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
+  @@unique([commandId, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
   @@map("project_versions")
+}
+
+model V2EditCommand {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  baseVersionId      String   @db.VarChar(128)
+  baseHash           String   @db.Char(64)
+  type               String   @db.VarChar(80)
+  scopeJson          String   @db.Text
+  payloadJson        String   @db.Text
+  reason             String?  @db.VarChar(1000)
+  actorType          String   @db.VarChar(32)
+  actorId            String   @db.VarChar(128)
+  delegatedUserId    String?  @db.VarChar(128)
+  idempotencyKey     String   @db.VarChar(128)
+  requestFingerprint String   @db.Char(64)
+  createdAt          DateTime @db.Timestamptz(3)
+
+  workspace     V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project       V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  baseVersion   V2ProjectVersion @relation("CommandBaseVersion", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  resultVersion V2ProjectVersion? @relation("CommandResultVersion")
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, baseVersionId])
+  @@map("edit_commands")
 }
 
 model V2IdempotencyRecord {

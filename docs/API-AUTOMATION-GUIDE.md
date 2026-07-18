@@ -30,3 +30,11 @@ Esses endpoints possuem capability IDs, schemas e OpenAPI, mas não possuem `too
 IA, MCP, scripts e ferramentas de terceiros usam `Authorization: Bearer <ApiCredential>`. A credencial pertence a um `ApiClient`, pode ser rotacionada/revogada e recebe somente os scopes necessários. Não é necessário — nem permitido — fazer login humano antes de operar a API com Bearer.
 
 O bootstrap administrativo inicial é operacional. Depois dele, criação/rotação/revogação de clients ocorre pela própria Public API. Nunca grave username, password, cookie ou bearer em prompt, log, evento, analytics ou arquivo versionado.
+
+## Workspace e edição por Command
+
+`GET /v1/projects/{projectId}/workspace` devolve o estado atual usado pela interface, incluindo versão, mídia, transcrições, operações, resumo do EditPlan e Commands persistidos. A consulta exige `projects:read`.
+
+Alterações editoriais usam o mesmo contrato para UI, IA e integrações. `POST /v1/projects/{projectId}/commands`, com scope `projects:write`, aplica atualmente o Command `remove-spoken-content`. A requisição deve informar `Idempotency-Key`, `baseVersionId`, `baseHash`, `sourceTranscriptId` e regras de frases. O servidor rejeita base obsoleta, confirma as frases na transcrição alinhada, cria uma nova `ProjectVersion` imutável e retima o plano sem sobrescrever a versão anterior.
+
+Os contratos completos e exemplos são descobertos em `GET /v1/capabilities`, `GET /v1/openapi.json` e nos schemas `apply-project-edit-command-request/v1`, `project-edit-command-applied/v1` e `project-workspace/v2`.

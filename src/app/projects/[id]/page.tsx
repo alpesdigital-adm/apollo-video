@@ -24,6 +24,8 @@ interface WorkspaceData {
   project: { id: string; name: string; status: string; objective?: string; format?: string; locale?: string; createdAt: string }
   version?: { id: string; sequence: number; baseHash: string; createdAt: string }
   brief?: Record<string, unknown>
+  editPlan?: { id: string; state: string; fps: number; durationFrames: number; clipCount: number; cutCount: number; automaticZoom: boolean; subtitleFaceProtection: boolean }
+  commands: { id: string; type: string; baseVersionId: string; resultVersionId?: string; reason?: string; createdAt: string }[]
   media: MediaRecord[]
   transcripts: TranscriptSummary[]
   operationIds: string[]
@@ -102,7 +104,7 @@ export default function ProjectWorkspacePage() {
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
-      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}`, { headers: { accept: 'application/json' }, cache: 'no-store' })
+      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/workspace`, { headers: { accept: 'application/json' }, cache: 'no-store' })
       if (response.status === 401) { router.replace('/login'); return }
       const payload = await response.json() as ApiEnvelope<WorkspaceData>
       if (!response.ok || !payload.data) throw new Error(apiError(payload, 'Não foi possível carregar o workspace.'))
@@ -261,7 +263,13 @@ export default function ProjectWorkspacePage() {
 
   const ingestSteps = ['assembling', 'probing', 'normalizing', 'transcribing', 'verifying', 'persisting']
   const currentStep = activeOperation ? ingestSteps.indexOf(activeOperation.phase) : -1
-  const briefText = typeof workspace?.brief?.briefing === 'string' ? workspace.brief.briefing : ''
+  const productionBrief = workspace?.brief?.productionBrief
+  const ownerInput = typeof productionBrief === 'object' && productionBrief !== null && !Array.isArray(productionBrief)
+    ? (productionBrief as Record<string, unknown>).ownerInput
+    : undefined
+  const briefText = typeof ownerInput === 'object' && ownerInput !== null && !Array.isArray(ownerInput) && typeof (ownerInput as Record<string, unknown>).text === 'string'
+    ? (ownerInput as Record<string, unknown>).text as string
+    : ''
 
   if (loading) return <main className="grid min-h-screen place-items-center bg-[#070707] text-[#8d887f]"><span className="animate-pulse text-sm">Abrindo sala de produção…</span></main>
   if (!workspace) return <main className="grid min-h-screen place-items-center bg-[#070707] px-6 text-center text-[#c8c2b8]"><div><p>{notice ?? 'Projeto não encontrado.'}</p><button className="mt-4 text-sm text-[#d9ad44]" onClick={() => router.push('/')} type="button">Voltar aos projetos</button></div></main>
@@ -297,7 +305,8 @@ export default function ProjectWorkspacePage() {
           </div>
           <div className="mt-5 rounded-xl border border-[#6962de]/15 bg-[#6962de]/[0.045] p-4">
             <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#8c85e8]">Gate atual</p>
-            <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">Ingestão verificável: master, proxy de edição, transcript e lineage. Nenhuma decisão editorial é simulada nesta etapa.</p>
+            <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">{workspace.editPlan?.state === 'compiled' ? `Corte editorial V2 aplicado em ${workspace.editPlan.clipCount} trechos, com ${workspace.editPlan.cutCount} decisões persistidas.` : 'Ingestão verificável: master, proxy de edição, transcript e lineage.'}</p>
+            {workspace.editPlan?.state === 'compiled' ? <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Zoom automático {workspace.editPlan.automaticZoom ? 'ativo' : 'desativado'}</span><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Proteção facial {workspace.editPlan.subtitleFaceProtection ? 'ativa' : 'pendente'}</span></div> : null}
           </div>
         </aside>
 

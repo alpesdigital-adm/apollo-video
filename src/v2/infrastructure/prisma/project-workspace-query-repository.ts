@@ -29,7 +29,12 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
     const project = await this.client.v2Project.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId },
       include: {
-        currentVersion: { include: { briefSnapshot: true } },
+        currentVersion: { include: { briefSnapshot: true, editPlanSnapshot: true } },
+        editCommands: {
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          include: { resultVersion: { select: { id: true } } },
+        },
         mediaAssets: {
           orderBy: { createdAt: 'asc' },
           include: {
@@ -76,6 +81,22 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
         createdAt: row.createdAt.toISOString(),
       })
     })
+    const editPlan = project.currentVersion
+      ? parseJson(project.currentVersion.editPlanSnapshot.contentJson, 'project EditPlan')
+      : undefined
+    const videoTracks = editPlan && Array.isArray(editPlan.videoTracks) ? editPlan.videoTracks : []
+    const clipCount = videoTracks.reduce((total, track) => {
+      if (typeof track !== 'object' || track === null || Array.isArray(track)) return total
+      const clips = (track as Record<string, unknown>).clips
+      return total + (Array.isArray(clips) ? clips.length : 0)
+    }, 0)
+    const markers = editPlan && Array.isArray(editPlan.markers) ? editPlan.markers : []
+    const movementPolicy = editPlan && typeof editPlan.movementPolicy === 'object' && editPlan.movementPolicy !== null && !Array.isArray(editPlan.movementPolicy)
+      ? editPlan.movementPolicy as Record<string, unknown>
+      : {}
+    const subtitlePolicy = editPlan && typeof editPlan.subtitlePolicy === 'object' && editPlan.subtitlePolicy !== null && !Array.isArray(editPlan.subtitlePolicy)
+      ? editPlan.subtitlePolicy as Record<string, unknown>
+      : {}
     return Object.freeze({
       project: Object.freeze({
         id: project.id, workspaceId: project.workspaceId, name: project.name, status: project.status,
@@ -85,6 +106,24 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
       }),
       ...(project.currentVersion ? { version: Object.freeze({ id: project.currentVersion.id, sequence: project.currentVersion.sequence, baseHash: project.currentVersion.baseHash, createdAt: project.currentVersion.createdAt.toISOString() }) } : {}),
       ...(project.currentVersion ? { brief: parseJson(project.currentVersion.briefSnapshot.contentJson, 'project brief') } : {}),
+      ...(editPlan ? { editPlan: Object.freeze({
+        id: typeof editPlan.id === 'string' ? editPlan.id : project.currentVersion!.editPlanSnapshotId,
+        state: typeof editPlan.state === 'string' ? editPlan.state : 'unknown',
+        fps: typeof editPlan.fps === 'number' ? editPlan.fps : 0,
+        durationFrames: typeof editPlan.durationFrames === 'number' ? editPlan.durationFrames : 0,
+        clipCount,
+        cutCount: markers.filter((marker) => typeof marker === 'object' && marker !== null && !Array.isArray(marker) && (marker as Record<string, unknown>).kind === 'editorial-cut').length,
+        automaticZoom: movementPolicy.automaticZoom === true,
+        subtitleFaceProtection: subtitlePolicy.faceProtection === true,
+      }) } : {}),
+      commands: Object.freeze(project.editCommands.map((command) => Object.freeze({
+        id: command.id,
+        type: command.type,
+        baseVersionId: command.baseVersionId,
+        ...(command.resultVersion ? { resultVersionId: command.resultVersion.id } : {}),
+        ...(command.reason ? { reason: command.reason } : {}),
+        createdAt: command.createdAt.toISOString(),
+      }))),
       media: Object.freeze(media),
       transcripts: Object.freeze(transcripts),
       operationIds: Object.freeze(project.mediaIngestOperations.map((item) => item.operationId)),

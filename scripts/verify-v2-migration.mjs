@@ -181,6 +181,10 @@ const requiredChecks = [
   'webhook_worker_shard_leases_identity_check',
   'webhook_worker_shard_leases_token_check',
   'webhook_worker_shard_leases_dates_check',
+  'edit_commands_type_check',
+  'edit_commands_actor_type_check',
+  'edit_commands_base_hash_check',
+  'edit_commands_request_fingerprint_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

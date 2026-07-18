@@ -21,6 +21,13 @@ export interface ProjectWorkspaceRecord {
   }
   version?: { id: string; sequence: number; baseHash: string; createdAt: string }
   brief?: unknown
+  editPlan?: {
+    id: string; state: string; fps: number; durationFrames: number; clipCount: number;
+    cutCount: number; automaticZoom: boolean; subtitleFaceProtection: boolean
+  }
+  commands: readonly {
+    id: string; type: string; baseVersionId: string; resultVersionId?: string; reason?: string; createdAt: string
+  }[]
   media: readonly ProjectWorkspaceMediaRecord[]
   transcripts: readonly {
     id: string; sourceArtifactId: string; language: string; provider: string; model: string;
