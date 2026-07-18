@@ -17,7 +17,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=dependencies /app/generated ./generated
 COPY --from=dependencies /app/remotion/node_modules ./remotion/node_modules
 COPY . .
-RUN npm run build
+RUN mkdir -p public && npm run build
 
 FROM node:22-bookworm-slim AS runtime
 
