@@ -14,6 +14,7 @@ export interface CreatedApiClientCredential {
 }
 
 export interface ApiClientRepository {
+  findActiveClientById(clientId: string): Promise<ApiClient | null>
   findCredentialById(
     clientId: string,
     credentialId: string,

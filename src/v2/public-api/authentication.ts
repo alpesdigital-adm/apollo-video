@@ -1,10 +1,15 @@
 import type { NextRequest } from 'next/server'
 
 import { authenticateApiClientService } from '../application/authenticate-api-client.ts'
+import { authenticateUiSessionService } from '../application/authenticate-ui-session.ts'
 import type { ApiEnvironment } from '../domain/api-client.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createApiClientRepository } from '../infrastructure/repository-factory.ts'
 import { nodeApiCredentialCrypto } from '../infrastructure/security/api-credential.ts'
+import {
+  APOLLO_SESSION_COOKIE,
+  verifyUiSession,
+} from '../infrastructure/security/ui-session.ts'
 import {
   capabilitiesForAccess,
   defineCapabilityAccessPolicy,
@@ -21,14 +26,22 @@ export function resolveApiEnvironment(): ApiEnvironment {
 }
 
 export async function authenticateExternalRequest(request: NextRequest) {
+  const repository = createApiClientRepository()
+  const environment = resolveApiEnvironment()
+  const authorization = request.headers.get('authorization')
+  if (!authorization) {
+    return authenticateUiSessionService({ repository, environment })(
+      verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value),
+    )
+  }
   const authenticate = authenticateApiClientService({
-    repository: createApiClientRepository(),
+    repository,
     credentialCrypto: nodeApiCredentialCrypto,
     clock: () => new Date(),
-    environment: resolveApiEnvironment(),
+    environment,
   })
 
-  return authenticate(request.headers.get('authorization'))
+  return authenticate(authorization)
 }
 
 export function resolveCapabilityAccessPolicy(
@@ -65,7 +78,7 @@ export async function discoverExternalCapabilities(
   registry: readonly PublicCapability[],
 ) {
   const environment = resolveApiEnvironment()
-  const actor = request.headers.get('authorization')
+  const actor = request.headers.get('authorization') || request.cookies.has(APOLLO_SESSION_COOKIE)
     ? await authenticateExternalRequest(request)
     : undefined
   return capabilitiesForAccess(registry, {

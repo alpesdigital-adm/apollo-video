@@ -10,7 +10,7 @@ export default function LogoutButton() {
   async function logout() {
     setLeaving(true)
     try {
-      await fetch('/api/auth/logout', { method: 'POST' })
+      await fetch('/v1/session', { method: 'DELETE' })
     } finally {
       router.replace('/login')
       router.refresh()

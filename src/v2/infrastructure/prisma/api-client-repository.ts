@@ -118,6 +118,15 @@ export class PrismaApiClientRepository
     this.client = client
   }
 
+  async findActiveClientById(clientId: string): Promise<ApiClient | null> {
+    const row = await this.client.v2ApiClient.findUnique({
+      where: { id: clientId },
+      include: { workspace: { select: { status: true } } },
+    })
+    if (!row || row.status !== 'active' || row.workspace.status !== 'active') return null
+    return hydrateClient(row)
+  }
+
   async findCredentialById(
     clientId: string,
     credentialId: string,

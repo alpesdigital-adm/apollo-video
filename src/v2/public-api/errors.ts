@@ -6,6 +6,7 @@ import { presentPublicDomainError } from './error-presenter.ts'
 import { PUBLIC_API_VERSION } from './presenters.ts'
 
 const STATUS_BY_CODE: Partial<Record<DomainErrorCode, number>> = {
+  AUTH_NOT_CONFIGURED: 503,
   AUTH_INVALID: 401,
   AUTH_SCOPE_REQUIRED: 403,
   WORKSPACE_NOT_FOUND: 404,

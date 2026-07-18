@@ -25,7 +25,7 @@ export default function LoginForm() {
     setError('')
     const next = new URLSearchParams(window.location.search).get('next') ?? '/'
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch('/v1/session', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ username, password, next }),
