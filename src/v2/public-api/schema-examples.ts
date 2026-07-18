@@ -141,6 +141,21 @@ const webhookPendingEndpointExample = {
   createdAt,
   currentSigningSecret: webhookSecretMetadataExample,
 }
+const queuedMediaIngestOperationExample = {
+  schemaVersion: 'public-operation/v1',
+  id: 'operation-ingest-example-1',
+  type: 'media-ingest',
+  status: 'queued',
+  phase: 'queued',
+  progress: { completed: 0, total: 6, unit: 'ingest-stage' },
+  cancelable: true,
+  retryable: false,
+  target: { type: 'media-artifact', id: 'artifact-example-master-1', manifestId: 'manifest-example-master-1' },
+  attempt: 0,
+  maxAttempts: 3,
+  createdAt,
+  updatedAt: createdAt,
+}
 const webhookSigningSecretRotationExample = {
   schemaVersion: 'webhook-signing-secret-rotation/v1',
   id: '20000000-0000-4000-8000-000000000010',
@@ -673,6 +688,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/public-operation-detail/v2': [
+      { data: { operation: queuedMediaIngestOperationExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -690,6 +708,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         },
         meta: { apiVersion: 'v1' },
       },
+    ],
+    'apollo://schemas/public-operation-list/v2': [
+      { data: { operations: [queuedMediaIngestOperationExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/webhook-delivery-list/v1': [
       {
@@ -920,8 +941,37 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/capability-list/v3': [
+      {
+        data: {
+          capabilities: [{
+            id: 'apollo.media.uploads.content.put', version: '1.0.0', title: 'Upload signed media bytes',
+            description: 'Receives media bytes through a short-lived signed URL.', operationKind: 'command',
+            authMode: 'required', authScheme: 'signed-token', requiredScopes: [],
+            inputSchemaRef: 'apollo://schemas/binary-media-content/v1', outputSchemaRef: 'apollo://schemas/media-upload-content-received/v1',
+            endpoint: { method: 'PUT', path: '/v1/media/uploads/{uploadId}/content' }, supportsDryRun: false,
+            costClass: 'low', confirmation: 'none', successStatuses: [201], idempotency: 'natural',
+            queryParameters: [], requestBodyRequired: true, requestMediaType: 'application/octet-stream', responseMediaType: 'application/json',
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/begin-media-upload-request/v1': [
       { kind: 'video', size: '104857600', mimeType: 'video/mp4', checksum: 'a'.repeat(64) },
+    ],
+    'apollo://schemas/binary-media-content/v1': ['binary-media-bytes'],
+    'apollo://schemas/project-workspace/v1': [
+      {
+        data: {
+          project: { id: projectId, workspaceId, name: 'Anúncio de descoberta', status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt },
+          media: [], transcripts: [], operationIds: [], operations: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/begin-media-upload-request/v2': [
+      { projectId, fileName: 'gravacao-bruta.mp4', rightsConfirmed: true, kind: 'video', size: '104857600', mimeType: 'video/mp4', checksum: 'a'.repeat(64) },
     ],
     'apollo://schemas/media-upload-begun/v1': [
       {
@@ -929,6 +979,19 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           upload: {
             id: '123e4567-e89b-42d3-a456-426614174001', kind: 'video', size: '104857600',
             mimeType: 'video/mp4', checksum: 'a'.repeat(64), status: 'pending-session',
+            expiresAt: '2026-07-16T22:30:00.000Z', createdAt,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-upload-begun/v2': [
+      {
+        data: {
+          upload: {
+            id: '123e4567-e89b-42d3-a456-426614174001', projectId, fileName: 'gravacao-bruta.mp4', rightsConfirmed: true,
+            kind: 'video', size: '104857600', mimeType: 'video/mp4', checksum: 'a'.repeat(64), status: 'pending-session',
             expiresAt: '2026-07-16T22:30:00.000Z', createdAt,
           },
           replayed: false,
@@ -949,6 +1012,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/media-upload-content-received/v1': [
+      { data: { receipt: { byteSize: '104857600', checksum: 'a'.repeat(64), etag: '"uploadetag001"' } }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/record-media-upload-part-request/v1': [
       { byteSize: '67108864', etag: '"partetag001"', checksum: 'b'.repeat(64) },
     ],
@@ -968,8 +1034,24 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/media-upload-detail/v2': [
+      {
+        data: {
+          upload: { id: '123e4567-e89b-42d3-a456-426614174001', projectId, fileName: 'gravacao-bruta.mp4', rightsConfirmed: true, kind: 'video', size: '134217728', mimeType: 'video/mp4', checksum: 'a'.repeat(64), status: 'uploading', expiresAt: '2026-07-16T22:30:00.000Z', createdAt },
+          parts: [{ uploadId: '123e4567-e89b-42d3-a456-426614174001', partNumber: 1, byteSize: '67108864', etag: '"partetag001"', checksum: 'b'.repeat(64), recordedAt: createdAt }],
+          missingPartNumbers: [2],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/media-upload-completed/v1': [
       { data: { uploadId: '123e4567-e89b-42d3-a456-426614174001', status: 'verified', verifiedAt: createdAt, replayed: false }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/media-upload-completed/v2': [
+      { data: { uploadId: '123e4567-e89b-42d3-a456-426614174001', status: 'verified', verifiedAt: createdAt, operation: queuedMediaIngestOperationExample, replayed: false }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/media-upload-aborted/v1': [
+      { data: { uploadId: '123e4567-e89b-42d3-a456-426614174001', status: 'aborted', aborted: true }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/issue-media-download-grant-request/v1': [
       { ttlSeconds: 300 },

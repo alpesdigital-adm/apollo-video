@@ -22,6 +22,7 @@ export interface MediaTransferRepository {
   markUploadVerified(input: {
     workspaceId: string; clientId: string; uploadId: string; actualByteSize: string; actualSha256: string; verifiedAt: string
   }): Promise<Readonly<MediaUpload>>
+  markUploadAborted(input: { workspaceId: string; clientId: string; uploadId: string }): Promise<Readonly<MediaUpload>>
 }
 
 export interface MediaUploadVerifier {
@@ -29,6 +30,17 @@ export interface MediaUploadVerifier {
     upload: Readonly<MediaUpload>
     parts: readonly Readonly<MediaUploadPart>[]
   }): Promise<Readonly<{ byteSize: string; mimeType: string; sha256: string }>>
+}
+
+export interface MediaUploadContentStorage {
+  write(input: {
+    upload: Readonly<MediaUpload>
+    mode: 'single' | 'multipart'
+    partNumber?: number
+    body: ReadableStream<Uint8Array>
+    contentLength?: number
+  }): Promise<Readonly<{ byteSize: string; checksum: string; etag: string }>>
+  discard(uploadId: string): Promise<void>
 }
 
 export interface MediaUploadSessionSigner {

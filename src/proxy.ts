@@ -6,18 +6,12 @@ import {
   verifyUiSession,
 } from '@/v2/infrastructure/security/ui-session'
 
-const PUBLIC_PREFIXES = ['/v1']
-
 function hasValidSession(request: NextRequest): boolean {
   return verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value) !== null
 }
 
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl
-
-  if (PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
-    return NextResponse.next()
-  }
 
   const authenticated = hasValidSession(request)
   if (pathname === '/login') {
@@ -36,5 +30,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // Public APIs authenticate at the route boundary. Keeping /v1 outside Proxy is
+  // also required for streaming multipart media without buffering gigabyte bodies.
+  matcher: ['/((?!v1|_next/static|_next/image|favicon.ico).*)'],
 }

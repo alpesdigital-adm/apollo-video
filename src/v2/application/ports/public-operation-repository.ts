@@ -6,13 +6,25 @@ import type {
 } from '../../domain/public-operation.ts'
 
 export interface ArtifactRenderOperationContext {
+  kind: 'artifact-render'
   authorizationId: string
   inputHash: string
 }
 
+export interface MediaIngestOperationContext {
+  kind: 'media-ingest'
+  uploadId: string
+  projectId: string
+  originalFileName: string
+  sourceArtifactId: string
+  sourceManifestId: string
+}
+
+export type PublicOperationContext = ArtifactRenderOperationContext | MediaIngestOperationContext
+
 export interface PublicOperationRecord {
   operation: Readonly<PublicOperation>
-  context: Readonly<ArtifactRenderOperationContext>
+  context: Readonly<PublicOperationContext>
 }
 
 export interface PublicOperationPersistenceResult extends PublicOperationRecord {
@@ -72,7 +84,7 @@ export interface PublicOperationRepository {
   }): Promise<PublicOperationPersistenceResult | null>
   createOrReplay(input: {
     operation: PublicOperation
-    context: ArtifactRenderOperationContext
+    context: PublicOperationContext
     idempotencyKey: string
     requestFingerprint: string
   }): Promise<PublicOperationPersistenceResult>
@@ -81,6 +93,7 @@ export interface PublicOperationRepository {
     now: string
     leaseUntil: string
     workspaceId?: string
+    type?: PublicOperation['type']
   }): Promise<ClaimedPublicOperationRecord | null>
   heartbeat(input: PublicOperationLeaseCommand & {
     leaseUntil: string

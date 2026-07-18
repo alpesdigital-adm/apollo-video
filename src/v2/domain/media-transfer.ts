@@ -14,6 +14,9 @@ export interface MediaUpload {
   id: string
   workspaceId: string
   clientId: string
+  projectId?: string
+  fileName?: string
+  rightsConfirmed?: boolean
   kind: MediaUploadKind
   byteSize: string
   mimeType: string
@@ -49,6 +52,16 @@ export function createMediaUploadPart(input: MediaUploadPart): Readonly<MediaUpl
 
 export function createMediaUpload(input: MediaUpload): Readonly<MediaUpload> {
   assertDomain(/^[0-9a-f-]{36}$/.test(input.id), 'INVALID_ARGUMENT', 'upload id must be a UUID')
+  if (input.projectId !== undefined) {
+    assertDomain(/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(input.projectId), 'INVALID_ARGUMENT', 'projectId is invalid')
+  }
+  if (input.fileName !== undefined) {
+    const fileName = input.fileName.trim()
+    assertDomain(fileName.length >= 1 && fileName.length <= 240 && !/[\\/\u0000-\u001f]/.test(fileName), 'INVALID_ARGUMENT', 'fileName is invalid')
+  }
+  if (input.rightsConfirmed !== undefined) {
+    assertDomain(typeof input.rightsConfirmed === 'boolean', 'INVALID_ARGUMENT', 'rightsConfirmed must be a boolean')
+  }
   assertDomain(MEDIA_UPLOAD_KINDS.includes(input.kind), 'INVALID_ARGUMENT', 'upload kind is invalid')
   assertDomain(/^[1-9][0-9]{0,15}$/.test(input.byteSize), 'INVALID_ARGUMENT', 'size must be a positive decimal string')
   assertDomain(BigInt(input.byteSize) <= BigInt('5000000000000'), 'INVALID_ARGUMENT', 'size exceeds the 5 TB upload limit')

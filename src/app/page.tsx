@@ -207,7 +207,7 @@ export default function Dashboard() {
       setProjects((current) => [payload.data!.project, ...current.filter((item) => item.id !== payload.data!.project.id)])
       setComposerOpen(false)
       resetComposer()
-      setNotice('Projeto criado com direção e formato salvos. A mídia será vinculada na próxima etapa.')
+      router.push(`/projects/${encodeURIComponent(payload.data.project.id)}`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível criar o projeto.')
     } finally {
@@ -389,7 +389,7 @@ export default function Dashboard() {
                           </div>
                           <div className="mt-5 flex items-center justify-between border-t border-white/[0.06] pt-4">
                             <p className="text-[11px] text-[#625f59]">Criado em {new Date(project.createdAt).toLocaleDateString('pt-BR')}</p>
-                            <button className="cursor-not-allowed text-xs font-medium text-[#6f6858]" disabled title="O workspace V2 será conectado após o upload V2" type="button">Abrir em breve</button>
+                            <button className="text-xs font-semibold text-[#d6ac49] transition hover:text-[#f0ca6d]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)} type="button">Abrir workspace →</button>
                           </div>
                         </div>
                       </article>

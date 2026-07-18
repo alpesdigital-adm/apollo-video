@@ -51,6 +51,7 @@ renders/
 /maquina-de-criativos.zip
 /.claude/
 /data/
+/.apollo/
 
 # IDE
 .vscode/

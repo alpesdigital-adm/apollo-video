@@ -67,6 +67,7 @@ export function presentCapability(capability: PublicCapability) {
     requestBodyRequired: capability.inputSchemaRef
       ? capability.requestBodyRequired ?? true
       : undefined,
+    requestMediaType: capability.requestMediaType ?? 'application/json',
     responseMediaType: capability.responseMediaType ?? 'application/json',
   }
 }

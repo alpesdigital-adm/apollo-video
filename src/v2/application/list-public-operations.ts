@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import {
   PUBLIC_OPERATION_STATUSES,
+  PUBLIC_OPERATION_TYPES,
   type PublicOperation,
   type PublicOperationStatus,
 } from '../domain/public-operation.ts'
@@ -11,7 +12,6 @@ import type { PublicOperationRepository } from './ports/public-operation-reposit
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,1024}$/
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
-const OPERATION_TYPES = ['artifact-render'] as const
 
 interface OperationCursor {
   v: 1
@@ -123,7 +123,7 @@ export function listPublicOperationsService(dependencies: {
 
     const typeValue = normalizeOptional(request.type)
     assertDomain(
-      !typeValue || OPERATION_TYPES.includes(typeValue as PublicOperation['type']),
+      !typeValue || PUBLIC_OPERATION_TYPES.includes(typeValue as PublicOperation['type']),
       'INVALID_ARGUMENT',
       'type is not supported',
     )

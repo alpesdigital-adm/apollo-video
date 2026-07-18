@@ -20,6 +20,9 @@ export function beginMediaUploadService(dependencies: {
     workspaceId: string
     clientId: string
     idempotencyKey: string
+    projectId?: string
+    fileName?: string
+    rightsConfirmed?: boolean
     kind: MediaUploadKind
     size: string
     mimeType: string
@@ -30,6 +33,9 @@ export function beginMediaUploadService(dependencies: {
     assertDomain(/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey), 'INVALID_ARGUMENT', 'A valid Idempotency-Key is required')
     const now = clock()
     const intent = {
+      ...(input.projectId ? { projectId: input.projectId.trim() } : {}),
+      ...(input.fileName ? { fileName: input.fileName.trim() } : {}),
+      ...(input.rightsConfirmed !== undefined ? { rightsConfirmed: input.rightsConfirmed } : {}),
       kind: input.kind,
       byteSize: input.size,
       mimeType: input.mimeType.trim().toLowerCase(),

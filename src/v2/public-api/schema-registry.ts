@@ -400,6 +400,21 @@ const webhookEndpointDetailSchema = {
   properties: { ...webhookEndpointSummaryProperties, signingSecrets: { type: 'array', maxItems: 100, items: webhookSigningSecretMetadataSchema } },
 }
 
+const publicOperationSchemaV2 = {
+  ...publicOperationSchema,
+  properties: {
+    ...publicOperationSchema.properties,
+    type: { enum: ['artifact-render', 'media-ingest'] },
+    phase: {
+      enum: [
+        'queued', 'assembling', 'probing', 'normalizing', 'transcribing',
+        'materializing', 'rendering', 'verifying', 'persisting',
+        'waiting', 'retrying', 'completed', 'failed', 'canceled',
+      ],
+    },
+  },
+}
+
 const semanticDiffItemSchema = {
   type: 'object',
   additionalProperties: false,
@@ -902,6 +917,37 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               queryParameters: { type: 'array', items: { type: 'object' } },
               requestBodyRequired: { type: 'boolean' },
               responseMediaType: { enum: ['application/json', 'application/schema+json'] },
+            },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema('capability-list', 3, 'Capability list with signed transports and media types',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['capabilities'],
+      properties: {
+        capabilities: {
+          type: 'array',
+          items: {
+            type: 'object', additionalProperties: false,
+            required: [
+              'id', 'version', 'title', 'description', 'operationKind', 'authMode',
+              'authScheme', 'requiredScopes', 'outputSchemaRef', 'endpoint',
+              'supportsDryRun', 'costClass', 'confirmation', 'successStatuses',
+              'idempotency', 'requestMediaType', 'responseMediaType',
+            ],
+            properties: {
+              id: { type: 'string', pattern: '^apollo\\.' }, version: { type: 'string', pattern: '^\\d+\\.\\d+\\.\\d+$' },
+              title: { type: 'string' }, description: { type: 'string' }, operationKind: { enum: ['query', 'command', 'preflight', 'job'] },
+              authMode: { enum: ['none', 'optional', 'required'] }, authScheme: { enum: ['none', 'bearer', 'ui-session', 'signed-token'] },
+              requiredScopes: { type: 'array', items: { type: 'string' }, uniqueItems: true }, inputSchemaRef: { type: 'string' }, outputSchemaRef: { type: 'string' },
+              endpoint: { type: 'object', additionalProperties: false, required: ['method', 'path'], properties: { method: { enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] }, path: { type: 'string', pattern: '^/v1/' } } },
+              toolName: { type: 'string' }, supportsDryRun: { type: 'boolean' }, costClass: { enum: ['free', 'low', 'medium', 'high', 'variable'] },
+              confirmation: { enum: ['none', 'preflight-token', 'human-approval'] }, successStatuses: { type: 'array', items: { type: 'integer' }, uniqueItems: true },
+              idempotency: { enum: ['not-applicable', 'required', 'natural'] }, queryParameters: { type: 'array', items: { type: 'object' } },
+              requestBodyRequired: { type: 'boolean' }, requestMediaType: { enum: ['application/json', 'application/octet-stream'] },
+              responseMediaType: { enum: ['application/json', 'application/schema+json', 'application/octet-stream'] },
             },
           },
         },
@@ -1596,6 +1642,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchema },
     }),
   ),
+  defineSchema('public-operation-detail', 2, 'Public operation detail response for render and media ingest',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation'],
+      properties: { operation: publicOperationSchemaV2 },
+    }),
+  ),
   defineSchema('public-operation-list', 1, 'Public operation list response',
     successSchema({
       type: 'object',
@@ -1855,6 +1909,66 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('public-operation-list', 2, 'Public render and media ingest operation list response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV2 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      },
+    }),
+  ),
+  defineSchema('binary-media-content', 1, 'Binary media content', {
+    type: 'string',
+    format: 'binary',
+  }),
+  defineSchema('project-workspace', 1, 'Project editing workspace response',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['project', 'media', 'transcripts', 'operationIds', 'operations'],
+      properties: {
+        project: searchableProjectSchema,
+        version: {
+          type: 'object', additionalProperties: false, required: ['id', 'sequence', 'baseHash', 'createdAt'],
+          properties: { id: idSchema, sequence: { type: 'integer', minimum: 1 }, baseHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, createdAt: dateTimeSchema },
+        },
+        brief: { type: 'object', additionalProperties: true },
+        media: {
+          type: 'array', maxItems: 1000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'role', 'originalFileName', 'artifactId', 'manifestId', 'mediaType', 'container', 'byteSize', 'sha256', 'status', 'createdAt'],
+            properties: {
+              id: idSchema, role: { enum: ['source-master', 'editing-proxy'] }, originalFileName: { type: 'string', minLength: 1, maxLength: 255 },
+              artifactId: idSchema, manifestId: idSchema, mediaType: { enum: ['video', 'audio', 'image'] }, container: { type: 'string', minLength: 2, maxLength: 16 },
+              byteSize: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' }, sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' }, status: { enum: ['available', 'quarantined', 'deleted'] },
+              rightsStatus: { type: 'string' },
+              probe: {
+                type: 'object', additionalProperties: false, required: ['width', 'height', 'duration', 'fps'],
+                properties: { width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 }, duration: { type: 'number', exclusiveMinimum: 0 }, fps: { type: 'number', exclusiveMinimum: 0 } },
+              },
+              createdAt: dateTimeSchema,
+            },
+          },
+        },
+        transcripts: {
+          type: 'array', maxItems: 1000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'sourceArtifactId', 'language', 'provider', 'model', 'transcriptHash', 'text', 'wordCount', 'segmentCount', 'createdAt'],
+            properties: {
+              id: idSchema, sourceArtifactId: idSchema, language: { type: 'string', minLength: 2, maxLength: 35 }, provider: { type: 'string' }, model: { type: 'string' },
+              transcriptHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, text: { type: 'string' }, wordCount: { type: 'integer', minimum: 0 }, segmentCount: { type: 'integer', minimum: 0 }, createdAt: dateTimeSchema,
+            },
+          },
+        },
+        operationIds: { type: 'array', maxItems: 1000, items: idSchema, uniqueItems: true },
+        operations: { type: 'array', maxItems: 1000, items: publicOperationSchemaV2 },
+      },
+    }),
+  ),
   defineSchema('begin-media-upload-request', 1, 'Begin media upload request', {
     type: 'object', additionalProperties: false,
     required: ['kind', 'size', 'mimeType', 'checksum'],
@@ -1862,6 +1976,19 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       kind: { enum: ['video', 'audio', 'image'] },
       size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' },
       mimeType: { type: 'string', pattern: '^(video|audio|image)/[a-z0-9.+-]+$', maxLength: 160 },
+      checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    },
+  }),
+  defineSchema('begin-media-upload-request', 2, 'Begin project media upload request', {
+    type: 'object', additionalProperties: false,
+    required: ['projectId', 'fileName', 'rightsConfirmed', 'kind', 'size', 'mimeType', 'checksum'],
+    properties: {
+      projectId: idSchema,
+      fileName: { type: 'string', minLength: 1, maxLength: 255 },
+      rightsConfirmed: { const: true },
+      kind: { const: 'video' },
+      size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' },
+      mimeType: { type: 'string', pattern: '^video/[a-z0-9.+-]+$', maxLength: 160 },
       checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
     },
   }),
@@ -1877,6 +2004,23 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' },
             mimeType: { type: 'string', maxLength: 160 }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
             status: { const: 'pending-session' }, expiresAt: dateTimeSchema, createdAt: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('media-upload-begun', 2, 'Project media upload intent response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['upload', 'replayed'],
+      properties: {
+        upload: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'projectId', 'fileName', 'rightsConfirmed', 'kind', 'size', 'mimeType', 'checksum', 'status', 'expiresAt', 'createdAt'],
+          properties: {
+            id: { type: 'string', format: 'uuid' }, projectId: idSchema, fileName: { type: 'string', minLength: 1, maxLength: 255 }, rightsConfirmed: { const: true },
+            kind: { const: 'video' }, size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' }, mimeType: { type: 'string', pattern: '^video/', maxLength: 160 },
+            checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' }, status: { const: 'pending-session' }, expiresAt: dateTimeSchema, createdAt: dateTimeSchema,
           },
         },
         replayed: { type: 'boolean' },
@@ -1906,6 +2050,21 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             partSize: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' },
             partUrlTemplate: { type: 'string', pattern: '^https?://', maxLength: 4096 },
           },
+        },
+      },
+    }),
+  ),
+  defineSchema('media-upload-content-received', 1, 'Signed media bytes receipt',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['receipt'],
+      properties: {
+        receipt: {
+          type: 'object', additionalProperties: false, required: ['byteSize', 'checksum', 'etag'],
+          properties: { byteSize: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' }, etag: { type: 'string', maxLength: 258 } },
+        },
+        part: {
+          type: 'object', additionalProperties: false, required: ['uploadId', 'partNumber', 'byteSize', 'etag', 'checksum', 'recordedAt'],
+          properties: { uploadId: { type: 'string', format: 'uuid' }, partNumber: { type: 'integer', minimum: 1, maximum: 10000 }, byteSize: { type: 'string' }, etag: { type: 'string' }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' }, recordedAt: dateTimeSchema },
         },
       },
     }),
@@ -1964,12 +2123,48 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('media-upload-detail', 2, 'Resumable project media upload detail response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['upload', 'parts', 'missingPartNumbers'],
+      properties: {
+        upload: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'projectId', 'fileName', 'rightsConfirmed', 'kind', 'size', 'mimeType', 'checksum', 'status', 'expiresAt', 'createdAt'],
+          properties: {
+            id: { type: 'string', format: 'uuid' }, projectId: idSchema, fileName: { type: 'string', minLength: 1, maxLength: 255 }, rightsConfirmed: { const: true },
+            kind: { const: 'video' }, size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' }, mimeType: { type: 'string', pattern: '^video/', maxLength: 160 }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            status: { enum: ['pending-session', 'uploading', 'uploaded', 'verified', 'expired', 'aborted'] }, expiresAt: dateTimeSchema, createdAt: dateTimeSchema,
+          },
+        },
+        parts: {
+          type: 'array', maxItems: 10000,
+          items: { type: 'object', additionalProperties: false, required: ['uploadId', 'partNumber', 'byteSize', 'etag', 'checksum', 'recordedAt'], properties: { uploadId: { type: 'string', format: 'uuid' }, partNumber: { type: 'integer', minimum: 1, maximum: 10000 }, byteSize: { type: 'string' }, etag: { type: 'string' }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' }, recordedAt: dateTimeSchema } },
+        },
+        missingPartNumbers: { type: 'array', maxItems: 10000, items: { type: 'integer', minimum: 1, maximum: 10000 }, uniqueItems: true },
+      },
+    }),
+  ),
   defineSchema('media-upload-completed', 1, 'Verified media upload completion response',
     successSchema({
       type: 'object', additionalProperties: false, required: ['uploadId', 'status', 'verifiedAt', 'replayed'],
       properties: {
         uploadId: { type: 'string', format: 'uuid' }, status: { const: 'verified' }, verifiedAt: dateTimeSchema, replayed: { type: 'boolean' },
       },
+    }),
+  ),
+  defineSchema('media-upload-completed', 2, 'Verified project media upload and queued ingest response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['uploadId', 'status', 'verifiedAt', 'operation', 'replayed'],
+      properties: {
+        uploadId: { type: 'string', format: 'uuid' }, status: { const: 'verified' }, verifiedAt: dateTimeSchema,
+        operation: publicOperationSchemaV2, replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('media-upload-aborted', 1, 'Aborted project media upload response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['uploadId', 'status', 'aborted'],
+      properties: { uploadId: { type: 'string', format: 'uuid' }, status: { const: 'aborted' }, aborted: { const: true } },
     }),
   ),
   defineSchema('issue-media-download-grant-request', 1, 'Issue media download grant request', {

@@ -20,16 +20,16 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado após a primeira auditoria conservadora:
+Estado auditado após o gate de workspace e ingestão V2:
 
-- **84 de 1.258 microtarefas verificadas como efetivamente entregues (6,7%)**;
-- **1.174 microtarefas abertas ou aguardando nova comprovação**;
-- o total aumentou em três itens quando autenticação humana, isolamento de agentes e hardening de sessão foram decompostos explicitamente; nenhuma tarefa anterior foi removida do denominador;
+- **92 de 1.259 microtarefas verificadas como efetivamente entregues (7,3%)**;
+- **1.167 microtarefas abertas ou aguardando nova comprovação**;
+- o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
 
-Esta porcentagem mede o PRD completo. Para o próximo teste vertical V2, o reaproveitamento técnico existente é estimado em 20–25%; ainda faltam 75–80% da jornada executável específica descrita no gate abaixo.
+Esta porcentagem mede o PRD completo. O workspace e a ingestão reais já são executáveis; o próximo gate vertical continua aberto porque Diretor, compiler, critic e render final ainda não produziram o MP4 de aceite.
 
 ---
 
@@ -39,16 +39,17 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 **Decisão irrevogável de arquitetura (2026-07-18):** o legado fica no passado. É proibido lançar fallback, flag de compatibilidade ou correção incremental sobre `analyzeContent`, o `narrativeEngine` antigo, projetos SQLite ou rotas `/api/process/*`. A interface, a API externa e os workers devem executar exclusivamente a jornada V2 sobre Postgres, versões imutáveis e operações duráveis.
 
-- [ ] Tornar formato de saída e briefing opcional visíveis na criação do projeto.
-- [ ] Conectar o workspace de edição aos projetos, versões, operações e artifacts V2, sem ler o projeto SQLite legado.
+- [x] Tornar formato de saída e briefing opcional visíveis na criação do projeto. Evidência: criação visual em `src/app/page.tsx`, `POST /v1/projects`, projeto real 9:16 e regressões de contrato.
+- [x] Conectar o workspace de edição aos projetos, versões, operações e artifacts V2, sem ler o projeto SQLite legado. Evidência: `/projects/[id]` consome exclusivamente `GET /v1/projects/{projectId}` e exibe operação, master, proxy e transcript persistidos no Postgres.
 - [ ] Impedir punch-in automático nos quatro segundos iniciais e desativar zoom automático por padrão.
 - [ ] Limitar legendas a blocos curtos, respeitar âncora e manter a região de rosto/olhos livre.
 - [ ] Expor corte editorial no modelo de `Command` V2, com nova versão imutável, alinhamento às palavras e retiming da transcrição.
 - [ ] Criar regressões automatizadas para autenticação e cortes editoriais.
-- [ ] Publicar a nova autenticação própria do Apollo exclusivamente pela API `/v1/session`, com capabilities, schemas, OpenAPI e E2E; remover o Basic Auth do proxy.
-- [ ] Importar o master do projeto de teste como artifact V2 e aplicar via API a remoção de datas, “dia 8” e “dois dias de aula”.
+- [x] Publicar a nova autenticação própria do Apollo exclusivamente pela API `/v1/session`, com capabilities, schemas, OpenAPI e E2E; remover o Basic Auth do proxy. Evidência: `src/app/v1/session/route.ts`, capability registry, OpenAPI e testes de sessão/API.
+- [x] Importar o master do projeto de teste como artifact V2, promovendo bytes imutáveis, proxy, áudio e transcript pela operação pública de ingestão. Evidência: projeto `project-fe932791-32f4-4453-8b85-6ce35a711860`, operação `operation-b3bab0da-ded6-453c-809f-c637268de131` e master de 145.445.848 bytes.
+- [ ] Aplicar via API V2 a remoção de datas, “dia 8” e “dois dias de aula”, preservando continuidade e retiming.
 - [ ] Implementar a jornada executável V2: briefing → percepção → `TreatmentPlan` → `StoryPlan` → `EditPlan` → critic → proxy/final.
-- [ ] Remover da superfície executável da aplicação todas as chamadas às rotas e serviços legados.
+- [x] Remover da superfície executável da aplicação todas as chamadas às rotas e serviços legados. Evidência: schema antigo, 68 rotas `/api`, páginas/componentes antigos e `src/lib` removidos; `npm run lint` impede reintrodução e o build lista somente UI e `/v1` novos.
 - [ ] Revisar e corrigir continuidade, transições, enquadramento e posicionamento de legendas no vídeo renderizado.
 - [ ] Executar o E2E completo em produção e entregar o MP4 final assistível.
 
@@ -569,9 +570,9 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F0.041 — Transferência externa de mídia [FR-247]
 
-- [ ] Implementar `begin-upload` com kind, size, MIME e checksum esperado. Evidência F0-086: `POST /v1/media/uploads` exige scope e idempotency key, valida coerência kind/MIME, tamanho até 5 TB e SHA-256, persiste sessão workspace/client-scoped e retorna replay convergente sem expor storage.
-- [ ] Gerar signed single/multipart sessions curtas com headers obrigatórios. Evidência F0-087: endpoint de sessão escolhe single até 100 MiB ou multipart de 64 MiB/até 10 mil partes, assina autorização HMAC limitada a workspace/client/upload/expiry e exige MIME + checksum em headers.
-- [ ] Implementar resume, parts completion e verification antes do ingest. Evidência F0-088: receipts multipart são persistidos/substituídos por número, consulta retorna parts ausentes para resume e completion só converge para `verified` após conferência autoritativa exata de tamanho, MIME e SHA-256; nenhum ingest é iniciado por esta etapa.
+- [x] Implementar `begin-upload` com kind, size, MIME e checksum esperado. Evidência F0-086 + E2E real: `POST /v1/media/uploads` persiste intent isolado, e o master de 145 MB atravessou o contrato sem bufferizar o Proxy do Next.
+- [x] Gerar signed single/multipart sessions curtas com headers obrigatórios. Evidência F0-087 + E2E real: autorização assinada foi usada pela UI para transferir o master e permanece vinculada a workspace/client/upload/expiry.
+- [x] Implementar resume, parts completion e verification antes do ingest. Evidência F0-088 + E2E real: bytes foram verificados por tamanho/MIME/SHA-256 antes de enfileirar `media-ingest`; regressões cobrem interrupção, descarte e range.
 - [ ] Gerar download grants curtos por asset/artifact autorizado. Evidência F0-089: artifact disponível e workspace-scoped recebe grant HMAC de 30–900 segundos, vinculado ao client e idempotency key; banco retém somente hash do token, e revogação convergente invalida a autorização imediatamente.
 - [ ] Impedir storage path/URI permanente de virar identidade pública. Evidência F0-090: presenters convertem chaves internas em referências lógicas `artifact:<id>`; um gate recursivo rejeita storage path/URI/bucket/object key e valida todos os exemplos públicos, enquanto URLs efêmeras permanecem limitadas aos grants/sessions.
 - [ ] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado. Evidência F0-091: jornada determinística cobre 256 MiB/4 parts, retomada após sessão expirada, preservação de receipts, bloqueio de checksum divergente, conclusão verificada e invalidação imediata do grant revogado.

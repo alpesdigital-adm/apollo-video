@@ -8,12 +8,8 @@ import { DomainError } from '../../domain/errors.ts'
 import { createWebhookSigningSecretPayload } from '../../domain/webhook-signing-secret-payload.ts'
 import { webhookSigningSecretCipherContext } from '../security/webhook-signing-secret-protector.ts'
 
-function unavailable(fallbackAllowed = true): never {
-  throw new DomainError(
-    'WEBHOOK_SECRET_UNAVAILABLE',
-    'Webhook signing secret is unavailable',
-    { fallbackAllowed },
-  )
+function unavailable(): never {
+  throw new DomainError('WEBHOOK_SECRET_UNAVAILABLE', 'Webhook signing secret is unavailable')
 }
 
 function invalidPayload(): never {
@@ -47,7 +43,7 @@ export class PrismaWebhookSigningSecretProvider implements WebhookSigningSecretP
     const eligible = row.status === 'active' || (
       row.status === 'retired' && row.usableUntil !== null && row.usableUntil > now
     )
-    if (!eligible) unavailable(false)
+    if (!eligible) unavailable()
     if (!row.payload) invalidPayload()
     let payload: ReturnType<typeof createWebhookSigningSecretPayload>
     try {

@@ -1,13 +1,13 @@
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type {
-  ArtifactRenderOperationContext,
   ClaimedPublicOperationRecord,
   PublicOperationLeaseCommand,
   PublicOperationListQuery,
   PublicOperationPersistenceResult,
   PublicOperationRecord,
   PublicOperationRepository,
+  PublicOperationContext,
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
@@ -18,6 +18,7 @@ import {
   rehydratePublicOperation,
   retryPublicOperation,
   retryOrFailPublicOperation,
+  requiresArtifactRenderCheckpoint,
   startPublicOperationAttempt,
   succeedPublicOperation,
   type PublicOperation,
@@ -43,6 +44,7 @@ type StoredOperation = Prisma.V2PublicOperationGetPayload<{
         }
       }
     }
+    mediaIngest: true
   }
 }>
 
@@ -62,6 +64,7 @@ const OPERATION_INCLUDE = {
       },
     },
   },
+  mediaIngest: true,
 } as const
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
@@ -144,49 +147,60 @@ function parseResult(value: string | null): PublicOperationResult | undefined {
 }
 
 function hydrateRecord(row: StoredOperation): PublicOperationRecord {
-  const detail = row.artifactRender
-  if (
-    !detail ||
-    row.type !== 'artifact-render' ||
-    row.targetType !== 'media-artifact' ||
-    row.targetId !== detail.artifactId ||
-    row.workspaceId !== detail.workspaceId ||
-    detail.manifest.artifactId !== detail.artifactId ||
-    detail.authorization.artifactId !== detail.artifactId ||
-    detail.authorization.manifestId !== detail.manifestId ||
-    detail.authorization.inputHash !== detail.inputHash ||
-    detail.authorization.clientId !== row.clientId ||
-    detail.authorization.status !== 'authorized' ||
-    !SHA256_PATTERN.test(detail.inputHash)
-  ) {
+  const renderDetail = row.artifactRender
+  const ingestDetail = row.mediaIngest
+  const isRender = row.type === 'artifact-render'
+  const isIngest = row.type === 'media-ingest'
+  if (row.targetType !== 'media-artifact' || (isRender === isIngest)) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
       'Stored PublicOperation context is invalid',
       { operationId: row.id },
     )
   }
-  const outputFields = checkpointFields(detail)
+  if (isRender && (
+    !renderDetail || ingestDetail || row.targetId !== renderDetail.artifactId ||
+    row.workspaceId !== renderDetail.workspaceId ||
+    renderDetail.manifest.artifactId !== renderDetail.artifactId ||
+    renderDetail.authorization.artifactId !== renderDetail.artifactId ||
+    renderDetail.authorization.manifestId !== renderDetail.manifestId ||
+    renderDetail.authorization.inputHash !== renderDetail.inputHash ||
+    renderDetail.authorization.clientId !== row.clientId ||
+    renderDetail.authorization.status !== 'authorized' ||
+    !SHA256_PATTERN.test(renderDetail.inputHash)
+  )) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored render operation context is invalid', { operationId: row.id })
+  }
+  if (isIngest && (
+    !ingestDetail || renderDetail || row.targetId !== ingestDetail.sourceArtifactId ||
+    row.workspaceId !== ingestDetail.workspaceId ||
+    !ID_PATTERN.test(ingestDetail.projectId) || !ID_PATTERN.test(ingestDetail.sourceManifestId) ||
+    ingestDetail.originalFileName.trim().length < 1
+  )) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored ingest operation context is invalid', { operationId: row.id })
+  }
+  const outputFields = checkpointFields(renderDetail)
   const hasAnyCheckpoint = outputFields.some((value) => value !== null)
   if (
     hasAnyCheckpoint &&
-    (!hasCompleteCheckpoint(detail) ||
-      !OUTPUT_KEY_PATTERN.test(detail.outputKey as string) ||
-      (detail.outputKey as string).length > 512 ||
-      (detail.outputKey as string).includes('//') ||
-      !SHA256_PATTERN.test(detail.outputSha256 as string) ||
-      (detail.outputByteSize as bigint) <= BigInt(0) ||
-      (detail.outputWidth as number) <= 0 ||
-      (detail.outputHeight as number) <= 0 ||
-      (detail.outputFps as number) <= 0 ||
-      (detail.outputDurationInFrames as number) <= 0 ||
-      detail.outputCodec !== 'h264' ||
-      detail.outputContainer !== 'mp4' ||
-      (detail.outputAttempt as number) <= 0 ||
-      (detail.outputRecordedAt as Date).getTime() <
-        (detail.outputCommittedAt as Date).getTime() ||
-      detail.outputSha256 !== detail.artifact.sha256 ||
-      detail.outputByteSize !== detail.artifact.byteSize ||
-      detail.outputContainer !== detail.artifact.container)
+    (!renderDetail || !hasCompleteCheckpoint(renderDetail) ||
+      !OUTPUT_KEY_PATTERN.test(renderDetail.outputKey as string) ||
+      (renderDetail.outputKey as string).length > 512 ||
+      (renderDetail.outputKey as string).includes('//') ||
+      !SHA256_PATTERN.test(renderDetail.outputSha256 as string) ||
+      (renderDetail.outputByteSize as bigint) <= BigInt(0) ||
+      (renderDetail.outputWidth as number) <= 0 ||
+      (renderDetail.outputHeight as number) <= 0 ||
+      (renderDetail.outputFps as number) <= 0 ||
+      (renderDetail.outputDurationInFrames as number) <= 0 ||
+      renderDetail.outputCodec !== 'h264' ||
+      renderDetail.outputContainer !== 'mp4' ||
+      (renderDetail.outputAttempt as number) <= 0 ||
+      (renderDetail.outputRecordedAt as Date).getTime() <
+        (renderDetail.outputCommittedAt as Date).getTime() ||
+      renderDetail.outputSha256 !== renderDetail.artifact.sha256 ||
+      renderDetail.outputByteSize !== renderDetail.artifact.byteSize ||
+      renderDetail.outputContainer !== renderDetail.artifact.container)
   ) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored render checkpoint is invalid')
   }
@@ -237,7 +251,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       id: row.id,
       workspaceId: row.workspaceId,
       clientId: row.clientId,
-      type: 'artifact-render',
+      type: row.type as PublicOperation['type'],
       status: row.status as PublicOperation['status'],
       phase: row.phase as PublicOperation['phase'],
       ...(hasProgress
@@ -253,8 +267,8 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       retryable: row.retryable,
       target: {
         type: 'media-artifact',
-        id: detail.artifactId,
-        manifestId: detail.manifestId,
+        id: isRender ? renderDetail!.artifactId : ingestDetail!.sourceArtifactId,
+        manifestId: isRender ? renderDetail!.manifestId : ingestDetail!.sourceManifestId,
       },
       ...(row.resultJson !== null ? { result: parseResult(row.resultJson) } : {}),
       ...(hasAnyError
@@ -277,9 +291,17 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     })
     return Object.freeze({
       operation,
-      context: Object.freeze({
-        authorizationId: detail.authorizationId,
-        inputHash: detail.inputHash,
+      context: Object.freeze(isRender ? {
+        kind: 'artifact-render' as const,
+        authorizationId: renderDetail!.authorizationId,
+        inputHash: renderDetail!.inputHash,
+      } : {
+        kind: 'media-ingest' as const,
+        uploadId: ingestDetail!.uploadId,
+        projectId: ingestDetail!.projectId,
+        originalFileName: ingestDetail!.originalFileName,
+        sourceArtifactId: ingestDetail!.sourceArtifactId,
+        sourceManifestId: ingestDetail!.sourceManifestId,
       }),
     })
   } catch (error) {
@@ -545,16 +567,27 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
 
   async createOrReplay(input: {
     operation: PublicOperation
-    context: ArtifactRenderOperationContext
+    context: PublicOperationContext
     idempotencyKey: string
     requestFingerprint: string
   }, serializationAttempt = 1): Promise<PublicOperationPersistenceResult> {
     assertPublicOperation(input.operation)
+    const renderContext = input.operation.type === 'artifact-render' && 'authorizationId' in input.context
+      ? input.context
+      : undefined
+    const ingestContext = input.operation.type === 'media-ingest' && 'uploadId' in input.context
+      ? input.context
+      : undefined
     if (
-      input.operation.status !== 'queued' ||
-      !SHA256_PATTERN.test(input.requestFingerprint) ||
-      !SHA256_PATTERN.test(input.context.inputHash) ||
-      !ID_PATTERN.test(input.context.authorizationId) ||
+      input.operation.status !== 'queued' || !SHA256_PATTERN.test(input.requestFingerprint) ||
+      (!renderContext && !ingestContext) ||
+      (renderContext && (!SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
+      (ingestContext && (
+        !/^[0-9a-f-]{36}$/.test(ingestContext.uploadId) ||
+        ![ingestContext.projectId, ingestContext.sourceArtifactId, ingestContext.sourceManifestId].every((value) => ID_PATTERN.test(value)) ||
+        ingestContext.sourceArtifactId !== input.operation.target.id || ingestContext.sourceManifestId !== input.operation.target.manifestId ||
+        ingestContext.originalFileName.trim().length < 1 || ingestContext.originalFileName.length > 240
+      )) ||
       input.idempotencyKey.length < 1 ||
       input.idempotencyKey.length > 128
     ) {
@@ -583,6 +616,23 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           return { ...hydrateRecord(existing), replayed: true }
         }
 
+        if (ingestContext) {
+          const upload = await transaction.v2MediaUpload.findFirst({
+            where: {
+              id: ingestContext.uploadId,
+              workspaceId: input.operation.workspaceId,
+              clientId: input.operation.clientId,
+              projectId: ingestContext.projectId,
+              status: 'verified',
+              rightsConfirmed: true,
+            },
+            select: { id: true, fileName: true },
+          })
+          if (!upload || upload.fileName !== ingestContext.originalFileName) {
+            throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Verified upload cannot be attached to this ingest operation')
+          }
+        }
+
         await transaction.v2PublicOperation.create({
           data: {
             id: input.operation.id,
@@ -606,16 +656,34 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             updatedAt: new Date(input.operation.updatedAt),
           },
         })
-        await transaction.v2ArtifactRenderOperation.create({
-          data: {
-            operationId: input.operation.id,
-            workspaceId: input.operation.workspaceId,
-            artifactId: input.operation.target.id,
-            manifestId: input.operation.target.manifestId,
-            authorizationId: input.context.authorizationId,
-            inputHash: input.context.inputHash,
-          },
-        })
+        if (renderContext) {
+          await transaction.v2ArtifactRenderOperation.create({
+            data: {
+              operationId: input.operation.id,
+              workspaceId: input.operation.workspaceId,
+              artifactId: input.operation.target.id,
+              manifestId: input.operation.target.manifestId,
+              authorizationId: renderContext.authorizationId,
+              inputHash: renderContext.inputHash,
+            },
+          })
+        } else {
+          await transaction.v2MediaIngestOperation.create({
+            data: {
+              operationId: input.operation.id,
+              workspaceId: input.operation.workspaceId,
+              uploadId: ingestContext!.uploadId,
+              projectId: ingestContext!.projectId,
+              sourceArtifactId: ingestContext!.sourceArtifactId,
+              sourceManifestId: ingestContext!.sourceManifestId,
+              originalFileName: ingestContext!.originalFileName,
+            },
+          })
+          await transaction.v2Project.updateMany({
+            where: { id: ingestContext!.projectId, workspaceId: input.operation.workspaceId, status: { in: ['draft', 'failed'] } },
+            data: { status: 'ingesting' },
+          })
+        }
         const created = await transaction.v2PublicOperation.findUnique({
           where: { id: input.operation.id },
           include: OPERATION_INCLUDE,
@@ -653,6 +721,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     now: string
     leaseUntil: string
     workspaceId?: string
+    type?: PublicOperation['type']
   }): Promise<ClaimedPublicOperationRecord | null> {
     if (!ID_PATTERN.test(input.leaseOwner)) {
       throw new DomainError('INVALID_PUBLIC_OPERATION', 'Worker lease owner is invalid')
@@ -666,7 +735,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     return this.client.$transaction(async (transaction) => {
       const candidates = await transaction.v2PublicOperation.findMany({
         where: {
-          type: 'artifact-render',
+          ...(input.type ? { type: input.type } : {}),
           ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
           OR: [
             { status: 'queued', leaseOwner: null },
@@ -703,7 +772,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                 retryable: false,
                 resultJson: null,
                 errorCode: 'worker_lease_expired',
-                errorMessage: 'Render operation exhausted its available attempts',
+                errorMessage: 'Operation exhausted its available attempts',
                 errorRetryable: false,
                 completedAt: now,
                 nextAttemptAt: null,
@@ -819,6 +888,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       }
       if (
         requiresCheckpoint &&
+        requiresArtifactRenderCheckpoint(stored.type as PublicOperation['type']) &&
         (!stored.artifactRender || !hasCompleteCheckpoint(stored.artifactRender))
       ) {
         throw new DomainError(

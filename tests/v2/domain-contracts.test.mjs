@@ -1075,6 +1075,7 @@ test('authorized render enqueue is idempotent, actor-bound and expiry-aware', as
   assert.equal(replay.operation.id, created.operation.id)
   assert.equal(created.operation.status, 'queued')
   assert.deepEqual(created.context, {
+    kind: 'artifact-render',
     authorizationId: authorization.id,
     inputHash: authorization.inputHash,
   })

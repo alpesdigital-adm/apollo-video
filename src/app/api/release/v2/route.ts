@@ -1,2 +1,0 @@
-import {NextResponse} from 'next/server';import {evaluateMandatoryJourney,evaluateReleaseGate} from '@/v2/application/mandatory-journeys';
-export async function POST(request:Request){const b=await request.json();if(b.operation==='journey')return NextResponse.json({data:evaluateMandatoryJourney(b.evidence)});if(b.operation==='gate')return NextResponse.json({data:evaluateReleaseGate(b.evidence)});return NextResponse.json({error:'unsupported-operation'},{status:400})}

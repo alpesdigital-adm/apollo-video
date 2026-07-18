@@ -7,10 +7,10 @@ export type CapabilityCostClass = 'free' | 'low' | 'medium' | 'high' | 'variable
 export type CapabilityConfirmation = 'none' | 'preflight-token' | 'human-approval'
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type CapabilityAuthMode = 'none' | 'optional' | 'required'
-export type CapabilityAuthScheme = 'none' | 'bearer' | 'ui-session'
+export type CapabilityAuthScheme = 'none' | 'bearer' | 'ui-session' | 'signed-token'
 export type CapabilityIdempotency = 'not-applicable' | 'required' | 'natural'
-export type CapabilityPrecondition = 'if-match'
-export type CapabilitySuccessStatus = 200 | 201 | 202 | 204
+export type CapabilityPrecondition = 'if-match' | 'signed-intent'
+export type CapabilitySuccessStatus = 200 | 201 | 202 | 204 | 206
 
 export interface CapabilityQueryParameter {
   name: string
@@ -50,7 +50,8 @@ export interface PublicCapability {
   responseEtag?: boolean
   queryParameters?: readonly CapabilityQueryParameter[]
   requestBodyRequired?: boolean
-  responseMediaType?: 'application/json' | 'application/schema+json'
+  requestMediaType?: 'application/json' | 'application/octet-stream'
+  responseMediaType?: 'application/json' | 'application/schema+json' | 'application/octet-stream'
   availableIn?: readonly ApiEnvironment[]
 }
 
@@ -176,7 +177,7 @@ function validateCapability(capability: PublicCapability): void {
     { capabilityId: capability.id },
   )
   assertDomain(
-    capability.precondition === undefined || capability.responseEtag === true,
+    capability.precondition !== 'if-match' || capability.responseEtag === true,
     'INVALID_CAPABILITY',
     'If-Match capabilities must return the resulting ETag',
     { capabilityId: capability.id },
@@ -529,14 +530,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.capabilities.list',
-    version: '2.0.0',
+    version: '3.0.0',
     title: 'List available capabilities',
     description: 'Lists public capabilities available to the current external actor.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'optional',
     requiredScopes: [],
-    outputSchemaRef: 'apollo://schemas/capability-list/v2',
+    outputSchemaRef: 'apollo://schemas/capability-list/v3',
     endpoint: { method: 'GET', path: '/v1/capabilities' },
     toolName: 'apollo.capabilities.list',
     supportsDryRun: false,
@@ -622,6 +623,24 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     ],
   },
   {
+    id: 'apollo.projects.workspace.read',
+    version: '1.0.0',
+    title: 'Read project workspace',
+    description: 'Returns the current direction, ingested media, transcript summaries and durable ingest operations for one project.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/project-workspace/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}' },
+    toolName: 'apollo.projects.workspace.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.artifacts.read',
     version: '1.0.0',
     title: 'Read media artifact lineage',
@@ -638,6 +657,25 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     confirmation: 'none',
     successStatuses: [200],
     idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.artifacts.content.read',
+    version: '1.0.0',
+    title: 'Stream media artifact content',
+    description: 'Streams authenticated workspace media with HTTP byte-range support for preview and external processing.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['artifacts:read'],
+    outputSchemaRef: 'apollo://schemas/binary-media-content/v1',
+    endpoint: { method: 'GET', path: '/v1/artifacts/{artifactId}/content' },
+    toolName: 'apollo.artifacts.content.read',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [200, 206],
+    idempotency: 'not-applicable',
+    responseMediaType: 'application/octet-stream',
   },
   {
     id: 'apollo.artifacts.lineage.diagnose',
@@ -850,14 +888,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.operations.list',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'List public operations',
     description: 'Returns one stable cursor page of safe workspace operation metadata with allowlisted filters.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['operations:read'],
-    outputSchemaRef: 'apollo://schemas/public-operation-list/v1',
+    outputSchemaRef: 'apollo://schemas/public-operation-list/v2',
     endpoint: { method: 'GET', path: '/v1/operations' },
     toolName: 'apollo.operations.list',
     supportsDryRun: false,
@@ -903,14 +941,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.operations.dead-letter.list',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'List dead-letter operations',
     description: 'Returns failed workspace operations whose automatic retry capacity was exhausted and that may be considered for manual retry.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['operations:read'],
-    outputSchemaRef: 'apollo://schemas/public-operation-list/v1',
+    outputSchemaRef: 'apollo://schemas/public-operation-list/v2',
     endpoint: { method: 'GET', path: '/v1/operations/dead-letter' },
     toolName: 'apollo.operations.dead-letter.list',
     supportsDryRun: false,
@@ -947,14 +985,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.operations.read',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Read public operation',
     description: 'Returns safe status, progress, target and terminal result metadata for one workspace operation.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['operations:read'],
-    outputSchemaRef: 'apollo://schemas/public-operation-detail/v1',
+    outputSchemaRef: 'apollo://schemas/public-operation-detail/v2',
     endpoint: { method: 'GET', path: '/v1/operations/{operationId}' },
     toolName: 'apollo.operations.read',
     supportsDryRun: false,
@@ -965,14 +1003,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.operations.cancel',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Cancel public operation',
     description: 'Idempotently cancels a queued, waiting, retrying or running workspace operation and invalidates any active worker lease.',
     exposure: 'public',
     operationKind: 'command',
     authMode: 'required',
     requiredScopes: ['operations:cancel'],
-    outputSchemaRef: 'apollo://schemas/public-operation-detail/v1',
+    outputSchemaRef: 'apollo://schemas/public-operation-detail/v2',
     endpoint: { method: 'POST', path: '/v1/operations/{operationId}/cancel' },
     toolName: 'apollo.operations.cancel',
     supportsDryRun: false,
@@ -983,14 +1021,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.operations.retry',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Retry public operation',
     description: 'Requeues a failed or canceled workspace operation while preserving its protected context and attempt history.',
     exposure: 'public',
     operationKind: 'command',
     authMode: 'required',
     requiredScopes: ['operations:retry'],
-    outputSchemaRef: 'apollo://schemas/public-operation-detail/v1',
+    outputSchemaRef: 'apollo://schemas/public-operation-detail/v2',
     endpoint: { method: 'POST', path: '/v1/operations/{operationId}/retry' },
     toolName: 'apollo.operations.retry',
     supportsDryRun: false,
@@ -1444,15 +1482,15 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.media.uploads.begin',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Begin media upload',
     description: 'Registers one bounded media upload intent with declared kind, size, MIME and SHA-256 checksum.',
     exposure: 'public',
     operationKind: 'command',
     authMode: 'required',
     requiredScopes: ['media:write'],
-    inputSchemaRef: 'apollo://schemas/begin-media-upload-request/v1',
-    outputSchemaRef: 'apollo://schemas/media-upload-begun/v1',
+    inputSchemaRef: 'apollo://schemas/begin-media-upload-request/v2',
+    outputSchemaRef: 'apollo://schemas/media-upload-begun/v2',
     endpoint: { method: 'POST', path: '/v1/media/uploads' },
     toolName: 'apollo.media.uploads.begin',
     supportsDryRun: false,
@@ -1461,6 +1499,32 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     successStatuses: [200, 201],
     idempotency: 'required',
     requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.media.uploads.content.put',
+    version: '1.0.0',
+    title: 'Upload signed media bytes',
+    description: 'Receives one complete file or multipart chunk through the short-lived signed URL issued by the upload session.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    authScheme: 'signed-token',
+    requiredScopes: [],
+    inputSchemaRef: 'apollo://schemas/binary-media-content/v1',
+    outputSchemaRef: 'apollo://schemas/media-upload-content-received/v1',
+    endpoint: { method: 'PUT', path: '/v1/media/uploads/{uploadId}/content' },
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [201],
+    idempotency: 'natural',
+    precondition: 'signed-intent',
+    queryParameters: [
+      { name: 'token', description: 'Short-lived signed upload authorization.', required: true, schema: { type: 'string', minLength: 32, maxLength: 8192 } },
+      { name: 'partNumber', description: 'Multipart part number when the issued session is multipart.', required: false, schema: { type: 'integer', minimum: 1, maximum: 10000 } },
+    ],
+    requestBodyRequired: true,
+    requestMediaType: 'application/octet-stream',
   },
   {
     id: 'apollo.media.uploads.session.issue',
@@ -1477,7 +1541,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     id: 'apollo.media.uploads.read', version: '1.0.0', title: 'Read resumable media upload',
     description: 'Returns safe upload state, recorded multipart parts and missing part numbers.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['media:write'],
-    outputSchemaRef: 'apollo://schemas/media-upload-detail/v1', endpoint: { method: 'GET', path: '/v1/media/uploads/{uploadId}' },
+    outputSchemaRef: 'apollo://schemas/media-upload-detail/v2', endpoint: { method: 'GET', path: '/v1/media/uploads/{uploadId}' },
     toolName: 'apollo.media.uploads.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
   {
@@ -1489,11 +1553,18 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [200], idempotency: 'natural', requestBodyRequired: true,
   },
   {
-    id: 'apollo.media.uploads.complete', version: '1.0.0', title: 'Complete and verify media upload',
-    description: 'Completes one upload only after storage verifies exact size, MIME and SHA-256 checksum.',
+    id: 'apollo.media.uploads.complete', version: '2.0.0', title: 'Complete, verify and enqueue media ingest',
+    description: 'Verifies exact size, MIME and SHA-256, then enqueues the durable V2 project ingest operation.',
     exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['media:write'],
-    outputSchemaRef: 'apollo://schemas/media-upload-completed/v1', endpoint: { method: 'POST', path: '/v1/media/uploads/{uploadId}/complete' },
-    toolName: 'apollo.media.uploads.complete', supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [200], idempotency: 'natural',
+    outputSchemaRef: 'apollo://schemas/media-upload-completed/v2', endpoint: { method: 'POST', path: '/v1/media/uploads/{uploadId}/complete' },
+    toolName: 'apollo.media.uploads.complete', supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [202], idempotency: 'natural',
+  },
+  {
+    id: 'apollo.media.uploads.abort', version: '1.0.0', title: 'Abort project media upload',
+    description: 'Idempotently rejects further signed writes and removes staged upload bytes before verification.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['media:write'],
+    outputSchemaRef: 'apollo://schemas/media-upload-aborted/v1', endpoint: { method: 'POST', path: '/v1/media/uploads/{uploadId}/abort' },
+    toolName: 'apollo.media.uploads.abort', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'natural',
   },
   {
     id: 'apollo.artifacts.download-grants.issue', version: '1.0.0', title: 'Issue media artifact download grant',

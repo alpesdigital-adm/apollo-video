@@ -105,6 +105,7 @@ export function enqueueAuthorizedRenderService(dependencies: {
     return dependencies.operations.createOrReplay({
       operation,
       context: {
+        kind: 'artifact-render',
         authorizationId,
         inputHash: authorization.inputHash,
       },

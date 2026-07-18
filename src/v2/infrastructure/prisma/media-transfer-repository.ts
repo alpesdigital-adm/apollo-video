@@ -21,13 +21,26 @@ export class PrismaMediaTransferRepository implements MediaTransferRepository {
         }
         return { upload: createMediaUpload({
           id: existing.id, workspaceId: existing.workspaceId, clientId: existing.clientId,
+          ...(existing.projectId ? { projectId: existing.projectId } : {}),
+          ...(existing.fileName ? { fileName: existing.fileName } : {}),
+          rightsConfirmed: existing.rightsConfirmed,
           kind: existing.kind as MediaUploadKind, byteSize: existing.byteSize.toString(), mimeType: existing.mimeType,
           expectedSha256: existing.expectedSha256, status: existing.status as MediaUploadStatus,
           expiresAt: existing.expiresAt.toISOString(), createdAt: existing.createdAt.toISOString(),
         }), replayed: true }
       }
+      if (record.upload.projectId) {
+        const project = await tx.v2Project.findFirst({
+          where: { id: record.upload.projectId, workspaceId: record.upload.workspaceId },
+          select: { id: true },
+        })
+        if (!project) throw new DomainError('INVALID_ARGUMENT', 'Upload project was not found in this workspace')
+      }
       const created = await tx.v2MediaUpload.create({ data: {
         id: record.upload.id, workspaceId: record.upload.workspaceId, clientId: record.upload.clientId,
+        projectId: record.upload.projectId ?? null,
+        fileName: record.upload.fileName ?? null,
+        rightsConfirmed: record.upload.rightsConfirmed ?? false,
         kind: record.upload.kind, byteSize: BigInt(record.upload.byteSize), mimeType: record.upload.mimeType,
         expectedSha256: record.upload.expectedSha256, status: record.upload.status,
         idempotencyKey: record.idempotencyKey, requestFingerprint: record.requestFingerprint,
@@ -44,12 +57,16 @@ export class PrismaMediaTransferRepository implements MediaTransferRepository {
 
   private present(row: {
     id: string; workspaceId: string; clientId: string; kind: string; byteSize: bigint; mimeType: string;
+    projectId: string | null; fileName: string | null; rightsConfirmed: boolean;
     expectedSha256: string; status: string; expiresAt: Date; createdAt: Date;
     sessionMode: string | null; partSize: bigint | null; sessionExpiresAt: Date | null;
     actualSha256: string | null; actualByteSize: bigint | null; verifiedAt: Date | null;
   }) {
     return createMediaUpload({
       id: row.id, workspaceId: row.workspaceId, clientId: row.clientId,
+      ...(row.projectId ? { projectId: row.projectId } : {}),
+      ...(row.fileName ? { fileName: row.fileName } : {}),
+      rightsConfirmed: row.rightsConfirmed,
       kind: row.kind as MediaUploadKind, byteSize: row.byteSize.toString(), mimeType: row.mimeType,
       expectedSha256: row.expectedSha256, status: row.status as MediaUploadStatus,
       expiresAt: row.expiresAt.toISOString(), createdAt: row.createdAt.toISOString(),
@@ -117,5 +134,19 @@ export class PrismaMediaTransferRepository implements MediaTransferRepository {
     if (updated.count !== 1) throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Upload cannot be completed')
     const row = await this.client.v2MediaUpload.findFirstOrThrow({ where: { id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId } })
     return this.present(row)
+  }
+
+  async markUploadAborted(input: { workspaceId: string; clientId: string; uploadId: string }) {
+    const current = await this.findUpload(input)
+    if (!current) throw new DomainError('MEDIA_UPLOAD_NOT_FOUND', 'Upload was not found')
+    if (current.status === 'aborted') return current
+    const updated = await this.client.v2MediaUpload.updateMany({
+      where: { id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId, status: { in: ['pending-session', 'uploading'] } },
+      data: { status: 'aborted' },
+    })
+    if (updated.count !== 1) throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Upload cannot be aborted')
+    const row = await this.findUpload(input)
+    if (!row) throw new DomainError('PERSISTENCE_CONFLICT', 'Aborted upload was not found')
+    return row
   }
 }

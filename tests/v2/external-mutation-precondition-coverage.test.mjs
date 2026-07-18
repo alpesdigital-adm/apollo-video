@@ -73,6 +73,8 @@ const coverage = Object.freeze({
   },
   'apollo.media.uploads.parts.record': { mode: 'state-machine-action', evidence: 'F0-088' },
   'apollo.media.uploads.complete': { mode: 'state-machine-action', evidence: 'F0-088' },
+  'apollo.media.uploads.abort': { mode: 'state-machine-action', evidence: 'bounded media upload lifecycle transition' },
+  'apollo.media.uploads.content.put': { mode: 'explicit-precondition', mechanism: 'signed-intent', evidence: 'signed token binds upload, session mode, checksum and expiry' },
   'apollo.artifacts.download-grants.issue': { mode: 'idempotent-create', evidence: 'F0-089' },
   'apollo.artifacts.download-grants.revoke': { mode: 'state-machine-action', evidence: 'F0-089' },
   'apollo.clients.create': {
@@ -84,6 +86,8 @@ const coverage = Object.freeze({
   'apollo.clients.credentials.revoke': {
     mode: 'state-machine-action', evidence: 'F0-073',
   },
+  'apollo.sessions.login': { mode: 'state-machine-action', evidence: 'credential verification creates a bounded server-signed session' },
+  'apollo.sessions.logout': { mode: 'state-machine-action', evidence: 'session revocation is naturally idempotent' },
 })
 
 const externalMutations = FOUNDATION_CAPABILITIES.filter(
@@ -120,6 +124,8 @@ test('every external mutation has an explicit precondition strategy', () => {
       if (decision.mechanism === 'if-match') {
         assert.equal(capability.precondition, 'if-match')
         assert.equal(capability.responseEtag, true)
+      } else if (decision.mechanism === 'signed-intent') {
+        assert.equal(capability.precondition, 'signed-intent')
       } else {
         assert.equal(decision.mechanism, 'body-revision')
         requiresBodyRevision(capability)
@@ -148,9 +154,9 @@ test('the current public surface has no unguarded state replacement', () => {
   }, {})
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
-    'explicit-precondition': 3,
+    'explicit-precondition': 4,
     'idempotent-create': 9,
-    'state-machine-action': 10,
+    'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,
   })

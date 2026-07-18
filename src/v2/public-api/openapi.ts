@@ -25,9 +25,12 @@ function schemaReference(ref: string) {
 
 function securityFor(capability: PublicCapability) {
   if (capability.authMode === 'none') return []
-  const scheme = resolveCapabilityAuthScheme(capability) === 'ui-session'
+  const resolved = resolveCapabilityAuthScheme(capability)
+  const scheme = resolved === 'ui-session'
     ? 'uiSession'
-    : 'bearerAuth'
+    : resolved === 'signed-token'
+      ? 'signedUploadToken'
+      : 'bearerAuth'
   if (capability.authMode === 'optional') return [{}, { [scheme]: [] }]
   return [{ [scheme]: [] }]
 }
@@ -105,7 +108,7 @@ function responsesFor(capability: PublicCapability) {
       },
     },
   }
-  for (const status of [401, 403, 404, 409, 422, 429, 500, 502, 503]) {
+  for (const status of [401, 403, 404, 409, 416, 422, 429, 500, 502, 503]) {
     responses[String(status)] = errorResponse
   }
   if (capability.precondition === 'if-match') {
@@ -141,7 +144,9 @@ export function createOpenApiDocument(
         ? {
             required: capability.requestBodyRequired ?? true,
             content: {
-              'application/json': { schema: schemaReference(capability.inputSchemaRef) },
+              [capability.requestMediaType ?? 'application/json']: {
+                schema: schemaReference(capability.inputSchemaRef),
+              },
             },
           }
         : undefined,
@@ -167,6 +172,7 @@ export function createOpenApiDocument(
       securitySchemes: {
         bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'Apollo service credential' },
         uiSession: { type: 'apiKey', in: 'cookie', name: 'apollo_session' },
+        signedUploadToken: { type: 'apiKey', in: 'query', name: 'token' },
       },
       schemas,
     },

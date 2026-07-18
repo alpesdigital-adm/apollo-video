@@ -18,6 +18,7 @@ import { coordinateWebhookWorkerShardService } from '../application/coordinate-w
 import { materializeAuthorizedRenderInputService } from '../application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../application/render-authorized-input.ts'
 import { runNextPublicOperationService } from '../application/run-public-operation-worker.ts'
+import { runNextMediaIngestOperationService } from '../application/run-media-ingest-worker.ts'
 import { calculateVersionHash } from '../application/version-hash.ts'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
@@ -26,11 +27,14 @@ import type { MaterializationAuthorizationRepository } from '../application/port
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
+import type { MediaArtifactPersistenceRepository } from '../application/ports/media-artifact-repository.ts'
+import type { ProjectMediaRepository } from '../application/ports/media-ingest.ts'
 import type { ProtectedRenderInputStore } from '../application/ports/protected-render-input-store.ts'
 import type { RenderInputAssetResolver } from '../application/ports/render-input-asset-resolver.ts'
 import type { RenderInputAssetAvailability } from '../application/ports/render-reconstruction-readiness.ts'
 import type { ProjectCreationRepository } from '../application/ports/project-creation-repository.ts'
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
+import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
 import type { PublicOperationRepository } from '../application/ports/public-operation-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
 import type { WebhookRegistrationRepository } from '../application/ports/webhook-registration-repository.ts'
@@ -80,6 +84,8 @@ import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
 import { PrismaProjectCreationRepository } from './prisma/project-creation-repository.ts'
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
+import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
+import { PrismaProjectMediaRepository } from './prisma/project-media-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
@@ -102,10 +108,12 @@ import { SafeWebhookDeliveryTransport } from './webhook/safe-webhook-delivery-tr
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
 import { LocalArtifactRenderInputResolver } from './local-artifact-render-input-resolver.ts'
 import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts'
+import { createLocalMediaUploadStorageFromEnvironment } from './media/local-media-upload-storage.ts'
+import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
+import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
+import { createMediaTranscriberFromEnvironment } from './media/groq-media-transcriber.ts'
 import { createConfiguredRenderTargetRegistry } from './render-target-registry.ts'
 import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
-import { createEnvironmentWebhookSigningSecretProvider } from './security/environment-webhook-signing-secret-provider.ts'
-import { createFallbackWebhookSigningSecretProvider } from './security/fallback-webhook-signing-secret-provider.ts'
 import { createWebhookSigningSecretProtector } from './security/webhook-signing-secret-protector.ts'
 export { createMediaUploadSessionSignerFromEnvironment } from './security/media-upload-session-signer.ts'
 export { createMediaUploadVerifierFromEnvironment } from './media-upload-verifier.ts'
@@ -133,6 +141,18 @@ export function createMaterializationAuthorizationRepository(): MaterializationA
 
 export function createMediaArtifactQueryRepository(): MediaArtifactQueryRepository {
   return new PrismaMediaArtifactRepository(resolveV2Client())
+}
+
+export function createMediaArtifactPersistenceRepository(): MediaArtifactPersistenceRepository {
+  return new PrismaMediaArtifactRepository(resolveV2Client())
+}
+
+export function createArtifactContentStorage(environment: NodeJS.ProcessEnv = process.env) {
+  return createLocalArtifactContentStorageFromEnvironment(environment)
+}
+
+export function createProjectMediaRepository(): ProjectMediaRepository {
+  return new PrismaProjectMediaRepository(resolveV2Client())
 }
 
 export function createMediaTransferRepository(): MediaTransferRepository {
@@ -267,14 +287,9 @@ export function createWebhookDeliveryDispatcher(
 export function createConfiguredWebhookSigningSecretProvider(
   environment: NodeJS.ProcessEnv = process.env,
 ): WebhookSigningSecretProvider {
-  const database = new PrismaWebhookSigningSecretProvider(
+  return new PrismaWebhookSigningSecretProvider(
     createProtectedPayloadCipherFromEnvironment(environment),
     resolveV2Client(),
-  )
-  if (!environment.APOLLO_V2_WEBHOOK_SIGNING_SECRETS_JSON?.trim()) return database
-  return createFallbackWebhookSigningSecretProvider(
-    database,
-    createEnvironmentWebhookSigningSecretProvider(environment),
   )
 }
 
@@ -518,12 +533,41 @@ export function createPublicOperationWorker(
   })
 }
 
+export function createMediaIngestWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const configuredLease = Number(environment.APOLLO_V2_INGEST_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS)
+  const configuredHeartbeat = Number(environment.APOLLO_V2_INGEST_HEARTBEAT_MS ?? environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
+  const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
+  const configuredRetryMax = Number(environment.APOLLO_V2_WORKER_RETRY_MAX_MS)
+  return runNextMediaIngestOperationService({
+    operations: createPublicOperationRepository(),
+    uploads: createMediaTransferRepository(),
+    artifacts: createMediaArtifactPersistenceRepository(),
+    projectMedia: createProjectMediaRepository(),
+    storage: createLocalMediaUploadStorageFromEnvironment(environment),
+    processor: createFfmpegIngestProcessorFromEnvironment(environment),
+    transcriber: createMediaTranscriberFromEnvironment(environment),
+    rights: createAssetRightsRepository(),
+    clock,
+    ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
+    ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
+    ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
+    ...(Number.isSafeInteger(configuredRetryMax) && configuredRetryMax > 0 ? { retryMaxDelayMs: configuredRetryMax } : {}),
+  })
+}
+
 export function createProjectCreationRepository(): ProjectCreationRepository {
   return new PrismaProjectCreationRepository(resolveV2Client())
 }
 
 export function createProjectQueryRepository(): ProjectQueryRepository {
   return new PrismaProjectQueryRepository(resolveV2Client())
+}
+
+export function createProjectWorkspaceQueryRepository(): ProjectWorkspaceQueryRepository {
+  return new PrismaProjectWorkspaceQueryRepository(resolveV2Client())
 }
 
 export function createWorkspaceRepository(): WorkspaceRepository {

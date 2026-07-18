@@ -96,8 +96,12 @@ export function runNextPublicOperationService(dependencies: {
       leaseOwner,
       now: claimedAt.toISOString(),
       leaseUntil: leaseWindow(claimedAt),
+      type: 'artifact-render',
     })
     if (!claimed) return null
+    if (claimed.context.kind !== 'artifact-render') {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Render worker claimed a non-render operation')
+    }
 
     const operationId = claimed.operation.id
     const attempt = claimed.lease.attempt

@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -7,6 +7,18 @@ const v2Root = join(repositoryRoot, 'src', 'v2')
 const publicRoutesRoot = join(repositoryRoot, 'src', 'app', 'v1')
 const legacyRuntimeRoot = join(repositoryRoot, 'src', 'lib')
 const compositionRoots = new Set(['public-api/authentication.ts'])
+const forbiddenLegacyPaths = [
+  'prisma/schema.prisma',
+  'src/app/api',
+  'src/app/project',
+  'src/app/assets',
+  'src/app/batches',
+  'src/app/capture',
+  'src/app/settings',
+  'src/components/ApolloEditorWorkspace.tsx',
+  'src/components/RemotionProjectPlayer.tsx',
+  'src/lib',
+]
 
 async function files(directory) {
   const entries = await readdir(directory, { withFileTypes: true })
@@ -32,6 +44,17 @@ function resolvesIntoLegacyRuntime(file, specifier) {
 }
 
 const violations = []
+for (const forbiddenPath of forbiddenLegacyPaths) {
+  try {
+    const target = join(repositoryRoot, forbiddenPath)
+    const metadata = await stat(target)
+    if (metadata.isFile() || (metadata.isDirectory() && (await files(target)).length > 0)) {
+      violations.push(`${forbiddenPath}: retired Apollo runtime path must not contain code`)
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+}
 for (const file of await files(v2Root)) {
   if (!/\.(ts|tsx)$/.test(file)) continue
   const rel = normalized(relative(v2Root, file))
@@ -70,4 +93,4 @@ if (violations.length) {
   console.error(violations.join('\n'))
   process.exit(1)
 }
-console.log('Architecture boundaries verified: V2 has no legacy runtime imports')
+console.log('Architecture boundaries verified: only the Postgres/API-first Apollo runtime exists')

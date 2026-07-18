@@ -72,6 +72,8 @@ const coverage = Object.freeze({
   },
   'apollo.media.uploads.parts.record': { mode: 'durable-covered', evidence: 'F0-088' },
   'apollo.media.uploads.complete': { mode: 'durable-covered', evidence: 'F0-088' },
+  'apollo.media.uploads.abort': { mode: 'durable-covered', evidence: 'atomic upload state transition followed by idempotent staged-byte cleanup' },
+  'apollo.media.uploads.content.put': { mode: 'durable-covered', evidence: 'signed immutable upload intent and atomic content storage tests' },
   'apollo.artifacts.download-grants.issue': { mode: 'durable-covered', evidence: 'F0-089' },
   'apollo.artifacts.download-grants.revoke': { mode: 'durable-covered', evidence: 'F0-089' },
   'apollo.clients.create': {
@@ -83,6 +85,8 @@ const coverage = Object.freeze({
   'apollo.clients.credentials.revoke': {
     mode: 'durable-covered', evidence: 'F0-073',
   },
+  'apollo.sessions.login': { mode: 'durable-covered', evidence: 'bounded signed UI session contract tests' },
+  'apollo.sessions.logout': { mode: 'durable-covered', evidence: 'idempotent UI session revocation contract tests' },
 })
 
 const externalCommands = FOUNDATION_CAPABILITIES.filter(
@@ -112,7 +116,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    27,
+    31,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

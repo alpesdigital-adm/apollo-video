@@ -12,10 +12,21 @@ export const PUBLIC_OPERATION_STATUSES = [
 
 export type PublicOperationStatus = (typeof PUBLIC_OPERATION_STATUSES)[number]
 
+export const PUBLIC_OPERATION_TYPES = ['artifact-render', 'media-ingest'] as const
+export type PublicOperationType = (typeof PUBLIC_OPERATION_TYPES)[number]
+
+export function requiresArtifactRenderCheckpoint(type: PublicOperationType): boolean {
+  return type === 'artifact-render'
+}
+
 export const PUBLIC_OPERATION_PHASES = [
   'queued',
   'materializing',
   'rendering',
+  'assembling',
+  'probing',
+  'normalizing',
+  'transcribing',
   'verifying',
   'persisting',
   'waiting',
@@ -54,7 +65,7 @@ export interface PublicOperation {
   id: string
   workspaceId: string
   clientId: string
-  type: 'artifact-render'
+  type: PublicOperationType
   status: PublicOperationStatus
   phase: PublicOperationPhase
   progress?: PublicOperationProgress
@@ -80,14 +91,33 @@ const TERMINAL_STATUSES = new Set<PublicOperationStatus>([
   'failed',
   'canceled',
 ])
-const RUNNING_PHASE_ORDER = [
+const RENDER_PHASE_ORDER = [
   'materializing',
   'rendering',
   'verifying',
   'persisting',
 ] as const
 
-export type PublicOperationRunningPhase = (typeof RUNNING_PHASE_ORDER)[number]
+const INGEST_PHASE_ORDER = [
+  'assembling',
+  'probing',
+  'normalizing',
+  'transcribing',
+  'verifying',
+  'persisting',
+] as const
+
+export type PublicOperationRunningPhase =
+  | (typeof RENDER_PHASE_ORDER)[number]
+  | (typeof INGEST_PHASE_ORDER)[number]
+
+function runningPhasesFor(type: PublicOperationType): readonly PublicOperationRunningPhase[] {
+  return type === 'artifact-render' ? RENDER_PHASE_ORDER : INGEST_PHASE_ORDER
+}
+
+function progressUnit(type: PublicOperationType): string {
+  return type === 'artifact-render' ? 'render' : 'stage'
+}
 
 function validateId(value: string, field: string): string {
   const normalized = value.trim()
@@ -168,7 +198,7 @@ export function assertPublicOperation(operation: PublicOperation): void {
   validateId(operation.workspaceId, 'operation.workspaceId')
   validateId(operation.clientId, 'operation.clientId')
   assertDomain(
-    operation.type === 'artifact-render',
+    PUBLIC_OPERATION_TYPES.includes(operation.type),
     'INVALID_PUBLIC_OPERATION',
     'PublicOperation type is invalid',
   )
@@ -268,9 +298,7 @@ export function assertPublicOperation(operation: PublicOperation): void {
   }
   if (operation.status === 'running') {
     assertDomain(
-      !['queued', 'waiting', 'retrying', 'completed', 'failed', 'canceled'].includes(
-        operation.phase,
-      ) &&
+      runningPhasesFor(operation.type).includes(operation.phase as PublicOperationRunningPhase) &&
         operation.attempt > 0 &&
         Boolean(operation.startedAt) &&
         !operation.completedAt &&
@@ -401,7 +429,7 @@ export function createQueuedPublicOperation(input: {
   id: string
   workspaceId: string
   clientId: string
-  type: 'artifact-render'
+  type: PublicOperationType
   target: PublicOperationTarget
   maxAttempts?: number
   createdAt: string
@@ -415,7 +443,7 @@ export function createQueuedPublicOperation(input: {
     type: input.type,
     status: 'queued',
     phase: 'queued',
-    progress: { completed: 0, total: 1, unit: 'render' },
+    progress: { completed: 0, total: 1, unit: progressUnit(input.type) },
     cancelable: true,
     retryable: false,
     target: {
@@ -478,8 +506,12 @@ export function startPublicOperationAttempt(
   return freezeOperation({
     ...operation,
     status: 'running',
-    phase: 'materializing',
-    progress: { completed: 0, total: 1, unit: 'render' },
+    phase: operation.type === 'artifact-render' ? 'materializing' : 'assembling',
+    progress: {
+      completed: 0,
+      total: runningPhasesFor(operation.type).length,
+      unit: progressUnit(operation.type),
+    },
     cancelable: true,
     retryable: false,
     attempt: operation.attempt + 1,
@@ -499,10 +531,9 @@ export function advancePublicOperationPhase(
   updatedAtValue: string,
 ): Readonly<PublicOperation> {
   assertPublicOperation(operation)
-  const currentIndex = RUNNING_PHASE_ORDER.indexOf(
-    operation.phase as PublicOperationRunningPhase,
-  )
-  const nextIndex = RUNNING_PHASE_ORDER.indexOf(phase)
+  const order = runningPhasesFor(operation.type)
+  const currentIndex = order.indexOf(operation.phase as PublicOperationRunningPhase)
+  const nextIndex = order.indexOf(phase)
   assertDomain(
     operation.status === 'running' && currentIndex >= 0 && nextIndex >= currentIndex,
     'INVALID_PUBLIC_OPERATION',
@@ -511,6 +542,7 @@ export function advancePublicOperationPhase(
   return freezeOperation({
     ...operation,
     phase,
+    progress: { completed: nextIndex, total: order.length, unit: progressUnit(operation.type) },
     updatedAt: transitionDate(operation, updatedAtValue),
   })
 }
@@ -530,7 +562,11 @@ export function succeedPublicOperation(
     ...operation,
     status: 'succeeded',
     phase: 'completed',
-    progress: { completed: 1, total: 1, unit: 'render' },
+    progress: {
+      completed: runningPhasesFor(operation.type).length,
+      total: runningPhasesFor(operation.type).length,
+      unit: progressUnit(operation.type),
+    },
     cancelable: false,
     retryable: false,
     result: { resource: { ...operation.target } },

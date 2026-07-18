@@ -1,6 +1,14 @@
 import { assertDomain } from '../domain/errors.ts'
 import { createMediaUploadPart } from '../domain/media-transfer.ts'
-import type { MediaTransferRepository, MediaUploadVerifier } from './ports/media-transfer-repository.ts'
+import type { MediaTransferRepository, MediaUploadContentStorage, MediaUploadVerifier } from './ports/media-transfer-repository.ts'
+
+export function abortMediaUploadService(dependencies: { repository: MediaTransferRepository; storage: MediaUploadContentStorage }) {
+  return async function abort(input: { workspaceId: string; clientId: string; uploadId: string }) {
+    const upload = await dependencies.repository.markUploadAborted(input)
+    await dependencies.storage.discard(input.uploadId)
+    return Object.freeze({ uploadId: upload.id, status: upload.status, aborted: true as const })
+  }
+}
 
 export function inspectMediaUploadService(dependencies: { repository: MediaTransferRepository }) {
   return async function inspect(input: { workspaceId: string; clientId: string; uploadId: string }) {

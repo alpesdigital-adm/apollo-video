@@ -23,6 +23,9 @@ model V2Workspace {
   idempotencyRecords              V2IdempotencyRecord[]
   mediaArtifacts                  V2MediaArtifact[]
   mediaUploads                    V2MediaUpload[]
+  projectMediaAssets              V2ProjectMediaAsset[]
+  mediaTranscripts                V2MediaTranscript[]
+  mediaIngestOperations           V2MediaIngestOperation[]
   mediaDownloadGrants             V2MediaDownloadGrant[]
   mediaManifests                  V2MediaArtifactManifest[]
   mediaLineage                    V2MediaArtifactLineage[]
@@ -99,6 +102,9 @@ model V2MediaUpload {
   id                 String    @id @db.Uuid
   workspaceId        String    @db.VarChar(128)
   clientId           String    @db.VarChar(80)
+  projectId          String?   @db.VarChar(128)
+  fileName           String?   @db.VarChar(240)
+  rightsConfirmed    Boolean   @default(false)
   kind               String    @db.VarChar(16)
   byteSize           BigInt
   mimeType           String    @db.VarChar(160)
@@ -116,14 +122,18 @@ model V2MediaUpload {
   createdAt          DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
 
-  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  client    V2ApiClient         @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  parts     V2MediaUploadPart[]
+  workspace       V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  client          V2ApiClient             @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  project         V2Project?              @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  parts           V2MediaUploadPart[]
+  projectAssets   V2ProjectMediaAsset[]
+  ingestOperation V2MediaIngestOperation?
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
   @@index([workspaceId, status, createdAt(sort: Desc)])
   @@index([workspaceId, status, expiresAt])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@map("media_uploads")
 }
 
@@ -159,10 +169,14 @@ model V2Project {
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
   updatedAt        DateTime @updatedAt @db.Timestamptz(3)
 
-  workspace      V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  versions       V2ProjectVersion[]  @relation("ProjectVersions")
-  snapshots      V2ProjectSnapshot[]
-  currentVersion V2ProjectVersion?   @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace             V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  versions              V2ProjectVersion[]       @relation("ProjectVersions")
+  snapshots             V2ProjectSnapshot[]
+  currentVersion        V2ProjectVersion?        @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  mediaUploads          V2MediaUpload[]
+  mediaAssets           V2ProjectMediaAsset[]
+  mediaTranscripts      V2MediaTranscript[]
+  mediaIngestOperations V2MediaIngestOperation[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -265,6 +279,8 @@ model V2MediaArtifact {
   materializationTargets V2MaterializationAuthorization[] @relation("MaterializationTarget")
   renderOperationTargets V2ArtifactRenderOperation[]      @relation("ArtifactRenderTarget")
   downloadGrants         V2MediaDownloadGrant[]
+  projectAssets          V2ProjectMediaAsset[]
+  transcriptSources      V2MediaTranscript[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -312,13 +328,14 @@ model V2MediaArtifactManifest {
   manifestJson        String   @db.Text
   createdAt           DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace        V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  artifact         V2MediaArtifact                  @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  lineageEdges     V2MediaArtifactLineage[]
-  recipeParameters V2RecipeParameterPayload?        @relation(fields: [recipeParametersRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
-  renderInput      V2RenderInputPayload?            @relation(fields: [renderInputRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
-  materializations V2MaterializationAuthorization[]
-  renderOperations V2ArtifactRenderOperation[]
+  workspace         V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact          V2MediaArtifact                  @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  lineageEdges      V2MediaArtifactLineage[]
+  recipeParameters  V2RecipeParameterPayload?        @relation(fields: [recipeParametersRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
+  renderInput       V2RenderInputPayload?            @relation(fields: [renderInputRef, workspaceId], references: [ref, workspaceId], onDelete: Restrict)
+  materializations  V2MaterializationAuthorization[]
+  renderOperations  V2ArtifactRenderOperation[]
+  transcriptSources V2MediaTranscript[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, manifestHash])
@@ -532,6 +549,7 @@ model V2PublicOperation {
   workspace      V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   client         V2ApiClient                @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   artifactRender V2ArtifactRenderOperation?
+  mediaIngest    V2MediaIngestOperation?
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
@@ -543,6 +561,75 @@ model V2PublicOperation {
   @@index([status, leaseExpiresAt, createdAt])
   @@index([status, nextAttemptAt, createdAt])
   @@map("public_operations")
+}
+
+model V2MediaIngestOperation {
+  operationId      String   @id @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  uploadId         String   @unique @db.Uuid
+  projectId        String   @db.VarChar(128)
+  sourceArtifactId String   @db.VarChar(128)
+  sourceManifestId String   @db.VarChar(128)
+  originalFileName String   @db.VarChar(240)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  operation V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  upload    V2MediaUpload     @relation(fields: [uploadId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  project   V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([operationId, workspaceId])
+  @@unique([uploadId, workspaceId])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId])
+  @@map("media_ingest_operations")
+}
+
+model V2ProjectMediaAsset {
+  id               String   @id @db.Uuid
+  workspaceId      String   @db.VarChar(128)
+  projectId        String   @db.VarChar(128)
+  artifactId       String   @db.VarChar(128)
+  uploadId         String?  @db.Uuid
+  role             String   @db.VarChar(32)
+  originalFileName String   @db.VarChar(240)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace V2Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  artifact  V2MediaArtifact @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  upload    V2MediaUpload?  @relation(fields: [uploadId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([projectId, artifactId, role])
+  @@unique([uploadId, role])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, artifactId])
+  @@map("project_media_assets")
+}
+
+model V2MediaTranscript {
+  id               String   @id @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  projectId        String   @db.VarChar(128)
+  sourceArtifactId String   @db.VarChar(128)
+  sourceManifestId String   @db.VarChar(128)
+  schemaVersion    String   @db.VarChar(64)
+  language         String   @db.VarChar(35)
+  provider         String   @db.VarChar(64)
+  model            String   @db.VarChar(128)
+  transcriptHash   String   @db.Char(64)
+  transcriptJson   String   @db.Text
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace      V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact V2MediaArtifact         @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceManifest V2MediaArtifactManifest @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([sourceArtifactId, transcriptHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId])
+  @@map("media_transcripts")
 }
 
 model V2ArtifactRenderOperation {

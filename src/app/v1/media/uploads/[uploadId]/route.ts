@@ -15,7 +15,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ upl
     const { uploadId } = await context.params
     const result = await inspectMediaUploadService({ repository: createMediaTransferRepository() })({ workspaceId: actor.workspaceId, clientId: actor.clientId, uploadId })
     return NextResponse.json(presentSuccess({
-      upload: { id: result.upload!.id, kind: result.upload!.kind, size: result.upload!.byteSize, mimeType: result.upload!.mimeType, checksum: result.upload!.expectedSha256, status: result.upload!.status, expiresAt: result.upload!.expiresAt, createdAt: result.upload!.createdAt },
+      upload: { id: result.upload!.id, projectId: result.upload!.projectId, fileName: result.upload!.fileName, rightsConfirmed: result.upload!.rightsConfirmed, kind: result.upload!.kind, size: result.upload!.byteSize, mimeType: result.upload!.mimeType, checksum: result.upload!.expectedSha256, status: result.upload!.status, expiresAt: result.upload!.expiresAt, createdAt: result.upload!.createdAt },
       parts: result.parts,
       missingPartNumbers: result.missingPartNumbers,
     }), { headers: publicApiHeaders(requestId) })

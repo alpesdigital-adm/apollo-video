@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 
 import { DomainError } from '../../domain/errors.ts'
 import type { MediaUploadSessionSigner } from '../../application/ports/media-transfer-repository.ts'
@@ -30,6 +30,41 @@ export class HmacMediaUploadSessionSigner implements MediaUploadSessionSigner {
     url.searchParams.set('token', token)
     return Object.freeze({ partUrlTemplate: url.toString().replace('%7BpartNumber%7D', '{partNumber}') })
   }
+
+  authorize(token: string, now: Date = new Date()) {
+    const [payload, signature, extra] = token.split('.')
+    if (!payload || !signature || extra) {
+      throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Signed upload token is invalid')
+    }
+    const expected = createHmac('sha256', this.secret).update(payload).digest('base64url')
+    const receivedBytes = Buffer.from(signature)
+    const expectedBytes = Buffer.from(expected)
+    if (receivedBytes.length !== expectedBytes.length || !timingSafeEqual(receivedBytes, expectedBytes)) {
+      throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Signed upload token is invalid')
+    }
+    let value: Record<string, unknown>
+    try {
+      value = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>
+    } catch {
+      throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Signed upload token is invalid')
+    }
+    if (
+      value.v !== 1 || Object.keys(value).some((key) => !['v', 'workspaceId', 'clientId', 'uploadId', 'mode', 'maxParts', 'expiresAt'].includes(key)) ||
+      typeof value.workspaceId !== 'string' || typeof value.clientId !== 'string' || typeof value.uploadId !== 'string' ||
+      !['single', 'multipart'].includes(value.mode as string) || !Number.isInteger(value.maxParts) ||
+      typeof value.expiresAt !== 'string' || Number.isNaN(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= now.getTime()
+    ) {
+      throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Signed upload token is invalid or expired')
+    }
+    return Object.freeze({
+      workspaceId: value.workspaceId,
+      clientId: value.clientId,
+      uploadId: value.uploadId,
+      mode: value.mode as 'single' | 'multipart',
+      maxParts: value.maxParts as number,
+      expiresAt: new Date(value.expiresAt).toISOString(),
+    })
+  }
 }
 
 export function createMediaUploadSessionSignerFromEnvironment(environment: NodeJS.ProcessEnv = process.env) {
@@ -37,4 +72,8 @@ export function createMediaUploadSessionSignerFromEnvironment(environment: NodeJ
     baseUrl: environment.APOLLO_MEDIA_UPLOAD_BASE_URL ?? 'http://127.0.0.1:3333/',
     secret: environment.APOLLO_MEDIA_UPLOAD_SIGNING_SECRET ?? '',
   })
+}
+
+export function createMediaUploadSessionAuthorizerFromEnvironment(environment: NodeJS.ProcessEnv = process.env) {
+  return createMediaUploadSessionSignerFromEnvironment(environment)
 }

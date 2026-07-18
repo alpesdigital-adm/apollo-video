@@ -1,3 +1,0 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createDirectorBudget, reserveDirectorBudget, settleDirectorBudget, cancelDirectorBudget } from '@/v2/domain/director-budget'
-export async function POST(request: NextRequest) { try { const body = await request.json(); const action = body.action ?? 'create'; const state = action === 'create' ? createDirectorBudget(body.runId, body.limits) : action === 'reserve' ? reserveDirectorBudget(body.state, body.estimate) : action === 'settle' ? settleDirectorBudget(body.state, body.estimate, body.actual) : cancelDirectorBudget(body.state); return NextResponse.json({ state }) } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : 'Budget inválido' }, { status: 400 }) } }

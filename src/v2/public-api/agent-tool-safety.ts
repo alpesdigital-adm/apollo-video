@@ -167,7 +167,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none', reason: 'Records one numbered receipt for one authorized multipart upload.',
     },
     'apollo.media.uploads.complete': {
-      impact: 'bounded', confirmation: 'none', reason: 'Verifies and closes one checksum-bound upload without starting ingest.',
+      impact: 'bounded', confirmation: 'none', reason: 'Verifies one checksum-bound upload and queues its project-scoped ingest operation.',
+    },
+    'apollo.media.uploads.abort': {
+      impact: 'destructive', confirmation: 'human-approval', reason: 'Permanently closes one staged upload and discards its unverified bytes.',
     },
     'apollo.artifacts.download-grants.issue': {
       impact: 'bounded', confirmation: 'none', reason: 'Issues one short-lived artifact-scoped download authorization.',

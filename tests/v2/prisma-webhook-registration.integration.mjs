@@ -125,9 +125,6 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const { nodeApiCredentialCrypto } = await import(
     '../../src/v2/infrastructure/security/api-credential.ts'
   )
-  const { createEnvironmentWebhookSigningSecretProvider } = await import(
-    '../../src/v2/infrastructure/security/environment-webhook-signing-secret-provider.ts'
-  )
   const { createAesRecipeParameterCipher } = await import(
     '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
   )
@@ -1470,15 +1467,17 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const activeWebhookSigningKey = Buffer.alloc(32, 43)
     const dispatchDelivery = dispatchWebhookDeliveryService({
       repository: deliveryRepository,
-      secrets: createEnvironmentWebhookSigningSecretProvider({
-        APOLLO_V2_WEBHOOK_SIGNING_SECRETS_JSON: JSON.stringify([{
-          workspaceId,
-          endpointId: endpoint.id,
-          keyRef: thirdActivatedRotation.activatedSecret.keyRef,
-          version: thirdActivatedRotation.activatedSecret.version,
-          secretBase64url: activeWebhookSigningKey.toString('base64url'),
-        }]),
-      }),
+      secrets: {
+        async open(request) {
+          assert.deepEqual(request, {
+            workspaceId,
+            endpointId: endpoint.id,
+            keyRef: thirdActivatedRotation.activatedSecret.keyRef,
+            version: thirdActivatedRotation.activatedSecret.version,
+          })
+          return Uint8Array.from(activeWebhookSigningKey)
+        },
+      },
       transport: {
         async send(transportRequest) {
           const eventBody = JSON.parse(Buffer.from(transportRequest.rawBody).toString('utf8'))

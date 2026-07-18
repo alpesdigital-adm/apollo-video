@@ -6,6 +6,7 @@ import {
   cancelPublicOperation,
   createQueuedPublicOperation,
   retryOrFailPublicOperation,
+  requiresArtifactRenderCheckpoint,
   startPublicOperationAttempt,
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
@@ -13,6 +14,11 @@ import {
   calculatePublicOperationRetryDelayMs,
   runNextPublicOperationService,
 } from '../../src/v2/application/run-public-operation-worker.ts'
+
+test('only artifact render completion requires an output checkpoint', () => {
+  assert.equal(requiresArtifactRenderCheckpoint('artifact-render'), true)
+  assert.equal(requiresArtifactRenderCheckpoint('media-ingest'), false)
+})
 
 function createClock() {
   let current = Date.parse('2026-07-14T12:00:00.000Z')
@@ -37,6 +43,7 @@ function createOperations() {
   let denyHeartbeat = false
   let allowExpiredClaim = false
   const context = Object.freeze({
+    kind: 'artifact-render',
     authorizationId: 'authorization-worker-test',
     inputHash: 'a'.repeat(64),
   })

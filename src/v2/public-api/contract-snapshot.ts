@@ -35,6 +35,7 @@ function snapshotCapability(capability: PublicCapability) {
     requestBodyRequired: capability.inputSchemaRef
       ? capability.requestBodyRequired ?? true
       : undefined,
+    ...(capability.requestMediaType ? { requestMediaType: capability.requestMediaType } : {}),
     responseMediaType: capability.responseMediaType ?? 'application/json',
   }
 }

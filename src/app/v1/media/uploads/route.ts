@@ -18,14 +18,20 @@ export async function POST(request: NextRequest) {
     const idempotencyKey = request.headers.get('idempotency-key') ?? ''
     let body: Record<string, unknown>
     try { body = await request.json() as Record<string, unknown> } catch { throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON') }
+    if (typeof body.projectId !== 'string' || typeof body.fileName !== 'string' || body.rightsConfirmed !== true || body.kind !== 'video') {
+      throw new DomainError('INVALID_ARGUMENT', 'projectId, fileName, rightsConfirmed=true and kind=video are required')
+    }
     const result = await beginMediaUploadService({ repository: createMediaTransferRepository() })({
       workspaceId: actor.workspaceId, clientId: actor.clientId, idempotencyKey,
-      kind: body.kind as 'video' | 'audio' | 'image', size: body.size as string,
+      projectId: body.projectId, fileName: body.fileName, rightsConfirmed: true,
+      kind: 'video', size: body.size as string,
       mimeType: body.mimeType as string, checksum: body.checksum as string,
     })
     return NextResponse.json(presentSuccess({
       upload: {
         id: result.upload.id, kind: result.upload.kind, size: result.upload.byteSize,
+        projectId: result.upload.projectId, fileName: result.upload.fileName,
+        rightsConfirmed: result.upload.rightsConfirmed,
         mimeType: result.upload.mimeType, checksum: result.upload.expectedSha256,
         status: result.upload.status, expiresAt: result.upload.expiresAt, createdAt: result.upload.createdAt,
       },
