@@ -1,5 +1,8 @@
 import type { PublicCapability } from './capability-registry.ts'
-import { FOUNDATION_CAPABILITIES } from './capability-registry.ts'
+import {
+  FOUNDATION_CAPABILITIES,
+  resolveCapabilityAuthScheme,
+} from './capability-registry.ts'
 import {
   PUBLIC_SCHEMAS,
   getPublicSchema,
@@ -22,8 +25,11 @@ function schemaReference(ref: string) {
 
 function securityFor(capability: PublicCapability) {
   if (capability.authMode === 'none') return []
-  if (capability.authMode === 'optional') return [{}, { bearerAuth: [] }]
-  return [{ bearerAuth: [] }]
+  const scheme = resolveCapabilityAuthScheme(capability) === 'ui-session'
+    ? 'uiSession'
+    : 'bearerAuth'
+  if (capability.authMode === 'optional') return [{}, { [scheme]: [] }]
+  return [{ [scheme]: [] }]
 }
 
 function parametersFor(capability: PublicCapability) {
@@ -99,7 +105,7 @@ function responsesFor(capability: PublicCapability) {
       },
     },
   }
-  for (const status of [401, 403, 404, 409, 422, 500, 502]) {
+  for (const status of [401, 403, 404, 409, 422, 429, 500, 502, 503]) {
     responses[String(status)] = errorResponse
   }
   if (capability.precondition === 'if-match') {
@@ -160,6 +166,7 @@ export function createOpenApiDocument(
     components: {
       securitySchemes: {
         bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'Apollo service credential' },
+        uiSession: { type: 'apiKey', in: 'cookie', name: 'apollo_session' },
       },
       schemas,
     },

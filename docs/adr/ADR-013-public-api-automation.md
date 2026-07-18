@@ -33,6 +33,8 @@ Toda capacidade operável deve ser acessível por ferramentas e agentes externos
 
 O domínio depende de `AuthenticatedExternalActor`. O ADR-010 escolhe credenciais opacas e revogáveis de service account como primeiro mecanismo de produção, com múltiplas credenciais por client e rotação expand-contract. OAuth 2.1 permanece previsto para delegação e integrações multiusuário.
 
+Autenticação humana também obedece à regra API-first. `POST`, `GET` e `DELETE /v1/session` formam o contrato versionado de login, inspeção e logout usado pela Web App e por clientes HTTP que preservem cookies. O cookie é HTTP-only e nunca aparece no body. Essas capabilities não são tools de agente; automações continuam usando Bearer de `ApiClient`, sem receber senha ou sessão humana. O bootstrap humano baseado em configuração local é provisório e não substitui a futura identidade OIDC, `WorkspaceMember`, recuperação de conta nem revogação persistente de sessões.
+
 ## Consequências
 
 - Endpoint novo não pode inventar regra paralela.

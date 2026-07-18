@@ -44,7 +44,7 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 - [ ] Limitar legendas a blocos curtos, respeitar âncora e manter a região de rosto/olhos livre.
 - [ ] Expor corte editorial no modelo de `Command` V2, com nova versão imutável, alinhamento às palavras e retiming da transcrição.
 - [ ] Criar regressões automatizadas para autenticação e cortes editoriais.
-- [ ] Publicar a nova autenticação própria do Apollo e remover o Basic Auth do proxy.
+- [ ] Publicar a nova autenticação própria do Apollo exclusivamente pela API `/v1/session`, com capabilities, schemas, OpenAPI e E2E; remover o Basic Auth do proxy.
 - [ ] Importar o master do projeto de teste como artifact V2 e aplicar via API a remoção de datas, “dia 8” e “dois dias de aula”.
 - [ ] Implementar a jornada executável V2: briefing → percepção → `TreatmentPlan` → `StoryPlan` → `EditPlan` → critic → proxy/final.
 - [ ] Remover da superfície executável da aplicação todas as chamadas às rotas e serviços legados.
@@ -469,6 +469,9 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 ### F0.031 — Autenticação, shell e navegação
 
 - [ ] Selecionar mecanismo de autenticação e documentar sessão, expiração e recuperação de conta. Evidência: T-F0.031 e ADR-134.
+- [ ] Publicar `apollo.sessions.login`, `apollo.sessions.read` e `apollo.sessions.logout` no capability registry/OpenAPI; login humano usa cookie HTTP-only e automações usam Bearer de `ApiClient`. Evidência: FR-240/FR-242, ADR-010/013 e Spec 09 §7.1.
+- [ ] Impedir que capabilities de sessão humana recebam `toolName` ou sejam expostas ao MCP/Director; password deve ser `writeOnly` e ausente de logs/eventos. Evidência: security/contract tests de F0.031.
+- [ ] Substituir rate limit local por store distribuído e auditável, com revogação de sessão e proteção contra brute force antes de produção. Evidência: security/integration tests de F0.031.
 - [ ] Implementar sign-in/sign-out e proteção server-side das rotas v2. Evidência: T-F0.031 e ADR-134.
 - [ ] Criar `WorkspaceMember` a partir de identidade autenticada e papel ativo. Evidência: T-F0.031 e ADR-134.
 - [ ] Implementar shell com navegação para projetos, lotes, biblioteca, apresentadores, marca e settings. Evidência: T-F0.031 e ADR-134.

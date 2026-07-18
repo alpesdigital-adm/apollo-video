@@ -111,6 +111,15 @@ test('OpenAPI derives auth, idempotency and optional request bodies from capabil
   const capabilities = document.paths['/v1/capabilities'].get
   assert.deepEqual(capabilities.security, [{}, { bearerAuth: [] }])
 
+  const login = document.paths['/v1/session'].post
+  const readSession = document.paths['/v1/session'].get
+  const logout = document.paths['/v1/session'].delete
+  assert.deepEqual(login.security, [])
+  assert.deepEqual(readSession.security, [{ uiSession: [] }])
+  assert.deepEqual(logout.security, [{}, { uiSession: [] }])
+  assert.equal(login.requestBody.content['application/json'].schema.$ref, '#/components/schemas/UiSessionCreateRequestV1')
+  assert.equal(document.components.securitySchemes.uiSession.in, 'cookie')
+
   const readRights = document.paths['/v1/artifacts/{artifactId}/rights'].get
   assert.ok(readRights.responses['200'].headers.ETag)
   const setRights = document.paths['/v1/artifacts/{artifactId}/rights'].put
@@ -186,7 +195,10 @@ test('agent tools compose transport inputs and structured outputs from capabilit
   const tools = agentToolsForCapabilities(
     capabilitiesForScopes(FOUNDATION_CAPABILITIES, grantedScopes),
   )
-  assert.equal(tools.length, FOUNDATION_CAPABILITIES.length)
+  assert.equal(
+    tools.length,
+    FOUNDATION_CAPABILITIES.filter((capability) => capability.toolName).length,
+  )
   assert.equal(new Set(tools.map((tool) => tool.name)).size, tools.length)
   assert.ok(tools.every((tool) => Object.isFrozen(tool)))
 

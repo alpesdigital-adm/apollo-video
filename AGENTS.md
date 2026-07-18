@@ -71,6 +71,7 @@ Requisitos estruturais:
 - mudanças manuais e decisões do Diretor usam o mesmo modelo de `Command`;
 - UI e API externa chamam os mesmos application services;
 - toda capacidade operável possui API externa, capability ID e contract test;
+- autenticação também é API-first: sign-in, leitura da sessão e sign-out humanos possuem contratos `/v1` públicos; automações usam credenciais Bearer de `ApiClient`, sem compartilhar senha humana com agentes;
 - jobs longos são duráveis, retomáveis, idempotentes e observáveis;
 - providers ficam atrás de ports/adapters novos e não aparecem no domínio;
 - `TreatmentPlan`, `StoryPlan`, `EditPlan`, `DirectorRun`, `QualityReport` e artifacts são persistidos e realmente usados;

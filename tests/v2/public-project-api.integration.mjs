@@ -498,6 +498,11 @@ test('authenticated public API manages projects, clients and artifact inspection
     const uiLoginPayload = await uiLoginResponse.json()
     assert.equal(uiLoginResponse.status, 200, JSON.stringify(uiLoginPayload))
     assert.equal(uiLoginPayload.data.redirectTo, '/')
+    assert.equal(uiLoginPayload.data.subject, uiUsername)
+    assert.equal(uiLoginPayload.data.workspaceId, workspaceId)
+    assert.match(uiLoginPayload.data.expiresAt, /^\d{4}-\d{2}-\d{2}T/)
+    assert.equal(uiLoginResponse.headers.get('apollo-api-version'), 'v1')
+    assert.ok(uiLoginResponse.headers.get('apollo-request-id'))
     const uiSession = uiLoginResponse.headers
       .get('set-cookie')
       ?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
@@ -507,6 +512,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     const uiSessionPayload = await uiSessionResponse.json()
     assert.equal(uiSessionResponse.status, 200)
+    assert.equal(uiSessionPayload.data.subject, uiUsername)
     assert.equal(uiSessionPayload.data.workspaceId, workspaceId)
     const uiProjectListResponse = await fetch(`${baseUrl}/v1/projects`, {
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
@@ -517,6 +523,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     const openApi = await openApiResponse.json()
     assert.equal(openApiResponse.status, 200)
     assert.equal(openApi.openapi, '3.1.0')
+    assert.deepEqual(openApi.paths['/v1/session'].post.security, [])
+    assert.deepEqual(openApi.paths['/v1/session'].get.security, [{ uiSession: [] }])
+    assert.deepEqual(openApi.paths['/v1/session'].delete.security, [{}, { uiSession: [] }])
     assert.equal(
       openApi.paths['/v1/workspaces/{workspaceId}/clients'].post["x-apollo-capability-id"],
       'apollo.clients.create',
@@ -899,6 +908,12 @@ test('authenticated public API manages projects, clients and artifact inspection
       ),
       true,
     )
+    assert.equal(
+      anonymousCapabilities.data.capabilities.some(
+        (capability) => capability.id === 'apollo.sessions.login' && !capability.toolName,
+      ),
+      true,
+    )
     const capabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`, {
       headers: { authorization },
     })
@@ -908,6 +923,9 @@ test('authenticated public API manages projects, clients and artifact inspection
       capabilities.data.capabilities.map((capability) => capability.id),
       [
         'apollo.health.read',
+        'apollo.sessions.login',
+        'apollo.sessions.read',
+        'apollo.sessions.logout',
         'apollo.capabilities.list',
         'apollo.tools.list',
         'apollo.projects.list',
@@ -1013,7 +1031,13 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(toolsResponse.status, 200)
     assert.deepEqual(
       tools.data.tools.map((tool) => tool.apollo.capabilityId),
-      capabilities.data.capabilities.map((capability) => capability.id),
+      capabilities.data.capabilities
+        .filter((capability) => capability.toolName)
+        .map((capability) => capability.id),
+    )
+    assert.equal(
+      tools.data.tools.some((tool) => tool.apollo.capabilityId.startsWith('apollo.sessions.')),
+      false,
     )
     assert.equal(
       tools.data.tools.some((tool) => tool.name === 'apollo.events.catalog.read'),
@@ -2227,6 +2251,9 @@ test('authenticated public API manages projects, clients and artifact inspection
       childCapabilities.data.capabilities.map((capability) => capability.id),
       [
         'apollo.health.read',
+        'apollo.sessions.login',
+        'apollo.sessions.read',
+        'apollo.sessions.logout',
         'apollo.capabilities.list',
         'apollo.tools.list',
         'apollo.events.catalog.read',

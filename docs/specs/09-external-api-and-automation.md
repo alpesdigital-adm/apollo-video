@@ -156,6 +156,22 @@ Regras:
 
 ADR-013 escolhe OAuth 2.1, signed service keys ou ambos. O domínio depende de `AuthenticatedExternalActor`, não do mecanismo concreto.
 
+### 7.1 Sessão humana também é API
+
+A Web App não possui um caminho privilegiado de autenticação. O contrato público inicial é:
+
+| Capability | Método e rota | Autenticação da operação | Resultado |
+|---|---|---|---|
+| `apollo.sessions.login` | `POST /v1/session` | nenhuma; credenciais no body protegido por TLS | cria cookie de sessão HTTP-only e devolve subject, workspace e expiração |
+| `apollo.sessions.read` | `GET /v1/session` | cookie `apollo_session` | devolve a sessão corrente sem token ou secret |
+| `apollo.sessions.logout` | `DELETE /v1/session` | cookie opcional | expira o cookie de modo idempotente |
+
+O schema de login marca password como `writeOnly`; logs, errors, analytics e eventos nunca registram username/password. Rate limit é aplicado antes da derivação de senha. Cookie usa `HttpOnly`, `SameSite=Strict`, `Secure` em HTTPS, path `/` e duração máxima documentada.
+
+Essas capabilities aparecem em OpenAPI/capability discovery, mas não recebem `toolName`: agentes e MCP não devem solicitar nem manipular senha humana. Automação usa exclusivamente `Authorization: Bearer <ApiCredential>` e pode operar todas as capabilities permitidas por seus scopes sem criar sessão humana.
+
+O bootstrap local de usuário único é transitório e não conclui F0.031. Produção multiusuário exige identidade persistida, `WorkspaceMember`, recuperação de conta, revogação de sessões, armazenamento distribuído de rate limit e OIDC/OAuth 2.1 conforme ADR específico.
+
 ## 8. Escopos
 
 Formato: `<resource>:<action>`, com escopo administrativo separado.

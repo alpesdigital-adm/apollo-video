@@ -22,6 +22,9 @@ test('foundation registry exposes health and discovery without scopes', () => {
     visible.map((capability) => capability.id),
     [
       'apollo.health.read',
+      'apollo.sessions.login',
+      'apollo.sessions.read',
+      'apollo.sessions.logout',
       'apollo.capabilities.list',
       'apollo.tools.list',
       'apollo.events.catalog.read',
@@ -30,6 +33,20 @@ test('foundation registry exposes health and discovery without scopes', () => {
     ],
   )
   assert.ok(visible.every((capability) => Object.isFrozen(capability)))
+})
+
+test('human session capabilities are public contracts but never agent tools', () => {
+  const sessions = FOUNDATION_CAPABILITIES.filter((capability) =>
+    capability.id.startsWith('apollo.sessions.'),
+  )
+
+  assert.deepEqual(sessions.map((capability) => capability.id), [
+    'apollo.sessions.login',
+    'apollo.sessions.read',
+    'apollo.sessions.logout',
+  ])
+  assert.ok(sessions.every((capability) => capability.toolName === undefined))
+  assert.equal(sessions.find((capability) => capability.id.endsWith('.read')).authScheme, 'ui-session')
 })
 test('scope filtering is deny-by-default', () => {
   const registry = defineCapabilityRegistry([

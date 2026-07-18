@@ -11,6 +11,8 @@ import {
   verifyUiPassword,
   verifyUiSession,
 } from '@/v2/infrastructure/security/ui-session'
+import { publicApiHeaders, resolveRequestId } from '@/v2/public-api/errors'
+import { presentSuccess } from '@/v2/public-api/presenters'
 
 interface AttemptWindow { count: number; resetAt: number }
 
@@ -46,38 +48,76 @@ function secureCookie(request: NextRequest): boolean {
   return request.nextUrl.protocol === 'https:' || forwardedProto === 'https'
 }
 
+function sessionError(
+  requestId: string,
+  status: number,
+  code: string,
+  message: string,
+  options: { retryable?: boolean; retryAfter?: number; category?: 'auth' | 'validation' | 'internal' } = {},
+) {
+  return NextResponse.json(
+    {
+      error: {
+        code,
+        message,
+        category: options.category ?? 'auth',
+        retryable: options.retryable ?? false,
+        requestId,
+      },
+    },
+    {
+      status,
+      headers: {
+        ...publicApiHeaders(requestId),
+        ...(options.retryAfter ? { 'Retry-After': String(options.retryAfter) } : {}),
+      },
+    },
+  )
+}
+
 export async function GET(request: NextRequest) {
+  const requestId = resolveRequestId(request)
   const session = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
   if (!session) {
-    return NextResponse.json(
-      { error: { code: 'AUTH_INVALID', message: 'Entre para continuar.' } },
-      { status: 401 },
+    return sessionError(requestId, 401, 'AUTH_INVALID', 'Entre para continuar.')
+  }
+  let client
+  try {
+    client = await createApiClientRepository().findActiveClientById(session.clientId)
+  } catch {
+    return sessionError(
+      requestId,
+      503,
+      'AUTH_UNAVAILABLE',
+      'Não foi possível validar a sessão agora.',
+      { retryable: true, category: 'internal' },
     )
   }
-  const client = await createApiClientRepository().findActiveClientById(session.clientId)
   if (!client) {
-    return NextResponse.json(
-      { error: { code: 'AUTH_INVALID', message: 'A sessão não está mais autorizada.' } },
-      { status: 401 },
-    )
+    return sessionError(requestId, 401, 'AUTH_INVALID', 'A sessão não está mais autorizada.')
   }
-  return NextResponse.json({
-    data: {
+  return NextResponse.json(
+    presentSuccess({
       subject: session.subject,
       workspaceId: client.workspaceId,
       expiresAt: new Date(session.expiresAt * 1000).toISOString(),
-    },
-  })
+    }),
+    { headers: publicApiHeaders(requestId) },
+  )
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = resolveRequestId(request)
   const key = clientKey(request)
   const existing = attempts.get(key)
   if (existing && existing.count >= MAX_ATTEMPTS && existing.resetAt > Date.now()) {
     const retryAfter = Math.max(1, Math.ceil((existing.resetAt - Date.now()) / 1000))
-    return NextResponse.json(
-      { error: { code: 'LOGIN_RATE_LIMITED', message: 'Muitas tentativas. Aguarde alguns minutos.' } },
-      { status: 429, headers: { 'retry-after': String(retryAfter) } },
+    return sessionError(
+      requestId,
+      429,
+      'LOGIN_RATE_LIMITED',
+      'Muitas tentativas. Aguarde alguns minutos.',
+      { retryable: true, retryAfter },
     )
   }
 
@@ -85,9 +125,12 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json() as typeof body
   } catch {
-    return NextResponse.json(
-      { error: { code: 'INVALID_LOGIN', message: 'Preencha usuário e senha.' } },
-      { status: 400 },
+    return sessionError(
+      requestId,
+      422,
+      'INVALID_LOGIN',
+      'Preencha usuário e senha.',
+      { category: 'validation' },
     )
   }
   const username = typeof body.username === 'string' ? body.username.trim() : ''
@@ -98,53 +141,77 @@ export async function POST(request: NextRequest) {
     clientId = configuredUiApiClientId()
     validCredentials = verifyUiPassword(username, password)
   } catch {
-    return NextResponse.json(
-      { error: { code: 'LOGIN_NOT_CONFIGURED', message: 'O acesso ao Apollo ainda não foi configurado.' } },
-      { status: 503 },
+    return sessionError(
+      requestId,
+      503,
+      'LOGIN_NOT_CONFIGURED',
+      'O acesso ao Apollo ainda não foi configurado.',
+      { category: 'internal' },
     )
   }
   const result = consumeAttempt(key, validCredentials)
   if (!validCredentials) {
-    return NextResponse.json(
+    return sessionError(
+      requestId,
+      result.blocked ? 429 : 401,
+      result.blocked ? 'LOGIN_RATE_LIMITED' : 'LOGIN_INVALID',
+      result.blocked
+        ? 'Muitas tentativas. Aguarde alguns minutos.'
+        : 'Usuário ou senha não conferem.',
       {
-        error: {
-          code: result.blocked ? 'LOGIN_RATE_LIMITED' : 'LOGIN_INVALID',
-          message: result.blocked
-            ? 'Muitas tentativas. Aguarde alguns minutos.'
-            : 'Usuário ou senha não conferem.',
-        },
-      },
-      {
-        status: result.blocked ? 429 : 401,
-        ...(result.retryAfter ? { headers: { 'retry-after': String(result.retryAfter) } } : {}),
+        retryable: result.blocked,
+        ...(result.retryAfter ? { retryAfter: result.retryAfter } : {}),
       },
     )
   }
 
+  let workspaceId = ''
   try {
     const client = await createApiClientRepository().findActiveClientById(clientId)
     if (!client) {
-      return NextResponse.json(
-        {
-          error: {
-            code: 'LOGIN_NOT_CONFIGURED',
-            message: 'O acesso do Apollo não está vinculado a um cliente ativo.',
-          },
-        },
-        { status: 503 },
+      return sessionError(
+        requestId,
+        503,
+        'LOGIN_NOT_CONFIGURED',
+        'O acesso do Apollo não está vinculado a um cliente ativo.',
+        { category: 'internal' },
       )
     }
+    workspaceId = client.workspaceId
   } catch {
-    return NextResponse.json(
-      { error: { code: 'LOGIN_NOT_CONFIGURED', message: 'O acesso ao Apollo ainda não foi configurado.' } },
-      { status: 503 },
+    return sessionError(
+      requestId,
+      503,
+      'LOGIN_NOT_CONFIGURED',
+      'O acesso ao Apollo ainda não foi configurado.',
+      { retryable: true, category: 'internal' },
     )
   }
 
-  const response = NextResponse.json({ data: { redirectTo: safeUiRedirect(body.next) } })
+  const subject = configuredUiUsername()
+  const token = issueUiSession(subject, clientId)
+  const session = verifyUiSession(token)
+  if (!session) {
+    return sessionError(
+      requestId,
+      503,
+      'LOGIN_NOT_CONFIGURED',
+      'O acesso ao Apollo ainda não foi configurado.',
+      { category: 'internal' },
+    )
+  }
+  const response = NextResponse.json(
+    presentSuccess({
+      subject,
+      workspaceId,
+      expiresAt: new Date(session.expiresAt * 1000).toISOString(),
+      redirectTo: safeUiRedirect(body.next),
+    }),
+    { headers: publicApiHeaders(requestId) },
+  )
   response.cookies.set(
     APOLLO_SESSION_COOKIE,
-    issueUiSession(configuredUiUsername(), clientId),
+    token,
     {
       httpOnly: true,
       secure: secureCookie(request),
@@ -157,7 +224,11 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const response = NextResponse.json({ data: { signedOut: true } })
+  const requestId = resolveRequestId(request)
+  const response = NextResponse.json(
+    presentSuccess({ signedOut: true }),
+    { headers: publicApiHeaders(requestId) },
+  )
   response.cookies.set(APOLLO_SESSION_COOKIE, '', {
     httpOnly: true,
     secure: secureCookie(request),

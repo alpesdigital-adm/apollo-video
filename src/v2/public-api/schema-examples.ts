@@ -201,6 +201,33 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/ui-session-create-request/v1': [
+      { username: 'apollo-operator', password: 'example-password-not-a-secret', next: '/' },
+    ],
+    'apollo://schemas/ui-session-created/v1': [
+      {
+        data: {
+          subject: 'apollo-operator',
+          workspaceId,
+          expiresAt: '2026-07-13T08:00:00.000Z',
+          redirectTo: '/',
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/ui-session-status/v1': [
+      {
+        data: {
+          subject: 'apollo-operator',
+          workspaceId,
+          expiresAt: '2026-07-13T08:00:00.000Z',
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/ui-session-ended/v1': [
+      { data: { signedOut: true }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/capability-list/v1': [
       {
         data: {
@@ -860,6 +887,35 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             locale: 'pt-BR', ownerId: 'client-example-1', createdAt,
           }],
           nextCursor: Buffer.from('project-search-page-example').toString('base64url'),
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/capability-list/v2': [
+      {
+        data: {
+          capabilities: [
+            {
+              id: 'apollo.sessions.login',
+              version: '1.0.0',
+              title: 'Create human UI session',
+              description: 'Authenticates a human operator and creates an HTTP-only UI session.',
+              operationKind: 'command',
+              authMode: 'none',
+              authScheme: 'none',
+              requiredScopes: [],
+              inputSchemaRef: 'apollo://schemas/ui-session-create-request/v1',
+              outputSchemaRef: 'apollo://schemas/ui-session-created/v1',
+              endpoint: { method: 'POST', path: '/v1/session' },
+              supportsDryRun: false,
+              costClass: 'free',
+              confirmation: 'none',
+              successStatuses: [200],
+              idempotency: 'natural',
+              requestBodyRequired: true,
+              responseMediaType: 'application/json',
+            },
+          ],
         },
         meta: { apiVersion: 'v1' },
       },

@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 
-import type { PublicCapability } from './capability-registry.ts'
+import {
+  resolveCapabilityAuthScheme,
+  type PublicCapability,
+} from './capability-registry.ts'
 import type { ApiClient } from '../domain/api-client.ts'
 import type { ApiCredential } from '../domain/api-credential.ts'
 import type { MediaArtifactRecord } from '../application/ports/media-artifact-query-repository.ts'
@@ -46,6 +49,7 @@ export function presentCapability(capability: PublicCapability) {
     description: capability.description,
     operationKind: capability.operationKind,
     authMode: capability.authMode,
+    authScheme: resolveCapabilityAuthScheme(capability),
     requiredScopes: [...capability.requiredScopes],
     inputSchemaRef: capability.inputSchemaRef,
     outputSchemaRef: capability.outputSchemaRef,

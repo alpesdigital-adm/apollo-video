@@ -173,6 +173,8 @@ Contratos devem prever a visão final, mas cada ciclo libera uma fatia vertical 
 
 Tudo que o usuário pode criar, consultar, alterar, revisar, aprovar, renderizar, exportar ou administrar pela interface deve possuir contrato externo estável. Web App, agentes de IA e ferramentas de terceiros usam o mesmo domínio, Commands, políticas e estados; a API não expõe banco, storage interno nem atalhos capazes de contornar direitos, guardrails ou validações.
 
+Autenticação não é exceção. Sign-in, leitura da sessão corrente e sign-out do usuário humano devem existir como endpoints versionados, documentados e testados; a tela de login é apenas um cliente desses endpoints. Clientes de automação não reutilizam senha nem cookie humano: recebem identidade `ApiClient`, credencial Bearer revogável e escopos próprios. Endpoints de sessão humana não são publicados como tools de agentes, para que senha não atravesse contexto de modelo.
+
 ---
 
 ## 6. Usuários e papéis
@@ -1303,6 +1305,13 @@ Draft, ingesting, perceiving, planning, generating, reviewing-assets, rendering-
 
 Toda capacidade operável pela interface deve estar disponível por API externa versionada usando os mesmos Commands, queries, policies e state machines. Recursos puramente internos — tabelas, filas, storage keys, prompts privados e primitives do renderer — não são API pública.
 
+Critérios adicionais de paridade:
+
+- login, consulta de sessão e logout possuem capability IDs e operações OpenAPI;
+- a GUI não chama rota privada, action server-only ou acesso direto ao banco para autenticar;
+- uma operação da UI sem capability pública e contract test bloqueia o release;
+- endpoints de sessão humana podem ser consumidos por um cliente HTTP que preserve cookies, enquanto integrações não humanas usam Bearer de service account.
+
 ### FR-241 — Contrato público e descoberta
 
 A API deve publicar OpenAPI e JSON Schemas versionados, IDs estáveis, enums, paginação, filtros, erros estruturados, exemplos e capability discovery. Alteração incompatível exige nova versão e janela de depreciação.
@@ -1310,6 +1319,13 @@ A API deve publicar OpenAPI e JSON Schemas versionados, IDs estáveis, enums, pa
 ### FR-242 — Clientes, autenticação e escopos
 
 O sistema deve suportar clientes externos e service accounts com credenciais revogáveis, escopos granulares, workspace explícito, expiração/rotação e autorização server-side. A escolha exata entre OAuth 2.1, chaves assinadas ou ambos será fechada em ADR.
+
+O mecanismo inicial distingue dois fluxos explícitos:
+
+1. **sessão humana:** `POST /v1/session` autentica credenciais, `GET /v1/session` consulta a sessão e `DELETE /v1/session` encerra; o token fica em cookie HTTP-only, `SameSite=Strict`, com expiração limitada;
+2. **cliente externo:** cada request usa Bearer opaco de `ApiClient`, com scopes, environment, status, rotação e revogação resolvidos server-side.
+
+Senha humana nunca é uma credencial de integração e não deve ser enviada a MCP, Director ou provider. OAuth 2.1/OIDC substituirá o bootstrap humano local quando houver identidade multiusuário, recuperação de conta e delegação.
 
 ### FR-243 — Operações assíncronas e controle de jobs
 

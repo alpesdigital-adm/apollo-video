@@ -7,6 +7,7 @@ export type CapabilityCostClass = 'free' | 'low' | 'medium' | 'high' | 'variable
 export type CapabilityConfirmation = 'none' | 'preflight-token' | 'human-approval'
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type CapabilityAuthMode = 'none' | 'optional' | 'required'
+export type CapabilityAuthScheme = 'none' | 'bearer' | 'ui-session'
 export type CapabilityIdempotency = 'not-applicable' | 'required' | 'natural'
 export type CapabilityPrecondition = 'if-match'
 export type CapabilitySuccessStatus = 200 | 201 | 202 | 204
@@ -34,6 +35,7 @@ export interface PublicCapability {
   exposure: CapabilityExposure
   operationKind: CapabilityOperationKind
   authMode: CapabilityAuthMode
+  authScheme?: CapabilityAuthScheme
   requiredScopes: readonly string[]
   inputSchemaRef?: string
   outputSchemaRef: string
@@ -144,6 +146,19 @@ function validateCapability(capability: PublicCapability): void {
     'INVALID_CAPABILITY',
     'requestBodyRequired is only valid when an input schema exists',
     { capabilityId: capability.id },
+  )
+  const authScheme = resolveCapabilityAuthScheme(capability)
+  assertDomain(
+    capability.authMode === 'none' ? authScheme === 'none' : authScheme !== 'none',
+    'INVALID_CAPABILITY',
+    'Capability auth scheme must match its authentication mode',
+    { capabilityId: capability.id, authMode: capability.authMode, authScheme },
+  )
+  assertDomain(
+    authScheme === 'bearer' || capability.requiredScopes.length === 0,
+    'INVALID_CAPABILITY',
+    'Only bearer-authenticated capabilities can require API scopes',
+    { capabilityId: capability.id, authScheme },
   )
   assertDomain(
     capability.availableIn === undefined ||
@@ -271,6 +286,13 @@ export function defineCapabilityRegistry(
   })
 
   return Object.freeze(registry)
+}
+
+export function resolveCapabilityAuthScheme(
+  capability: Pick<PublicCapability, 'authMode' | 'authScheme'>,
+): CapabilityAuthScheme {
+  if (capability.authMode === 'none') return capability.authScheme ?? 'none'
+  return capability.authScheme ?? 'bearer'
 }
 
 function normalizePolicyCapabilityIds(
@@ -450,15 +472,71 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'not-applicable',
   },
   {
-    id: 'apollo.capabilities.list',
+    id: 'apollo.sessions.login',
     version: '1.0.0',
+    title: 'Create human UI session',
+    description: 'Authenticates a human operator and creates a bounded HTTP-only UI session. This capability is not exposed as an agent tool.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'none',
+    authScheme: 'none',
+    requiredScopes: [],
+    inputSchemaRef: 'apollo://schemas/ui-session-create-request/v1',
+    outputSchemaRef: 'apollo://schemas/ui-session-created/v1',
+    endpoint: { method: 'POST', path: '/v1/session' },
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'natural',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.sessions.read',
+    version: '1.0.0',
+    title: 'Read current human UI session',
+    description: 'Returns the current human session subject, workspace and expiry without exposing its token.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    authScheme: 'ui-session',
+    requiredScopes: [],
+    outputSchemaRef: 'apollo://schemas/ui-session-status/v1',
+    endpoint: { method: 'GET', path: '/v1/session' },
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.sessions.logout',
+    version: '1.0.0',
+    title: 'End human UI session',
+    description: 'Idempotently expires the human UI session cookie without returning session material.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'optional',
+    authScheme: 'ui-session',
+    requiredScopes: [],
+    outputSchemaRef: 'apollo://schemas/ui-session-ended/v1',
+    endpoint: { method: 'DELETE', path: '/v1/session' },
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'natural',
+  },
+  {
+    id: 'apollo.capabilities.list',
+    version: '2.0.0',
     title: 'List available capabilities',
     description: 'Lists public capabilities available to the current external actor.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'optional',
     requiredScopes: [],
-    outputSchemaRef: 'apollo://schemas/capability-list/v1',
+    outputSchemaRef: 'apollo://schemas/capability-list/v2',
     endpoint: { method: 'GET', path: '/v1/capabilities' },
     toolName: 'apollo.capabilities.list',
     supportsDryRun: false,

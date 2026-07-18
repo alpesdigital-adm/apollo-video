@@ -26,6 +26,15 @@ A Public API já manipula recursos de workspace e precisa ser operável sem aces
 - `clients:admin` só opera dentro do workspace autenticado. Um admin só pode conceder scopes que já possui. Rotação da própria credencial é permitida; autoelevação de scopes e autorrevogação destrutiva não são.
 - O primeiro client administrativo é criado por bootstrap operacional auditável. Depois disso, clients e credenciais são administrados pela mesma Public API usada pela UI.
 
+## Sessão humana e fronteira com automações
+
+- A tela de login chama `POST /v1/session`; leitura e encerramento usam `GET` e `DELETE` na mesma rota pública versionada.
+- Sessão humana é transportada por cookie assinado HTTP-only, `SameSite=Strict`, `Secure` em HTTPS e com expiração limitada. O body nunca devolve token, hash ou material de assinatura.
+- O cookie resolve um `ApiClient` ativo no Postgres para obter workspace e scopes; IDs ou scopes fornecidos pelo navegador nunca ampliam autoridade.
+- Password é `writeOnly`, limitada, comparada em tempo constante após `scrypt` e omitida de logs, eventos, analytics e erros.
+- Capabilities de sessão humana não são expostas como tools MCP/IA. Agentes usam Bearer próprio e revogável; compartilhar senha/cookie humano com agente é proibido.
+- Rate limit em memória serve apenas ao desenvolvimento local. Produção exige store distribuído, audit redigido, revogação de sessões e recuperação de conta antes de concluir F0.031.
+
 ## Idempotência e concorrência
 
 - Criação de client e rotação exigem `Idempotency-Key` e request fingerprint.
