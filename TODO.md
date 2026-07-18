@@ -12,14 +12,18 @@
 
 Este gate reabre honestamente o aceite da interface e da primeira edição real. Os testes de domínio existentes continuam válidos, mas não substituem a comparação com os mockups aprovados nem a revisão do MP4 final.
 
+**Decisão irrevogável de arquitetura (2026-07-18):** o legado fica no passado. É proibido lançar fallback, flag de compatibilidade ou correção incremental sobre `analyzeContent`, o `narrativeEngine` antigo, projetos SQLite ou rotas `/api/process/*`. A interface, a API externa e os workers devem executar exclusivamente a jornada V2 sobre Postgres, versões imutáveis e operações duráveis.
+
 - [x] Tornar formato de saída e briefing opcional visíveis na criação do projeto.
-- [x] Substituir a tela operacional legada pelo workspace de edição alinhado aos mockups aprovados.
+- [ ] Conectar o workspace de edição aos projetos, versões, operações e artifacts V2, sem ler o projeto SQLite legado.
 - [x] Impedir punch-in automático nos quatro segundos iniciais e desativar zoom automático por padrão.
 - [x] Limitar legendas a blocos curtos, respeitar âncora e manter a região de rosto/olhos livre.
-- [x] Expor corte editorial por API com remoção alinhada às palavras e retiming da transcrição.
+- [ ] Expor corte editorial no modelo de `Command` V2, com nova versão imutável, alinhamento às palavras e retiming da transcrição.
 - [x] Criar regressões automatizadas para autenticação e cortes editoriais.
 - [ ] Publicar a nova autenticação própria do Apollo e remover o Basic Auth do proxy.
-- [ ] Aplicar via API, no projeto de teste real, a remoção de datas, “dia 8” e “dois dias de aula”.
+- [ ] Importar o master do projeto de teste como artifact V2 e aplicar via API a remoção de datas, “dia 8” e “dois dias de aula”.
+- [ ] Implementar a jornada executável V2: briefing → percepção → `TreatmentPlan` → `StoryPlan` → `EditPlan` → critic → proxy/final.
+- [ ] Remover da superfície executável da aplicação todas as chamadas às rotas e serviços legados.
 - [ ] Revisar e corrigir continuidade, transições, enquadramento e posicionamento de legendas no vídeo renderizado.
 - [ ] Executar o E2E completo em produção e entregar o MP4 final assistível.
 
