@@ -5,10 +5,14 @@ IMAGE="${APOLLO_IMAGE:-apollo-video:latest}"
 CONTAINER="${APOLLO_CONTAINER:-apollo-video}"
 APP_ROOT="${APOLLO_APP_ROOT:-/apps/apollo-video}"
 ENV_FILE="${APOLLO_ENV_FILE:-${APP_ROOT}/.env}"
+BASIC_AUTH_FILE="${APOLLO_BASIC_AUTH_FILE:-${APP_ROOT}/access.htpasswd}"
 DOMAIN="${APOLLO_DOMAIN:-apollo.alpesd.com.br}"
 
 test -f "${ENV_FILE}"
+test -f "${BASIC_AUTH_FILE}"
 docker network inspect easypanel >/dev/null
+
+BASIC_AUTH="$(tr -d '\r\n' < "${BASIC_AUTH_FILE}")"
 
 for directory in data uploads renders tmp artifacts render-outputs; do
   install -d -o 1000 -g 1000 "${APP_ROOT}/${directory}"
@@ -53,12 +57,27 @@ docker run -d \
   --label traefik.docker.network=easypanel \
   --label "traefik.http.middlewares.apollo-buffer.buffering.maxRequestBodyBytes=4294967296" \
   --label "traefik.http.middlewares.apollo-buffer.buffering.memRequestBodyBytes=67108864" \
+  --label "traefik.http.middlewares.apollo-auth.basicauth.users=${BASIC_AUTH}" \
+  --label traefik.http.middlewares.apollo-redirect.redirectscheme.scheme=https \
+  --label traefik.http.middlewares.apollo-redirect.redirectscheme.permanent=true \
+  --label "traefik.http.routers.apollo-api-http.rule=Host(\`${DOMAIN}\`) && PathPrefix(\`/v1\`)" \
+  --label traefik.http.routers.apollo-api-http.entrypoints=http \
+  --label traefik.http.routers.apollo-api-http.middlewares=apollo-redirect \
+  --label traefik.http.routers.apollo-api-http.priority=100 \
+  --label "traefik.http.routers.apollo-api-https.rule=Host(\`${DOMAIN}\`) && PathPrefix(\`/v1\`)" \
+  --label traefik.http.routers.apollo-api-https.entrypoints=https \
+  --label traefik.http.routers.apollo-api-https.middlewares=apollo-buffer \
+  --label traefik.http.routers.apollo-api-https.priority=100 \
+  --label traefik.http.routers.apollo-api-https.tls=true \
+  --label traefik.http.routers.apollo-api-https.tls.certresolver=letsencrypt \
   --label "traefik.http.routers.apollo-http.rule=Host(\`${DOMAIN}\`)" \
   --label traefik.http.routers.apollo-http.entrypoints=http \
-  --label traefik.http.routers.apollo-http.middlewares=apollo-buffer \
+  --label traefik.http.routers.apollo-http.middlewares=apollo-redirect \
+  --label traefik.http.routers.apollo-http.priority=10 \
   --label "traefik.http.routers.apollo-https.rule=Host(\`${DOMAIN}\`)" \
   --label traefik.http.routers.apollo-https.entrypoints=https \
-  --label traefik.http.routers.apollo-https.middlewares=apollo-buffer \
+  --label traefik.http.routers.apollo-https.middlewares=apollo-auth,apollo-buffer \
+  --label traefik.http.routers.apollo-https.priority=10 \
   --label traefik.http.routers.apollo-https.tls=true \
   --label traefik.http.routers.apollo-https.tls.certresolver=letsencrypt \
   --label traefik.http.services.apollo-video.loadbalancer.server.port=3333 \
