@@ -168,6 +168,8 @@ A Web App não possui um caminho privilegiado de autenticação. O contrato púb
 
 O schema de login marca password como `writeOnly`; logs, errors, analytics e eventos nunca registram username/password. Rate limit é aplicado antes da derivação de senha. Cookie usa `HttpOnly`, `SameSite=Strict`, `Secure` em HTTPS, path `/` e duração máxima documentada.
 
+Para continuar seguro quando o JavaScript da Web App não hidratar, `POST /v1/session` também aceita formulário `application/x-www-form-urlencoded` e responde `303` para um path interno allowlisted. O formulário nunca usa `GET`, portanto credenciais não podem aparecer na URL, histórico ou referer. A representação JSON permanece o contrato canônico da capability.
+
 Essas capabilities aparecem em OpenAPI/capability discovery, mas não recebem `toolName`: agentes e MCP não devem solicitar nem manipular senha humana. Automação usa exclusivamente `Authorization: Bearer <ApiCredential>` e pode operar todas as capabilities permitidas por seus scopes sem criar sessão humana.
 
 O bootstrap local de usuário único é transitório e não conclui F0.031. Produção multiusuário exige identidade persistida, `WorkspaceMember`, recuperação de conta, revogação de sessões, armazenamento distribuído de rate limit e OIDC/OAuth 2.1 conforme ADR específico.

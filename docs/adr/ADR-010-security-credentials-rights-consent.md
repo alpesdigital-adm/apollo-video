@@ -29,6 +29,7 @@ A Public API já manipula recursos de workspace e precisa ser operável sem aces
 ## Sessão humana e fronteira com automações
 
 - A tela de login chama `POST /v1/session`; leitura e encerramento usam `GET` e `DELETE` na mesma rota pública versionada.
+- O login suporta JSON canônico e formulário URL-encoded como fallback sem JavaScript; o fallback usa `POST` e redirect `303`, jamais query string com credenciais.
 - Sessão humana é transportada por cookie assinado HTTP-only, `SameSite=Strict`, `Secure` em HTTPS e com expiração limitada. O body nunca devolve token, hash ou material de assinatura.
 - O cookie resolve um `ApiClient` ativo no Postgres para obter workspace e scopes; IDs ou scopes fornecidos pelo navegador nunca ampliam autoridade.
 - Password é `writeOnly`, limitada, comparada em tempo constante após `scrypt` e omitida de logs, eventos, analytics e erros.

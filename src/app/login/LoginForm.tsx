@@ -42,7 +42,8 @@ export default function LoginForm() {
   }
 
   return (
-    <form className="mt-10" onSubmit={submit}>
+    <form action="/v1/session" className="mt-10" method="post" onSubmit={submit}>
+      <input name="next" type="hidden" value="/" />
       <div className="space-y-5">
         <label className="block">
           <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#868b9c]">Usuário</span>
@@ -61,7 +62,7 @@ export default function LoginForm() {
         {error ? <p className="rounded-lg border border-red-400/20 bg-red-400/8 px-3 py-2 text-sm text-red-200">{error}</p> : null}
       </div>
 
-      <button className="group mt-2 flex h-12 w-full items-center justify-between rounded-xl bg-[#7167ff] px-5 text-sm font-semibold text-white transition hover:bg-[#8077ff] focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#101116] disabled:cursor-wait disabled:opacity-60" disabled={loading || !username || !password} type="submit">
+      <button className="group mt-2 flex h-12 w-full items-center justify-between rounded-xl bg-[#7167ff] px-5 text-sm font-semibold text-white transition hover:bg-[#8077ff] focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#101116] disabled:cursor-wait disabled:opacity-60" disabled={loading} type="submit">
         <span>{loading ? 'Abrindo o workspace…' : 'Entrar no Apollo'}</span>
         <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">→</span>
       </button>

@@ -21,6 +21,8 @@ Content-Type: application/json
 
 Uma resposta `200` define o cookie `apollo_session` como HTTP-only e devolve somente `subject`, `workspaceId`, `expiresAt` e `redirectTo`. O token da sessão nunca aparece no JSON. `GET /v1/session` consulta a sessão corrente e `DELETE /v1/session` a encerra de modo idempotente. Clientes externos que escolherem esse fluxo precisam preservar cookies e usar HTTPS em produção.
 
+O mesmo `POST /v1/session` aceita `application/x-www-form-urlencoded` como degradação segura da tela de login: em caso de sucesso responde `303` para um path interno validado e mantém username/password no corpo da requisição, nunca na query string. JSON continua sendo a representação canônica documentada em OpenAPI.
+
 Esses endpoints possuem capability IDs, schemas e OpenAPI, mas não possuem `toolName`: senha humana não deve passar por MCP, Director, provider ou contexto de modelo.
 
 ### Automação e integrações

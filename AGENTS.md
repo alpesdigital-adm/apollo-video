@@ -28,8 +28,9 @@ O problema não foi uma regressão causada pela auditoria. O “100%” nunca re
 
 Após a auditoria conservadora de 18 de julho de 2026:
 
-- 83 de 1.255 microtarefas estão comprovadamente concluídas: **6,6% do PRD completo**;
-- 1.172 microtarefas estão abertas ou aguardando comprovação integrada;
+- 84 de 1.258 microtarefas estão comprovadamente concluídas: **6,7% do PRD completo**;
+- 1.174 microtarefas estão abertas ou aguardando comprovação integrada;
+- o denominador aumentou em três itens quando autenticação humana, isolamento de agentes e hardening de sessão foram decompostos explicitamente; nenhuma tarefa antiga foi apagada para melhorar o percentual;
 - a base técnica nova reaproveitável foi estimada em 20–25% do necessário para o primeiro E2E V2;
 - faltam aproximadamente 75–80% da jornada executável necessária para esse primeiro teste;
 - `TODO.md` é a fonte do status auditado e não pode ser remarcado em massa.

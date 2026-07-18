@@ -109,6 +109,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const requestId = resolveRequestId(request)
   const key = clientKey(request)
+  const isFormLogin = request.headers.get('content-type')?.includes(
+    'application/x-www-form-urlencoded',
+  ) ?? false
   const existing = attempts.get(key)
   if (existing && existing.count >= MAX_ATTEMPTS && existing.resetAt > Date.now()) {
     const retryAfter = Math.max(1, Math.ceil((existing.resetAt - Date.now()) / 1000))
@@ -123,7 +126,16 @@ export async function POST(request: NextRequest) {
 
   let body: { username?: unknown; password?: unknown; next?: unknown }
   try {
-    body = await request.json() as typeof body
+    if (isFormLogin) {
+      const form = await request.formData()
+      body = {
+        username: form.get('username'),
+        password: form.get('password'),
+        next: form.get('next'),
+      }
+    } else {
+      body = await request.json() as typeof body
+    }
   } catch {
     return sessionError(
       requestId,
@@ -200,15 +212,24 @@ export async function POST(request: NextRequest) {
       { category: 'internal' },
     )
   }
-  const response = NextResponse.json(
-    presentSuccess({
-      subject,
-      workspaceId,
-      expiresAt: new Date(session.expiresAt * 1000).toISOString(),
-      redirectTo: safeUiRedirect(body.next),
-    }),
-    { headers: publicApiHeaders(requestId) },
-  )
+  const redirectTo = safeUiRedirect(body.next)
+  const response = isFormLogin
+    ? new NextResponse(null, {
+      status: 303,
+      headers: {
+        ...publicApiHeaders(requestId),
+        location: redirectTo,
+      },
+    })
+    : NextResponse.json(
+      presentSuccess({
+        subject,
+        workspaceId,
+        expiresAt: new Date(session.expiresAt * 1000).toISOString(),
+        redirectTo,
+      }),
+      { headers: publicApiHeaders(requestId) },
+    )
   response.cookies.set(
     APOLLO_SESSION_COOKIE,
     token,

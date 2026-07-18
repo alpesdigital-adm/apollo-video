@@ -22,8 +22,9 @@ Critério vigente para `[x]`:
 
 Estado após a primeira auditoria conservadora:
 
-- **83 de 1.255 microtarefas verificadas como efetivamente entregues (6,6%)**;
-- **1.172 microtarefas abertas ou aguardando nova comprovação**;
+- **84 de 1.258 microtarefas verificadas como efetivamente entregues (6,7%)**;
+- **1.174 microtarefas abertas ou aguardando nova comprovação**;
+- o total aumentou em três itens quando autenticação humana, isolamento de agentes e hardening de sessão foram decompostos explicitamente; nenhuma tarefa anterior foi removida do denominador;
 - todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
@@ -469,7 +470,7 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 ### F0.031 — Autenticação, shell e navegação
 
 - [ ] Selecionar mecanismo de autenticação e documentar sessão, expiração e recuperação de conta. Evidência: T-F0.031 e ADR-134.
-- [ ] Publicar `apollo.sessions.login`, `apollo.sessions.read` e `apollo.sessions.logout` no capability registry/OpenAPI; login humano usa cookie HTTP-only e automações usam Bearer de `ApiClient`. Evidência: FR-240/FR-242, ADR-010/013 e Spec 09 §7.1.
+- [x] Publicar `apollo.sessions.login`, `apollo.sessions.read` e `apollo.sessions.logout` no capability registry/OpenAPI; login humano usa cookie HTTP-only e automações usam Bearer de `ApiClient`. Evidência: `src/v2/public-api/capability-registry.ts`, `src/app/v1/session/route.ts`, OpenAPI validado e `tests/v2/public-project-api.integration.mjs` cobrindo login JSON/form, sessão, acesso a projetos e logout.
 - [ ] Impedir que capabilities de sessão humana recebam `toolName` ou sejam expostas ao MCP/Director; password deve ser `writeOnly` e ausente de logs/eventos. Evidência: security/contract tests de F0.031.
 - [ ] Substituir rate limit local por store distribuído e auditável, com revogação de sessão e proteção contra brute force antes de produção. Evidência: security/integration tests de F0.031.
 - [ ] Implementar sign-in/sign-out e proteção server-side das rotas v2. Evidência: T-F0.031 e ADR-134.

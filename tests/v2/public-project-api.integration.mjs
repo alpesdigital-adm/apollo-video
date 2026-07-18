@@ -507,6 +507,24 @@ test('authenticated public API manages projects, clients and artifact inspection
       .get('set-cookie')
       ?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
     assert.ok(uiSession)
+    const formLoginResponse = await fetch(`${baseUrl}/v1/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        username: uiUsername,
+        password: uiPassword,
+        next: '/',
+      }),
+      redirect: 'manual',
+    })
+    assert.equal(formLoginResponse.status, 303)
+    assert.equal(formLoginResponse.headers.get('location'), '/')
+    assert.equal(formLoginResponse.headers.get('apollo-api-version'), 'v1')
+    assert.ok(formLoginResponse.headers.get('apollo-request-id'))
+    assert.match(
+      formLoginResponse.headers.get('set-cookie') ?? '',
+      new RegExp(`^${APOLLO_SESSION_COOKIE}=`),
+    )
     const uiSessionResponse = await fetch(`${baseUrl}/v1/session`, {
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
     })
@@ -518,6 +536,17 @@ test('authenticated public API manages projects, clients and artifact inspection
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
     })
     assert.equal(uiProjectListResponse.status, 200)
+    const uiLogoutResponse = await fetch(`${baseUrl}/v1/session`, {
+      method: 'DELETE',
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
+    })
+    const uiLogoutPayload = await uiLogoutResponse.json()
+    assert.equal(uiLogoutResponse.status, 200)
+    assert.equal(uiLogoutPayload.data.signedOut, true)
+    assert.match(
+      uiLogoutResponse.headers.get('set-cookie') ?? '',
+      new RegExp(`^${APOLLO_SESSION_COOKIE}=;`),
+    )
 
     const openApiResponse = await fetch(`${baseUrl}/v1/openapi.json`)
     const openApi = await openApiResponse.json()
