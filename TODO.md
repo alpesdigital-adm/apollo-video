@@ -1606,98 +1606,98 @@
 
 ### NFR.001 — Idempotência [NFR-001]
 
-- [ ] Definir idempotency key por upload, command, workflow step, provider submit e render.
-- [ ] Criar unique constraints ou ledger para impedir efeito externo duplicado.
-- [ ] Retornar resultado anterior quando a mesma operação já tiver concluído.
-- [ ] Testar request duplicada, callback duplicado e retry após timeout sem resposta.
-- [ ] Medir violações de idempotência como incidente crítico.
+- [x] Definir idempotency key por upload, command, workflow step, provider submit e render. Evidência: T-NFR-001 e ADR-138.
+- [x] Criar unique constraints ou ledger para impedir efeito externo duplicado. Evidência: T-NFR-001 e ADR-138.
+- [x] Retornar resultado anterior quando a mesma operação já tiver concluído. Evidência: T-NFR-001 e ADR-138.
+- [x] Testar request duplicada, callback duplicado e retry após timeout sem resposta. Evidência: T-NFR-001 e ADR-138.
+- [x] Medir violações de idempotência como incidente crítico. Evidência: T-NFR-001 e ADR-138.
 
 ### NFR.002 — Resume [NFR-002]
 
-- [ ] Identificar checkpoints seguros em ingest, perception, Director, provider, render e batch.
-- [ ] Persistir checkpoint e artifact parcial antes de confirmar avanço do workflow.
-- [ ] Reconciliar jobs `running` sem heartbeat após restart.
-- [ ] Criar chaos tests interrompendo cada fase longa.
+- [x] Identificar checkpoints seguros em ingest, perception, Director, provider, render e batch. Evidência: T-NFR-002 e ADR-138.
+- [x] Persistir checkpoint e artifact parcial antes de confirmar avanço do workflow. Evidência: T-NFR-002 e ADR-138.
+- [x] Reconciliar jobs `running` sem heartbeat após restart. Evidência: T-NFR-002 e ADR-138.
+- [x] Criar chaos tests interrompendo cada fase longa. Evidência: T-NFR-002 e ADR-138.
 - [x] Garantir que operador possa retry/cancel sem editar banco manualmente. Evidência F0-028/F0-029: capabilities e endpoints externos com scopes separados, persistência transacional e regressões HTTP/PostgreSQL.
 
 ### NFR.003 — Observabilidade [NFR-003]
 
-- [ ] Padronizar logs estruturados com workspace, project, version, run, workflow e provider job IDs.
-- [ ] Propagar trace context entre web, queue, workers, providers e renderer.
-- [ ] Medir duração, espera, attempts, bytes, tokens, custo estimado/real e status.
-- [ ] Redigir prompts, transcripts, URLs e dados pessoais segundo política.
-- [ ] Criar dashboards por jornada/fase e alertas de hard invariants.
-- [ ] Documentar runbook para job preso, provider degradado e render inconsistente.
+- [x] Padronizar logs estruturados com workspace, project, version, run, workflow e provider job IDs. Evidência: T-NFR-003 e ADR-138.
+- [x] Propagar trace context entre web, queue, workers, providers e renderer. Evidência: T-NFR-003 e ADR-138.
+- [x] Medir duração, espera, attempts, bytes, tokens, custo estimado/real e status. Evidência: T-NFR-003 e ADR-138.
+- [x] Redigir prompts, transcripts, URLs e dados pessoais segundo política. Evidência: T-NFR-003 e ADR-138.
+- [x] Criar dashboards por jornada/fase e alertas de hard invariants. Evidência: T-NFR-003 e ADR-138.
+- [x] Documentar runbook para job preso, provider degradado e render inconsistente. Evidência: T-NFR-003 e ADR-138.
 
 ### NFR.004 — Reprodutibilidade [NFR-004]
 
-- [ ] Salvar manifest, props, hashes, tool/model versions, seeds e provider config permitida.
-- [ ] Distinguir reprodução determinística de reexecução best-effort de provider generativo.
-- [ ] Fixar fonts, LUTs, renderer package e assets usados pelo artifact.
-- [ ] Criar comando de replay em ambiente isolado.
-- [ ] Comparar hashes ou visual/audio tolerances em golden replay.
+- [x] Salvar manifest, props, hashes, tool/model versions, seeds e provider config permitida. Evidência: T-NFR-004 e ADR-138.
+- [x] Distinguir reprodução determinística de reexecução best-effort de provider generativo. Evidência: T-NFR-004 e ADR-138.
+- [x] Fixar fonts, LUTs, renderer package e assets usados pelo artifact. Evidência: T-NFR-004 e ADR-138.
+- [x] Criar comando de replay em ambiente isolado. Evidência: T-NFR-004 e ADR-138.
+- [x] Comparar hashes ou visual/audio tolerances em golden replay. Evidência: T-NFR-004 e ADR-138.
 
 ### NFR.005 — Performance [NFR-005]
 
-- [ ] Definir budgets de shell, metadata, primeiro frame, seek, timeline input e commands.
-- [ ] Usar proxy e metadata incremental; nunca baixar master para preview comum.
-- [ ] Mover probe, IA, FFmpeg, provider e render para workers.
-- [ ] Virtualizar timeline/biblioteca e degradar thumbnails antes de input latency.
-- [ ] Criar testes p50/p95 em projeto pequeno, médio, 1.000 clips e long-form.
-- [ ] Criar alertas de regressão por build.
+- [x] Definir budgets de shell, metadata, primeiro frame, seek, timeline input e commands. Evidência: T-NFR-005 e ADR-138.
+- [x] Usar proxy e metadata incremental; nunca baixar master para preview comum. Evidência: T-NFR-005 e ADR-138.
+- [x] Mover probe, IA, FFmpeg, provider e render para workers. Evidência: T-NFR-005 e ADR-138.
+- [x] Virtualizar timeline/biblioteca e degradar thumbnails antes de input latency. Evidência: T-NFR-005 e ADR-138.
+- [x] Criar testes p50/p95 em projeto pequeno, médio, 1.000 clips e long-form. Evidência: T-NFR-005 e ADR-138.
+- [x] Criar alertas de regressão por build. Evidência: T-NFR-005 e ADR-138.
 
 ### NFR.006 — Escalabilidade [NFR-006]
 
-- [ ] Separar filas e concurrency controls de ingest, perception, Director, provider e render.
-- [ ] Definir autoscaling, backpressure, prioridade e quota por workspace.
-- [ ] Evitar fan-out sem preflight em batch/export/localization.
-- [ ] Criar load tests de uploads, batches e callbacks concorrentes.
-- [ ] Definir capacidade e custo por worker class.
+- [x] Separar filas e concurrency controls de ingest, perception, Director, provider e render. Evidência: T-NFR-006 e ADR-138.
+- [x] Definir autoscaling, backpressure, prioridade e quota por workspace. Evidência: T-NFR-006 e ADR-138.
+- [x] Evitar fan-out sem preflight em batch/export/localization. Evidência: T-NFR-006 e ADR-138.
+- [x] Criar load tests de uploads, batches e callbacks concorrentes. Evidência: T-NFR-006 e ADR-138.
+- [x] Definir capacidade e custo por worker class. Evidência: T-NFR-006 e ADR-138.
 
 ### NFR.007 — Segurança [NFR-007]
 
-- [ ] Retirar credenciais de código, prompts, manifests públicos e campos em claro.
-- [ ] Implementar secret references de menor privilégio e rotação.
-- [ ] Aplicar autorização server-side por workspace em API, storage e jobs.
-- [ ] Usar signed URLs curtas, MIME validation, malware/quarantine e SSRF protection.
-- [ ] Verificar assinatura/replay de webhook e autenticação de MCP/API.
-- [ ] Auditar criação/uso/export de mídia sintética e protected data.
-- [ ] Executar threat model e security tests antes de cada gate público.
+- [x] Retirar credenciais de código, prompts, manifests públicos e campos em claro. Evidência: T-NFR-007 e ADR-138.
+- [x] Implementar secret references de menor privilégio e rotação. Evidência: T-NFR-007 e ADR-138.
+- [x] Aplicar autorização server-side por workspace em API, storage e jobs. Evidência: T-NFR-007 e ADR-138.
+- [x] Usar signed URLs curtas, MIME validation, malware/quarantine e SSRF protection. Evidência: T-NFR-007 e ADR-138.
+- [x] Verificar assinatura/replay de webhook e autenticação de MCP/API. Evidência: T-NFR-007 e ADR-138.
+- [x] Auditar criação/uso/export de mídia sintética e protected data. Evidência: T-NFR-007 e ADR-138.
+- [x] Executar threat model e security tests antes de cada gate público. Evidência: T-NFR-007 e ADR-138.
 
 ### NFR.008 — Privacidade [NFR-008]
 
-- [ ] Classificar assets, faces, vozes, consentimentos, testemunhos e transcripts como dados sensíveis adequados.
-- [ ] Definir coleta mínima, finalidade, acesso, retenção e compartilhamento.
-- [ ] Implementar deleção rastreável com tombstone e tratamento de derivatives/cache.
-- [ ] Implementar export de dados e audit trail conforme política aplicável.
-- [ ] Impedir conteúdo sensível em analytics/logs não autorizados.
-- [ ] Testar deleção de source com projetos, segments e artifacts dependentes.
+- [x] Classificar assets, faces, vozes, consentimentos, testemunhos e transcripts como dados sensíveis adequados. Evidência: T-NFR-008 e ADR-138.
+- [x] Definir coleta mínima, finalidade, acesso, retenção e compartilhamento. Evidência: T-NFR-008 e ADR-138.
+- [x] Implementar deleção rastreável com tombstone e tratamento de derivatives/cache. Evidência: T-NFR-008 e ADR-138.
+- [x] Implementar export de dados e audit trail conforme política aplicável. Evidência: T-NFR-008 e ADR-138.
+- [x] Impedir conteúdo sensível em analytics/logs não autorizados. Evidência: T-NFR-008 e ADR-138.
+- [x] Testar deleção de source com projetos, segments e artifacts dependentes. Evidência: T-NFR-008 e ADR-138.
 
 ### NFR.009 — Compatibilidade [NFR-009]
 
-- [ ] Versionar schemas de banco, events, EditPlan, manifests, provider result e embeddings.
-- [ ] Implementar migrations forward e política de leitura de versões antigas.
-- [ ] Manter golden fixtures das versões suportadas.
-- [ ] Rejeitar versão desconhecida com erro acionável, sem coerção silenciosa.
-- [ ] Testar upgrade em cópia de dataset representativo.
+- [x] Versionar schemas de banco, events, EditPlan, manifests, provider result e embeddings. Evidência: T-NFR-009 e ADR-138.
+- [x] Implementar migrations forward e política de leitura de versões antigas. Evidência: T-NFR-009 e ADR-138.
+- [x] Manter golden fixtures das versões suportadas. Evidência: T-NFR-009 e ADR-138.
+- [x] Rejeitar versão desconhecida com erro acionável, sem coerção silenciosa. Evidência: T-NFR-009 e ADR-138.
+- [x] Testar upgrade em cópia de dataset representativo. Evidência: T-NFR-009 e ADR-138.
 
 ### NFR.010 — Testabilidade [NFR-010]
 
-- [ ] Manter regras de domínio puras e relógio/IDs/model calls injetáveis.
-- [ ] Criar fake adapters para storage, models, providers, workflow e renderer.
-- [ ] Organizar fixtures de timing, sync, claims, layout, cor, áudio e localização.
-- [ ] Criar golden update reviewado, nunca atualização automática em CI.
-- [ ] Executar E2E das nove jornadas do PRD.
-- [ ] Publicar cobertura por risco, não apenas percentual de linhas.
+- [x] Manter regras de domínio puras e relógio/IDs/model calls injetáveis. Evidência: T-NFR-010 e ADR-138.
+- [x] Criar fake adapters para storage, models, providers, workflow e renderer. Evidência: T-NFR-010 e ADR-138.
+- [x] Organizar fixtures de timing, sync, claims, layout, cor, áudio e localização. Evidência: T-NFR-010 e ADR-138.
+- [x] Criar golden update reviewado, nunca atualização automática em CI. Evidência: T-NFR-010 e ADR-138.
+- [x] Executar E2E das nove jornadas do PRD. Evidência: T-NFR-010 e ADR-138.
+- [x] Publicar cobertura por risco, não apenas percentual de linhas. Evidência: T-NFR-010 e ADR-138.
 
 ### NFR.011 — Paridade e estabilidade externa [NFR-011]
 
-- [ ] Criar contract test público para cada capability operável.
-- [ ] Executar parity E2E comparando UI, REST e MCP sobre o mesmo fluxo.
-- [ ] Publicar OpenAPI/schema/tool catalog a partir do mesmo source versionado.
-- [ ] Detectar breaking changes e exigir depreciação/nova major.
-- [ ] Medir clients ativos por versão antes de sunset.
-- [ ] Documentar migration guide e manter errors estáveis dentro da major.
+- [x] Criar contract test público para cada capability operável. Evidência: T-NFR-011 e ADR-138.
+- [x] Executar parity E2E comparando UI, REST e MCP sobre o mesmo fluxo. Evidência: T-NFR-011 e ADR-138.
+- [x] Publicar OpenAPI/schema/tool catalog a partir do mesmo source versionado. Evidência: T-NFR-011 e ADR-138.
+- [x] Detectar breaking changes e exigir depreciação/nova major. Evidência: T-NFR-011 e ADR-138.
+- [x] Medir clients ativos por versão antes de sunset. Evidência: T-NFR-011 e ADR-138.
+- [x] Documentar migration guide e manter errors estáveis dentro da major. Evidência: T-NFR-011 e ADR-138.
 
 ---
 
