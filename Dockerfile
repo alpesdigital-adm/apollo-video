@@ -4,8 +4,9 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
+COPY remotion/package.json remotion/package-lock.json ./remotion/
 COPY scripts/generate-prisma-clients.mjs ./scripts/generate-prisma-clients.mjs
-RUN npm ci
+RUN npm ci && npm ci --prefix remotion
 
 FROM node:22-bookworm-slim AS build
 
@@ -14,6 +15,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=dependencies /app/generated ./generated
+COPY --from=dependencies /app/remotion/node_modules ./remotion/node_modules
 COPY . .
 RUN npm run build
 
