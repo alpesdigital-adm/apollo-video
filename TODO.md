@@ -280,132 +280,132 @@
 
 ### F0.012 — EditPlan versionado [FR-070]
 
-- [ ] Implementar schema v2 conforme spec 02 com `schemaVersion` obrigatório.
-- [ ] Criar parser/validator que rejeite references, ranges e overlaps inválidos.
-- [ ] Implementar registry de migrations puras entre versões.
-- [ ] Criar golden files para parse, compile, migrate e serialize.
+- [x] Implementar schema v2 conforme spec 02 com `schemaVersion` obrigatório. Evidência: T-FR-070 e ADR-133.
+- [x] Criar parser/validator que rejeite references, ranges e overlaps inválidos. Evidência: T-FR-070 e ADR-133.
+- [x] Implementar registry de migrations puras entre versões. Evidência: T-FR-070 e ADR-133.
+- [x] Criar golden files para parse, compile, migrate e serialize. Evidência: T-FR-070 e ADR-133.
 
 ### F0.013 — Tracks [FR-071]
 
-- [ ] Implementar track types, ordering, exclusivity, visibility, mute e lock.
-- [ ] Codificar políticas de overlap por tipo de track.
-- [ ] Compilar tracks para renderer somente a partir do plano resolvido.
-- [ ] Testar base video, audio, B-roll, overlay, subtitle, color e annotation.
+- [x] Implementar track types, ordering, exclusivity, visibility, mute e lock. Evidência: T-FR-071 e ADR-133.
+- [x] Codificar políticas de overlap por tipo de track. Evidência: T-FR-071 e ADR-133.
+- [x] Compilar tracks para renderer somente a partir do plano resolvido. Evidência: T-FR-071 e ADR-133.
+- [x] Testar base video, audio, B-roll, overlay, subtitle, color e annotation. Evidência: T-FR-071 e ADR-133.
 
 ### F0.014 — Source ranges [FR-072]
 
-- [ ] Modelar `sourceIn/sourceOut`, `timelineIn/timelineOut`, rate e mapping.
-- [ ] Impedir range negativo, invertido ou além da duração conhecida.
-- [ ] Implementar trim/split preservando source mapping.
-- [ ] Criar property tests em frame rates e timebases distintos.
+- [x] Modelar `sourceIn/sourceOut`, `timelineIn/timelineOut`, rate e mapping. Evidência: T-FR-072 e ADR-133.
+- [x] Impedir range negativo, invertido ou além da duração conhecida. Evidência: T-FR-072 e ADR-133.
+- [x] Implementar trim/split preservando source mapping. Evidência: T-FR-072 e ADR-133.
+- [x] Criar property tests em frame rates e timebases distintos. Evidência: T-FR-072 e ADR-133.
 
 ### F0.015 — Múltiplas fontes [FR-073]
 
-- [ ] Permitir que um EditPlan referencie N assets e segmentos por ID imutável.
-- [ ] Resolver references em etapa explícita antes do render.
-- [ ] Detectar source ausente, sem direito ou ainda não processado.
-- [ ] Testar plano com talking head, B-roll, imagem, áudio e overlay.
+- [x] Permitir que um EditPlan referencie N assets e segmentos por ID imutável. Evidência: T-FR-073 e ADR-133.
+- [x] Resolver references em etapa explícita antes do render. Evidência: T-FR-073 e ADR-133.
+- [x] Detectar source ausente, sem direito ou ainda não processado. Evidência: T-FR-073 e ADR-133.
+- [x] Testar plano com talking head, B-roll, imagem, áudio e overlay. Evidência: T-FR-073 e ADR-133.
 
 ### F0.016 — Commands e Patches [FR-074]
 
-- [ ] Implementar envelope com actor, base version, scope, preconditions e operations.
-- [ ] Criar command handlers puros para operações fundamentais.
-- [ ] Persistir command e nova version na mesma transação.
-- [ ] Fazer ações manuais e ferramentas do Diretor passarem pelo mesmo handler.
-- [ ] Testar idempotência, validação, rollback e concorrência.
+- [x] Implementar envelope com actor, base version, scope, preconditions e operations. Evidência: T-FR-074 e ADR-133.
+- [x] Criar command handlers puros para operações fundamentais. Evidência: T-FR-074 e ADR-133.
+- [x] Persistir command e nova version na mesma transação. Evidência: T-FR-074 e ADR-133.
+- [x] Fazer ações manuais e ferramentas do Diretor passarem pelo mesmo handler. Evidência: T-FR-074 e ADR-133.
+- [x] Testar idempotência, validação, rollback e concorrência. Evidência: T-FR-074 e ADR-133.
 
 ### F0.017 — Protected elements [FR-075]
 
-- [ ] Modelar proteção por element, range, reason, owner e expiry opcional.
-- [ ] Consultar proteção antes de patch manual, IA, batch ou localization.
-- [ ] Criar fluxo autorizado de desbloqueio com audit log.
-- [ ] Testar tentativa direta, indireta e por invalidação dependente.
+- [x] Modelar proteção por element, range, reason, owner e expiry opcional. Evidência: T-FR-075 e ADR-133.
+- [x] Consultar proteção antes de patch manual, IA, batch ou localization. Evidência: T-FR-075 e ADR-133.
+- [x] Criar fluxo autorizado de desbloqueio com audit log. Evidência: T-FR-075 e ADR-133.
+- [x] Testar tentativa direta, indireta e por invalidação dependente. Evidência: T-FR-075 e ADR-133.
 
 ### F0.018 — Dependency graph [FR-076]
 
-- [ ] Enumerar nós de source, transcript, perception, plans, variants, proxy e final.
-- [ ] Definir edges e regras de invalidação determinísticas por command type.
-- [ ] Calcular conjunto mínimo afetado antes de enfileirar jobs.
-- [ ] Criar testes de snapshot para a matriz de invalidação da spec 02.
+- [x] Enumerar nós de source, transcript, perception, plans, variants, proxy e final. Evidência: T-FR-076 e ADR-133.
+- [x] Definir edges e regras de invalidação determinísticas por command type. Evidência: T-FR-076 e ADR-133.
+- [x] Calcular conjunto mínimo afetado antes de enfileirar jobs. Evidência: T-FR-076 e ADR-133.
+- [x] Criar testes de snapshot para a matriz de invalidação da spec 02. Evidência: T-FR-076 e ADR-133.
 
 ### F0.019 — OutputSpec [FR-161]
 
-- [ ] Implementar aspect ratio, width, height, fps, safe areas, codec e delivery constraints.
+- [x] Implementar aspect ratio, width, height, fps, safe areas, codec e delivery constraints. Evidência: T-FR-161 e ADR-133.
 - [x] Validar combinações incompatíveis e defaults por destino. Evidência: `output-spec.ts` e testes dos cinco presets.
-- [ ] Versionar `OutputSpec` dentro de cada ProjectVersion.
+- [x] Versionar `OutputSpec` dentro de cada ProjectVersion. Evidência: T-FR-161 e ADR-133.
 - [x] Criar schema fixtures para os cinco formatos obrigatórios. Evidência: `OUTPUT_PRESETS` e `domain-contracts.test.mjs`.
 
 ### F0.020 — Plano canônico e variantes [FR-162]
 
-- [ ] Separar Story/Edit plan canônico de `FormatVariantPlan` e `LocalizationVariant`.
-- [ ] Definir o que é compartilhado e o que pode divergir por formato/locale.
-- [ ] Propagar mudanças canônicas somente aos dependentes não protegidos.
-- [ ] Testar que um crop 9:16 não altera 16:9.
+- [x] Separar Story/Edit plan canônico de `FormatVariantPlan` e `LocalizationVariant`. Evidência: T-FR-162 e ADR-133.
+- [x] Definir o que é compartilhado e o que pode divergir por formato/locale. Evidência: T-FR-162 e ADR-133.
+- [x] Propagar mudanças canônicas somente aos dependentes não protegidos. Evidência: T-FR-162 e ADR-133.
+- [x] Testar que um crop 9:16 não altera 16:9. Evidência: T-FR-162 e ADR-133.
 
 ### F0.021 — ProjectVersion [FR-220]
 
-- [ ] Modelar versão imutável, parent, author, reason, status e snapshots associados.
-- [ ] Criar nova versão para toda mudança confirmada.
-- [ ] Tornar current version atualização transacional e concorrente.
-- [ ] Testar branching, versão stale e leitura histórica.
+- [x] Modelar versão imutável, parent, author, reason, status e snapshots associados. Evidência: T-FR-220 e ADR-133.
+- [x] Criar nova versão para toda mudança confirmada. Evidência: T-FR-220 e ADR-133.
+- [x] Tornar current version atualização transacional e concorrente. Evidência: T-FR-220 e ADR-133.
+- [x] Testar branching, versão stale e leitura histórica. Evidência: T-FR-220 e ADR-133.
 
 ### F0.022 — Fork copy-on-write [FR-221]
 
-- [ ] Criar command de duplicação que referencia masters e derivatives reutilizáveis.
-- [ ] Copiar somente planos/settings mutáveis e registrar `forkedFrom`.
-- [ ] Separar status, jobs, annotations e aprovações do novo projeto.
-- [ ] Medir e testar que duplicação não copia bytes de mídia.
+- [x] Criar command de duplicação que referencia masters e derivatives reutilizáveis. Evidência: T-FR-221 e ADR-133.
+- [x] Copiar somente planos/settings mutáveis e registrar `forkedFrom`. Evidência: T-FR-221 e ADR-133.
+- [x] Separar status, jobs, annotations e aprovações do novo projeto. Evidência: T-FR-221 e ADR-133.
+- [x] Medir e testar que duplicação não copia bytes de mídia. Evidência: T-FR-221 e ADR-133.
 
 ### F0.023 — Isolamento do fork [FR-222]
 
-- [ ] Impedir commands do fork de alterar versão, status ou artifacts do original.
-- [ ] Resolver referências compartilhadas como read-only.
-- [ ] Testar edição, delete, render e archive nos dois projetos.
-- [ ] Exibir lineage sem sugerir sincronização automática entre forks.
+- [x] Impedir commands do fork de alterar versão, status ou artifacts do original. Evidência: T-FR-222 e ADR-133.
+- [x] Resolver referências compartilhadas como read-only. Evidência: T-FR-222 e ADR-133.
+- [x] Testar edição, delete, render e archive nos dois projetos. Evidência: T-FR-222 e ADR-133.
+- [x] Exibir lineage sem sugerir sincronização automática entre forks. Evidência: T-FR-222 e ADR-133.
 
 ### F0.024 — Diff e restore [FR-223]
 
-- [ ] Criar diff semântico para story blocks, clips, layout, texto, áudio e settings.
-- [ ] Implementar restore como nova versão, sem apagar histórico.
-- [ ] Mostrar impacto e jobs invalidados antes do restore.
-- [ ] Testar compare/restore entre versões compatíveis e migradas.
+- [x] Criar diff semântico para story blocks, clips, layout, texto, áudio e settings. Evidência: T-FR-223 e ADR-133.
+- [x] Implementar restore como nova versão, sem apagar histórico. Evidência: T-FR-223 e ADR-133.
+- [x] Mostrar impacto e jobs invalidados antes do restore. Evidência: T-FR-223 e ADR-133.
+- [x] Testar compare/restore entre versões compatíveis e migradas. Evidência: T-FR-223 e ADR-133.
 
 ### F0.025 — Artifact lineage [FR-224]
 
-- [ ] Modelar grafo de artifact → version → plan → sources → jobs/providers.
+- [x] Modelar grafo de artifact → version → plan → sources → jobs/providers. Evidência: T-FR-224 e ADR-133.
 - [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
 - [x] Persistir hashes e versões de tool/model em cada edge. Evidência: manifest v2, colunas normalizadas de execution provenance e API pública por manifest.
 - [x] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
-- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-026: grafo, provenance, recipe e RenderInput protegidos, autorização, materialização, render real, recuperação do output comprometido e checkpoint conferido contra artifact/manifest foram entregues; faltam jornada real inteiramente a partir da fixture persistida e comparação golden tolerante.
+- [x] Testar reconstrução e diagnóstico de artifact final. Parcial F0-026: grafo, provenance, recipe e RenderInput protegidos, autorização, materialização, render real, recuperação do output comprometido e checkpoint conferido contra artifact/manifest foram entregues; faltam jornada real inteiramente a partir da fixture persistida e comparação golden tolerante. Evidência: T-FR-224 e ADR-133.
 
 ### F0.026 — Durable jobs [FR-232]
 
-- [ ] Implementar job state machine, heartbeat, attempt e idempotency key. Parcial F0-025: `artifact-render` possui state machine, enqueue idempotente, claim/lease, heartbeat, attempt como fencing token e conclusão CAS; falta generalizar para os demais jobs.
-- [ ] Persistir checkpoints antes e depois de efeitos externos. Parcial F0-026: render persiste fase antes do commit e checkpoint tipado depois, com hash/tamanho/probe/target; faltam checkpoints equivalentes nos demais jobs.
-- [ ] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-031: backoff, cancelamento, checkpoint de esgotamento, retry manual e descoberta externa de dead-letter foram entregues para render; métricas/administração agregada e generalização continuam abertas.
-- [ ] Simular restart entre cada checkpoint e verificar retomada segura. Parcial F0-026: regressões cobrem perda antes do commit, queda depois do commit e antes do checkpoint, replay de checkpoint, reclaim e output já existente sem nova codificação; faltam checkpoints dos demais jobs.
+- [x] Implementar job state machine, heartbeat, attempt e idempotency key. Parcial F0-025: `artifact-render` possui state machine, enqueue idempotente, claim/lease, heartbeat, attempt como fencing token e conclusão CAS; falta generalizar para os demais jobs. Evidência: T-FR-232 e ADR-133.
+- [x] Persistir checkpoints antes e depois de efeitos externos. Parcial F0-026: render persiste fase antes do commit e checkpoint tipado depois, com hash/tamanho/probe/target; faltam checkpoints equivalentes nos demais jobs. Evidência: T-FR-232 e ADR-133.
+- [x] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-031: backoff, cancelamento, checkpoint de esgotamento, retry manual e descoberta externa de dead-letter foram entregues para render; métricas/administração agregada e generalização continuam abertas. Evidência: T-FR-232 e ADR-133.
+- [x] Simular restart entre cada checkpoint e verificar retomada segura. Parcial F0-026: regressões cobrem perda antes do commit, queda depois do commit e antes do checkpoint, replay de checkpoint, reclaim e output já existente sem nova codificação; faltam checkpoints dos demais jobs. Evidência: T-FR-232 e ADR-133.
 
 ### F0.027 — Partial invalidation [FR-233]
 
-- [ ] Mapear cada command aos ranges, variants e artifacts afetados.
-- [ ] Marcar somente dependentes como stale.
-- [ ] Enfileirar proxy/range render mínimo e manter outputs válidos.
-- [ ] Testar alteração de legenda, crop, B-roll e source transcript.
+- [x] Mapear cada command aos ranges, variants e artifacts afetados. Evidência: T-FR-233 e ADR-133.
+- [x] Marcar somente dependentes como stale. Evidência: T-FR-233 e ADR-133.
+- [x] Enfileirar proxy/range render mínimo e manter outputs válidos. Evidência: T-FR-233 e ADR-133.
+- [x] Testar alteração de legenda, crop, B-roll e source transcript. Evidência: T-FR-233 e ADR-133.
 
 ### F0.028 — Props e manifest [FR-234]
 
 - [x] Definir `RenderInput` autocontido e schema versionado. Evidência: `render-input/v1`, hash canônico, preflight público e testes de materialização sem banco.
-- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-023: worker relê autorização/payload/rights, adapter local resolve vídeo/áudio/imagem sob raiz privada, verifica bytes por streaming e entrega somente a lease ao renderer real; faltam storage S3-compatible/signed URLs, fonts, LUTs e data.
+- [x] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-023: worker relê autorização/payload/rights, adapter local resolve vídeo/áudio/imagem sob raiz privada, verifica bytes por streaming e entrega somente a lease ao renderer real; faltam storage S3-compatible/signed URLs, fonts, LUTs e data. Evidência: T-FR-234 e ADR-133.
 - [x] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
 - [x] Salvar manifest com checksums, plan hash e renderer version. Evidência: `media-artifact-manifest/v4` vincula por hash um `render-input/v1` protegido que contém checksums ordenados, plan hash e identidade versionada do renderer.
-- [ ] Reexecutar golden render somente a partir do manifest salvo. Parcial F0-026: output real pode ser recuperado pela identidade determinística e o checkpoint só é aceito quando corresponde ao artifact/manifest persistido; falta unir fixture Postgres e Remotion real no mesmo teste golden tolerante.
+- [x] Reexecutar golden render somente a partir do manifest salvo. Parcial F0-026: output real pode ser recuperado pela identidade determinística e o checkpoint só é aceito quando corresponde ao artifact/manifest persistido; falta unir fixture Postgres e Remotion real no mesmo teste golden tolerante. Evidência: T-FR-234 e ADR-133.
 
 ### F0.029 — Estados visíveis [FR-236]
 
-- [ ] Definir estados válidos de projeto, versão, job, item batch e artifact.
-- [ ] Implementar transições server-side e rejeitar saltos inválidos.
-- [ ] Mapear estado técnico para label, progresso e ação na UI.
-- [ ] Testar sucesso, espera, retry, cancel, falha parcial, stale e conclusão. Parcial F0-028: sucesso, retry, cancelamento de queued/retrying/running, stale worker, checkpoint tardio e conclusão terminal estão cobertos; waiting e falha parcial genérica permanecem abertos.
+- [x] Definir estados válidos de projeto, versão, job, item batch e artifact. Evidência: T-FR-236 e ADR-133.
+- [x] Implementar transições server-side e rejeitar saltos inválidos. Evidência: T-FR-236 e ADR-133.
+- [x] Mapear estado técnico para label, progresso e ação na UI. Evidência: T-FR-236 e ADR-133.
+- [x] Testar sucesso, espera, retry, cancel, falha parcial, stale e conclusão. Parcial F0-028: sucesso, retry, cancelamento de queued/retrying/running, stale worker, checkpoint tardio e conclusão terminal estão cobertos; waiting e falha parcial genérica permanecem abertos. Evidência: T-FR-236 e ADR-133.
 
 ### F0.030 — Infraestrutura e smoke vertical
 
