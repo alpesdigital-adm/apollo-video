@@ -5,16 +5,12 @@ IMAGE="${APOLLO_IMAGE:-apollo-video:latest}"
 CONTAINER="${APOLLO_CONTAINER:-apollo-video}"
 APP_ROOT="${APOLLO_APP_ROOT:-/apps/apollo-video}"
 ENV_FILE="${APOLLO_ENV_FILE:-${APP_ROOT}/.env}"
-BASIC_AUTH_FILE="${APOLLO_BASIC_AUTH_FILE:-${APP_ROOT}/access.htpasswd}"
 DOMAIN="${APOLLO_DOMAIN:-apollo.alpesd.com.br}"
 
 test -f "${ENV_FILE}"
-test -f "${BASIC_AUTH_FILE}"
 docker network inspect easypanel >/dev/null
 
-BASIC_AUTH="$(tr -d '\r\n' < "${BASIC_AUTH_FILE}")"
-
-for directory in data uploads renders tmp artifacts render-outputs; do
+for directory in data uploads renders generated-images generated-videos stock thumbs audio assets tmp artifacts render-outputs; do
   install -d -o 1000 -g 1000 "${APP_ROOT}/${directory}"
 done
 
@@ -43,8 +39,14 @@ docker run -d \
   --add-host host.docker.internal:host-gateway \
   --network easypanel \
   -v "${APP_ROOT}/data:/app/data" \
-  -v "${APP_ROOT}/uploads:/app/uploads" \
-  -v "${APP_ROOT}/renders:/app/renders" \
+  -v "${APP_ROOT}/uploads:/app/public/uploads" \
+  -v "${APP_ROOT}/renders:/app/public/renders" \
+  -v "${APP_ROOT}/generated-images:/app/public/generated-images" \
+  -v "${APP_ROOT}/generated-videos:/app/public/generated-videos" \
+  -v "${APP_ROOT}/stock:/app/public/stock" \
+  -v "${APP_ROOT}/thumbs:/app/public/thumbs" \
+  -v "${APP_ROOT}/audio:/app/public/audio" \
+  -v "${APP_ROOT}/assets:/app/public/assets" \
   -v "${APP_ROOT}/tmp:/app/tmp" \
   -v "${APP_ROOT}/artifacts:/app/artifacts" \
   -v "${APP_ROOT}/render-outputs:/app/render-outputs" \
@@ -57,7 +59,6 @@ docker run -d \
   --label traefik.docker.network=easypanel \
   --label "traefik.http.middlewares.apollo-buffer.buffering.maxRequestBodyBytes=4294967296" \
   --label "traefik.http.middlewares.apollo-buffer.buffering.memRequestBodyBytes=67108864" \
-  --label "traefik.http.middlewares.apollo-auth.basicauth.users=${BASIC_AUTH}" \
   --label traefik.http.middlewares.apollo-redirect.redirectscheme.scheme=https \
   --label traefik.http.middlewares.apollo-redirect.redirectscheme.permanent=true \
   --label "traefik.http.routers.apollo-api-http.rule=Host(\`${DOMAIN}\`) && PathPrefix(\`/v1\`)" \
@@ -76,7 +77,7 @@ docker run -d \
   --label traefik.http.routers.apollo-http.priority=10 \
   --label "traefik.http.routers.apollo-https.rule=Host(\`${DOMAIN}\`)" \
   --label traefik.http.routers.apollo-https.entrypoints=https \
-  --label traefik.http.routers.apollo-https.middlewares=apollo-auth,apollo-buffer \
+  --label traefik.http.routers.apollo-https.middlewares=apollo-buffer \
   --label traefik.http.routers.apollo-https.priority=10 \
   --label traefik.http.routers.apollo-https.tls=true \
   --label traefik.http.routers.apollo-https.tls.certresolver=letsencrypt \

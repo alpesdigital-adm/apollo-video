@@ -6,6 +6,7 @@ import { deriveDashboardProject } from '@/v2/domain/project-dashboard'
 import { optimisticProjectPatch } from '@/v2/application/project-quick-actions'
 import { STRATEGIC_OBJECTIVES, type StrategicObjectiveId } from '@/v2/domain/strategic-objective'
 import { createProductionBrief } from '@/v2/domain/production-brief'
+import LogoutButton from '@/components/LogoutButton'
 
 interface ProjectSummary {
   id: string; name: string; format: string; stylePreset: string; status: string; error?: string | null
@@ -31,6 +32,7 @@ export default function Dashboard() {
   const [filtersReady, setFiltersReady] = useState(false)
   const [actionProjectId, setActionProjectId] = useState<string | null>(null)
   const [objective, setObjective] = useState<StrategicObjectiveId>('discovery')
+  const [outputFormat, setOutputFormat] = useState('9:16')
   const [destination, setDestination] = useState('')
   const [briefing, setBriefing] = useState('')
   const [isNavigating, startNavigation] = useTransition()
@@ -71,7 +73,7 @@ export default function Dashboard() {
     if (!file.type.startsWith('video/')) { setMessage('Escolha um arquivo de vídeo válido.'); return }
     setUploading(true); setMessage('Enviando e preparando o vídeo…')
     try {
-      const body = new FormData(); body.append('file', file); body.append('objective', objective); if (destination.trim()) body.append('destination', destination.trim()); if (briefing.trim()) body.append('briefing', briefing.trim())
+      const body = new FormData(); body.append('file', file); body.append('objective', objective); body.append('format', outputFormat); if (destination.trim()) body.append('destination', destination.trim()); if (briefing.trim()) body.append('briefing', briefing.trim())
       const response = await fetch('/api/upload', { method: 'POST', body })
       const data = await response.json()
       if (!response.ok || !data.projectId) throw new Error(data.error ?? 'O upload não foi concluído.')
@@ -135,7 +137,7 @@ export default function Dashboard() {
       <header className="border-b border-white/10 bg-[#08090d]/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1440px] items-center justify-between px-6 py-5 lg:px-10">
           <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-[#7167ff] font-black text-white">A</div><div><p className="text-[11px] uppercase tracking-[0.24em] text-[#8f93a3]">Apollo studio</p><h1 className="text-lg font-semibold">Central de produções</h1></div></div>
-          <nav className="flex items-center gap-2 text-sm"><a className="rounded-lg px-3 py-2 text-[#b9bdc9] hover:bg-white/5 hover:text-white" href="/assets">Biblioteca</a><a className="rounded-lg px-3 py-2 text-[#b9bdc9] hover:bg-white/5 hover:text-white" href="/settings">Workspace</a></nav>
+          <nav className="flex items-center gap-2 text-sm"><a className="rounded-lg px-3 py-2 text-[#b9bdc9] hover:bg-white/5 hover:text-white" href="/assets">Biblioteca</a><a className="rounded-lg px-3 py-2 text-[#b9bdc9] hover:bg-white/5 hover:text-white" href="/settings">Workspace</a><LogoutButton /></nav>
         </div>
       </header>
 
@@ -146,7 +148,9 @@ export default function Dashboard() {
             <label className="block text-[11px] uppercase tracking-[0.16em] text-[#aaaee0]">Objetivo desta produção<select className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0b0c12] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-[#7167ff]" value={objective} onChange={(event) => setObjective(event.target.value as StrategicObjectiveId)}>{STRATEGIC_OBJECTIVES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
             <p className="mt-2 min-h-10 text-xs leading-5 text-[#999ec0]">{STRATEGIC_OBJECTIVES.find((item) => item.id === objective)?.description}</p>
             {DESTINATION_REQUIRED.has(objective) ? <label className="mt-2 block text-[11px] text-[#aaaee0]">Destino da ação<input className="mt-1 h-10 w-full rounded-lg border border-white/10 bg-[#0b0c12] px-3 text-sm text-white outline-none placeholder:text-[#62677a] focus:border-[#7167ff]" placeholder={objective === 'whatsapp' ? '+55…' : objective === 'booking' ? 'Link ou agenda' : objective === 'download' ? 'Material ou arquivo' : 'https://…'} value={destination} onChange={(event) => setDestination(event.target.value)}/></label> : null}
-            <details className="mt-2"><summary className="cursor-pointer text-[11px] text-[#aaaee0]">Adicionar briefing opcional</summary><textarea className="mt-2 min-h-20 w-full resize-y rounded-lg border border-white/10 bg-[#0b0c12] p-3 text-sm text-white outline-none placeholder:text-[#62677a] focus:border-[#7167ff]" maxLength={10000} placeholder="Público, oferta, tom, limites ou referências…" value={briefing} onChange={(event) => setBriefing(event.target.value)}/><div className="mt-2 rounded-lg bg-black/20 p-2 text-[11px] leading-4 text-[#999ec0]"><span className="text-white/80">Resumo:</span> {briefPreview.summary.text}<br/><span className="text-white/80">Assumptions:</span> {briefPreview.assumptions.length ? briefPreview.assumptions.join(', ') : 'nenhuma'}</div></details>
+            <fieldset className="mt-3"><legend className="text-[11px] uppercase tracking-[0.14em] text-[#aaaee0]">Formato de saída</legend><div className="mt-2 grid grid-cols-5 gap-1" aria-label="Formato do vídeo">{['9:16','16:9','4:5','1:1','21:9'].map((value) => <button key={value} type="button" onClick={() => setOutputFormat(value)} aria-pressed={outputFormat === value} className={`rounded-lg border px-1 py-2 text-xs transition ${outputFormat === value ? 'border-[#8b84ff] bg-[#7167ff] text-white' : 'border-white/10 bg-[#0b0c12] text-[#9ca1b4] hover:border-white/25'}`}>{value}</button>)}</div><p className="mt-1.5 text-[11px] text-[#777d8e]">O vídeo bruto não limita o formato final.</p></fieldset>
+            <label className="mt-3 block text-[11px] uppercase tracking-[0.14em] text-[#aaaee0]">Briefing <span className="normal-case tracking-normal text-[#777d8e]">(opcional)</span><textarea className="mt-2 min-h-24 w-full resize-y rounded-lg border border-white/10 bg-[#0b0c12] p-3 text-sm normal-case tracking-normal text-white outline-none placeholder:text-[#62677a] focus:border-[#7167ff]" maxLength={10000} placeholder="Público, oferta, tom, limites, referências e o que o Diretor deve evitar…" value={briefing} onChange={(event) => setBriefing(event.target.value)}/></label>
+            {briefing.trim() ? <div className="mt-2 rounded-lg bg-black/20 p-2 text-[11px] leading-4 text-[#999ec0]"><span className="text-white/80">Entendido pelo Diretor:</span> {briefPreview.summary.text}</div> : null}
             <label className="group mt-3 flex cursor-pointer items-center justify-between rounded-xl bg-[#7167ff] px-4 py-3 transition hover:bg-[#8178ff] focus-within:ring-2 focus-within:ring-white/70">
               <input className="sr-only" type="file" accept="video/*" disabled={uploading || isNavigating || (DESTINATION_REQUIRED.has(objective) && !destination.trim())} onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file) }} />
               <span><span className="block font-semibold">Nova produção</span><span className="block text-xs text-white/75">Envie o primeiro vídeo bruto</span></span><span className="text-2xl">+</span>

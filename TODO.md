@@ -8,6 +8,23 @@
 
 ---
 
+## Gate corretivo — aceite visual e E2E em produção
+
+Este gate reabre honestamente o aceite da interface e da primeira edição real. Os testes de domínio existentes continuam válidos, mas não substituem a comparação com os mockups aprovados nem a revisão do MP4 final.
+
+- [x] Tornar formato de saída e briefing opcional visíveis na criação do projeto.
+- [x] Substituir a tela operacional legada pelo workspace de edição alinhado aos mockups aprovados.
+- [x] Impedir punch-in automático nos quatro segundos iniciais e desativar zoom automático por padrão.
+- [x] Limitar legendas a blocos curtos, respeitar âncora e manter a região de rosto/olhos livre.
+- [x] Expor corte editorial por API com remoção alinhada às palavras e retiming da transcrição.
+- [x] Criar regressões automatizadas para autenticação e cortes editoriais.
+- [ ] Publicar a nova autenticação própria do Apollo e remover o Basic Auth do proxy.
+- [ ] Aplicar via API, no projeto de teste real, a remoção de datas, “dia 8” e “dois dias de aula”.
+- [ ] Revisar e corrigir continuidade, transições, enquadramento e posicionamento de legendas no vídeo renderizado.
+- [ ] Executar o E2E completo em produção e entregar o MP4 final assistível.
+
+---
+
 ## 0. Como executar este backlog
 
 ### 0.1 Regras de uso

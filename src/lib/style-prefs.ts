@@ -37,7 +37,8 @@ export interface StylePrefs {
 
 const DEFAULT_PREFS: StylePrefs = {
   subtitleStyle: 'kinetic',
-  jumpCutPunchIns: true,
+  // Movimento de câmera precisa ser uma decisão editorial explícita.
+  jumpCutPunchIns: false,
   gradePreset: 'natural'
 }
 

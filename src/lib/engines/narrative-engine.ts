@@ -341,7 +341,7 @@ function buildLayoutSegments(scenes: Scene[], fps: number): LayoutSegment[] {
  * frame doesn't flicker. Only intervals that actually scale (1.06) are emitted —
  * VideoComposition keeps the base video at 1.0 wherever no punch-in is active.
  */
-function buildPunchIns(
+export function buildPunchIns(
   cuts: EditCut[],
   durationFrames: number,
   fps: number,
@@ -374,6 +374,7 @@ function buildPunchIns(
   if (points.length < 2) return []
 
   const shortFrames = Math.max(1, Math.round(fps * 0.8))
+  const openingRunwayFrames = Math.max(1, Math.round(fps * 4))
   const punchIns: PlanPunchIn[] = []
   let nextBig = 1.0
   let prevAssigned = 1.0
@@ -382,6 +383,7 @@ function buildPunchIns(
     const fromFrame = points[i]
     const toFrame = points[i + 1]
     if (toFrame <= fromFrame) continue
+    if (fromFrame < openingRunwayFrames) continue
 
     let scale: number
     if (toFrame - fromFrame < shortFrames) {

@@ -16,6 +16,11 @@ export async function POST(request: NextRequest) {
     const objective = resolveStrategicObjective(String(formData.get('objective') ?? 'discovery'))
     const desiredAction = createDesiredAction({ objective: objective.id, destination: String(formData.get('destination') ?? '').trim() || undefined })
     const briefing = createProductionBrief({ ownerText: String(formData.get('briefing') ?? '') })
+    const requestedFormat = String(formData.get('format') ?? '').trim()
+    const allowedFormats = new Set(['9:16', '16:9', '4:5', '1:1', '21:9'])
+    if (requestedFormat && !allowedFormats.has(requestedFormat)) {
+      return NextResponse.json({ error: 'Formato de saída inválido' }, { status: 400 })
+    }
     // Seletor de preset removido do produto: o visual é dirigido pelas cores da
     // marca, presets de legenda, grade e leis de direção. Fica o padrão fixo.
     const stylePreset = 'creator-clean'
@@ -46,7 +51,8 @@ export async function POST(request: NextRequest) {
     const videoInfo = await getVideoInfo(filepath)
 
     // Detect video format based on aspect ratio
-    const aspectRatio = videoInfo.width > videoInfo.height ? '16:9' : '9:16'
+    const sourceAspectRatio = videoInfo.width > videoInfo.height ? '16:9' : '9:16'
+    const outputFormat = requestedFormat || sourceAspectRatio
 
     // Create project in database
     const project = await prisma.project.create({
@@ -58,7 +64,7 @@ export async function POST(request: NextRequest) {
         videoHeight: videoInfo.height,
         videoDuration: videoInfo.duration,
         videoFps: videoInfo.fps,
-        format: aspectRatio,
+        format: outputFormat,
         stylePreset,
         objective: objective.id,
         desiredActionJson: JSON.stringify(desiredAction),
@@ -69,7 +75,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       projectId: project.id,
-      format: aspectRatio,
+      format: outputFormat,
+      sourceFormat: sourceAspectRatio,
       videoInfo
     })
   } catch (error) {

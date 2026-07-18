@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { RemotionProjectPlayer } from '@/components/RemotionProjectPlayer'
+import { ApolloEditorWorkspace } from '@/components/ApolloEditorWorkspace'
 import { resolveColdOpen } from '@/lib/remotion/input-props'
 import type { Scene } from '@/lib/types/scene'
 import type { SubtitleEntry } from '@/lib/types/project'
@@ -603,6 +604,79 @@ export default function EditorPage() {
     )
   }
 
+  const activeFps = project.videoFps || 30
+  const previewDurationFrames = (() => {
+    const base = project.editPlan?.durationFrames || Math.ceil((project.videoDuration || 1) * activeFps)
+    const coldOpen = resolveColdOpen(project.editPlan, activeFps, project.editPlan?.durationFrames)
+    return base + (coldOpen?.len || 0)
+  })()
+  const previewPlayer = project.status === 'complete' && project.renderedVideoPath ? (
+    <video src={`/api/video/${project.id}`} controls className="h-full w-full bg-black object-contain" />
+  ) : (
+    <RemotionProjectPlayer
+      projectId={project.id}
+      format={project.format}
+      fps={activeFps}
+      durationFrames={previewDurationFrames}
+      scenes={project.scenes || []}
+      subtitles={project.subtitles || []}
+      transcription={project.transcription}
+      stylePreset={project.stylePreset || 'creator-clean'}
+      palette={project.palette || { primary: '#FFB800', secondary: '#20202A', accent: '#FF6B35', background: '#050508', text: '#FFFFFF' }}
+      editPlan={project.editPlan}
+      musicPick={project.musicPick}
+      seekRef={seekRef}
+      onFrameUpdate={handleFrameUpdate}
+    />
+  )
+  const previewAnnotation = annotationMode ? (
+    <div
+      className="absolute inset-0 z-30 cursor-crosshair bg-amber-400/5"
+      aria-label="Demarcar área da revisão"
+      onPointerDown={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect()
+        setAnnotationStart({ x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height })
+      }}
+      onPointerUp={(event) => {
+        if (!annotationStart) return
+        const rect = event.currentTarget.getBoundingClientRect()
+        const end = { x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height }
+        setAnnotationRegion({ x: Math.min(annotationStart.x, end.x), y: Math.min(annotationStart.y, end.y), width: Math.abs(end.x - annotationStart.x), height: Math.abs(end.y - annotationStart.y) })
+        setAnnotationStart(null)
+      }}
+    >
+      {annotationRegion ? <div className="absolute border-2 border-amber-300 bg-amber-300/10" style={{ left: `${annotationRegion.x * 100}%`, top: `${annotationRegion.y * 100}%`, width: `${annotationRegion.width * 100}%`, height: `${annotationRegion.height * 100}%` }} /> : null}
+    </div>
+  ) : null
+
+  if (process.env.NEXT_PUBLIC_APOLLO_EDITOR !== 'legacy') return (
+    <ApolloEditorWorkspace
+      project={project}
+      beats={beats}
+      player={previewPlayer}
+      refineInput={refineInput}
+      refineError={refineError}
+      isRefining={isRefining}
+      isRendering={isRendering}
+      annotationMode={annotationMode}
+      annotationText={annotationText}
+      annotationOverlay={previewAnnotation}
+      onBack={() => router.push('/')}
+      onRender={handleRender}
+      onRefine={handleDirectProject}
+      onRefineInput={setRefineInput}
+      onBeatClick={(beat) => {
+        const selected = beats.find((item) => item.index === beat.index)
+        if (selected) handleBeatClick(selected)
+      }}
+      onToggleAnnotation={() => setAnnotationMode((value) => !value)}
+      onAnnotationText={setAnnotationText}
+      onSaveAnnotation={saveReviewAnnotation}
+    />
+  )
+
+  /* Legacy editor kept below temporarily until the E2E visual acceptance pass
+     proves the new workspace against a real production project. */
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#050508] to-zinc-900">
       {/* Header */}
