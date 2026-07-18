@@ -8,18 +8,42 @@
 
 ---
 
+## Auditoria de execução — 2026-07-18
+
+Após o E2E revelar que a interface nova ainda acionava o pipeline legado, todas as caixas foram reavaliadas. O status anterior de 1.247/1.255 não representava produto entregue: misturava documentação, funções isoladas, fixtures e testes com jornadas integradas inexistentes.
+
+Critério vigente para `[x]`:
+
+- o artefato documental é o próprio resultado pedido e existe no repositório; ou
+- a capacidade está integrada ao runtime V2, usa Postgres V2 como fonte de verdade, possui contrato público quando operável e passou por teste proporcional ao risco;
+- fixture, fake, tipo, função pura ou unit test isolado não conclui uma tarefa que promete UI, provider, worker, persistência, render, E2E ou comportamento observável;
+- itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
+- nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
+
+Estado após a primeira auditoria conservadora:
+
+- **83 de 1.255 microtarefas verificadas como efetivamente entregues (6,6%)**;
+- **1.172 microtarefas abertas ou aguardando nova comprovação**;
+- todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
+- decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
+- componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
+
+Esta porcentagem mede o PRD completo. Para o próximo teste vertical V2, o reaproveitamento técnico existente é estimado em 20–25%; ainda faltam 75–80% da jornada executável específica descrita no gate abaixo.
+
+---
+
 ## Gate corretivo — aceite visual e E2E em produção
 
 Este gate reabre honestamente o aceite da interface e da primeira edição real. Os testes de domínio existentes continuam válidos, mas não substituem a comparação com os mockups aprovados nem a revisão do MP4 final.
 
 **Decisão irrevogável de arquitetura (2026-07-18):** o legado fica no passado. É proibido lançar fallback, flag de compatibilidade ou correção incremental sobre `analyzeContent`, o `narrativeEngine` antigo, projetos SQLite ou rotas `/api/process/*`. A interface, a API externa e os workers devem executar exclusivamente a jornada V2 sobre Postgres, versões imutáveis e operações duráveis.
 
-- [x] Tornar formato de saída e briefing opcional visíveis na criação do projeto.
+- [ ] Tornar formato de saída e briefing opcional visíveis na criação do projeto.
 - [ ] Conectar o workspace de edição aos projetos, versões, operações e artifacts V2, sem ler o projeto SQLite legado.
-- [x] Impedir punch-in automático nos quatro segundos iniciais e desativar zoom automático por padrão.
-- [x] Limitar legendas a blocos curtos, respeitar âncora e manter a região de rosto/olhos livre.
+- [ ] Impedir punch-in automático nos quatro segundos iniciais e desativar zoom automático por padrão.
+- [ ] Limitar legendas a blocos curtos, respeitar âncora e manter a região de rosto/olhos livre.
 - [ ] Expor corte editorial no modelo de `Command` V2, com nova versão imutável, alinhamento às palavras e retiming da transcrição.
-- [x] Criar regressões automatizadas para autenticação e cortes editoriais.
+- [ ] Criar regressões automatizadas para autenticação e cortes editoriais.
 - [ ] Publicar a nova autenticação própria do Apollo e remover o Basic Auth do proxy.
 - [ ] Importar o master do projeto de teste como artifact V2 e aplicar via API a remoção de datas, “dia 8” e “dois dias de aula”.
 - [ ] Implementar a jornada executável V2: briefing → percepção → `TreatmentPlan` → `StoryPlan` → `EditPlan` → critic → proxy/final.
@@ -33,51 +57,51 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### 0.1 Regras de uso
 
-- [x] Antes de iniciar uma microtarefa, confirmar as dependências citadas no FR, ADR ou spec correspondente. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Associar cada implementação a um ID deste arquivo e ao FR/NFR/AC de origem no PR ou commit. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Nomear a evidência principal de cada requisito como `T-FR-xxx`, conforme a matriz, e vincular testes adicionais ao mesmo ID. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Não marcar uma tarefa de implementação sem teste, fixture, captura ou métrica que demonstre o resultado. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Quando uma decisão mudar contrato, atualizar PRD, spec, matriz, migration e testes no mesmo PR. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Tratar valores indicados como “inicial”, “default” ou “a calibrar” como configuração versionada, não constante dispersa. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Abrir um ADR quando a implementação exigir decisão diferente das questões já listadas no PRD. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Entregar slices verticais pequenos: domínio → persistência → job/provider → UI → observabilidade → teste. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Manter masters imutáveis e executar toda transformação por derivado com lineage. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Fazer UI e IA emitirem o mesmo modelo de `Command`; não criar mutações paralelas fora do domínio. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Exigir que toda capability operável possua contrato público, capability ID e contract test; UI, API e agentes usam o mesmo application service. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Impedir que transcrição, OCR, metadados ou documentos enviados sejam interpretados como instruções do proprietário. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Antes de iniciar uma microtarefa, confirmar as dependências citadas no FR, ADR ou spec correspondente. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Associar cada implementação a um ID deste arquivo e ao FR/NFR/AC de origem no PR ou commit. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Nomear a evidência principal de cada requisito como `T-FR-xxx`, conforme a matriz, e vincular testes adicionais ao mesmo ID. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Não marcar uma tarefa de implementação sem teste, fixture, captura ou métrica que demonstre o resultado. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Quando uma decisão mudar contrato, atualizar PRD, spec, matriz, migration e testes no mesmo PR. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Tratar valores indicados como “inicial”, “default” ou “a calibrar” como configuração versionada, não constante dispersa. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Abrir um ADR quando a implementação exigir decisão diferente das questões já listadas no PRD. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Entregar slices verticais pequenos: domínio → persistência → job/provider → UI → observabilidade → teste. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Manter masters imutáveis e executar toda transformação por derivado com lineage. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Fazer UI e IA emitirem o mesmo modelo de `Command`; não criar mutações paralelas fora do domínio. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Exigir que toda capability operável possua contrato público, capability ID e contract test; UI, API e agentes usam o mesmo application service. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Impedir que transcrição, OCR, metadados ou documentos enviados sejam interpretados como instruções do proprietário. Evidência: docs/EXECUTION-GOVERNANCE.md.
 
 ### 0.2 Definition of Ready de uma microtarefa
 
-- [x] Resultado esperado e estado de erro estão escritos. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Contrato de entrada/saída e owner do dado estão identificados. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Dependências técnicas e de produto estão resolvidas ou explicitamente mockadas. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Fixture, caso de teste ou procedimento de validação está definido. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Impacto em rights, consent, custo, lineage e invalidação foi avaliado. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Resultado esperado e estado de erro estão escritos. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Contrato de entrada/saída e owner do dado estão identificados. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Dependências técnicas e de produto estão resolvidas ou explicitamente mockadas. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Fixture, caso de teste ou procedimento de validação está definido. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Impacto em rights, consent, custo, lineage e invalidação foi avaliado. Evidência: docs/EXECUTION-GOVERNANCE.md.
 
 ### 0.3 Definition of Done global
 
-- [x] Contrato e migration afetados possuem versão. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Permissões, rights e isolamento de workspace foram verificados. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Operações repetíveis possuem idempotency key e comportamento de retry definido. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] UI possui loading, empty, error, retry e cancel quando aplicável. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Logs, métricas e correlation IDs foram adicionados sem expor conteúdo sensível. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Regra de domínio possui teste unitário. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Integração externa possui adapter mockado e contract test. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Fluxo visual/timing possui E2E, golden ou fixture determinística. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Dashboard/editor representam o estado verdadeiro do workflow. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Versionamento, lineage, proteção e invalidação parcial foram exercitados. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Critério de aceite local foi demonstrado. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Segurança não depende exclusivamente de prompt. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Contrato e migration afetados possuem versão. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Permissões, rights e isolamento de workspace foram verificados. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Operações repetíveis possuem idempotency key e comportamento de retry definido. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] UI possui loading, empty, error, retry e cancel quando aplicável. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Logs, métricas e correlation IDs foram adicionados sem expor conteúdo sensível. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Regra de domínio possui teste unitário. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Integração externa possui adapter mockado e contract test. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Fluxo visual/timing possui E2E, golden ou fixture determinística. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Dashboard/editor representam o estado verdadeiro do workflow. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Versionamento, lineage, proteção e invalidação parcial foram exercitados. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Critério de aceite local foi demonstrado. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Segurança não depende exclusivamente de prompt. Evidência: docs/EXECUTION-GOVERNANCE.md.
 
 ### 0.4 Ordem macro
 
-- [x] Concluir decisões bloqueantes e Fundação (F0). Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Entregar MVP Core ponta a ponta (F1) antes de ampliar variações. Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Adicionar lotes, reuso e formatos (F2). Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Adicionar mídia sintética e transformação (F3). Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Adicionar multicâmera e long-form avançado (F4). Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Adicionar localização e áudio avançado (F5). Evidência: docs/EXECUTION-GOVERNANCE.md.
-- [x] Executar o gate da fase anterior antes de habilitar a próxima para usuários. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Concluir decisões bloqueantes e Fundação (F0). Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Entregar MVP Core ponta a ponta (F1) antes de ampliar variações. Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Adicionar lotes, reuso e formatos (F2). Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Adicionar mídia sintética e transformação (F3). Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Adicionar multicâmera e long-form avançado (F4). Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Adicionar localização e áudio avançado (F5). Evidência: docs/EXECUTION-GOVERNANCE.md.
+- [ ] Executar o gate da fase anterior antes de habilitar a próxima para usuários. Evidência: docs/EXECUTION-GOVERNANCE.md.
 
 ---
 
@@ -86,35 +110,35 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 ### 1.1 Princípios P-01 a P-10
 
 - [x] [P-01] Documentar quais decisões pertencem à IA e quais validações permanecem determinísticas em código. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
-- [x] [P-02] Proibir qualquer fluxo que descarte áudio, vídeo, imagem ou saída sintética antes de aplicar retention policy. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
-- [x] [P-03] Remover seleção manual obrigatória de “estilo” e fazer o `TreatmentPlan` determinar o tratamento visual. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
-- [x] [P-04] Implementar precedência “reutilizar → adaptar → gerar → omitir” nas decisões de assets. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
-- [x] [P-05] Permitir explicitamente `no_insert`, `no_effect` e `no_music` como decisões válidas. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
-- [x] [P-06] Exigir critic/validator para toda geração antes de promovê-la a artifact aprovável. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
-- [x] [P-07] Registrar decisão, evidência, confidence, custo e alternativa em todo `DirectorRun`. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
-- [x] [P-08] Garantir edição manual, proteção, undo e restore sem bifurcar o modelo de estado. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
-- [x] [P-09] Traduzir guardrails livres em políticas estruturadas e versionadas. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
-- [x] [P-10] Manter contratos amplos, mas liberar capacidades apenas pelos gates incrementais F0–F5. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
-- [x] [P-11] Expor externamente toda capacidade operável sem publicar internals nem permitir bypass de policies. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [ ] [P-02] Proibir qualquer fluxo que descarte áudio, vídeo, imagem ou saída sintética antes de aplicar retention policy. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [ ] [P-03] Remover seleção manual obrigatória de “estilo” e fazer o `TreatmentPlan` determinar o tratamento visual. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [ ] [P-04] Implementar precedência “reutilizar → adaptar → gerar → omitir” nas decisões de assets. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [ ] [P-05] Permitir explicitamente `no_insert`, `no_effect` e `no_music` como decisões válidas. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [ ] [P-06] Exigir critic/validator para toda geração antes de promovê-la a artifact aprovável. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [ ] [P-07] Registrar decisão, evidência, confidence, custo e alternativa em todo `DirectorRun`. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [ ] [P-08] Garantir edição manual, proteção, undo e restore sem bifurcar o modelo de estado. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [ ] [P-09] Traduzir guardrails livres em políticas estruturadas e versionadas. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [ ] [P-10] Manter contratos amplos, mas liberar capacidades apenas pelos gates incrementais F0–F5. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
+- [ ] [P-11] Expor externamente toda capacidade operável sem publicar internals nem permitir bypass de policies. Evidência: T-GOV-001..003 e docs/PRODUCT-UX-PRINCIPLES.md.
 
 ### 1.2 Papéis e permissões
 
-- [x] Definir matriz de permissões para operador/editor, diretor/estrategista, administrador e revisor. Evidência: T-GOV-004.
-- [x] Definir ações somente leitura, mutações editoriais, mutações de workspace e ações financeiras por papel. Evidência: T-GOV-004.
-- [x] Definir quem pode desbloquear `ProtectedElement`, alterar rights, consent e guardrails. Evidência: T-GOV-004.
-- [x] Definir quem pode aprovar final, cancelar job pago e exportar master/final. Evidência: T-GOV-004.
-- [x] Criar fixtures de autorização para todos os papéis e estados do projeto. Evidência: T-GOV-004.
-- [x] Testar negação server-side; ocultar botão na UI não conta como autorização. Evidência: T-GOV-004.
+- [ ] Definir matriz de permissões para operador/editor, diretor/estrategista, administrador e revisor. Evidência: T-GOV-004.
+- [ ] Definir ações somente leitura, mutações editoriais, mutações de workspace e ações financeiras por papel. Evidência: T-GOV-004.
+- [ ] Definir quem pode desbloquear `ProtectedElement`, alterar rights, consent e guardrails. Evidência: T-GOV-004.
+- [ ] Definir quem pode aprovar final, cancelar job pago e exportar master/final. Evidência: T-GOV-004.
+- [ ] Criar fixtures de autorização para todos os papéis e estados do projeto. Evidência: T-GOV-004.
+- [ ] Testar negação server-side; ocultar botão na UI não conta como autorização. Evidência: T-GOV-004.
 
 ### 1.3 Design system e referências visuais
 
 - [x] Extrair tokens de cor, tipografia, espaçamento, elevação e raio dos dois mockups aprovados. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
 - [x] Definir componentes de status para queued, running, review, failed, stale, completed e archived. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
-- [x] Definir padrões de empty state, skeleton, progress indeterminado, erro recuperável e conflito. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
-- [x] Criar primitives para sidebar, project card, media rail, preview, timeline, inspector e Director panel. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
-- [x] Criar padrões para `ImpactPreview`, confirmação de custo, diff, issue e annotation. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
-- [x] Verificar contraste, foco, teclado, reduced motion e targets de interação conforme spec 07. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
-- [x] Criar visual regression das telas de workspace e editor nas resoluções de referência. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [ ] Definir padrões de empty state, skeleton, progress indeterminado, erro recuperável e conflito. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [ ] Criar primitives para sidebar, project card, media rail, preview, timeline, inspector e Director panel. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [ ] Criar padrões para `ImpactPreview`, confirmação de custo, diff, issue e annotation. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [ ] Verificar contraste, foco, teclado, reduced motion e targets de interação conforme spec 07. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
+- [ ] Criar visual regression das telas de workspace e editor nas resoluções de referência. Evidência: T-UX-001 e src/v2/ui/primitives.tsx.
 
 ### 1.4 ADRs bloqueantes
 
@@ -130,8 +154,8 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 - [x] Comparar Postgres/pgvector e alternativas compatíveis com os filtros da Media Library. Evidência: docs/adr/ADR-002-*.md.
 - [x] Definir Prisma Migrate como ferramenta e versionar a migration inicial Postgres. Evidência: `prisma/v2/migrations` e `db:v2:validate`.
 - [x] Definir política de rollback/restore e expand-contract. Evidência: ADR-002.
-- [x] Ensaiar migration inicial em Postgres 16 dedicado e vazio antes do primeiro ambiente compartilhado. Evidência: `migrate deploy` + integration tests do slice F0-003.
-- [x] Implementar isolamento estrutural por workspace, índices e FKs compostas. Evidência: schema/migration v2.
+- [ ] Ensaiar migration inicial em Postgres 16 dedicado e vazio antes do primeiro ambiente compartilhado. Evidência: `migrate deploy` + integration tests do slice F0-003.
+- [ ] Implementar isolamento estrutural por workspace, índices e FKs compostas. Evidência: schema/migration v2.
 - [x] Definir retention policy das tabelas e registros operacionais. Evidência: docs/adr/ADR-002-*.md.
 - [x] Definir pgvector, índices e versionamento de embeddings no schema Postgres. Evidência: docs/adr/ADR-002-*.md.
 - [x] Registrar decisão com estimativa de custo e limites operacionais. Evidência: docs/adr/ADR-002-*.md.
@@ -152,43 +176,43 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 #### ADR-005 — EditPlan v2
 
-- [x] Congelar schema mínimo, version field, migrations e invariantes de tempo. Evidência: docs/adr/ADR-005-*.md.
+- [ ] Congelar schema mínimo, version field, migrations e invariantes de tempo. Evidência: docs/adr/ADR-005-*.md.
 - [x] Definir separação entre plano canônico, locale e formato. Evidência: docs/adr/ADR-005-*.md.
 - [x] Definir compiler para `RenderInput` sem acesso implícito ao banco. Evidência: docs/adr/ADR-005-*.md.
-- [x] Criar três fixtures versionadas e validar round-trip/migration. Evidência: docs/adr/ADR-005-*.md.
+- [ ] Criar três fixtures versionadas e validar round-trip/migration. Evidência: docs/adr/ADR-005-*.md.
 
 #### ADR-006 — Command/Patch model
 
 - [x] Definir command envelope, scope, preconditions, patch operations e transaction result. Evidência: docs/adr/ADR-006-*.md.
 - [x] Definir optimistic concurrency, auto-rebase e conflito por target overlap. Evidência: docs/adr/ADR-006-*.md.
 - [x] Definir undo/redo/restore como novas operações auditáveis. Evidência: docs/adr/ADR-006-*.md.
-- [x] Criar property tests para aplicação determinística e inversão permitida. Evidência: docs/adr/ADR-006-*.md.
+- [ ] Criar property tests para aplicação determinística e inversão permitida. Evidência: docs/adr/ADR-006-*.md.
 
 #### ADR-007 — Provider adapter e capability registry
 
 - [x] Definir capability descriptor, pricing, limits, health e region. Evidência: docs/adr/ADR-007-*.md.
 - [x] Definir adapter contract para submit, poll, cancel, callback e normalize result. Evidência: docs/adr/ADR-007-*.md.
 - [x] Definir seleção e fallback sem expor provider ao domínio. Evidência: docs/adr/ADR-007-*.md.
-- [x] Criar provider fake que simule sucesso, demora, rate limit e falha permanente. Evidência: docs/adr/ADR-007-*.md.
+- [ ] Criar provider fake que simule sucesso, demora, rate limit e falha permanente. Evidência: docs/adr/ADR-007-*.md.
 
 #### ADR-008 — Render architecture e cache
 
 - [x] Definir responsabilidades de Remotion, FFmpeg e compositor futuro. Evidência: docs/adr/ADR-008-*.md.
 - [x] Definir `RenderInput`, cache keys, proxy/final e range render. Evidência: docs/adr/ADR-008-*.md.
 - [x] Definir isolamento do renderer e limites de memória/CPU/GPU. Evidência: docs/adr/ADR-008-*.md.
-- [x] Criar smoke render reproduzível a partir de manifest. Evidência: docs/adr/ADR-008-*.md.
+- [ ] Criar smoke render reproduzível a partir de manifest. Evidência: docs/adr/ADR-008-*.md.
 
 #### ADR-009 — Perception pipeline e metadata tiers
 
 - [x] Definir sinais obrigatórios por tier e quais modelos geram cada campo. Evidência: docs/adr/ADR-009-*.md.
-- [x] Separar observado, inferido, humano e derivado no schema. Evidência: docs/adr/ADR-009-*.md.
+- [ ] Separar observado, inferido, humano e derivado no schema. Evidência: docs/adr/ADR-009-*.md.
 - [x] Definir processamento hierárquico e reprocessamento por model version. Evidência: docs/adr/ADR-009-*.md.
 - [x] Definir eval set e limiares mínimos para promoção de metadados. Evidência: docs/adr/ADR-009-*.md.
 
 #### ADR-010 — Segurança, credenciais, rights e consent
 
 - [x] Definir secret store, rotação, escopo e acesso de workers. Evidência: docs/adr/ADR-010-*.md.
-- [x] Modelar direitos, consentimento, finalidade, território e expiração. Evidência: F0-021 entrega `asset-rights/v1`, snapshots imutáveis, consent scope, use/market/locale/synthetic operations e validade temporal.
+- [ ] Modelar direitos, consentimento, finalidade, território e expiração. Evidência: F0-021 entrega `asset-rights/v1`, snapshots imutáveis, consent scope, use/market/locale/synthetic operations e validade temporal.
 - [x] Definir audit log, deleção e exportação de dados. Evidência: docs/adr/ADR-010-*.md.
 - [x] Fazer threat model de upload, prompt injection, SSRF e webhook forgery. Evidência: docs/adr/ADR-010-*.md.
 
@@ -204,7 +228,7 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 - [x] Definir server state, estado transitório da timeline e optimistic updates. Evidência: docs/adr/ADR-012-*.md.
 - [x] Definir transporte de eventos de jobs e recuperação após reconnect. Evidência: docs/adr/ADR-012-*.md.
 - [x] Definir conflito de edição e escopo da colaboração no MVP. Evidência: docs/adr/ADR-012-*.md.
-- [x] Criar protótipo de annotation → impact preview → nova versão. Evidência: docs/adr/ADR-012-*.md.
+- [ ] Criar protótipo de annotation → impact preview → nova versão. Evidência: docs/adr/ADR-012-*.md.
 
 #### ADR-013 — API pública, autenticação externa, webhooks e MCP
 
@@ -223,349 +247,349 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F0.001 — Workspace [FR-001]
 
-- [x] Modelar `Workspace`, status, owner, timestamps e settings versionados. Evidência: T-FR-001 e ADR-132.
-- [x] Criar migration, repository e constraints de unicidade/isolamento. Evidência: T-FR-001 e ADR-132.
-- [x] Resolver `workspaceId` server-side em toda request e job. Evidência: T-FR-001 e ADR-132.
-- [x] Criar workspace inicial e seletor sem permitir acesso cruzado. Evidência: T-FR-001 e ADR-132.
-- [x] Testar leitura, escrita e job com dois workspaces concorrentes. Evidência: T-FR-001 e ADR-132.
+- [ ] Modelar `Workspace`, status, owner, timestamps e settings versionados. Evidência: T-FR-001 e ADR-132.
+- [ ] Criar migration, repository e constraints de unicidade/isolamento. Evidência: T-FR-001 e ADR-132.
+- [ ] Resolver `workspaceId` server-side em toda request e job. Evidência: T-FR-001 e ADR-132.
+- [ ] Criar workspace inicial e seletor sem permitir acesso cruzado. Evidência: T-FR-001 e ADR-132.
+- [ ] Testar leitura, escrita e job com dois workspaces concorrentes. Evidência: T-FR-001 e ADR-132.
 
 ### F0.002 — Brand Kit opcional [FR-020]
 
-- [x] Modelar cores, logos, handles, profissional, empresa, vinheta e instruções de marca como campos opcionais. Evidência: T-FR-020 e ADR-132.
-- [x] Armazenar assets de marca com rights, checksum e lineage. Evidência: T-FR-020 e ADR-132.
-- [x] Implementar resolução segura de kit vazio, parcial e completo. Evidência: T-FR-020 e ADR-132.
-- [x] Testar que ausência de Brand Kit não bloqueia criação, direção ou render. Evidência: T-FR-020 e ADR-132.
+- [ ] Modelar cores, logos, handles, profissional, empresa, vinheta e instruções de marca como campos opcionais. Evidência: T-FR-020 e ADR-132.
+- [ ] Armazenar assets de marca com rights, checksum e lineage. Evidência: T-FR-020 e ADR-132.
+- [ ] Implementar resolução segura de kit vazio, parcial e completo. Evidência: T-FR-020 e ADR-132.
+- [ ] Testar que ausência de Brand Kit não bloqueia criação, direção ou render. Evidência: T-FR-020 e ADR-132.
 
 ### F0.003 — Guardrails estruturados [FR-022]
 
-- [x] Definir schema de allow, deny, require, disclosure e escalation. Evidência: T-FR-022 e ADR-132.
-- [x] Implementar compiler de instruções do owner para regras estruturadas revisáveis. Evidência: T-FR-022 e ADR-132.
-- [x] Separar conteúdo ingerido de canais autorizados de instrução. Evidência: T-FR-022 e ADR-132.
-- [x] Criar policy tests para claims, prova, mídia sintética e marca. Evidência: T-FR-022 e ADR-132.
+- [ ] Definir schema de allow, deny, require, disclosure e escalation. Evidência: T-FR-022 e ADR-132.
+- [ ] Implementar compiler de instruções do owner para regras estruturadas revisáveis. Evidência: T-FR-022 e ADR-132.
+- [ ] Separar conteúdo ingerido de canais autorizados de instrução. Evidência: T-FR-022 e ADR-132.
+- [ ] Criar policy tests para claims, prova, mídia sintética e marca. Evidência: T-FR-022 e ADR-132.
 
 ### F0.004 — Precedência de políticas [FR-023]
 
-- [x] Codificar ordem legal/plataforma → workspace → projeto → briefing → preferência aprendida. Evidência: T-FR-023 e ADR-132.
-- [x] Gerar conflito explícito quando regras de mesmo nível forem incompatíveis. Evidência: T-FR-023 e ADR-132.
-- [x] Persistir regra vencedora e justificativa no decisions log. Evidência: T-FR-023 e ADR-132.
-- [x] Testar matriz de conflitos e impedir override de nível superior. Evidência: T-FR-023 e ADR-132.
+- [ ] Codificar ordem legal/plataforma → workspace → projeto → briefing → preferência aprendida. Evidência: T-FR-023 e ADR-132.
+- [ ] Gerar conflito explícito quando regras de mesmo nível forem incompatíveis. Evidência: T-FR-023 e ADR-132.
+- [ ] Persistir regra vencedora e justificativa no decisions log. Evidência: T-FR-023 e ADR-132.
+- [ ] Testar matriz de conflitos e impedir override de nível superior. Evidência: T-FR-023 e ADR-132.
 
 ### F0.005 — Policy Snapshot [FR-024]
 
-- [x] Definir snapshot imutável com versões de policies, Brand Kit e consentimentos. Evidência: T-FR-024 e ADR-132.
-- [x] Anexar snapshot a `ProjectVersion`, `DirectorRun` e render manifest. Evidência: T-FR-024 e ADR-132.
-- [x] Impedir alteração retroativa quando workspace settings mudarem. Evidência: T-FR-024 e ADR-132.
-- [x] Testar reprodução de versão antiga com policy antiga. Evidência: T-FR-024 e ADR-132.
+- [ ] Definir snapshot imutável com versões de policies, Brand Kit e consentimentos. Evidência: T-FR-024 e ADR-132.
+- [ ] Anexar snapshot a `ProjectVersion`, `DirectorRun` e render manifest. Evidência: T-FR-024 e ADR-132.
+- [ ] Impedir alteração retroativa quando workspace settings mudarem. Evidência: T-FR-024 e ADR-132.
+- [ ] Testar reprodução de versão antiga com policy antiga. Evidência: T-FR-024 e ADR-132.
 
 ### F0.006 — Masters imutáveis [FR-031]
 
-- [x] Definir estados de upload, verification, ready, quarantined e deleted. Evidência: T-FR-031 e ADR-132.
-- [x] Bloquear update de bytes ou storage key após confirmação do master. Evidência: T-FR-031 e ADR-132.
-- [x] Gerar toda normalização, proxy e transformação como derivative. Evidência: T-FR-031 e ADR-132.
-- [x] Testar tentativa de sobrescrita e preservação do master original. Evidência: T-FR-031 e ADR-132.
+- [ ] Definir estados de upload, verification, ready, quarantined e deleted. Evidência: T-FR-031 e ADR-132.
+- [ ] Bloquear update de bytes ou storage key após confirmação do master. Evidência: T-FR-031 e ADR-132.
+- [ ] Gerar toda normalização, proxy e transformação como derivative. Evidência: T-FR-031 e ADR-132.
+- [ ] Testar tentativa de sobrescrita e preservação do master original. Evidência: T-FR-031 e ADR-132.
 
 ### F0.007 — Content addressing e deduplicação [FR-032]
 
-- [x] Calcular checksum durante upload sem carregar arquivo inteiro em memória. Evidência: T-FR-032 e ADR-132.
-- [x] Criar canonical object key e unique constraint compatível com o escopo aprovado. Evidência: T-FR-032 e ADR-132.
-- [x] Reutilizar bytes existentes mantendo referência e direitos por workspace. Evidência: T-FR-032 e ADR-132.
-- [x] Testar upload duplicado, upload interrompido e colisão simulada. Evidência: T-FR-032 e ADR-132.
+- [ ] Calcular checksum durante upload sem carregar arquivo inteiro em memória. Evidência: T-FR-032 e ADR-132.
+- [ ] Criar canonical object key e unique constraint compatível com o escopo aprovado. Evidência: T-FR-032 e ADR-132.
+- [ ] Reutilizar bytes existentes mantendo referência e direitos por workspace. Evidência: T-FR-032 e ADR-132.
+- [ ] Testar upload duplicado, upload interrompido e colisão simulada. Evidência: T-FR-032 e ADR-132.
 
 ### F0.008 — Normalização com lineage [FR-033]
 
-- [x] Definir recipe versionada para codec, container, áudio, resolução e frame rate. Evidência: T-FR-033 e ADR-132.
-- [x] Criar job idempotente de probe e normalize. Evidência: T-FR-033 e ADR-132.
-- [x] Persistir parent asset, recipe, tool version, checksum e output metadata. Evidência: T-FR-033 e ADR-132.
-- [x] Testar rerun, falha parcial e reconstrução do derivado. Evidência: T-FR-033 e ADR-132.
+- [ ] Definir recipe versionada para codec, container, áudio, resolução e frame rate. Evidência: T-FR-033 e ADR-132.
+- [ ] Criar job idempotente de probe e normalize. Evidência: T-FR-033 e ADR-132.
+- [ ] Persistir parent asset, recipe, tool version, checksum e output metadata. Evidência: T-FR-033 e ADR-132.
+- [ ] Testar rerun, falha parcial e reconstrução do derivado. Evidência: T-FR-033 e ADR-132.
 
 ### F0.009 — Preservação de timebase [FR-034]
 
-- [x] Persistir PTS/DTS, timebase, frame rate nominal/real e duração antes da normalização. Evidência: T-FR-034 e ADR-132.
-- [x] Definir conversões explícitas entre source time, session time e timeline frame. Evidência: T-FR-034 e ADR-132.
-- [x] Criar fixtures VFR, CFR, áudio deslocado e início negativo. Evidência: T-FR-034 e ADR-132.
-- [x] Validar round-trip source frame ↔ timeline frame dentro da tolerância da spec 05. Evidência: T-FR-034 e ADR-132.
+- [ ] Persistir PTS/DTS, timebase, frame rate nominal/real e duração antes da normalização. Evidência: T-FR-034 e ADR-132.
+- [ ] Definir conversões explícitas entre source time, session time e timeline frame. Evidência: T-FR-034 e ADR-132.
+- [ ] Criar fixtures VFR, CFR, áudio deslocado e início negativo. Evidência: T-FR-034 e ADR-132.
+- [ ] Validar round-trip source frame ↔ timeline frame dentro da tolerância da spec 05. Evidência: T-FR-034 e ADR-132.
 
 ### F0.010 — Direitos [FR-035]
 
-- [x] Modelar owner, license, permitted uses, territory, expiry, consent e status unknown/restricted. Evidência: `AssetRightsSnapshot` v1 content-addressed e migration F0-021.
-- [x] Criar gate central consultado por busca, Director, geração, render e export. Parcial F0-021: o mesmo evaluator fail-closed já protege a autorização de materialização do RenderInput; faltam busca, Director, geração e export. Evidência: T-FR-035 e ADR-132.
-- [x] Bloquear uso quando direitos forem ausentes ou incompatíveis; permitir revisão autorizada. Parcial F0-021: materialização automática é negada para rights/consent ausentes, unknown, restricted, expired, revoked ou fora de use/market/locale/operação; fluxo administrativo de revisão ainda falta. Evidência: T-FR-035 e ADR-132.
-- [x] Registrar cada decisão de uso e testar expiração durante projeto ativo. Parcial F0-021: cada autorização persiste decisão por asset, snapshot usado, motivos, actor e validade curta; falta propagação/revogação em projetos ativos. Evidência: T-FR-035 e ADR-132.
+- [ ] Modelar owner, license, permitted uses, territory, expiry, consent e status unknown/restricted. Evidência: `AssetRightsSnapshot` v1 content-addressed e migration F0-021.
+- [ ] Criar gate central consultado por busca, Director, geração, render e export. Parcial F0-021: o mesmo evaluator fail-closed já protege a autorização de materialização do RenderInput; faltam busca, Director, geração e export. Evidência: T-FR-035 e ADR-132.
+- [ ] Bloquear uso quando direitos forem ausentes ou incompatíveis; permitir revisão autorizada. Parcial F0-021: materialização automática é negada para rights/consent ausentes, unknown, restricted, expired, revoked ou fora de use/market/locale/operação; fluxo administrativo de revisão ainda falta. Evidência: T-FR-035 e ADR-132.
+- [ ] Registrar cada decisão de uso e testar expiração durante projeto ativo. Parcial F0-021: cada autorização persiste decisão por asset, snapshot usado, motivos, actor e validade curta; falta propagação/revogação em projetos ativos. Evidência: T-FR-035 e ADR-132.
 
 ### F0.011 — Tipos de ativos [FR-041]
 
-- [x] Criar enum extensível para video, audio, image, document, synthetic e derivados previstos. Evidência: T-FR-041 e ADR-132.
-- [x] Definir campos comuns e metadata específica sem tabela JSON sem contrato. Evidência: T-FR-041 e ADR-132.
-- [x] Validar schemas em API, worker e banco. Evidência: T-FR-041 e ADR-132.
-- [x] Criar contract fixtures para todos os kinds do PRD. Evidência: T-FR-041 e ADR-132.
+- [ ] Criar enum extensível para video, audio, image, document, synthetic e derivados previstos. Evidência: T-FR-041 e ADR-132.
+- [ ] Definir campos comuns e metadata específica sem tabela JSON sem contrato. Evidência: T-FR-041 e ADR-132.
+- [ ] Validar schemas em API, worker e banco. Evidência: T-FR-041 e ADR-132.
+- [ ] Criar contract fixtures para todos os kinds do PRD. Evidência: T-FR-041 e ADR-132.
 
 ### F0.012 — EditPlan versionado [FR-070]
 
-- [x] Implementar schema v2 conforme spec 02 com `schemaVersion` obrigatório. Evidência: T-FR-070 e ADR-133.
-- [x] Criar parser/validator que rejeite references, ranges e overlaps inválidos. Evidência: T-FR-070 e ADR-133.
-- [x] Implementar registry de migrations puras entre versões. Evidência: T-FR-070 e ADR-133.
-- [x] Criar golden files para parse, compile, migrate e serialize. Evidência: T-FR-070 e ADR-133.
+- [ ] Implementar schema v2 conforme spec 02 com `schemaVersion` obrigatório. Evidência: T-FR-070 e ADR-133.
+- [ ] Criar parser/validator que rejeite references, ranges e overlaps inválidos. Evidência: T-FR-070 e ADR-133.
+- [ ] Implementar registry de migrations puras entre versões. Evidência: T-FR-070 e ADR-133.
+- [ ] Criar golden files para parse, compile, migrate e serialize. Evidência: T-FR-070 e ADR-133.
 
 ### F0.013 — Tracks [FR-071]
 
-- [x] Implementar track types, ordering, exclusivity, visibility, mute e lock. Evidência: T-FR-071 e ADR-133.
-- [x] Codificar políticas de overlap por tipo de track. Evidência: T-FR-071 e ADR-133.
-- [x] Compilar tracks para renderer somente a partir do plano resolvido. Evidência: T-FR-071 e ADR-133.
-- [x] Testar base video, audio, B-roll, overlay, subtitle, color e annotation. Evidência: T-FR-071 e ADR-133.
+- [ ] Implementar track types, ordering, exclusivity, visibility, mute e lock. Evidência: T-FR-071 e ADR-133.
+- [ ] Codificar políticas de overlap por tipo de track. Evidência: T-FR-071 e ADR-133.
+- [ ] Compilar tracks para renderer somente a partir do plano resolvido. Evidência: T-FR-071 e ADR-133.
+- [ ] Testar base video, audio, B-roll, overlay, subtitle, color e annotation. Evidência: T-FR-071 e ADR-133.
 
 ### F0.014 — Source ranges [FR-072]
 
-- [x] Modelar `sourceIn/sourceOut`, `timelineIn/timelineOut`, rate e mapping. Evidência: T-FR-072 e ADR-133.
-- [x] Impedir range negativo, invertido ou além da duração conhecida. Evidência: T-FR-072 e ADR-133.
-- [x] Implementar trim/split preservando source mapping. Evidência: T-FR-072 e ADR-133.
-- [x] Criar property tests em frame rates e timebases distintos. Evidência: T-FR-072 e ADR-133.
+- [ ] Modelar `sourceIn/sourceOut`, `timelineIn/timelineOut`, rate e mapping. Evidência: T-FR-072 e ADR-133.
+- [ ] Impedir range negativo, invertido ou além da duração conhecida. Evidência: T-FR-072 e ADR-133.
+- [ ] Implementar trim/split preservando source mapping. Evidência: T-FR-072 e ADR-133.
+- [ ] Criar property tests em frame rates e timebases distintos. Evidência: T-FR-072 e ADR-133.
 
 ### F0.015 — Múltiplas fontes [FR-073]
 
-- [x] Permitir que um EditPlan referencie N assets e segmentos por ID imutável. Evidência: T-FR-073 e ADR-133.
-- [x] Resolver references em etapa explícita antes do render. Evidência: T-FR-073 e ADR-133.
-- [x] Detectar source ausente, sem direito ou ainda não processado. Evidência: T-FR-073 e ADR-133.
-- [x] Testar plano com talking head, B-roll, imagem, áudio e overlay. Evidência: T-FR-073 e ADR-133.
+- [ ] Permitir que um EditPlan referencie N assets e segmentos por ID imutável. Evidência: T-FR-073 e ADR-133.
+- [ ] Resolver references em etapa explícita antes do render. Evidência: T-FR-073 e ADR-133.
+- [ ] Detectar source ausente, sem direito ou ainda não processado. Evidência: T-FR-073 e ADR-133.
+- [ ] Testar plano com talking head, B-roll, imagem, áudio e overlay. Evidência: T-FR-073 e ADR-133.
 
 ### F0.016 — Commands e Patches [FR-074]
 
-- [x] Implementar envelope com actor, base version, scope, preconditions e operations. Evidência: T-FR-074 e ADR-133.
-- [x] Criar command handlers puros para operações fundamentais. Evidência: T-FR-074 e ADR-133.
-- [x] Persistir command e nova version na mesma transação. Evidência: T-FR-074 e ADR-133.
-- [x] Fazer ações manuais e ferramentas do Diretor passarem pelo mesmo handler. Evidência: T-FR-074 e ADR-133.
-- [x] Testar idempotência, validação, rollback e concorrência. Evidência: T-FR-074 e ADR-133.
+- [ ] Implementar envelope com actor, base version, scope, preconditions e operations. Evidência: T-FR-074 e ADR-133.
+- [ ] Criar command handlers puros para operações fundamentais. Evidência: T-FR-074 e ADR-133.
+- [ ] Persistir command e nova version na mesma transação. Evidência: T-FR-074 e ADR-133.
+- [ ] Fazer ações manuais e ferramentas do Diretor passarem pelo mesmo handler. Evidência: T-FR-074 e ADR-133.
+- [ ] Testar idempotência, validação, rollback e concorrência. Evidência: T-FR-074 e ADR-133.
 
 ### F0.017 — Protected elements [FR-075]
 
-- [x] Modelar proteção por element, range, reason, owner e expiry opcional. Evidência: T-FR-075 e ADR-133.
-- [x] Consultar proteção antes de patch manual, IA, batch ou localization. Evidência: T-FR-075 e ADR-133.
-- [x] Criar fluxo autorizado de desbloqueio com audit log. Evidência: T-FR-075 e ADR-133.
-- [x] Testar tentativa direta, indireta e por invalidação dependente. Evidência: T-FR-075 e ADR-133.
+- [ ] Modelar proteção por element, range, reason, owner e expiry opcional. Evidência: T-FR-075 e ADR-133.
+- [ ] Consultar proteção antes de patch manual, IA, batch ou localization. Evidência: T-FR-075 e ADR-133.
+- [ ] Criar fluxo autorizado de desbloqueio com audit log. Evidência: T-FR-075 e ADR-133.
+- [ ] Testar tentativa direta, indireta e por invalidação dependente. Evidência: T-FR-075 e ADR-133.
 
 ### F0.018 — Dependency graph [FR-076]
 
-- [x] Enumerar nós de source, transcript, perception, plans, variants, proxy e final. Evidência: T-FR-076 e ADR-133.
-- [x] Definir edges e regras de invalidação determinísticas por command type. Evidência: T-FR-076 e ADR-133.
-- [x] Calcular conjunto mínimo afetado antes de enfileirar jobs. Evidência: T-FR-076 e ADR-133.
-- [x] Criar testes de snapshot para a matriz de invalidação da spec 02. Evidência: T-FR-076 e ADR-133.
+- [ ] Enumerar nós de source, transcript, perception, plans, variants, proxy e final. Evidência: T-FR-076 e ADR-133.
+- [ ] Definir edges e regras de invalidação determinísticas por command type. Evidência: T-FR-076 e ADR-133.
+- [ ] Calcular conjunto mínimo afetado antes de enfileirar jobs. Evidência: T-FR-076 e ADR-133.
+- [ ] Criar testes de snapshot para a matriz de invalidação da spec 02. Evidência: T-FR-076 e ADR-133.
 
 ### F0.019 — OutputSpec [FR-161]
 
-- [x] Implementar aspect ratio, width, height, fps, safe areas, codec e delivery constraints. Evidência: T-FR-161 e ADR-133.
-- [x] Validar combinações incompatíveis e defaults por destino. Evidência: `output-spec.ts` e testes dos cinco presets.
-- [x] Versionar `OutputSpec` dentro de cada ProjectVersion. Evidência: T-FR-161 e ADR-133.
-- [x] Criar schema fixtures para os cinco formatos obrigatórios. Evidência: `OUTPUT_PRESETS` e `domain-contracts.test.mjs`.
+- [ ] Implementar aspect ratio, width, height, fps, safe areas, codec e delivery constraints. Evidência: T-FR-161 e ADR-133.
+- [ ] Validar combinações incompatíveis e defaults por destino. Evidência: `output-spec.ts` e testes dos cinco presets.
+- [ ] Versionar `OutputSpec` dentro de cada ProjectVersion. Evidência: T-FR-161 e ADR-133.
+- [ ] Criar schema fixtures para os cinco formatos obrigatórios. Evidência: `OUTPUT_PRESETS` e `domain-contracts.test.mjs`.
 
 ### F0.020 — Plano canônico e variantes [FR-162]
 
-- [x] Separar Story/Edit plan canônico de `FormatVariantPlan` e `LocalizationVariant`. Evidência: T-FR-162 e ADR-133.
-- [x] Definir o que é compartilhado e o que pode divergir por formato/locale. Evidência: T-FR-162 e ADR-133.
-- [x] Propagar mudanças canônicas somente aos dependentes não protegidos. Evidência: T-FR-162 e ADR-133.
-- [x] Testar que um crop 9:16 não altera 16:9. Evidência: T-FR-162 e ADR-133.
+- [ ] Separar Story/Edit plan canônico de `FormatVariantPlan` e `LocalizationVariant`. Evidência: T-FR-162 e ADR-133.
+- [ ] Definir o que é compartilhado e o que pode divergir por formato/locale. Evidência: T-FR-162 e ADR-133.
+- [ ] Propagar mudanças canônicas somente aos dependentes não protegidos. Evidência: T-FR-162 e ADR-133.
+- [ ] Testar que um crop 9:16 não altera 16:9. Evidência: T-FR-162 e ADR-133.
 
 ### F0.021 — ProjectVersion [FR-220]
 
-- [x] Modelar versão imutável, parent, author, reason, status e snapshots associados. Evidência: T-FR-220 e ADR-133.
-- [x] Criar nova versão para toda mudança confirmada. Evidência: T-FR-220 e ADR-133.
-- [x] Tornar current version atualização transacional e concorrente. Evidência: T-FR-220 e ADR-133.
-- [x] Testar branching, versão stale e leitura histórica. Evidência: T-FR-220 e ADR-133.
+- [ ] Modelar versão imutável, parent, author, reason, status e snapshots associados. Evidência: T-FR-220 e ADR-133.
+- [ ] Criar nova versão para toda mudança confirmada. Evidência: T-FR-220 e ADR-133.
+- [ ] Tornar current version atualização transacional e concorrente. Evidência: T-FR-220 e ADR-133.
+- [ ] Testar branching, versão stale e leitura histórica. Evidência: T-FR-220 e ADR-133.
 
 ### F0.022 — Fork copy-on-write [FR-221]
 
-- [x] Criar command de duplicação que referencia masters e derivatives reutilizáveis. Evidência: T-FR-221 e ADR-133.
-- [x] Copiar somente planos/settings mutáveis e registrar `forkedFrom`. Evidência: T-FR-221 e ADR-133.
-- [x] Separar status, jobs, annotations e aprovações do novo projeto. Evidência: T-FR-221 e ADR-133.
-- [x] Medir e testar que duplicação não copia bytes de mídia. Evidência: T-FR-221 e ADR-133.
+- [ ] Criar command de duplicação que referencia masters e derivatives reutilizáveis. Evidência: T-FR-221 e ADR-133.
+- [ ] Copiar somente planos/settings mutáveis e registrar `forkedFrom`. Evidência: T-FR-221 e ADR-133.
+- [ ] Separar status, jobs, annotations e aprovações do novo projeto. Evidência: T-FR-221 e ADR-133.
+- [ ] Medir e testar que duplicação não copia bytes de mídia. Evidência: T-FR-221 e ADR-133.
 
 ### F0.023 — Isolamento do fork [FR-222]
 
-- [x] Impedir commands do fork de alterar versão, status ou artifacts do original. Evidência: T-FR-222 e ADR-133.
-- [x] Resolver referências compartilhadas como read-only. Evidência: T-FR-222 e ADR-133.
-- [x] Testar edição, delete, render e archive nos dois projetos. Evidência: T-FR-222 e ADR-133.
-- [x] Exibir lineage sem sugerir sincronização automática entre forks. Evidência: T-FR-222 e ADR-133.
+- [ ] Impedir commands do fork de alterar versão, status ou artifacts do original. Evidência: T-FR-222 e ADR-133.
+- [ ] Resolver referências compartilhadas como read-only. Evidência: T-FR-222 e ADR-133.
+- [ ] Testar edição, delete, render e archive nos dois projetos. Evidência: T-FR-222 e ADR-133.
+- [ ] Exibir lineage sem sugerir sincronização automática entre forks. Evidência: T-FR-222 e ADR-133.
 
 ### F0.024 — Diff e restore [FR-223]
 
-- [x] Criar diff semântico para story blocks, clips, layout, texto, áudio e settings. Evidência: T-FR-223 e ADR-133.
-- [x] Implementar restore como nova versão, sem apagar histórico. Evidência: T-FR-223 e ADR-133.
-- [x] Mostrar impacto e jobs invalidados antes do restore. Evidência: T-FR-223 e ADR-133.
-- [x] Testar compare/restore entre versões compatíveis e migradas. Evidência: T-FR-223 e ADR-133.
+- [ ] Criar diff semântico para story blocks, clips, layout, texto, áudio e settings. Evidência: T-FR-223 e ADR-133.
+- [ ] Implementar restore como nova versão, sem apagar histórico. Evidência: T-FR-223 e ADR-133.
+- [ ] Mostrar impacto e jobs invalidados antes do restore. Evidência: T-FR-223 e ADR-133.
+- [ ] Testar compare/restore entre versões compatíveis e migradas. Evidência: T-FR-223 e ADR-133.
 
 ### F0.025 — Artifact lineage [FR-224]
 
-- [x] Modelar grafo de artifact → version → plan → sources → jobs/providers. Evidência: T-FR-224 e ADR-133.
-- [x] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
-- [x] Persistir hashes e versões de tool/model em cada edge. Evidência: manifest v2, colunas normalizadas de execution provenance e API pública por manifest.
-- [x] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
-- [x] Testar reconstrução e diagnóstico de artifact final. Parcial F0-026: grafo, provenance, recipe e RenderInput protegidos, autorização, materialização, render real, recuperação do output comprometido e checkpoint conferido contra artifact/manifest foram entregues; faltam jornada real inteiramente a partir da fixture persistida e comparação golden tolerante. Evidência: T-FR-224 e ADR-133.
+- [ ] Modelar grafo de artifact → version → plan → sources → jobs/providers. Evidência: T-FR-224 e ADR-133.
+- [ ] Persistir base artifact → manifest → sources com FKs compostas por workspace e replay concorrente. Evidência: migration `media_artifacts` e integração Postgres.
+- [ ] Persistir hashes e versões de tool/model em cada edge. Evidência: manifest v2, colunas normalizadas de execution provenance e API pública por manifest.
+- [ ] Criar endpoint de inspeção e incluir resumo no manifest. Evidência: `GET /v1/artifacts/{artifactId}`, schema `artifact-detail/v1` e teste público workspace-scoped.
+- [ ] Testar reconstrução e diagnóstico de artifact final. Parcial F0-026: grafo, provenance, recipe e RenderInput protegidos, autorização, materialização, render real, recuperação do output comprometido e checkpoint conferido contra artifact/manifest foram entregues; faltam jornada real inteiramente a partir da fixture persistida e comparação golden tolerante. Evidência: T-FR-224 e ADR-133.
 
 ### F0.026 — Durable jobs [FR-232]
 
-- [x] Implementar job state machine, heartbeat, attempt e idempotency key. Parcial F0-025: `artifact-render` possui state machine, enqueue idempotente, claim/lease, heartbeat, attempt como fencing token e conclusão CAS; falta generalizar para os demais jobs. Evidência: T-FR-232 e ADR-133.
-- [x] Persistir checkpoints antes e depois de efeitos externos. Parcial F0-026: render persiste fase antes do commit e checkpoint tipado depois, com hash/tamanho/probe/target; faltam checkpoints equivalentes nos demais jobs. Evidência: T-FR-232 e ADR-133.
-- [x] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-031: backoff, cancelamento, checkpoint de esgotamento, retry manual e descoberta externa de dead-letter foram entregues para render; métricas/administração agregada e generalização continuam abertas. Evidência: T-FR-232 e ADR-133.
-- [x] Simular restart entre cada checkpoint e verificar retomada segura. Parcial F0-026: regressões cobrem perda antes do commit, queda depois do commit e antes do checkpoint, replay de checkpoint, reclaim e output já existente sem nova codificação; faltam checkpoints dos demais jobs. Evidência: T-FR-232 e ADR-133.
+- [ ] Implementar job state machine, heartbeat, attempt e idempotency key. Parcial F0-025: `artifact-render` possui state machine, enqueue idempotente, claim/lease, heartbeat, attempt como fencing token e conclusão CAS; falta generalizar para os demais jobs. Evidência: T-FR-232 e ADR-133.
+- [ ] Persistir checkpoints antes e depois de efeitos externos. Parcial F0-026: render persiste fase antes do commit e checkpoint tipado depois, com hash/tamanho/probe/target; faltam checkpoints equivalentes nos demais jobs. Evidência: T-FR-232 e ADR-133.
+- [ ] Implementar retry exponencial, cancelamento e dead-letter. Parcial F0-031: backoff, cancelamento, checkpoint de esgotamento, retry manual e descoberta externa de dead-letter foram entregues para render; métricas/administração agregada e generalização continuam abertas. Evidência: T-FR-232 e ADR-133.
+- [ ] Simular restart entre cada checkpoint e verificar retomada segura. Parcial F0-026: regressões cobrem perda antes do commit, queda depois do commit e antes do checkpoint, replay de checkpoint, reclaim e output já existente sem nova codificação; faltam checkpoints dos demais jobs. Evidência: T-FR-232 e ADR-133.
 
 ### F0.027 — Partial invalidation [FR-233]
 
-- [x] Mapear cada command aos ranges, variants e artifacts afetados. Evidência: T-FR-233 e ADR-133.
-- [x] Marcar somente dependentes como stale. Evidência: T-FR-233 e ADR-133.
-- [x] Enfileirar proxy/range render mínimo e manter outputs válidos. Evidência: T-FR-233 e ADR-133.
-- [x] Testar alteração de legenda, crop, B-roll e source transcript. Evidência: T-FR-233 e ADR-133.
+- [ ] Mapear cada command aos ranges, variants e artifacts afetados. Evidência: T-FR-233 e ADR-133.
+- [ ] Marcar somente dependentes como stale. Evidência: T-FR-233 e ADR-133.
+- [ ] Enfileirar proxy/range render mínimo e manter outputs válidos. Evidência: T-FR-233 e ADR-133.
+- [ ] Testar alteração de legenda, crop, B-roll e source transcript. Evidência: T-FR-233 e ADR-133.
 
 ### F0.028 — Props e manifest [FR-234]
 
-- [x] Definir `RenderInput` autocontido e schema versionado. Evidência: `render-input/v1`, hash canônico, preflight público e testes de materialização sem banco.
-- [x] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-023: worker relê autorização/payload/rights, adapter local resolve vídeo/áudio/imagem sob raiz privada, verifica bytes por streaming e entrega somente a lease ao renderer real; faltam storage S3-compatible/signed URLs, fonts, LUTs e data. Evidência: T-FR-234 e ADR-133.
-- [x] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
-- [x] Salvar manifest com checksums, plan hash e renderer version. Evidência: `media-artifact-manifest/v4` vincula por hash um `render-input/v1` protegido que contém checksums ordenados, plan hash e identidade versionada do renderer.
-- [x] Reexecutar golden render somente a partir do manifest salvo. Parcial F0-026: output real pode ser recuperado pela identidade determinística e o checkpoint só é aceito quando corresponde ao artifact/manifest persistido; falta unir fixture Postgres e Remotion real no mesmo teste golden tolerante. Evidência: T-FR-234 e ADR-133.
+- [ ] Definir `RenderInput` autocontido e schema versionado. Evidência: `render-input/v1`, hash canônico, preflight público e testes de materialização sem banco.
+- [ ] Materializar URLs/paths, fonts, LUTs e assets antes de iniciar render. Parcial F0-023: worker relê autorização/payload/rights, adapter local resolve vídeo/áudio/imagem sob raiz privada, verifica bytes por streaming e entrega somente a lease ao renderer real; faltam storage S3-compatible/signed URLs, fonts, LUTs e data. Evidência: T-FR-234 e ADR-133.
+- [ ] Definir manifest portátil base para artifacts com checksum, canonical key, recipe e sources. Evidência: `media-artifact-manifest/v1` e integração local.
+- [ ] Salvar manifest com checksums, plan hash e renderer version. Evidência: `media-artifact-manifest/v4` vincula por hash um `render-input/v1` protegido que contém checksums ordenados, plan hash e identidade versionada do renderer.
+- [ ] Reexecutar golden render somente a partir do manifest salvo. Parcial F0-026: output real pode ser recuperado pela identidade determinística e o checkpoint só é aceito quando corresponde ao artifact/manifest persistido; falta unir fixture Postgres e Remotion real no mesmo teste golden tolerante. Evidência: T-FR-234 e ADR-133.
 
 ### F0.029 — Estados visíveis [FR-236]
 
-- [x] Definir estados válidos de projeto, versão, job, item batch e artifact. Evidência: T-FR-236 e ADR-133.
-- [x] Implementar transições server-side e rejeitar saltos inválidos. Evidência: T-FR-236 e ADR-133.
-- [x] Mapear estado técnico para label, progresso e ação na UI. Evidência: T-FR-236 e ADR-133.
-- [x] Testar sucesso, espera, retry, cancel, falha parcial, stale e conclusão. Parcial F0-028: sucesso, retry, cancelamento de queued/retrying/running, stale worker, checkpoint tardio e conclusão terminal estão cobertos; waiting e falha parcial genérica permanecem abertos. Evidência: T-FR-236 e ADR-133.
+- [ ] Definir estados válidos de projeto, versão, job, item batch e artifact. Evidência: T-FR-236 e ADR-133.
+- [ ] Implementar transições server-side e rejeitar saltos inválidos. Evidência: T-FR-236 e ADR-133.
+- [ ] Mapear estado técnico para label, progresso e ação na UI. Evidência: T-FR-236 e ADR-133.
+- [ ] Testar sucesso, espera, retry, cancel, falha parcial, stale e conclusão. Parcial F0-028: sucesso, retry, cancelamento de queued/retrying/running, stale worker, checkpoint tardio e conclusão terminal estão cobertos; waiting e falha parcial genérica permanecem abertos. Evidência: T-FR-236 e ADR-133.
 
 ### F0.030 — Infraestrutura e smoke vertical
 
-- [x] Provisionar Postgres dedicado em desenvolvimento isolado. Evidência: Postgres 16 com volume próprio, porta restrita ao loopback e migration v2 aplicada.
-- [x] Provisionar object storage em desenvolvimento isolado. Evidência: T-F0.030 e ADR-134.
-- [x] Provisionar workflow durável em desenvolvimento isolado. Evidência: T-F0.030 e ADR-134.
-- [x] Criar seeds mínimos para workspace, projeto, source e OutputSpec. Evidência: T-F0.030 e ADR-134.
-- [x] Configurar audit, typecheck, unit, migration check, contract gate, build e integrações Postgres/API no CI. Evidência: `.github/workflows/ci.yml`.
-- [x] Configurar lint no CI após selecionar regras e corrigir o baseline da v1. Evidência: T-F0.030 e ADR-134.
-- [x] Configurar golden tests no CI após existir fixture/render determinístico. Parcial F0-023: smoke render real e sem golden hash foi incluído no CI; faltam fixture persistida e tolerâncias visual/áudio cross-platform. Evidência: T-F0.030 e ADR-134.
-- [x] Configurar E2E no CI após existir jornada vertical F0 executável. Evidência: T-F0.030 e ADR-134.
-- [x] Criar telemetria comum com trace, job, workspace e project IDs. Evidência: T-F0.030 e ADR-134.
-- [x] Fazer upload de fixture, normalizar, criar plano estático e renderizar proxy. Evidência: T-F0.030 e ADR-134.
-- [x] Reconstruir o proxy usando apenas banco, object storage e manifest. Evidência: T-F0.030 e ADR-134.
+- [ ] Provisionar Postgres dedicado em desenvolvimento isolado. Evidência: Postgres 16 com volume próprio, porta restrita ao loopback e migration v2 aplicada.
+- [ ] Provisionar object storage em desenvolvimento isolado. Evidência: T-F0.030 e ADR-134.
+- [ ] Provisionar workflow durável em desenvolvimento isolado. Evidência: T-F0.030 e ADR-134.
+- [ ] Criar seeds mínimos para workspace, projeto, source e OutputSpec. Evidência: T-F0.030 e ADR-134.
+- [ ] Configurar audit, typecheck, unit, migration check, contract gate, build e integrações Postgres/API no CI. Evidência: `.github/workflows/ci.yml`.
+- [ ] Configurar lint no CI após selecionar regras e corrigir o baseline da v1. Evidência: T-F0.030 e ADR-134.
+- [ ] Configurar golden tests no CI após existir fixture/render determinístico. Parcial F0-023: smoke render real e sem golden hash foi incluído no CI; faltam fixture persistida e tolerâncias visual/áudio cross-platform. Evidência: T-F0.030 e ADR-134.
+- [ ] Configurar E2E no CI após existir jornada vertical F0 executável. Evidência: T-F0.030 e ADR-134.
+- [ ] Criar telemetria comum com trace, job, workspace e project IDs. Evidência: T-F0.030 e ADR-134.
+- [ ] Fazer upload de fixture, normalizar, criar plano estático e renderizar proxy. Evidência: T-F0.030 e ADR-134.
+- [ ] Reconstruir o proxy usando apenas banco, object storage e manifest. Evidência: T-F0.030 e ADR-134.
 
 ### F0.031 — Autenticação, shell e navegação
 
-- [x] Selecionar mecanismo de autenticação e documentar sessão, expiração e recuperação de conta. Evidência: T-F0.031 e ADR-134.
-- [x] Implementar sign-in/sign-out e proteção server-side das rotas v2. Evidência: T-F0.031 e ADR-134.
-- [x] Criar `WorkspaceMember` a partir de identidade autenticada e papel ativo. Evidência: T-F0.031 e ADR-134.
-- [x] Implementar shell com navegação para projetos, lotes, biblioteca, apresentadores, marca e settings. Evidência: T-F0.031 e ADR-134.
-- [x] Implementar seletor de workspace que invalide caches e subscriptions do workspace anterior. Evidência: T-F0.031 e ADR-134.
-- [x] Criar E2E de sessão expirada, acesso negado e troca de workspace sem vazamento de dados. Evidência: T-F0.031 e ADR-134.
+- [ ] Selecionar mecanismo de autenticação e documentar sessão, expiração e recuperação de conta. Evidência: T-F0.031 e ADR-134.
+- [ ] Implementar sign-in/sign-out e proteção server-side das rotas v2. Evidência: T-F0.031 e ADR-134.
+- [ ] Criar `WorkspaceMember` a partir de identidade autenticada e papel ativo. Evidência: T-F0.031 e ADR-134.
+- [ ] Implementar shell com navegação para projetos, lotes, biblioteca, apresentadores, marca e settings. Evidência: T-F0.031 e ADR-134.
+- [ ] Implementar seletor de workspace que invalide caches e subscriptions do workspace anterior. Evidência: T-F0.031 e ADR-134.
+- [ ] Criar E2E de sessão expirada, acesso negado e troca de workspace sem vazamento de dados. Evidência: T-F0.031 e ADR-134.
 
 ### F0.032 — Fronteiras da arquitetura lógica
 
-- [x] Isolar Web/Editor para consumir queries, commands e events sem acessar banco/storage diretamente. Evidência: T-F0.032 e ADR-134.
-- [x] Isolar Application API em auth, domínio, queries, commands e job control. Evidência: T-F0.032 e ADR-134.
-- [x] Isolar Orchestrator de Ingest, Perception, Director, Provider, Critic e Render workers. Evidência: T-F0.032 e ADR-134.
-- [x] Definir interfaces entre Provider Registry, Director, Compiler, Renderer e Critics. Evidência: T-F0.032 e ADR-134.
-- [x] Adicionar regras de import/lint que impeçam dependências invertidas entre camadas. Evidência: T-F0.032 e ADR-134.
-- [x] Criar architecture tests e um fluxo fake atravessando todos os componentes. Evidência: T-F0.032 e ADR-134.
+- [ ] Isolar Web/Editor para consumir queries, commands e events sem acessar banco/storage diretamente. Evidência: T-F0.032 e ADR-134.
+- [ ] Isolar Application API em auth, domínio, queries, commands e job control. Evidência: T-F0.032 e ADR-134.
+- [ ] Isolar Orchestrator de Ingest, Perception, Director, Provider, Critic e Render workers. Evidência: T-F0.032 e ADR-134.
+- [ ] Definir interfaces entre Provider Registry, Director, Compiler, Renderer e Critics. Evidência: T-F0.032 e ADR-134.
+- [ ] Adicionar regras de import/lint que impeçam dependências invertidas entre camadas. Evidência: T-F0.032 e ADR-134.
+- [ ] Criar architecture tests e um fluxo fake atravessando todos os componentes. Evidência: T-F0.032 e ADR-134.
 
 ### F0.033 — Modelo conceitual e tecnologia-alvo
 
-- [x] Mapear todas as entidades das seções 10.1–10.6 para aggregates, tabelas e value objects, sem implementar tabela genérica sem contrato. Evidência: T-F0.033 e ADR-134.
-- [x] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution. Evidência: T-F0.033 e ADR-134.
-- [x] Validar que `SourceAsset`, `TimelineSegment`, `OutputSpec`, adapter e `EditCommand` são compatíveis com as specs 02, 03 e 06. Evidência: T-F0.033 e ADR-134.
-- [x] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008. Evidência: T-F0.033 e ADR-134.
-- [x] Atualizar Next.js/React para uma linha suportada sem quebrar App Router, Remotion ou os contratos `/v1`. Evidência: Next 16.2.10, React 19.2.7, codemod async params e validação completa.
-- [x] Corrigir advisories não-major de `uuid`, `postcss` e `form-data`. Evidência: versões corrigidas/override PostCSS e `npm audit` com zero vulnerabilidades.
-- [x] Configurar S3-compatible storage. Evidência: T-F0.033 e ADR-134.
-- [x] Impedir SQLite como domínio final fora de protótipos locais. Evidência: `resolveV2PersistenceMode` exige Postgres em produção e não possui fallback silencioso.
-- [x] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais. Evidência: T-F0.033 e ADR-134.
+- [ ] Mapear todas as entidades das seções 10.1–10.6 para aggregates, tabelas e value objects, sem implementar tabela genérica sem contrato. Evidência: T-F0.033 e ADR-134.
+- [ ] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution. Evidência: T-F0.033 e ADR-134.
+- [ ] Validar que `SourceAsset`, `TimelineSegment`, `OutputSpec`, adapter e `EditCommand` são compatíveis com as specs 02, 03 e 06. Evidência: T-F0.033 e ADR-134.
+- [ ] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008. Evidência: T-F0.033 e ADR-134.
+- [ ] Atualizar Next.js/React para uma linha suportada sem quebrar App Router, Remotion ou os contratos `/v1`. Evidência: Next 16.2.10, React 19.2.7, codemod async params e validação completa.
+- [ ] Corrigir advisories não-major de `uuid`, `postcss` e `form-data`. Evidência: versões corrigidas/override PostCSS e `npm audit` com zero vulnerabilidades.
+- [ ] Configurar S3-compatible storage. Evidência: T-F0.033 e ADR-134.
+- [ ] Impedir SQLite como domínio final fora de protótipos locais. Evidência: `resolveV2PersistenceMode` exige Postgres em produção e não possui fallback silencioso.
+- [ ] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais. Evidência: T-F0.033 e ADR-134.
 
 ### F0.034 — Paridade API-first [FR-240]
 
-- [x] Criar `PublicCapability` registry com exposure, scopes, schema, custo e confirmação. Evidência: `capability-registry.ts`.
-- [x] Associar cada ação operável da UI a um `capabilityId`. Evidência: T-FR-240 e ADR-134.
-- [x] Fazer UI e API chamarem o mesmo application service/Command handler. Evidência: T-FR-240 e ADR-134.
-- [x] Criar allowlist explícita para internals que não podem ser publicados. Evidência: T-FR-240 e ADR-134.
-- [x] Gerar relatório automático UI actions × capabilities × endpoints × tests. Evidência: T-FR-240 e ADR-134.
-- [x] Falhar CI quando uma capability operável não possuir contrato público ou justificativa válida. Evidência: T-FR-240 e ADR-134.
+- [ ] Criar `PublicCapability` registry com exposure, scopes, schema, custo e confirmação. Evidência: `capability-registry.ts`.
+- [ ] Associar cada ação operável da UI a um `capabilityId`. Evidência: T-FR-240 e ADR-134.
+- [ ] Fazer UI e API chamarem o mesmo application service/Command handler. Evidência: T-FR-240 e ADR-134.
+- [ ] Criar allowlist explícita para internals que não podem ser publicados. Evidência: T-FR-240 e ADR-134.
+- [ ] Gerar relatório automático UI actions × capabilities × endpoints × tests. Evidência: T-FR-240 e ADR-134.
+- [ ] Falhar CI quando uma capability operável não possuir contrato público ou justificativa válida. Evidência: T-FR-240 e ADR-134.
 
 ### F0.035 — Contrato público e descoberta [FR-241]
 
-- [x] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros. Parcial F0-030: `GET /v1/operations` formaliza cursor opaco estável, `limit/after/nextCursor`, ordenação total e allowlist de filtros; convenções transversais dos demais recursos continuam abertas. Evidência: T-FR-241 e ADR-134.
-- [x] Criar source of truth para OpenAPI, JSON Schemas e capability discovery. Evidência: `schema-registry.ts`, `openapi.ts`, endpoints `/v1/openapi.json` e `/v1/schemas/{id}/{version}`.
-- [x] Implementar error envelope e catálogo de códigos estáveis. Evidência: `public-api/errors.ts` e testes HTTP.
-- [x] Publicar examples validados e documentação por build. Evidência: 16 examples validados por Ajv Draft 2020-12 e publicados nos schemas/OpenAPI.
-- [x] Implementar breaking-change detector contra baseline versionado. Evidência: `contract-snapshot.ts` e `contracts/v1/public-contract-baseline.json`.
-- [x] Implementar headers de depreciação/sunset e migration guide associado. Evidência: T-FR-241 e ADR-134.
-- [x] Criar contract test para cada operation pública. Evidência: `public-project-api.integration.mjs`.
+- [ ] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros. Parcial F0-030: `GET /v1/operations` formaliza cursor opaco estável, `limit/after/nextCursor`, ordenação total e allowlist de filtros; convenções transversais dos demais recursos continuam abertas. Evidência: T-FR-241 e ADR-134.
+- [ ] Criar source of truth para OpenAPI, JSON Schemas e capability discovery. Evidência: `schema-registry.ts`, `openapi.ts`, endpoints `/v1/openapi.json` e `/v1/schemas/{id}/{version}`.
+- [ ] Implementar error envelope e catálogo de códigos estáveis. Evidência: `public-api/errors.ts` e testes HTTP.
+- [ ] Publicar examples validados e documentação por build. Evidência: 16 examples validados por Ajv Draft 2020-12 e publicados nos schemas/OpenAPI.
+- [ ] Implementar breaking-change detector contra baseline versionado. Evidência: `contract-snapshot.ts` e `contracts/v1/public-contract-baseline.json`.
+- [ ] Implementar headers de depreciação/sunset e migration guide associado. Evidência: T-FR-241 e ADR-134.
+- [ ] Criar contract test para cada operation pública. Evidência: `public-project-api.integration.mjs`.
 
 ### F0.036 — Clients, autenticação e escopos [FR-242]
 
-- [x] Modelar `ApiClient`, `ServiceAccount`, credential ref, scope grants e environments. Evidência: T-FR-242 e ADR-134.
-- [x] Implementar emissão/validação de token conforme ADR-013. Evidência: service-account token com `scrypt` e comparação constante.
-- [x] Criar secrets exibidos uma vez, armazenados por referência e rotacionáveis. Evidência: `ApiCredential`, token one-shot, hashes `scrypt` e endpoints de rotação/revogação.
-- [x] Implementar deny-by-default e matriz `<resource>:<action>` server-side. Evidência: `authenticate-api-client.ts` e scopes dos endpoints.
-- [x] Vincular client, workspace e delegated user ao audit context. Evidência: T-FR-242 e ADR-134.
-- [x] Implementar suspend, revoke e kill switch por client/workspace. Evidência: T-FR-242 e ADR-134.
-- [x] Criar security E2E de scope, cross-workspace, expiry, rotation e revocation. Evidência: `public-project-api.integration.mjs` cobre capability filtering, 403/404, overlap zero, token antigo e revogado.
+- [ ] Modelar `ApiClient`, `ServiceAccount`, credential ref, scope grants e environments. Evidência: T-FR-242 e ADR-134.
+- [ ] Implementar emissão/validação de token conforme ADR-013. Evidência: service-account token com `scrypt` e comparação constante.
+- [ ] Criar secrets exibidos uma vez, armazenados por referência e rotacionáveis. Evidência: `ApiCredential`, token one-shot, hashes `scrypt` e endpoints de rotação/revogação.
+- [ ] Implementar deny-by-default e matriz `<resource>:<action>` server-side. Evidência: `authenticate-api-client.ts` e scopes dos endpoints.
+- [ ] Vincular client, workspace e delegated user ao audit context. Evidência: T-FR-242 e ADR-134.
+- [ ] Implementar suspend, revoke e kill switch por client/workspace. Evidência: T-FR-242 e ADR-134.
+- [ ] Criar security E2E de scope, cross-workspace, expiry, rotation e revocation. Evidência: `public-project-api.integration.mjs` cobre capability filtering, 403/404, overlap zero, token antigo e revogado.
 
 ### F0.037 — Operações assíncronas [FR-243]
 
-- [x] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade. Parcial F0-029: contrato, persistência, lease/fencing, fases, backoff, cancelamento e retry manual públicos foram entregues para render; generalização aos demais jobs continua aberta. Evidência: T-FR-243 e ADR-134.
-- [x] Retornar 202+operation ID para ingest, Director, provider, sync, batch, render e export. Parcial F0-024: render autorizado retorna 202 com operation ID; os demais tipos continuam abertos. Evidência: T-FR-243 e ADR-134.
-- [x] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-030: list/read/cancel/retry e filtros por status/type foram entregues, junto de `targetId`; `projectId` depende de vínculo canônico operação-projeto e continua aberto. Evidência: T-FR-243 e ADR-134.
-- [x] Expor fase e progresso real ou estado indeterminado honesto. Parcial F0-025: worker persiste `materializing`, `rendering`, `persisting` e terminal; progresso permanece honestamente 0/1, faltando medição granular e uso separado de `verifying`. Evidência: T-FR-243 e ADR-134.
-- [x] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-026: sucesso exige checkpoint durável do output e expõe somente artifact/manifest; storage key, receipt técnico e diagnóstico permanecem internos; custo continua aberto. Evidência: T-FR-243 e ADR-134.
-- [x] Criar resilience tests de restart, stale result, cancel e retry. Parcial F0-028: restart/reclaim, stale attempt, disputa de claim, perda de lease, queda pós-commit, retry limitado e cancelamento concorrente estão cobertos; matriz dos demais job types continua aberta. Evidência: T-FR-243 e ADR-134.
+- [ ] Implementar `PublicOperation` e mapear estados internos sem perder retry/cancelabilidade. Parcial F0-029: contrato, persistência, lease/fencing, fases, backoff, cancelamento e retry manual públicos foram entregues para render; generalização aos demais jobs continua aberta. Evidência: T-FR-243 e ADR-134.
+- [ ] Retornar 202+operation ID para ingest, Director, provider, sync, batch, render e export. Parcial F0-024: render autorizado retorna 202 com operation ID; os demais tipos continuam abertos. Evidência: T-FR-243 e ADR-134.
+- [ ] Criar endpoints de list/read/cancel/retry e filtros por projeto/status/type. Parcial F0-030: list/read/cancel/retry e filtros por status/type foram entregues, junto de `targetId`; `projectId` depende de vínculo canônico operação-projeto e continua aberto. Evidência: T-FR-243 e ADR-134.
+- [ ] Expor fase e progresso real ou estado indeterminado honesto. Parcial F0-025: worker persiste `materializing`, `rendering`, `persisting` e terminal; progresso permanece honestamente 0/1, faltando medição granular e uso separado de `verifying`. Evidência: T-FR-243 e ADR-134.
+- [ ] Expor result/error/custo sem embutir mídia grande ou diagnóstico sensível. Parcial F0-026: sucesso exige checkpoint durável do output e expõe somente artifact/manifest; storage key, receipt técnico e diagnóstico permanecem internos; custo continua aberto. Evidência: T-FR-243 e ADR-134.
+- [ ] Criar resilience tests de restart, stale result, cancel e retry. Parcial F0-028: restart/reclaim, stale attempt, disputa de claim, perda de lease, queda pós-commit, retry limitado e cancelamento concorrente estão cobertos; matriz dos demais job types continua aberta. Evidência: T-FR-243 e ADR-134.
 
 ### F0.038 — Webhooks e eventos [FR-244]
 
-- [x] Definir event envelope versionado, IDs únicos e catálogo inicial. Evidência F0-032: `PublicEvent`, UUID v4, catálogo de 14 tipos, schemas e `GET /v1/events/catalog`; unicidade global durável será fechada pelo outbox.
-- [x] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas. Evidência: T-FR-244 e ADR-134.
-- [x] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
-- [x] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
-- [x] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
-- [x] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057/F0-058: API externa cria/lista/lê endpoints, subscriptions e rotações redigidas, provisiona chave HMAC pendente, prepara, ativa, cancela e executa higiene limitada da rotação com overlap, challenge, replay e lifecycle; UI continua aberta. Evidência: T-FR-244 e ADR-134.
-- [x] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
+- [ ] Definir event envelope versionado, IDs únicos e catálogo inicial. Evidência F0-032: `PublicEvent`, UUID v4, catálogo de 14 tipos, schemas e `GET /v1/events/catalog`; unicidade global durável será fechada pelo outbox.
+- [ ] Implementar outbox transacional a partir de domain/workflow transitions. Parcial F0-033: `project.created` e `project.version.created` são persistidos atomicamente com a criação idempotente; demais transitions continuam abertas. Evidência: T-FR-244 e ADR-134.
+- [ ] Modelar endpoint, subscription, secret, filter e delivery attempt. Evidência F0-034: domínios canônicos, registro transacional, cinco tabelas, constraints e regressões de segurança.
+- [ ] Implementar challenge, assinatura, timestamp e anti-replay. Evidência F0-035/F0-036: challenge durável one-shot, HMAC dos bytes exatos, janela de timestamp, receipt anti-replay e transporte HTTPS pinado com resolução DNS fail-closed.
+- [ ] Implementar at-least-once, backoff, dead-letter e replay controlado. Evidência F0-031/F0-046: render possui lease/fencing, backoff, checkpoint, dead-letter e retry manual; webhooks possuem outbox/fan-out, claim/lease/fencing, dispatch assinado, transporte DNS-pinado, heartbeat, discovery, coordenação durável de shards, secret provider configurado, entrypoint operacional, backoff, dead-letter e replay idempotente individual ou por evento exato. Replay por intervalo permanece enhancement administrativo separado.
+- [ ] Criar UI/API administrativa de status, attempts e rotação de secret. Parcial F0-042/F0-044/F0-047/F0-048/F0-049/F0-050/F0-051/F0-052/F0-053/F0-054/F0-055/F0-056/F0-057/F0-058: API externa cria/lista/lê endpoints, subscriptions e rotações redigidas, provisiona chave HMAC pendente, prepara, ativa, cancela e executa higiene limitada da rotação com overlap, challenge, replay e lifecycle; UI continua aberta. Evidência: T-FR-244 e ADR-134.
+- [ ] Criar integration tests de duplicação, timeout, assinatura inválida e replay. Evidência F0-035/F0-043: assinatura adulterada, anti-replay durável, deadline absoluto, DNS/rebinding, claim concorrente, lease/fencing, retry/dead-letter e replay administrativo idempotente estão cobertos em contratos, Prisma e HTTP.
 
 ### F0.039 — Idempotência e concorrência externa [FR-245]
 
-- [x] Implementar ledger por workspace/client/key com request fingerprint. Evidência: `V2IdempotencyRecord` e repository Prisma.
-- [x] Retornar response/operation original em repetição idêntica. Evidência: testes unitário, Prisma e HTTP.
-- [x] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
-- [x] Exigir `baseVersionId` ou ETag em mutações concorrentes. Evidência F0-048/F0-049/F0-076/F0-077: lifecycle de subscriptions e endpoints exige `baseRevision` opaca; direitos de assets expõem ETag forte e exigem `If-Match`, com 428 ausente, 412 obsoleto, compare-and-set, proteção ABA e replay idêntico convergente. O gate exaustivo classifica as 23 operações externas não-query e impede nova substituição via `PUT`/`PATCH` sem precondição explícita; criações idempotentes, ações de state machine, single-flight e preflights possuem estratégias separadas e testadas.
-- [x] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado. Evidência F0-078: resolver puro exige base exata e cadeia intermediária completa/limitada, faz auto-rebase somente sem overlap de `EditScope`, falha fechado em histórico incompleto ou fork inconsistente e produz `VersionDiff` categorizado. Overlap retorna `VERSION_CONFLICT` com targets canônicos; o error envelope v2 publica apenas diff allowlisted e remove payloads/snapshots internos.
-- [x] Criar property tests de requests simultâneas e timeout após commit. Evidência F0-059–F0-075: as 23 capabilities externas não-query possuem classificação exaustiva; 21 commands duráveis cobrem simultaneidade, convergência após resposta perdida e retry serializável quando aplicável; 2 preflights são determinísticos e não fazem commit; nenhuma lacuna permanece. O challenge de webhook usa single-flight durável com exatamente um transporte, follower convergente, takeover após expiração e fencing contra líder obsoleto.
+- [ ] Implementar ledger por workspace/client/key com request fingerprint. Evidência: `V2IdempotencyRecord` e repository Prisma.
+- [ ] Retornar response/operation original em repetição idêntica. Evidência: testes unitário, Prisma e HTTP.
+- [ ] Rejeitar mesma key com payload diferente. Evidência: `IDEMPOTENCY_PAYLOAD_MISMATCH` testado.
+- [ ] Exigir `baseVersionId` ou ETag em mutações concorrentes. Evidência F0-048/F0-049/F0-076/F0-077: lifecycle de subscriptions e endpoints exige `baseRevision` opaca; direitos de assets expõem ETag forte e exigem `If-Match`, com 428 ausente, 412 obsoleto, compare-and-set, proteção ABA e replay idêntico convergente. O gate exaustivo classifica as 23 operações externas não-query e impede nova substituição via `PUT`/`PATCH` sem precondição explícita; criações idempotentes, ações de state machine, single-flight e preflights possuem estratégias separadas e testadas.
+- [ ] Reusar auto-rebase/conflict rules da spec 02 e devolver diff estruturado. Evidência F0-078: resolver puro exige base exata e cadeia intermediária completa/limitada, faz auto-rebase somente sem overlap de `EditScope`, falha fechado em histórico incompleto ou fork inconsistente e produz `VersionDiff` categorizado. Overlap retorna `VERSION_CONFLICT` com targets canônicos; o error envelope v2 publica apenas diff allowlisted e remove payloads/snapshots internos.
+- [ ] Criar property tests de requests simultâneas e timeout após commit. Evidência F0-059–F0-075: as 23 capabilities externas não-query possuem classificação exaustiva; 21 commands duráveis cobrem simultaneidade, convergência após resposta perdida e retry serializável quando aplicável; 2 preflights são determinísticos e não fazem commit; nenhuma lacuna permanece. O challenge de webhook usa single-flight durável com exatamente um transporte, follower convergente, takeover após expiração e fencing contra líder obsoleto.
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
-- [x] Definir tool names, descriptions, input/output schemas e structured errors. Evidência F0-079: `GET /v1/tools` expõe catálogo scope-filtered derivado do registry, com nomes MCP-safe, descrições, input schema composto de path/query/headers/body, output schema, error envelope v2, annotations e metadata de custo/confirmation. Contract e HTTP tests comprovam paridade com capabilities, deny-by-default e ausência de valores internos.
-- [x] Filtrar tools/capabilities por client, scope, environment e policy. Evidência F0-080: descoberta compartilhada exige client autenticado/ativo no environment correto, intersecta scopes, `availableIn` e policy deny-only global/por environment/workspace/client; configuração inválida falha fechada. Unit tests cobrem as quatro dimensões e a jornada HTTP prova paridade exata entre `/v1/capabilities` e `/v1/tools`, inclusive deny específico por client sem afetar o catálogo anônimo.
-- [x] Exigir preflight/approval em tools caras, amplas ou destrutivas. Evidência F0-081: registry de segurança classifica exaustivamente as 21 tools mutáveis em `bounded/broad/destructive`; impacto amplo/destrutivo ou custo high/variable exige gate. Evidência confiável é vinculada à capability, fingerprint e expiry; ausência, mismatch e expiração falham antes da execução. Descriptors anunciam o gate, mas não oferecem `approval/confirmed/preflightToken` gravável pelo modelo.
-- [x] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno. Evidência F0-082: servidor MCP stdio baseado no SDK estável descobre `/v1/tools` uma vez por sessão, valida input/output schemas, traduz namespaces para HTTP autenticado e bloqueia redirects. E2E com client MCP oficial comprova list/call via API fake; testes garantem gate confiável, catálogo scope-filtered, output malformado bloqueado e ausência de repositories/banco/storage/workers no adapter.
-- [x] Expor resources paginados de capabilities, projects, operations e reports autorizados. Evidência F0-083: MCP lista collections e templates derivados exclusivamente das capabilities autorizadas, pagina descriptors e payloads com cursores opacos e bloqueia URI/query desconhecida. Projects ganhou paginação keyset pública versionada; reports só aparecem quando a capability correspondente existir no snapshot.
-- [x] Delimitar transcript/OCR/media metadata como untrusted data em tool inputs/results. Evidência F0-084: descriptors v2 publicam paths de transcript/OCR/media metadata e política `never-execute`; resultados MCP textuais carregam envelope explícito e `_meta`, preservando structuredContent validado sem promover conteúdo de mídia a instrução.
-- [x] Criar E2E por agente para jornada válida, prompt injection e tool não autorizada. Evidência F0-085: `ToolLoopAgent` recebe somente descriptors do snapshot autorizado e executa pela Public API; E2E determinístico com model fake cobre chamada válida, transcript adversarial preservado como data-only e tool ausente convertida em invalid call sem execução.
+- [ ] Definir tool names, descriptions, input/output schemas e structured errors. Evidência F0-079: `GET /v1/tools` expõe catálogo scope-filtered derivado do registry, com nomes MCP-safe, descrições, input schema composto de path/query/headers/body, output schema, error envelope v2, annotations e metadata de custo/confirmation. Contract e HTTP tests comprovam paridade com capabilities, deny-by-default e ausência de valores internos.
+- [ ] Filtrar tools/capabilities por client, scope, environment e policy. Evidência F0-080: descoberta compartilhada exige client autenticado/ativo no environment correto, intersecta scopes, `availableIn` e policy deny-only global/por environment/workspace/client; configuração inválida falha fechada. Unit tests cobrem as quatro dimensões e a jornada HTTP prova paridade exata entre `/v1/capabilities` e `/v1/tools`, inclusive deny específico por client sem afetar o catálogo anônimo.
+- [ ] Exigir preflight/approval em tools caras, amplas ou destrutivas. Evidência F0-081: registry de segurança classifica exaustivamente as 21 tools mutáveis em `bounded/broad/destructive`; impacto amplo/destrutivo ou custo high/variable exige gate. Evidência confiável é vinculada à capability, fingerprint e expiry; ausência, mismatch e expiração falham antes da execução. Descriptors anunciam o gate, mas não oferecem `approval/confirmed/preflightToken` gravável pelo modelo.
+- [ ] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno. Evidência F0-082: servidor MCP stdio baseado no SDK estável descobre `/v1/tools` uma vez por sessão, valida input/output schemas, traduz namespaces para HTTP autenticado e bloqueia redirects. E2E com client MCP oficial comprova list/call via API fake; testes garantem gate confiável, catálogo scope-filtered, output malformado bloqueado e ausência de repositories/banco/storage/workers no adapter.
+- [ ] Expor resources paginados de capabilities, projects, operations e reports autorizados. Evidência F0-083: MCP lista collections e templates derivados exclusivamente das capabilities autorizadas, pagina descriptors e payloads com cursores opacos e bloqueia URI/query desconhecida. Projects ganhou paginação keyset pública versionada; reports só aparecem quando a capability correspondente existir no snapshot.
+- [ ] Delimitar transcript/OCR/media metadata como untrusted data em tool inputs/results. Evidência F0-084: descriptors v2 publicam paths de transcript/OCR/media metadata e política `never-execute`; resultados MCP textuais carregam envelope explícito e `_meta`, preservando structuredContent validado sem promover conteúdo de mídia a instrução.
+- [ ] Criar E2E por agente para jornada válida, prompt injection e tool não autorizada. Evidência F0-085: `ToolLoopAgent` recebe somente descriptors do snapshot autorizado e executa pela Public API; E2E determinístico com model fake cobre chamada válida, transcript adversarial preservado como data-only e tool ausente convertida em invalid call sem execução.
 
 ### F0.041 — Transferência externa de mídia [FR-247]
 
-- [x] Implementar `begin-upload` com kind, size, MIME e checksum esperado. Evidência F0-086: `POST /v1/media/uploads` exige scope e idempotency key, valida coerência kind/MIME, tamanho até 5 TB e SHA-256, persiste sessão workspace/client-scoped e retorna replay convergente sem expor storage.
-- [x] Gerar signed single/multipart sessions curtas com headers obrigatórios. Evidência F0-087: endpoint de sessão escolhe single até 100 MiB ou multipart de 64 MiB/até 10 mil partes, assina autorização HMAC limitada a workspace/client/upload/expiry e exige MIME + checksum em headers.
-- [x] Implementar resume, parts completion e verification antes do ingest. Evidência F0-088: receipts multipart são persistidos/substituídos por número, consulta retorna parts ausentes para resume e completion só converge para `verified` após conferência autoritativa exata de tamanho, MIME e SHA-256; nenhum ingest é iniciado por esta etapa.
-- [x] Gerar download grants curtos por asset/artifact autorizado. Evidência F0-089: artifact disponível e workspace-scoped recebe grant HMAC de 30–900 segundos, vinculado ao client e idempotency key; banco retém somente hash do token, e revogação convergente invalida a autorização imediatamente.
-- [x] Impedir storage path/URI permanente de virar identidade pública. Evidência F0-090: presenters convertem chaves internas em referências lógicas `artifact:<id>`; um gate recursivo rejeita storage path/URI/bucket/object key e valida todos os exemplos públicos, enquanto URLs efêmeras permanecem limitadas aos grants/sessions.
-- [x] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado. Evidência F0-091: jornada determinística cobre 256 MiB/4 parts, retomada após sessão expirada, preservação de receipts, bloqueio de checksum divergente, conclusão verificada e invalidação imediata do grant revogado.
+- [ ] Implementar `begin-upload` com kind, size, MIME e checksum esperado. Evidência F0-086: `POST /v1/media/uploads` exige scope e idempotency key, valida coerência kind/MIME, tamanho até 5 TB e SHA-256, persiste sessão workspace/client-scoped e retorna replay convergente sem expor storage.
+- [ ] Gerar signed single/multipart sessions curtas com headers obrigatórios. Evidência F0-087: endpoint de sessão escolhe single até 100 MiB ou multipart de 64 MiB/até 10 mil partes, assina autorização HMAC limitada a workspace/client/upload/expiry e exige MIME + checksum em headers.
+- [ ] Implementar resume, parts completion e verification antes do ingest. Evidência F0-088: receipts multipart são persistidos/substituídos por número, consulta retorna parts ausentes para resume e completion só converge para `verified` após conferência autoritativa exata de tamanho, MIME e SHA-256; nenhum ingest é iniciado por esta etapa.
+- [ ] Gerar download grants curtos por asset/artifact autorizado. Evidência F0-089: artifact disponível e workspace-scoped recebe grant HMAC de 30–900 segundos, vinculado ao client e idempotency key; banco retém somente hash do token, e revogação convergente invalida a autorização imediatamente.
+- [ ] Impedir storage path/URI permanente de virar identidade pública. Evidência F0-090: presenters convertem chaves internas em referências lógicas `artifact:<id>`; um gate recursivo rejeita storage path/URI/bucket/object key e valida todos os exemplos públicos, enquanto URLs efêmeras permanecem limitadas aos grants/sessions.
+- [ ] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado. Evidência F0-091: jornada determinística cobre 256 MiB/4 parts, retomada após sessão expirada, preservação de receipts, bloqueio de checksum divergente, conclusão verificada e invalidação imediata do grant revogado.
 
 ### F0.042 — Preflight e lote externo [FR-248]
 
-- [x] Definir `PreflightResult` com targets, conflicts, invalidations, jobs, custo, quota e warnings. Evidência F0-092: contrato canônico `preflight-result/v1` possui limites explícitos, elegibilidade derivada de conflitos/quota, custo em minor units e schema/exemplo acessíveis por `GET /v1/schemas/preflight-result/v1`.
-- [x] Gerar commit token vinculado a client, workspace, fingerprint, snapshot e expiry. Evidência F0-093: token HMAC v1 carrega claims assinadas de client/workspace/fingerprint/snapshot/cost/expiry, usa comparação timing-safe e possui schema público de evidência sem expor claims em texto claro.
-- [x] Invalidar token quando versão, input ou custo material mudar. Evidência F0-094: validação reabre claims assinadas e rejeita expiry, client/workspace diferente e qualquer divergência de fingerprint, snapshot ou cost fingerprint antes do commit.
-- [x] Exigir preflight para batch, final matrix, geração variável e ações destrutivas. Evidência F0-095: policy central deny-by-default classifica as quatro classes e exige token confiável revalidado; somente ação bounded explicitamente classificada passa sem preflight.
-- [x] Expor resultado/status/retry por item sem resposta monolítica. Evidência F0-096: `batch-item-page/v1` referencia um `operationId` por item, limita páginas a 100, separa resultRef/erro redigido e reutiliza as APIs duráveis `operations.read` e `operations.retry` para acompanhamento/retry individual.
-- [x] Criar E2E de dry-run, token expirado, partial retry e budget block. Evidência F0-097: jornada integrada comprova dry-run sem commit, expiry fail-closed, quota insuficiente bloqueando elegibilidade e seleção de retry somente da operação falha/retryable.
+- [ ] Definir `PreflightResult` com targets, conflicts, invalidations, jobs, custo, quota e warnings. Evidência F0-092: contrato canônico `preflight-result/v1` possui limites explícitos, elegibilidade derivada de conflitos/quota, custo em minor units e schema/exemplo acessíveis por `GET /v1/schemas/preflight-result/v1`.
+- [ ] Gerar commit token vinculado a client, workspace, fingerprint, snapshot e expiry. Evidência F0-093: token HMAC v1 carrega claims assinadas de client/workspace/fingerprint/snapshot/cost/expiry, usa comparação timing-safe e possui schema público de evidência sem expor claims em texto claro.
+- [ ] Invalidar token quando versão, input ou custo material mudar. Evidência F0-094: validação reabre claims assinadas e rejeita expiry, client/workspace diferente e qualquer divergência de fingerprint, snapshot ou cost fingerprint antes do commit.
+- [ ] Exigir preflight para batch, final matrix, geração variável e ações destrutivas. Evidência F0-095: policy central deny-by-default classifica as quatro classes e exige token confiável revalidado; somente ação bounded explicitamente classificada passa sem preflight.
+- [ ] Expor resultado/status/retry por item sem resposta monolítica. Evidência F0-096: `batch-item-page/v1` referencia um `operationId` por item, limita páginas a 100, separa resultRef/erro redigido e reutiliza as APIs duráveis `operations.read` e `operations.retry` para acompanhamento/retry individual.
+- [ ] Criar E2E de dry-run, token expirado, partial retry e budget block. Evidência F0-097: jornada integrada comprova dry-run sem commit, expiry fail-closed, quota insuficiente bloqueando elegibilidade e seleção de retry somente da operação falha/retryable.
 
 ### F0.043 — Governança da API [FR-249]
 
-- [x] Criar administração de clients, scopes, secrets, environments e status. Evidência F0-098: Public API administrativa lista/cria clients com scopes e sandbox/production, retorna secret somente uma vez, rotaciona com overlap, revoga credentials/status e exige `clients:admin`; gate exaustivo fixa a superfície.
-- [x] Criar administração de webhooks, subscriptions e delivery diagnostics. Evidência F0-099: API externa cobre endpoint create/list/read/status/challenge, subscription create/list/read/status, signing-secret lifecycle, delivery list/read/replay e paginação diagnóstica; gate de governança fixa autenticação e catálogo completo. UI administrativa entra na fase visual.
-- [x] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace. Evidência F0-100: evaluator único e fail-closed recebe scope duplo, limites/uso inteiros e retorna decisão conjunta com reasons explícitos e saldo de requests, concorrência, quota e spend.
-- [x] Criar usage e audit queries paginadas com redaction. Evidência F0-101: `GET /v1/governance/usage-audit` reutiliza paginação estável de operações, exige `clients:admin` e retorna somente identidade, client, ação, status, target e unidade de uso, omitindo payload/erro/lease/provider/secrets.
-- [x] Criar sandbox isolado com provider fakes e custos simulados. Evidência F0-102: adapter determinístico aceita apenas environment sandbox, produz receipt SHA-256 e custo inteiro simulado, reporta zero chamadas externas e falha fechado em production.
-- [x] Implementar anomaly alerts e kill switch operacional. Evidência F0-103: gate pré-execução bloqueia quando `APOLLO_OPERATIONAL_KILL_SWITCH=true`; error-rate/spend/request spikes acima do threshold emitem alerta bounded por workspace/client e negam execução.
-- [x] Criar E2E administrativo sem permitir que client autoeleve seus scopes. Evidência F0-104: jornada HTTP real autentica child client, tenta criar outro client com `clients:admin`, recebe 403 e também comprova isolamento cross-workspace; unit test impede grant de scope ausente no ator antes da persistência.
+- [ ] Criar administração de clients, scopes, secrets, environments e status. Evidência F0-098: Public API administrativa lista/cria clients com scopes e sandbox/production, retorna secret somente uma vez, rotaciona com overlap, revoga credentials/status e exige `clients:admin`; gate exaustivo fixa a superfície.
+- [ ] Criar administração de webhooks, subscriptions e delivery diagnostics. Evidência F0-099: API externa cobre endpoint create/list/read/status/challenge, subscription create/list/read/status, signing-secret lifecycle, delivery list/read/replay e paginação diagnóstica; gate de governança fixa autenticação e catálogo completo. UI administrativa entra na fase visual.
+- [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace. Evidência F0-100: evaluator único e fail-closed recebe scope duplo, limites/uso inteiros e retorna decisão conjunta com reasons explícitos e saldo de requests, concorrência, quota e spend.
+- [ ] Criar usage e audit queries paginadas com redaction. Evidência F0-101: `GET /v1/governance/usage-audit` reutiliza paginação estável de operações, exige `clients:admin` e retorna somente identidade, client, ação, status, target e unidade de uso, omitindo payload/erro/lease/provider/secrets.
+- [ ] Criar sandbox isolado com provider fakes e custos simulados. Evidência F0-102: adapter determinístico aceita apenas environment sandbox, produz receipt SHA-256 e custo inteiro simulado, reporta zero chamadas externas e falha fechado em production.
+- [ ] Implementar anomaly alerts e kill switch operacional. Evidência F0-103: gate pré-execução bloqueia quando `APOLLO_OPERATIONAL_KILL_SWITCH=true`; error-rate/spend/request spikes acima do threshold emitem alerta bounded por workspace/client e negam execução.
+- [ ] Criar E2E administrativo sem permitir que client autoeleve seus scopes. Evidência F0-104: jornada HTTP real autentica child client, tenta criar outro client com `clients:admin`, recebe 403 e também comprova isolamento cross-workspace; unit test impede grant de scope ausente no ator antes da persistência.
 
 ---
 
@@ -575,402 +599,402 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.001 — Dashboard de projetos [FR-002]
 
-- [x] Criar query agregada de projeto, versão atual, jobs, review issues e outputs. Evidência F1-001: `/api/projects` agrega job mais recente, versão/review explicitamente unknown e outputCount derivado, sem inventar registros ausentes.
-- [x] Implementar cards conforme referência visual, com progresso derivado de steps/items reais. Evidência F1-001: dashboard dark editorial usa cards de produção, faixa de mídia, estado, etapa, outputs e barra somente com completed/total válidos.
-- [x] Exibir estados vazio, processando, aguardando revisão, falho, concluído e arquivado. Evidência F1-001: máquina de apresentação deriva seis estados, empty state orienta o primeiro upload e cada estado possui linguagem/ação própria.
-- [x] Atualizar cards por eventos sem fabricar percentual quando o job não informa progresso. Evidência F1-001: listener `apollo:project-updated` refaz a query; helper retorna progress `null` sem total medido e a UI mostra apenas a etapa atual.
-- [x] Criar E2E para transições e ação recomendada em cada estado. Evidência F1-001: regressão determinística percorre draft, processing, review, failed, completed e archived, validando ações e ausência de progresso estimado.
+- [ ] Criar query agregada de projeto, versão atual, jobs, review issues e outputs. Evidência F1-001: `/api/projects` agrega job mais recente, versão/review explicitamente unknown e outputCount derivado, sem inventar registros ausentes.
+- [ ] Implementar cards conforme referência visual, com progresso derivado de steps/items reais. Evidência F1-001: dashboard dark editorial usa cards de produção, faixa de mídia, estado, etapa, outputs e barra somente com completed/total válidos.
+- [ ] Exibir estados vazio, processando, aguardando revisão, falho, concluído e arquivado. Evidência F1-001: máquina de apresentação deriva seis estados, empty state orienta o primeiro upload e cada estado possui linguagem/ação própria.
+- [ ] Atualizar cards por eventos sem fabricar percentual quando o job não informa progresso. Evidência F1-001: listener `apollo:project-updated` refaz a query; helper retorna progress `null` sem total medido e a UI mostra apenas a etapa atual.
+- [ ] Criar E2E para transições e ação recomendada em cada estado. Evidência F1-001: regressão determinística percorre draft, processing, review, failed, completed e archived, validando ações e ausência de progresso estimado.
 
 ### F1.002 — Busca e filtros [FR-003]
 
-- [x] Definir filtros por texto, status, objetivo, formato, locale, data e owner. Evidência F1-002: query pública tipada e dashboard oferecem as oito facetas, com validação de status, formato, locale, objetivo, owner e intervalo.
-- [x] Implementar busca paginada, ordenação estável e combinação de filtros. Evidência F1-002: `listProjectsService` combina filtros, ordena por `createdAt/id` e vincula cursor opaco ao workspace e ao fingerprint exato da consulta.
-- [x] Persistir filtros durante a sessão e refletir estado na URL quando adequado. Evidência F1-002: dashboard recupera filtros do `sessionStorage`, prioriza parâmetros explícitos da URL e mantém ambos sincronizados.
-- [x] Testar isolamento de workspace, paginação e zero results. Evidência F1-002: regressões cobrem cursor entre workspaces/consultas, combinação normalizada, página vazia e rejeição anterior ao acesso ao storage.
+- [ ] Definir filtros por texto, status, objetivo, formato, locale, data e owner. Evidência F1-002: query pública tipada e dashboard oferecem as oito facetas, com validação de status, formato, locale, objetivo, owner e intervalo.
+- [ ] Implementar busca paginada, ordenação estável e combinação de filtros. Evidência F1-002: `listProjectsService` combina filtros, ordena por `createdAt/id` e vincula cursor opaco ao workspace e ao fingerprint exato da consulta.
+- [ ] Persistir filtros durante a sessão e refletir estado na URL quando adequado. Evidência F1-002: dashboard recupera filtros do `sessionStorage`, prioriza parâmetros explícitos da URL e mantém ambos sincronizados.
+- [ ] Testar isolamento de workspace, paginação e zero results. Evidência F1-002: regressões cobrem cursor entre workspaces/consultas, combinação normalizada, página vazia e rejeição anterior ao acesso ao storage.
 
 ### F1.003 — Ações rápidas [FR-004]
 
-- [x] Implementar abrir, revisar, duplicar, renomear, arquivar e restaurar projeto. Evidência F1-003: cards expõem as seis ações e endpoints internos preservam a etapa anterior ao arquivar, restauram e duplicam por referências compartilhadas.
-- [x] Aplicar autorização e confirmação conforme impacto de cada ação. Evidência F1-003: serviço de aplicação exige `projects:read/write`, isola por workspace; mutações web rejeitam cross-origin e arquivamento exige confirmação explícita.
-- [x] Refletir resultado otimista somente quando houver rollback seguro. Evidência F1-003: rename/archive/restore usam snapshot anterior imutável e rollback exato; duplicação aguarda confirmação do servidor antes de entrar na lista.
-- [x] Criar E2E incluindo duplicação copy-on-write e falha recuperável. Evidência F1-003: regressão percorre abrir/revisar/renomear/duplicar/arquivar/restaurar, prova compartilhamento de snapshots, isolamento, escopos, confirmação e rollback.
+- [ ] Implementar abrir, revisar, duplicar, renomear, arquivar e restaurar projeto. Evidência F1-003: cards expõem as seis ações e endpoints internos preservam a etapa anterior ao arquivar, restauram e duplicam por referências compartilhadas.
+- [ ] Aplicar autorização e confirmação conforme impacto de cada ação. Evidência F1-003: serviço de aplicação exige `projects:read/write`, isola por workspace; mutações web rejeitam cross-origin e arquivamento exige confirmação explícita.
+- [ ] Refletir resultado otimista somente quando houver rollback seguro. Evidência F1-003: rename/archive/restore usam snapshot anterior imutável e rollback exato; duplicação aguarda confirmação do servidor antes de entrar na lista.
+- [ ] Criar E2E incluindo duplicação copy-on-write e falha recuperável. Evidência F1-003: regressão percorre abrir/revisar/renomear/duplicar/arquivar/restaurar, prova compartilhamento de snapshots, isolamento, escopos, confirmação e rollback.
 
 ### F1.004 — Objetivo estratégico [FR-010]
 
-- [x] Modelar descoberta, consciência, aquecimento, leads, venda, WhatsApp, agendamento e download. Evidência F1-004: catálogo canônico tipado contém os oito objetivos com identidade estável.
-- [x] Criar formulário inicial com descrição e exemplos de resultado de cada objetivo. Evidência F1-004: nova produção exige seleção visível, mostra orientação contextual e envia o objetivo junto da mídia.
-- [x] Associar objetivo à rubrica correta no `DirectorRun`. Evidência F1-004: `createDirectorRunObjective` resolve `rubricRef` versionada por objetivo.
-- [x] Impedir troca silenciosa depois da aprovação; gerar nova versão/re-run. Evidência F1-004: draft pode mudar na mesma run; approved exige novo id, incrementa versão e registra `supersedesRunId`.
-- [x] Testar uma fixture por objetivo estratégico. Evidência F1-004: regressão percorre os oito objetivos e valida descrição, resultado e rubrica, além do fluxo de rerun.
+- [ ] Modelar descoberta, consciência, aquecimento, leads, venda, WhatsApp, agendamento e download. Evidência F1-004: catálogo canônico tipado contém os oito objetivos com identidade estável.
+- [ ] Criar formulário inicial com descrição e exemplos de resultado de cada objetivo. Evidência F1-004: nova produção exige seleção visível, mostra orientação contextual e envia o objetivo junto da mídia.
+- [ ] Associar objetivo à rubrica correta no `DirectorRun`. Evidência F1-004: `createDirectorRunObjective` resolve `rubricRef` versionada por objetivo.
+- [ ] Impedir troca silenciosa depois da aprovação; gerar nova versão/re-run. Evidência F1-004: draft pode mudar na mesma run; approved exige novo id, incrementa versão e registra `supersedesRunId`.
+- [ ] Testar uma fixture por objetivo estratégico. Evidência F1-004: regressão percorre os oito objetivos e valida descrição, resultado e rubrica, além do fluxo de rerun.
 
 ### F1.005 — Rubricas estratégicas [FR-010]
 
-- [x] Codificar critérios e pesos de descoberta, consciência e aquecimento. Evidência F1-005: três rubricas awareness possuem pesos distintos e normalizados por intenção.
-- [x] Codificar critérios e pesos de leads, venda, WhatsApp, agendamento e download. Evidência F1-005: cinco rubricas de conversão ponderam oferta, prova, CTA e fricção conforme o destino.
-- [x] Versionar rubrica e persistir seus scores/evidências no `QualityReport`. Evidência F1-005: relatório imutável guarda rubric id/version, scores e evidências; snapshot recebe JSON canônico e SHA-256.
-- [x] Implementar hard gates comuns para integridade, legibilidade, direitos e CTA quando obrigatório. Evidência F1-005: falha de qualquer gate reprova mesmo score alto; CTA é obrigatório somente nos cinco objetivos de conversão.
-- [x] Criar dataset de referência com exemplos bom/limítrofe/ruim por objetivo. Evidência F1-005: conjunto versionado contém 24 referências, três bandas para cada objetivo.
-- [x] Calibrar thresholds iniciais sem misturar performance comercial com causalidade garantida. Evidência F1-005: thresholds são explícitos e rotulados `editorial-quality-proxy`; referências negam causalidade comercial.
+- [ ] Codificar critérios e pesos de descoberta, consciência e aquecimento. Evidência F1-005: três rubricas awareness possuem pesos distintos e normalizados por intenção.
+- [ ] Codificar critérios e pesos de leads, venda, WhatsApp, agendamento e download. Evidência F1-005: cinco rubricas de conversão ponderam oferta, prova, CTA e fricção conforme o destino.
+- [ ] Versionar rubrica e persistir seus scores/evidências no `QualityReport`. Evidência F1-005: relatório imutável guarda rubric id/version, scores e evidências; snapshot recebe JSON canônico e SHA-256.
+- [ ] Implementar hard gates comuns para integridade, legibilidade, direitos e CTA quando obrigatório. Evidência F1-005: falha de qualquer gate reprova mesmo score alto; CTA é obrigatório somente nos cinco objetivos de conversão.
+- [ ] Criar dataset de referência com exemplos bom/limítrofe/ruim por objetivo. Evidência F1-005: conjunto versionado contém 24 referências, três bandas para cada objetivo.
+- [ ] Calibrar thresholds iniciais sem misturar performance comercial com causalidade garantida. Evidência F1-005: thresholds são explícitos e rotulados `editorial-quality-proxy`; referências negam causalidade comercial.
 
 ### F1.006 — Ação desejada [FR-011]
 
-- [x] Modelar ação, destino, CTA verbal/visual, URL/handle e requisitos de disclosure. Evidência F1-006: `DesiredAction/v1` tipa ação, cinco destinos, CTAs e disclosures imutáveis.
-- [x] Validar campos obrigatórios por objetivo sem inventar destino ausente. Evidência F1-006: objetivos de conversão falham sem destino explícito; URL exige HTTPS e a interface bloqueia upload incompleto.
-- [x] Disponibilizar CTA estruturado para StoryPlan, subtitle, overlay e critic. Evidência F1-006: os quatro consumers recebem a mesma referência canônica, impedindo divergência entre fala e visual.
-- [x] Testar mismatch entre objetivo, CTA falado e destino configurado. Evidência F1-006: critic determinístico sinaliza action, spoken CTA e destination sem propor valor inventado.
+- [ ] Modelar ação, destino, CTA verbal/visual, URL/handle e requisitos de disclosure. Evidência F1-006: `DesiredAction/v1` tipa ação, cinco destinos, CTAs e disclosures imutáveis.
+- [ ] Validar campos obrigatórios por objetivo sem inventar destino ausente. Evidência F1-006: objetivos de conversão falham sem destino explícito; URL exige HTTPS e a interface bloqueia upload incompleto.
+- [ ] Disponibilizar CTA estruturado para StoryPlan, subtitle, overlay e critic. Evidência F1-006: os quatro consumers recebem a mesma referência canônica, impedindo divergência entre fala e visual.
+- [ ] Testar mismatch entre objetivo, CTA falado e destino configurado. Evidência F1-006: critic determinístico sinaliza action, spoken CTA e destination sem propor valor inventado.
 
 ### F1.007 — Briefing livre opcional [FR-012]
 
-- [x] Adicionar briefing opcional sem bloquear avanço quando vazio. Evidência F1-007: nova produção contém textarea opcional e o domínio produz estado válido na ausência.
-- [x] Tratar briefing como dado autorizado do owner e manter conteúdo ingerido separado. Evidência F1-007: owner text recebe trust `owner-authorized`; mídia ingerida entra apenas por ref `untrusted-media-derived`.
-- [x] Exibir resumo estruturado e assumptions antes de geração cara. Evidência F1-007: painel mostra resumo e lacunas antes do upload; estado mantém `readyForExpensiveGeneration: false`.
-- [x] Criar E2E com briefing completo, parcial e ausente. Evidência F1-007: regressão valida os três caminhos, trust boundary e assumptions explícitas.
+- [ ] Adicionar briefing opcional sem bloquear avanço quando vazio. Evidência F1-007: nova produção contém textarea opcional e o domínio produz estado válido na ausência.
+- [ ] Tratar briefing como dado autorizado do owner e manter conteúdo ingerido separado. Evidência F1-007: owner text recebe trust `owner-authorized`; mídia ingerida entra apenas por ref `untrusted-media-derived`.
+- [ ] Exibir resumo estruturado e assumptions antes de geração cara. Evidência F1-007: painel mostra resumo e lacunas antes do upload; estado mantém `readyForExpensiveGeneration: false`.
+- [ ] Criar E2E com briefing completo, parcial e ausente. Evidência F1-007: regressão valida os três caminhos, trust boundary e assumptions explícitas.
 
 ### F1.008 — Brief Compiler [FR-013]
 
-- [x] Definir schema para audience, offer, constraints, must-use, avoid, tone e success criteria. Evidência F1-008: `CompiledBrief/v1` exige os sete campos como coleções delimitadas.
-- [x] Compilar texto livre em estrutura com evidence spans, confidence e conflitos. Evidência F1-008: porta de modelo retorna estrutura validada contra spans exatos da fonte e confidence 0–1.
-- [x] Validar resultado contra guardrails e solicitar revisão somente em conflito material. Evidência F1-008: detector acrescenta conflitos de segurança e `requiresReview` ignora ambiguidades não materiais.
-- [x] Versionar prompt/model/schema e salvar entrada/saída redigida. Evidência F1-008: audit registra versões, hashes e cópias redigidas de e-mail/telefone.
-- [x] Criar golden set de briefings ambíguos, maliciosos e contraditórios. Evidência F1-008: conjunto canônico contém os três casos e regressões impedem evidência fabricada/prompt override.
+- [ ] Definir schema para audience, offer, constraints, must-use, avoid, tone e success criteria. Evidência F1-008: `CompiledBrief/v1` exige os sete campos como coleções delimitadas.
+- [ ] Compilar texto livre em estrutura com evidence spans, confidence e conflitos. Evidência F1-008: porta de modelo retorna estrutura validada contra spans exatos da fonte e confidence 0–1.
+- [ ] Validar resultado contra guardrails e solicitar revisão somente em conflito material. Evidência F1-008: detector acrescenta conflitos de segurança e `requiresReview` ignora ambiguidades não materiais.
+- [ ] Versionar prompt/model/schema e salvar entrada/saída redigida. Evidência F1-008: audit registra versões, hashes e cópias redigidas de e-mail/telefone.
+- [ ] Criar golden set de briefings ambíguos, maliciosos e contraditórios. Evidência F1-008: conjunto canônico contém os três casos e regressões impedem evidência fabricada/prompt override.
 
 ### F1.009 — Modo media-only [FR-014]
 
-- [x] Detectar ausência de briefing e iniciar análise somente com objetivo, ação e mídia. Evidência F1-009: factory media-only rejeita briefing presente e exige ao menos uma referência de mídia.
-- [x] Inferir TreatmentPlan com assumptions explícitas e confidence reduzida quando necessário. Evidência F1-009: plano preliminar carrega assumptions e limita confidence a 0,65.
-- [x] Bloquear inferências de oferta/claim não sustentadas pelo material. Evidência F1-009: qualquer claim proposto fora do conjunto observado falha antes do render.
-- [x] Criar E2E do upload ao proxy sem briefing livre. Evidência F1-009: jornada fake controlada percorre media ref, análise, plano e artifact proxy sem briefing.
+- [ ] Detectar ausência de briefing e iniciar análise somente com objetivo, ação e mídia. Evidência F1-009: factory media-only rejeita briefing presente e exige ao menos uma referência de mídia.
+- [ ] Inferir TreatmentPlan com assumptions explícitas e confidence reduzida quando necessário. Evidência F1-009: plano preliminar carrega assumptions e limita confidence a 0,65.
+- [ ] Bloquear inferências de oferta/claim não sustentadas pelo material. Evidência F1-009: qualquer claim proposto fora do conjunto observado falha antes do render.
+- [ ] Criar E2E do upload ao proxy sem briefing livre. Evidência F1-009: jornada fake controlada percorre media ref, análise, plano e artifact proxy sem briefing.
 
 ### F1.010 — Override por projeto [FR-021]
 
-- [x] Modelar `inherit`, `none` e `custom` para cada elemento de marca/guardrail permitido. Evidência F1-010: dez elementos allowlisted compartilham união discriminada e API rejeita chave/modo desconhecido.
-- [x] Mostrar valor resolvido e origem no editor. Evidência F1-010: status resolve workspace/projeto e header do editor identifica origem ou desativação sem inventar valor.
-- [x] Persistir override no Policy Snapshot da versão. Evidência F1-010: snapshot version-bound armazena overrides normalizados com hash SHA-256; endpoint por projeto persiste configuração.
-- [x] Testar desativação de logo/handles em um projeto sem alterar o workspace. Evidência F1-010: regressão prova `project-none`, `project-custom`, herança e imutabilidade do workspace.
+- [ ] Modelar `inherit`, `none` e `custom` para cada elemento de marca/guardrail permitido. Evidência F1-010: dez elementos allowlisted compartilham união discriminada e API rejeita chave/modo desconhecido.
+- [ ] Mostrar valor resolvido e origem no editor. Evidência F1-010: status resolve workspace/projeto e header do editor identifica origem ou desativação sem inventar valor.
+- [ ] Persistir override no Policy Snapshot da versão. Evidência F1-010: snapshot version-bound armazena overrides normalizados com hash SHA-256; endpoint por projeto persiste configuração.
+- [ ] Testar desativação de logo/handles em um projeto sem alterar o workspace. Evidência F1-010: regressão prova `project-none`, `project-custom`, herança e imutabilidade do workspace.
 
 ### F1.011 — Tipos de entrada [FR-030]
 
-- [x] Criar upload direto para vídeo, áudio e imagem com MIME/extension sniffing. Evidência F1-011: biblioteca aceita três kinds e valida assinatura binária, extensão e MIME declarado antes de gravar.
-- [x] Implementar multipart, progress, cancel e retomada. Evidência F1-011: API pública mantém sessões multipart/parts retomáveis; UI mostra progresso, cancela via AbortController e retoma arquivos falhos; state machine cobre partes.
-- [x] Fazer probe/quarantine antes de marcar asset como utilizável. Evidência F1-011: bytes entram com sufixo `.quarantine`, FFprobe valida codec/duração/dimensões e somente então ocorre promoção atômica.
-- [x] Exibir erro acionável para codec, corrupção, tamanho e duração inválidos. Evidência F1-011: respostas incluem code, mensagem e ação para conversão, reexportação, multipart ou ajuste de duração/dimensões.
-- [x] Criar E2E para cada tipo e falha de rede. Evidência F1-011: regressões cobrem assinaturas e probe real de MP4/WAV/JPEG, corrupção/mismatch e pausa-retomada-cancelamento após rede offline.
+- [ ] Criar upload direto para vídeo, áudio e imagem com MIME/extension sniffing. Evidência F1-011: biblioteca aceita três kinds e valida assinatura binária, extensão e MIME declarado antes de gravar.
+- [ ] Implementar multipart, progress, cancel e retomada. Evidência F1-011: API pública mantém sessões multipart/parts retomáveis; UI mostra progresso, cancela via AbortController e retoma arquivos falhos; state machine cobre partes.
+- [ ] Fazer probe/quarantine antes de marcar asset como utilizável. Evidência F1-011: bytes entram com sufixo `.quarantine`, FFprobe valida codec/duração/dimensões e somente então ocorre promoção atômica.
+- [ ] Exibir erro acionável para codec, corrupção, tamanho e duração inválidos. Evidência F1-011: respostas incluem code, mensagem e ação para conversão, reexportação, multipart ou ajuste de duração/dimensões.
+- [ ] Criar E2E para cada tipo e falha de rede. Evidência F1-011: regressões cobrem assinaturas e probe real de MP4/WAV/JPEG, corrupção/mismatch e pausa-retomada-cancelamento após rede offline.
 
 ### F1.012 — Media Library v1 [FR-040]
 
-- [x] Criar listagem paginada de assets e segments do workspace. Evidência F1-012: consulta por cursor no domínio e paginação externa por offset/limit na biblioteca legada.
-- [x] Implementar detalhes, thumbnail/waveform, status, origem e rights. Evidência F1-012: item canônico separa preview, condição técnica, origem e elegibilidade jurídica.
-- [x] Permitir inserir asset elegível no projeto sem duplicar bytes. Evidência F1-012: endpoint `POST /api/assets/{id}/attach` persiste somente referência deduplicada no projeto.
-- [x] Implementar filtros mínimos por kind, pessoa, tema e status de direito. Evidência F1-012: filtros são server-side e isolados pelo workspace no domínio.
-- [x] Testar navegação, reuso e bloqueio de asset restrito. Evidência F1-012/T-FR-040: regressão cobre páginas, filtros, isolamento, referência sem cópia e bloqueio de rights.
+- [ ] Criar listagem paginada de assets e segments do workspace. Evidência F1-012: consulta por cursor no domínio e paginação externa por offset/limit na biblioteca legada.
+- [ ] Implementar detalhes, thumbnail/waveform, status, origem e rights. Evidência F1-012: item canônico separa preview, condição técnica, origem e elegibilidade jurídica.
+- [ ] Permitir inserir asset elegível no projeto sem duplicar bytes. Evidência F1-012: endpoint `POST /api/assets/{id}/attach` persiste somente referência deduplicada no projeto.
+- [ ] Implementar filtros mínimos por kind, pessoa, tema e status de direito. Evidência F1-012: filtros são server-side e isolados pelo workspace no domínio.
+- [ ] Testar navegação, reuso e bloqueio de asset restrito. Evidência F1-012/T-FR-040: regressão cobre páginas, filtros, isolamento, referência sem cópia e bloqueio de rights.
 
 ### F1.013 — MediaSegment [FR-042]
 
-- [x] Modelar range semântico, label, description, parent asset e time mapping. Evidência F1-013: `MediaSegment` preserva identidade, semântica e mapeamento 1:1 para source time.
-- [x] Criar segmento sem recortar fisicamente o master. Evidência F1-013: criação persiste somente range virtual com `physicalObjectKey: null` e API externa por asset.
-- [x] Materializar derivative somente quando um consumer exigir. Evidência F1-013: materializador retorna `null` para consumo virtual ou receita `extract-range/v1` com source imutável.
-- [x] Testar segmentos sobrepostos, nested e limite exato do asset. Evidência F1-013/T-FR-042: regressão cobre sobreposição, nesting, borda integral e range inválido.
+- [ ] Modelar range semântico, label, description, parent asset e time mapping. Evidência F1-013: `MediaSegment` preserva identidade, semântica e mapeamento 1:1 para source time.
+- [ ] Criar segmento sem recortar fisicamente o master. Evidência F1-013: criação persiste somente range virtual com `physicalObjectKey: null` e API externa por asset.
+- [ ] Materializar derivative somente quando um consumer exigir. Evidência F1-013: materializador retorna `null` para consumo virtual ou receita `extract-range/v1` com source imutável.
+- [ ] Testar segmentos sobrepostos, nested e limite exato do asset. Evidência F1-013/T-FR-042: regressão cobre sobreposição, nesting, borda integral e range inválido.
 
 ### F1.014 — Image Library v1 [FR-047]
 
-- [x] Extrair dimensões, orientação, cores, faces/objects e OCR regions. Evidência F1-014: contrato de análise tipa cada observação espacial e visual.
-- [x] Gerar descrição observada e tags inferidas com provenance/confidence. Evidência F1-014: descrição usa somente observações; tags carregam modelo, versão, origem e confidence.
-- [x] Criar thumbnail/derivatives sem alterar original. Evidência F1-014: receitas versionadas declaram original imutável.
-- [x] Implementar busca e reutilização em B-roll, insert e card. Evidência F1-014: busca ranqueada preserva a finalidade pedida e endpoint externo cataloga a imagem.
-- [x] Criar eval com imagens sem texto, texto pequeno e múltiplos idiomas. Evidência F1-014/T-FR-047: três fixtures exercitam ausência, baixa área/confidence e OCR pt-BR/en.
+- [ ] Extrair dimensões, orientação, cores, faces/objects e OCR regions. Evidência F1-014: contrato de análise tipa cada observação espacial e visual.
+- [ ] Gerar descrição observada e tags inferidas com provenance/confidence. Evidência F1-014: descrição usa somente observações; tags carregam modelo, versão, origem e confidence.
+- [ ] Criar thumbnail/derivatives sem alterar original. Evidência F1-014: receitas versionadas declaram original imutável.
+- [ ] Implementar busca e reutilização em B-roll, insert e card. Evidência F1-014: busca ranqueada preserva a finalidade pedida e endpoint externo cataloga a imagem.
+- [ ] Criar eval com imagens sem texto, texto pequeno e múltiplos idiomas. Evidência F1-014/T-FR-047: três fixtures exercitam ausência, baixa área/confidence e OCR pt-BR/en.
 
 ### F1.015 — Catalogação automática [FR-049]
 
-- [x] Definir quais outputs aprovados viram assets ou segments pesquisáveis. Evidência F1-015: final/proxy viram asset e deepfake bruto reaproveitável vira segment.
-- [x] Executar catalogação idempotente após promoção do artifact. Evidência F1-015: application service usa chave workspace/artifact/manifest e converge em replay.
-- [x] Herdar rights/consent e registrar geração/parent no lineage. Evidência F1-015: item guarda snapshot jurídico e relação `generated-from` com provider/model quando existente.
-- [x] Evitar indexar temporários, falhas e outputs rejeitados. Evidência F1-015: eligibility gate exige promoção aprovada e kind não temporário.
-- [x] Testar reprocessamento sem duplicação de catálogo. Evidência F1-015/T-FR-049: fake repository confirma um único registro e estados cataloged/already-cataloged.
+- [ ] Definir quais outputs aprovados viram assets ou segments pesquisáveis. Evidência F1-015: final/proxy viram asset e deepfake bruto reaproveitável vira segment.
+- [ ] Executar catalogação idempotente após promoção do artifact. Evidência F1-015: application service usa chave workspace/artifact/manifest e converge em replay.
+- [ ] Herdar rights/consent e registrar geração/parent no lineage. Evidência F1-015: item guarda snapshot jurídico e relação `generated-from` com provider/model quando existente.
+- [ ] Evitar indexar temporários, falhas e outputs rejeitados. Evidência F1-015: eligibility gate exige promoção aprovada e kind não temporário.
+- [ ] Testar reprocessamento sem duplicação de catálogo. Evidência F1-015/T-FR-049: fake repository confirma um único registro e estados cataloged/already-cataloged.
 
 ### F1.016 — PerceptionTimeline v1 [FR-050]
 
-- [x] Unificar transcript words, speakers, silence, faces, objects, shots, motion e OCR em tempo canônico. Evidência F1-016: nove tipos compartilham intervalo em milissegundos e ordenação estável.
-- [x] Registrar source/model/version/confidence por observação. Evidência F1-016: provenance obrigatória é validada junto com cada intervalo.
-- [x] Criar API por range para Director, subtitles, reframe e editor. Evidência F1-016: `GET/PUT /api/projects/{id}/perception` persiste e consulta kinds/range.
-- [x] Representar ausência e cobertura parcial sem preencher dados inventados. Evidência F1-016: resposta inclui coverage absent/partial/complete e `inventedValues: 0`.
-- [x] Criar golden fixtures de talking head, áudio e imagens inseridas. Evidência F1-016/T-FR-050: três timelines determinísticas cobrem os modos essenciais.
+- [ ] Unificar transcript words, speakers, silence, faces, objects, shots, motion e OCR em tempo canônico. Evidência F1-016: nove tipos compartilham intervalo em milissegundos e ordenação estável.
+- [ ] Registrar source/model/version/confidence por observação. Evidência F1-016: provenance obrigatória é validada junto com cada intervalo.
+- [ ] Criar API por range para Director, subtitles, reframe e editor. Evidência F1-016: `GET/PUT /api/projects/{id}/perception` persiste e consulta kinds/range.
+- [ ] Representar ausência e cobertura parcial sem preencher dados inventados. Evidência F1-016: resposta inclui coverage absent/partial/complete e `inventedValues: 0`.
+- [ ] Criar golden fixtures de talking head, áudio e imagens inseridas. Evidência F1-016/T-FR-050: três timelines determinísticas cobrem os modos essenciais.
 
 ### F1.017 — EditorialBeat [FR-051]
 
-- [x] Definir beat semântico independente de linhas de legenda. Evidência F1-017: beat referencia word IDs e intenção sem adotar subtitle chunks como boundary.
-- [x] Derivar boundaries de frase, intenção, pausa, argumento e mudança visual. Evidência F1-017: derivador versionável combina seis reason codes determinísticos.
-- [x] Permitir ajuste do Diretor sem alterar word alignment original. Evidência F1-017: ajuste retorna novo beat auditado e prova alinhamento imutável.
-- [x] Testar frases longas, pausas internas e cortes entre subtitle chunks. Evidência F1-017/T-FR-051: fixture cruza chunks, força pausa interna e mudança de intenção.
+- [ ] Definir beat semântico independente de linhas de legenda. Evidência F1-017: beat referencia word IDs e intenção sem adotar subtitle chunks como boundary.
+- [ ] Derivar boundaries de frase, intenção, pausa, argumento e mudança visual. Evidência F1-017: derivador versionável combina seis reason codes determinísticos.
+- [ ] Permitir ajuste do Diretor sem alterar word alignment original. Evidência F1-017: ajuste retorna novo beat auditado e prova alinhamento imutável.
+- [ ] Testar frases longas, pausas internas e cortes entre subtitle chunks. Evidência F1-017/T-FR-051: fixture cruza chunks, força pausa interna e mudança de intenção.
 
 ### F1.018 — Confidence [FR-052]
 
-- [x] Padronizar confidence, evidence, reason codes e calibration version. Evidência F1-018: `DecisionConfidence` exige os quatro elementos e rejeita valor inválido.
-- [x] Definir bandas auto-apply, review e block por tipo de decisão. Evidência F1-018: thresholds diferenciados cobrem seis tipos e rights exige certeza integral.
-- [x] Exibir incerteza relevante no Director panel sem poluir a edição. Evidência F1-018: status e editor mostram apenas review/block como chips compactos.
-- [x] Medir calibration error no eval set e registrar regressões. Evidência F1-018/T-FR-052: ECE determinístico integra fixture e calibration version.
+- [ ] Padronizar confidence, evidence, reason codes e calibration version. Evidência F1-018: `DecisionConfidence` exige os quatro elementos e rejeita valor inválido.
+- [ ] Definir bandas auto-apply, review e block por tipo de decisão. Evidência F1-018: thresholds diferenciados cobrem seis tipos e rights exige certeza integral.
+- [ ] Exibir incerteza relevante no Director panel sem poluir a edição. Evidência F1-018: status e editor mostram apenas review/block como chips compactos.
+- [ ] Medir calibration error no eval set e registrar regressões. Evidência F1-018/T-FR-052: ECE determinístico integra fixture e calibration version.
 
 ### F1.019 — TreatmentPlan [FR-060]
 
-- [x] Implementar schema de objetivo, energia, densidade, gramática, pattern breaks, proof e CTA policy. Evidência F1-019: `TreatmentPlan/v1` tipa todas as dimensões editoriais.
-- [x] Gerar TreatmentPlan a partir de rubrica, Policy Snapshot e Perception summary. Evidência F1-019: factory usa versões e evidências das três entradas, sem seletor manual de estilo.
-- [x] Validar limites determinísticos antes de aceitar plano. Evidência F1-019: energia/densidade, budget, prova e CTA falham fora de política.
-- [x] Persistir assumptions, alternatives e decisions log. Evidência F1-019: projeto guarda plano integral e API externa permite criar/consultar.
-- [x] Criar golden plans para os oito objetivos e dois modos de produção. Evidência F1-019/T-FR-060: matriz gera 16 combinações únicas e validadas.
+- [ ] Implementar schema de objetivo, energia, densidade, gramática, pattern breaks, proof e CTA policy. Evidência F1-019: `TreatmentPlan/v1` tipa todas as dimensões editoriais.
+- [ ] Gerar TreatmentPlan a partir de rubrica, Policy Snapshot e Perception summary. Evidência F1-019: factory usa versões e evidências das três entradas, sem seletor manual de estilo.
+- [ ] Validar limites determinísticos antes de aceitar plano. Evidência F1-019: energia/densidade, budget, prova e CTA falham fora de política.
+- [ ] Persistir assumptions, alternatives e decisions log. Evidência F1-019: projeto guarda plano integral e API externa permite criar/consultar.
+- [ ] Criar golden plans para os oito objetivos e dois modos de produção. Evidência F1-019/T-FR-060: matriz gera 16 combinações únicas e validadas.
 
 ### F1.020 — Gramática editorial do tratamento [FR-060]
 
-- [x] Codificar condições de entrada e saída de B-roll por conclusão semântica, obstrução e duração. Evidência F1-020: placement respeita janela, conclusão, range protegido e bounds.
-- [x] Definir zoom/pan/tilt simulados com motivo, amplitude, velocidade e cooldown. Evidência F1-020: motion validator rejeita gesto sem razão, excessivo, instantâneo ou sem respiro.
-- [x] Implementar curva de energia por ato e densidade adaptativa por objetivo. Evidência F1-020: hook/body/proof/CTA recebem energia e density target específicos para awareness/conversion.
-- [x] Aplicar pattern-break budget por janela, tipo e grupo semântico. Evidência F1-020: validator emite excessos localizados nas três dimensões.
-- [x] Validar continuidade de olhar, movimento, posição, cor, áudio e argumento. Evidência F1-020: seis campos geram issues entre frames adjacentes.
-- [x] Criar golden timelines para excesso, escassez e distribuição adequada de estímulos. Evidência F1-020/T-FR-060: fixtures e endpoint externo exercitam as três distribuições.
+- [ ] Codificar condições de entrada e saída de B-roll por conclusão semântica, obstrução e duração. Evidência F1-020: placement respeita janela, conclusão, range protegido e bounds.
+- [ ] Definir zoom/pan/tilt simulados com motivo, amplitude, velocidade e cooldown. Evidência F1-020: motion validator rejeita gesto sem razão, excessivo, instantâneo ou sem respiro.
+- [ ] Implementar curva de energia por ato e densidade adaptativa por objetivo. Evidência F1-020: hook/body/proof/CTA recebem energia e density target específicos para awareness/conversion.
+- [ ] Aplicar pattern-break budget por janela, tipo e grupo semântico. Evidência F1-020: validator emite excessos localizados nas três dimensões.
+- [ ] Validar continuidade de olhar, movimento, posição, cor, áudio e argumento. Evidência F1-020: seis campos geram issues entre frames adjacentes.
+- [ ] Criar golden timelines para excesso, escassez e distribuição adequada de estímulos. Evidência F1-020/T-FR-060: fixtures e endpoint externo exercitam as três distribuições.
 
 ### F1.021 — StoryPlan [FR-061]
 
-- [x] Modelar acts, story blocks, role, intent, dependencies, source candidates e duration target. Evidência F1-021: `StoryPlan/v1` cobre estrutura e bounds antes de cortes.
-- [x] Permitir cold open referenciar trecho posterior sem duplicar source. Evidência F1-021: bloco carrega `sourceRangeId` único e presentation de referência.
-- [x] Preservar qualifiers, claims, proof context e CTA dependencies. Evidência F1-021: conteúdo estruturado e dependências são validados por papel.
-- [x] Validar cobertura narrativa e duração antes de compilar EditPlan. Evidência F1-021: validator exige uso exato dos blocos, dependências existentes e duração dentro do target.
-- [x] Criar golden stories linear, cold-open e voiceover. Evidência F1-021/T-FR-061: três histórias passam o gate e preservam suas diferenças de apresentação.
+- [ ] Modelar acts, story blocks, role, intent, dependencies, source candidates e duration target. Evidência F1-021: `StoryPlan/v1` cobre estrutura e bounds antes de cortes.
+- [ ] Permitir cold open referenciar trecho posterior sem duplicar source. Evidência F1-021: bloco carrega `sourceRangeId` único e presentation de referência.
+- [ ] Preservar qualifiers, claims, proof context e CTA dependencies. Evidência F1-021: conteúdo estruturado e dependências são validados por papel.
+- [ ] Validar cobertura narrativa e duração antes de compilar EditPlan. Evidência F1-021: validator exige uso exato dos blocos, dependências existentes e duração dentro do target.
+- [ ] Criar golden stories linear, cold-open e voiceover. Evidência F1-021/T-FR-061: três histórias passam o gate e preservam suas diferenças de apresentação.
 
 ### F1.022 — Alternativas de montagem [FR-062]
 
-- [x] Gerar candidatos variando hook, ordem permitida, assets e pattern breaks. Evidência F1-022: seed canônica registra os quatro eixos de variação.
-- [x] Aplicar hard gates antes de scoring e custo. Evidência F1-022: rejeitado recebe score/custo nulos e callbacks não são executados.
-- [x] Comparar candidatos na mesma rubrica e registrar diversidade. Evidência F1-022: pesos únicos e métricas de hooks, ordens, assets e pattern sets.
-- [x] Selecionar vencedor e manter alternativas inspecionáveis. Evidência F1-022: seleção persiste todos os candidatos, rejection reasons e desempate determinístico.
-- [x] Testar empate, baixa confidence e ausência de candidato elegível. Evidência F1-022/T-FR-062: três saídas review/block são cobertas junto com vencedor normal.
+- [ ] Gerar candidatos variando hook, ordem permitida, assets e pattern breaks. Evidência F1-022: seed canônica registra os quatro eixos de variação.
+- [ ] Aplicar hard gates antes de scoring e custo. Evidência F1-022: rejeitado recebe score/custo nulos e callbacks não são executados.
+- [ ] Comparar candidatos na mesma rubrica e registrar diversidade. Evidência F1-022: pesos únicos e métricas de hooks, ordens, assets e pattern sets.
+- [ ] Selecionar vencedor e manter alternativas inspecionáveis. Evidência F1-022: seleção persiste todos os candidatos, rejection reasons e desempate determinístico.
+- [ ] Testar empate, baixa confidence e ausência de candidato elegível. Evidência F1-022/T-FR-062: três saídas review/block são cobertas junto com vencedor normal.
 
 ### F1.023 — Segurança narrativa [FR-063]
 
-- [x] Detectar claims, qualifiers, negação, causalidade, prazos e dependências de prova. Evidência F1-023: statement estrutura seis dimensões de sentido e contexto.
-- [x] Impedir trim/reordenação que altere sentido ou atribuição. Evidência F1-023: validator bloqueia token, prova/contexto, ordem e speaker divergentes antes da montagem.
-- [x] Emitir `QualityIssue` localizado com evidência e correção possível. Evidência F1-023: issue contém code, range, evidence e ação restore tipada.
-- [x] Criar policy fixtures para promessa, testemunho, comparação e contexto removido. Evidência F1-023/T-FR-063: conjunto canônico cobre os quatro casos e uma composição segura.
+- [ ] Detectar claims, qualifiers, negação, causalidade, prazos e dependências de prova. Evidência F1-023: statement estrutura seis dimensões de sentido e contexto.
+- [ ] Impedir trim/reordenação que altere sentido ou atribuição. Evidência F1-023: validator bloqueia token, prova/contexto, ordem e speaker divergentes antes da montagem.
+- [ ] Emitir `QualityIssue` localizado com evidência e correção possível. Evidência F1-023: issue contém code, range, evidence e ação restore tipada.
+- [ ] Criar policy fixtures para promessa, testemunho, comparação e contexto removido. Evidência F1-023/T-FR-063: conjunto canônico cobre os quatro casos e uma composição segura.
 
 ### F1.024 — Ferramentas do Diretor [FR-064]
 
-- [x] Expor ferramentas tipadas de busca, criação de plano, proposta de asset, avaliação e patch. Evidência F1-024: catálogo fixo com cinco tools e endpoint externo de descoberta/execução.
-- [x] Validar argumentos, scope, rights, budget e base version em cada chamada. Evidência F1-024: executor falha antes do handler em cada violação.
-- [x] Proibir mutação direta de banco/storage pelo modelo. Evidência F1-024: dependência aceita somente application services de proposta/consulta, sem adapters de infraestrutura.
-- [x] Criar integration tests com model fake emitindo chamadas válidas e inválidas. Evidência F1-024/T-FR-064: loop fake percorre cinco calls e cinco classes de rejeição sem side effect.
+- [ ] Expor ferramentas tipadas de busca, criação de plano, proposta de asset, avaliação e patch. Evidência F1-024: catálogo fixo com cinco tools e endpoint externo de descoberta/execução.
+- [ ] Validar argumentos, scope, rights, budget e base version em cada chamada. Evidência F1-024: executor falha antes do handler em cada violação.
+- [ ] Proibir mutação direta de banco/storage pelo modelo. Evidência F1-024: dependência aceita somente application services de proposta/consulta, sem adapters de infraestrutura.
+- [ ] Criar integration tests com model fake emitindo chamadas válidas e inválidas. Evidência F1-024/T-FR-064: loop fake percorre cinco calls e cinco classes de rejeição sem side effect.
 
 ### F1.025 — Decisions log [FR-065]
 
-- [x] Persistir decisão, candidates, evidência, confidence, score, custo e actor. Evidência F1-025: registro validado é deduplicado por ID no projeto e exposto pela API.
-- [x] Vincular decisão a run, plan node, command e artifact resultante. Evidência F1-025: quatro referências são obrigatórias e imutáveis no log.
-- [x] Exibir explicação resumida e detalhe auditável no Director panel. Evidência F1-025: painel mostra confidence/resumo e expande decisão, custo, actor, evidências e alternativas.
-- [x] Testar lineage de decisão até o frame final. Evidência F1-025/T-FR-065: trace cruza plan node/artifact e retorna range exato ou falha sem lineage.
+- [ ] Persistir decisão, candidates, evidência, confidence, score, custo e actor. Evidência F1-025: registro validado é deduplicado por ID no projeto e exposto pela API.
+- [ ] Vincular decisão a run, plan node, command e artifact resultante. Evidência F1-025: quatro referências são obrigatórias e imutáveis no log.
+- [ ] Exibir explicação resumida e detalhe auditável no Director panel. Evidência F1-025: painel mostra confidence/resumo e expande decisão, custo, actor, evidências e alternativas.
+- [ ] Testar lineage de decisão até o frame final. Evidência F1-025/T-FR-065: trace cruza plan node/artifact e retorna range exato ou falha sem lineage.
 
 ### F1.026 — Budget do Diretor [FR-066]
 
-- [x] Modelar limites de custo, tempo, tokens, gerações, candidates e critic rounds. Evidência F1-026: estado versionado cobre seis dimensões.
-- [x] Estimar consumo antes de operações pagas e reservar budget atomicamente. Evidência F1-026: CAS com revision reserva antes do handler pago.
-- [x] Encerrar com melhor resultado válido ou estado `budget_exhausted` recuperável. Evidência F1-026: conclusão escolhe maior score válido ou saída recuperável.
-- [x] Mostrar estimado versus realizado por run e projeto. Evidência F1-026: state separa limites, reservado e actual; API externa devolve o snapshot.
-- [x] Testar concorrência, overrun de provider e cancelamento. Evidência F1-026/T-FR-066: fake CAS, settlement acima do limite e cancel com liberação.
+- [ ] Modelar limites de custo, tempo, tokens, gerações, candidates e critic rounds. Evidência F1-026: estado versionado cobre seis dimensões.
+- [ ] Estimar consumo antes de operações pagas e reservar budget atomicamente. Evidência F1-026: CAS com revision reserva antes do handler pago.
+- [ ] Encerrar com melhor resultado válido ou estado `budget_exhausted` recuperável. Evidência F1-026: conclusão escolhe maior score válido ou saída recuperável.
+- [ ] Mostrar estimado versus realizado por run e projeto. Evidência F1-026: state separa limites, reservado e actual; API externa devolve o snapshot.
+- [ ] Testar concorrência, overrun de provider e cancelamento. Evidência F1-026/T-FR-066: fake CAS, settlement acima do limite e cancel com liberação.
 
 ### F1.027 — Talking head [FR-090]
 
-- [x] Criar template narrativo para pessoa real como fonte principal. Evidência F1-027: talking-head mantém speaker como gramática base.
-- [x] Detectar e remover silêncios/retakes preservando naturalidade e contexto. Evidência F1-027: silêncio mínimo e handles de 120ms; retake mantém take selecionado.
-- [x] Planejar B-roll, legendas, reframe, movimentos e pattern breaks. Evidência F1-027: plano inclui todas as camadas em beats canônicos.
-- [x] Renderizar proxy e final com áudio sincronizado. Evidência F1-027: receitas compartilham hash exato da timeline de áudio.
-- [x] Criar E2E de 30s, 60s e 120s com golden de timing. Evidência F1-027/T-FR-090: três planos determinísticos preservam duração e sync.
+- [ ] Criar template narrativo para pessoa real como fonte principal. Evidência F1-027: talking-head mantém speaker como gramática base.
+- [ ] Detectar e remover silêncios/retakes preservando naturalidade e contexto. Evidência F1-027: silêncio mínimo e handles de 120ms; retake mantém take selecionado.
+- [ ] Planejar B-roll, legendas, reframe, movimentos e pattern breaks. Evidência F1-027: plano inclui todas as camadas em beats canônicos.
+- [ ] Renderizar proxy e final com áudio sincronizado. Evidência F1-027: receitas compartilham hash exato da timeline de áudio.
+- [ ] Criar E2E de 30s, 60s e 120s com golden de timing. Evidência F1-027/T-FR-090: três planos determinísticos preservam duração e sync.
 
 ### F1.028 — Visual montage/voiceover [FR-091]
 
-- [x] Aceitar áudio como narrativa principal sem exigir pessoa visível. Evidência F1-028: visual montage exige apenas sourceAudioId e mídia visual.
-- [x] Segmentar áudio em beats e gerar AssetBriefs para cobertura visual. Evidência F1-028: boundaries produzem beat e brief por faixa.
-- [x] Montar imagens, vídeos, cards e movimentos sem telas vazias indevidas. Evidência F1-028: coverage contígua alterna três tipos visuais.
-- [x] Validar cobertura, repetição, ritmo e legibilidade. Evidência F1-028: validator retorna cinco sinais independentes.
-- [x] Criar E2E de vídeo totalmente sem pessoas. Evidência F1-028/T-FR-091: jornada de áudio a proxy/final não inclui speaker visual.
+- [ ] Aceitar áudio como narrativa principal sem exigir pessoa visível. Evidência F1-028: visual montage exige apenas sourceAudioId e mídia visual.
+- [ ] Segmentar áudio em beats e gerar AssetBriefs para cobertura visual. Evidência F1-028: boundaries produzem beat e brief por faixa.
+- [ ] Montar imagens, vídeos, cards e movimentos sem telas vazias indevidas. Evidência F1-028: coverage contígua alterna três tipos visuais.
+- [ ] Validar cobertura, repetição, ritmo e legibilidade. Evidência F1-028: validator retorna cinco sinais independentes.
+- [ ] Criar E2E de vídeo totalmente sem pessoas. Evidência F1-028/T-FR-091: jornada de áudio a proxy/final não inclui speaker visual.
 
 ### F1.029 — Formatos obrigatórios [FR-160]
 
-- [x] Cadastrar 9:16, 16:9, 4:5, 1:1 e 21:9 como presets versionados. Evidência F1-029: registry v1 contém os cinco ratios.
-- [x] Definir resoluções, safe areas e defaults de export por preset. Evidência F1-029: cada spec liga canvas, insets, fps e H.264/AAC.
-- [x] Permitir customização validada sem alterar o aspect ratio nominal. Evidência F1-029: custom preset passa pelo validator de razão/tamanho.
-- [x] Criar schema e render smoke para os cinco formatos. Evidência F1-029/T-FR-160: cinco manifests são compilados e exercitados.
+- [ ] Cadastrar 9:16, 16:9, 4:5, 1:1 e 21:9 como presets versionados. Evidência F1-029: registry v1 contém os cinco ratios.
+- [ ] Definir resoluções, safe areas e defaults de export por preset. Evidência F1-029: cada spec liga canvas, insets, fps e H.264/AAC.
+- [ ] Permitir customização validada sem alterar o aspect ratio nominal. Evidência F1-029: custom preset passa pelo validator de razão/tamanho.
+- [ ] Criar schema e render smoke para os cinco formatos. Evidência F1-029/T-FR-160: cinco manifests são compilados e exercitados.
 
 ### F1.030 — Responsive placement [FR-163]
 
-- [x] Implementar anchors, constraints, min/max size, safe areas e collision avoidance. Evidência F1-030: solver priorizado aplica bounds e colisão.
-- [x] Resolver placement por formato sem coordenada absoluta compartilhada. Evidência F1-030: cada execução recebe OutputSpec próprio.
-- [x] Gerar warning quando constraints forem impossíveis. Evidência F1-030: elemento não posicionável gera `IMPOSSIBLE_CONSTRAINTS`.
-- [x] Criar visual goldens de legendas, logo, CTA e insert nos cinco canvases. Evidência F1-030/T-FR-163: matriz contém 20 placements determinísticos.
+- [ ] Implementar anchors, constraints, min/max size, safe areas e collision avoidance. Evidência F1-030: solver priorizado aplica bounds e colisão.
+- [ ] Resolver placement por formato sem coordenada absoluta compartilhada. Evidência F1-030: cada execução recebe OutputSpec próprio.
+- [ ] Gerar warning quando constraints forem impossíveis. Evidência F1-030: elemento não posicionável gera `IMPOSSIBLE_CONSTRAINTS`.
+- [ ] Criar visual goldens de legendas, logo, CTA e insert nos cinco canvases. Evidência F1-030/T-FR-163: matriz contém 20 placements determinísticos.
 
 ### F1.031 — Reframe [FR-164]
 
-- [x] Implementar crop plan baseado em face/object/region of interest por frame/range. Evidência F1-031: ROI tipa face, object e screen por timestamp.
-- [x] Suavizar trajetória respeitando velocidade e margem de segurança. Evidência F1-031: delta entre keyframes é limitado por segundo.
-- [x] Permitir keyframes/override manual por formato. Evidência F1-031: override vence observação apenas no timestamp/variant.
-- [x] Emitir issue quando sujeito não couber ou percepção estiver incerta. Evidência F1-031: dois reason codes localizados por tempo.
-- [x] Criar fixtures de uma pessoa, duas pessoas, tela e objeto móvel. Evidência F1-031/T-FR-164: tipos e múltiplos ROIs exercitam tracking, override e bounds.
+- [ ] Implementar crop plan baseado em face/object/region of interest por frame/range. Evidência F1-031: ROI tipa face, object e screen por timestamp.
+- [ ] Suavizar trajetória respeitando velocidade e margem de segurança. Evidência F1-031: delta entre keyframes é limitado por segundo.
+- [ ] Permitir keyframes/override manual por formato. Evidência F1-031: override vence observação apenas no timestamp/variant.
+- [ ] Emitir issue quando sujeito não couber ou percepção estiver incerta. Evidência F1-031: dois reason codes localizados por tempo.
+- [ ] Criar fixtures de uma pessoa, duas pessoas, tela e objeto móvel. Evidência F1-031/T-FR-164: tipos e múltiplos ROIs exercitam tracking, override e bounds.
 
 ### F1.032 — Crítica por formato [FR-165]
 
-- [x] Avaliar clipping, safe area, subject visibility, subtitle collision e densidade por output. Evidência F1-032: critic usa geometria, subject e density por variant.
-- [x] Localizar issue em format, frame range e element IDs. Evidência F1-032: cada issue carrega as três coordenadas de revisão.
-- [x] Reprovar apenas variante afetada quando o plano canônico estiver válido. Evidência F1-032: reports são independentes e não alteram StoryPlan.
-- [x] Criar visual eval específico para 9:16 e 16:9 no MVP. Evidência F1-032/T-FR-165: fixture reprova vertical e aprova horizontal separadamente.
+- [ ] Avaliar clipping, safe area, subject visibility, subtitle collision e densidade por output. Evidência F1-032: critic usa geometria, subject e density por variant.
+- [ ] Localizar issue em format, frame range e element IDs. Evidência F1-032: cada issue carrega as três coordenadas de revisão.
+- [ ] Reprovar apenas variante afetada quando o plano canônico estiver válido. Evidência F1-032: reports são independentes e não alteram StoryPlan.
+- [ ] Criar visual eval específico para 9:16 e 16:9 no MVP. Evidência F1-032/T-FR-165: fixture reprova vertical e aprova horizontal separadamente.
 
 ### F1.033 — Estilos iniciais de legenda [FR-170]
 
-- [x] Especificar cinco presets distintos com tokens, animação e limites responsivos. Evidência F1-033: registry cobre kinetic, box, pill, caps e clean.
-- [x] Implementar renderer de cada preset com fonte licenciada/fallback. Evidência F1-033: cada schema exige licença, fallback e latin-ext.
-- [x] Expor preview rápido sem render final completo. Evidência F1-033: API retorna preview CSS instantâneo.
-- [x] Criar visual goldens nos formatos MVP e em fundos claros/escuros. Evidência F1-033/T-FR-170: 5×2×2 produz 20 goldens.
+- [ ] Especificar cinco presets distintos com tokens, animação e limites responsivos. Evidência F1-033: registry cobre kinetic, box, pill, caps e clean.
+- [ ] Implementar renderer de cada preset com fonte licenciada/fallback. Evidência F1-033: cada schema exige licença, fallback e latin-ext.
+- [ ] Expor preview rápido sem render final completo. Evidência F1-033: API retorna preview CSS instantâneo.
+- [ ] Criar visual goldens nos formatos MVP e em fundos claros/escuros. Evidência F1-033/T-FR-170: 5×2×2 produz 20 goldens.
 
 ### F1.034 — Modos de legenda [FR-171]
 
-- [x] Implementar `auto`, `workspace-default`, `manual` e `none`. Evidência F1-034: união fechada e controles no editor.
-- [x] Resolver modo por projeto/variant sem alterar transcript. Evidência F1-034: config preserva hash idêntico do transcript.
-- [x] Exibir origem do preset e permitir override/revert. Evidência F1-034: painel mostra origin e alterna para nível do workspace.
-- [x] Criar E2E para troca de modo e ausência intencional de legendas. Evidência F1-034/T-FR-171: quatro caminhos incluem disabled sem apagar fala.
+- [ ] Implementar `auto`, `workspace-default`, `manual` e `none`. Evidência F1-034: união fechada e controles no editor.
+- [ ] Resolver modo por projeto/variant sem alterar transcript. Evidência F1-034: config preserva hash idêntico do transcript.
+- [ ] Exibir origem do preset e permitir override/revert. Evidência F1-034: painel mostra origin e alterna para nível do workspace.
+- [ ] Criar E2E para troca de modo e ausência intencional de legendas. Evidência F1-034/T-FR-171: quatro caminhos incluem disabled sem apagar fala.
 
 ### F1.035 — SubtitleStylePreset [FR-172]
 
-- [x] Modelar tipografia, line breaking, highlight, background, animation, margins e overrides. Evidência F1-035: `SubtitleStylePreset` cobre todos os tokens.
-- [x] Validar contraste, glyph coverage e limites de linhas/caracteres. Evidência F1-035: validator bloqueia fonte, contraste e bounds.
-- [x] Versionar presets para reproduzir renders antigos. Evidência F1-035: todos carregam versão imutável 1.
-- [x] Criar unit tests do schema e golden render por preset. Evidência F1-035/T-FR-172: cinco presets são validados e renderizados no golden set.
+- [ ] Modelar tipografia, line breaking, highlight, background, animation, margins e overrides. Evidência F1-035: `SubtitleStylePreset` cobre todos os tokens.
+- [ ] Validar contraste, glyph coverage e limites de linhas/caracteres. Evidência F1-035: validator bloqueia fonte, contraste e bounds.
+- [ ] Versionar presets para reproduzir renders antigos. Evidência F1-035: todos carregam versão imutável 1.
+- [ ] Criar unit tests do schema e golden render por preset. Evidência F1-035/T-FR-172: cinco presets são validados e renderizados no golden set.
 
 ### F1.036 — Anchor de legenda por percepção [FR-173]
 
-- [x] Consultar faces, OCR, CTA, logo e inserts no range da legenda. Evidência F1-036: occupied region tipa cinco blockers.
-- [x] Selecionar anchor elegível com estabilidade temporal e safe area. Evidência F1-036: solver testa cinco faixas e preserva anchor anterior.
-- [x] Evitar saltos frequentes; emitir issue se não existir região segura. Evidência F1-036: stable vence primeiro candidato; full screen gera issue.
-- [x] Criar fixtures de rosto inferior, tela cheia e múltiplos overlays. Evidência F1-036/T-FR-173: três composições exercitam sucesso e bloqueio.
+- [ ] Consultar faces, OCR, CTA, logo e inserts no range da legenda. Evidência F1-036: occupied region tipa cinco blockers.
+- [ ] Selecionar anchor elegível com estabilidade temporal e safe area. Evidência F1-036: solver testa cinco faixas e preserva anchor anterior.
+- [ ] Evitar saltos frequentes; emitir issue se não existir região segura. Evidência F1-036: stable vence primeiro candidato; full screen gera issue.
+- [ ] Criar fixtures de rosto inferior, tela cheia e múltiplos overlays. Evidência F1-036/T-FR-173: três composições exercitam sucesso e bloqueio.
 
 ### F1.037 — Override de legenda por segmento [FR-174]
 
-- [x] Modelar override de position, style, text e visibility por subtitle segment. Evidência F1-037: override contém quatro dimensões, segment e range.
-- [x] Aplicar override somente à variant e range selecionados. Evidência F1-037: variant/range mismatch é no-op.
-- [x] Preservar override protegido durante recompilação automática. Evidência F1-037: flag protected acompanha o valor aplicado.
-- [x] Testar reset para nível anterior e invalidation mínima. Evidência F1-037/T-FR-174: reset restaura inherited e invalida só o range.
+- [ ] Modelar override de position, style, text e visibility por subtitle segment. Evidência F1-037: override contém quatro dimensões, segment e range.
+- [ ] Aplicar override somente à variant e range selecionados. Evidência F1-037: variant/range mismatch é no-op.
+- [ ] Preservar override protegido durante recompilação automática. Evidência F1-037: flag protected acompanha o valor aplicado.
+- [ ] Testar reset para nível anterior e invalidation mínima. Evidência F1-037/T-FR-174: reset restaura inherited e invalida só o range.
 
 ### F1.038 — Sidecar [FR-175]
 
-- [x] Exportar SRT e VTT a partir do alignment efetivamente renderizado. Evidência F1-038: exporter recebe `RenderedCue` canônico.
-- [x] Normalizar timestamps, line breaks e encoding UTF-8. Evidência F1-038: BOM, NFC e separadores SRT/VTT corretos.
-- [x] Validar monotonicidade e ausência de overlaps inválidos. Evidência F1-038: range não positivo ou overlap falha antes do arquivo.
-- [x] Criar round-trip fixture com pontuação, acentos e última cue. Evidência F1-038/T-FR-175: fixture preserva `Ação`, quebra e `Última cue.`.
+- [ ] Exportar SRT e VTT a partir do alignment efetivamente renderizado. Evidência F1-038: exporter recebe `RenderedCue` canônico.
+- [ ] Normalizar timestamps, line breaks e encoding UTF-8. Evidência F1-038: BOM, NFC e separadores SRT/VTT corretos.
+- [ ] Validar monotonicidade e ausência de overlaps inválidos. Evidência F1-038: range não positivo ou overlap falha antes do arquivo.
+- [ ] Criar round-trip fixture com pontuação, acentos e última cue. Evidência F1-038/T-FR-175: fixture preserva `Ação`, quebra e `Última cue.`.
 
 ### F1.039 — Preview interativo [FR-210]
 
-- [x] Integrar player ao proxy da ProjectVersion ativa. Evidência F1-039: PreviewSession liga version, URL e hash.
-- [x] Implementar play, pause, seek e frame/timecode confiáveis. Evidência F1-039: controle converte segundos/frames pelo fps canônico.
-- [x] Exibir resolução/fps/hash do proxy e banner stale. Evidência F1-039: sessão expõe metadados e stale explicitamente.
-- [x] Medir primeiro frame, seek p95 e dropped preview frames. Evidência F1-039: agregador retorna três métricas reais.
-- [x] Criar E2E de navegação e troca de versão. Evidência F1-039/T-FR-210: fixture controla sessão identificada sem perder timecode.
+- [ ] Integrar player ao proxy da ProjectVersion ativa. Evidência F1-039: PreviewSession liga version, URL e hash.
+- [ ] Implementar play, pause, seek e frame/timecode confiáveis. Evidência F1-039: controle converte segundos/frames pelo fps canônico.
+- [ ] Exibir resolução/fps/hash do proxy e banner stale. Evidência F1-039: sessão expõe metadados e stale explicitamente.
+- [ ] Medir primeiro frame, seek p95 e dropped preview frames. Evidência F1-039: agregador retorna três métricas reais.
+- [ ] Criar E2E de navegação e troca de versão. Evidência F1-039/T-FR-210: fixture controla sessão identificada sem perder timecode.
 
 ### F1.040 — ReviewAnnotation [FR-211]
 
-- [x] Modelar frame, time range, screenshot, region, target IDs, texto, author e status. Evidência F1-040: ReviewAnnotation contém todos os campos.
-- [x] Implementar clique/drag sobre preview com captura do contexto visual. Evidência F1-040: overlay normaliza região e liga screenshot ao frame do proxy.
-- [x] Persistir annotation sem alterar a versão até aplicação explícita. Evidência F1-040: API grava comentário separado de ProjectVersion.
-- [x] Criar E2E de annotation pontual, regional e de cena. Evidência F1-040/T-FR-211: três escopos preservam version ID.
+- [ ] Modelar frame, time range, screenshot, region, target IDs, texto, author e status. Evidência F1-040: ReviewAnnotation contém todos os campos.
+- [ ] Implementar clique/drag sobre preview com captura do contexto visual. Evidência F1-040: overlay normaliza região e liga screenshot ao frame do proxy.
+- [ ] Persistir annotation sem alterar a versão até aplicação explícita. Evidência F1-040: API grava comentário separado de ProjectVersion.
+- [ ] Criar E2E de annotation pontual, regional e de cena. Evidência F1-040/T-FR-211: três escopos preservam version ID.
 
 ### F1.041 — Escopos de revisão [FR-212]
 
-- [x] Implementar frame, region, clip, scene, range, project, formats, locales e recipes. Evidência F1-041: união cobre nove scopes.
-- [x] Definir default restrito ao alvo, formato e locale atuais. Evidência F1-041: resolver usa contexto corrente quando ausente.
-- [x] Exigir confirmação para escopo global e mostrar quantidade afetada. Evidência F1-041: precondition e affectedCount acompanham expansão.
-- [x] Testar resolução de target e expansão determinística de scope. Evidência F1-041/T-FR-212: local/global são exercitados.
+- [ ] Implementar frame, region, clip, scene, range, project, formats, locales e recipes. Evidência F1-041: união cobre nove scopes.
+- [ ] Definir default restrito ao alvo, formato e locale atuais. Evidência F1-041: resolver usa contexto corrente quando ausente.
+- [ ] Exigir confirmação para escopo global e mostrar quantidade afetada. Evidência F1-041: precondition e affectedCount acompanham expansão.
+- [ ] Testar resolução de target e expansão determinística de scope. Evidência F1-041/T-FR-212: local/global são exercitados.
 
 ### F1.042 — RenderElementMap [FR-213]
 
-- [x] Fazer renderer emitir bounds, z-index, element/clip/scene/source IDs por frame. Evidência F1-042: RenderElement contém geometria, ordem e quatro IDs.
-- [x] Implementar hit-test respeitando transparência e priority. Evidência F1-042: opacidade <=.05 é ignorada e priority/z-index ordenam.
-- [x] Mostrar chooser quando múltiplos elementos forem elegíveis. Evidência F1-042: resultado sinaliza chooser e candidates.
-- [x] Validar map hash contra proxy hash. Evidência F1-042: mismatch produz VERSION_CONFLICT.
-- [x] Criar visual/E2E para overlays sobrepostos e canvas redimensionado. Evidência F1-042/T-FR-213: coordenadas de display são convertidas ao canvas.
+- [ ] Fazer renderer emitir bounds, z-index, element/clip/scene/source IDs por frame. Evidência F1-042: RenderElement contém geometria, ordem e quatro IDs.
+- [ ] Implementar hit-test respeitando transparência e priority. Evidência F1-042: opacidade <=.05 é ignorada e priority/z-index ordenam.
+- [ ] Mostrar chooser quando múltiplos elementos forem elegíveis. Evidência F1-042: resultado sinaliza chooser e candidates.
+- [ ] Validar map hash contra proxy hash. Evidência F1-042: mismatch produz VERSION_CONFLICT.
+- [ ] Criar visual/E2E para overlays sobrepostos e canvas redimensionado. Evidência F1-042/T-FR-213: coordenadas de display são convertidas ao canvas.
 
 ### F1.043 — Patch automático [FR-214]
 
-- [x] Interpretar annotation em proposta tipada de PatchSet, nunca mutação livre. Evidência F1-043: seis operações allowlisted compõem patch.
-- [x] Resolver ambiguidades, protected elements, policy e budget antes do commit. Evidência F1-043: quatro gates antecedem versão.
-- [x] Exibir impact preview, custo e ranges invalidados. Evidência F1-043: proposal ready inclui impact estruturado.
-- [x] Aplicar patch em nova versão e comparar resultado. Evidência F1-043: sucesso cria child version e comparison.
-- [x] Criar E2E para correção válida, ambígua, proibida e falha de render. Evidência F1-043/T-FR-214: quatro caminhos testados.
+- [ ] Interpretar annotation em proposta tipada de PatchSet, nunca mutação livre. Evidência F1-043: seis operações allowlisted compõem patch.
+- [ ] Resolver ambiguidades, protected elements, policy e budget antes do commit. Evidência F1-043: quatro gates antecedem versão.
+- [ ] Exibir impact preview, custo e ranges invalidados. Evidência F1-043: proposal ready inclui impact estruturado.
+- [ ] Aplicar patch em nova versão e comparar resultado. Evidência F1-043: sucesso cria child version e comparison.
+- [ ] Criar E2E para correção válida, ambígua, proibida e falha de render. Evidência F1-043/T-FR-214: quatro caminhos testados.
 
 ### F1.044 — Batch review [FR-215]
 
-- [x] Permitir selecionar múltiplas annotations compatíveis. Evidência F1-044: batch recebe coleção e propostas.
-- [x] Compilar PatchSet único ou explicar conflitos entre comentários. Evidência F1-044: mesmo target divergente gera conflict IDs.
-- [x] Aplicar all-or-nothing por default e registrar resultado por annotation. Evidência F1-044: conflito marca rolled-back para todos.
-- [x] Testar transação, rollback e retry parcial quando explicitamente escolhido. Evidência F1-044/T-FR-215: atomic e partial-retry cobertos.
+- [ ] Permitir selecionar múltiplas annotations compatíveis. Evidência F1-044: batch recebe coleção e propostas.
+- [ ] Compilar PatchSet único ou explicar conflitos entre comentários. Evidência F1-044: mesmo target divergente gera conflict IDs.
+- [ ] Aplicar all-or-nothing por default e registrar resultado por annotation. Evidência F1-044: conflito marca rolled-back para todos.
+- [ ] Testar transação, rollback e retry parcial quando explicitamente escolhido. Evidência F1-044/T-FR-215: atomic e partial-retry cobertos.
 
 ### F1.045 — Edição manual [FR-216]
 
-- [x] Implementar seleção, trim, split, move, replace e snapping no timeline view model. Evidência F1-045: seis gestos alteram modelo imutável e snap em 120ms.
-- [x] Implementar inspector de layout, texto, legenda, cor, movimento e áudio MVP. Evidência F1-045: inspector tipa as seis dimensões por clip.
-- [x] Gerar Commands com scope e optimistic concurrency para cada gesto. Evidência F1-045: command exige project/variant/target, base e revision.
-- [x] Implementar undo/redo como versões auditáveis. Evidência F1-045: restore cria child version com action e command.
-- [x] Criar E2E por teclado e mouse dos fluxos principais. Evidência F1-045/T-FR-216: interações mapeiam split, select e move.
+- [ ] Implementar seleção, trim, split, move, replace e snapping no timeline view model. Evidência F1-045: seis gestos alteram modelo imutável e snap em 120ms.
+- [ ] Implementar inspector de layout, texto, legenda, cor, movimento e áudio MVP. Evidência F1-045: inspector tipa as seis dimensões por clip.
+- [ ] Gerar Commands com scope e optimistic concurrency para cada gesto. Evidência F1-045: command exige project/variant/target, base e revision.
+- [ ] Implementar undo/redo como versões auditáveis. Evidência F1-045: restore cria child version com action e command.
+- [ ] Criar E2E por teclado e mouse dos fluxos principais. Evidência F1-045/T-FR-216: interações mapeiam split, select e move.
 
 ### F1.046 — Compare [FR-217]
 
-- [x] Implementar before/after por toggle, split ou overlay. Evidência F1-046: compare suporta três modos.
-- [x] Sincronizar playhead quando mappings forem compatíveis. Evidência F1-046: mapping ID compartilhado habilita playhead único.
-- [x] Exibir diff semântico e scores/issues antes/depois. Evidência F1-046: resultado inclui deltas e issues added/resolved.
-- [x] Permitir aceitar, reabrir ou restaurar sem apagar versões. Evidência F1-046: ações são explícitas e versionsPreserved permanece true.
-- [x] Criar E2E com versões de durações diferentes. Evidência F1-046/T-FR-217: fixture mede delta de 2s e mapping incompatível.
+- [ ] Implementar before/after por toggle, split ou overlay. Evidência F1-046: compare suporta três modos.
+- [ ] Sincronizar playhead quando mappings forem compatíveis. Evidência F1-046: mapping ID compartilhado habilita playhead único.
+- [ ] Exibir diff semântico e scores/issues antes/depois. Evidência F1-046: resultado inclui deltas e issues added/resolved.
+- [ ] Permitir aceitar, reabrir ou restaurar sem apagar versões. Evidência F1-046: ações são explícitas e versionsPreserved permanece true.
+- [ ] Criar E2E com versões de durações diferentes. Evidência F1-046/T-FR-217: fixture mede delta de 2s e mapping incompatível.
 
 ### F1.047 — Proxy first [FR-230]
 
-- [x] Criar workflow que materializa proxy antes de autorizar final. Evidência F1-047: proxy retorna finalAllowed false até revisão.
-- [x] Definir resolução/codec e ranges reaproveitáveis do proxy. Evidência F1-047: H.264 540×960 e rangeCacheKey.
-- [x] Executar hard validators e critic localizado após render. Evidência F1-047: validator agrega technical e critic issues.
-- [x] Bloquear final em issue hard; permitir aprovação consciente de warnings. Evidência F1-047: hard sempre bloqueia; warning exige acknowledged.
-- [x] Medir tempo do upload ao primeiro proxy revisável. Evidência F1-047/T-FR-230: métrica usa timestamps reais.
+- [ ] Criar workflow que materializa proxy antes de autorizar final. Evidência F1-047: proxy retorna finalAllowed false até revisão.
+- [ ] Definir resolução/codec e ranges reaproveitáveis do proxy. Evidência F1-047: H.264 540×960 e rangeCacheKey.
+- [ ] Executar hard validators e critic localizado após render. Evidência F1-047: validator agrega technical e critic issues.
+- [ ] Bloquear final em issue hard; permitir aprovação consciente de warnings. Evidência F1-047: hard sempre bloqueia; warning exige acknowledged.
+- [ ] Medir tempo do upload ao primeiro proxy revisável. Evidência F1-047/T-FR-230: métrica usa timestamps reais.
 
 ### F1.048 — Final render [FR-231]
 
-- [x] Exigir ProjectVersion/variants aprovadas e inputs não stale. Evidência F1-048: precondition valida approval, variants e stale.
-- [x] Criar job idempotente de final com qualidade e codec do OutputSpec. Evidência F1-048: key/fingerprint convergem ou falham em mismatch.
-- [x] Executar validators pós-render e gerar checksum/manifest. Evidência F1-048: SHA-256 e manifest reconstructable seguem bytes validados.
-- [x] Promover artifact atomicamente e preservar tentativas falhas. Evidência F1-048: histórico mantém failed antes do promoted.
-- [x] Criar E2E de aprovação, render, download e reconstrução. Evidência F1-048/T-FR-231: jornada produz grant elegível e verifica bytes pelo manifest.
+- [ ] Exigir ProjectVersion/variants aprovadas e inputs não stale. Evidência F1-048: precondition valida approval, variants e stale.
+- [ ] Criar job idempotente de final com qualidade e codec do OutputSpec. Evidência F1-048: key/fingerprint convergem ou falham em mismatch.
+- [ ] Executar validators pós-render e gerar checksum/manifest. Evidência F1-048: SHA-256 e manifest reconstructable seguem bytes validados.
+- [ ] Promover artifact atomicamente e preservar tentativas falhas. Evidência F1-048: histórico mantém failed antes do promoted.
+- [ ] Criar E2E de aprovação, render, download e reconstrução. Evidência F1-048/T-FR-231: jornada produz grant elegível e verifica bytes pelo manifest.
 
 ### F1.049 — AssetBrief e seleção de B-roll
 
-- [x] Implementar `AssetBrief` com intenção, conteúdo, estilo, duração, entrada/saída e elementos proibidos. Evidência F1-049: contrato tipado e validado em `asset-selection.ts`.
-- [x] Pesquisar biblioteca antes de stock/geração e registrar candidates descartados. Evidência F1-049: ordem determinística e auditId preservam avaliações.
-- [x] Avaliar relevância, continuidade, qualidade, rights e excesso de novidade. Evidência T-FR-218: score multidimensional com motivos explícitos.
-- [x] Permitir decisão “não usar insert” quando nenhum candidate for adequado. Evidência T-FR-218: todos rejeitados retornam `no_insert`.
-- [x] Criar eval de inserts corretos, literais demais, irrelevantes e visualmente conflitantes. Evidência T-FR-218: quatro classes cobertas.
+- [ ] Implementar `AssetBrief` com intenção, conteúdo, estilo, duração, entrada/saída e elementos proibidos. Evidência F1-049: contrato tipado e validado em `asset-selection.ts`.
+- [ ] Pesquisar biblioteca antes de stock/geração e registrar candidates descartados. Evidência F1-049: ordem determinística e auditId preservam avaliações.
+- [ ] Avaliar relevância, continuidade, qualidade, rights e excesso de novidade. Evidência T-FR-218: score multidimensional com motivos explícitos.
+- [ ] Permitir decisão “não usar insert” quando nenhum candidate for adequado. Evidência T-FR-218: todos rejeitados retornam `no_insert`.
+- [ ] Criar eval de inserts corretos, literais demais, irrelevantes e visualmente conflitantes. Evidência T-FR-218: quatro classes cobertas.
 
 ### F1.050 — Ciclo fechado de qualidade
 
-- [x] Implementar hard validators técnicos, policy e de integridade. Evidência T-FR-219: hard issues bloqueiam final.
-- [x] Implementar asset critic antes de inserir mídia gerada/reutilizada. Evidência T-FR-219: relevância, continuidade, qualidade, direitos e novidade.
-- [x] Implementar proxy critic por rubrica, formato e range. Evidência T-FR-219: crítica localizada por range.
-- [x] Compilar issues em patches elegíveis e rerender mínimo. Evidência T-FR-219: range mínimo agregado.
-- [x] Encerrar por aprovação, convergência, budget, issue não corrigível ou revisão humana. Evidência T-FR-219: cinco razões terminais cobertas.
-- [x] Versionar reports e medir regressão no dataset de referência. Evidência T-FR-219: quality-report/v1 com fingerprint e delta.
+- [ ] Implementar hard validators técnicos, policy e de integridade. Evidência T-FR-219: hard issues bloqueiam final.
+- [ ] Implementar asset critic antes de inserir mídia gerada/reutilizada. Evidência T-FR-219: relevância, continuidade, qualidade, direitos e novidade.
+- [ ] Implementar proxy critic por rubrica, formato e range. Evidência T-FR-219: crítica localizada por range.
+- [ ] Compilar issues em patches elegíveis e rerender mínimo. Evidência T-FR-219: range mínimo agregado.
+- [ ] Encerrar por aprovação, convergência, budget, issue não corrigível ou revisão humana. Evidência T-FR-219: cinco razões terminais cobertas.
+- [ ] Versionar reports e medir regressão no dataset de referência. Evidência T-FR-219: quality-report/v1 com fingerprint e delta.
 
 ### F1.051 — Gate do MVP Core [AC-001 a AC-015]
 
-- [x] Executar AC-001: workspace, marca/guardrails opcionais e criação de projeto. Evidência T-AC-001.
-- [x] Executar AC-002: objetivo obrigatório e briefing livre vazio. Evidência T-AC-002.
-- [x] Executar AC-003: vídeo/áudio persistido como master e proxy derivado. Evidência T-AC-003.
-- [x] Executar AC-004: transcript com timestamps e detecção de silêncios/retakes. Evidência T-AC-004.
-- [x] Executar AC-005: TreatmentPlan, StoryPlan e EditPlan estruturados. Evidência T-AC-005.
-- [x] Executar AC-006: talking head+B-roll e áudio+B-roll sem pessoas. Evidência T-AC-006.
-- [x] Executar AC-007: asset gerado avaliado, rejeitado e substituído. Evidência T-AC-007.
-- [x] Executar AC-008: proxy com hard validation e crítica localizada. Evidência T-AC-008.
-- [x] Executar AC-009: annotation em região/cena aplicada em nova versão. Evidência T-AC-009.
-- [x] Executar AC-010: trim, troca de B-roll, texto/legenda/layout e undo. Evidência T-AC-010.
-- [x] Executar AC-011: duplicação sem copiar masters. Evidência T-AC-011.
-- [x] Executar AC-012: export 9:16 e 16:9 validados separadamente. Evidência T-AC-012.
-- [x] Executar AC-013: final reconstruído pelo manifest. Evidência T-AC-013.
-- [x] Executar AC-014: restart e retry sem projeto preso. Evidência T-AC-014.
-- [x] Executar AC-015: dashboard fiel aos estados do workflow. Evidência T-AC-015.
-- [x] Executar AC-016: client/agente externo conclui jornada MVP com paridade de versões, policies, jobs e artifacts. Evidência T-AC-016 e endpoint quality-v2.
-- [x] Registrar evidência automática/manual e aprovar gate da fase. Evidência: `docs/quality/mvp-core-gate-v1.md`, gate exige 16/16 automáticos.
+- [ ] Executar AC-001: workspace, marca/guardrails opcionais e criação de projeto. Evidência T-AC-001.
+- [ ] Executar AC-002: objetivo obrigatório e briefing livre vazio. Evidência T-AC-002.
+- [ ] Executar AC-003: vídeo/áudio persistido como master e proxy derivado. Evidência T-AC-003.
+- [ ] Executar AC-004: transcript com timestamps e detecção de silêncios/retakes. Evidência T-AC-004.
+- [ ] Executar AC-005: TreatmentPlan, StoryPlan e EditPlan estruturados. Evidência T-AC-005.
+- [ ] Executar AC-006: talking head+B-roll e áudio+B-roll sem pessoas. Evidência T-AC-006.
+- [ ] Executar AC-007: asset gerado avaliado, rejeitado e substituído. Evidência T-AC-007.
+- [ ] Executar AC-008: proxy com hard validation e crítica localizada. Evidência T-AC-008.
+- [ ] Executar AC-009: annotation em região/cena aplicada em nova versão. Evidência T-AC-009.
+- [ ] Executar AC-010: trim, troca de B-roll, texto/legenda/layout e undo. Evidência T-AC-010.
+- [ ] Executar AC-011: duplicação sem copiar masters. Evidência T-AC-011.
+- [ ] Executar AC-012: export 9:16 e 16:9 validados separadamente. Evidência T-AC-012.
+- [ ] Executar AC-013: final reconstruído pelo manifest. Evidência T-AC-013.
+- [ ] Executar AC-014: restart e retry sem projeto preso. Evidência T-AC-014.
+- [ ] Executar AC-015: dashboard fiel aos estados do workflow. Evidência T-AC-015.
+- [ ] Executar AC-016: client/agente externo conclui jornada MVP com paridade de versões, policies, jobs e artifacts. Evidência T-AC-016 e endpoint quality-v2.
+- [ ] Registrar evidência automática/manual e aprovar gate da fase. Evidência: `docs/quality/mvp-core-gate-v1.md`, gate exige 16/16 automáticos.
 
 ---
 
@@ -980,234 +1004,234 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.001 — SpeechSegment [FR-043]
 
-- [x] Modelar texto exato, normalized text, word alignment, speaker, range e complete-thought score. Evidência T-FR-043.
-- [x] Extrair frases/reflexões sem criar arquivos físicos por segmento. Evidência: `physicalMaterialized=false` e ranges no master.
-- [x] Catalogar emoção, expressão, roupa, cenário e demais metadados com provenance/confidence. Evidência T-FR-043.
-- [x] Implementar busca por fala, intenção, pessoa e características visuais. Evidência T-FR-048: busca híbrida indexa esses campos.
-- [x] Criar fixtures com frase completa, corte incompleto, interrupção e múltiplos speakers. Evidência T-FR-043.
+- [ ] Modelar texto exato, normalized text, word alignment, speaker, range e complete-thought score. Evidência T-FR-043.
+- [ ] Extrair frases/reflexões sem criar arquivos físicos por segmento. Evidência: `physicalMaterialized=false` e ranges no master.
+- [ ] Catalogar emoção, expressão, roupa, cenário e demais metadados com provenance/confidence. Evidência T-FR-043.
+- [ ] Implementar busca por fala, intenção, pessoa e características visuais. Evidência T-FR-048: busca híbrida indexa esses campos.
+- [ ] Criar fixtures com frase completa, corte incompleto, interrupção e múltiplos speakers. Evidência T-FR-043.
 
 ### F2.002 — EvidenceSegment [FR-044]
 
-- [x] Modelar claim, qualifier, subject, attribution, consent, context window e integrity status. Evidência T-FR-044.
-- [x] Vincular transcript exato, frames e evidências adjacentes necessárias. Evidência: `EvidenceSegment` preserva refs e range.
-- [x] Impedir uso isolado quando qualifier/contexto for obrigatório. Evidência T-FR-044.
-- [x] Criar policy tests de testemunho, resultado financeiro, antes/depois e hearsay. Evidência T-FR-044.
+- [ ] Modelar claim, qualifier, subject, attribution, consent, context window e integrity status. Evidência T-FR-044.
+- [ ] Vincular transcript exato, frames e evidências adjacentes necessárias. Evidência: `EvidenceSegment` preserva refs e range.
+- [ ] Impedir uso isolado quando qualifier/contexto for obrigatório. Evidência T-FR-044.
+- [ ] Criar policy tests de testemunho, resultado financeiro, antes/depois e hearsay. Evidência T-FR-044.
 
 ### F2.003 — LongFormMoment [FR-045]
 
-- [x] Modelar chapter, topic, moment, summary, speakers, ranges e salience. Evidência T-FR-045.
-- [x] Indexar momentos hierarquicamente sem exigir um único resumo de duas horas. Evidência: `LongFormIndex` por chapters/moments.
-- [x] Permitir abrir contexto anterior/posterior a partir do resultado. Evidência T-FR-045: preview expandido e limitado ao master.
-- [x] Testar busca e preview em live/podcast com mudanças de assunto. Evidência T-FR-045: fixture de 2h com dois tópicos.
+- [ ] Modelar chapter, topic, moment, summary, speakers, ranges e salience. Evidência T-FR-045.
+- [ ] Indexar momentos hierarquicamente sem exigir um único resumo de duas horas. Evidência: `LongFormIndex` por chapters/moments.
+- [ ] Permitir abrir contexto anterior/posterior a partir do resultado. Evidência T-FR-045: preview expandido e limitado ao master.
+- [ ] Testar busca e preview em live/podcast com mudanças de assunto. Evidência T-FR-045: fixture de 2h com dois tópicos.
 
 ### F2.004 — ValidatedSegment [FR-046]
 
-- [x] Modelar validation source, scope, date, performance evidence e expiry. Evidência T-FR-046.
-- [x] Separar “hook validado” de “vídeo inteiro validado”. Evidência: `scope` explícito e `wholeVideoValidated` derivado.
-- [x] Criar protected envelope para copy, take, timing e opening conforme escopo. Evidência T-FR-046.
-- [x] Impedir alegação de causalidade além da evidência registrada. Evidência T-FR-046: causalidade sempre bloqueada.
-- [x] Testar uso compatível e incompatível em nova recipe. Evidência T-FR-046.
+- [ ] Modelar validation source, scope, date, performance evidence e expiry. Evidência T-FR-046.
+- [ ] Separar “hook validado” de “vídeo inteiro validado”. Evidência: `scope` explícito e `wholeVideoValidated` derivado.
+- [ ] Criar protected envelope para copy, take, timing e opening conforme escopo. Evidência T-FR-046.
+- [ ] Impedir alegação de causalidade além da evidência registrada. Evidência T-FR-046: causalidade sempre bloqueada.
+- [ ] Testar uso compatível e incompatível em nova recipe. Evidência T-FR-046.
 
 ### F2.005 — Busca híbrida [FR-048]
 
-- [x] Implementar filtros estruturados por rights, kind, pessoa, duração, locale e metadados. Evidência T-FR-048.
-- [x] Implementar full-text para transcript/OCR e vector search por intenção/descrição. Evidência T-FR-048.
-- [x] Unir candidates, remover duplicatas e reranquear com pesos versionados. Evidência: identidade única e `hybrid-rerank/v1`.
-- [x] Exibir por que cada resultado correspondeu e por que foi bloqueado. Evidência: `matchedBy`/`blockedReasons`.
-- [x] Criar retrieval eval com precision/recall/nDCG por tipo de consulta. Evidência T-FR-048.
+- [ ] Implementar filtros estruturados por rights, kind, pessoa, duração, locale e metadados. Evidência T-FR-048.
+- [ ] Implementar full-text para transcript/OCR e vector search por intenção/descrição. Evidência T-FR-048.
+- [ ] Unir candidates, remover duplicatas e reranquear com pesos versionados. Evidência: identidade única e `hybrid-rerank/v1`.
+- [ ] Exibir por que cada resultado correspondeu e por que foi bloqueado. Evidência: `matchedBy`/`blockedReasons`.
+- [ ] Criar retrieval eval com precision/recall/nDCG por tipo de consulta. Evidência T-FR-048.
 
 ### F2.006 — Processamento hierárquico [FR-053]
 
-- [x] Dividir long-form em chunks com overlap e time mapping preservado. Evidência T-FR-053.
-- [x] Processar sinais baratos antes de visão/LLM caros. Evidência: execution order tipada.
-- [x] Agregar chunks em moments/chapters sem perder evidence spans. Evidência T-FR-053.
-- [x] Reprocessar somente tiers invalidados por nova versão de modelo. Evidência T-FR-053: invalidação transitiva.
-- [x] Medir memória, custo e tempo em fixtures de 30min e 2h. Evidência T-FR-053.
+- [ ] Dividir long-form em chunks com overlap e time mapping preservado. Evidência T-FR-053.
+- [ ] Processar sinais baratos antes de visão/LLM caros. Evidência: execution order tipada.
+- [ ] Agregar chunks em moments/chapters sem perder evidence spans. Evidência T-FR-053.
+- [ ] Reprocessar somente tiers invalidados por nova versão de modelo. Evidência T-FR-053: invalidação transitiva.
+- [ ] Medir memória, custo e tempo em fixtures de 30min e 2h. Evidência T-FR-053.
 
 ### F2.007 — ProductionBatch [FR-080]
 
-- [x] Modelar batch, items, source groups, recipes, variants, budget e status agregado. Evidência T-FR-080.
-- [x] Manter estado, erro, retry e artifacts independentes por item. Evidência T-FR-080/T-FR-087.
-- [x] Criar UI de criação, acompanhamento e filtro do lote. Evidência: `/batches` com filtros e seleção em massa.
-- [x] Calcular progresso a partir de steps/items reais. Evidência T-FR-080.
-- [x] Testar batch parcialmente concluído, cancelado e retomado. Evidência T-FR-080.
+- [ ] Modelar batch, items, source groups, recipes, variants, budget e status agregado. Evidência T-FR-080.
+- [ ] Manter estado, erro, retry e artifacts independentes por item. Evidência T-FR-080/T-FR-087.
+- [ ] Criar UI de criação, acompanhamento e filtro do lote. Evidência: `/batches` com filtros e seleção em massa.
+- [ ] Calcular progresso a partir de steps/items reais. Evidência T-FR-080.
+- [ ] Testar batch parcialmente concluído, cancelado e retomado. Evidência T-FR-080.
 
 ### F2.008 — Importação e script alignment [FR-081]
 
-- [x] Importar roteiro com hooks, corpos, provas e CTAs identificáveis. Evidência T-FR-081.
-- [x] Normalizar blocos sem apagar texto original ou ordem do documento. Evidência T-FR-081.
-- [x] Alinhar bloco → transcript words → source range com confidence/evidence. Evidência T-FR-081.
-- [x] Classificar exact, near, partial, missing e extra take. Evidência T-FR-081.
-- [x] Criar UI de revisão dos alinhamentos incertos. Evidência: estado `review` e ação Revisar por item em `/batches`.
-- [x] Construir golden set com paráfrase, repetição, erro e gravação fora de ordem. Evidência T-FR-081.
+- [ ] Importar roteiro com hooks, corpos, provas e CTAs identificáveis. Evidência T-FR-081.
+- [ ] Normalizar blocos sem apagar texto original ou ordem do documento. Evidência T-FR-081.
+- [ ] Alinhar bloco → transcript words → source range com confidence/evidence. Evidência T-FR-081.
+- [ ] Classificar exact, near, partial, missing e extra take. Evidência T-FR-081.
+- [ ] Criar UI de revisão dos alinhamentos incertos. Evidência: estado `review` e ação Revisar por item em `/batches`.
+- [ ] Construir golden set com paráfrase, repetição, erro e gravação fora de ordem. Evidência T-FR-081.
 
 ### F2.009 — Biblioteca de takes [FR-082]
 
-- [x] Agrupar takes pelo ScriptBlock previsto ou intenção inferida. Evidência T-FR-082.
-- [x] Separar takes consecutivos dentro do mesmo arquivo por retake boundaries. Evidência: `retakeBoundaryId` obrigatório.
-- [x] Avaliar completude, performance, áudio, vídeo e integridade. Evidência T-FR-082.
-- [x] Marcar primary, alternate, rejected e needs-review sem apagar source. Evidência T-FR-082.
-- [x] Permitir seleção manual e proteção do take escolhido. Evidência T-FR-082.
+- [ ] Agrupar takes pelo ScriptBlock previsto ou intenção inferida. Evidência T-FR-082.
+- [ ] Separar takes consecutivos dentro do mesmo arquivo por retake boundaries. Evidência: `retakeBoundaryId` obrigatório.
+- [ ] Avaliar completude, performance, áudio, vídeo e integridade. Evidência T-FR-082.
+- [ ] Marcar primary, alternate, rejected e needs-review sem apagar source. Evidência T-FR-082.
+- [ ] Permitir seleção manual e proteção do take escolhido. Evidência T-FR-082.
 
 ### F2.010 — Compatibility graph [FR-083]
 
-- [x] Criar nós para hooks, corpos, provas e CTAs elegíveis. Evidência T-FR-083.
-- [x] Implementar hard incompatibilities de oferta, audiência, claim, persona, locale, CTA e continuidade obrigatória. Evidência T-FR-083.
-- [x] Calcular soft score de narrativa, tom, energia, duração, visual e experimento. Evidência T-FR-083.
-- [x] Persistir reason codes e evidence por edge. Evidência T-FR-083.
-- [x] Criar golden graph com combinações aceitas, bloqueadas e limítrofes. Evidência T-FR-083.
+- [ ] Criar nós para hooks, corpos, provas e CTAs elegíveis. Evidência T-FR-083.
+- [ ] Implementar hard incompatibilities de oferta, audiência, claim, persona, locale, CTA e continuidade obrigatória. Evidência T-FR-083.
+- [ ] Calcular soft score de narrativa, tom, energia, duração, visual e experimento. Evidência T-FR-083.
+- [ ] Persistir reason codes e evidence por edge. Evidência T-FR-083.
+- [ ] Criar golden graph com combinações aceitas, bloqueadas e limítrofes. Evidência T-FR-083.
 
 ### F2.011 — VariantRecipe [FR-084]
 
-- [x] Modelar seleção H+B+proof+CTA, ordem, source segments, assumptions e scores. Evidência T-FR-084.
-- [x] Compilar recipe em StoryPlan/EditPlan sem duplicar masters. Evidência T-FR-084.
-- [x] Registrar lineage até cada ScriptBlock e take. Evidência T-FR-084.
-- [x] Permitir recipe sem proof somente quando objetivo/policy permitirem. Evidência T-FR-084.
-- [x] Testar recipe completa, curta, sem prova e com cold open. Evidência T-FR-084.
+- [ ] Modelar seleção H+B+proof+CTA, ordem, source segments, assumptions e scores. Evidência T-FR-084.
+- [ ] Compilar recipe em StoryPlan/EditPlan sem duplicar masters. Evidência T-FR-084.
+- [ ] Registrar lineage até cada ScriptBlock e take. Evidência T-FR-084.
+- [ ] Permitir recipe sem proof somente quando objetivo/policy permitirem. Evidência T-FR-084.
+- [ ] Testar recipe completa, curta, sem prova e com cold open. Evidência T-FR-084.
 
 ### F2.012 — Anti-explosão combinatória [FR-085]
 
-- [x] Calcular espaço teórico e elegível antes de criar jobs. Evidência T-FR-085.
-- [x] Aplicar hard filters, threshold, dedupe e top-N com diversidade. Evidência T-FR-085.
-- [x] Definir cobertura mínima de hooks/corpos/CTAs dentro do budget. Evidência T-FR-085.
-- [x] Exibir preflight de quantidade, custo, tempo e reutilização esperada. Evidência T-FR-085.
-- [x] Exigir confirmação para expansão acima do default do workspace. Evidência T-FR-085.
-- [x] Testar que produto cartesiano não é materializado sem controle. Evidência: `productMaterialized=false`.
+- [ ] Calcular espaço teórico e elegível antes de criar jobs. Evidência T-FR-085.
+- [ ] Aplicar hard filters, threshold, dedupe e top-N com diversidade. Evidência T-FR-085.
+- [ ] Definir cobertura mínima de hooks/corpos/CTAs dentro do budget. Evidência T-FR-085.
+- [ ] Exibir preflight de quantidade, custo, tempo e reutilização esperada. Evidência T-FR-085.
+- [ ] Exigir confirmação para expansão acima do default do workspace. Evidência T-FR-085.
+- [ ] Testar que produto cartesiano não é materializado sem controle. Evidência: `productMaterialized=false`.
 
 ### F2.013 — Edição em lote [FR-086]
 
-- [x] Implementar seleção explícita de recipes, formatos e targets. Evidência T-FR-086 e UI `/batches`.
-- [x] Gerar impact preview com protected conflicts, invalidations e custo. Evidência T-FR-086.
-- [x] Aplicar command transaction por política all-or-nothing/skip failures. Evidência T-FR-086.
-- [x] Exibir diff amostrado antes do commit e resultado por item depois. Evidência T-FR-086.
-- [x] Criar E2E de troca de CTA, legenda e Brand Kit em lote. Evidência T-FR-086.
+- [ ] Implementar seleção explícita de recipes, formatos e targets. Evidência T-FR-086 e UI `/batches`.
+- [ ] Gerar impact preview com protected conflicts, invalidations e custo. Evidência T-FR-086.
+- [ ] Aplicar command transaction por política all-or-nothing/skip failures. Evidência T-FR-086.
+- [ ] Exibir diff amostrado antes do commit e resultado por item depois. Evidência T-FR-086.
+- [ ] Criar E2E de troca de CTA, legenda e Brand Kit em lote. Evidência T-FR-086.
 
 ### F2.014 — Partial retry [FR-087]
 
-- [x] Reenfileirar somente item/step falho com a mesma idempotency lineage. Evidência T-FR-087.
-- [x] Preservar items concluídos e artifacts válidos. Evidência T-FR-087.
-- [x] Recalcular progresso/custo sem cobrar cache hits como nova geração. Evidência T-FR-087.
-- [x] Testar retry de provider, render e validator em um lote misto. Evidência T-FR-087.
+- [ ] Reenfileirar somente item/step falho com a mesma idempotency lineage. Evidência T-FR-087.
+- [ ] Preservar items concluídos e artifacts válidos. Evidência T-FR-087.
+- [ ] Recalcular progresso/custo sem cobrar cache hits como nova geração. Evidência T-FR-087.
+- [ ] Testar retry de provider, render e validator em um lote misto. Evidência T-FR-087.
 
 ### F2.015 — Source Deconstruction [FR-120]
 
-- [x] Detectar conteúdo essencial, hook envelope, corpo/CTA e elementos contaminantes. Evidência T-FR-120.
-- [x] Produzir `DeconstructionReport` com clean candidate ranges e confidence. Evidência T-FR-120.
-- [x] Preservar fala/contexto necessário ao recortar material publicado. Evidência T-FR-120.
-- [x] Permitir comparação source versus range limpo. Evidência T-FR-120.
-- [x] Criar golden fixtures de Reel com abertura, legenda queimada, CTA e cauda removível. Evidência T-FR-120/T-FR-121.
+- [ ] Detectar conteúdo essencial, hook envelope, corpo/CTA e elementos contaminantes. Evidência T-FR-120.
+- [ ] Produzir `DeconstructionReport` com clean candidate ranges e confidence. Evidência T-FR-120.
+- [ ] Preservar fala/contexto necessário ao recortar material publicado. Evidência T-FR-120.
+- [ ] Permitir comparação source versus range limpo. Evidência T-FR-120.
+- [ ] Criar golden fixtures de Reel com abertura, legenda queimada, CTA e cauda removível. Evidência T-FR-120/T-FR-121.
 
 ### F2.016 — Detecção de contaminação [FR-121]
 
-- [x] Detectar burned captions, logos/watermarks, music, borders e overlays. Evidência T-FR-121.
-- [x] Localizar contaminação por região e range com confidence. Evidência T-FR-121.
-- [x] Identificar quando remoção destruiria conteúdo essencial. Evidência T-FR-121.
-- [x] Expor diagnóstico ao Director e à revisão humana. Evidência: diagnóstico duplo e flag de revisão.
-- [x] Criar fixtures de cada contaminação e combinações sobrepostas. Evidência T-FR-121.
+- [ ] Detectar burned captions, logos/watermarks, music, borders e overlays. Evidência T-FR-121.
+- [ ] Localizar contaminação por região e range com confidence. Evidência T-FR-121.
+- [ ] Identificar quando remoção destruiria conteúdo essencial. Evidência T-FR-121.
+- [ ] Expor diagnóstico ao Director e à revisão humana. Evidência: diagnóstico duplo e flag de revisão.
+- [ ] Criar fixtures de cada contaminação e combinações sobrepostas. Evidência T-FR-121.
 
 ### F2.017 — Limpeza MVP [FR-122]
 
-- [x] Implementar trim, crop/reframe, cover e reject como estratégias explícitas. Evidência T-FR-122.
-- [x] Escolher estratégia por qualidade residual, integridade e custo. Evidência T-FR-122.
-- [x] Gerar derivative e manter source publicado imutável. Evidência T-FR-122.
-- [x] Reavaliar visual/rights após limpeza. Evidência: `postCleanupReview` obrigatório.
-- [x] Criar visual goldens de cada estratégia e rejeição correta. Evidência T-FR-122.
+- [ ] Implementar trim, crop/reframe, cover e reject como estratégias explícitas. Evidência T-FR-122.
+- [ ] Escolher estratégia por qualidade residual, integridade e custo. Evidência T-FR-122.
+- [ ] Gerar derivative e manter source publicado imutável. Evidência T-FR-122.
+- [ ] Reavaliar visual/rights após limpeza. Evidência: `postCleanupReview` obrigatório.
+- [ ] Criar visual goldens de cada estratégia e rejeição correta. Evidência T-FR-122.
 
 ### F2.018 — Validation envelope [FR-124]
 
-- [x] Representar quais partes validadas podem ser alteradas: copy, take, framing, timing e opening. Evidência T-FR-124.
-- [x] Proteger automaticamente partes dentro do envelope durante reuso. Evidência T-FR-124.
-- [x] Solicitar aprovação quando uma composição exigir sair do envelope. Evidência T-FR-124.
-- [x] Registrar no decisions log se a validação foi preservada ou perdida. Evidência T-FR-124.
-- [x] Testar reuso de hook com corpo/CTA novos sem material excedente. Evidência T-FR-124.
+- [ ] Representar quais partes validadas podem ser alteradas: copy, take, framing, timing e opening. Evidência T-FR-124.
+- [ ] Proteger automaticamente partes dentro do envelope durante reuso. Evidência T-FR-124.
+- [ ] Solicitar aprovação quando uma composição exigir sair do envelope. Evidência T-FR-124.
+- [ ] Registrar no decisions log se a validação foi preservada ou perdida. Evidência T-FR-124.
+- [ ] Testar reuso de hook com corpo/CTA novos sem material excedente. Evidência T-FR-124.
 
 ### F2.019 — Proof need [FR-130]
 
-- [x] Fazer StoryPlan declarar tipo, função e momento de prova necessários. Evidência T-FR-130.
-- [x] Consultar EvidenceSegments compatíveis antes de gerar card genérico. Evidência T-FR-130.
-- [x] Permitir ausência explícita quando não houver prova adequada. Evidência: `proof-unavailable` sem card fabricado.
-- [x] Criar golden stories que pedem depoimento, dado, demonstração e nenhuma prova. Evidência T-FR-130.
+- [ ] Fazer StoryPlan declarar tipo, função e momento de prova necessários. Evidência T-FR-130.
+- [ ] Consultar EvidenceSegments compatíveis antes de gerar card genérico. Evidência T-FR-130.
+- [ ] Permitir ausência explícita quando não houver prova adequada. Evidência: `proof-unavailable` sem card fabricado.
+- [ ] Criar golden stories que pedem depoimento, dado, demonstração e nenhuma prova. Evidência T-FR-130.
 
 ### F2.020 — Integrity gate de prova [FR-131]
 
-- [x] Comparar claim, produto, pessoa, período, audience e consent da prova com a recipe. Evidência T-FR-131.
-- [x] Bloquear prova descontextualizada, incompatível ou expirada. Evidência T-FR-131.
-- [x] Preservar qualifier/attribution nos modos visual e verbal. Evidência T-FR-131.
-- [x] Emitir issue acionável sem sugerir fabricação de evidência. Evidência T-FR-131.
-- [x] Criar policy eval com falsos positivos e falsos negativos críticos. Evidência T-FR-131.
+- [ ] Comparar claim, produto, pessoa, período, audience e consent da prova com a recipe. Evidência T-FR-131.
+- [ ] Bloquear prova descontextualizada, incompatível ou expirada. Evidência T-FR-131.
+- [ ] Preservar qualifier/attribution nos modos visual e verbal. Evidência T-FR-131.
+- [ ] Emitir issue acionável sem sugerir fabricação de evidência. Evidência T-FR-131.
+- [ ] Criar policy eval com falsos positivos e falsos negativos críticos. Evidência T-FR-131.
 
 ### F2.021 — Modos de prova [FR-132]
 
-- [x] Implementar cutaway, split-screen e proof card. Evidência T-FR-132.
-- [x] Definir entrada/saída, duração mínima, identificação e legibilidade por modo. Evidência T-FR-132.
-- [x] Escolher modo conforme mídia, formato, ritmo e necessidade de contexto. Evidência T-FR-132.
-- [x] Permitir override manual por segmento/formato. Evidência T-FR-132.
-- [x] Criar visual goldens nos cinco formatos. Evidência: 15 combinações formato/modo.
+- [ ] Implementar cutaway, split-screen e proof card. Evidência T-FR-132.
+- [ ] Definir entrada/saída, duração mínima, identificação e legibilidade por modo. Evidência T-FR-132.
+- [ ] Escolher modo conforme mídia, formato, ritmo e necessidade de contexto. Evidência T-FR-132.
+- [ ] Permitir override manual por segmento/formato. Evidência T-FR-132.
+- [ ] Criar visual goldens nos cinco formatos. Evidência: 15 combinações formato/modo.
 
 ### F2.022 — Long-form indexing [FR-133]
 
-- [x] Criar workflow background resumível para probe, transcript, diarization, chunks e moments. Evidência T-FR-133.
-- [x] Publicar resultados parciais pesquisáveis com tier/status explícito. Evidência T-FR-133.
-- [x] Controlar custo e concorrência por duração/tier. Evidência T-FR-133.
-- [x] Retomar processamento após restart sem duplicar segments. Evidência: idempotency por job/tier.
-- [x] Testar vídeo de 2h dentro do orçamento de performance definido. Evidência T-FR-133.
+- [ ] Criar workflow background resumível para probe, transcript, diarization, chunks e moments. Evidência T-FR-133.
+- [ ] Publicar resultados parciais pesquisáveis com tier/status explícito. Evidência T-FR-133.
+- [ ] Controlar custo e concorrência por duração/tier. Evidência T-FR-133.
+- [ ] Retomar processamento após restart sem duplicar segments. Evidência: idempotency por job/tier.
+- [ ] Testar vídeo de 2h dentro do orçamento de performance definido. Evidência T-FR-133.
 
 ### F2.023 — Contiguous extraction [FR-134]
 
-- [x] Buscar janelas contínuas por objetivo, tópico e duração-alvo. Evidência T-FR-134.
-- [x] Expandir boundaries para começo/fim semântico e contexto necessário. Evidência T-FR-134.
-- [x] Pontuar autocontenção, densidade, integridade, áudio e visual. Evidência T-FR-134.
-- [x] Compilar melhor janela em StoryPlan/EditPlan sem síntese multi-range. Evidência T-FR-134.
-- [x] Criar golden de conteúdo de 2min extraído de vídeo de 2h. Evidência T-FR-134.
+- [ ] Buscar janelas contínuas por objetivo, tópico e duração-alvo. Evidência T-FR-134.
+- [ ] Expandir boundaries para começo/fim semântico e contexto necessário. Evidência T-FR-134.
+- [ ] Pontuar autocontenção, densidade, integridade, áudio e visual. Evidência T-FR-134.
+- [ ] Compilar melhor janela em StoryPlan/EditPlan sem síntese multi-range. Evidência T-FR-134.
+- [ ] Criar golden de conteúdo de 2min extraído de vídeo de 2h. Evidência T-FR-134.
 
 ### F2.024 — Repositório semântico cross-asset [FR-136]
 
-- [x] Criar índice unificado de assets, segments, moments, speech e evidence. Evidência T-FR-136.
-- [x] Restringir consulta por workspace, rights e consent antes do rerank. Evidência T-FR-136.
-- [x] Permitir ao Diretor pedir intenção, atmosfera, pessoa, fala e visual. Evidência T-FR-136.
-- [x] Registrar candidates reutilizados e motivos de rejeição. Evidência T-FR-136.
-- [x] Medir retrieval quality e latência com biblioteca crescente. Evidência T-FR-136.
+- [ ] Criar índice unificado de assets, segments, moments, speech e evidence. Evidência T-FR-136.
+- [ ] Restringir consulta por workspace, rights e consent antes do rerank. Evidência T-FR-136.
+- [ ] Permitir ao Diretor pedir intenção, atmosfera, pessoa, fala e visual. Evidência T-FR-136.
+- [ ] Registrar candidates reutilizados e motivos de rejeição. Evidência T-FR-136.
+- [ ] Medir retrieval quality e latência com biblioteca crescente. Evidência T-FR-136.
 
 ### F2.025 — ColorPipeline [FR-180]
 
-- [x] Implementar ordem technical transform → source/camera match → creative LUT → output transform. Evidência T-FR-180.
-- [x] Persistir color space, transfer, primaries e transform versions. Evidência T-FR-180.
-- [x] Impedir dupla aplicação de LUT/transform. Evidência T-FR-180.
-- [x] Criar visual fixtures SDR de fontes distintas e clipping. Evidência T-FR-180.
+- [ ] Implementar ordem technical transform → source/camera match → creative LUT → output transform. Evidência T-FR-180.
+- [ ] Persistir color space, transfer, primaries e transform versions. Evidência T-FR-180.
+- [ ] Impedir dupla aplicação de LUT/transform. Evidência T-FR-180.
+- [ ] Criar visual fixtures SDR de fontes distintas e clipping. Evidência T-FR-180.
 
 ### F2.026 — Workspace LUT Library [FR-181]
 
-- [x] Implementar upload, parse, validação e preview de `.cube`. Evidência T-FR-181.
-- [x] Modelar licença, owner, tags, version e status ativo. Evidência T-FR-181.
-- [x] Permitir default do workspace, seleção por projeto e `none` explícito. Evidência T-FR-181.
-- [x] Criar UI de comparação e remoção segura sem quebrar versões antigas. Evidência API color-v2 e LUT imutável.
-- [x] Criar E2E com LUT válido, inválido e glyph/nome incomum. Evidência T-FR-181.
+- [ ] Implementar upload, parse, validação e preview de `.cube`. Evidência T-FR-181.
+- [ ] Modelar licença, owner, tags, version e status ativo. Evidência T-FR-181.
+- [ ] Permitir default do workspace, seleção por projeto e `none` explícito. Evidência T-FR-181.
+- [ ] Criar UI de comparação e remoção segura sem quebrar versões antigas. Evidência API color-v2 e LUT imutável.
+- [ ] Criar E2E com LUT válido, inválido e glyph/nome incomum. Evidência T-FR-181.
 
 ### F2.027 — ColorPlan [FR-182]
 
-- [x] Modelar transforms globais, por source, por camera e por segment. Evidência T-FR-182.
-- [x] Resolver precedência e overrides de forma determinística. Evidência T-FR-182.
-- [x] Compilar plano para renderer e manifest. Evidência API color-v2.
-- [x] Testar que override local não altera outros segmentos/formatos. Evidência T-FR-182.
+- [ ] Modelar transforms globais, por source, por camera e por segment. Evidência T-FR-182.
+- [ ] Resolver precedência e overrides de forma determinística. Evidência T-FR-182.
+- [ ] Compilar plano para renderer e manifest. Evidência API color-v2.
+- [ ] Testar que override local não altera outros segmentos/formatos. Evidência T-FR-182.
 
 ### F2.028 — Export matrix [FR-235]
 
-- [x] Modelar recipes × formats × locales como outputs endereçáveis. Evidência T-FR-235.
-- [x] Fazer preflight de quantidade, direitos, readiness, custo e storage. Evidência T-FR-235.
-- [x] Reutilizar planos/assets/cache comuns sem misturar artifacts. Evidência T-FR-235.
-- [x] Renderizar e acompanhar cada célula com retry independente. Evidência T-FR-235.
-- [x] Exportar arquivos/manifests com naming determinístico. Evidência T-FR-235.
-- [x] Criar E2E com lote parcial nos cinco formatos. Evidência T-FR-235.
+- [ ] Modelar recipes × formats × locales como outputs endereçáveis. Evidência T-FR-235.
+- [ ] Fazer preflight de quantidade, direitos, readiness, custo e storage. Evidência T-FR-235.
+- [ ] Reutilizar planos/assets/cache comuns sem misturar artifacts. Evidência T-FR-235.
+- [ ] Renderizar e acompanhar cada célula com retry independente. Evidência T-FR-235.
+- [ ] Exportar arquivos/manifests com naming determinístico. Evidência T-FR-235.
+- [ ] Criar E2E com lote parcial nos cinco formatos. Evidência T-FR-235.
 
 ### F2.029 — Jornadas de reuso e lote
 
-- [x] Executar roteiro com 6 hooks, 3 corpos e 3 CTAs gravados em três arquivos. Evidência T-F2-GATE e testes production-batch.
-- [x] Demonstrar separação de takes e recipes compatíveis sem produto cartesiano cego. Evidência T-F2-GATE.
-- [x] Executar Reel validado, conservar apenas hook essencial e anexar corpo/CTA novos. Evidência T-FR-124.
-- [x] Selecionar EvidenceSegment de depoimento e preservar contexto/consentimento. Evidência T-FR-131.
-- [x] Extrair short contínuo de 2min de uma live de 2h. Evidência T-FR-134.
-- [x] Produzir outputs 9:16, 16:9, 4:5, 1:1 e 21:9 com crítica individual. Evidência T-FR-235.
-- [x] Registrar evidências e aprovar gate da fase. Evidência T-F2-GATE e ADR-127.
+- [ ] Executar roteiro com 6 hooks, 3 corpos e 3 CTAs gravados em três arquivos. Evidência T-F2-GATE e testes production-batch.
+- [ ] Demonstrar separação de takes e recipes compatíveis sem produto cartesiano cego. Evidência T-F2-GATE.
+- [ ] Executar Reel validado, conservar apenas hook essencial e anexar corpo/CTA novos. Evidência T-FR-124.
+- [ ] Selecionar EvidenceSegment de depoimento e preservar contexto/consentimento. Evidência T-FR-131.
+- [ ] Extrair short contínuo de 2min de uma live de 2h. Evidência T-FR-134.
+- [ ] Produzir outputs 9:16, 16:9, 4:5, 1:1 e 21:9 com crítica individual. Evidência T-FR-235.
+- [ ] Registrar evidências e aprovar gate da fase. Evidência T-F2-GATE e ADR-127.
 
 ---
 
@@ -1217,154 +1241,154 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F3.001 — Synthetic presenter [FR-092]
 
-- [x] Criar modo de produção com presenter profile, roteiro/áudio e visual plan. Evidência T-FR-092.
-- [x] Compilar áudio, synthetic blocks, B-roll, legendas e overlays no EditPlan. Evidência T-FR-092.
-- [x] Permitir vídeo totalmente sem pessoa real, usando somente personagem IA+B-roll. Evidência T-FR-092.
-- [x] Aplicar consent, disclosure e rights antes de geração/export. Evidência T-FR-092/T-FR-103.
-- [x] Criar E2E com provider fake e provider real em ambiente controlado. Evidência T-FR-101.
+- [ ] Criar modo de produção com presenter profile, roteiro/áudio e visual plan. Evidência T-FR-092.
+- [ ] Compilar áudio, synthetic blocks, B-roll, legendas e overlays no EditPlan. Evidência T-FR-092.
+- [ ] Permitir vídeo totalmente sem pessoa real, usando somente personagem IA+B-roll. Evidência T-FR-092.
+- [ ] Aplicar consent, disclosure e rights antes de geração/export. Evidência T-FR-092/T-FR-103.
+- [ ] Criar E2E com provider fake e provider real em ambiente controlado. Evidência T-FR-101.
 
 ### F3.002 — Modo híbrido [FR-093]
 
-- [x] Permitir real, sintético, voiceover, prova e B-roll no mesmo StoryPlan. Evidência T-FR-093.
-- [x] Definir regras de continuidade de identidade, áudio, cenário e disclosure entre blocos. Evidência T-FR-093.
-- [x] Resolver rights/consent separadamente por source e segment. Evidência T-FR-093.
-- [x] Criar golden de pessoa real → avatar → prova → CTA. Evidência T-FR-093.
+- [ ] Permitir real, sintético, voiceover, prova e B-roll no mesmo StoryPlan. Evidência T-FR-093.
+- [ ] Definir regras de continuidade de identidade, áudio, cenário e disclosure entre blocos. Evidência T-FR-093.
+- [ ] Resolver rights/consent separadamente por source e segment. Evidência T-FR-093.
+- [ ] Criar golden de pessoa real → avatar → prova → CTA. Evidência T-FR-093.
 
 ### F3.003 — Audio-first [FR-100]
 
-- [x] Aceitar texto para TTS ou áudio pronto como source canônico do bloco. Evidência T-FR-100.
-- [x] Gerar/persistir word alignment antes de solicitar vídeo sintético. Evidência T-FR-100.
-- [x] Fazer duração do áudio governar ranges e retries do avatar. Evidência T-FR-100.
-- [x] Reutilizar áudio aprovado quando somente vídeo/provider mudar. Evidência T-FR-100.
-- [x] Testar texto, áudio enviado e áudio regenerado. Evidência T-FR-100.
+- [ ] Aceitar texto para TTS ou áudio pronto como source canônico do bloco. Evidência T-FR-100.
+- [ ] Gerar/persistir word alignment antes de solicitar vídeo sintético. Evidência T-FR-100.
+- [ ] Fazer duração do áudio governar ranges e retries do avatar. Evidência T-FR-100.
+- [ ] Reutilizar áudio aprovado quando somente vídeo/provider mudar. Evidência T-FR-100.
+- [ ] Testar texto, áudio enviado e áudio regenerado. Evidência T-FR-100.
 
 ### F3.004 — Provider adapters [FR-101]
 
-- [x] Implementar contracts comuns definidos no ADR-007. Evidência T-FR-101.
-- [x] Criar adapter inicial ElevenLabs para TTS/alignment. Evidência T-FR-101.
-- [x] Criar adapter inicial HeyGen para avatar/lip-sync. Evidência T-FR-101.
-- [x] Normalizar erros, states, callbacks, costs e artifacts sem vazar tipos do provider. Evidência T-FR-101.
-- [x] Executar contract suite contra fake e adapters reais. Evidência T-FR-101.
+- [ ] Implementar contracts comuns definidos no ADR-007. Evidência T-FR-101.
+- [ ] Criar adapter inicial ElevenLabs para TTS/alignment. Evidência T-FR-101.
+- [ ] Criar adapter inicial HeyGen para avatar/lip-sync. Evidência T-FR-101.
+- [ ] Normalizar erros, states, callbacks, costs e artifacts sem vazar tipos do provider. Evidência T-FR-101.
+- [ ] Executar contract suite contra fake e adapters reais. Evidência T-FR-101.
 
 ### F3.005 — Geração por blocos [FR-102]
 
-- [x] Dividir roteiro em frases/reflexões completas com boundaries estáveis. Evidência T-FR-102.
-- [x] Criar job e cache key por bloco, voz, profile, locale e configuração. Evidência T-FR-102.
-- [x] Concatenar blocos preservando alignment e room tone/continuidade possível. Evidência T-FR-102.
-- [x] Retentar ou substituir apenas bloco falho. Evidência T-FR-102.
-- [x] Testar inserção, remoção e reordenação sem regenerar blocos intactos. Evidência T-FR-102.
+- [ ] Dividir roteiro em frases/reflexões completas com boundaries estáveis. Evidência T-FR-102.
+- [ ] Criar job e cache key por bloco, voz, profile, locale e configuração. Evidência T-FR-102.
+- [ ] Concatenar blocos preservando alignment e room tone/continuidade possível. Evidência T-FR-102.
+- [ ] Retentar ou substituir apenas bloco falho. Evidência T-FR-102.
+- [ ] Testar inserção, remoção e reordenação sem regenerar blocos intactos. Evidência T-FR-102.
 
 ### F3.006 — SyntheticPresenterProfile [FR-103]
 
-- [x] Modelar actor, provider identities, voice profiles, languages, consent e restrictions. Evidência T-FR-103.
-- [x] Versionar mudanças de aparência, voz, disclosure e expiração. Evidência T-FR-103.
-- [x] Criar UI de cadastro/ativação/desativação com prova de consentimento. Evidência API synthetic-v2 e profile ativo.
-- [x] Bloquear geração quando profile estiver expirado ou incompatível. Evidência T-FR-103.
-- [x] Criar policy tests para clonagem de voz e identidade. Evidência T-FR-103.
+- [ ] Modelar actor, provider identities, voice profiles, languages, consent e restrictions. Evidência T-FR-103.
+- [ ] Versionar mudanças de aparência, voz, disclosure e expiração. Evidência T-FR-103.
+- [ ] Criar UI de cadastro/ativação/desativação com prova de consentimento. Evidência API synthetic-v2 e profile ativo.
+- [ ] Bloquear geração quando profile estiver expirado ou incompatível. Evidência T-FR-103.
+- [ ] Criar policy tests para clonagem de voz e identidade. Evidência T-FR-103.
 
 ### F3.007 — SyntheticMasterAsset [FR-104]
 
-- [x] Salvar vídeo bruto, áudio final, alignment, provider config e generation lineage. Evidência T-FR-104.
-- [x] Catalogar cada frase completa como SpeechSegment reutilizável. Evidência T-FR-104.
-- [x] Marcar qualidade, identidade, roupa, cenário, emoção e direitos. Evidência T-FR-104.
-- [x] Manter master sintético independente da composição final. Evidência T-FR-104.
-- [x] Testar reuso em novo projeto sem nova chamada paga. Evidência T-FR-104.
+- [ ] Salvar vídeo bruto, áudio final, alignment, provider config e generation lineage. Evidência T-FR-104.
+- [ ] Catalogar cada frase completa como SpeechSegment reutilizável. Evidência T-FR-104.
+- [ ] Marcar qualidade, identidade, roupa, cenário, emoção e direitos. Evidência T-FR-104.
+- [ ] Manter master sintético independente da composição final. Evidência T-FR-104.
+- [ ] Testar reuso em novo projeto sem nova chamada paga. Evidência T-FR-104.
 
 ### F3.008 — Cache sintético [FR-105]
 
-- [x] Definir hash canônico de conteúdo, profile, provider capability, locale e settings relevantes. Evidência T-FR-105.
-- [x] Consultar cache após rights/consent e antes de reservar custo. Evidência T-FR-103/T-FR-104.
-- [x] Invalidar somente por mudança que altere o resultado ou elegibilidade. Evidência T-FR-105.
-- [x] Registrar cache hit/miss e economia estimada. Evidência T-FR-104.
-- [x] Testar igualdade semântica, config diferente e artifact expirado/corrompido. Evidência T-FR-105.
+- [ ] Definir hash canônico de conteúdo, profile, provider capability, locale e settings relevantes. Evidência T-FR-105.
+- [ ] Consultar cache após rights/consent e antes de reservar custo. Evidência T-FR-103/T-FR-104.
+- [ ] Invalidar somente por mudança que altere o resultado ou elegibilidade. Evidência T-FR-105.
+- [ ] Registrar cache hit/miss e economia estimada. Evidência T-FR-104.
+- [ ] Testar igualdade semântica, config diferente e artifact expirado/corrompido. Evidência T-FR-105.
 
 ### F3.009 — Crítico sintético [FR-106]
 
-- [x] Avaliar lip-sync, identidade, pronúncia, artefatos, enquadramento e continuidade. Evidência T-FR-106.
-- [x] Definir hard gates e thresholds por capability/provider. Evidência T-FR-106.
-- [x] Localizar issue por bloco/range e escolher retry, fallback ou revisão. Evidência T-FR-106.
-- [x] Criar eval set com falhas conhecidas e controle de regressão. Evidência T-FR-106.
+- [ ] Avaliar lip-sync, identidade, pronúncia, artefatos, enquadramento e continuidade. Evidência T-FR-106.
+- [ ] Definir hard gates e thresholds por capability/provider. Evidência T-FR-106.
+- [ ] Localizar issue por bloco/range e escolher retry, fallback ou revisão. Evidência T-FR-106.
+- [ ] Criar eval set com falhas conhecidas e controle de regressão. Evidência T-FR-106.
 
 ### F3.010 — TransformationBrief [FR-110]
 
-- [x] Modelar intent, source range, preserve list, allowed changes, novelty, safety e fallback ladder. Evidência T-FR-110.
-- [x] Gerar brief a partir do StoryPlan sem enviar conteúdo irrelevante ao provider. Evidência T-FR-110.
-- [x] Validar direitos, identidade e elementos que não podem mudar. Evidência T-FR-110/T-FR-116.
-- [x] Persistir brief, candidates e resultado no decisions log. Evidência API transformations-v2.
-- [x] Criar contract examples simples e “gestão de tráfego medieval”. Evidência T-FR-110.
+- [ ] Modelar intent, source range, preserve list, allowed changes, novelty, safety e fallback ladder. Evidência T-FR-110.
+- [ ] Gerar brief a partir do StoryPlan sem enviar conteúdo irrelevante ao provider. Evidência T-FR-110.
+- [ ] Validar direitos, identidade e elementos que não podem mudar. Evidência T-FR-110/T-FR-116.
+- [ ] Persistir brief, candidates e resultado no decisions log. Evidência API transformations-v2.
+- [ ] Criar contract examples simples e “gestão de tráfego medieval”. Evidência T-FR-110.
 
 ### F3.011 — Modos de transformação [FR-111]
 
-- [x] Registrar background replacement, stylization, cutaway, camera motion, relight e object/environment change. Evidência T-FR-111.
-- [x] Definir inputs, outputs, preserves e riscos de cada modo. Evidência T-FR-111.
-- [x] Declarar capabilities no registry em vez de `if provider` no domínio. Evidência T-FR-111.
-- [x] Criar contract fixture e fallback válido para cada modo. Evidência T-FR-111.
+- [ ] Registrar background replacement, stylization, cutaway, camera motion, relight e object/environment change. Evidência T-FR-111.
+- [ ] Definir inputs, outputs, preserves e riscos de cada modo. Evidência T-FR-111.
+- [ ] Declarar capabilities no registry em vez de `if provider` no domínio. Evidência T-FR-111.
+- [ ] Criar contract fixture e fallback válido para cada modo. Evidência T-FR-111.
 
 ### F3.012 — Provider Registry [FR-112]
 
-- [x] Persistir provider, capability, health, limits, regions, pricing e credentials reference. Evidência T-FR-112.
-- [x] Implementar routing por requisitos, policy, custo, qualidade e disponibilidade. Evidência T-FR-112.
-- [x] Registrar razão da seleção e alternativas descartadas. Evidência T-FR-112.
-- [x] Criar health check/circuit breaker sem apagar jobs em andamento. Evidência T-FR-112.
-- [x] Testar troca de provider sem alterar `TransformationBrief`. Evidência T-FR-112.
+- [ ] Persistir provider, capability, health, limits, regions, pricing e credentials reference. Evidência T-FR-112.
+- [ ] Implementar routing por requisitos, policy, custo, qualidade e disponibilidade. Evidência T-FR-112.
+- [ ] Registrar razão da seleção e alternativas descartadas. Evidência T-FR-112.
+- [ ] Criar health check/circuit breaker sem apagar jobs em andamento. Evidência T-FR-112.
+- [ ] Testar troca de provider sem alterar `TransformationBrief`. Evidência T-FR-112.
 
 ### F3.013 — Jobs duráveis API/MCP [FR-113]
 
-- [x] Criar transport adapters separados para API, webhook/polling e MCP. Evidência T-FR-113.
-- [x] Normalizar submit/result/cancel/resume em `ProviderJob`. Evidência T-FR-113.
-- [x] Verificar assinatura, replay e correlação de callbacks. Evidência T-FR-113.
-- [x] Retomar polling/callback wait após restart. Evidência T-FR-113.
-- [x] Simular timeout, duplicate callback, rate limit e artifact ausente. Evidência T-FR-113.
+- [ ] Criar transport adapters separados para API, webhook/polling e MCP. Evidência T-FR-113.
+- [ ] Normalizar submit/result/cancel/resume em `ProviderJob`. Evidência T-FR-113.
+- [ ] Verificar assinatura, replay e correlação de callbacks. Evidência T-FR-113.
+- [ ] Retomar polling/callback wait após restart. Evidência T-FR-113.
+- [ ] Simular timeout, duplicate callback, rate limit e artifact ausente. Evidência T-FR-113.
 
 ### F3.014 — Novelty budget [FR-114]
 
-- [x] Modelar custo de novidade por transformação, duração e janela narrativa. Evidência T-FR-114.
-- [x] Penalizar excesso antes de enviar ao provider. Evidência T-FR-114.
-- [x] Aplicar cooldown e diversidade de grupos de efeito. Evidência T-FR-114.
-- [x] Expor consumo no TreatmentPlan/QualityReport. Evidência T-FR-114.
-- [x] Criar golden de vídeo sóbrio, equilibrado e exagerado. Evidência T-FR-114.
+- [ ] Modelar custo de novidade por transformação, duração e janela narrativa. Evidência T-FR-114.
+- [ ] Penalizar excesso antes de enviar ao provider. Evidência T-FR-114.
+- [ ] Aplicar cooldown e diversidade de grupos de efeito. Evidência T-FR-114.
+- [ ] Expor consumo no TreatmentPlan/QualityReport. Evidência T-FR-114.
+- [ ] Criar golden de vídeo sóbrio, equilibrado e exagerado. Evidência T-FR-114.
 
 ### F3.015 — Fallback de transformação [FR-115]
 
-- [x] Implementar ladder v2v → composite/background → cutaway/B-roll → source unchanged. Evidência T-FR-115.
-- [x] Verificar se cada fallback ainda cumpre a intenção do AssetBrief. Evidência T-FR-115.
-- [x] Preservar melhor artifact válido e custo já incorrido. Evidência T-FR-115.
-- [x] Mostrar fallback aplicado e permitir revisão. Evidência T-FR-115.
-- [x] Testar falha transitória, capability ausente e resultado reprovado. Evidência T-FR-115.
+- [ ] Implementar ladder v2v → composite/background → cutaway/B-roll → source unchanged. Evidência T-FR-115.
+- [ ] Verificar se cada fallback ainda cumpre a intenção do AssetBrief. Evidência T-FR-115.
+- [ ] Preservar melhor artifact válido e custo já incorrido. Evidência T-FR-115.
+- [ ] Mostrar fallback aplicado e permitir revisão. Evidência T-FR-115.
+- [ ] Testar falha transitória, capability ausente e resultado reprovado. Evidência T-FR-115.
 
 ### F3.016 — Crítico de transformação [FR-116]
 
-- [x] Avaliar intenção, preserve list, identidade, temporal coherence, artefatos e risco. Evidência T-FR-116.
-- [x] Comparar source/result por regiões e ranges relevantes. Evidência T-FR-116.
-- [x] Rejeitar resultado que muda conteúdo protegido mesmo se visualmente bom. Evidência T-FR-116.
-- [x] Emitir issue e acionar ladder conforme confidence/budget. Evidência T-FR-116.
-- [x] Criar eval set com transformações aceitáveis e violações sutis. Evidência T-FR-116.
+- [ ] Avaliar intenção, preserve list, identidade, temporal coherence, artefatos e risco. Evidência T-FR-116.
+- [ ] Comparar source/result por regiões e ranges relevantes. Evidência T-FR-116.
+- [ ] Rejeitar resultado que muda conteúdo protegido mesmo se visualmente bom. Evidência T-FR-116.
+- [ ] Emitir issue e acionar ladder conforme confidence/budget. Evidência T-FR-116.
+- [ ] Criar eval set com transformações aceitáveis e violações sutis. Evidência T-FR-116.
 
 ### F3.017 — Limpeza avançada [FR-123]
 
-- [x] Integrar separation/inpaint por adapter como opções após limpeza MVP. Evidência T-FR-123.
-- [x] Definir máscara, preserve regions e quality threshold antes do job. Evidência T-FR-123.
-- [x] Salvar resultado como derivative e nunca substituir source publicado. Evidência T-FR-123.
-- [x] Comparar custo/qualidade com crop/cover/reject. Evidência T-FR-123.
-- [x] Criar visual eval para legenda queimada, logo e fundo complexo. Evidência T-FR-123.
+- [ ] Integrar separation/inpaint por adapter como opções após limpeza MVP. Evidência T-FR-123.
+- [ ] Definir máscara, preserve regions e quality threshold antes do job. Evidência T-FR-123.
+- [ ] Salvar resultado como derivative e nunca substituir source publicado. Evidência T-FR-123.
+- [ ] Comparar custo/qualidade com crop/cover/reject. Evidência T-FR-123.
+- [ ] Criar visual eval para legenda queimada, logo e fundo complexo. Evidência T-FR-123.
 
 ### F3.018 — Mask a partir da revisão [FR-218]
 
-- [x] Converter região de annotation em coordenadas normalizadas e tracking range. Evidência T-FR-218.
-- [x] Permitir refino da máscara antes de operação paga. Evidência T-FR-218.
-- [x] Vincular mask input ao PatchSet/TransformationBrief. Evidência T-FR-218.
-- [x] Tratar tracking incerto e mudança de formato explicitamente. Evidência T-FR-218.
-- [x] Criar E2E de selecionar região, remover/alterar e revisar resultado. Evidência T-FR-218.
+- [ ] Converter região de annotation em coordenadas normalizadas e tracking range. Evidência T-FR-218.
+- [ ] Permitir refino da máscara antes de operação paga. Evidência T-FR-218.
+- [ ] Vincular mask input ao PatchSet/TransformationBrief. Evidência T-FR-218.
+- [ ] Tratar tracking incerto e mudança de formato explicitamente. Evidência T-FR-218.
+- [ ] Criar E2E de selecionar região, remover/alterar e revisar resultado. Evidência T-FR-218.
 
 ### F3.019 — Gate sintético
 
-- [x] Produzir áudio via ElevenLabs a partir de texto com alignment utilizável. Evidência T-FR-101.
-- [x] Produzir avatar via HeyGen a partir de áudio pronto e de áudio gerado. Evidência T-FR-101.
-- [x] Salvar blocos aprovados em estado bruto e catalogá-los. Evidência T-FR-104.
-- [x] Reutilizar pelo menos um bloco em outro vídeo com zero regeneração. Evidência T-FR-104.
-- [x] Transformar uma cena por adapter e demonstrar fallback após reprovação. Evidência T-F3-GATE.
-- [x] Trocar fake/provider sem alterar domínio, EditPlan ou renderer. Evidência T-F3-GATE.
-- [x] Registrar evidências e aprovar gate da fase. Evidência T-F3-GATE e ADR-129.
+- [ ] Produzir áudio via ElevenLabs a partir de texto com alignment utilizável. Evidência T-FR-101.
+- [ ] Produzir avatar via HeyGen a partir de áudio pronto e de áudio gerado. Evidência T-FR-101.
+- [ ] Salvar blocos aprovados em estado bruto e catalogá-los. Evidência T-FR-104.
+- [ ] Reutilizar pelo menos um bloco em outro vídeo com zero regeneração. Evidência T-FR-104.
+- [ ] Transformar uma cena por adapter e demonstrar fallback após reprovação. Evidência T-F3-GATE.
+- [ ] Trocar fake/provider sem alterar domínio, EditPlan ou renderer. Evidência T-F3-GATE.
+- [ ] Registrar evidências e aprovar gate da fase. Evidência T-F3-GATE e ADR-129.
 
 ---
 
@@ -1374,126 +1398,126 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F4.001 — Editorial synthesis multi-range [FR-135]
 
-- [x] Selecionar múltiplos ranges de um ou mais long-form moments por objetivo. Evidência T-FR-135.
-- [x] Construir StoryPlan que explicite pontes, omissões e dependências de contexto. Evidência T-FR-135.
-- [x] Preservar claims, qualifiers e atribuição através dos cortes. Evidência T-FR-135.
-- [x] Gerar transições ou narration bridge somente quando sustentadas. Evidência T-FR-135.
-- [x] Criar golden de conteúdo de 2min sintetizado de vídeo de 2h. Evidência T-FR-135.
+- [ ] Selecionar múltiplos ranges de um ou mais long-form moments por objetivo. Evidência T-FR-135.
+- [ ] Construir StoryPlan que explicite pontes, omissões e dependências de contexto. Evidência T-FR-135.
+- [ ] Preservar claims, qualifiers e atribuição através dos cortes. Evidência T-FR-135.
+- [ ] Gerar transições ou narration bridge somente quando sustentadas. Evidência T-FR-135.
+- [ ] Criar golden de conteúdo de 2min sintetizado de vídeo de 2h. Evidência T-FR-135.
 
 ### F4.002 — CaptureSession [FR-140]
 
-- [x] Modelar sessão, tracks, roles, recorder/device, source assets e event metadata. Evidência T-FR-140.
-- [x] Permitir adicionar câmera, tela, áudio separado e reference media após ingest. Evidência T-FR-140.
-- [x] Preservar clocks/timebases originais e coverage de cada track. Evidência T-FR-140.
-- [x] Criar UI de agrupamento e correção de tracks. Evidência API sync-v2 e diagnóstico estruturado.
-- [x] Testar fontes com inícios, fins e interrupções distintos. Evidência T-FR-140/T-FR-143.
+- [ ] Modelar sessão, tracks, roles, recorder/device, source assets e event metadata. Evidência T-FR-140.
+- [ ] Permitir adicionar câmera, tela, áudio separado e reference media após ingest. Evidência T-FR-140.
+- [ ] Preservar clocks/timebases originais e coverage de cada track. Evidência T-FR-140.
+- [ ] Criar UI de agrupamento e correção de tracks. Evidência API sync-v2 e diagnóstico estruturado.
+- [ ] Testar fontes com inícios, fins e interrupções distintos. Evidência T-FR-140/T-FR-143.
 
 ### F4.003 — Session clock [FR-141]
 
-- [x] Definir tempo canônico da sessão independente de qualquer arquivo normalizado. Evidência T-FR-141.
-- [x] Implementar mappings source PTS ↔ session time com precision/confidence. Evidência T-FR-141.
-- [x] Manter conversão monotônica dentro de cada piece. Evidência T-FR-141.
-- [x] Criar property tests de round-trip e limites numéricos. Evidência T-FR-141.
+- [ ] Definir tempo canônico da sessão independente de qualquer arquivo normalizado. Evidência T-FR-141.
+- [ ] Implementar mappings source PTS ↔ session time com precision/confidence. Evidência T-FR-141.
+- [ ] Manter conversão monotônica dentro de cada piece. Evidência T-FR-141.
+- [ ] Criar property tests de round-trip e limites numéricos. Evidência T-FR-141.
 
 ### F4.004 — Estratégias de sincronização [FR-142]
 
-- [x] Implementar cascade timecode/metadata → marker → audio fingerprint → visual event → manual anchor. Evidência T-FR-142.
-- [x] Registrar método, signals, score e motivo de descarte das alternativas. Evidência T-FR-142.
-- [x] Definir thresholds de auto-apply, review e insufficient evidence. Evidência T-FR-142.
-- [x] Criar fixtures para cada método e nenhum sinal comum. Evidência T-FR-142.
+- [ ] Implementar cascade timecode/metadata → marker → audio fingerprint → visual event → manual anchor. Evidência T-FR-142.
+- [ ] Registrar método, signals, score e motivo de descarte das alternativas. Evidência T-FR-142.
+- [ ] Definir thresholds de auto-apply, review e insufficient evidence. Evidência T-FR-142.
+- [ ] Criar fixtures para cada método e nenhum sinal comum. Evidência T-FR-142.
 
 ### F4.005 — TrackCoverage [FR-143]
 
-- [x] Modelar intervals disponíveis, gaps, recorder splits e confidence por track. Evidência T-FR-143.
-- [x] Impedir seleção de source fora de coverage. Evidência T-FR-143.
-- [x] Exibir gaps/ausência na timeline e diagnóstico. Evidência T-FR-143.
-- [x] Criar property tests com source curto, gap interno e overlap de partes. Evidência T-FR-143.
+- [ ] Modelar intervals disponíveis, gaps, recorder splits e confidence por track. Evidência T-FR-143.
+- [ ] Impedir seleção de source fora de coverage. Evidência T-FR-143.
+- [ ] Exibir gaps/ausência na timeline e diagnóstico. Evidência T-FR-143.
+- [ ] Criar property tests com source curto, gap interno e overlap de partes. Evidência T-FR-143.
 
 ### F4.006 — Drift [FR-144]
 
-- [x] Coletar múltiplos anchors distribuídos na sessão. Evidência T-FR-144.
-- [x] Ajustar offset/rate com residual e limites de correção. Evidência T-FR-144.
-- [x] Detectar drift não linear e evitar stretch indevido de fala. Evidência T-FR-144.
-- [x] Criar numeric fixtures de ppm/rate distintos e validar erro final. Evidência T-FR-144.
+- [ ] Coletar múltiplos anchors distribuídos na sessão. Evidência T-FR-144.
+- [ ] Ajustar offset/rate com residual e limites de correção. Evidência T-FR-144.
+- [ ] Detectar drift não linear e evitar stretch indevido de fala. Evidência T-FR-144.
+- [ ] Criar numeric fixtures de ppm/rate distintos e validar erro final. Evidência T-FR-144.
 
 ### F4.007 — Piecewise maps [FR-145]
 
-- [x] Modelar pieces contínuos separados por stop, rewind, seek ou recorder restart. Evidência T-FR-145.
-- [x] Detectar discontinuities por PTS, fingerprint e anchors. Evidência T-FR-145.
-- [x] Resolver mapping apenas dentro de pieces com coverage válido. Evidência T-FR-145.
-- [x] Criar property tests de descontinuidade, overlap e gap. Evidência T-FR-145.
+- [ ] Modelar pieces contínuos separados por stop, rewind, seek ou recorder restart. Evidência T-FR-145.
+- [ ] Detectar discontinuities por PTS, fingerprint e anchors. Evidência T-FR-145.
+- [ ] Resolver mapping apenas dentro de pieces com coverage válido. Evidência T-FR-145.
+- [ ] Criar property tests de descontinuidade, overlap e gap. Evidência T-FR-145.
 
 ### F4.008 — Sync com áudio separado [FR-146]
 
-- [x] Permitir scratch audio ser usado como evidência e descartado do mix final. Evidência T-FR-146.
-- [x] Alinhar master audio a cada vídeo sem exigir durações iguais. Evidência T-FR-146.
-- [x] Detectar canal silencioso, mix diferente e sample-rate mismatch. Evidência T-FR-146.
-- [x] Testar câmera ruim + gravador bom + tela sem áudio útil. Evidência T-FR-146.
+- [ ] Permitir scratch audio ser usado como evidência e descartado do mix final. Evidência T-FR-146.
+- [ ] Alinhar master audio a cada vídeo sem exigir durações iguais. Evidência T-FR-146.
+- [ ] Detectar canal silencioso, mix diferente e sample-rate mismatch. Evidência T-FR-146.
+- [ ] Testar câmera ruim + gravador bom + tela sem áudio útil. Evidência T-FR-146.
 
 ### F4.009 — Capture Protocol [FR-147]
 
-- [x] Criar requisitos por cenário: professor+tela, podcast, react e multicâmera. Evidência T-FR-147.
-- [x] Exibir pré-requisitos antes do upload e no diagnóstico quando faltarem. Evidência tela `/capture`.
-- [x] Recomendar clap/marker, scratch audio, clock contínuo e gravação de referência. Evidência tela `/capture`.
-- [x] Salvar protocolo usado na CaptureSession. Evidência ADR-131 e `attachProtocol`.
-- [x] Criar E2E de aceite do protocolo e aviso de sincronização limitada. Evidência T-FR-147.
+- [ ] Criar requisitos por cenário: professor+tela, podcast, react e multicâmera. Evidência T-FR-147.
+- [ ] Exibir pré-requisitos antes do upload e no diagnóstico quando faltarem. Evidência tela `/capture`.
+- [ ] Recomendar clap/marker, scratch audio, clock contínuo e gravação de referência. Evidência tela `/capture`.
+- [ ] Salvar protocolo usado na CaptureSession. Evidência ADR-131 e `attachProtocol`.
+- [ ] Criar E2E de aceite do protocolo e aviso de sincronização limitada. Evidência T-FR-147.
 
 ### F4.010 — Apollo Sync Marker [FR-148]
 
-- [x] Especificar marker audiovisual com flash, chirp e ID/tempo decodificável. Evidência T-FR-148.
-- [x] Criar tela/arquivo de marker para reprodução e captura. Evidência API direction-v2.
-- [x] Implementar detectors independentes de áudio e vídeo. Evidência T-FR-148.
-- [x] Fundir detections, medir precisão e rejeitar falso positivo. Evidência T-FR-148.
-- [x] Criar fixtures filmadas/gravadas em diferentes dispositivos. Evidência T-FR-148.
+- [ ] Especificar marker audiovisual com flash, chirp e ID/tempo decodificável. Evidência T-FR-148.
+- [ ] Criar tela/arquivo de marker para reprodução e captura. Evidência API direction-v2.
+- [ ] Implementar detectors independentes de áudio e vídeo. Evidência T-FR-148.
+- [ ] Fundir detections, medir precisão e rejeitar falso positivo. Evidência T-FR-148.
+- [ ] Criar fixtures filmadas/gravadas em diferentes dispositivos. Evidência T-FR-148.
 
 ### F4.011 — SyncDiagnostic [FR-149]
 
-- [x] Modelar método, confidence, residual, drift, coverage, warnings e ações. Evidência T-FR-149.
-- [x] Criar visualização de waveforms/anchors/maps e preview lado a lado. Evidência modelo SyncDiagnostic e API direction-v2.
-- [x] Permitir adicionar/mover/remover anchor manual e recalcular. Evidência T-FR-149.
-- [x] Bloquear auto-edit quando confidence/coverage estiver abaixo do mínimo. Evidência T-FR-149.
-- [x] Criar E2E de diagnóstico aprovado, corrigido e impossível. Evidência T-FR-149.
+- [ ] Modelar método, confidence, residual, drift, coverage, warnings e ações. Evidência T-FR-149.
+- [ ] Criar visualização de waveforms/anchors/maps e preview lado a lado. Evidência modelo SyncDiagnostic e API direction-v2.
+- [ ] Permitir adicionar/mover/remover anchor manual e recalcular. Evidência T-FR-149.
+- [ ] Bloquear auto-edit quando confidence/coverage estiver abaixo do mínimo. Evidência T-FR-149.
+- [ ] Criar E2E de diagnóstico aprovado, corrigido e impossível. Evidência T-FR-149.
 
 ### F4.012 — Direção multicâmera [FR-150]
 
-- [x] Detectar active speaker e momentos de demonstração/tela. Evidência T-FR-150.
-- [x] Definir angle candidates por coverage, qualidade, contexto e continuidade. Evidência T-FR-150.
-- [x] Aplicar regras de cutaway, reaction, screen focus e minimum shot duration. Evidência T-FR-150.
-- [x] Evitar jump cuts/ângulos redundantes e respeitar protected selection. Evidência T-FR-150.
-- [x] Criar golden de podcast, professor+tela e react. Evidência T-FR-150.
+- [ ] Detectar active speaker e momentos de demonstração/tela. Evidência T-FR-150.
+- [ ] Definir angle candidates por coverage, qualidade, contexto e continuidade. Evidência T-FR-150.
+- [ ] Aplicar regras de cutaway, reaction, screen focus e minimum shot duration. Evidência T-FR-150.
+- [ ] Evitar jump cuts/ângulos redundantes e respeitar protected selection. Evidência T-FR-150.
+- [ ] Criar golden de podcast, professor+tela e react. Evidência T-FR-150.
 
 ### F4.013 — Multicam color match [FR-183]
 
-- [x] Estimar diferenças de white balance, exposure e resposta entre câmeras. Evidência T-FR-183.
-- [x] Aplicar match antes da creative LUT. Evidência T-FR-183.
-- [x] Permitir reference camera e override por range. Evidência T-FR-183.
-- [x] Emitir confidence/issue quando fontes não forem comparáveis. Evidência T-FR-183.
-- [x] Criar visual eval de duas e três câmeras. Evidência T-FR-183.
+- [ ] Estimar diferenças de white balance, exposure e resposta entre câmeras. Evidência T-FR-183.
+- [ ] Aplicar match antes da creative LUT. Evidência T-FR-183.
+- [ ] Permitir reference camera e override por range. Evidência T-FR-183.
+- [ ] Emitir confidence/issue quando fontes não forem comparáveis. Evidência T-FR-183.
+- [ ] Criar visual eval de duas e três câmeras. Evidência T-FR-183.
 
 ### F4.014 — Crítico de cor [FR-184]
 
-- [x] Detectar clipping, cast, skin tone fora do alvo e mismatch localizado. Evidência T-FR-184.
-- [x] Avaliar antes/depois do output transform sem confundir intenção criativa. Evidência T-FR-184.
-- [x] Propor correção limitada ou revisão humana conforme confidence. Evidência T-FR-184.
-- [x] Criar visual eval com fontes técnicas e LUTs diferentes. Evidência T-FR-184.
+- [ ] Detectar clipping, cast, skin tone fora do alvo e mismatch localizado. Evidência T-FR-184.
+- [ ] Avaliar antes/depois do output transform sem confundir intenção criativa. Evidência T-FR-184.
+- [ ] Propor correção limitada ou revisão humana conforme confidence. Evidência T-FR-184.
+- [ ] Criar visual eval com fontes técnicas e LUTs diferentes. Evidência T-FR-184.
 
 ### F4.015 — React playback map
 
-- [x] Detectar no vídeo de reação os intervalos em que o conteúdo de referência toca, pausa, volta ou avança. Evidência: T-F4.015 e ADR-135.
-- [x] Modelar playback pieces entre reference media e session time. Evidência: T-F4.015 e ADR-135.
-- [x] Sincronizar reference video sem presumir duração igual à gravação do react. Evidência: T-F4.015 e ADR-135.
-- [x] Permitir anchors manuais quando interface/player não estiver visível. Evidência: T-F4.015 e ADR-135.
-- [x] Criar fixture com play, pause, rewind e seek. Evidência: T-F4.015 e ADR-135.
+- [ ] Detectar no vídeo de reação os intervalos em que o conteúdo de referência toca, pausa, volta ou avança. Evidência: T-F4.015 e ADR-135.
+- [ ] Modelar playback pieces entre reference media e session time. Evidência: T-F4.015 e ADR-135.
+- [ ] Sincronizar reference video sem presumir duração igual à gravação do react. Evidência: T-F4.015 e ADR-135.
+- [ ] Permitir anchors manuais quando interface/player não estiver visível. Evidência: T-F4.015 e ADR-135.
+- [ ] Criar fixture com play, pause, rewind e seek. Evidência: T-F4.015 e ADR-135.
 
 ### F4.016 — Gate multicâmera/long-form
 
-- [x] Sincronizar podcast com dois participantes e áudios distintos. Evidência: T-F4.016 e ADR-135.
-- [x] Sincronizar professor e captura de tela com durações diferentes. Evidência: T-F4.016 e ADR-135.
-- [x] Demonstrar diagnóstico insuficiente e requisito escrito de marker/anchor. Evidência: T-F4.016 e ADR-135.
-- [x] Editar react com playback map piecewise. Evidência: T-F4.016 e ADR-135.
-- [x] Produzir montagem por active speaker e foco na demonstração. Evidência: T-F4.016 e ADR-135.
-- [x] Produzir síntese multi-range preservando contexto. Evidência: T-F4.016 e ADR-135.
-- [x] Registrar evidências e aprovar gate da fase. Evidência: T-F4.016 e ADR-135.
+- [ ] Sincronizar podcast com dois participantes e áudios distintos. Evidência: T-F4.016 e ADR-135.
+- [ ] Sincronizar professor e captura de tela com durações diferentes. Evidência: T-F4.016 e ADR-135.
+- [ ] Demonstrar diagnóstico insuficiente e requisito escrito de marker/anchor. Evidência: T-F4.016 e ADR-135.
+- [ ] Editar react com playback map piecewise. Evidência: T-F4.016 e ADR-135.
+- [ ] Produzir montagem por active speaker e foco na demonstração. Evidência: T-F4.016 e ADR-135.
+- [ ] Produzir síntese multi-range preservando contexto. Evidência: T-F4.016 e ADR-135.
+- [ ] Registrar evidências e aprovar gate da fase. Evidência: T-F4.016 e ADR-135.
 
 ---
 
@@ -1503,123 +1527,123 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F5.001 — Music-led montage [FR-094]
 
-- [x] Aceitar música aprovada como estrutura temporal primária do tratamento. Evidência: T-FR-094 e ADR-136.
-- [x] Extrair beat grid, downbeats, seções, energia e confidence. Evidência: T-FR-094 e ADR-136.
-- [x] Planejar cuts/eventos no grid sem deformar palavra ou integridade narrativa. Evidência: T-FR-094 e ADR-136.
-- [x] Definir exceções e fallbacks para beat incerto ou distante. Evidência: T-FR-094 e ADR-136.
-- [x] Criar audiovisual golden com cortes corretos e over-editing reprovado. Evidência: T-FR-094 e ADR-136.
+- [ ] Aceitar música aprovada como estrutura temporal primária do tratamento. Evidência: T-FR-094 e ADR-136.
+- [ ] Extrair beat grid, downbeats, seções, energia e confidence. Evidência: T-FR-094 e ADR-136.
+- [ ] Planejar cuts/eventos no grid sem deformar palavra ou integridade narrativa. Evidência: T-FR-094 e ADR-136.
+- [ ] Definir exceções e fallbacks para beat incerto ou distante. Evidência: T-FR-094 e ADR-136.
+- [ ] Criar audiovisual golden com cortes corretos e over-editing reprovado. Evidência: T-FR-094 e ADR-136.
 
 ### F5.002 — Conteúdo canônico [FR-190]
 
-- [x] Modelar `ScriptBlock` com source locale, intent, claims, CTA e dependencies. Evidência: T-FR-190 e ADR-136.
-- [x] Vincular blocos canônicos aos ranges/alignment aprovados. Evidência: T-FR-190 e ADR-136.
-- [x] Proteger texto factual e qualifiers durante adaptação. Evidência: T-FR-190 e ADR-136.
-- [x] Criar schema fixtures com PT-BR, números, moeda, datas e nomes próprios. Evidência: T-FR-190 e ADR-136.
+- [ ] Modelar `ScriptBlock` com source locale, intent, claims, CTA e dependencies. Evidência: T-FR-190 e ADR-136.
+- [ ] Vincular blocos canônicos aos ranges/alignment aprovados. Evidência: T-FR-190 e ADR-136.
+- [ ] Proteger texto factual e qualifiers durante adaptação. Evidência: T-FR-190 e ADR-136.
+- [ ] Criar schema fixtures com PT-BR, números, moeda, datas e nomes próprios. Evidência: T-FR-190 e ADR-136.
 
 ### F5.003 — LocalizationVariant [FR-191]
 
-- [x] Modelar locale, script version, audio assets, alignment, plan, formats e status. Evidência: T-FR-191 e ADR-136.
-- [x] Implementar state machine draft → translating → audio → visual → review → approved/failed. Evidência: T-FR-191 e ADR-136.
-- [x] Criar variant a partir da versão canônica aprovada sem copiar masters. Evidência: T-FR-191 e ADR-136.
-- [x] Isolar commands, jobs e approval por locale. Evidência: T-FR-191 e ADR-136.
-- [x] Testar EN/ES concorrentes e versão canônica atualizada. Evidência: T-FR-191 e ADR-136.
+- [ ] Modelar locale, script version, audio assets, alignment, plan, formats e status. Evidência: T-FR-191 e ADR-136.
+- [ ] Implementar state machine draft → translating → audio → visual → review → approved/failed. Evidência: T-FR-191 e ADR-136.
+- [ ] Criar variant a partir da versão canônica aprovada sem copiar masters. Evidência: T-FR-191 e ADR-136.
+- [ ] Isolar commands, jobs e approval por locale. Evidência: T-FR-191 e ADR-136.
+- [ ] Testar EN/ES concorrentes e versão canônica atualizada. Evidência: T-FR-191 e ADR-136.
 
 ### F5.004 — Timings próprios [FR-192]
 
-- [x] Gerar alignment novo para cada áudio localizado. Evidência: T-FR-192 e ADR-136.
-- [x] Calcular desvio de duração por ScriptBlock e total. Evidência: T-FR-192 e ADR-136.
-- [x] Adaptar copy, timeline, B-roll e pausas segundo política; não apenas esticar áudio. Evidência: T-FR-192 e ADR-136.
-- [x] Recompilar legendas, clips e events dependentes. Evidência: T-FR-192 e ADR-136.
-- [x] Criar property tests de mappings com durações ±15% e acima do threshold. Evidência: T-FR-192 e ADR-136.
+- [ ] Gerar alignment novo para cada áudio localizado. Evidência: T-FR-192 e ADR-136.
+- [ ] Calcular desvio de duração por ScriptBlock e total. Evidência: T-FR-192 e ADR-136.
+- [ ] Adaptar copy, timeline, B-roll e pausas segundo política; não apenas esticar áudio. Evidência: T-FR-192 e ADR-136.
+- [ ] Recompilar legendas, clips e events dependentes. Evidência: T-FR-192 e ADR-136.
+- [ ] Criar property tests de mappings com durações ±15% e acima do threshold. Evidência: T-FR-192 e ADR-136.
 
 ### F5.005 — Modos de áudio localizado [FR-193]
 
-- [x] Implementar TTS autorizado, voz local, upload pronto, lip-sync, avatar regenerado e subtitles-only. Evidência: T-FR-193 e ADR-136.
-- [x] Resolver modos permitidos por profile, consent, locale e provider capability. Evidência: T-FR-193 e ADR-136.
-- [x] Manter áudio original disponível e lineage entre versões. Evidência: T-FR-193 e ADR-136.
-- [x] Aplicar disclosure quando política/mercado exigir. Evidência: T-FR-193 e ADR-136.
-- [x] Criar integration tests de escolha e fallback entre modos. Evidência: T-FR-193 e ADR-136.
+- [ ] Implementar TTS autorizado, voz local, upload pronto, lip-sync, avatar regenerado e subtitles-only. Evidência: T-FR-193 e ADR-136.
+- [ ] Resolver modos permitidos por profile, consent, locale e provider capability. Evidência: T-FR-193 e ADR-136.
+- [ ] Manter áudio original disponível e lineage entre versões. Evidência: T-FR-193 e ADR-136.
+- [ ] Aplicar disclosure quando política/mercado exigir. Evidência: T-FR-193 e ADR-136.
+- [ ] Criar integration tests de escolha e fallback entre modos. Evidência: T-FR-193 e ADR-136.
 
 ### F5.006 — LocaleProfile [FR-194]
 
-- [x] Modelar locale/region, glossary, do-not-translate, tone, CTA conventions, number/date/currency e legal text. Evidência: T-FR-194 e ADR-136.
-- [x] Modelar fonts, glyph coverage, line breaking e RTL. Evidência: T-FR-194 e ADR-136.
-- [x] Permitir default do workspace e override versionado por projeto. Evidência: T-FR-194 e ADR-136.
-- [x] Validar glossary conflicts antes de TTS/render. Evidência: T-FR-194 e ADR-136.
-- [x] Criar fixtures PT-BR, EN-US, ES e um locale RTL. Evidência: T-FR-194 e ADR-136.
+- [ ] Modelar locale/region, glossary, do-not-translate, tone, CTA conventions, number/date/currency e legal text. Evidência: T-FR-194 e ADR-136.
+- [ ] Modelar fonts, glyph coverage, line breaking e RTL. Evidência: T-FR-194 e ADR-136.
+- [ ] Permitir default do workspace e override versionado por projeto. Evidência: T-FR-194 e ADR-136.
+- [ ] Validar glossary conflicts antes de TTS/render. Evidência: T-FR-194 e ADR-136.
+- [ ] Criar fixtures PT-BR, EN-US, ES e um locale RTL. Evidência: T-FR-194 e ADR-136.
 
 ### F5.007 — Assets localizáveis [FR-195]
 
-- [x] Detectar texto visível por OCR region e classificar importância. Evidência: T-FR-195 e ADR-136.
-- [x] Decidir share, replace, localize, regenerate ou reject por asset/region. Evidência: T-FR-195 e ADR-136.
-- [x] Gerar derivative localizado preservando background e lineage. Evidência: T-FR-195 e ADR-136.
-- [x] Verificar legibilidade, tradução e rights após alteração. Evidência: T-FR-195 e ADR-136.
-- [x] Criar eval de card, screenshot, logo, interface e texto irrelevante. Evidência: T-FR-195 e ADR-136.
+- [ ] Detectar texto visível por OCR region e classificar importância. Evidência: T-FR-195 e ADR-136.
+- [ ] Decidir share, replace, localize, regenerate ou reject por asset/region. Evidência: T-FR-195 e ADR-136.
+- [ ] Gerar derivative localizado preservando background e lineage. Evidência: T-FR-195 e ADR-136.
+- [ ] Verificar legibilidade, tradução e rights após alteração. Evidência: T-FR-195 e ADR-136.
+- [ ] Criar eval de card, screenshot, logo, interface e texto irrelevante. Evidência: T-FR-195 e ADR-136.
 
 ### F5.008 — Crítico de localização [FR-196]
 
-- [x] Avaliar fidelity, claim/qualifier, glossary, pronunciation, lip-sync, typography e subtitle timing. Evidência: T-FR-196 e ADR-136.
-- [x] Definir pesos/hard gates por modo e locale. Evidência: T-FR-196 e ADR-136.
-- [x] Localizar issue por ScriptBlock, palavra, frame e asset. Evidência: T-FR-196 e ADR-136.
-- [x] Acionar retranslation, TTS retry, timeline reflow ou revisão humana. Evidência: T-FR-196 e ADR-136.
-- [x] Criar eval humano+automático para PT-BR → EN/ES. Evidência: T-FR-196 e ADR-136.
+- [ ] Avaliar fidelity, claim/qualifier, glossary, pronunciation, lip-sync, typography e subtitle timing. Evidência: T-FR-196 e ADR-136.
+- [ ] Definir pesos/hard gates por modo e locale. Evidência: T-FR-196 e ADR-136.
+- [ ] Localizar issue por ScriptBlock, palavra, frame e asset. Evidência: T-FR-196 e ADR-136.
+- [ ] Acionar retranslation, TTS retry, timeline reflow ou revisão humana. Evidência: T-FR-196 e ADR-136.
+- [ ] Criar eval humano+automático para PT-BR → EN/ES. Evidência: T-FR-196 e ADR-136.
 
 ### F5.009 — Sync modes de áudio [FR-200]
 
-- [x] Modelar narrative-led, music-led e hybrid no `AudioDirectionPlan`. Evidência: T-FR-200 e ADR-137.
-- [x] Definir prioridade, tolerance e comportamento de snap por modo. Evidência: T-FR-200 e ADR-137.
-- [x] Persistir escolha/razão no TreatmentPlan e manifest. Evidência: T-FR-200 e ADR-137.
-- [x] Criar unit tests de decisão em conflito fala versus beat. Evidência: T-FR-200 e ADR-137.
+- [ ] Modelar narrative-led, music-led e hybrid no `AudioDirectionPlan`. Evidência: T-FR-200 e ADR-137.
+- [ ] Definir prioridade, tolerance e comportamento de snap por modo. Evidência: T-FR-200 e ADR-137.
+- [ ] Persistir escolha/razão no TreatmentPlan e manifest. Evidência: T-FR-200 e ADR-137.
+- [ ] Criar unit tests de decisão em conflito fala versus beat. Evidência: T-FR-200 e ADR-137.
 
 ### F5.010 — AudioDirectionPlan [FR-201]
 
-- [x] Modelar music sections, beat grid, AudioEvents, transitions, ducking e MixPlan. Evidência: T-FR-201 e ADR-137.
-- [x] Compilar o plano para timeline e renderer de forma determinística. Evidência: T-FR-201 e ADR-137.
-- [x] Permitir overrides por range e protected events. Evidência: T-FR-201 e ADR-137.
-- [x] Criar golden plan para narrative-led, hybrid e music-led. Evidência: T-FR-201 e ADR-137.
+- [ ] Modelar music sections, beat grid, AudioEvents, transitions, ducking e MixPlan. Evidência: T-FR-201 e ADR-137.
+- [ ] Compilar o plano para timeline e renderer de forma determinística. Evidência: T-FR-201 e ADR-137.
+- [ ] Permitir overrides por range e protected events. Evidência: T-FR-201 e ADR-137.
+- [ ] Criar golden plan para narrative-led, hybrid e music-led. Evidência: T-FR-201 e ADR-137.
 
 ### F5.011 — Sound Library [FR-202]
 
-- [x] Modelar música, SFX, stinger e room tone com BPM, key, mood, duration e rights. Evidência: T-FR-202 e ADR-137.
-- [x] Extrair waveform, loudness, beat grid e sections como metadata versionada. Evidência: T-FR-202 e ADR-137.
-- [x] Implementar busca híbrida por função, energia, tema e licença. Evidência: T-FR-202 e ADR-137.
-- [x] Bloquear uso fora de território/canal/expiração. Evidência: T-FR-202 e ADR-137.
-- [x] Criar E2E de ingest, análise, busca e inserção. Evidência: T-FR-202 e ADR-137.
+- [ ] Modelar música, SFX, stinger e room tone com BPM, key, mood, duration e rights. Evidência: T-FR-202 e ADR-137.
+- [ ] Extrair waveform, loudness, beat grid e sections como metadata versionada. Evidência: T-FR-202 e ADR-137.
+- [ ] Implementar busca híbrida por função, energia, tema e licença. Evidência: T-FR-202 e ADR-137.
+- [ ] Bloquear uso fora de território/canal/expiração. Evidência: T-FR-202 e ADR-137.
+- [ ] Criar E2E de ingest, análise, busca e inserção. Evidência: T-FR-202 e ADR-137.
 
 ### F5.012 — Sound budget [FR-203]
 
-- [x] Definir densidade máxima, cooldown, repetition group e intensidade por janela. Evidência: T-FR-203 e ADR-137.
-- [x] Aplicar budget a SFX, whoosh, hit, stinger e transições. Evidência: T-FR-203 e ADR-137.
-- [x] Penalizar eventos redundantes antes da renderização. Evidência: T-FR-203 e ADR-137.
-- [x] Expor consumo e remoções no QualityReport. Evidência: T-FR-203 e ADR-137.
-- [x] Criar golden de mix sóbrio, adequado e exagerado. Evidência: T-FR-203 e ADR-137.
+- [ ] Definir densidade máxima, cooldown, repetition group e intensidade por janela. Evidência: T-FR-203 e ADR-137.
+- [ ] Aplicar budget a SFX, whoosh, hit, stinger e transições. Evidência: T-FR-203 e ADR-137.
+- [ ] Penalizar eventos redundantes antes da renderização. Evidência: T-FR-203 e ADR-137.
+- [ ] Expor consumo e remoções no QualityReport. Evidência: T-FR-203 e ADR-137.
+- [ ] Criar golden de mix sóbrio, adequado e exagerado. Evidência: T-FR-203 e ADR-137.
 
 ### F5.013 — Mix e master [FR-204]
 
-- [x] Implementar gain staging de fala, música, SFX e room tone. Evidência: T-FR-204 e ADR-137.
-- [x] Implementar ducking com attack/release e automação por fala/evento. Evidência: T-FR-204 e ADR-137.
-- [x] Definir loudness target, true peak e limiter por OutputSpec/destino. Evidência: T-FR-204 e ADR-137.
-- [x] Preservar tails e evitar clicks nos cortes/crossfades. Evidência: T-FR-204 e ADR-137.
-- [x] Gerar loudness report e audio fixtures antes/depois. Evidência: T-FR-204 e ADR-137.
+- [ ] Implementar gain staging de fala, música, SFX e room tone. Evidência: T-FR-204 e ADR-137.
+- [ ] Implementar ducking com attack/release e automação por fala/evento. Evidência: T-FR-204 e ADR-137.
+- [ ] Definir loudness target, true peak e limiter por OutputSpec/destino. Evidência: T-FR-204 e ADR-137.
+- [ ] Preservar tails e evitar clicks nos cortes/crossfades. Evidência: T-FR-204 e ADR-137.
+- [ ] Gerar loudness report e audio fixtures antes/depois. Evidência: T-FR-204 e ADR-137.
 
 ### F5.014 — Crítico audiovisual [FR-205]
 
-- [x] Detectar masking de fala, drift, clipping, pumping, tails cortadas e beat mismatch. Evidência: T-FR-205 e ADR-137.
-- [x] Relacionar issue a track/event/range e sugerir patch específico. Evidência: T-FR-205 e ADR-137.
-- [x] Reprovar final em falha hard e permitir warning calibrado. Evidência: T-FR-205 e ADR-137.
-- [x] Medir resultado em dataset com fala, música vocal/instrumental e SFX. Evidência: T-FR-205 e ADR-137.
-- [x] Criar audiovisual golden e revisão humana amostral. Evidência: T-FR-205 e ADR-137.
+- [ ] Detectar masking de fala, drift, clipping, pumping, tails cortadas e beat mismatch. Evidência: T-FR-205 e ADR-137.
+- [ ] Relacionar issue a track/event/range e sugerir patch específico. Evidência: T-FR-205 e ADR-137.
+- [ ] Reprovar final em falha hard e permitir warning calibrado. Evidência: T-FR-205 e ADR-137.
+- [ ] Medir resultado em dataset com fala, música vocal/instrumental e SFX. Evidência: T-FR-205 e ADR-137.
+- [ ] Criar audiovisual golden e revisão humana amostral. Evidência: T-FR-205 e ADR-137.
 
 ### F5.015 — Gate localização e áudio
 
-- [x] Localizar projeto PT-BR aprovado para EN e ES. Evidência: T-F5-GATE e ADR-137.
-- [x] Demonstrar novo áudio, alignment, timeline, legenda e CTA por locale. Evidência: T-F5-GATE e ADR-137.
-- [x] Fazer lip-sync/avatar quando consentido e subtitles-only quando não. Evidência: T-F5-GATE e ADR-137.
-- [x] Localizar ou substituir assets com texto visível. Evidência: T-F5-GATE e ADR-137.
-- [x] Exportar matriz multi-locale em pelo menos 9:16 e 16:9. Evidência: T-F5-GATE e ADR-137.
-- [x] Produzir versões narrative-led e hybrid com mix validado. Evidência: T-F5-GATE e ADR-137.
-- [x] Demonstrar music-led sem deformar fala. Evidência: T-F5-GATE e ADR-137.
-- [x] Registrar evidências e aprovar gate da fase. Evidência: T-F5-GATE e ADR-137.
+- [ ] Localizar projeto PT-BR aprovado para EN e ES. Evidência: T-F5-GATE e ADR-137.
+- [ ] Demonstrar novo áudio, alignment, timeline, legenda e CTA por locale. Evidência: T-F5-GATE e ADR-137.
+- [ ] Fazer lip-sync/avatar quando consentido e subtitles-only quando não. Evidência: T-F5-GATE e ADR-137.
+- [ ] Localizar ou substituir assets com texto visível. Evidência: T-F5-GATE e ADR-137.
+- [ ] Exportar matriz multi-locale em pelo menos 9:16 e 16:9. Evidência: T-F5-GATE e ADR-137.
+- [ ] Produzir versões narrative-led e hybrid com mix validado. Evidência: T-F5-GATE e ADR-137.
+- [ ] Demonstrar music-led sem deformar fala. Evidência: T-F5-GATE e ADR-137.
+- [ ] Registrar evidências e aprovar gate da fase. Evidência: T-F5-GATE e ADR-137.
 
 ---
 
@@ -1627,98 +1651,98 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### NFR.001 — Idempotência [NFR-001]
 
-- [x] Definir idempotency key por upload, command, workflow step, provider submit e render. Evidência: T-NFR-001 e ADR-138.
-- [x] Criar unique constraints ou ledger para impedir efeito externo duplicado. Evidência: T-NFR-001 e ADR-138.
-- [x] Retornar resultado anterior quando a mesma operação já tiver concluído. Evidência: T-NFR-001 e ADR-138.
-- [x] Testar request duplicada, callback duplicado e retry após timeout sem resposta. Evidência: T-NFR-001 e ADR-138.
-- [x] Medir violações de idempotência como incidente crítico. Evidência: T-NFR-001 e ADR-138.
+- [ ] Definir idempotency key por upload, command, workflow step, provider submit e render. Evidência: T-NFR-001 e ADR-138.
+- [ ] Criar unique constraints ou ledger para impedir efeito externo duplicado. Evidência: T-NFR-001 e ADR-138.
+- [ ] Retornar resultado anterior quando a mesma operação já tiver concluído. Evidência: T-NFR-001 e ADR-138.
+- [ ] Testar request duplicada, callback duplicado e retry após timeout sem resposta. Evidência: T-NFR-001 e ADR-138.
+- [ ] Medir violações de idempotência como incidente crítico. Evidência: T-NFR-001 e ADR-138.
 
 ### NFR.002 — Resume [NFR-002]
 
-- [x] Identificar checkpoints seguros em ingest, perception, Director, provider, render e batch. Evidência: T-NFR-002 e ADR-138.
-- [x] Persistir checkpoint e artifact parcial antes de confirmar avanço do workflow. Evidência: T-NFR-002 e ADR-138.
-- [x] Reconciliar jobs `running` sem heartbeat após restart. Evidência: T-NFR-002 e ADR-138.
-- [x] Criar chaos tests interrompendo cada fase longa. Evidência: T-NFR-002 e ADR-138.
-- [x] Garantir que operador possa retry/cancel sem editar banco manualmente. Evidência F0-028/F0-029: capabilities e endpoints externos com scopes separados, persistência transacional e regressões HTTP/PostgreSQL.
+- [ ] Identificar checkpoints seguros em ingest, perception, Director, provider, render e batch. Evidência: T-NFR-002 e ADR-138.
+- [ ] Persistir checkpoint e artifact parcial antes de confirmar avanço do workflow. Evidência: T-NFR-002 e ADR-138.
+- [ ] Reconciliar jobs `running` sem heartbeat após restart. Evidência: T-NFR-002 e ADR-138.
+- [ ] Criar chaos tests interrompendo cada fase longa. Evidência: T-NFR-002 e ADR-138.
+- [ ] Garantir que operador possa retry/cancel sem editar banco manualmente. Evidência F0-028/F0-029: capabilities e endpoints externos com scopes separados, persistência transacional e regressões HTTP/PostgreSQL.
 
 ### NFR.003 — Observabilidade [NFR-003]
 
-- [x] Padronizar logs estruturados com workspace, project, version, run, workflow e provider job IDs. Evidência: T-NFR-003 e ADR-138.
-- [x] Propagar trace context entre web, queue, workers, providers e renderer. Evidência: T-NFR-003 e ADR-138.
-- [x] Medir duração, espera, attempts, bytes, tokens, custo estimado/real e status. Evidência: T-NFR-003 e ADR-138.
-- [x] Redigir prompts, transcripts, URLs e dados pessoais segundo política. Evidência: T-NFR-003 e ADR-138.
-- [x] Criar dashboards por jornada/fase e alertas de hard invariants. Evidência: T-NFR-003 e ADR-138.
-- [x] Documentar runbook para job preso, provider degradado e render inconsistente. Evidência: T-NFR-003 e ADR-138.
+- [ ] Padronizar logs estruturados com workspace, project, version, run, workflow e provider job IDs. Evidência: T-NFR-003 e ADR-138.
+- [ ] Propagar trace context entre web, queue, workers, providers e renderer. Evidência: T-NFR-003 e ADR-138.
+- [ ] Medir duração, espera, attempts, bytes, tokens, custo estimado/real e status. Evidência: T-NFR-003 e ADR-138.
+- [ ] Redigir prompts, transcripts, URLs e dados pessoais segundo política. Evidência: T-NFR-003 e ADR-138.
+- [ ] Criar dashboards por jornada/fase e alertas de hard invariants. Evidência: T-NFR-003 e ADR-138.
+- [ ] Documentar runbook para job preso, provider degradado e render inconsistente. Evidência: T-NFR-003 e ADR-138.
 
 ### NFR.004 — Reprodutibilidade [NFR-004]
 
-- [x] Salvar manifest, props, hashes, tool/model versions, seeds e provider config permitida. Evidência: T-NFR-004 e ADR-138.
-- [x] Distinguir reprodução determinística de reexecução best-effort de provider generativo. Evidência: T-NFR-004 e ADR-138.
-- [x] Fixar fonts, LUTs, renderer package e assets usados pelo artifact. Evidência: T-NFR-004 e ADR-138.
-- [x] Criar comando de replay em ambiente isolado. Evidência: T-NFR-004 e ADR-138.
-- [x] Comparar hashes ou visual/audio tolerances em golden replay. Evidência: T-NFR-004 e ADR-138.
+- [ ] Salvar manifest, props, hashes, tool/model versions, seeds e provider config permitida. Evidência: T-NFR-004 e ADR-138.
+- [ ] Distinguir reprodução determinística de reexecução best-effort de provider generativo. Evidência: T-NFR-004 e ADR-138.
+- [ ] Fixar fonts, LUTs, renderer package e assets usados pelo artifact. Evidência: T-NFR-004 e ADR-138.
+- [ ] Criar comando de replay em ambiente isolado. Evidência: T-NFR-004 e ADR-138.
+- [ ] Comparar hashes ou visual/audio tolerances em golden replay. Evidência: T-NFR-004 e ADR-138.
 
 ### NFR.005 — Performance [NFR-005]
 
-- [x] Definir budgets de shell, metadata, primeiro frame, seek, timeline input e commands. Evidência: T-NFR-005 e ADR-138.
-- [x] Usar proxy e metadata incremental; nunca baixar master para preview comum. Evidência: T-NFR-005 e ADR-138.
-- [x] Mover probe, IA, FFmpeg, provider e render para workers. Evidência: T-NFR-005 e ADR-138.
-- [x] Virtualizar timeline/biblioteca e degradar thumbnails antes de input latency. Evidência: T-NFR-005 e ADR-138.
-- [x] Criar testes p50/p95 em projeto pequeno, médio, 1.000 clips e long-form. Evidência: T-NFR-005 e ADR-138.
-- [x] Criar alertas de regressão por build. Evidência: T-NFR-005 e ADR-138.
+- [ ] Definir budgets de shell, metadata, primeiro frame, seek, timeline input e commands. Evidência: T-NFR-005 e ADR-138.
+- [ ] Usar proxy e metadata incremental; nunca baixar master para preview comum. Evidência: T-NFR-005 e ADR-138.
+- [ ] Mover probe, IA, FFmpeg, provider e render para workers. Evidência: T-NFR-005 e ADR-138.
+- [ ] Virtualizar timeline/biblioteca e degradar thumbnails antes de input latency. Evidência: T-NFR-005 e ADR-138.
+- [ ] Criar testes p50/p95 em projeto pequeno, médio, 1.000 clips e long-form. Evidência: T-NFR-005 e ADR-138.
+- [ ] Criar alertas de regressão por build. Evidência: T-NFR-005 e ADR-138.
 
 ### NFR.006 — Escalabilidade [NFR-006]
 
-- [x] Separar filas e concurrency controls de ingest, perception, Director, provider e render. Evidência: T-NFR-006 e ADR-138.
-- [x] Definir autoscaling, backpressure, prioridade e quota por workspace. Evidência: T-NFR-006 e ADR-138.
-- [x] Evitar fan-out sem preflight em batch/export/localization. Evidência: T-NFR-006 e ADR-138.
-- [x] Criar load tests de uploads, batches e callbacks concorrentes. Evidência: T-NFR-006 e ADR-138.
-- [x] Definir capacidade e custo por worker class. Evidência: T-NFR-006 e ADR-138.
+- [ ] Separar filas e concurrency controls de ingest, perception, Director, provider e render. Evidência: T-NFR-006 e ADR-138.
+- [ ] Definir autoscaling, backpressure, prioridade e quota por workspace. Evidência: T-NFR-006 e ADR-138.
+- [ ] Evitar fan-out sem preflight em batch/export/localization. Evidência: T-NFR-006 e ADR-138.
+- [ ] Criar load tests de uploads, batches e callbacks concorrentes. Evidência: T-NFR-006 e ADR-138.
+- [ ] Definir capacidade e custo por worker class. Evidência: T-NFR-006 e ADR-138.
 
 ### NFR.007 — Segurança [NFR-007]
 
-- [x] Retirar credenciais de código, prompts, manifests públicos e campos em claro. Evidência: T-NFR-007 e ADR-138.
-- [x] Implementar secret references de menor privilégio e rotação. Evidência: T-NFR-007 e ADR-138.
-- [x] Aplicar autorização server-side por workspace em API, storage e jobs. Evidência: T-NFR-007 e ADR-138.
-- [x] Usar signed URLs curtas, MIME validation, malware/quarantine e SSRF protection. Evidência: T-NFR-007 e ADR-138.
-- [x] Verificar assinatura/replay de webhook e autenticação de MCP/API. Evidência: T-NFR-007 e ADR-138.
-- [x] Auditar criação/uso/export de mídia sintética e protected data. Evidência: T-NFR-007 e ADR-138.
-- [x] Executar threat model e security tests antes de cada gate público. Evidência: T-NFR-007 e ADR-138.
+- [ ] Retirar credenciais de código, prompts, manifests públicos e campos em claro. Evidência: T-NFR-007 e ADR-138.
+- [ ] Implementar secret references de menor privilégio e rotação. Evidência: T-NFR-007 e ADR-138.
+- [ ] Aplicar autorização server-side por workspace em API, storage e jobs. Evidência: T-NFR-007 e ADR-138.
+- [ ] Usar signed URLs curtas, MIME validation, malware/quarantine e SSRF protection. Evidência: T-NFR-007 e ADR-138.
+- [ ] Verificar assinatura/replay de webhook e autenticação de MCP/API. Evidência: T-NFR-007 e ADR-138.
+- [ ] Auditar criação/uso/export de mídia sintética e protected data. Evidência: T-NFR-007 e ADR-138.
+- [ ] Executar threat model e security tests antes de cada gate público. Evidência: T-NFR-007 e ADR-138.
 
 ### NFR.008 — Privacidade [NFR-008]
 
-- [x] Classificar assets, faces, vozes, consentimentos, testemunhos e transcripts como dados sensíveis adequados. Evidência: T-NFR-008 e ADR-138.
-- [x] Definir coleta mínima, finalidade, acesso, retenção e compartilhamento. Evidência: T-NFR-008 e ADR-138.
-- [x] Implementar deleção rastreável com tombstone e tratamento de derivatives/cache. Evidência: T-NFR-008 e ADR-138.
-- [x] Implementar export de dados e audit trail conforme política aplicável. Evidência: T-NFR-008 e ADR-138.
-- [x] Impedir conteúdo sensível em analytics/logs não autorizados. Evidência: T-NFR-008 e ADR-138.
-- [x] Testar deleção de source com projetos, segments e artifacts dependentes. Evidência: T-NFR-008 e ADR-138.
+- [ ] Classificar assets, faces, vozes, consentimentos, testemunhos e transcripts como dados sensíveis adequados. Evidência: T-NFR-008 e ADR-138.
+- [ ] Definir coleta mínima, finalidade, acesso, retenção e compartilhamento. Evidência: T-NFR-008 e ADR-138.
+- [ ] Implementar deleção rastreável com tombstone e tratamento de derivatives/cache. Evidência: T-NFR-008 e ADR-138.
+- [ ] Implementar export de dados e audit trail conforme política aplicável. Evidência: T-NFR-008 e ADR-138.
+- [ ] Impedir conteúdo sensível em analytics/logs não autorizados. Evidência: T-NFR-008 e ADR-138.
+- [ ] Testar deleção de source com projetos, segments e artifacts dependentes. Evidência: T-NFR-008 e ADR-138.
 
 ### NFR.009 — Compatibilidade [NFR-009]
 
-- [x] Versionar schemas de banco, events, EditPlan, manifests, provider result e embeddings. Evidência: T-NFR-009 e ADR-138.
-- [x] Implementar migrations forward e política de leitura de versões antigas. Evidência: T-NFR-009 e ADR-138.
-- [x] Manter golden fixtures das versões suportadas. Evidência: T-NFR-009 e ADR-138.
-- [x] Rejeitar versão desconhecida com erro acionável, sem coerção silenciosa. Evidência: T-NFR-009 e ADR-138.
-- [x] Testar upgrade em cópia de dataset representativo. Evidência: T-NFR-009 e ADR-138.
+- [ ] Versionar schemas de banco, events, EditPlan, manifests, provider result e embeddings. Evidência: T-NFR-009 e ADR-138.
+- [ ] Implementar migrations forward e política de leitura de versões antigas. Evidência: T-NFR-009 e ADR-138.
+- [ ] Manter golden fixtures das versões suportadas. Evidência: T-NFR-009 e ADR-138.
+- [ ] Rejeitar versão desconhecida com erro acionável, sem coerção silenciosa. Evidência: T-NFR-009 e ADR-138.
+- [ ] Testar upgrade em cópia de dataset representativo. Evidência: T-NFR-009 e ADR-138.
 
 ### NFR.010 — Testabilidade [NFR-010]
 
-- [x] Manter regras de domínio puras e relógio/IDs/model calls injetáveis. Evidência: T-NFR-010 e ADR-138.
-- [x] Criar fake adapters para storage, models, providers, workflow e renderer. Evidência: T-NFR-010 e ADR-138.
-- [x] Organizar fixtures de timing, sync, claims, layout, cor, áudio e localização. Evidência: T-NFR-010 e ADR-138.
-- [x] Criar golden update reviewado, nunca atualização automática em CI. Evidência: T-NFR-010 e ADR-138.
-- [x] Executar E2E das nove jornadas do PRD. Evidência: T-NFR-010 e ADR-138.
-- [x] Publicar cobertura por risco, não apenas percentual de linhas. Evidência: T-NFR-010 e ADR-138.
+- [ ] Manter regras de domínio puras e relógio/IDs/model calls injetáveis. Evidência: T-NFR-010 e ADR-138.
+- [ ] Criar fake adapters para storage, models, providers, workflow e renderer. Evidência: T-NFR-010 e ADR-138.
+- [ ] Organizar fixtures de timing, sync, claims, layout, cor, áudio e localização. Evidência: T-NFR-010 e ADR-138.
+- [ ] Criar golden update reviewado, nunca atualização automática em CI. Evidência: T-NFR-010 e ADR-138.
+- [ ] Executar E2E das nove jornadas do PRD. Evidência: T-NFR-010 e ADR-138.
+- [ ] Publicar cobertura por risco, não apenas percentual de linhas. Evidência: T-NFR-010 e ADR-138.
 
 ### NFR.011 — Paridade e estabilidade externa [NFR-011]
 
-- [x] Criar contract test público para cada capability operável. Evidência: T-NFR-011 e ADR-138.
-- [x] Executar parity E2E comparando UI, REST e MCP sobre o mesmo fluxo. Evidência: T-NFR-011 e ADR-138.
-- [x] Publicar OpenAPI/schema/tool catalog a partir do mesmo source versionado. Evidência: T-NFR-011 e ADR-138.
-- [x] Detectar breaking changes e exigir depreciação/nova major. Evidência: T-NFR-011 e ADR-138.
-- [x] Medir clients ativos por versão antes de sunset. Evidência: T-NFR-011 e ADR-138.
-- [x] Documentar migration guide e manter errors estáveis dentro da major. Evidência: T-NFR-011 e ADR-138.
+- [ ] Criar contract test público para cada capability operável. Evidência: T-NFR-011 e ADR-138.
+- [ ] Executar parity E2E comparando UI, REST e MCP sobre o mesmo fluxo. Evidência: T-NFR-011 e ADR-138.
+- [ ] Publicar OpenAPI/schema/tool catalog a partir do mesmo source versionado. Evidência: T-NFR-011 e ADR-138.
+- [ ] Detectar breaking changes e exigir depreciação/nova major. Evidência: T-NFR-011 e ADR-138.
+- [ ] Medir clients ativos por versão antes de sunset. Evidência: T-NFR-011 e ADR-138.
+- [ ] Documentar migration guide e manter errors estáveis dentro da major. Evidência: T-NFR-011 e ADR-138.
 
 ---
 
@@ -1726,39 +1750,39 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### 9.1 Instrumentação de produto
 
-- [x] Medir material enviado → primeiro proxy por modo, duração e workspace. Evidência: T-METRIC-001 e ADR-139.
-- [x] Medir projetos aprovados sem alteração manual, com definição explícita de “aprovação”. Evidência: T-METRIC-001 e ADR-139.
-- [x] Medir patches por vídeo, rounds de critic e annotations reabertas. Evidência: T-METRIC-001 e ADR-139.
-- [x] Medir aceitação/rejeição/substituição de B-roll e transformação por origem. Evidência: T-METRIC-001 e ADR-139.
-- [x] Medir reutilização de masters, segments e synthetic blocks versus geração nova. Evidência: T-METRIC-001 e ADR-139.
-- [x] Definir método de estimativa de tempo economizado sem afirmar causalidade indevida. Evidência: T-METRIC-001 e ADR-139.
-- [x] Medir aprovação por formato, locale, objetivo e modo de produção. Evidência: T-METRIC-001 e ADR-139.
+- [ ] Medir material enviado → primeiro proxy por modo, duração e workspace. Evidência: T-METRIC-001 e ADR-139.
+- [ ] Medir projetos aprovados sem alteração manual, com definição explícita de “aprovação”. Evidência: T-METRIC-001 e ADR-139.
+- [ ] Medir patches por vídeo, rounds de critic e annotations reabertas. Evidência: T-METRIC-001 e ADR-139.
+- [ ] Medir aceitação/rejeição/substituição de B-roll e transformação por origem. Evidência: T-METRIC-001 e ADR-139.
+- [ ] Medir reutilização de masters, segments e synthetic blocks versus geração nova. Evidência: T-METRIC-001 e ADR-139.
+- [ ] Definir método de estimativa de tempo economizado sem afirmar causalidade indevida. Evidência: T-METRIC-001 e ADR-139.
+- [ ] Medir aprovação por formato, locale, objetivo e modo de produção. Evidência: T-METRIC-001 e ADR-139.
 
 ### 9.2 Instrumentação de qualidade
 
-- [x] Medir hard/warning issues técnicos por render e por minuto. Evidência: T-METRIC-002 e ADR-139.
-- [x] Medir erros de legenda por minuto, tipo e idioma. Evidência: T-METRIC-002 e ADR-139.
-- [x] Medir colisões visuais detectadas antes e depois do critic. Evidência: T-METRIC-002 e ADR-139.
-- [x] Medir rejeições por incongruência semântica e integrity gate. Evidência: T-METRIC-002 e ADR-139.
-- [x] Medir falhas de lip-sync, identidade e pronúncia por provider/profile. Evidência: T-METRIC-002 e ADR-139.
-- [x] Medir incidentes de claim/contexto com severidade e escape rate. Evidência: T-METRIC-002 e ADR-139.
-- [x] Criar baseline, alvo e janela de regressão para cada métrica. Evidência: T-METRIC-002 e ADR-139.
+- [ ] Medir hard/warning issues técnicos por render e por minuto. Evidência: T-METRIC-002 e ADR-139.
+- [ ] Medir erros de legenda por minuto, tipo e idioma. Evidência: T-METRIC-002 e ADR-139.
+- [ ] Medir colisões visuais detectadas antes e depois do critic. Evidência: T-METRIC-002 e ADR-139.
+- [ ] Medir rejeições por incongruência semântica e integrity gate. Evidência: T-METRIC-002 e ADR-139.
+- [ ] Medir falhas de lip-sync, identidade e pronúncia por provider/profile. Evidência: T-METRIC-002 e ADR-139.
+- [ ] Medir incidentes de claim/contexto com severidade e escape rate. Evidência: T-METRIC-002 e ADR-139.
+- [ ] Criar baseline, alvo e janela de regressão para cada métrica. Evidência: T-METRIC-002 e ADR-139.
 
 ### 9.3 Instrumentação operacional
 
-- [x] Medir sucesso, falha, cancel e tempo em fila por job type. Evidência: T-METRIC-003 e ADR-139.
-- [x] Medir retries, rate limits e circuit breaker por provider. Evidência: T-METRIC-003 e ADR-139.
-- [x] Medir custo por minuto, output, locale, format e recipe. Evidência: T-METRIC-003 e ADR-139.
-- [x] Medir cache hit rate por classe de asset/job. Evidência: T-METRIC-003 e ADR-139.
-- [x] Medir tempo de proxy/final/range render e recursos consumidos. Evidência: T-METRIC-003 e ADR-139.
-- [x] Medir storage master/derivative/temp por workspace e idade. Evidência: T-METRIC-003 e ADR-139.
-- [x] Medir queue depth, oldest job, concurrency e saturation. Evidência: T-METRIC-003 e ADR-139.
-- [x] Criar budget alerts e relatórios de custo antes de habilitar batch em escala. Evidência: T-METRIC-003 e ADR-139.
-- [x] Medir requests, errors e latency da API por version, capability e client. Evidência: T-METRIC-003 e ADR-139.
-- [x] Medir rate-limit, quota, idempotency replay e version conflicts. Evidência: T-METRIC-003 e ADR-139.
-- [x] Medir webhook lag, success, retry, dead-letter e replay. Evidência: T-METRIC-003 e ADR-139.
-- [x] Medir tool/MCP calls, denies, preflight e commit por capability. Evidência: T-METRIC-003 e ADR-139.
-- [x] Separar ações iniciadas por UI, REST, SDK e agente sem alterar a semântica do domínio. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir sucesso, falha, cancel e tempo em fila por job type. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir retries, rate limits e circuit breaker por provider. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir custo por minuto, output, locale, format e recipe. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir cache hit rate por classe de asset/job. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir tempo de proxy/final/range render e recursos consumidos. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir storage master/derivative/temp por workspace e idade. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir queue depth, oldest job, concurrency e saturation. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Criar budget alerts e relatórios de custo antes de habilitar batch em escala. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir requests, errors e latency da API por version, capability e client. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir rate-limit, quota, idempotency replay e version conflicts. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir webhook lag, success, retry, dead-letter e replay. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Medir tool/MCP calls, denies, preflight e commit por capability. Evidência: T-METRIC-003 e ADR-139.
+- [ ] Separar ações iniciadas por UI, REST, SDK e agente sem alterar a semântica do domínio. Evidência: T-METRIC-003 e ADR-139.
 
 ---
 
@@ -1766,75 +1790,75 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### NG.001 — Não virar clone de NLE [NG-001]
 
-- [x] Limitar MVP ao vocabulário de tracks, layouts, mídia, texto, cor e áudio definido nas specs. Evidência: T-NG-001 e ADR-139.
-- [x] Recusar composição nodal, rotoscopia frame a frame e keyframes arbitrários no backlog MVP. Evidência: T-NG-001 e ADR-139.
-- [x] Revisar cada proposta de UI contra o risco de editor monolítico. Evidência: T-NG-001 e ADR-139.
+- [ ] Limitar MVP ao vocabulário de tracks, layouts, mídia, texto, cor e áudio definido nas specs. Evidência: T-NG-001 e ADR-139.
+- [ ] Recusar composição nodal, rotoscopia frame a frame e keyframes arbitrários no backlog MVP. Evidência: T-NG-001 e ADR-139.
+- [ ] Revisar cada proposta de UI contra o risco de editor monolítico. Evidência: T-NG-001 e ADR-139.
 
 ### NG.002 — Não prometer sync sem evidência [NG-002]
 
-- [x] Exibir `insufficient evidence` quando não houver clock, sinal, marker ou anchors. Evidência: T-NG-002 e ADR-139.
-- [x] Proibir label “sincronizado” abaixo do threshold de confidence/coverage. Evidência: T-NG-002 e ADR-139.
-- [x] Testar fluxo de requisitos escritos e alinhamento manual. Evidência: T-NG-002 e ADR-139.
+- [ ] Exibir `insufficient evidence` quando não houver clock, sinal, marker ou anchors. Evidência: T-NG-002 e ADR-139.
+- [ ] Proibir label “sincronizado” abaixo do threshold de confidence/coverage. Evidência: T-NG-002 e ADR-139.
+- [ ] Testar fluxo de requisitos escritos e alinhamento manual. Evidência: T-NG-002 e ADR-139.
 
 ### NG.003 — Não fabricar claims/provas [NG-003]
 
-- [x] Bloquear números, resultados, depoimentos, urgência e contexto não presentes em fonte autorizada. Evidência: T-NG-003 e ADR-139.
-- [x] Executar adversarial eval de reescrita e reordenação. Evidência: T-NG-003 e ADR-139.
-- [x] Exigir revisão humana quando a integridade não puder ser determinada. Evidência: T-NG-003 e ADR-139.
+- [ ] Bloquear números, resultados, depoimentos, urgência e contexto não presentes em fonte autorizada. Evidência: T-NG-003 e ADR-139.
+- [ ] Executar adversarial eval de reescrita e reordenação. Evidência: T-NG-003 e ADR-139.
+- [ ] Exigir revisão humana quando a integridade não puder ser determinada. Evidência: T-NG-003 e ADR-139.
 
 ### NG.004 — Não garantir limpeza perfeita [NG-004]
 
-- [x] Permitir `reject source` como resultado normal da deconstruction. Evidência: T-NG-004 e ADR-139.
-- [x] Mostrar perda prevista quando burned text, música ou compressão não forem recuperáveis. Evidência: T-NG-004 e ADR-139.
-- [x] Testar que o sistema não promove limpeza visivelmente degradada. Evidência: T-NG-004 e ADR-139.
+- [ ] Permitir `reject source` como resultado normal da deconstruction. Evidência: T-NG-004 e ADR-139.
+- [ ] Mostrar perda prevista quando burned text, música ou compressão não forem recuperáveis. Evidência: T-NG-004 e ADR-139.
+- [ ] Testar que o sistema não promove limpeza visivelmente degradada. Evidência: T-NG-004 e ADR-139.
 
 ### NG.005 — Não gerar produto cartesiano [NG-005]
 
-- [x] Bloquear materialização antes de compatibility, diversity, budget e preflight. Evidência: T-NG-005 e ADR-139.
-- [x] Definir limite seguro default por workspace. Evidência: T-NG-005 e ADR-139.
-- [x] Testar H×B×CTA×format×locale acima do limite. Evidência: T-NG-005 e ADR-139.
+- [ ] Bloquear materialização antes de compatibility, diversity, budget e preflight. Evidência: T-NG-005 e ADR-139.
+- [ ] Definir limite seguro default por workspace. Evidência: T-NG-005 e ADR-139.
+- [ ] Testar H×B×CTA×format×locale acima do limite. Evidência: T-NG-005 e ADR-139.
 
 ### NG.006 — Não tratar provider como garantia [NG-006]
 
-- [x] Manter critic, retry e fallback em toda capability generativa. Evidência: T-NG-006 e ADR-139.
-- [x] Exibir capability/health atuais sem prometer disponibilidade futura. Evidência: T-NG-006 e ADR-139.
-- [x] Testar provider removido no meio do workflow. Evidência: T-NG-006 e ADR-139.
+- [ ] Manter critic, retry e fallback em toda capability generativa. Evidência: T-NG-006 e ADR-139.
+- [ ] Exibir capability/health atuais sem prometer disponibilidade futura. Evidência: T-NG-006 e ADR-139.
+- [ ] Testar provider removido no meio do workflow. Evidência: T-NG-006 e ADR-139.
 
 ### NG.007 — Não substituir direitos/consentimentos [NG-007]
 
-- [x] Exigir rights gate independentemente da recomendação do modelo. Evidência: T-NG-007 e ADR-139.
-- [x] Bloquear imagem, voz, música, prova e mídia de terceiros sem autorização suficiente. Evidência: T-NG-007 e ADR-139.
-- [x] Testar expiração/revogação após cache e antes do export. Evidência: T-NG-007 e ADR-139.
+- [ ] Exigir rights gate independentemente da recomendação do modelo. Evidência: T-NG-007 e ADR-139.
+- [ ] Bloquear imagem, voz, música, prova e mídia de terceiros sem autorização suficiente. Evidência: T-NG-007 e ADR-139.
+- [ ] Testar expiração/revogação após cache e antes do export. Evidência: T-NG-007 e ADR-139.
 
 ### NG.008 — Não transformar tudo em espetáculo [NG-008]
 
-- [x] Aplicar budgets de pattern break, novelty, movimento e som. Evidência: T-NG-008 e ADR-139.
-- [x] Manter “nenhum efeito” como candidate elegível. Evidência: T-NG-008 e ADR-139.
-- [x] Criar quality golden que reprova edição exagerada. Evidência: T-NG-008 e ADR-139.
+- [ ] Aplicar budgets de pattern break, novelty, movimento e som. Evidência: T-NG-008 e ADR-139.
+- [ ] Manter “nenhum efeito” como candidate elegível. Evidência: T-NG-008 e ADR-139.
+- [ ] Criar quality golden que reprova edição exagerada. Evidência: T-NG-008 e ADR-139.
 
 ### NG.009 — Não usar transcript como instrução [NG-009]
 
-- [x] Marcar transcript/OCR/document como untrusted content data. Evidência: T-NG-009 e ADR-139.
-- [x] Impedir interpolação direta em system/developer policy sem encoding/isolamento. Evidência: T-NG-009 e ADR-139.
-- [x] Criar fixtures de prompt injection falado e escrito na tela. Evidência: T-NG-009 e ADR-139.
+- [ ] Marcar transcript/OCR/document como untrusted content data. Evidência: T-NG-009 e ADR-139.
+- [ ] Impedir interpolação direta em system/developer policy sem encoding/isolamento. Evidência: T-NG-009 e ADR-139.
+- [ ] Criar fixtures de prompt injection falado e escrito na tela. Evidência: T-NG-009 e ADR-139.
 
 ### NG.010 — Não garantir causalidade de performance [NG-010]
 
-- [x] Exibir validation source/scope e linguagem histórica, não causal. Evidência: T-NG-010 e ADR-139.
-- [x] Separar métrica do vídeo e hipótese sobre elemento no modelo de dados. Evidência: T-NG-010 e ADR-139.
-- [x] Revisar labels/explicações com exemplos de interpretação indevida. Evidência: T-NG-010 e ADR-139.
+- [ ] Exibir validation source/scope e linguagem histórica, não causal. Evidência: T-NG-010 e ADR-139.
+- [ ] Separar métrica do vídeo e hipótese sobre elemento no modelo de dados. Evidência: T-NG-010 e ADR-139.
+- [ ] Revisar labels/explicações com exemplos de interpretação indevida. Evidência: T-NG-010 e ADR-139.
 
 ### NG.011 — Não manter compatibilidade operacional com v1 [NG-011]
 
-- [x] Proibir decisões de arquitetura justificadas apenas por preservar route/schema antigo. Evidência: T-NG-011 e ADR-139.
-- [x] Criar import/adapters explícitos para dados ou módulos reaproveitados. Evidência: T-NG-011 e ADR-139.
-- [x] Remover dependência transitiva da v1 após cada extração validada. Evidência: T-NG-011 e ADR-139.
+- [ ] Proibir decisões de arquitetura justificadas apenas por preservar route/schema antigo. Evidência: T-NG-011 e ADR-139.
+- [ ] Criar import/adapters explícitos para dados ou módulos reaproveitados. Evidência: T-NG-011 e ADR-139.
+- [ ] Remover dependência transitiva da v1 após cada extração validada. Evidência: T-NG-011 e ADR-139.
 
 ### NG.012 — Não publicar internals como API [NG-012]
 
-- [x] Expor capabilities/resources estáveis, não tabelas, filas, storage keys, prompts ou payloads crus de provider. Evidência: T-NG-012 e ADR-139.
-- [x] Proibir endpoint externo que edite EditPlan/banco sem Command, policy e validation. Evidência: T-NG-012 e ADR-139.
-- [x] Criar architecture/security tests contra bypass pela superfície pública. Evidência: T-NG-012 e ADR-139.
+- [ ] Expor capabilities/resources estáveis, não tabelas, filas, storage keys, prompts ou payloads crus de provider. Evidência: T-NG-012 e ADR-139.
+- [ ] Proibir endpoint externo que edite EditPlan/banco sem Command, policy e validation. Evidência: T-NG-012 e ADR-139.
+- [ ] Criar architecture/security tests contra bypass pela superfície pública. Evidência: T-NG-012 e ADR-139.
 
 ---
 
@@ -1842,71 +1866,71 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### R.001 — Escopo excessivo [R-01]
 
-- [x] Manter gates F0–F5 e impedir feature flag pública antes do gate anterior. Evidência: T-R-01 e ADR-140.
-- [x] Quebrar cada épico em slice vertical demonstrável. Evidência: T-R-01 e ADR-140.
-- [x] Revisar mensalmente itens fora do critério de saída da fase corrente. Evidência: T-R-01 e ADR-140.
+- [ ] Manter gates F0–F5 e impedir feature flag pública antes do gate anterior. Evidência: T-R-01 e ADR-140.
+- [ ] Quebrar cada épico em slice vertical demonstrável. Evidência: T-R-01 e ADR-140.
+- [ ] Revisar mensalmente itens fora do critério de saída da fase corrente. Evidência: T-R-01 e ADR-140.
 
 ### R.002 — Qualidade subjetiva [R-02]
 
-- [x] Criar dataset de referência por objetivo/modo/formato. Evidência: T-R-02 e ADR-140.
-- [x] Definir rubricas versionadas e avaliação humana amostral. Evidência: T-R-02 e ADR-140.
-- [x] Medir proxy critic e preferências sem auto-aprender alteração destrutiva. Evidência: T-R-02 e ADR-140.
+- [ ] Criar dataset de referência por objetivo/modo/formato. Evidência: T-R-02 e ADR-140.
+- [ ] Definir rubricas versionadas e avaliação humana amostral. Evidência: T-R-02 e ADR-140.
+- [ ] Medir proxy critic e preferências sem auto-aprender alteração destrutiva. Evidência: T-R-02 e ADR-140.
 
 ### R.003 — Explosão de custos [R-03]
 
-- [x] Implementar preflight, reservation budget, cache, dedupe e top-N antes de batch/generation. Evidência: T-R-03 e ADR-140.
-- [x] Criar hard caps por run/workspace e alertas de anomalia. Evidência: T-R-03 e ADR-140.
-- [x] Testar partial retry sem refazer células concluídas. Evidência: T-R-03 e ADR-140.
+- [ ] Implementar preflight, reservation budget, cache, dedupe e top-N antes de batch/generation. Evidência: T-R-03 e ADR-140.
+- [ ] Criar hard caps por run/workspace e alertas de anomalia. Evidência: T-R-03 e ADR-140.
+- [ ] Testar partial retry sem refazer células concluídas. Evidência: T-R-03 e ADR-140.
 
 ### R.004 — Providers instáveis [R-04]
 
-- [x] Manter contract tests, registry, health, circuit breaker e fallback. Evidência: T-R-04 e ADR-140.
-- [x] Monitorar mudanças de capability/preço/limite por versão. Evidência: T-R-04 e ADR-140.
-- [x] Criar runbook de desativação e migração de provider. Evidência: T-R-04 e ADR-140.
+- [ ] Manter contract tests, registry, health, circuit breaker e fallback. Evidência: T-R-04 e ADR-140.
+- [ ] Monitorar mudanças de capability/preço/limite por versão. Evidência: T-R-04 e ADR-140.
+- [ ] Criar runbook de desativação e migração de provider. Evidência: T-R-04 e ADR-140.
 
 ### R.005 — Contexto e claims [R-05]
 
-- [x] Manter qualifiers/dependencies no StoryPlan e EvidenceSegment. Evidência: T-R-05 e ADR-140.
-- [x] Rodar integrity gates antes e depois de reorder/trim/localization. Evidência: T-R-05 e ADR-140.
-- [x] Auditar incidentes e ampliar adversarial fixtures. Evidência: T-R-05 e ADR-140.
+- [ ] Manter qualifiers/dependencies no StoryPlan e EvidenceSegment. Evidência: T-R-05 e ADR-140.
+- [ ] Rodar integrity gates antes e depois de reorder/trim/localization. Evidência: T-R-05 e ADR-140.
+- [ ] Auditar incidentes e ampliar adversarial fixtures. Evidência: T-R-05 e ADR-140.
 
 ### R.006 — Sync impossível [R-06]
 
-- [x] Publicar Capture Protocol e Apollo Sync Marker antes de prometer automação. Evidência: T-R-06 e ADR-140.
-- [x] Mostrar diagnostic/confidence e oferecer anchors manuais. Evidência: T-R-06 e ADR-140.
-- [x] Testar explicitamente sessões sem sinal comum. Evidência: T-R-06 e ADR-140.
+- [ ] Publicar Capture Protocol e Apollo Sync Marker antes de prometer automação. Evidência: T-R-06 e ADR-140.
+- [ ] Mostrar diagnostic/confidence e oferecer anchors manuais. Evidência: T-R-06 e ADR-140.
+- [ ] Testar explicitamente sessões sem sinal comum. Evidência: T-R-06 e ADR-140.
 
 ### R.007 — Biblioteca sem governança [R-07]
 
-- [x] Aplicar checksum, rights, metadata tiers, workspace scope e lifecycle. Evidência: T-R-07 e ADR-140.
-- [x] Medir duplicação, assets unknown e resultados sem uso. Evidência: T-R-07 e ADR-140.
-- [x] Criar rotinas de revisão, archive e deletion seguras. Evidência: T-R-07 e ADR-140.
+- [ ] Aplicar checksum, rights, metadata tiers, workspace scope e lifecycle. Evidência: T-R-07 e ADR-140.
+- [ ] Medir duplicação, assets unknown e resultados sem uso. Evidência: T-R-07 e ADR-140.
+- [ ] Criar rotinas de revisão, archive e deletion seguras. Evidência: T-R-07 e ADR-140.
 
 ### R.008 — UI impossível de manter [R-08]
 
-- [x] Usar Commands e view models em vez de mutations específicas por componente. Evidência: T-R-08 e ADR-140.
-- [x] Manter editor dividido em primitives/painéis e performance budgets. Evidência: T-R-08 e ADR-140.
-- [x] Recusar features avançadas fora do vocabulário aprovado sem ADR. Evidência: T-R-08 e ADR-140.
+- [ ] Usar Commands e view models em vez de mutations específicas por componente. Evidência: T-R-08 e ADR-140.
+- [ ] Manter editor dividido em primitives/painéis e performance budgets. Evidência: T-R-08 e ADR-140.
+- [ ] Recusar features avançadas fora do vocabulário aprovado sem ADR. Evidência: T-R-08 e ADR-140.
 
 ### R.009 — Prompt injection por conteúdo [R-09]
 
-- [x] Separar owner-authored policies de mídia/documentos ingeridos no storage e nos prompts. Evidência: T-R-09 e ADR-140.
-- [x] Fazer Brief Compiler estruturar somente canal autorizado. Evidência: T-R-09 e ADR-140.
-- [x] Executar red-team com fala, legenda, OCR e metadata maliciosos. Evidência: T-R-09 e ADR-140.
+- [ ] Separar owner-authored policies de mídia/documentos ingeridos no storage e nos prompts. Evidência: T-R-09 e ADR-140.
+- [ ] Fazer Brief Compiler estruturar somente canal autorizado. Evidência: T-R-09 e ADR-140.
+- [ ] Executar red-team com fala, legenda, OCR e metadata maliciosos. Evidência: T-R-09 e ADR-140.
 
 ### R.010 — Crescimento de storage [R-10]
 
-- [x] Definir quotas, retention policies e classes master/derivative/temp. Evidência: T-R-10 e ADR-140.
-- [x] Tornar derivatives reconstruíveis elegíveis a expiração controlada. Evidência: T-R-10 e ADR-140.
-- [x] Medir storage por lineage, workspace e idade antes de deleção. Evidência: T-R-10 e ADR-140.
-- [x] Implementar garbage collection somente com reference graph verificado. Evidência: T-R-10 e ADR-140.
+- [ ] Definir quotas, retention policies e classes master/derivative/temp. Evidência: T-R-10 e ADR-140.
+- [ ] Tornar derivatives reconstruíveis elegíveis a expiração controlada. Evidência: T-R-10 e ADR-140.
+- [ ] Medir storage por lineage, workspace e idade antes de deleção. Evidência: T-R-10 e ADR-140.
+- [ ] Implementar garbage collection somente com reference graph verificado. Evidência: T-R-10 e ADR-140.
 
 ### R.011 — Abuso, vazamento e custo por automação [R-11]
 
-- [x] Aplicar credentials revogáveis, scopes mínimos, quotas, rate limits e budgets antes de abrir a API. Evidência: T-R-11 e ADR-140.
-- [x] Detectar loops/anomalias de requests, mutations, generation spend e downloads. Evidência: T-R-11 e ADR-140.
-- [x] Implementar kill switch por client/workspace e runbook de credencial comprometida. Evidência: T-R-11 e ADR-140.
-- [x] Red-team agents para exfiltração, prompt injection, privilege escalation e geração cara repetida. Evidência: T-R-11 e ADR-140.
+- [ ] Aplicar credentials revogáveis, scopes mínimos, quotas, rate limits e budgets antes de abrir a API. Evidência: T-R-11 e ADR-140.
+- [ ] Detectar loops/anomalias de requests, mutations, generation spend e downloads. Evidência: T-R-11 e ADR-140.
+- [ ] Implementar kill switch por client/workspace e runbook de credencial comprometida. Evidência: T-R-11 e ADR-140.
+- [ ] Red-team agents para exfiltração, prompt injection, privilege escalation e geração cara repetida. Evidência: T-R-11 e ADR-140.
 
 ---
 
@@ -1914,44 +1938,44 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### 12.1 Caracterização antes de reutilizar
 
-- [x] Criar inventário de Remotion scenes/primitives e dependências ocultas. Evidência: T-V1-001 e ADR-140.
-- [x] Criar golden renders dos estilos de legenda atuais. Evidência: T-V1-001 e ADR-140.
-- [x] Criar fixtures dos fluxos FFmpeg normalize/cut/proxy. Evidência: `tests/media/ffmpeg-service.integration.mjs` cobre também probe, áudio, silêncio e thumbnail.
-- [x] Caracterizar Whisper/word timings, silence e retake removal. Evidência: T-V1-001 e ADR-140.
-- [x] Caracterizar timing frame-first, cold open, beat thumbnails e anchor vision. Evidência: T-V1-001 e ADR-140.
-- [x] Caracterizar render watchdog, locks, progress e `propsOnly`. Evidência: T-V1-001 e ADR-140.
-- [x] Inventariar serviços de imagem, vídeo e stock para adaptação ao Provider Registry. Evidência: T-V1-001 e ADR-140.
-- [x] Registrar incidentes/comportamentos que viram testes de regressão. Evidência: T-V1-001 e ADR-140.
+- [ ] Criar inventário de Remotion scenes/primitives e dependências ocultas. Evidência: T-V1-001 e ADR-140.
+- [ ] Criar golden renders dos estilos de legenda atuais. Evidência: T-V1-001 e ADR-140.
+- [ ] Criar fixtures dos fluxos FFmpeg normalize/cut/proxy. Evidência: `tests/media/ffmpeg-service.integration.mjs` cobre também probe, áudio, silêncio e thumbnail.
+- [ ] Caracterizar Whisper/word timings, silence e retake removal. Evidência: T-V1-001 e ADR-140.
+- [ ] Caracterizar timing frame-first, cold open, beat thumbnails e anchor vision. Evidência: T-V1-001 e ADR-140.
+- [ ] Caracterizar render watchdog, locks, progress e `propsOnly`. Evidência: T-V1-001 e ADR-140.
+- [ ] Inventariar serviços de imagem, vídeo e stock para adaptação ao Provider Registry. Evidência: T-V1-001 e ADR-140.
+- [ ] Registrar incidentes/comportamentos que viram testes de regressão. Evidência: T-V1-001 e ADR-140.
 
 ### 12.2 Extração por contrato
 
-- [x] Extrair apenas primitives Remotion que aceitem `RenderInput` v2 sem ler banco/config global. Evidência: T-V1-001 e ADR-140.
-- [x] Extrair pipeline FFmpeg atrás de recipes e jobs idempotentes. Evidência: T-V1-001 e ADR-140.
-- [x] Endurecer executor FFmpeg/ffprobe legado com timeout, cancelamento, limite de saída e erros tipados. Evidência: `MediaProcessError` e `tests/media/ffmpeg-service.integration.mjs`.
-- [x] Impedir promoção de outputs FFmpeg parciais e preservar o derivado anterior em falha/cancelamento. Evidência: staging irmão, validação, rename e testes de rollback local.
-- [x] Extrair transcription/timing atrás de adapter versionado. Evidência: T-V1-001 e ADR-140.
-- [x] Extrair componentes de legenda atrás de `SubtitleStylePreset`. Evidência: T-V1-001 e ADR-140.
-- [x] Extrair watchdog/progress para workflow base sem status ad hoc. Evidência: T-V1-001 e ADR-140.
-- [x] Adaptar provider atual somente após passar contract suite. Evidência: T-V1-001 e ADR-140.
-- [x] Remover ou isolar dependência da v1 em cada módulo extraído. Evidência: T-V1-001 e ADR-140.
+- [ ] Extrair apenas primitives Remotion que aceitem `RenderInput` v2 sem ler banco/config global. Evidência: T-V1-001 e ADR-140.
+- [ ] Extrair pipeline FFmpeg atrás de recipes e jobs idempotentes. Evidência: T-V1-001 e ADR-140.
+- [ ] Endurecer executor FFmpeg/ffprobe legado com timeout, cancelamento, limite de saída e erros tipados. Evidência: `MediaProcessError` e `tests/media/ffmpeg-service.integration.mjs`.
+- [ ] Impedir promoção de outputs FFmpeg parciais e preservar o derivado anterior em falha/cancelamento. Evidência: staging irmão, validação, rename e testes de rollback local.
+- [ ] Extrair transcription/timing atrás de adapter versionado. Evidência: T-V1-001 e ADR-140.
+- [ ] Extrair componentes de legenda atrás de `SubtitleStylePreset`. Evidência: T-V1-001 e ADR-140.
+- [ ] Extrair watchdog/progress para workflow base sem status ad hoc. Evidência: T-V1-001 e ADR-140.
+- [ ] Adaptar provider atual somente após passar contract suite. Evidência: T-V1-001 e ADR-140.
+- [ ] Remover ou isolar dependência da v1 em cada módulo extraído. Evidência: T-V1-001 e ADR-140.
 
 ### 12.3 Substituições obrigatórias
 
-- [x] Substituir Prisma `Project` como single source por domínio/versionamento v2. Evidência: T-V1-001 e ADR-140.
-- [x] Substituir `scenesJson/editPlanJson` como estado principal por contracts versionados. Evidência: T-V1-001 e ADR-140.
-- [x] Decompor `claude.ts` monolítico em Director, tools, policies e model routing. Evidência: T-V1-001 e ADR-140.
-- [x] Decompor analyze route em workflow steps idempotentes. Evidência: T-V1-001 e ADR-140.
-- [x] Eliminar `Scene` como contrato universal em favor de Story/Edit/Format plans. Evidência: T-V1-001 e ADR-140.
-- [x] Decompor editor page monolítica em view models e commands. Evidência: T-V1-001 e ADR-140.
-- [x] Migrar configs JSON de fonte de verdade para dados/schema versionados. Evidência: T-V1-001 e ADR-140.
-- [x] Remover coupling direto de providers do domínio. Evidência: T-V1-001 e ADR-140.
+- [ ] Substituir Prisma `Project` como single source por domínio/versionamento v2. Evidência: T-V1-001 e ADR-140.
+- [ ] Substituir `scenesJson/editPlanJson` como estado principal por contracts versionados. Evidência: T-V1-001 e ADR-140.
+- [ ] Decompor `claude.ts` monolítico em Director, tools, policies e model routing. Evidência: T-V1-001 e ADR-140.
+- [ ] Decompor analyze route em workflow steps idempotentes. Evidência: T-V1-001 e ADR-140.
+- [ ] Eliminar `Scene` como contrato universal em favor de Story/Edit/Format plans. Evidência: T-V1-001 e ADR-140.
+- [ ] Decompor editor page monolítica em view models e commands. Evidência: T-V1-001 e ADR-140.
+- [ ] Migrar configs JSON de fonte de verdade para dados/schema versionados. Evidência: T-V1-001 e ADR-140.
+- [ ] Remover coupling direto de providers do domínio. Evidência: T-V1-001 e ADR-140.
 
 ### 12.4 Gate de reaproveitamento
 
-- [x] Para cada módulo, anexar teste de caracterização anterior e contract test v2 posterior. Evidência: T-V1-001 e ADR-140.
-- [x] Rejeitar reutilização quando extração custar mais ou mantiver acoplamento incompatível. Evidência: T-V1-001 e ADR-140.
-- [x] Documentar origem, alterações e owner de manutenção do código reaproveitado. Evidência: T-V1-001 e ADR-140.
-- [x] Apagar ponte temporária somente depois que fixtures v2 passarem. Evidência: T-V1-001 e ADR-140.
+- [ ] Para cada módulo, anexar teste de caracterização anterior e contract test v2 posterior. Evidência: T-V1-001 e ADR-140.
+- [ ] Rejeitar reutilização quando extração custar mais ou mantiver acoplamento incompatível. Evidência: T-V1-001 e ADR-140.
+- [ ] Documentar origem, alterações e owner de manutenção do código reaproveitado. Evidência: T-V1-001 e ADR-140.
+- [ ] Apagar ponte temporária somente depois que fixtures v2 passarem. Evidência: T-V1-001 e ADR-140.
 
 ---
 
@@ -1999,69 +2023,69 @@ Para cada decisão:
 
 ### J.001 — Vídeo bruto único
 
-- [x] Criar projeto media-only com objetivo estratégico. Evidência: T-J.001 e ADR-141.
-- [x] Ingerir vídeo bruto, normalizar, transcrever e perceber. Evidência: T-J.001 e ADR-141.
-- [x] Gerar TreatmentPlan, StoryPlan, EditPlan, proxy e QualityReport. Evidência: T-J.001 e ADR-141.
-- [x] Aplicar correção por annotation e exportar final reconstruível. Evidência: T-J.001 e ADR-141.
+- [ ] Criar projeto media-only com objetivo estratégico. Evidência: T-J.001 e ADR-141.
+- [ ] Ingerir vídeo bruto, normalizar, transcrever e perceber. Evidência: T-J.001 e ADR-141.
+- [ ] Gerar TreatmentPlan, StoryPlan, EditPlan, proxy e QualityReport. Evidência: T-J.001 e ADR-141.
+- [ ] Aplicar correção por annotation e exportar final reconstruível. Evidência: T-J.001 e ADR-141.
 
 ### J.002 — Hooks, corpos e CTAs
 
-- [x] Ingerir documento com 6 hooks, 3 corpos e 3 CTAs. Evidência: T-J.002 e ADR-141.
-- [x] Ingerir três vídeos contendo os grupos gravados em sequência. Evidência: T-J.002 e ADR-141.
-- [x] Alinhar takes, gerar compatibility graph e selecionar top-N diverso. Evidência: T-J.002 e ADR-141.
-- [x] Renderizar lote, editar CTA em escopo e retentar item falho. Evidência: T-J.002 e ADR-141.
+- [ ] Ingerir documento com 6 hooks, 3 corpos e 3 CTAs. Evidência: T-J.002 e ADR-141.
+- [ ] Ingerir três vídeos contendo os grupos gravados em sequência. Evidência: T-J.002 e ADR-141.
+- [ ] Alinhar takes, gerar compatibility graph e selecionar top-N diverso. Evidência: T-J.002 e ADR-141.
+- [ ] Renderizar lote, editar CTA em escopo e retentar item falho. Evidência: T-J.002 e ADR-141.
 
 ### J.003 — Material publicado validado
 
-- [x] Ingerir Reel com validation metadata e direitos. Evidência: T-J.003 e ADR-141.
-- [x] Deconstruir, isolar hook essencial e preservar validation envelope. Evidência: T-J.003 e ADR-141.
-- [x] Combinar hook com corpo/CTA novos sem manter material irrelevante. Evidência: T-J.003 e ADR-141.
-- [x] Demonstrar que o sistema não atribui causalidade indevida. Evidência: T-J.003 e ADR-141.
+- [ ] Ingerir Reel com validation metadata e direitos. Evidência: T-J.003 e ADR-141.
+- [ ] Deconstruir, isolar hook essencial e preservar validation envelope. Evidência: T-J.003 e ADR-141.
+- [ ] Combinar hook com corpo/CTA novos sem manter material irrelevante. Evidência: T-J.003 e ADR-141.
+- [ ] Demonstrar que o sistema não atribui causalidade indevida. Evidência: T-J.003 e ADR-141.
 
 ### J.004 — Depoimento/prova
 
-- [x] Indexar EvidenceSegments com claim, qualifier, pessoa e consent. Evidência: T-J.004 e ADR-141.
-- [x] StoryPlan solicitar prova compatível e integrity gate aprovar/rejeitar candidates. Evidência: T-J.004 e ADR-141.
-- [x] Renderizar cutaway, split ou card preservando contexto. Evidência: T-J.004 e ADR-141.
-- [x] Testar expiração/revogação antes do export. Evidência: T-J.004 e ADR-141.
+- [ ] Indexar EvidenceSegments com claim, qualifier, pessoa e consent. Evidência: T-J.004 e ADR-141.
+- [ ] StoryPlan solicitar prova compatível e integrity gate aprovar/rejeitar candidates. Evidência: T-J.004 e ADR-141.
+- [ ] Renderizar cutaway, split ou card preservando contexto. Evidência: T-J.004 e ADR-141.
+- [ ] Testar expiração/revogação antes do export. Evidência: T-J.004 e ADR-141.
 
 ### J.005 — Live longa
 
-- [x] Ingerir vídeo de aproximadamente duas horas e processar hierarquicamente. Evidência: T-J.005 e ADR-141.
-- [x] Pesquisar moments antes da conclusão de todos os tiers quando permitido. Evidência: T-J.005 e ADR-141.
-- [x] Extrair conteúdo contínuo de aproximadamente dois minutos. Evidência: T-J.005 e ADR-141.
-- [x] Produzir síntese multi-range e comparar integridade/custo. Evidência: T-J.005 e ADR-141.
+- [ ] Ingerir vídeo de aproximadamente duas horas e processar hierarquicamente. Evidência: T-J.005 e ADR-141.
+- [ ] Pesquisar moments antes da conclusão de todos os tiers quando permitido. Evidência: T-J.005 e ADR-141.
+- [ ] Extrair conteúdo contínuo de aproximadamente dois minutos. Evidência: T-J.005 e ADR-141.
+- [ ] Produzir síntese multi-range e comparar integridade/custo. Evidência: T-J.005 e ADR-141.
 
 ### J.006 — Synthetic presenter
 
-- [x] Gerar áudio por texto e aceitar áudio pronto. Evidência: T-J.006 e ADR-141.
-- [x] Gerar avatar em blocos, criticar e salvar SyntheticMasterAssets. Evidência: T-J.006 e ADR-141.
-- [x] Reutilizar bloco catalogado em composição com B-roll. Evidência: T-J.006 e ADR-141.
-- [x] Localizar bloco autorizado sem regenerar partes não afetadas. Evidência: T-J.006 e ADR-141.
+- [ ] Gerar áudio por texto e aceitar áudio pronto. Evidência: T-J.006 e ADR-141.
+- [ ] Gerar avatar em blocos, criticar e salvar SyntheticMasterAssets. Evidência: T-J.006 e ADR-141.
+- [ ] Reutilizar bloco catalogado em composição com B-roll. Evidência: T-J.006 e ADR-141.
+- [ ] Localizar bloco autorizado sem regenerar partes não afetadas. Evidência: T-J.006 e ADR-141.
 
 ### J.007 — Multicâmera, tela e react
 
-- [x] Ingerir tracks com durações e áudios diferentes em CaptureSession. Evidência: T-J.007 e ADR-141.
-- [x] Sincronizar por cascade, corrigir drift e representar gaps. Evidência: T-J.007 e ADR-141.
-- [x] Exigir marker/anchor quando evidência for insuficiente. Evidência: T-J.007 e ADR-141.
-- [x] Dirigir podcast, professor+tela e react com playback map. Evidência: T-J.007 e ADR-141.
+- [ ] Ingerir tracks com durações e áudios diferentes em CaptureSession. Evidência: T-J.007 e ADR-141.
+- [ ] Sincronizar por cascade, corrigir drift e representar gaps. Evidência: T-J.007 e ADR-141.
+- [ ] Exigir marker/anchor quando evidência for insuficiente. Evidência: T-J.007 e ADR-141.
+- [ ] Dirigir podcast, professor+tela e react com playback map. Evidência: T-J.007 e ADR-141.
 
 ### J.008 — Localização
 
-- [x] Criar EN/ES a partir de versão PT-BR aprovada. Evidência: T-J.008 e ADR-141.
-- [x] Adaptar script/áudio/timing/legenda/assets textuais por locale. Evidência: T-J.008 e ADR-141.
-- [x] Aplicar lipsync/avatar ou subtitles-only conforme consent. Evidência: T-J.008 e ADR-141.
-- [x] Exportar matriz multi-locale com crítica e mix próprios. Evidência: T-J.008 e ADR-141.
+- [ ] Criar EN/ES a partir de versão PT-BR aprovada. Evidência: T-J.008 e ADR-141.
+- [ ] Adaptar script/áudio/timing/legenda/assets textuais por locale. Evidência: T-J.008 e ADR-141.
+- [ ] Aplicar lipsync/avatar ou subtitles-only conforme consent. Evidência: T-J.008 e ADR-141.
+- [ ] Exportar matriz multi-locale com crítica e mix próprios. Evidência: T-J.008 e ADR-141.
 
 ### J.009 — Operação externa por agente de IA
 
-- [x] Criar client/service account com scopes mínimos para a jornada. Evidência: T-J.009 e ADR-141.
-- [x] Descobrir capabilities e schemas por API/MCP. Evidência: T-J.009 e ADR-141.
-- [x] Criar projeto, abrir upload session, enviar mídia e iniciar workflow. Evidência: T-J.009 e ADR-141.
-- [x] Acompanhar operation e receber webhook de proxy/QualityReport. Evidência: T-J.009 e ADR-141.
-- [x] Criar annotation/Command com base version e preflight quando exigido. Evidência: T-J.009 e ADR-141.
-- [x] Aprovar, renderizar, exportar e consultar lineage sem usar a UI. Evidência: T-J.009 e ADR-141.
-- [x] Comparar versões, jobs, policies e artifacts com a mesma jornada pela UI. Evidência: T-J.009 e ADR-141.
+- [ ] Criar client/service account com scopes mínimos para a jornada. Evidência: T-J.009 e ADR-141.
+- [ ] Descobrir capabilities e schemas por API/MCP. Evidência: T-J.009 e ADR-141.
+- [ ] Criar projeto, abrir upload session, enviar mídia e iniciar workflow. Evidência: T-J.009 e ADR-141.
+- [ ] Acompanhar operation e receber webhook de proxy/QualityReport. Evidência: T-J.009 e ADR-141.
+- [ ] Criar annotation/Command com base version e preflight quando exigido. Evidência: T-J.009 e ADR-141.
+- [ ] Aprovar, renderizar, exportar e consultar lineage sem usar a UI. Evidência: T-J.009 e ADR-141.
+- [ ] Comparar versões, jobs, policies e artifacts com a mesma jornada pela UI. Evidência: T-J.009 e ADR-141.
 
 ---
 
@@ -2083,20 +2107,20 @@ Para cada decisão:
 
 ## 16. Checklist de release por fase
 
-- [x] Todas as microtarefas obrigatórias da fase estão concluídas ou explicitamente removidas por decisão aprovada. Evidência: T-RELEASE e ADR-141.
-- [x] Todos os FRs da fase possuem evidência do teste indicado na matriz de rastreabilidade. Evidência: T-RELEASE e ADR-141.
-- [x] NFRs aplicáveis foram executados com budgets e resultados anexados. Evidência: T-RELEASE e ADR-141.
-- [x] Security/privacy review não possui finding crítico aberto. Evidência: T-RELEASE e ADR-141.
-- [x] Migração foi testada em snapshot e rollback/recovery foi ensaiado. Evidência: T-RELEASE e ADR-141.
-- [x] Dashboards, alertas e runbooks da fase estão ativos. Evidência: T-RELEASE e ADR-141.
-- [x] Custos unitários e limites de uso foram medidos. Evidência: T-RELEASE e ADR-141.
-- [x] Dataset/goldens não apresentam regressão não aprovada. Evidência: T-RELEASE e ADR-141.
-- [x] Documentação de usuário explicita pré-requisitos, limitações e fallbacks. Evidência: T-RELEASE e ADR-141.
-- [x] Feature flags, quotas e rollout gradual estão definidos. Evidência: T-RELEASE e ADR-141.
-- [x] Parity report confirma UI × API × MCP para as capabilities liberadas. Evidência: T-RELEASE e ADR-141.
-- [x] OpenAPI, changelog, migration guide, SDK/tool schemas e webhook catalog foram publicados. Evidência: T-RELEASE e ADR-141.
-- [x] Critério de saída da fase foi demonstrado em ambiente semelhante à produção. Evidência: T-RELEASE e ADR-141.
-- [x] PRD, specs, matriz e este TODO refletem o comportamento entregue. Evidência: T-RELEASE e ADR-141.
+- [ ] Todas as microtarefas obrigatórias da fase estão concluídas ou explicitamente removidas por decisão aprovada. Evidência: T-RELEASE e ADR-141.
+- [ ] Todos os FRs da fase possuem evidência do teste indicado na matriz de rastreabilidade. Evidência: T-RELEASE e ADR-141.
+- [ ] NFRs aplicáveis foram executados com budgets e resultados anexados. Evidência: T-RELEASE e ADR-141.
+- [ ] Security/privacy review não possui finding crítico aberto. Evidência: T-RELEASE e ADR-141.
+- [ ] Migração foi testada em snapshot e rollback/recovery foi ensaiado. Evidência: T-RELEASE e ADR-141.
+- [ ] Dashboards, alertas e runbooks da fase estão ativos. Evidência: T-RELEASE e ADR-141.
+- [ ] Custos unitários e limites de uso foram medidos. Evidência: T-RELEASE e ADR-141.
+- [ ] Dataset/goldens não apresentam regressão não aprovada. Evidência: T-RELEASE e ADR-141.
+- [ ] Documentação de usuário explicita pré-requisitos, limitações e fallbacks. Evidência: T-RELEASE e ADR-141.
+- [ ] Feature flags, quotas e rollout gradual estão definidos. Evidência: T-RELEASE e ADR-141.
+- [ ] Parity report confirma UI × API × MCP para as capabilities liberadas. Evidência: T-RELEASE e ADR-141.
+- [ ] OpenAPI, changelog, migration guide, SDK/tool schemas e webhook catalog foram publicados. Evidência: T-RELEASE e ADR-141.
+- [ ] Critério de saída da fase foi demonstrado em ambiente semelhante à produção. Evidência: T-RELEASE e ADR-141.
+- [ ] PRD, specs, matriz e este TODO refletem o comportamento entregue. Evidência: T-RELEASE e ADR-141.
 
 ---
 
