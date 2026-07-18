@@ -50,7 +50,7 @@ COPY --from=build --chown=node:node /app/src ./src
 COPY --from=build --chown=node:node /app/remotion ./remotion
 
 RUN mkdir -p /app/data /app/uploads /app/renders /app/tmp /app/artifacts /app/render-outputs \
-    && chown -R node:node /app
+    && chown -R node:node /app/data /app/uploads /app/renders /app/tmp /app/artifacts /app/render-outputs
 
 USER node
 EXPOSE 3333
