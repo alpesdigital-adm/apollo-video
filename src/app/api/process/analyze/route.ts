@@ -13,6 +13,19 @@ import type { AnalyzeContentBrandColors } from '@/lib/services/claude'
 import type { Silence, SubtitleEntry, Transcription } from '@/lib/types/project'
 import type { Scene } from '@/lib/types/scene'
 
+function readOwnerBrief(value: string | null): string | undefined {
+  if (!value) return undefined
+  try {
+    const parsed = JSON.parse(value) as { ownerInput?: { text?: unknown; trust?: unknown } }
+    if (parsed.ownerInput?.trust !== 'owner-authorized' || typeof parsed.ownerInput.text !== 'string') {
+      return undefined
+    }
+    return parsed.ownerInput.text.trim().slice(0, 10_000) || undefined
+  } catch {
+    return undefined
+  }
+}
+
 function shouldUseCloseUpCompactLayout(project: {
   videoWidth: number | null
   videoHeight: number | null
@@ -122,7 +135,8 @@ export async function POST(request: NextRequest) {
       stylePreset,
       brandColors,
       assetCatalog.length > 0 ? assetCatalog : undefined,
-      minimal
+      minimal,
+      readOwnerBrief(project.briefingJson)
     )
 
     // Resolve scene timing - convert startLeg to actual frame numbers
