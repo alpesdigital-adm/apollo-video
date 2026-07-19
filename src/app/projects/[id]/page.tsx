@@ -99,6 +99,7 @@ export default function ProjectWorkspacePage() {
   const params = useParams<{ id: string }>()
   const projectId = params.id
   const fileInput = useRef<HTMLInputElement>(null)
+  const previewVideo = useRef<HTMLVideoElement>(null)
   const activeRequest = useRef<AbortController | null>(null)
   const pendingUpload = useRef<PendingUpload | null>(null)
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null)
@@ -111,6 +112,7 @@ export default function ProjectWorkspacePage() {
   const [uploadLabel, setUploadLabel] = useState('')
   const [directorRunning, setDirectorRunning] = useState(false)
   const [exportRunning, setExportRunning] = useState(false)
+  const [previewState, setPreviewState] = useState<'idle' | 'loading' | 'ready' | 'playing' | 'paused' | 'error'>('idle')
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -160,6 +162,20 @@ export default function ProjectWorkspacePage() {
   const sourceMasters = useMemo(() => (workspace?.media ?? []).filter((item) => item.role === 'source-master'), [workspace])
   const transcript = workspace?.transcripts[0]
   const latestDirectorRun = workspace?.directorRuns[0]
+
+  useEffect(() => { setPreviewState('idle') }, [editingProxy?.artifactId])
+
+  function togglePreview(): void {
+    const video = previewVideo.current
+    if (!video) return
+    if (!video.paused) {
+      video.pause()
+      return
+    }
+    setPreviewState('loading')
+    if (video.networkState === 0) video.load()
+    void video.play().catch(() => setPreviewState('error'))
+  }
 
   async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(url, { ...init, headers: { accept: 'application/json', ...(init.headers ?? {}) } })
@@ -405,7 +421,7 @@ export default function ProjectWorkspacePage() {
           <div className="mt-5 flex min-h-[500px] items-center justify-center overflow-hidden rounded-2xl border border-white/[0.08] bg-[#030303] p-4 shadow-[0_30px_80px_rgba(0,0,0,.25)]">
             {editingProxy ? (
               <div className="relative flex max-h-[560px] max-w-full items-center justify-center overflow-hidden rounded-xl border border-white/[0.1] bg-black" style={{ aspectRatio: (workspace.project.format ?? '16:9').replace(':', ' / ') }}>
-                <video className="max-h-[560px] max-w-full object-contain" controls key={editingProxy.artifactId} preload="metadata" src={`/v1/artifacts/${encodeURIComponent(editingProxy.artifactId)}/content`} />
+                <video className="max-h-[560px] max-w-full object-contain" controls key={editingProxy.artifactId} onCanPlay={() => setPreviewState((current) => current === 'playing' ? current : 'ready')} onError={() => setPreviewState('error')} onPause={() => setPreviewState((current) => current === 'idle' ? current : 'paused')} onPlay={() => setPreviewState('playing')} playsInline preload="auto" ref={previewVideo} src={`/v1/artifacts/${encodeURIComponent(editingProxy.artifactId)}/content`} />
                 <div aria-hidden="true" className="pointer-events-none absolute inset-[5%] rounded border border-white/[0.12]" />
               </div>
             ) : (
@@ -423,6 +439,8 @@ export default function ProjectWorkspacePage() {
               </div>
             )}
           </div>
+
+          {editingProxy ? <div className="mt-3 flex items-center justify-center gap-3"><button className="rounded-lg border border-white/[0.1] bg-white/[0.035] px-4 py-2 text-xs font-medium text-[#d6d0c7] transition hover:border-[#d9aa3d]/35 hover:text-white" onClick={togglePreview} type="button">{previewState === 'loading' ? 'Carregando previewâ€¦' : previewState === 'playing' ? 'Pausar preview' : 'Reproduzir preview'}</button>{previewState === 'error' ? <span className="text-[10px] text-[#d17a7a]">O preview nÃ£o carregou. Use o download final para validar o arquivo.</span> : null}</div> : null}
 
           {uploadPhase !== 'idle' && !editingProxy ? (
             <div className="mt-4 rounded-xl border border-white/[0.08] bg-[#0b0b0b] p-4">
