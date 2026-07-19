@@ -27,6 +27,41 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     this.sourceReader = new PrismaProjectProxyRenderRepository(client)
   }
 
+  async findReusableOutput(input: {
+    workspaceId: string
+    projectId: string
+    projectVersionId: string
+    inputHash: string
+  }): Promise<Readonly<{ artifactId: string }> | null> {
+    const previous = await this.client.v2ProjectFinalExportOperation.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        projectVersionId: input.projectVersionId,
+        inputHash: input.inputHash,
+        operation: { status: 'succeeded' },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { outputArtifactId: true, outputManifestId: true },
+    })
+    if (!previous) return null
+    const [artifact, manifest] = await Promise.all([
+      this.client.v2MediaArtifact.findFirst({
+        where: { id: previous.outputArtifactId, workspaceId: input.workspaceId, status: 'available' },
+        select: { id: true },
+      }),
+      this.client.v2MediaArtifactManifest.findFirst({
+        where: {
+          id: previous.outputManifestId,
+          workspaceId: input.workspaceId,
+          artifactId: previous.outputArtifactId,
+        },
+        select: { id: true },
+      }),
+    ])
+    return artifact && manifest ? Object.freeze({ artifactId: artifact.id }) : null
+  }
+
   private async readApproval(input: {
     workspaceId: string
     projectId: string

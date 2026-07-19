@@ -11,6 +11,12 @@ export interface ApprovedProjectFinalExportSource extends ProjectProxyRenderSour
 }
 
 export interface ProjectFinalExportRepository {
+  findReusableOutput(input: {
+    workspaceId: string
+    projectId: string
+    projectVersionId: string
+    inputHash: string
+  }): Promise<Readonly<{ artifactId: string }> | null>
   readApprovedCurrentSource(input: {
     workspaceId: string
     projectId: string

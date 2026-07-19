@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -86,7 +87,10 @@ test('final export enqueue binds approval, exact Director evidence and 1080x1920
   }
   const ids = { operation: 0, artifact: 0, manifest: 0 }
   const enqueue = enqueueProjectFinalExportService({
-    projects: { async readApprovedCurrentSource() { return approvedSource() } },
+    projects: {
+      async readApprovedCurrentSource() { return approvedSource() },
+      async findReusableOutput() { return null },
+    },
     rights: { async findCurrent() { return { snapshot: rightsSnapshot(), revision: 'revision-1' } } },
     operations,
     clock: () => new Date('2026-07-19T01:05:00.000Z'),
@@ -118,6 +122,40 @@ test('final export enqueue binds approval, exact Director evidence and 1080x1920
   assert.equal(replay.operation.id, first.operation.id)
   assert.equal(created.requestFingerprint.length, 64)
   assert.deepEqual(ids, { operation: 1, artifact: 1, manifest: 1 })
+})
+
+test('final export reuses an identical available artifact while issuing fresh approval lineage', async () => {
+  const allocated = []
+  const enqueue = enqueueProjectFinalExportService({
+    projects: {
+      async readApprovedCurrentSource() { return approvedSource() },
+      async findReusableOutput(input) {
+        assert.match(input.inputHash, /^[a-f0-9]{64}$/)
+        return { artifactId: 'artifact-final-output-reused' }
+      },
+    },
+    rights: { async findCurrent() { return { snapshot: rightsSnapshot(), revision: 'revision-1' } } },
+    operations: {
+      async findReplay() { return null },
+      async createOrReplay(input) { return { operation: input.operation, context: input.context, replayed: false } },
+    },
+    clock: () => new Date('2026-07-19T01:06:00.000Z'),
+    createId(kind) { allocated.push(kind); return `${kind}-fresh` },
+  })
+  const result = await enqueue({
+    workspaceId,
+    projectId,
+    projectVersionId,
+    projectVersionHash: '1'.repeat(64),
+    format: '9:16',
+    approval: { approved: true, note: 'Nova aprovaÃ§Ã£o auditada.' },
+    actor: { type: 'api-client', id: 'client-final-export-test' },
+    idempotencyKey: 'final-export-reuse-1',
+  })
+
+  assert.equal(result.context.outputArtifactId, 'artifact-final-output-reused')
+  assert.equal(result.operation.target.id, 'artifact-final-output-reused')
+  assert.deepEqual(allocated, ['operation', 'manifest'])
 })
 
 test('final export enqueue fails closed without current rendering rights', async () => {
@@ -232,6 +270,9 @@ function workerDependencies(operations, rightsProvider = () => rightsSnapshot())
         async persistOrReplay(input) {
           calls.persisted += 1
           assert.equal(input.manifest.recipe.id, 'editorial-final')
+          assert.deepEqual(input.lineageIds, [
+            `lineage-${createHash('sha256').update(`${workspaceId}:${'5'.repeat(64)}:manifest-final-output:final`).digest('hex')}`,
+          ])
           assert.equal(input.manifest.schemaVersion, 'media-artifact-manifest/v3')
           assert.equal(input.manifest.recipe.parametersRef, input.recipeParameters.ref)
           const parameters = JSON.parse(input.recipeParameters.canonicalJson)

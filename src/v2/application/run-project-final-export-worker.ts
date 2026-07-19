@@ -217,7 +217,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         workspaceId: operation.workspaceId,
         artifactId: context.outputArtifactId,
         manifestId: context.outputManifestId,
-        lineageIds: [`lineage-${createHash('sha256').update(`${operation.workspaceId}:${context.inputHash}:final`).digest('hex')}`],
+        lineageIds: [`lineage-${createHash('sha256').update(`${operation.workspaceId}:${context.inputHash}:${context.outputManifestId}:final`).digest('hex')}`],
         manifest: replayableManifest.manifest,
         recipeParameters: replayableManifest.recipeParameters,
         createdAt: clock().toISOString(),
