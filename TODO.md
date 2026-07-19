@@ -899,7 +899,7 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 - [x] Modelar frame, time range, screenshot, region, target IDs, texto, author e status. Evidência F1-040: `V2ReviewAnnotation`, migration `20260719141000_review_annotations`, `review-system.ts` e `project-review.test.mjs` cobrem todos os campos, invariantes e três scopes.
 - [ ] Implementar clique/drag sobre preview com captura do contexto visual. Evidência F1-040: overlay normaliza região e liga screenshot ao frame do proxy.
-- [x] Persistir annotation sem alterar a versão até aplicação explícita. Evidência F1-040: `GET/POST /v1/projects/{projectId}/annotations` e `prisma-review-annotation.integration.mjs` autenticam pela API pública, vinculam version/proxy/hash, provam replay idempotente no Postgres e mantêm uma única ProjectVersion.
+- [x] Persistir annotation sem alterar a versão até aplicação explícita. Evidência F1-040: `GET/POST /v1/projects/{projectId}/annotations` e `prisma-review-annotation.integration.mjs` autenticam pela API pública, vinculam version/proxy/hash, provam replay idempotente no Postgres e mantêm uma única ProjectVersion. Em produção, a annotation regional `49d8a688-1150-4bc7-aeef-ab24d3b631aa` foi criada sobre JPEG real do frame 60 do artifact final, repetida com `replayed=true` e preservou `project-version-b16bd189-c734-44d7-bd6f-7685cb3fc9be` como versão atual e anotada.
 - [ ] Criar E2E de annotation pontual, regional e de cena. Evidência F1-040/T-FR-211: três escopos preservam version ID.
 
 ### F1.041 — Escopos de revisão [FR-212]
