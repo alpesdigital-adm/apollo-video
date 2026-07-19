@@ -27,6 +27,7 @@ model V2Workspace {
   mediaTranscripts                V2MediaTranscript[]
   mediaIngestOperations           V2MediaIngestOperation[]
   projectProxyRenderOperations    V2ProjectProxyRenderOperation[]
+  projectFinalExportOperations    V2ProjectFinalExportOperation[]
   mediaDownloadGrants             V2MediaDownloadGrant[]
   mediaManifests                  V2MediaArtifactManifest[]
   mediaLineage                    V2MediaArtifactLineage[]
@@ -172,15 +173,16 @@ model V2Project {
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
   updatedAt        DateTime @updatedAt @db.Timestamptz(3)
 
-  workspace             V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  versions              V2ProjectVersion[]       @relation("ProjectVersions")
+  workspace             V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  versions              V2ProjectVersion[]              @relation("ProjectVersions")
   snapshots             V2ProjectSnapshot[]
-  currentVersion        V2ProjectVersion?        @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  currentVersion        V2ProjectVersion?               @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   mediaUploads          V2MediaUpload[]
   mediaAssets           V2ProjectMediaAsset[]
   mediaTranscripts      V2MediaTranscript[]
   mediaIngestOperations V2MediaIngestOperation[]
   proxyRenderOperations V2ProjectProxyRenderOperation[]
+  finalExportOperations V2ProjectFinalExportOperation[]
   editCommands          V2EditCommand[]
   directorRuns          V2DirectorRun[]
 
@@ -204,18 +206,19 @@ model V2ProjectSnapshot {
   contentHash   String   @db.Char(64)
   createdAt     DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace        V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project          V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  briefVersions    V2ProjectVersion[] @relation("BriefSnapshot")
-  treatmentVersions V2ProjectVersion[] @relation("TreatmentSnapshot")
-  storyVersions    V2ProjectVersion[] @relation("StorySnapshot")
-  editPlanVersions V2ProjectVersion[] @relation("EditPlanSnapshot")
-  policyVersions   V2ProjectVersion[] @relation("PoliciesSnapshot")
-  perceptionDirectorRuns V2DirectorRun[] @relation("DirectorRunPerceptionSnapshot")
-  treatmentDirectorRuns  V2DirectorRun[] @relation("DirectorRunTreatmentSnapshot")
-  storyDirectorRuns      V2DirectorRun[] @relation("DirectorRunStorySnapshot")
-  editPlanDirectorRuns   V2DirectorRun[] @relation("DirectorRunEditPlanSnapshot")
-  qualityDirectorRuns    V2DirectorRun[] @relation("DirectorRunQualitySnapshot")
+  workspace              V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  briefVersions          V2ProjectVersion[]              @relation("BriefSnapshot")
+  treatmentVersions      V2ProjectVersion[]              @relation("TreatmentSnapshot")
+  storyVersions          V2ProjectVersion[]              @relation("StorySnapshot")
+  editPlanVersions       V2ProjectVersion[]              @relation("EditPlanSnapshot")
+  policyVersions         V2ProjectVersion[]              @relation("PoliciesSnapshot")
+  perceptionDirectorRuns V2DirectorRun[]                 @relation("DirectorRunPerceptionSnapshot")
+  treatmentDirectorRuns  V2DirectorRun[]                 @relation("DirectorRunTreatmentSnapshot")
+  storyDirectorRuns      V2DirectorRun[]                 @relation("DirectorRunStorySnapshot")
+  editPlanDirectorRuns   V2DirectorRun[]                 @relation("DirectorRunEditPlanSnapshot")
+  qualityDirectorRuns    V2DirectorRun[]                 @relation("DirectorRunQualitySnapshot")
+  finalExportOperations  V2ProjectFinalExportOperation[] @relation("FinalExportQualitySnapshot")
 
   @@unique([projectId, kind, contentHash])
   @@index([workspaceId, kind])
@@ -223,35 +226,36 @@ model V2ProjectSnapshot {
 }
 
 model V2ProjectVersion {
-  id                 String   @id @db.VarChar(128)
-  workspaceId        String   @db.VarChar(128)
-  projectId          String   @db.VarChar(128)
-  sequence           Int
-  parentVersionId    String?  @db.VarChar(128)
-  briefSnapshotId    String   @db.VarChar(128)
-  treatmentSnapshotId String? @db.VarChar(128)
-  storySnapshotId     String? @db.VarChar(128)
-  editPlanSnapshotId String   @db.VarChar(128)
-  policiesSnapshotId String   @db.VarChar(128)
-  baseHash           String   @db.Char(64)
-  createdBy          String   @db.VarChar(128)
-  commandId          String?  @db.VarChar(128)
-  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  id                  String   @id @db.VarChar(128)
+  workspaceId         String   @db.VarChar(128)
+  projectId           String   @db.VarChar(128)
+  sequence            Int
+  parentVersionId     String?  @db.VarChar(128)
+  briefSnapshotId     String   @db.VarChar(128)
+  treatmentSnapshotId String?  @db.VarChar(128)
+  storySnapshotId     String?  @db.VarChar(128)
+  editPlanSnapshotId  String   @db.VarChar(128)
+  policiesSnapshotId  String   @db.VarChar(128)
+  baseHash            String   @db.Char(64)
+  createdBy           String   @db.VarChar(128)
+  commandId           String?  @db.VarChar(128)
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
 
-  project            V2Project          @relation("ProjectVersions", fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  currentForProjects V2Project[]        @relation("CurrentProjectVersion")
-  parent             V2ProjectVersion?  @relation("VersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
-  children           V2ProjectVersion[] @relation("VersionParent")
-  briefSnapshot      V2ProjectSnapshot  @relation("BriefSnapshot", fields: [briefSnapshotId], references: [id], onDelete: Restrict)
-  treatmentSnapshot  V2ProjectSnapshot? @relation("TreatmentSnapshot", fields: [treatmentSnapshotId], references: [id], onDelete: Restrict)
-  storySnapshot      V2ProjectSnapshot? @relation("StorySnapshot", fields: [storySnapshotId], references: [id], onDelete: Restrict)
-  editPlanSnapshot   V2ProjectSnapshot  @relation("EditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
-  policiesSnapshot   V2ProjectSnapshot  @relation("PoliciesSnapshot", fields: [policiesSnapshotId], references: [id], onDelete: Restrict)
-  command            V2EditCommand?     @relation("CommandResultVersion", fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  commandsBasedOn    V2EditCommand[]    @relation("CommandBaseVersion")
+  project               V2Project                       @relation("ProjectVersions", fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  currentForProjects    V2Project[]                     @relation("CurrentProjectVersion")
+  parent                V2ProjectVersion?               @relation("VersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  children              V2ProjectVersion[]              @relation("VersionParent")
+  briefSnapshot         V2ProjectSnapshot               @relation("BriefSnapshot", fields: [briefSnapshotId], references: [id], onDelete: Restrict)
+  treatmentSnapshot     V2ProjectSnapshot?              @relation("TreatmentSnapshot", fields: [treatmentSnapshotId], references: [id], onDelete: Restrict)
+  storySnapshot         V2ProjectSnapshot?              @relation("StorySnapshot", fields: [storySnapshotId], references: [id], onDelete: Restrict)
+  editPlanSnapshot      V2ProjectSnapshot               @relation("EditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
+  policiesSnapshot      V2ProjectSnapshot               @relation("PoliciesSnapshot", fields: [policiesSnapshotId], references: [id], onDelete: Restrict)
+  command               V2EditCommand?                  @relation("CommandResultVersion", fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  commandsBasedOn       V2EditCommand[]                 @relation("CommandBaseVersion")
   proxyRenderOperations V2ProjectProxyRenderOperation[]
-  directorRunsAsBase     V2DirectorRun[] @relation("DirectorRunBaseVersion")
-  directorRunAsResult    V2DirectorRun?  @relation("DirectorRunResultVersion")
+  finalExportOperations V2ProjectFinalExportOperation[]
+  directorRunsAsBase    V2DirectorRun[]                 @relation("DirectorRunBaseVersion")
+  directorRunAsResult   V2DirectorRun?                  @relation("DirectorRunResultVersion")
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -277,11 +281,11 @@ model V2EditCommand {
   requestFingerprint String   @db.Char(64)
   createdAt          DateTime @db.Timestamptz(3)
 
-  workspace     V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project       V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  baseVersion   V2ProjectVersion @relation("CommandBaseVersion", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace     V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project       V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  baseVersion   V2ProjectVersion  @relation("CommandBaseVersion", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   resultVersion V2ProjectVersion? @relation("CommandResultVersion")
-  directorRun   V2DirectorRun? @relation("DirectorRunCommand")
+  directorRun   V2DirectorRun?    @relation("DirectorRunCommand")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -291,37 +295,38 @@ model V2EditCommand {
 }
 
 model V2DirectorRun {
-  id                    String   @id @db.VarChar(128)
-  workspaceId           String   @db.VarChar(128)
-  projectId             String   @db.VarChar(128)
-  commandId             String   @db.VarChar(128)
-  baseVersionId         String   @db.VarChar(128)
-  resultVersionId       String   @db.VarChar(128)
-  status                String   @db.VarChar(32)
-  plannerVersion        String   @db.VarChar(64)
-  criticVersion         String   @db.VarChar(64)
-  perceptionSnapshotId  String   @db.VarChar(128)
-  treatmentSnapshotId   String   @db.VarChar(128)
-  storySnapshotId       String   @db.VarChar(128)
-  editPlanSnapshotId    String   @db.VarChar(128)
-  qualitySnapshotId     String   @db.VarChar(128)
-  decisionsJson         String   @db.Text
-  assumptionsJson       String   @db.Text
-  initiatedByType       String   @db.VarChar(32)
-  initiatedById         String   @db.VarChar(128)
-  createdAt             DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt             DateTime @updatedAt @db.Timestamptz(3)
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  commandId            String   @db.VarChar(128)
+  baseVersionId        String   @db.VarChar(128)
+  resultVersionId      String   @db.VarChar(128)
+  status               String   @db.VarChar(32)
+  plannerVersion       String   @db.VarChar(64)
+  criticVersion        String   @db.VarChar(64)
+  perceptionSnapshotId String   @db.VarChar(128)
+  treatmentSnapshotId  String   @db.VarChar(128)
+  storySnapshotId      String   @db.VarChar(128)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  qualitySnapshotId    String   @db.VarChar(128)
+  decisionsJson        String   @db.Text
+  assumptionsJson      String   @db.Text
+  initiatedByType      String   @db.VarChar(32)
+  initiatedById        String   @db.VarChar(128)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime @updatedAt @db.Timestamptz(3)
 
-  workspace          V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project            V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  command            V2EditCommand     @relation("DirectorRunCommand", fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  baseVersion        V2ProjectVersion  @relation("DirectorRunBaseVersion", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  resultVersion      V2ProjectVersion  @relation("DirectorRunResultVersion", fields: [resultVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  perceptionSnapshot V2ProjectSnapshot @relation("DirectorRunPerceptionSnapshot", fields: [perceptionSnapshotId], references: [id], onDelete: Restrict)
-  treatmentSnapshot  V2ProjectSnapshot @relation("DirectorRunTreatmentSnapshot", fields: [treatmentSnapshotId], references: [id], onDelete: Restrict)
-  storySnapshot      V2ProjectSnapshot @relation("DirectorRunStorySnapshot", fields: [storySnapshotId], references: [id], onDelete: Restrict)
-  editPlanSnapshot   V2ProjectSnapshot @relation("DirectorRunEditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
-  qualitySnapshot    V2ProjectSnapshot @relation("DirectorRunQualitySnapshot", fields: [qualitySnapshotId], references: [id], onDelete: Restrict)
+  workspace             V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project               V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  command               V2EditCommand                   @relation("DirectorRunCommand", fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  baseVersion           V2ProjectVersion                @relation("DirectorRunBaseVersion", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  resultVersion         V2ProjectVersion                @relation("DirectorRunResultVersion", fields: [resultVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  perceptionSnapshot    V2ProjectSnapshot               @relation("DirectorRunPerceptionSnapshot", fields: [perceptionSnapshotId], references: [id], onDelete: Restrict)
+  treatmentSnapshot     V2ProjectSnapshot               @relation("DirectorRunTreatmentSnapshot", fields: [treatmentSnapshotId], references: [id], onDelete: Restrict)
+  storySnapshot         V2ProjectSnapshot               @relation("DirectorRunStorySnapshot", fields: [storySnapshotId], references: [id], onDelete: Restrict)
+  editPlanSnapshot      V2ProjectSnapshot               @relation("DirectorRunEditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
+  qualitySnapshot       V2ProjectSnapshot               @relation("DirectorRunQualitySnapshot", fields: [qualitySnapshotId], references: [id], onDelete: Restrict)
+  finalExportOperations V2ProjectFinalExportOperation[]
 
   @@unique([id, workspaceId])
   @@unique([commandId, workspaceId])
@@ -640,11 +645,12 @@ model V2PublicOperation {
   nextAttemptAt      DateTime? @db.Timestamptz(3)
   deadLetteredAt     DateTime? @db.Timestamptz(3)
 
-  workspace      V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  client         V2ApiClient                @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  artifactRender V2ArtifactRenderOperation?
-  mediaIngest    V2MediaIngestOperation?
+  workspace          V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  client             V2ApiClient                    @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  artifactRender     V2ArtifactRenderOperation?
+  mediaIngest        V2MediaIngestOperation?
   projectProxyRender V2ProjectProxyRenderOperation?
+  projectFinalExport V2ProjectFinalExportOperation?
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
@@ -681,18 +687,18 @@ model V2MediaIngestOperation {
 }
 
 model V2ProjectProxyRenderOperation {
-  operationId       String   @id @db.VarChar(128)
-  workspaceId      String   @db.VarChar(128)
-  projectId        String   @db.VarChar(128)
-  projectVersionId String   @db.VarChar(128)
-  editPlanSnapshotId String @db.VarChar(128)
-  sourceArtifactId String   @db.VarChar(128)
-  sourceManifestId String   @db.VarChar(128)
-  inputHash        String   @db.Char(64)
-  outputArtifactId String   @db.VarChar(128)
-  outputManifestId String   @db.VarChar(128)
-  originalFileName String   @db.VarChar(240)
-  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  operationId        String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  projectVersionId   String   @db.VarChar(128)
+  editPlanSnapshotId String   @db.VarChar(128)
+  sourceArtifactId   String   @db.VarChar(128)
+  sourceManifestId   String   @db.VarChar(128)
+  inputHash          String   @db.Char(64)
+  outputArtifactId   String   @db.VarChar(128)
+  outputManifestId   String   @db.VarChar(128)
+  originalFileName   String   @db.VarChar(240)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
 
   workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   operation V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
@@ -705,6 +711,48 @@ model V2ProjectProxyRenderOperation {
   @@index([workspaceId, sourceArtifactId])
   @@index([workspaceId, outputArtifactId])
   @@map("project_proxy_render_operations")
+}
+
+model V2ProjectFinalExportOperation {
+  operationId         String   @id @db.VarChar(128)
+  workspaceId         String   @db.VarChar(128)
+  projectId           String   @db.VarChar(128)
+  projectVersionId    String   @db.VarChar(128)
+  projectVersionHash  String   @db.Char(64)
+  editPlanSnapshotId  String   @db.VarChar(128)
+  directorRunId       String   @db.VarChar(128)
+  qualitySnapshotId   String   @db.VarChar(128)
+  qualitySnapshotHash String   @db.Char(64)
+  sourceArtifactId    String   @db.VarChar(128)
+  sourceManifestId    String   @db.VarChar(128)
+  inputHash           String   @db.Char(64)
+  outputArtifactId    String   @db.VarChar(128)
+  outputManifestId    String   @db.VarChar(128)
+  outputAspectRatio   String   @db.VarChar(16)
+  outputWidth         Int
+  outputHeight        Int
+  outputFps           Int
+  approvedByType      String   @db.VarChar(32)
+  approvedById        String   @db.VarChar(128)
+  approvalNote        String?  @db.VarChar(1000)
+  approvedAt          DateTime @db.Timestamptz(3)
+  originalFileName    String   @db.VarChar(240)
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace       V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  operation       V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  project         V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  version         V2ProjectVersion  @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  directorRun     V2DirectorRun     @relation(fields: [directorRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  qualitySnapshot V2ProjectSnapshot @relation("FinalExportQualitySnapshot", fields: [qualitySnapshotId], references: [id], onDelete: Restrict)
+
+  @@unique([operationId, workspaceId])
+  @@index([workspaceId, projectVersionId, inputHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId])
+  @@index([workspaceId, outputArtifactId])
+  @@index([workspaceId, directorRunId])
+  @@map("project_final_export_operations")
 }
 
 model V2ProjectMediaAsset {

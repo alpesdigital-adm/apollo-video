@@ -46,6 +46,7 @@ type StoredOperation = Prisma.V2PublicOperationGetPayload<{
     }
     mediaIngest: true
     projectProxyRender: true
+    projectFinalExport: true
   }
 }>
 
@@ -67,6 +68,7 @@ const OPERATION_INCLUDE = {
   },
   mediaIngest: true,
   projectProxyRender: true,
+  projectFinalExport: true,
 } as const
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
@@ -152,10 +154,12 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   const renderDetail = row.artifactRender
   const ingestDetail = row.mediaIngest
   const projectRenderDetail = row.projectProxyRender
+  const finalExportDetail = row.projectFinalExport
   const isRender = row.type === 'artifact-render'
   const isIngest = row.type === 'media-ingest'
   const isProjectRender = row.type === 'project-proxy-render'
-  if (row.targetType !== 'media-artifact' || [isRender, isIngest, isProjectRender].filter(Boolean).length !== 1) {
+  const isFinalExport = row.type === 'project-final-export'
+  if (row.targetType !== 'media-artifact' || [isRender, isIngest, isProjectRender, isFinalExport].filter(Boolean).length !== 1) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
       'Stored PublicOperation context is invalid',
@@ -163,7 +167,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     )
   }
   if (isRender && (
-    !renderDetail || ingestDetail || projectRenderDetail || row.targetId !== renderDetail.artifactId ||
+    !renderDetail || ingestDetail || projectRenderDetail || finalExportDetail || row.targetId !== renderDetail.artifactId ||
     row.workspaceId !== renderDetail.workspaceId ||
     renderDetail.manifest.artifactId !== renderDetail.artifactId ||
     renderDetail.authorization.artifactId !== renderDetail.artifactId ||
@@ -176,7 +180,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored render operation context is invalid', { operationId: row.id })
   }
   if (isIngest && (
-    !ingestDetail || renderDetail || projectRenderDetail || row.targetId !== ingestDetail.sourceArtifactId ||
+    !ingestDetail || renderDetail || projectRenderDetail || finalExportDetail || row.targetId !== ingestDetail.sourceArtifactId ||
     row.workspaceId !== ingestDetail.workspaceId ||
     !ID_PATTERN.test(ingestDetail.projectId) || !ID_PATTERN.test(ingestDetail.sourceManifestId) ||
     ingestDetail.originalFileName.trim().length < 1
@@ -184,7 +188,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored ingest operation context is invalid', { operationId: row.id })
   }
   if (isProjectRender && (
-    !projectRenderDetail || renderDetail || ingestDetail ||
+    !projectRenderDetail || renderDetail || ingestDetail || finalExportDetail ||
     row.targetId !== projectRenderDetail.outputArtifactId ||
     row.workspaceId !== projectRenderDetail.workspaceId ||
     ![projectRenderDetail.projectId, projectRenderDetail.projectVersionId, projectRenderDetail.editPlanSnapshotId,
@@ -194,6 +198,23 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     projectRenderDetail.originalFileName.trim().length < 1
   )) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy render context is invalid', { operationId: row.id })
+  }
+  if (isFinalExport && (
+    !finalExportDetail || renderDetail || ingestDetail || projectRenderDetail ||
+    row.targetId !== finalExportDetail.outputArtifactId ||
+    row.workspaceId !== finalExportDetail.workspaceId ||
+    ![finalExportDetail.projectId, finalExportDetail.projectVersionId, finalExportDetail.editPlanSnapshotId,
+      finalExportDetail.directorRunId, finalExportDetail.qualitySnapshotId, finalExportDetail.sourceArtifactId,
+      finalExportDetail.sourceManifestId, finalExportDetail.outputArtifactId,
+      finalExportDetail.outputManifestId, finalExportDetail.approvedById].every((value) => ID_PATTERN.test(value)) ||
+    ![finalExportDetail.projectVersionHash, finalExportDetail.qualitySnapshotHash, finalExportDetail.inputHash].every((value) => SHA256_PATTERN.test(value)) ||
+    !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(finalExportDetail.outputAspectRatio) ||
+    ![finalExportDetail.outputWidth, finalExportDetail.outputHeight, finalExportDetail.outputFps].every((value) => Number.isSafeInteger(value) && value > 0) ||
+    finalExportDetail.outputWidth % 2 !== 0 || finalExportDetail.outputHeight % 2 !== 0 ||
+    !['api-client', 'user'].includes(finalExportDetail.approvedByType) ||
+    finalExportDetail.originalFileName.trim().length < 1
+  )) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project final export context is invalid', { operationId: row.id })
   }
   const outputFields = checkpointFields(renderDetail)
   const hasAnyCheckpoint = outputFields.some((value) => value !== null)
@@ -283,8 +304,8 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       retryable: row.retryable,
       target: {
         type: 'media-artifact',
-        id: isRender ? renderDetail!.artifactId : isIngest ? ingestDetail!.sourceArtifactId : projectRenderDetail!.outputArtifactId,
-        manifestId: isRender ? renderDetail!.manifestId : isIngest ? ingestDetail!.sourceManifestId : projectRenderDetail!.outputManifestId,
+        id: isRender ? renderDetail!.artifactId : isIngest ? ingestDetail!.sourceArtifactId : isProjectRender ? projectRenderDetail!.outputArtifactId : finalExportDetail!.outputArtifactId,
+        manifestId: isRender ? renderDetail!.manifestId : isIngest ? ingestDetail!.sourceManifestId : isProjectRender ? projectRenderDetail!.outputManifestId : finalExportDetail!.outputManifestId,
       },
       ...(row.resultJson !== null ? { result: parseResult(row.resultJson) } : {}),
       ...(hasAnyError
@@ -318,7 +339,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         originalFileName: ingestDetail!.originalFileName,
         sourceArtifactId: ingestDetail!.sourceArtifactId,
         sourceManifestId: ingestDetail!.sourceManifestId,
-      } : {
+      } : isProjectRender ? {
         kind: 'project-proxy-render' as const,
         projectId: projectRenderDetail!.projectId,
         projectVersionId: projectRenderDetail!.projectVersionId,
@@ -329,6 +350,33 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         outputArtifactId: projectRenderDetail!.outputArtifactId,
         outputManifestId: projectRenderDetail!.outputManifestId,
         originalFileName: projectRenderDetail!.originalFileName,
+      } : {
+        kind: 'project-final-export' as const,
+        projectId: finalExportDetail!.projectId,
+        projectVersionId: finalExportDetail!.projectVersionId,
+        projectVersionHash: finalExportDetail!.projectVersionHash,
+        editPlanSnapshotId: finalExportDetail!.editPlanSnapshotId,
+        directorRunId: finalExportDetail!.directorRunId,
+        qualitySnapshotId: finalExportDetail!.qualitySnapshotId,
+        qualitySnapshotHash: finalExportDetail!.qualitySnapshotHash,
+        sourceArtifactId: finalExportDetail!.sourceArtifactId,
+        sourceManifestId: finalExportDetail!.sourceManifestId,
+        inputHash: finalExportDetail!.inputHash,
+        outputArtifactId: finalExportDetail!.outputArtifactId,
+        outputManifestId: finalExportDetail!.outputManifestId,
+        outputSpec: {
+          aspectRatio: finalExportDetail!.outputAspectRatio as '9:16' | '16:9' | '4:5' | '1:1' | '21:9',
+          width: finalExportDetail!.outputWidth,
+          height: finalExportDetail!.outputHeight,
+          fps: finalExportDetail!.outputFps,
+        },
+        approval: {
+          actorType: finalExportDetail!.approvedByType as 'api-client' | 'user',
+          actorId: finalExportDetail!.approvedById,
+          approvedAt: finalExportDetail!.approvedAt.toISOString(),
+          ...(finalExportDetail!.approvalNote ? { note: finalExportDetail!.approvalNote } : {}),
+        },
+        originalFileName: finalExportDetail!.originalFileName,
       }),
     })
   } catch (error) {
@@ -608,9 +656,12 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     const projectRenderContext = input.operation.type === 'project-proxy-render' && input.context.kind === 'project-proxy-render'
       ? input.context
       : undefined
+    const finalExportContext = input.operation.type === 'project-final-export' && input.context.kind === 'project-final-export'
+      ? input.context
+      : undefined
     if (
       input.operation.status !== 'queued' || !SHA256_PATTERN.test(input.requestFingerprint) ||
-      (!renderContext && !ingestContext && !projectRenderContext) ||
+      (!renderContext && !ingestContext && !projectRenderContext && !finalExportContext) ||
       (renderContext && (!SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
       (ingestContext && (
         !/^[0-9a-f-]{36}$/.test(ingestContext.uploadId) ||
@@ -626,6 +677,22 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         projectRenderContext.outputArtifactId !== input.operation.target.id ||
         projectRenderContext.outputManifestId !== input.operation.target.manifestId ||
         projectRenderContext.originalFileName.trim().length < 1 || projectRenderContext.originalFileName.length > 240
+      )) ||
+      (finalExportContext && (
+        ![finalExportContext.projectId, finalExportContext.projectVersionId, finalExportContext.editPlanSnapshotId,
+          finalExportContext.directorRunId, finalExportContext.qualitySnapshotId,
+          finalExportContext.sourceArtifactId, finalExportContext.sourceManifestId,
+          finalExportContext.outputArtifactId, finalExportContext.outputManifestId,
+          finalExportContext.approval.actorId].every((value) => ID_PATTERN.test(value)) ||
+        ![finalExportContext.projectVersionHash, finalExportContext.qualitySnapshotHash, finalExportContext.inputHash].every((value) => SHA256_PATTERN.test(value)) ||
+        finalExportContext.outputArtifactId !== input.operation.target.id ||
+        finalExportContext.outputManifestId !== input.operation.target.manifestId ||
+        !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(finalExportContext.outputSpec.aspectRatio) ||
+        ![finalExportContext.outputSpec.width, finalExportContext.outputSpec.height, finalExportContext.outputSpec.fps].every((value) => Number.isSafeInteger(value) && value > 0) ||
+        finalExportContext.outputSpec.width % 2 !== 0 || finalExportContext.outputSpec.height % 2 !== 0 ||
+        finalExportContext.approval.actorType !== 'api-client' || Number.isNaN(Date.parse(finalExportContext.approval.approvedAt)) ||
+        (finalExportContext.approval.note !== undefined && (finalExportContext.approval.note.length < 1 || finalExportContext.approval.note.length > 1000)) ||
+        finalExportContext.originalFileName.trim().length < 1 || finalExportContext.originalFileName.length > 240
       )) ||
       input.idempotencyKey.length < 1 ||
       input.idempotencyKey.length > 128
@@ -690,6 +757,47 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy render source is not immutable and available')
           }
         }
+        if (finalExportContext) {
+          const source = await transaction.v2Project.findFirst({
+            where: {
+              id: finalExportContext.projectId,
+              workspaceId: input.operation.workspaceId,
+              currentVersionId: finalExportContext.projectVersionId,
+            },
+            include: {
+              versions: {
+                where: {
+                  id: finalExportContext.projectVersionId,
+                  baseHash: finalExportContext.projectVersionHash,
+                  editPlanSnapshotId: finalExportContext.editPlanSnapshotId,
+                },
+                take: 1,
+              },
+              directorRuns: {
+                where: {
+                  id: finalExportContext.directorRunId,
+                  resultVersionId: finalExportContext.projectVersionId,
+                  qualitySnapshotId: finalExportContext.qualitySnapshotId,
+                  status: 'succeeded',
+                },
+                include: { qualitySnapshot: true },
+                take: 1,
+              },
+              mediaAssets: {
+                where: { artifactId: finalExportContext.sourceArtifactId, role: 'source-master' },
+                include: { artifact: { include: { manifests: { where: { id: finalExportContext.sourceManifestId }, take: 1 } } } },
+                take: 1,
+              },
+            },
+          })
+          if (
+            !source || source.versions.length !== 1 || source.directorRuns.length !== 1 || source.mediaAssets.length !== 1 ||
+            source.mediaAssets[0]!.artifact.manifests.length !== 1 ||
+            source.directorRuns[0]!.qualitySnapshot.contentHash !== finalExportContext.qualitySnapshotHash
+          ) {
+            throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Final export source, DirectorRun or QualityReport is no longer current and approved')
+          }
+        }
 
         await transaction.v2PublicOperation.create({
           data: {
@@ -741,7 +849,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             where: { id: ingestContext!.projectId, workspaceId: input.operation.workspaceId, status: { in: ['draft', 'failed'] } },
             data: { status: 'ingesting' },
           })
-        } else {
+        } else if (projectRenderContext) {
           await transaction.v2ProjectProxyRenderOperation.create({
             data: {
               operationId: input.operation.id,
@@ -756,6 +864,42 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               outputManifestId: projectRenderContext!.outputManifestId,
               originalFileName: projectRenderContext!.originalFileName,
             },
+          })
+        } else {
+          await transaction.v2ProjectFinalExportOperation.create({
+            data: {
+              operationId: input.operation.id,
+              workspaceId: input.operation.workspaceId,
+              projectId: finalExportContext!.projectId,
+              projectVersionId: finalExportContext!.projectVersionId,
+              projectVersionHash: finalExportContext!.projectVersionHash,
+              editPlanSnapshotId: finalExportContext!.editPlanSnapshotId,
+              directorRunId: finalExportContext!.directorRunId,
+              qualitySnapshotId: finalExportContext!.qualitySnapshotId,
+              qualitySnapshotHash: finalExportContext!.qualitySnapshotHash,
+              sourceArtifactId: finalExportContext!.sourceArtifactId,
+              sourceManifestId: finalExportContext!.sourceManifestId,
+              inputHash: finalExportContext!.inputHash,
+              outputArtifactId: finalExportContext!.outputArtifactId,
+              outputManifestId: finalExportContext!.outputManifestId,
+              outputAspectRatio: finalExportContext!.outputSpec.aspectRatio,
+              outputWidth: finalExportContext!.outputSpec.width,
+              outputHeight: finalExportContext!.outputSpec.height,
+              outputFps: finalExportContext!.outputSpec.fps,
+              approvedByType: finalExportContext!.approval.actorType,
+              approvedById: finalExportContext!.approval.actorId,
+              approvalNote: finalExportContext!.approval.note,
+              approvedAt: new Date(finalExportContext!.approval.approvedAt),
+              originalFileName: finalExportContext!.originalFileName,
+            },
+          })
+          await transaction.v2Project.updateMany({
+            where: {
+              id: finalExportContext!.projectId,
+              workspaceId: input.operation.workspaceId,
+              currentVersionId: finalExportContext!.projectVersionId,
+            },
+            data: { status: 'rendering-final' },
           })
         }
         const created = await transaction.v2PublicOperation.findUnique({

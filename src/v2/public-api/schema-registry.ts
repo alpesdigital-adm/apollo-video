@@ -423,6 +423,14 @@ const publicOperationSchemaV3 = {
   },
 }
 
+const publicOperationSchemaV4 = {
+  ...publicOperationSchemaV3,
+  properties: {
+    ...publicOperationSchemaV3.properties,
+    type: { enum: ['artifact-render', 'media-ingest', 'project-proxy-render', 'project-final-export'] },
+  },
+}
+
 const semanticDiffItemSchema = {
   type: 'object',
   additionalProperties: false,
@@ -1664,6 +1672,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV3 },
     }),
   ),
+  defineSchema('public-operation-detail', 4, 'Public operation detail including final project exports',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['operation'],
+      properties: { operation: publicOperationSchemaV4 },
+    }),
+  ),
   defineSchema('public-operation-list', 1, 'Public operation list response',
     successSchema({
       type: 'object',
@@ -1943,6 +1957,15 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('public-operation-list', 4, 'Public operation list including final project exports',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV4 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      },
+    }),
+  ),
   defineSchema('binary-media-content', 1, 'Binary media content', {
     type: 'string',
     format: 'binary',
@@ -2190,6 +2213,86 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         },
         operationIds: { type: 'array', maxItems: 1000, items: idSchema, uniqueItems: true },
         operations: { type: 'array', maxItems: 1000, items: publicOperationSchemaV3 },
+      },
+    }),
+  ),
+  defineSchema('project-workspace', 5, 'Project workspace with persisted final exports',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations'],
+      properties: {
+        project: searchableProjectSchema,
+        version: {
+          type: 'object', additionalProperties: false, required: ['id', 'sequence', 'baseHash', 'createdAt'],
+          properties: { id: idSchema, sequence: { type: 'integer', minimum: 1 }, baseHash: sha256Schema, createdAt: dateTimeSchema },
+        },
+        brief: { type: 'object', additionalProperties: true },
+        editPlan: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'state', 'fps', 'durationFrames', 'clipCount', 'cutCount', 'automaticZoom', 'subtitleFaceProtection'],
+          properties: {
+            id: idSchema, state: { type: 'string' }, fps: { type: 'number', minimum: 0 }, durationFrames: { type: 'integer', minimum: 0 },
+            clipCount: { type: 'integer', minimum: 0 }, cutCount: { type: 'integer', minimum: 0 },
+            automaticZoom: { type: 'boolean' }, subtitleFaceProtection: { type: 'boolean' },
+          },
+        },
+        commands: {
+          type: 'array', maxItems: 20,
+          items: {
+            type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'createdAt'],
+            properties: { id: idSchema, type: { enum: ['remove-spoken-content', 'run-director'] }, baseVersionId: idSchema, resultVersionId: idSchema, reason: { type: 'string', maxLength: 1000 }, createdAt: dateTimeSchema },
+          },
+        },
+        directorRuns: {
+          type: 'array', maxItems: 10,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: [
+              'id', 'status', 'plannerVersion', 'criticVersion', 'baseVersionId', 'resultVersionId',
+              'treatmentSnapshotId', 'storySnapshotId', 'qualitySnapshotId', 'qualityStatus',
+              'qualityScore', 'decisionCount', 'assumptionCount', 'subtitleCueCount', 'transitionCount',
+              'automaticZoom', 'createdAt',
+            ],
+            properties: {
+              id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
+              plannerVersion: { type: 'string', minLength: 3, maxLength: 64 }, criticVersion: { type: 'string', minLength: 3, maxLength: 64 },
+              baseVersionId: idSchema, resultVersionId: idSchema, treatmentSnapshotId: idSchema,
+              storySnapshotId: idSchema, qualitySnapshotId: idSchema,
+              qualityStatus: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
+              qualityScore: { type: 'number', minimum: 0, maximum: 1 },
+              decisionCount: { type: 'integer', minimum: 0, maximum: 64 }, assumptionCount: { type: 'integer', minimum: 0, maximum: 64 },
+              subtitleCueCount: { type: 'integer', minimum: 0 }, transitionCount: { type: 'integer', minimum: 0 },
+              automaticZoom: { type: 'boolean' }, createdAt: dateTimeSchema,
+            },
+          },
+        },
+        media: {
+          type: 'array', maxItems: 1000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'role', 'originalFileName', 'artifactId', 'manifestId', 'mediaType', 'container', 'byteSize', 'sha256', 'status', 'createdAt'],
+            properties: {
+              id: idSchema, role: { enum: ['source-master', 'editing-proxy', 'editorial-proxy', 'final-output'] }, originalFileName: { type: 'string', minLength: 1, maxLength: 255 },
+              artifactId: idSchema, manifestId: idSchema, mediaType: { enum: ['video', 'audio', 'image'] }, container: { type: 'string', minLength: 2, maxLength: 16 },
+              byteSize: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' }, sha256: sha256Schema, status: { enum: ['available', 'quarantined', 'deleted'] }, rightsStatus: { type: 'string' },
+              probe: { type: 'object', additionalProperties: false, required: ['width', 'height', 'duration', 'fps'], properties: { width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 }, duration: { type: 'number', exclusiveMinimum: 0 }, fps: { type: 'number', exclusiveMinimum: 0 } } },
+              createdAt: dateTimeSchema,
+            },
+          },
+        },
+        transcripts: {
+          type: 'array', maxItems: 1000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'sourceArtifactId', 'language', 'provider', 'model', 'transcriptHash', 'text', 'wordCount', 'segmentCount', 'createdAt'],
+            properties: {
+              id: idSchema, sourceArtifactId: idSchema, language: { type: 'string', minLength: 2, maxLength: 35 }, provider: { type: 'string' }, model: { type: 'string' },
+              transcriptHash: sha256Schema, text: { type: 'string' }, wordCount: { type: 'integer', minimum: 0 }, segmentCount: { type: 'integer', minimum: 0 }, createdAt: dateTimeSchema,
+            },
+          },
+        },
+        operationIds: { type: 'array', maxItems: 1000, items: idSchema, uniqueItems: true },
+        operations: { type: 'array', maxItems: 1000, items: publicOperationSchemaV4 },
       },
     }),
   ),
@@ -3003,6 +3106,43 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     successSchema({
       type: 'object', additionalProperties: false, required: ['operation', 'replayed'],
       properties: { operation: publicOperationSchemaV3, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('project-final-export-request', 1, 'Approve and export the current project version', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'projectVersionHash', 'format', 'approval'],
+    properties: {
+      projectVersionId: idSchema,
+      projectVersionHash: sha256Schema,
+      format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+      approval: {
+        type: 'object', additionalProperties: false, required: ['approved'],
+        properties: { approved: { const: true }, note: { type: 'string', minLength: 1, maxLength: 1000 } },
+      },
+    },
+  }),
+  defineSchema('project-final-export-operation-accepted', 1, 'Accepted approved project final export operation',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['operation', 'approval', 'outputSpec', 'replayed'],
+      properties: {
+        operation: publicOperationSchemaV4,
+        approval: {
+          type: 'object', additionalProperties: false, required: ['actorType', 'actorId', 'approvedAt'],
+          properties: {
+            actorType: { enum: ['api-client', 'user'] }, actorId: idSchema,
+            approvedAt: dateTimeSchema, note: { type: 'string', minLength: 1, maxLength: 1000 },
+          },
+        },
+        outputSpec: {
+          type: 'object', additionalProperties: false, required: ['aspectRatio', 'width', 'height', 'fps'],
+          properties: {
+            aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+            width: { type: 'integer', minimum: 2 }, height: { type: 'integer', minimum: 2 },
+            fps: { type: 'integer', minimum: 1, maximum: 120 },
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
     }),
   ),
   defineSchema('api-client-list', 1, 'API client list response',

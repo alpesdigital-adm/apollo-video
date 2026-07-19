@@ -33,7 +33,40 @@ export interface ProjectProxyRenderOperationContext {
   originalFileName: string
 }
 
-export type PublicOperationContext = ArtifactRenderOperationContext | MediaIngestOperationContext | ProjectProxyRenderOperationContext
+export interface ProjectFinalExportOperationContext {
+  kind: 'project-final-export'
+  projectId: string
+  projectVersionId: string
+  projectVersionHash: string
+  editPlanSnapshotId: string
+  directorRunId: string
+  qualitySnapshotId: string
+  qualitySnapshotHash: string
+  sourceArtifactId: string
+  sourceManifestId: string
+  inputHash: string
+  outputArtifactId: string
+  outputManifestId: string
+  outputSpec: {
+    aspectRatio: '9:16' | '16:9' | '4:5' | '1:1' | '21:9'
+    width: number
+    height: number
+    fps: number
+  }
+  approval: {
+    actorType: 'api-client' | 'user'
+    actorId: string
+    approvedAt: string
+    note?: string
+  }
+  originalFileName: string
+}
+
+export type PublicOperationContext =
+  | ArtifactRenderOperationContext
+  | MediaIngestOperationContext
+  | ProjectProxyRenderOperationContext
+  | ProjectFinalExportOperationContext
 
 export interface PublicOperationRecord {
   operation: Readonly<PublicOperation>

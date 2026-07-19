@@ -1002,6 +1002,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.projects.create',
         'apollo.projects.commands.apply',
         'apollo.projects.proxy-renders.enqueue',
+        'apollo.projects.final-exports.enqueue',
         'apollo.clients.list',
         'apollo.clients.create',
         'apollo.clients.credentials.rotate',

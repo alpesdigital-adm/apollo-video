@@ -11,10 +11,12 @@ export interface EditorialProxyRenderResult {
 export interface EditorialProxyRenderer {
   render(input: {
     operationId: string
+    renderKind: 'proxy' | 'final'
     sourcePath: string
     clips: readonly Readonly<EditorialCutClip>[]
     fps: number
     format: string
+    outputSpec?: { width: number; height: number; fps: number }
     subtitleCues?: readonly Readonly<DirectedSubtitleCue>[]
     transitions?: readonly Readonly<DirectedTransition>[]
     signal?: AbortSignal

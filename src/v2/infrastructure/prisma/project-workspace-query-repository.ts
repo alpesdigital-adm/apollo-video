@@ -62,8 +62,9 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
           },
         },
         mediaTranscripts: { orderBy: { createdAt: 'desc' } },
-        mediaIngestOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true } },
-        proxyRenderOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true } },
+        mediaIngestOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true, createdAt: true } },
+        proxyRenderOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true, createdAt: true } },
+        finalExportOperations: { orderBy: { createdAt: 'desc' }, select: { operationId: true, createdAt: true } },
       },
     })
     if (!project) return null
@@ -72,7 +73,7 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
       if (!manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Project media artifact has no manifest')
       return Object.freeze({
         id: link.id,
-        role: link.role as 'source-master' | 'editing-proxy' | 'editorial-proxy',
+        role: link.role as 'source-master' | 'editing-proxy' | 'editorial-proxy' | 'final-output',
         originalFileName: link.originalFileName,
         artifactId: link.artifactId,
         manifestId: manifest.id,
@@ -176,7 +177,11 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
       directorRuns: Object.freeze(directorRuns),
       media: Object.freeze(media),
       transcripts: Object.freeze(transcripts),
-      operationIds: Object.freeze([...project.proxyRenderOperations, ...project.mediaIngestOperations].map((item) => item.operationId)),
+      operationIds: Object.freeze([
+        ...project.finalExportOperations,
+        ...project.proxyRenderOperations,
+        ...project.mediaIngestOperations,
+      ].toSorted((left, right) => right.createdAt.getTime() - left.createdAt.getTime()).map((item) => item.operationId)),
     })
   }
 }

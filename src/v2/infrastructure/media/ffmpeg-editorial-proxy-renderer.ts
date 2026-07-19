@@ -55,7 +55,7 @@ function buildAssSubtitles(input: {
   fps: number
   cues: NonNullable<Parameters<EditorialProxyRenderer['render']>[0]['subtitleCues']>
 }): string {
-  const fontSize = input.width <= 640 ? 32 : 38
+  const fontSize = Math.max(32, Math.min(72, Math.round(input.width * 0.059)))
   const marginHorizontal = Math.round(input.width * 0.07)
   const marginVertical = Math.round(input.height * 0.075)
   const events = input.cues.map((cue) =>
@@ -102,10 +102,19 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
 
   async render(input: Parameters<EditorialProxyRenderer['render']>[0]) {
     if (!isAbsolute(input.sourcePath) || !Number.isFinite(input.fps) || input.fps <= 0 || input.clips.length < 1) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial proxy render input is invalid')
-    const dimensions = FORMAT_DIMENSIONS[input.format]
+    const dimensions = input.renderKind === 'final' && input.outputSpec
+      ? [input.outputSpec.width, input.outputSpec.height] as const
+      : FORMAT_DIMENSIONS[input.format]
     if (!dimensions) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial proxy format is not supported')
+    if (
+      input.renderKind === 'final' && (
+        !input.outputSpec || input.outputSpec.fps !== input.fps ||
+        !Number.isSafeInteger(input.outputSpec.width) || input.outputSpec.width <= 0 || input.outputSpec.width % 2 !== 0 ||
+        !Number.isSafeInteger(input.outputSpec.height) || input.outputSpec.height <= 0 || input.outputSpec.height % 2 !== 0
+      )
+    ) throw new DomainError('INVALID_RENDER_INPUT', 'Final editorial output spec is invalid')
     const directory = this.directory(input.operationId)
-    const outputPath = join(directory, 'editorial-proxy.mp4')
+    const outputPath = join(directory, input.renderKind === 'final' ? 'editorial-final.mp4' : 'editorial-proxy.mp4')
     const subtitlePath = join(directory, 'captions.ass')
     await mkdir(directory, { recursive: true })
     await rm(outputPath, { force: true })
@@ -139,8 +148,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       await execFileAsync(this.ffmpegPath, [
         '-hide_banner', '-loglevel', 'error', '-y', '-i', input.sourcePath,
         '-filter_complex', filters.join(';'), '-map', '[outv]', '-map', '[outa]',
-        '-r', String(input.fps), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
-        '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-movflags', '+faststart', outputPath,
+        '-r', String(input.fps), '-c:v', 'libx264', '-preset', input.renderKind === 'final' ? 'medium' : 'veryfast', '-crf', input.renderKind === 'final' ? '18' : '23',
+        '-c:a', 'aac', '-b:a', input.renderKind === 'final' ? '192k' : '160k', '-ar', '48000', '-movflags', '+faststart', outputPath,
       ], { windowsHide: true, timeout: 30 * 60_000, maxBuffer: 2 * 1024 * 1024, signal: input.signal })
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code

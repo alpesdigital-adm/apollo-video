@@ -1,6 +1,6 @@
 export interface ProjectWorkspaceMediaRecord {
   id: string
-  role: 'source-master' | 'editing-proxy' | 'editorial-proxy'
+  role: 'source-master' | 'editing-proxy' | 'editorial-proxy' | 'final-output'
   originalFileName: string
   artifactId: string
   manifestId: string

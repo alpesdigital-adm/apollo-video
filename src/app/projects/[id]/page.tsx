@@ -8,7 +8,7 @@ import LogoutButton from '@/components/LogoutButton'
 
 interface ApiEnvelope<T> { data?: T; error?: { message?: string } }
 interface MediaRecord {
-  id: string; role: 'source-master' | 'editing-proxy' | 'editorial-proxy'; originalFileName: string; artifactId: string;
+  id: string; role: 'source-master' | 'editing-proxy' | 'editorial-proxy' | 'final-output'; originalFileName: string; artifactId: string;
   manifestId: string; mediaType: string; container: string; byteSize: string; sha256: string; status: string;
   rightsStatus?: string; probe?: { width: number; height: number; duration: number; fps: number }; createdAt: string
 }
@@ -17,7 +17,7 @@ interface TranscriptSummary {
   text: string; wordCount: number; segmentCount: number; createdAt: string
 }
 interface PublicOperation {
-  id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render'; status: string; phase: string;
+  id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export'; status: string; phase: string;
   progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string
 }
 interface DirectorRunSummary {
@@ -110,6 +110,7 @@ export default function ProjectWorkspacePage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadLabel, setUploadLabel] = useState('')
   const [directorRunning, setDirectorRunning] = useState(false)
+  const [exportRunning, setExportRunning] = useState(false)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -154,7 +155,8 @@ export default function ProjectWorkspacePage() {
     return () => window.clearInterval(timer)
   }, [activeOperation, loadWorkspace])
 
-  const editingProxy = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'editorial-proxy') ?? [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'editing-proxy'), [workspace])
+  const finalOutput = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'final-output'), [workspace])
+  const editingProxy = useMemo(() => finalOutput ?? [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'editorial-proxy') ?? [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'editing-proxy'), [finalOutput, workspace])
   const sourceMasters = useMemo(() => (workspace?.media ?? []).filter((item) => item.role === 'source-master'), [workspace])
   const transcript = workspace?.transcripts[0]
   const latestDirectorRun = workspace?.directorRuns[0]
@@ -296,12 +298,46 @@ export default function ProjectWorkspacePage() {
     }
   }
 
-  const directorOperation = activeOperation?.type === 'project-proxy-render'
-  const pipelineSteps: readonly (readonly [string, string, string])[] = directorOperation
+  async function exportFinal() {
+    if (!workspace?.version || !workspace.project.format || !latestDirectorRun || latestDirectorRun.resultVersionId !== workspace.version.id || latestDirectorRun.status !== 'succeeded' || latestDirectorRun.qualityStatus === 'blocked') {
+      setNotice('A exportação final exige a versão atual aprovada pelo DirectorRun e pelo critic.')
+      return
+    }
+    setExportRunning(true)
+    setNotice(null)
+    try {
+      await requestJson(`/v1/projects/${encodeURIComponent(projectId)}/exports`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+        body: JSON.stringify({
+          projectVersionId: workspace.version.id,
+          projectVersionHash: workspace.version.baseHash,
+          format: workspace.project.format,
+          approval: { approved: true, note: 'Versão revisada no workspace e aprovada para exportação final.' },
+        }),
+      })
+      setNotice('Aprovação registrada. O MP4 final em alta resolução entrou na fila de render.')
+      await loadWorkspace(true)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível iniciar a exportação final.')
+    } finally {
+      setExportRunning(false)
+    }
+  }
+
+  const finalExportOperation = activeOperation?.type === 'project-final-export'
+  const directorOperation = activeOperation?.type === 'project-proxy-render' || finalExportOperation
+  const pipelineSteps: readonly (readonly [string, string, string])[] = finalExportOperation
+    ? [
+        ['rendering', 'Render final 1080p', 'H.264/AAC, legendas e composição aprovada'],
+        ['verifying', 'Validação de entrega', 'Canvas, FPS, duração e direitos'],
+        ['persisting', 'Publicação do final', 'Artifact, manifest, checksum e lineage'],
+      ]
+    : directorOperation
     ? [
         ['rendering', 'Composição editorial', 'Cortes, enquadramento e legendas'],
         ['verifying', 'Crítica técnica', 'Duração, canvas e integridade'],
-        ['persisting', 'Artifact final', 'Lineage, versão e disponibilidade'],
+        ['persisting', 'Proxy editorial', 'Lineage, versão e disponibilidade'],
       ]
     : [
         ['assembling', 'Master imutável', 'Checksum e armazenamento'], ['probing', 'Leitura técnica', 'Duração, canvas e FPS'],
@@ -354,14 +390,16 @@ export default function ProjectWorkspacePage() {
             <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">{latestDirectorRun ? `DirectorRun ${latestDirectorRun.qualityStatus === 'approved' ? 'aprovado' : 'aprovado com ressalvas'} pelo critic, com ${latestDirectorRun.decisionCount} decisões editoriais persistidas.` : workspace.editPlan?.state === 'compiled' ? `Corte editorial V2 aplicado em ${workspace.editPlan.clipCount} trechos, com ${workspace.editPlan.cutCount} decisões persistidas.` : 'Ingestão verificável: master, proxy de edição, transcript e lineage.'}</p>
             {workspace.editPlan?.state === 'compiled' ? <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Zoom automático {workspace.editPlan.automaticZoom ? 'ativo' : 'desativado'}</span><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Proteção facial {workspace.editPlan.subtitleFaceProtection ? 'ativa' : 'pendente'}</span></div> : null}
             {latestDirectorRun ? <div className="mt-3 grid grid-cols-2 gap-2 text-center"><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.subtitleCueCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">blocos de legenda</span></div><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.transitionCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">transições</span></div></div> : null}
-            {workspace.editPlan?.state === 'compiled' && transcript ? <button className="mt-4 w-full rounded-lg bg-[#dbae3f] px-3 py-2.5 text-xs font-semibold text-[#171207] transition hover:bg-[#e5bb50] disabled:cursor-not-allowed disabled:opacity-45" disabled={directorRunning || Boolean(activeOperation && ['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status))} onClick={() => void runDirector()} type="button">{directorRunning ? 'Diretor planejando…' : latestDirectorRun ? 'Executar nova direção V2' : 'Executar Diretor V2'}</button> : null}
+            {workspace.editPlan?.state === 'compiled' && transcript ? <button className="mt-4 w-full rounded-lg bg-[#dbae3f] px-3 py-2.5 text-xs font-semibold text-[#171207] transition hover:bg-[#e5bb50] disabled:cursor-not-allowed disabled:opacity-45" disabled={directorRunning || exportRunning || Boolean(activeOperation && ['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status))} onClick={() => void runDirector()} type="button">{directorRunning ? 'Diretor planejando…' : latestDirectorRun ? 'Executar nova direção V2' : 'Executar Diretor V2'}</button> : null}
+            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && latestDirectorRun.qualityStatus !== 'blocked' ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || Boolean(activeOperation && ['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status))} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final'}</button> : null}
+            {finalOutput ? <a className="mt-2 block w-full rounded-lg border border-white/[0.08] px-3 py-2.5 text-center text-xs text-[#aaa49a] transition hover:border-white/[0.16] hover:text-white" download={finalOutput.originalFileName} href={`/v1/artifacts/${encodeURIComponent(finalOutput.artifactId)}/content`}>Baixar MP4 final</a> : null}
           </div>
         </aside>
 
         <section className="min-w-0 bg-[#070707] p-4 sm:p-7">
           <div className="flex items-end justify-between gap-4">
             <div><p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#68645c]">Monitor de origem</p><h1 className="mt-1 text-2xl font-semibold tracking-[-0.035em]">Material bruto</h1></div>
-            {editingProxy ? <span className="rounded-full border border-[#5eb77d]/20 bg-[#5eb77d]/[0.07] px-3 py-1 text-[10px] text-[#76c792]">Proxy verificado</span> : null}
+            {editingProxy ? <span className="rounded-full border border-[#5eb77d]/20 bg-[#5eb77d]/[0.07] px-3 py-1 text-[10px] text-[#76c792]">{finalOutput ? 'Final 1080p verificado' : 'Proxy verificado'}</span> : null}
           </div>
 
           <div className="mt-5 flex min-h-[500px] items-center justify-center overflow-hidden rounded-2xl border border-white/[0.08] bg-[#030303] p-4 shadow-[0_30px_80px_rgba(0,0,0,.25)]">
@@ -402,7 +440,7 @@ export default function ProjectWorkspacePage() {
         </section>
 
         <aside className="border-t border-white/[0.07] bg-[#0a0a0a] p-5 xl:border-l xl:border-t-0 xl:p-6">
-          <div className="flex items-center justify-between"><div><p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#b58d31]">Pipeline V2</p><h2 className="mt-2 text-lg font-semibold">{directorOperation ? 'Direção materializada' : 'Ingestão verificável'}</h2></div><span className="font-mono text-[9px] text-[#5f5c55]">{activeOperation?.id.slice(-8) ?? 'AGUARDANDO'}</span></div>
+          <div className="flex items-center justify-between"><div><p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#b58d31]">Pipeline V2</p><h2 className="mt-2 text-lg font-semibold">{finalExportOperation ? 'Exportação final' : directorOperation ? 'Direção materializada' : 'Ingestão verificável'}</h2></div><span className="font-mono text-[9px] text-[#5f5c55]">{activeOperation?.id.slice(-8) ?? 'AGUARDANDO'}</span></div>
           <div className="mt-7 space-y-1">
             {pipelineSteps.map(([phase, title, description], index) => {
               const failed = activeOperation?.status === 'failed' && currentStep === index
@@ -411,7 +449,7 @@ export default function ProjectWorkspacePage() {
             })}
           </div>
           <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
-            <div className="flex items-center justify-between"><span className="text-[9px] uppercase tracking-[0.15em] text-[#68645e]">Estado</span><span className="text-[10px] text-[#b9b3aa]">{activeOperation ? directorOperation && activeOperation.phase === 'completed' ? 'Render editorial concluído' : PHASE_LABELS[activeOperation.phase] ?? activeOperation.status : 'Aguardando mídia'}</span></div>
+            <div className="flex items-center justify-between"><span className="text-[9px] uppercase tracking-[0.15em] text-[#68645e]">Estado</span><span className="text-[10px] text-[#b9b3aa]">{activeOperation ? finalExportOperation && activeOperation.phase === 'completed' ? 'MP4 final disponível' : directorOperation && activeOperation.phase === 'completed' ? 'Render editorial concluído' : PHASE_LABELS[activeOperation.phase] ?? activeOperation.status : 'Aguardando mídia'}</span></div>
             {activeOperation?.error?.message ? <p className="mt-3 text-[10px] leading-4 text-[#c87b7b]">{activeOperation.error.message}</p> : null}
           </div>
         </aside>
@@ -420,7 +458,7 @@ export default function ProjectWorkspacePage() {
       <section className="border-t border-white/[0.07] bg-[#080808] px-4 py-5 sm:px-7">
         <div className="flex items-end justify-between"><div><p className="text-[9px] uppercase tracking-[0.18em] text-[#67635c]">Fontes do projeto</p><h2 className="mt-1 text-base font-semibold">Mídia catalogada</h2></div><span className="text-[10px] text-[#615e57]">{sourceMasters.length} master{sourceMasters.length === 1 ? '' : 's'} · {workspace.transcripts.length} transcript{workspace.transcripts.length === 1 ? '' : 's'}</span></div>
         <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
-          {workspace.media.length ? workspace.media.map((media) => <article className="min-w-64 rounded-xl border border-white/[0.07] bg-[#0b0b0b] p-4" key={media.id}><div className="flex items-start justify-between gap-3"><div className="grid h-9 w-9 place-items-center rounded-lg bg-[#d7a638]/[0.07] text-xs text-[#d5ab47]">{media.role === 'source-master' ? 'M' : media.role === 'editorial-proxy' ? 'E' : 'P'}</div><span className="rounded-full border border-[#61ad7a]/15 px-2 py-1 text-[9px] text-[#6fba87]">{media.rightsStatus ?? 'catalogado'}</span></div><p className="mt-3 truncate text-xs font-medium text-[#c8c2b9]">{media.originalFileName}</p><p className="mt-1 text-[10px] text-[#68645e]">{media.role === 'source-master' ? 'Master original' : media.role === 'editorial-proxy' ? 'Proxy editorial materializado' : 'Proxy de ingestão'} · {readableBytes(media.byteSize)}{media.probe ? ` · ${Math.round(media.probe.duration)}s` : ''}</p></article>) : <div className="w-full rounded-xl border border-dashed border-white/[0.08] px-4 py-8 text-center text-xs text-[#656159]">O primeiro master aparecerá aqui após a verificação.</div>}
+          {workspace.media.length ? workspace.media.map((media) => <article className="min-w-64 rounded-xl border border-white/[0.07] bg-[#0b0b0b] p-4" key={media.id}><div className="flex items-start justify-between gap-3"><div className="grid h-9 w-9 place-items-center rounded-lg bg-[#d7a638]/[0.07] text-xs text-[#d5ab47]">{media.role === 'source-master' ? 'M' : media.role === 'final-output' ? 'F' : media.role === 'editorial-proxy' ? 'E' : 'P'}</div><span className="rounded-full border border-[#61ad7a]/15 px-2 py-1 text-[9px] text-[#6fba87]">{media.rightsStatus ?? 'catalogado'}</span></div><p className="mt-3 truncate text-xs font-medium text-[#c8c2b9]">{media.originalFileName}</p><p className="mt-1 text-[10px] text-[#68645e]">{media.role === 'source-master' ? 'Master original' : media.role === 'final-output' ? 'MP4 final aprovado' : media.role === 'editorial-proxy' ? 'Proxy editorial materializado' : 'Proxy de ingestão'} · {readableBytes(media.byteSize)}{media.probe ? ` · ${media.probe.width}×${media.probe.height} · ${Math.round(media.probe.duration)}s` : ''}</p></article>) : <div className="w-full rounded-xl border border-dashed border-white/[0.08] px-4 py-8 text-center text-xs text-[#656159]">O primeiro master aparecerá aqui após a verificação.</div>}
         </div>
       </section>
     </main>

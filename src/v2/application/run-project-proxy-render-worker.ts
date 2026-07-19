@@ -110,7 +110,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       await enter('rendering')
       const rendered = await dependencies.renderer.render({
-        operationId: operation.id, sourcePath: resolveArtifactPath(dependencies.artifactRoot, source.sourceArtifactKey),
+        operationId: operation.id, renderKind: 'proxy', sourcePath: resolveArtifactPath(dependencies.artifactRoot, source.sourceArtifactKey),
         clips, fps: source.editPlan.fps, format: source.format, subtitleCues, transitions,
         signal: abortController.signal,
       })

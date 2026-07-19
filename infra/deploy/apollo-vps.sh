@@ -3,6 +3,9 @@ set -euo pipefail
 
 IMAGE="${APOLLO_IMAGE:-apollo-video:latest}"
 CONTAINER="${APOLLO_CONTAINER:-apollo-video}"
+INGEST_WORKER="${APOLLO_INGEST_WORKER_CONTAINER:-${CONTAINER}-ingest-worker}"
+RENDER_WORKER="${APOLLO_RENDER_WORKER_CONTAINER:-${CONTAINER}-render-worker}"
+WEBHOOK_WORKER="${APOLLO_WEBHOOK_WORKER_CONTAINER:-${CONTAINER}-webhook-worker}"
 APP_ROOT="${APOLLO_APP_ROOT:-/apps/apollo-video}"
 ENV_FILE="${APOLLO_ENV_FILE:-${APP_ROOT}/.env}"
 DOMAIN="${APOLLO_DOMAIN:-apollo.alpesd.com.br}"
@@ -10,46 +13,43 @@ DOMAIN="${APOLLO_DOMAIN:-apollo.alpesd.com.br}"
 test -f "${ENV_FILE}"
 docker network inspect easypanel >/dev/null
 
-for directory in data uploads renders generated-images generated-videos stock thumbs audio assets tmp artifacts render-outputs; do
+for directory in tmp artifacts render-outputs; do
   install -d -o 1000 -g 1000 "${APP_ROOT}/${directory}"
 done
 
-docker run --rm \
-  --env-file "${ENV_FILE}" \
-  --add-host host.docker.internal:host-gateway \
-  "${IMAGE}" \
-  npm run db:v2:migrate:deploy
+COMMON_RUNTIME=(
+  --restart unless-stopped
+  --init
+  --env-file "${ENV_FILE}"
+  --add-host host.docker.internal:host-gateway
+  --network easypanel
+  -v "${APP_ROOT}/tmp:/app/tmp"
+  -v "${APP_ROOT}/artifacts:/app/artifacts"
+  -v "${APP_ROOT}/render-outputs:/app/render-outputs"
+)
+
+remove_container() {
+  docker stop --time 30 "$1" 2>/dev/null || true
+  docker rm "$1" 2>/dev/null || true
+}
 
 docker run --rm \
-  --env-file "${ENV_FILE}" \
-  -v "${APP_ROOT}/data:/app/data" \
-  "${IMAGE}" \
-  npx prisma db push --skip-generate
-
-docker stop "${CONTAINER}" 2>/dev/null || true
-docker rm "${CONTAINER}" 2>/dev/null || true
-
-docker run -d \
-  --name "${CONTAINER}" \
-  --restart unless-stopped \
-  --init \
-  --memory 3g \
-  --cpus 4 \
   --env-file "${ENV_FILE}" \
   --add-host host.docker.internal:host-gateway \
   --network easypanel \
-  -v "${APP_ROOT}/data:/app/data" \
-  -v "${APP_ROOT}/uploads:/app/public/uploads" \
-  -v "${APP_ROOT}/renders:/app/public/renders" \
-  -v "${APP_ROOT}/generated-images:/app/public/generated-images" \
-  -v "${APP_ROOT}/generated-videos:/app/public/generated-videos" \
-  -v "${APP_ROOT}/stock:/app/public/stock" \
-  -v "${APP_ROOT}/thumbs:/app/public/thumbs" \
-  -v "${APP_ROOT}/audio:/app/public/audio" \
-  -v "${APP_ROOT}/assets:/app/public/assets" \
-  -v "${APP_ROOT}/tmp:/app/tmp" \
-  -v "${APP_ROOT}/artifacts:/app/artifacts" \
-  -v "${APP_ROOT}/render-outputs:/app/render-outputs" \
+  "${IMAGE}" \
+  npm run db:v2:migrate:deploy
+
+remove_container "${CONTAINER}"
+remove_container "${INGEST_WORKER}"
+remove_container "${RENDER_WORKER}"
+remove_container "${WEBHOOK_WORKER}"
+
+docker run -d \
+  --name "${CONTAINER}" \
+  --memory 3g \
+  --cpus 4 \
+  "${COMMON_RUNTIME[@]}" \
   --health-cmd "node -e \"fetch('http://127.0.0.1:3333/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\"" \
   --health-interval 15s \
   --health-timeout 5s \
@@ -83,3 +83,47 @@ docker run -d \
   --label traefik.http.routers.apollo-https.tls.certresolver=letsencrypt \
   --label traefik.http.services.apollo-video.loadbalancer.server.port=3333 \
   "${IMAGE}"
+
+docker run -d \
+  --name "${INGEST_WORKER}" \
+  --memory 2g \
+  --cpus 2 \
+  "${COMMON_RUNTIME[@]}" \
+  "${IMAGE}" \
+  npm run worker:v2:ingest
+
+docker run -d \
+  --name "${RENDER_WORKER}" \
+  --memory 4g \
+  --cpus 4 \
+  "${COMMON_RUNTIME[@]}" \
+  "${IMAGE}" \
+  npm run worker:v2:render
+
+docker run -d \
+  --name "${WEBHOOK_WORKER}" \
+  --memory 1g \
+  --cpus 1 \
+  "${COMMON_RUNTIME[@]}" \
+  "${IMAGE}" \
+  npm run worker:v2:webhook
+
+for attempt in $(seq 1 30); do
+  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${CONTAINER}")"
+  if [[ "${health}" == "healthy" ]]; then
+    break
+  fi
+  if [[ "${health}" == "unhealthy" || "${health}" == "exited" || "${health}" == "dead" ]]; then
+    docker logs --tail 100 "${CONTAINER}" >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+test "$(docker inspect --format '{{.State.Health.Status}}' "${CONTAINER}")" = "healthy"
+for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}"; do
+  test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
+done
+
+docker exec "${CONTAINER}" node -e \
+  "fetch('http://127.0.0.1:3333/v1/health').then(async r=>{if(!r.ok)throw new Error(await r.text())}).catch(()=>process.exit(1))"

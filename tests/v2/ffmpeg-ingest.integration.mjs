@@ -57,6 +57,7 @@ test('V2 editorial renderer materializes exact retained clips as a format-aware 
   const renderer = new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'work'), ffmpegPath })
   const result = await renderer.render({
     operationId: 'operation-editorial-render-1',
+    renderKind: 'proxy',
     sourcePath,
     fps: 25,
     format: '9:16',
@@ -87,4 +88,42 @@ test('V2 editorial renderer materializes exact retained clips as a format-aware 
 
   await renderer.cleanup('operation-editorial-render-1')
   await assert.rejects(() => access(result.outputPath), { code: 'ENOENT' })
+})
+
+test('V2 editorial renderer produces a verified 1080x1920 final MP4 from the approved timeline', async (t) => {
+  assert.equal(typeof ffmpegPath, 'string')
+  const root = await mkdtemp(join(tmpdir(), 'apollo-v2-ffmpeg-final-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const sourcePath = join(root, 'master.mp4')
+  await execFileAsync(ffmpegPath, [
+    '-hide_banner', '-loglevel', 'error', '-y',
+    '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30:duration=0.5',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=0.5',
+    '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', sourcePath,
+  ], { windowsHide: true, timeout: 60_000 })
+
+  const renderer = new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'work'), ffmpegPath })
+  const result = await renderer.render({
+    operationId: 'operation-editorial-final-1',
+    renderKind: 'final',
+    sourcePath,
+    fps: 30,
+    format: '9:16',
+    outputSpec: { width: 1080, height: 1920, fps: 30 },
+    clips: [
+      { id: 'clip-final-1', sourceArtifactId: 'artifact-1', sourceInFrame: 0, sourceOutFrame: 12, timelineInFrame: 0, timelineOutFrame: 12, rate: 1 },
+    ],
+    subtitleCues: [
+      { id: 'cue-final-1', startFrame: 0, endFrame: 12, text: 'Legenda final segura', anchor: 'bottom' },
+    ],
+    transitions: [],
+  })
+
+  assert.equal(result.probe.width, 1080)
+  assert.equal(result.probe.height, 1920)
+  assert.ok(Math.abs(result.probe.fps - 30) <= 0.01)
+  assert.equal(result.probe.codec, 'h264')
+  assert.match(result.sha256, /^[a-f0-9]{64}$/)
+  assert.ok(result.byteSize > 0)
+  await access(result.outputPath)
 })
