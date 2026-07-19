@@ -56,3 +56,12 @@ test('project editor exposes version-bound spatial review through the public ann
   assert.match(projectEditorSource, /Marcar ajuste/)
   assert.match(projectEditorSource, /A versão do vídeo não foi alterada/)
 })
+
+test('annotation seek keeps the media position, visible timecode and performance sample synchronized', () => {
+  assert.match(projectEditorSource, /function seekPreviewToFrame\(frame: number\)/)
+  assert.match(projectEditorSource, /previewSeekStartedAt\.current = performance\.now\(\)\s+video\.currentTime = Math\.max\(0, frame \/ fps\)\s+readPreviewPosition\(\)/)
+  assert.match(projectEditorSource, /function finishPreviewSeek\(\): void \{[\s\S]*?readPreviewPosition\(\)\s+\}/)
+  assert.match(projectEditorSource, /onClick=\{\(\) => seekPreviewToFrame\(annotation\.frame\)\}/)
+  assert.match(projectEditorSource, /data-testid="project-preview"/)
+  assert.match(projectEditorSource, /data-testid="review-overlay"/)
+})

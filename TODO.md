@@ -22,8 +22,8 @@ Critério vigente para `[x]`:
 
 Estado auditado após o gate de workspace, ingestão, corte editorial e primeiro DirectorRun V2 materializado:
 
-- **102 de 1.259 microtarefas verificadas como efetivamente entregues (8,1%)**;
-- **1.157 microtarefas abertas ou aguardando nova comprovação**;
+- **107 de 1.259 microtarefas verificadas como efetivamente entregues (8,5%)**;
+- **1.152 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
@@ -889,18 +889,18 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.039 — Preview interativo [FR-210]
 
-- [ ] Integrar player ao proxy da ProjectVersion ativa. Evidência F1-039: PreviewSession liga version, URL e hash.
-- [ ] Implementar play, pause, seek e frame/timecode confiáveis. Evidência F1-039: controle converte segundos/frames pelo fps canônico.
+- [x] Integrar player ao proxy da ProjectVersion ativa. Evidência F1-039: `GET /v1/projects/{projectId}/annotations` materializa uma `PreviewSession` ligada à versão `project-version-b16bd189-c734-44d7-bd6f-7685cb3fc9be`, ao artifact `artifact-f540a227-c393-4459-9be2-e52a9198ecde`, à URL pública e ao hash `5a6f8a8a…`; o navegador real carregou o MP4 1080×1920 dessa identidade no workspace.
+- [x] Implementar play, pause, seek e frame/timecode confiáveis. Evidência F1-039: E2E visual reproduziu, pausou e buscou a annotation do frame 60; a falha encontrada, em que o vídeo ia a 2,0 s mas o timecode permanecia em 15,4 s, foi corrigida por `seekPreviewToFrame`/`finishPreviewSeek`, e a repetição exibiu `00:00:02:00` com o vídeo pausado em 2,0 s. `project-editor-ui.test.mjs` impede a regressão da integração e `review-system.test.mjs` cobre a conversão canônica pelo fps.
 - [ ] Exibir resolução/fps/hash do proxy e banner stale. Evidência F1-039: sessão expõe metadados e stale explicitamente.
-- [ ] Medir primeiro frame, seek p95 e dropped preview frames. Evidência F1-039: agregador retorna três métricas reais.
+- [x] Medir primeiro frame, seek p95 e dropped preview frames. Evidência F1-039: no browser E2E o painel exibiu primeiro frame de 1.357 ms, seek p95 de 109 ms e dropped frames de 0,00%; `previewMetrics` continua coberto por regressão determinística.
 - [ ] Criar E2E de navegação e troca de versão. Evidência F1-039/T-FR-210: fixture controla sessão identificada sem perder timecode.
 
 ### F1.040 — ReviewAnnotation [FR-211]
 
 - [x] Modelar frame, time range, screenshot, region, target IDs, texto, author e status. Evidência F1-040: `V2ReviewAnnotation`, migration `20260719141000_review_annotations`, `review-system.ts` e `project-review.test.mjs` cobrem todos os campos, invariantes e três scopes.
-- [ ] Implementar clique/drag sobre preview com captura do contexto visual. Evidência F1-040: overlay normaliza região e liga screenshot ao frame do proxy.
+- [x] Implementar clique/drag sobre preview com captura do contexto visual. Evidência F1-040: browser E2E clicou um ponto e arrastou uma região sobre o frame 60; o Postgres preservou screenshot JPEG, artifact/hash da sessão e bounds normalizados `{x:0.1621,y:0.1966,width:0.4782,height:0.5191}` na annotation `93927d92-5e4b-4ea7-a70e-80957231194a`.
 - [x] Persistir annotation sem alterar a versão até aplicação explícita. Evidência F1-040: `GET/POST /v1/projects/{projectId}/annotations` e `prisma-review-annotation.integration.mjs` autenticam pela API pública, vinculam version/proxy/hash, provam replay idempotente no Postgres e mantêm uma única ProjectVersion. Em produção, a annotation regional `49d8a688-1150-4bc7-aeef-ab24d3b631aa` foi criada sobre JPEG real do frame 60 do artifact final, repetida com `replayed=true` e preservou `project-version-b16bd189-c734-44d7-bd6f-7685cb3fc9be` como versão atual e anotada.
-- [ ] Criar E2E de annotation pontual, regional e de cena. Evidência F1-040/T-FR-211: três escopos preservam version ID.
+- [x] Criar E2E de annotation pontual, regional e de cena. Evidência F1-040/T-FR-211: a UI real persistiu ponto `c7f59f90-ef35-48c3-b7ba-b9076fb86f02`, região `93927d92-5e4b-4ea7-a70e-80957231194a` e cena `d9c21d79-8c1e-4a34-9800-e4eaecffb428`; todas apontam para a mesma ProjectVersion ativa `project-version-b16bd189-c734-44d7-bd6f-7685cb3fc9be`, o mesmo proxy final e screenshots JPEG. A cena resolveu `scene:clip-1` no range 0–36.233 ms. O total de ProjectVersions não foi alterado pelo fluxo de revisão.
 
 ### F1.041 — Escopos de revisão [FR-212]
 

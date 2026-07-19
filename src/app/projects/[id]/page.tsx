@@ -279,12 +279,23 @@ export default function ProjectWorkspacePage() {
   }
 
   function finishPreviewSeek(): void {
-    if (previewSeekStartedAt.current <= 0) return
-    previewSeekSamples.current.push(performance.now() - previewSeekStartedAt.current)
-    previewSeekStartedAt.current = 0
-    const sorted = [...previewSeekSamples.current].toSorted((left, right) => left - right)
-    const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)
-    setPreviewPerformance((current) => ({ ...current, seekP95Ms: Math.round(sorted[index] ?? 0) }))
+    if (previewSeekStartedAt.current > 0) {
+      previewSeekSamples.current.push(performance.now() - previewSeekStartedAt.current)
+      previewSeekStartedAt.current = 0
+      const sorted = [...previewSeekSamples.current].toSorted((left, right) => left - right)
+      const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)
+      setPreviewPerformance((current) => ({ ...current, seekP95Ms: Math.round(sorted[index] ?? 0) }))
+    }
+    readPreviewPosition()
+  }
+
+  function seekPreviewToFrame(frame: number): void {
+    const video = previewVideo.current
+    const fps = review?.session.fps ?? editingProxy?.probe?.fps ?? 30
+    if (!video || !Number.isFinite(frame) || fps <= 0) return
+    video.pause()
+    previewSeekStartedAt.current = performance.now()
+    video.currentTime = Math.max(0, frame / fps)
     readPreviewPosition()
   }
 
@@ -657,6 +668,7 @@ export default function ProjectWorkspacePage() {
                 <video
                   className="max-h-[560px] max-w-full object-contain"
                   controls
+                  data-testid="project-preview"
                   key={editingProxy.artifactId}
                   onCanPlay={() => setPreviewState((current) => current === 'playing' ? current : 'ready')}
                   onError={() => setPreviewState('error')}
@@ -676,6 +688,7 @@ export default function ProjectWorkspacePage() {
                 <div
                   aria-label={reviewMode === 'marking' ? 'Arraste sobre o frame para marcar a área do ajuste' : 'Marcações da revisão neste frame'}
                   className={`absolute inset-0 touch-none ${reviewMode === 'marking' ? 'cursor-crosshair pointer-events-auto bg-[#dcae3f]/[0.025]' : 'pointer-events-none'}`}
+                  data-testid="review-overlay"
                   onPointerDown={beginReviewMark}
                   onPointerMove={moveReviewMark}
                   onPointerUp={finishReviewMark}
@@ -771,7 +784,7 @@ export default function ProjectWorkspacePage() {
 
               <div className="mt-5 border-t border-white/[0.07] pt-4">
                 <div className="flex items-center justify-between"><p className="text-[9px] uppercase tracking-[0.17em] text-[#706c64]">Ajustes desta versão</p><span className="text-[9px] text-[#55524c]">{review.annotations.length} aberto{review.annotations.length === 1 ? '' : 's'}</span></div>
-                {review.annotations.length ? <div className="mt-3 grid gap-px bg-white/[0.06] sm:grid-cols-2">{review.annotations.slice(0, 6).map((annotation) => <button className="bg-[#090909] px-3 py-3 text-left transition hover:bg-[#0d0c0a]" key={annotation.id} onClick={() => { const video = previewVideo.current; if (video) { video.pause(); video.currentTime = annotation.frame / review.session.fps } }} type="button"><span className="font-mono text-[9px] text-[#b8943e]">{frameTimecode(annotation.frame, review.session.fps)}</span><span className="ml-2 text-[8px] uppercase tracking-[0.1em] text-[#5f5b54]">{annotation.scope === 'region' ? 'área' : annotation.scope === 'scene' ? 'cena' : 'ponto'}</span><p className="mt-1.5 line-clamp-2 text-xs leading-5 text-[#aaa49a]">{annotation.text}</p></button>)}</div> : <p className="mt-3 text-xs text-[#5f5b54]">Nenhum ajuste registrado nesta versão.</p>}
+                {review.annotations.length ? <div className="mt-3 grid gap-px bg-white/[0.06] sm:grid-cols-2">{review.annotations.slice(0, 6).map((annotation) => <button className="bg-[#090909] px-3 py-3 text-left transition hover:bg-[#0d0c0a]" data-testid={`review-annotation-${annotation.id}`} key={annotation.id} onClick={() => seekPreviewToFrame(annotation.frame)} type="button"><span className="font-mono text-[9px] text-[#b8943e]">{frameTimecode(annotation.frame, review.session.fps)}</span><span className="ml-2 text-[8px] uppercase tracking-[0.1em] text-[#5f5b54]">{annotation.scope === 'region' ? 'área' : annotation.scope === 'scene' ? 'cena' : 'ponto'}</span><p className="mt-1.5 line-clamp-2 text-xs leading-5 text-[#aaa49a]">{annotation.text}</p></button>)}</div> : <p className="mt-3 text-xs text-[#5f5b54]">Nenhum ajuste registrado nesta versão.</p>}
               </div>
             </section>
           ) : null}
