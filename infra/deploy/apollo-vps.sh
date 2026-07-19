@@ -29,7 +29,7 @@ COMMON_RUNTIME=(
 )
 
 remove_container() {
-  docker stop --time 30 "$1" 2>/dev/null || true
+  docker stop --timeout 30 "$1" 2>/dev/null || true
   docker rm "$1" 2>/dev/null || true
 }
 
@@ -90,7 +90,7 @@ docker run -d \
   --cpus 2 \
   "${COMMON_RUNTIME[@]}" \
   "${IMAGE}" \
-  npm run worker:v2:ingest
+  ./node_modules/.bin/tsx scripts/run-v2-ingest-worker.mjs
 
 docker run -d \
   --name "${RENDER_WORKER}" \
@@ -98,7 +98,7 @@ docker run -d \
   --cpus 4 \
   "${COMMON_RUNTIME[@]}" \
   "${IMAGE}" \
-  npm run worker:v2:render
+  ./node_modules/.bin/tsx scripts/run-v2-render-worker.mjs
 
 docker run -d \
   --name "${WEBHOOK_WORKER}" \
@@ -106,7 +106,7 @@ docker run -d \
   --cpus 1 \
   "${COMMON_RUNTIME[@]}" \
   "${IMAGE}" \
-  npm run worker:v2:webhook
+  ./node_modules/.bin/tsx scripts/run-v2-webhook-worker.mjs
 
 for attempt in $(seq 1 30); do
   health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${CONTAINER}")"
@@ -123,6 +123,12 @@ done
 test "$(docker inspect --format '{{.State.Health.Status}}' "${CONTAINER}")" = "healthy"
 for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}"; do
   test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
+done
+
+sleep 5
+for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}"; do
+  test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
+  test "$(docker inspect --format '{{.RestartCount}}' "${worker}")" = "0"
 done
 
 docker exec "${CONTAINER}" node -e \
