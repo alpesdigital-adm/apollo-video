@@ -145,6 +145,30 @@ const reviewAnnotationSchema = {
   },
 }
 
+const reviewApplicationScopeSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['kind', 'targetIds', 'formatIds', 'localeIds', 'recipeIds', 'global'],
+  properties: {
+    kind: { enum: ['frame', 'region', 'clip', 'scene', 'range', 'project', 'formats', 'locales', 'recipes'] },
+    targetIds: { type: 'array', maxItems: 1000, uniqueItems: true, items: idSchema },
+    formatIds: { type: 'array', maxItems: 20, uniqueItems: true, items: idSchema },
+    localeIds: { type: 'array', maxItems: 100, uniqueItems: true, items: idSchema },
+    recipeIds: { type: 'array', maxItems: 1000, uniqueItems: true, items: idSchema },
+    global: { type: 'boolean' },
+  },
+}
+
+const reviewAnnotationSchemaV2 = {
+  ...reviewAnnotationSchema,
+  required: [...reviewAnnotationSchema.required, 'applicationScope', 'affectedCount'],
+  properties: {
+    ...reviewAnnotationSchema.properties,
+    applicationScope: reviewApplicationScopeSchema,
+    affectedCount: { type: 'integer', minimum: 1 },
+  },
+}
+
 const reviewSessionSchema = {
   type: 'object',
   additionalProperties: false,
@@ -161,6 +185,45 @@ const reviewSessionSchema = {
     },
     durationFrames: { type: 'integer', minimum: 1 },
     stale: { type: 'boolean' },
+  },
+}
+
+const reviewSessionSchemaV2 = {
+  ...reviewSessionSchema,
+  required: [...reviewSessionSchema.required, 'currentProjectVersionId'],
+  properties: { ...reviewSessionSchema.properties, currentProjectVersionId: idSchema },
+}
+
+const reviewVersionSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'sequence', 'createdAt', 'current', 'previewAvailable'],
+  properties: {
+    id: idSchema,
+    sequence: { type: 'integer', minimum: 1 },
+    createdAt: dateTimeSchema,
+    current: { type: 'boolean' },
+    previewAvailable: { type: 'boolean' },
+  },
+}
+
+const reviewScopeContextSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['formatId', 'localeId', 'recipeIds', 'options'],
+  properties: {
+    formatId: idSchema,
+    localeId: idSchema,
+    recipeIds: { type: 'array', maxItems: 1000, uniqueItems: true, items: idSchema },
+    options: {
+      type: 'array', minItems: 9, maxItems: 9,
+      items: {
+        type: 'object', additionalProperties: false, required: ['kind', 'affectedCount', 'enabled'],
+        properties: {
+          kind: reviewApplicationScopeSchema.properties.kind,
+          affectedCount: { type: 'integer', minimum: 0 },
+          enabled: { type: 'boolean' },
+        },
+      },
+    },
   },
 }
 
@@ -2071,6 +2134,46 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     ],
   }),
+  defineSchema('create-review-annotation-request', 2, 'Create project review annotation request with deterministic application scope', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['projectVersionId', 'proxyArtifactId', 'proxyHash', 'frame', 'timeRangeMs', 'scope', 'targetIds', 'screenshotRef', 'text'],
+    properties: {
+      projectVersionId: idSchema,
+      proxyArtifactId: idSchema,
+      proxyHash: sha256Schema,
+      frame: { type: 'integer', minimum: 0 },
+      timeRangeMs: reviewAnnotationSchema.properties.timeRangeMs,
+      scope: { enum: ['point', 'region', 'scene'] },
+      region: normalizedReviewRegionSchema,
+      targetIds: reviewAnnotationSchema.properties.targetIds,
+      applicationScope: {
+        ...reviewApplicationScopeSchema,
+        required: [],
+      },
+      confirmedGlobal: { type: 'boolean' },
+      screenshotRef: reviewAnnotationSchema.properties.screenshotRef,
+      text: reviewAnnotationSchema.properties.text,
+    },
+    allOf: [
+      {
+        if: { properties: { scope: { const: 'region' } }, required: ['scope'] },
+        then: { required: ['region'], properties: { region: normalizedReviewRegionSchema } },
+        else: { properties: { region: false } },
+      },
+      {
+        if: { properties: { scope: { const: 'scene' } }, required: ['scope'] },
+        then: { properties: { targetIds: { type: 'array', minItems: 1, maxItems: 1, uniqueItems: true, items: idSchema } } },
+      },
+      {
+        if: {
+          properties: { applicationScope: { type: 'object', properties: { global: { const: true } }, required: ['global'] } },
+          required: ['applicationScope'],
+        },
+        then: { required: ['confirmedGlobal'], properties: { confirmedGlobal: { const: true } } },
+      },
+    ],
+  }),
   defineSchema('project-review', 1, 'Project review session and annotations',
     successSchema({
       type: 'object', additionalProperties: false, required: ['session', 'scenes', 'annotations'],
@@ -2081,10 +2184,28 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('project-review', 2, 'Version-selectable project review session, scope context and annotations',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['session', 'versions', 'scopeContext', 'scenes', 'annotations'],
+      properties: {
+        session: reviewSessionSchemaV2,
+        versions: { type: 'array', minItems: 1, maxItems: 1000, items: reviewVersionSchema },
+        scopeContext: reviewScopeContextSchema,
+        scenes: { type: 'array', maxItems: 1000, items: reviewSceneSchema },
+        annotations: { type: 'array', maxItems: 100, items: reviewAnnotationSchemaV2 },
+      },
+    }),
+  ),
   defineSchema('review-annotation-created', 1, 'Review annotation creation response',
     successSchema({
       type: 'object', additionalProperties: false, required: ['annotation', 'replayed'],
       properties: { annotation: reviewAnnotationSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('review-annotation-created', 2, 'Review annotation creation response with resolved application scope',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['annotation', 'replayed'],
+      properties: { annotation: reviewAnnotationSchemaV2, replayed: { type: 'boolean' } },
     }),
   ),
   defineSchema('project-workspace', 1, 'Project editing workspace response',

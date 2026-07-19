@@ -891,9 +891,9 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 - [x] Integrar player ao proxy da ProjectVersion ativa. Evidência F1-039: `GET /v1/projects/{projectId}/annotations` materializa uma `PreviewSession` ligada à versão `project-version-b16bd189-c734-44d7-bd6f-7685cb3fc9be`, ao artifact `artifact-f540a227-c393-4459-9be2-e52a9198ecde`, à URL pública e ao hash `5a6f8a8a…`; o navegador real carregou o MP4 1080×1920 dessa identidade no workspace.
 - [x] Implementar play, pause, seek e frame/timecode confiáveis. Evidência F1-039: E2E visual reproduziu, pausou e buscou a annotation do frame 60; a falha encontrada, em que o vídeo ia a 2,0 s mas o timecode permanecia em 15,4 s, foi corrigida por `seekPreviewToFrame`/`finishPreviewSeek`, e a repetição exibiu `00:00:02:00` com o vídeo pausado em 2,0 s. `project-editor-ui.test.mjs` impede a regressão da integração e `review-system.test.mjs` cobre a conversão canônica pelo fps.
-- [ ] Exibir resolução/fps/hash do proxy e banner stale. Evidência F1-039: sessão expõe metadados e stale explicitamente.
+- [x] Exibir resolução/fps/hash do proxy e banner stale. Evidência F1-039: `GET /v1/projects/{projectId}/annotations` retorna a identidade e os metadados do artifact exato; no E2E real a V5 exibiu 1080×1920, 30 fps e hash `5a6f8a8a…`, enquanto a seleção da V4 mostrou o banner de versão histórica somente leitura. `project-editor-ui.test.mjs`, `project-review.test.mjs` e `prisma-review-annotation.integration.mjs` cobrem a regressão.
 - [x] Medir primeiro frame, seek p95 e dropped preview frames. Evidência F1-039: no browser E2E o painel exibiu primeiro frame de 1.357 ms, seek p95 de 109 ms e dropped frames de 0,00%; `previewMetrics` continua coberto por regressão determinística.
-- [ ] Criar E2E de navegação e troca de versão. Evidência F1-039/T-FR-210: fixture controla sessão identificada sem perder timecode.
+- [x] Criar E2E de navegação e troca de versão. Evidência F1-039/T-FR-210: o navegador real navegou V5 → V4 → V5 no projeto de teste, manteve `00:00:02:00`, tornou a versão histórica somente leitura e desabilitou V1–V3 por ausência de proxy exato. A API aceita `projectVersionId`, devolve a lista imutável de versões e nunca substitui um artifact histórico por fallback incorreto.
 
 ### F1.040 — ReviewAnnotation [FR-211]
 
@@ -904,10 +904,10 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.041 — Escopos de revisão [FR-212]
 
-- [ ] Implementar frame, region, clip, scene, range, project, formats, locales e recipes. Evidência F1-041: união cobre nove scopes.
-- [ ] Definir default restrito ao alvo, formato e locale atuais. Evidência F1-041: resolver usa contexto corrente quando ausente.
-- [ ] Exigir confirmação para escopo global e mostrar quantidade afetada. Evidência F1-041: precondition e affectedCount acompanham expansão.
-- [ ] Testar resolução de target e expansão determinística de scope. Evidência F1-041/T-FR-212: local/global são exercitados.
+- [x] Implementar frame, region, clip, scene, range, project, formats, locales e recipes. Evidência F1-041: `ReviewScopeKind`, o application service, a API pública v2.0.0 e o seletor da mesa de revisão compartilham os nove valores; `review-system.test.mjs` resolve todos deterministicamente e `project-editor-ui.test.mjs` impede perda de uma opção na UI.
+- [x] Definir default restrito ao alvo, formato e locale atuais. Evidência F1-041: `review-project.ts` deriva cena/região/frame corrente e vincula formato, locale e recipe da sessão quando o cliente omite o escopo; GET expõe `scopeContext` com os defaults verdadeiros do artifact selecionado.
+- [x] Exigir confirmação para escopo global e mostrar quantidade afetada. Evidência F1-041: domínio/API rejeitam expansão não confirmada com `PRECONDITION_REQUIRED`; no E2E real o botão Registrar permaneceu bloqueado até a confirmação explícita de 2.392 frames, e o Postgres persistiu `global=true` e `affectedCount=2392` sem criar ProjectVersion.
+- [x] Testar resolução de target e expansão determinística de scope. Evidência F1-041/T-FR-212: testes unitários cobrem os nove scopes e local/global, o teste de aplicação prova defaults e precondition, a integração Prisma/API prova 428 e persistência, e o E2E real criou a annotation `a017fd7f-809a-44fa-92b2-75569fffd8b2` sobre a mesma V5, mantendo cinco versões.
 
 ### F1.042 — RenderElementMap [FR-213]
 

@@ -69,6 +69,8 @@ export interface ReviewAnnotation {
   scope?: ReviewAnnotationScope
   region?: { x: number; y: number; width: number; height: number }
   targetIds: readonly string[]
+  applicationScope: ReviewScope
+  affectedCount: number
   text: string
   author: { id: string; name: string; type?: 'user' | 'api-client' }
   status: 'open' | 'applied' | 'dismissed'
@@ -83,6 +85,8 @@ export function createReviewAnnotation(input: ReviewAnnotation) {
       Number.isInteger(input.frame) && input.frame >= 0 &&
       Number.isInteger(input.timeRangeMs[0]) && Number.isInteger(input.timeRangeMs[1]) &&
       input.timeRangeMs[0] >= 0 && input.timeRangeMs[1] >= input.timeRangeMs[0] &&
+      Number.isInteger(input.affectedCount) && input.affectedCount >= 1 &&
+      REVIEW_SCOPE_KINDS.includes(input.applicationScope.kind) &&
       !Number.isNaN(Date.parse(input.createdAt)),
     'INVALID_ARGUMENT',
     'Annotation fields are invalid',
@@ -110,11 +114,21 @@ export function createReviewAnnotation(input: ReviewAnnotation) {
     text: input.text.trim(),
     author: Object.freeze({ ...input.author, type: input.author.type ?? 'api-client' as const }),
     targetIds: Object.freeze([...new Set(input.targetIds)]),
+    applicationScope: Object.freeze({
+      ...input.applicationScope,
+      targetIds: Object.freeze([...new Set(input.applicationScope.targetIds)]),
+      formatIds: Object.freeze([...new Set(input.applicationScope.formatIds)]),
+      localeIds: Object.freeze([...new Set(input.applicationScope.localeIds)]),
+      recipeIds: Object.freeze([...new Set(input.applicationScope.recipeIds)]),
+    }),
     status: input.status,
   })
 }
 
-export type ReviewScopeKind = 'frame' | 'region' | 'clip' | 'scene' | 'range' | 'project' | 'formats' | 'locales' | 'recipes'
+export const REVIEW_SCOPE_KINDS = Object.freeze([
+  'frame', 'region', 'clip', 'scene', 'range', 'project', 'formats', 'locales', 'recipes',
+] as const)
+export type ReviewScopeKind = (typeof REVIEW_SCOPE_KINDS)[number]
 export interface ReviewScope {
   kind: ReviewScopeKind
   targetIds: readonly string[]
@@ -126,26 +140,40 @@ export interface ReviewScope {
 
 export function resolveReviewScope(input: {
   requested?: Partial<ReviewScope>
-  current: { targetId: string; formatId: string; localeId: string }
+  current: { targetId: string; formatId: string; localeId: string; recipeId?: string }
   availableCounts: Record<ReviewScopeKind, number>
   confirmedGlobal?: boolean
 }) {
   const kind = input.requested?.kind ?? 'region'
+  assertDomain(REVIEW_SCOPE_KINDS.includes(kind), 'INVALID_SCOPE', 'Review scope kind is invalid')
+  assertDomain(
+    Boolean(input.current.targetId.trim()) && Boolean(input.current.formatId.trim()) && Boolean(input.current.localeId.trim()) &&
+      Object.values(input.availableCounts).every((count) => Number.isInteger(count) && count >= 0),
+    'INVALID_SCOPE',
+    'Review scope context is invalid',
+  )
   const global = Boolean(input.requested?.global)
   if (global && !input.confirmedGlobal) {
     throw new DomainError('PRECONDITION_REQUIRED', 'Global review scope requires confirmation')
   }
+  const affectedCount = global ? input.availableCounts[kind] : 1
+  assertDomain(affectedCount > 0, 'INVALID_SCOPE', `Review scope ${kind} has no available target`)
+  const unique = (values: readonly string[] | undefined) => Object.freeze([
+    ...new Set((values ?? []).map((value) => value.trim()).filter(Boolean)),
+  ])
   const resolved: ReviewScope = {
     kind,
-    targetIds: input.requested?.targetIds?.length ? input.requested.targetIds : [input.current.targetId],
-    formatIds: global ? input.requested?.formatIds ?? [] : [input.current.formatId],
-    localeIds: global ? input.requested?.localeIds ?? [] : [input.current.localeId],
-    recipeIds: input.requested?.recipeIds ?? [],
+    targetIds: global ? unique(input.requested?.targetIds) : Object.freeze([input.current.targetId]),
+    formatIds: global ? unique(input.requested?.formatIds) : Object.freeze([input.current.formatId]),
+    localeIds: global ? unique(input.requested?.localeIds) : Object.freeze([input.current.localeId]),
+    recipeIds: global
+      ? unique(input.requested?.recipeIds)
+      : Object.freeze(input.current.recipeId ? [input.current.recipeId] : []),
     global,
   }
   return Object.freeze({
     scope: Object.freeze(resolved),
-    affectedCount: input.availableCounts[kind] ?? 1,
+    affectedCount,
     confirmationRequired: global,
   })
 }

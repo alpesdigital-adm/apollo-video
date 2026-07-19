@@ -193,6 +193,8 @@ const requiredChecks = [
   'review_annotations_status_check',
   'review_annotations_author_check',
   'review_annotations_region_check',
+  'review_annotations_affected_count_check',
+  'review_annotations_application_scope_json_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

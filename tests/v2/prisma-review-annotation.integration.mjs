@@ -211,6 +211,9 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(initialPayload.data.session.proxyArtifactId, artifactId)
     assert.equal(initialPayload.data.session.proxyHash, proxyHash)
     assert.equal(initialPayload.data.session.stale, false)
+    assert.equal(initialPayload.data.versions.length, 1)
+    assert.equal(initialPayload.data.versions[0].current, true)
+    assert.equal(initialPayload.data.scopeContext.options.length, 9)
     assert.equal(initialPayload.data.annotations.length, 0)
 
     const annotationRequest = {
@@ -243,6 +246,42 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(firstPayload.data.replayed, false)
     assert.equal(replayPayload.data.replayed, true)
     assert.equal(replayPayload.data.annotation.id, firstPayload.data.annotation.id)
+    assert.equal(firstPayload.data.annotation.applicationScope.kind, 'region')
+    assert.deepEqual(firstPayload.data.annotation.applicationScope.formatIds, ['9:16'])
+    assert.deepEqual(firstPayload.data.annotation.applicationScope.localeIds, ['pt-BR'])
+    assert.equal(firstPayload.data.annotation.affectedCount, 1)
+
+    const globalRequest = {
+      ...annotationRequest,
+      frame: 45,
+      timeRangeMs: [1500, 1500],
+      applicationScope: { kind: 'formats', global: true },
+      text: 'Aplicar o mesmo ajuste em todos os formatos.',
+    }
+    const unconfirmedGlobalResponse = await fetch(reviewUrl, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': 'review-integration-global-annotation',
+      },
+      body: JSON.stringify(globalRequest),
+    })
+    assert.equal(unconfirmedGlobalResponse.status, 428)
+    const confirmedGlobalResponse = await fetch(reviewUrl, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': 'review-integration-global-annotation',
+      },
+      body: JSON.stringify({ ...globalRequest, confirmedGlobal: true }),
+    })
+    const confirmedGlobalPayload = await confirmedGlobalResponse.json()
+    assert.equal(confirmedGlobalResponse.status, 201, JSON.stringify(confirmedGlobalPayload))
+    assert.equal(confirmedGlobalPayload.data.annotation.applicationScope.kind, 'formats')
+    assert.equal(confirmedGlobalPayload.data.annotation.applicationScope.global, true)
+    assert.equal(confirmedGlobalPayload.data.annotation.affectedCount, 1)
 
     const stored = await repository.list({
       workspaceId,
@@ -255,8 +294,13 @@ test('review annotations persist idempotently without mutating the project versi
       include: { versions: true },
     })
 
-    assert.equal(stored.length, 1)
-    assert.deepEqual(stored[0].region, annotationRequest.region)
+    assert.equal(stored.length, 2)
+    const regional = stored.find((annotation) => annotation.applicationScope.kind === 'region')
+    const global = stored.find((annotation) => annotation.applicationScope.kind === 'formats')
+    assert.deepEqual(regional.region, annotationRequest.region)
+    assert.equal(regional.affectedCount, 1)
+    assert.equal(global.applicationScope.global, true)
+    assert.equal(global.affectedCount, 1)
     assert.equal(projectAfterReview.currentVersionId, projectResult.version.id)
     assert.equal(projectAfterReview.versions.length, 1)
   } finally {

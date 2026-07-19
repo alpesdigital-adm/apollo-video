@@ -46,7 +46,8 @@ test('Apollo version is globally visible and receives the deployed build revisio
 })
 
 test('project editor exposes version-bound spatial review through the public annotation API', () => {
-  assert.match(projectEditorSource, /\/v1\/projects\/\$\{encodeURIComponent\(projectId\)\}\/annotations\?limit=50/)
+  assert.match(projectEditorSource, /new URLSearchParams\(\{ limit: '50' \}\)/)
+  assert.match(projectEditorSource, /query\.set\('projectVersionId', projectVersionId\)/)
   assert.match(projectEditorSource, /'idempotency-key': crypto\.randomUUID\(\)/)
   assert.match(projectEditorSource, /captureReviewScreenshot\(\)/)
   assert.match(projectEditorSource, /onPointerDown=\{beginReviewMark\}/)
@@ -55,6 +56,21 @@ test('project editor exposes version-bound spatial review through the public ann
   assert.match(projectEditorSource, /review\.session\.stale/)
   assert.match(projectEditorSource, /Marcar ajuste/)
   assert.match(projectEditorSource, /A versão do vídeo não foi alterada/)
+})
+
+test('project editor switches immutable previews without losing timecode and exposes all nine application scopes', () => {
+  assert.match(projectEditorSource, /const preservedPreviewTimeMs = useRef<number \| null>\(null\)/)
+  assert.match(projectEditorSource, /preservedPreviewTimeMs\.current = Math\.round\(video\.currentTime \* 1000\)/)
+  assert.match(projectEditorSource, /function initializePreviewPosition\(\): void/)
+  assert.match(projectEditorSource, /data-testid="review-version-rail"/)
+  assert.match(projectEditorSource, /data-testid="review-stale-banner"/)
+  for (const kind of ['frame', 'region', 'clip', 'scene', 'range', 'project', 'formats', 'locales', 'recipes']) {
+    assert.match(projectEditorSource, new RegExp(`${kind}:`))
+  }
+  assert.match(projectEditorSource, /data-testid="review-application-scope"/)
+  assert.match(projectEditorSource, /data-testid="review-global-toggle"/)
+  assert.match(projectEditorSource, /data-testid="review-global-confirmation"/)
+  assert.match(projectEditorSource, /confirmedGlobal: reviewGlobalConfirmed/)
 })
 
 test('annotation seek keeps the media position, visible timecode and performance sample synchronized', () => {

@@ -7,6 +7,7 @@ import type {
   ReviewSceneRecord,
 } from '../../application/ports/review-annotation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { REVIEW_SCOPE_KINDS, type ReviewScope } from '../../domain/review-system.ts'
 
 function parseObject(value: string, field: string): Record<string, unknown> {
   try {
@@ -26,6 +27,24 @@ function parseStringArray(value: string, field: string): string[] {
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
   }
+}
+
+function parseReviewScope(value: string): Readonly<ReviewScope> {
+  const parsed = parseObject(value, 'review application scope')
+  const arrayFields = ['targetIds', 'formatIds', 'localeIds', 'recipeIds'] as const
+  if (
+    typeof parsed.kind !== 'string' || !REVIEW_SCOPE_KINDS.includes(parsed.kind as ReviewScope['kind']) ||
+    typeof parsed.global !== 'boolean' ||
+    arrayFields.some((field) => !Array.isArray(parsed[field]) || !(parsed[field] as unknown[]).every((item) => typeof item === 'string'))
+  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored review application scope is invalid')
+  return Object.freeze({
+    kind: parsed.kind as ReviewScope['kind'],
+    targetIds: Object.freeze([...(parsed.targetIds as string[])]),
+    formatIds: Object.freeze([...(parsed.formatIds as string[])]),
+    localeIds: Object.freeze([...(parsed.localeIds as string[])]),
+    recipeIds: Object.freeze([...(parsed.recipeIds as string[])]),
+    global: parsed.global,
+  })
 }
 
 function toAnnotation(row: V2ReviewAnnotation): Readonly<PersistedReviewAnnotation> {
@@ -48,6 +67,8 @@ function toAnnotation(row: V2ReviewAnnotation): Readonly<PersistedReviewAnnotati
     scope: row.scope as PersistedReviewAnnotation['scope'],
     ...(region ? { region: Object.freeze(region) } : {}),
     targetIds: Object.freeze(parseStringArray(row.targetIdsJson, 'review target IDs')),
+    applicationScope: parseReviewScope(row.applicationScopeJson),
+    affectedCount: row.affectedCount,
     text: row.text,
     author: Object.freeze({
       id: row.authorId,
@@ -94,46 +115,59 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
     this.client = client
   }
 
-  async readPreviewContext(input: { workspaceId: string; projectId: string }): Promise<Readonly<ReviewPreviewContext> | null> {
+  async readPreviewContext(input: { workspaceId: string; projectId: string; projectVersionId?: string }): Promise<Readonly<ReviewPreviewContext> | null> {
     const project = await this.client.v2Project.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId },
-      include: { currentVersion: { include: { editPlanSnapshot: true } } },
+      select: {
+        id: true,
+        currentVersionId: true,
+        format: true,
+        locale: true,
+        versions: {
+          orderBy: { sequence: 'desc' },
+          select: {
+            id: true,
+            sequence: true,
+            createdAt: true,
+            editPlanSnapshot: { select: { contentJson: true } },
+          },
+        },
+      },
     })
-    if (!project?.currentVersion) return null
-    const currentVersionId = project.currentVersion.id
-    const [currentFinal, currentProxy] = await Promise.all([
-      this.client.v2ProjectFinalExportOperation.findFirst({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded' } },
+    if (!project?.currentVersionId) return null
+    const selectedVersion = input.projectVersionId
+      ? project.versions.find((version) => version.id === input.projectVersionId)
+      : project.versions.find((version) => version.id === project.currentVersionId)
+    if (!selectedVersion) return null
+    const [finalOperations, proxyOperations] = await Promise.all([
+      this.client.v2ProjectFinalExportOperation.findMany({
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
         orderBy: { createdAt: 'desc' },
+        select: { outputArtifactId: true, projectVersionId: true, createdAt: true },
       }),
-      this.client.v2ProjectProxyRenderOperation.findFirst({
-        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: currentVersionId, operation: { status: 'succeeded' } },
+      this.client.v2ProjectProxyRenderOperation.findMany({
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
         orderBy: { createdAt: 'desc' },
+        select: { outputArtifactId: true, projectVersionId: true, createdAt: true },
       }),
     ])
-    let candidate: ProxyCandidate | null = currentFinal
-      ? { artifactId: currentFinal.outputArtifactId, projectVersionId: currentFinal.projectVersionId, createdAt: currentFinal.createdAt }
-      : currentProxy
-        ? { artifactId: currentProxy.outputArtifactId, projectVersionId: currentProxy.projectVersionId, createdAt: currentProxy.createdAt }
+    const exactFinal = finalOperations.find((operation) => operation.projectVersionId === selectedVersion.id)
+    const exactProxy = proxyOperations.find((operation) => operation.projectVersionId === selectedVersion.id)
+    let candidate: ProxyCandidate | null = exactFinal
+      ? { artifactId: exactFinal.outputArtifactId, projectVersionId: exactFinal.projectVersionId, createdAt: exactFinal.createdAt }
+      : exactProxy
+        ? { artifactId: exactProxy.outputArtifactId, projectVersionId: exactProxy.projectVersionId, createdAt: exactProxy.createdAt }
         : null
-    if (!candidate) {
-      const [latestFinal, latestProxy] = await Promise.all([
-        this.client.v2ProjectFinalExportOperation.findFirst({
-          where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
-          orderBy: { createdAt: 'desc' },
-        }),
-        this.client.v2ProjectProxyRenderOperation.findFirst({
-          where: { workspaceId: input.workspaceId, projectId: input.projectId, operation: { status: 'succeeded' } },
-          orderBy: { createdAt: 'desc' },
-        }),
-      ])
+    if (!candidate && selectedVersion.id === project.currentVersionId) {
+      const latestFinal = finalOperations[0]
+      const latestProxy = proxyOperations[0]
       const candidates: ProxyCandidate[] = [
         ...(latestFinal ? [{ artifactId: latestFinal.outputArtifactId, projectVersionId: latestFinal.projectVersionId, createdAt: latestFinal.createdAt }] : []),
         ...(latestProxy ? [{ artifactId: latestProxy.outputArtifactId, projectVersionId: latestProxy.projectVersionId, createdAt: latestProxy.createdAt }] : []),
       ]
       candidate = candidates.toSorted((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0] ?? null
     }
-    if (!candidate) {
+    if (!candidate && selectedVersion.id === project.currentVersionId) {
       const editingProxy = await this.client.v2ProjectMediaAsset.findFirst({
         where: { workspaceId: input.workspaceId, projectId: input.projectId, role: 'editing-proxy' },
         orderBy: { createdAt: 'desc' },
@@ -150,7 +184,7 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
     const probe = typeof manifest.probe === 'object' && manifest.probe !== null && !Array.isArray(manifest.probe)
       ? manifest.probe as Record<string, unknown>
       : {}
-    const editPlan = parseObject(project.currentVersion.editPlanSnapshot.contentJson, 'review EditPlan')
+    const editPlan = parseObject(selectedVersion.editPlanSnapshot.contentJson, 'review EditPlan')
     const fps = typeof probe.fps === 'number' && probe.fps > 0
       ? probe.fps
       : typeof editPlan.fps === 'number' && editPlan.fps > 0 ? editPlan.fps : 0
@@ -161,16 +195,45 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
       !fps || !durationFrames || typeof probe.width !== 'number' || probe.width <= 0 ||
       typeof probe.height !== 'number' || probe.height <= 0
     ) throw new DomainError('PERSISTENCE_CONFLICT', 'Review proxy metadata is incomplete')
+    const scenes = scenesFromEditPlan(editPlan)
+    const recipeIds = Object.freeze([artifact.manifests[0].recipeId])
+    const previewVersionIds = new Set([
+      ...finalOperations.map((operation) => operation.projectVersionId),
+      ...proxyOperations.map((operation) => operation.projectVersionId),
+    ])
+    previewVersionIds.add(project.currentVersionId)
     return Object.freeze({
-      projectVersionId: currentVersionId,
+      currentProjectVersionId: project.currentVersionId,
+      projectVersionId: selectedVersion.id,
       proxyArtifactId: artifact.id,
       proxyHash: artifact.sha256,
       fps,
       width: probe.width,
       height: probe.height,
       durationFrames,
-      stale: candidate.projectVersionId !== currentVersionId,
-      scenes: scenesFromEditPlan(editPlan),
+      stale: selectedVersion.id !== project.currentVersionId || candidate.projectVersionId !== selectedVersion.id,
+      formatId: project.format ?? '9:16',
+      localeId: project.locale ?? 'pt-BR',
+      recipeIds,
+      availableScopeCounts: Object.freeze({
+        frame: durationFrames,
+        region: 1,
+        clip: scenes.length,
+        scene: scenes.length,
+        range: 1,
+        project: 1,
+        formats: project.format ? 1 : 0,
+        locales: project.locale ? 1 : 0,
+        recipes: recipeIds.length,
+      }),
+      versions: Object.freeze(project.versions.map((version) => Object.freeze({
+        id: version.id,
+        sequence: version.sequence,
+        createdAt: version.createdAt.toISOString(),
+        current: version.id === project.currentVersionId,
+        previewAvailable: previewVersionIds.has(version.id),
+      }))),
+      scenes,
     })
   }
 
@@ -251,6 +314,8 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
             regionHeight: input.annotation.region.height,
           } : {}),
           targetIdsJson: JSON.stringify(input.annotation.targetIds),
+          applicationScopeJson: JSON.stringify(input.annotation.applicationScope),
+          affectedCount: input.annotation.affectedCount,
           screenshotRef: input.annotation.screenshotRef,
           text: input.annotation.text,
           authorType: input.annotation.author.type,

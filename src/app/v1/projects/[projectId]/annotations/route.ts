@@ -8,7 +8,11 @@ import {
   readProjectReviewService,
 } from '@/v2/application/review-project'
 import { DomainError } from '@/v2/domain/errors'
-import type { ReviewAnnotationScope } from '@/v2/domain/review-system'
+import {
+  REVIEW_SCOPE_KINDS,
+  type ReviewAnnotationScope,
+  type ReviewScope,
+} from '@/v2/domain/review-system'
 import { createReviewAnnotationRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
@@ -28,11 +32,37 @@ function annotationView(annotation: PersistedReviewAnnotation) {
     scope: annotation.scope,
     ...(annotation.region ? { region: annotation.region } : {}),
     targetIds: annotation.targetIds,
+    applicationScope: annotation.applicationScope,
+    affectedCount: annotation.affectedCount,
     text: annotation.text,
     author: annotation.author,
     status: annotation.status,
     createdAt: annotation.createdAt,
   }
+}
+
+function parseApplicationScope(value: unknown): Partial<ReviewScope> | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new DomainError('INVALID_ARGUMENT', 'applicationScope must be an object')
+  }
+  const record = value as Record<string, unknown>
+  const allowed = ['kind', 'targetIds', 'formatIds', 'localeIds', 'recipeIds', 'global']
+  if (Object.keys(record).some((key) => !allowed.includes(key))) {
+    throw new DomainError('INVALID_ARGUMENT', 'applicationScope contains an unsupported field')
+  }
+  if (record.kind !== undefined && (typeof record.kind !== 'string' || !REVIEW_SCOPE_KINDS.includes(record.kind as ReviewScope['kind']))) {
+    throw new DomainError('INVALID_ARGUMENT', 'applicationScope.kind is invalid')
+  }
+  for (const field of ['targetIds', 'formatIds', 'localeIds', 'recipeIds'] as const) {
+    if (record[field] !== undefined && (!Array.isArray(record[field]) || !(record[field] as unknown[]).every((item) => typeof item === 'string'))) {
+      throw new DomainError('INVALID_ARGUMENT', `applicationScope.${field} must be an array of strings`)
+    }
+  }
+  if (record.global !== undefined && typeof record.global !== 'boolean') {
+    throw new DomainError('INVALID_ARGUMENT', 'applicationScope.global must be a boolean')
+  }
+  return record as Partial<ReviewScope>
 }
 
 function parseRegion(value: unknown) {
@@ -65,14 +95,18 @@ export async function GET(
     requireScope(actor, 'projects:read')
     const rawLimit = request.nextUrl.searchParams.get('limit')
     const limit = rawLimit === null ? 50 : Number(rawLimit)
+    const projectVersionId = request.nextUrl.searchParams.get('projectVersionId')?.trim() || undefined
     const { projectId } = await context.params
     const result = await readProjectReviewService({ repository: createReviewAnnotationRepository() })({
       workspaceId: actor.workspaceId,
       projectId,
+      ...(projectVersionId ? { projectVersionId } : {}),
       limit,
     })
     return NextResponse.json(presentSuccess({
       session: result.session,
+      versions: result.versions,
+      scopeContext: result.scopeContext,
       scenes: result.scenes,
       annotations: result.annotations.map(annotationView),
     }), { headers: publicApiHeaders(requestId) })
@@ -100,7 +134,7 @@ export async function POST(
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
     }
     const record = body as Record<string, unknown>
-    const allowed = ['projectVersionId', 'proxyArtifactId', 'proxyHash', 'frame', 'timeRangeMs', 'scope', 'region', 'targetIds', 'screenshotRef', 'text']
+    const allowed = ['projectVersionId', 'proxyArtifactId', 'proxyHash', 'frame', 'timeRangeMs', 'scope', 'region', 'targetIds', 'applicationScope', 'confirmedGlobal', 'screenshotRef', 'text']
     if (Object.keys(record).some((key) => !allowed.includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
@@ -114,6 +148,10 @@ export async function POST(
       typeof record.screenshotRef !== 'string' || typeof record.text !== 'string'
     ) throw new DomainError('INVALID_ARGUMENT', 'Review annotation body is invalid')
     const region = parseRegion(record.region)
+    const applicationScope = parseApplicationScope(record.applicationScope)
+    if (record.confirmedGlobal !== undefined && typeof record.confirmedGlobal !== 'boolean') {
+      throw new DomainError('INVALID_ARGUMENT', 'confirmedGlobal must be a boolean')
+    }
     const { projectId } = await context.params
     const result = await createProjectReviewAnnotationService({
       repository: createReviewAnnotationRepository(),
@@ -130,6 +168,8 @@ export async function POST(
       scope: record.scope as ReviewAnnotationScope,
       ...(region ? { region } : {}),
       targetIds: record.targetIds as string[],
+      ...(applicationScope ? { applicationScope } : {}),
+      ...(record.confirmedGlobal === true ? { confirmedGlobal: true } : {}),
       screenshotRef: record.screenshotRef,
       text: record.text,
       author: { id: actor.clientId, name: actor.clientId, type: 'api-client' },

@@ -39,17 +39,25 @@ interface WorkspaceData {
   operations: PublicOperation[]
 }
 interface ReviewSessionData {
-  projectVersionId: string; proxyArtifactId: string; proxyUrl: string; proxyHash: string; fps: number;
+  currentProjectVersionId: string; projectVersionId: string; proxyArtifactId: string; proxyUrl: string; proxyHash: string; fps: number;
   resolution: { width: number; height: number }; durationFrames: number; stale: boolean
+}
+type ReviewApplicationScopeKind = 'frame' | 'region' | 'clip' | 'scene' | 'range' | 'project' | 'formats' | 'locales' | 'recipes'
+interface ReviewVersionData { id: string; sequence: number; createdAt: string; current: boolean; previewAvailable: boolean }
+interface ReviewScopeContextData {
+  formatId: string; localeId: string; recipeIds: string[];
+  options: { kind: ReviewApplicationScopeKind; affectedCount: number; enabled: boolean }[]
 }
 interface ReviewSceneData { id: string; label: string; startFrame: number; endFrame: number }
 interface ReviewAnnotationData {
   id: string; projectVersionId: string; proxyArtifactId: string; proxyHash: string; frame: number;
   timeRangeMs: [number, number]; screenshotRef: string; scope: 'point' | 'region' | 'scene';
   region?: { x: number; y: number; width: number; height: number }; targetIds: string[]; text: string;
+  applicationScope: { kind: ReviewApplicationScopeKind; targetIds: string[]; formatIds: string[]; localeIds: string[]; recipeIds: string[]; global: boolean };
+  affectedCount: number;
   author: { id: string; name: string; type: 'user' | 'api-client' }; status: 'open' | 'applied' | 'dismissed'; createdAt: string
 }
-interface ProjectReviewData { session: ReviewSessionData; scenes: ReviewSceneData[]; annotations: ReviewAnnotationData[] }
+interface ProjectReviewData { session: ReviewSessionData; versions: ReviewVersionData[]; scopeContext: ReviewScopeContextData; scenes: ReviewSceneData[]; annotations: ReviewAnnotationData[] }
 type ReviewMode = 'idle' | 'marking' | 'composing'
 interface UploadSession {
   mode: 'single' | 'multipart'; expiresAt: string; maxParts: number;
@@ -64,6 +72,18 @@ const PHASE_LABELS: Record<string, string> = {
   rendering: 'Materializando plano editorial',
   completed: 'Ingestão concluída', retrying: 'Nova tentativa', failed: 'Falha na ingestão', canceled: 'Cancelada',
 }
+
+const REVIEW_SCOPE_LABELS: Readonly<Record<ReviewApplicationScopeKind, string>> = Object.freeze({
+  frame: 'Somente este frame',
+  region: 'Área marcada',
+  clip: 'Clipe atual',
+  scene: 'Cena atual',
+  range: 'Trecho selecionado',
+  project: 'Projeto inteiro',
+  formats: 'Formatos de saída',
+  locales: 'Idiomas',
+  recipes: 'Receitas de variação',
+})
 
 function readableBytes(value: number | string): string {
   const bytes = typeof value === 'string' ? Number(value) : value
@@ -132,6 +152,8 @@ export default function ProjectWorkspacePage() {
   const previewLoadStartedAt = useRef(0)
   const previewSeekStartedAt = useRef(0)
   const previewSeekSamples = useRef<number[]>([])
+  const preservedPreviewTimeMs = useRef<number | null>(null)
+  const selectedReviewVersionId = useRef<string | null>(null)
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
@@ -146,6 +168,11 @@ export default function ProjectWorkspacePage() {
   const [review, setReview] = useState<ProjectReviewData | null>(null)
   const [reviewMode, setReviewMode] = useState<ReviewMode>('idle')
   const [reviewScope, setReviewScope] = useState<'point' | 'region' | 'scene'>('point')
+  const [reviewApplicationScope, setReviewApplicationScope] = useState<ReviewApplicationScopeKind>('scene')
+  const [reviewGlobal, setReviewGlobal] = useState(false)
+  const [reviewGlobalConfirmed, setReviewGlobalConfirmed] = useState(false)
+  const [reviewRangeDurationSeconds, setReviewRangeDurationSeconds] = useState(5)
+  const [reviewVersionLoading, setReviewVersionLoading] = useState(false)
   const [reviewRegion, setReviewRegion] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const [reviewText, setReviewText] = useState('')
   const [reviewSaving, setReviewSaving] = useState(false)
@@ -188,18 +215,23 @@ export default function ProjectWorkspacePage() {
 
   useEffect(() => { void loadWorkspace() }, [loadWorkspace])
 
-  const loadReview = useCallback(async (quiet = false) => {
+  const loadReview = useCallback(async (quiet = false, projectVersionId?: string) => {
     try {
-      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/annotations?limit=50`, {
+      const query = new URLSearchParams({ limit: '50' })
+      if (projectVersionId) query.set('projectVersionId', projectVersionId)
+      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/annotations?${query.toString()}`, {
         headers: { accept: 'application/json' },
         cache: 'no-store',
       })
       if (response.status === 401) { router.replace('/login'); return }
       const payload = await response.json() as ApiEnvelope<ProjectReviewData>
       if (!response.ok || !payload.data) throw new Error(apiError(payload, 'Não foi possível abrir a revisão deste projeto.'))
+      selectedReviewVersionId.current = payload.data.session.projectVersionId
       setReview(payload.data)
+      return true
     } catch (error) {
       if (!quiet && workspace?.media.length) setNotice(error instanceof Error ? error.message : 'Não foi possível abrir a revisão deste projeto.')
+      return false
     }
   }, [projectId, router, workspace?.media.length])
 
@@ -213,7 +245,7 @@ export default function ProjectWorkspacePage() {
     if (!activeOperation || !['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status)) return
     const timer = window.setInterval(() => {
       void loadWorkspace(true)
-      void loadReview(true)
+      void loadReview(true, selectedReviewVersionId.current ?? undefined)
     }, 2500)
     return () => window.clearInterval(timer)
   }, [activeOperation, loadReview, loadWorkspace])
@@ -233,16 +265,22 @@ export default function ProjectWorkspacePage() {
     () => review?.scenes.find((scene) => previewFrame >= scene.startFrame && previewFrame < scene.endFrame),
     [previewFrame, review?.scenes],
   )
+  const selectedApplicationScopeOption = useMemo(
+    () => review?.scopeContext.options.find((option) => option.kind === reviewApplicationScope),
+    [review?.scopeContext.options, reviewApplicationScope],
+  )
 
   useEffect(() => {
     setPreviewState('idle')
-    setPreviewFrame(0)
+    const preservedMs = preservedPreviewTimeMs.current
+    const fps = review?.session.fps ?? editingProxy?.probe?.fps ?? 30
+    setPreviewFrame(preservedMs === null ? 0 : Math.max(0, Math.round(preservedMs / 1000 * fps)))
     setReviewMode('idle')
     setReviewRegion(null)
     previewLoadStartedAt.current = performance.now()
     previewSeekSamples.current = []
     setPreviewPerformance({ firstFrameMs: 0, seekP95Ms: 0, droppedFrameRate: 0 })
-  }, [editingProxy?.artifactId])
+  }, [editingProxy?.artifactId, review?.session.fps])
 
   function togglePreview(): void {
     const video = previewVideo.current
@@ -299,6 +337,36 @@ export default function ProjectWorkspacePage() {
     readPreviewPosition()
   }
 
+  function initializePreviewPosition(): void {
+    const video = previewVideo.current
+    if (!video) return
+    const preservedMs = preservedPreviewTimeMs.current
+    if (preservedMs === null) {
+      readPreviewPosition()
+      return
+    }
+    const maximumSeconds = Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.001) : preservedMs / 1000
+    const nextSeconds = Math.min(preservedMs / 1000, maximumSeconds)
+    preservedPreviewTimeMs.current = null
+    previewSeekStartedAt.current = performance.now()
+    video.currentTime = nextSeconds
+    readPreviewPosition()
+  }
+
+  async function switchReviewVersion(version: ReviewVersionData): Promise<void> {
+    if (!version.previewAvailable || version.id === review?.session.projectVersionId || reviewVersionLoading) return
+    const video = previewVideo.current
+    if (video) {
+      video.pause()
+      preservedPreviewTimeMs.current = Math.round(video.currentTime * 1000)
+    }
+    setReviewVersionLoading(true)
+    setNotice(null)
+    const loaded = await loadReview(false, version.id)
+    if (!loaded) preservedPreviewTimeMs.current = null
+    setReviewVersionLoading(false)
+  }
+
   function normalizedReviewPoint(event: ReactPointerEvent<HTMLDivElement>) {
     const bounds = event.currentTarget.getBoundingClientRect()
     return {
@@ -347,6 +415,9 @@ export default function ProjectWorkspacePage() {
       setReviewRegion(null)
       setReviewScope('point')
     }
+    setReviewApplicationScope(currentReviewScene ? 'scene' : region.width >= 0.015 && region.height >= 0.015 ? 'region' : 'frame')
+    setReviewGlobal(false)
+    setReviewGlobalConfirmed(false)
     setReviewMode('composing')
   }
 
@@ -358,6 +429,10 @@ export default function ProjectWorkspacePage() {
     setReviewText('')
     setReviewRegion(null)
     setReviewScope('point')
+    setReviewApplicationScope(currentReviewScene ? 'scene' : 'frame')
+    setReviewGlobal(false)
+    setReviewGlobalConfirmed(false)
+    setReviewRangeDurationSeconds(5)
     setReviewMode('marking')
   }
 
@@ -367,6 +442,10 @@ export default function ProjectWorkspacePage() {
     setReviewRegion(null)
     setReviewText('')
     setReviewScope('point')
+    setReviewApplicationScope('scene')
+    setReviewGlobal(false)
+    setReviewGlobalConfirmed(false)
+    setReviewRangeDurationSeconds(5)
   }
 
   function captureReviewScreenshot(): string {
@@ -394,12 +473,30 @@ export default function ProjectWorkspacePage() {
       setNotice('Este frame não está associado a uma cena da versão atual.')
       return
     }
+    if (!selectedApplicationScopeOption?.enabled) {
+      setNotice('Este escopo ainda não possui alvos disponíveis nesta versão.')
+      return
+    }
+    if ((reviewApplicationScope === 'scene' || reviewApplicationScope === 'clip') && !scene) {
+      setNotice('O frame atual não pertence a uma cena ou clipe identificável.')
+      return
+    }
+    if (reviewApplicationScope === 'region' && !reviewRegion) {
+      setNotice('Marque uma área antes de escolher o escopo regional.')
+      return
+    }
+    if (reviewGlobal && !reviewGlobalConfirmed) {
+      setNotice(`Confirme o alcance global de ${selectedApplicationScopeOption.affectedCount} alvos antes de registrar.`)
+      return
+    }
     setReviewSaving(true)
     setNotice(null)
     try {
       const timeRangeMs: [number, number] = reviewScope === 'scene'
         ? [Math.round(scene!.startFrame / fps * 1000), Math.round(scene!.endFrame / fps * 1000)]
-        : [pointTimeMs, pointTimeMs]
+        : reviewApplicationScope === 'range'
+          ? [pointTimeMs, Math.min(Math.ceil(review.session.durationFrames / fps * 1000), pointTimeMs + Math.round(reviewRangeDurationSeconds * 1000))]
+          : [pointTimeMs, pointTimeMs]
       const result = await requestJson<{ annotation: ReviewAnnotationData; replayed: boolean }>(
         `/v1/projects/${encodeURIComponent(projectId)}/annotations`,
         {
@@ -414,13 +511,15 @@ export default function ProjectWorkspacePage() {
             scope: reviewScope,
             ...(reviewScope === 'region' && reviewRegion ? { region: reviewRegion } : {}),
             targetIds: reviewScope === 'scene' ? [scene!.id] : [],
+            applicationScope: { kind: reviewApplicationScope, global: reviewGlobal },
+            ...(reviewGlobal ? { confirmedGlobal: reviewGlobalConfirmed } : {}),
             screenshotRef: captureReviewScreenshot(),
             text: reviewText.trim(),
           }),
         },
       )
       setReview((current) => current ? { ...current, annotations: [result.annotation, ...current.annotations.filter((item) => item.id !== result.annotation.id)] } : current)
-      setNotice(`Ajuste registrado no frame ${frameTimecode(frame, fps)}. A versão do vídeo não foi alterada.`)
+      setNotice(`Ajuste registrado no frame ${frameTimecode(frame, fps)} para ${result.annotation.affectedCount} alvo${result.annotation.affectedCount === 1 ? '' : 's'}. A versão do vídeo não foi alterada.`)
       cancelReview()
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível registrar o ajuste.')
@@ -673,7 +772,7 @@ export default function ProjectWorkspacePage() {
                   onCanPlay={() => setPreviewState((current) => current === 'playing' ? current : 'ready')}
                   onError={() => setPreviewState('error')}
                   onLoadedData={() => setPreviewPerformance((current) => ({ ...current, firstFrameMs: Math.max(0, Math.round(performance.now() - previewLoadStartedAt.current)) }))}
-                  onLoadedMetadata={readPreviewPosition}
+                  onLoadedMetadata={initializePreviewPosition}
                   onPause={() => setPreviewState((current) => current === 'idle' ? current : 'paused')}
                   onPlay={() => setPreviewState('playing')}
                   onSeeked={finishPreviewSeek}
@@ -761,7 +860,31 @@ export default function ProjectWorkspacePage() {
                 </div>
               </div>
 
-              {review.session.stale ? <div className="mt-4 border-l-2 border-[#d46f63] bg-[#d46f63]/[0.06] px-4 py-3 text-xs leading-5 text-[#d99288]">O proxy exibido pertence a uma versão anterior. Gere o proxy da versão atual antes de registrar ajustes.</div> : null}
+              <div className="mt-4 border-y border-white/[0.06] bg-[#060606] px-3 py-3" aria-label="Versões disponíveis para revisão" data-testid="review-version-rail">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  <span className="mr-1 shrink-0 font-mono text-[8px] uppercase tracking-[0.16em] text-[#5e5a53]">Cortes</span>
+                  {review.versions.map((version) => {
+                    const selected = version.id === review.session.projectVersionId
+                    return (
+                      <button
+                        aria-current={selected ? 'true' : undefined}
+                        className={`group flex min-w-[78px] shrink-0 items-center justify-between gap-3 border px-3 py-2 text-left transition ${selected ? 'border-[#d9aa3d]/55 bg-[#d9aa3d]/10 text-[#e1ba5d]' : version.previewAvailable ? 'border-white/[0.08] bg-white/[0.02] text-[#8b867d] hover:border-white/[0.18] hover:text-[#d8d2c8]' : 'cursor-not-allowed border-white/[0.04] text-[#47443f]'}`}
+                        data-testid={`review-version-${version.sequence}`}
+                        disabled={!version.previewAvailable || reviewVersionLoading}
+                        key={version.id}
+                        onClick={() => void switchReviewVersion(version)}
+                        title={version.previewAvailable ? `Abrir versão ${version.sequence} sem perder o timecode` : `A versão ${version.sequence} ainda não possui preview`}
+                        type="button"
+                      >
+                        <span><span className="block font-mono text-[10px]">V{version.sequence}</span><span className="mt-0.5 block text-[7px] uppercase tracking-[0.11em]">{version.current ? 'atual' : version.previewAvailable ? 'histórico' : 'sem proxy'}</span></span>
+                        <i className={`h-1.5 w-1.5 rounded-full ${selected ? 'bg-[#e0b44c]' : version.previewAvailable ? 'bg-[#6c8d76]' : 'bg-[#33312e]'}`} />
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {review.session.stale ? <div className="mt-4 border-l-2 border-[#d46f63] bg-[#d46f63]/[0.06] px-4 py-3 text-xs leading-5 text-[#d99288]" data-testid="review-stale-banner">Você está vendo uma versão histórica em modo somente leitura. Volte ao corte atual para registrar novos ajustes.</div> : null}
               {reviewMode === 'marking' ? <div className="mt-4 border-l-2 border-[#d9aa3d] bg-[#d9aa3d]/[0.045] px-4 py-3 text-xs text-[#c9ad6c]">O vídeo está pausado. Arraste sobre o frame para marcar uma área; um clique simples cria uma anotação pontual.</div> : null}
 
               {reviewMode === 'composing' ? (
@@ -774,17 +897,52 @@ export default function ProjectWorkspacePage() {
                       <button className={`border px-3 py-2 text-[10px] transition ${reviewScope === 'region' ? 'border-[#d9aa3d]/60 bg-[#d9aa3d]/10 text-[#e4bd62]' : 'border-white/[0.08] text-[#77736b] hover:text-white'} disabled:opacity-30`} disabled={!reviewRegion} onClick={() => setReviewScope('region')} type="button">Área marcada</button>
                       <button className={`border px-3 py-2 text-[10px] transition ${reviewScope === 'scene' ? 'border-[#d9aa3d]/60 bg-[#d9aa3d]/10 text-[#e4bd62]' : 'border-white/[0.08] text-[#77736b] hover:text-white'} disabled:opacity-30`} disabled={!currentReviewScene} onClick={() => setReviewScope('scene')} type="button">{currentReviewScene ? `${currentReviewScene.label} inteira` : 'Cena indisponível'}</button>
                     </div>
+                    <div className="mt-5 grid gap-3 border-t border-white/[0.06] pt-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+                      <label className="block">
+                        <span className="text-[9px] uppercase tracking-[0.16em] text-[#747067]">Onde a correção deve valer?</span>
+                        <select
+                          className="mt-2 w-full border border-white/[0.1] bg-[#050505] px-3 py-2.5 text-xs text-[#d4cec4] outline-none focus:border-[#d9aa3d]/55"
+                          data-testid="review-application-scope"
+                          onChange={(event) => { setReviewApplicationScope(event.target.value as ReviewApplicationScopeKind); setReviewGlobal(false); setReviewGlobalConfirmed(false) }}
+                          value={reviewApplicationScope}
+                        >
+                          {review.scopeContext.options.map((option) => {
+                            const unavailable = !option.enabled || (option.kind === 'region' && !reviewRegion) || (['clip', 'scene'].includes(option.kind) && !currentReviewScene)
+                            return <option disabled={unavailable} key={option.kind} value={option.kind}>{REVIEW_SCOPE_LABELS[option.kind]}{unavailable ? ' — indisponível' : ''}</option>
+                          })}
+                        </select>
+                      </label>
+                      {reviewApplicationScope === 'range' ? (
+                        <label className="block">
+                          <span className="text-[9px] uppercase tracking-[0.16em] text-[#747067]">Duração do trecho</span>
+                          <span className="mt-2 flex items-center border border-white/[0.1] bg-[#050505] px-3">
+                            <input className="w-full bg-transparent py-2.5 text-xs text-[#d4cec4] outline-none" data-testid="review-range-duration" max={Math.max(0.1, review.session.durationFrames / review.session.fps)} min="0.1" onChange={(event) => setReviewRangeDurationSeconds(Math.max(0.1, Number(event.target.value) || 0.1))} step="0.1" type="number" value={reviewRangeDurationSeconds} />
+                            <i className="text-[9px] not-italic text-[#656159]">s</i>
+                          </span>
+                        </label>
+                      ) : <div className="hidden sm:block" />}
+                    </div>
+                    <label className="mt-3 flex cursor-pointer items-start gap-3 border border-white/[0.07] bg-white/[0.015] px-3 py-3">
+                      <input checked={reviewGlobal} className="mt-0.5 h-4 w-4 accent-[#d9aa3d]" data-testid="review-global-toggle" onChange={(event) => { setReviewGlobal(event.target.checked); setReviewGlobalConfirmed(false) }} type="checkbox" />
+                      <span><span className="block text-[10px] font-medium text-[#aaa49a]">Expandir para todos os alvos deste escopo</span><span className="mt-1 block text-[9px] leading-4 text-[#625f58]">Sem esta opção, o ajuste fica restrito a {review.scopeContext.formatId}, {review.scopeContext.localeId} e ao alvo atual.</span></span>
+                    </label>
+                    {reviewGlobal ? (
+                      <label className="mt-2 flex cursor-pointer items-start gap-3 border-l-2 border-[#d46f63] bg-[#d46f63]/[0.05] px-3 py-3" data-testid="review-global-confirmation">
+                        <input checked={reviewGlobalConfirmed} className="mt-0.5 h-4 w-4 accent-[#d46f63]" onChange={(event) => setReviewGlobalConfirmed(event.target.checked)} type="checkbox" />
+                        <span className="text-[10px] leading-4 text-[#d28b82]">Confirmo o alcance global em {selectedApplicationScopeOption?.affectedCount ?? 0} alvo{selectedApplicationScopeOption?.affectedCount === 1 ? '' : 's'}.</span>
+                      </label>
+                    ) : null}
                   </div>
                   <div className="flex flex-col justify-between border-l border-white/[0.07] pl-4">
-                    <div><p className="font-mono text-[10px] text-[#d8ad49]">{frameTimecode(previewFrame, review.session.fps)}</p><p className="mt-2 text-[10px] leading-4 text-[#6f6b63]">Versão {workspace.version?.sequence ?? '—'} · o comentário será salvo sem alterar o vídeo.</p></div>
-                    <div className="mt-5 flex gap-2"><button className="flex-1 border border-white/[0.09] px-3 py-2 text-[10px] text-[#8b867d] hover:text-white" onClick={cancelReview} type="button">Cancelar</button><button className="flex-1 bg-[#dbae3f] px-3 py-2 text-[10px] font-bold text-[#171207] disabled:opacity-35" disabled={reviewSaving || !reviewText.trim()} onClick={() => void saveReviewAnnotation()} type="button">{reviewSaving ? 'Salvando…' : 'Registrar'}</button></div>
+                    <div><p className="font-mono text-[10px] text-[#d8ad49]">{frameTimecode(previewFrame, review.session.fps)}</p><p className="mt-2 text-[10px] leading-4 text-[#6f6b63]">Versão {review.versions.find((version) => version.id === review.session.projectVersionId)?.sequence ?? '—'} · {reviewGlobal ? `${selectedApplicationScopeOption?.affectedCount ?? 0} alvos declarados` : '1 alvo no formato e idioma atuais'}.</p></div>
+                    <div className="mt-5 flex gap-2"><button className="flex-1 border border-white/[0.09] px-3 py-2 text-[10px] text-[#8b867d] hover:text-white" onClick={cancelReview} type="button">Cancelar</button><button className="flex-1 bg-[#dbae3f] px-3 py-2 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-save" disabled={reviewSaving || !reviewText.trim() || !selectedApplicationScopeOption?.enabled || (reviewGlobal && !reviewGlobalConfirmed)} onClick={() => void saveReviewAnnotation()} type="button">{reviewSaving ? 'Salvando…' : 'Registrar'}</button></div>
                   </div>
                 </div>
               ) : null}
 
               <div className="mt-5 border-t border-white/[0.07] pt-4">
                 <div className="flex items-center justify-between"><p className="text-[9px] uppercase tracking-[0.17em] text-[#706c64]">Ajustes desta versão</p><span className="text-[9px] text-[#55524c]">{review.annotations.length} aberto{review.annotations.length === 1 ? '' : 's'}</span></div>
-                {review.annotations.length ? <div className="mt-3 grid gap-px bg-white/[0.06] sm:grid-cols-2">{review.annotations.slice(0, 6).map((annotation) => <button className="bg-[#090909] px-3 py-3 text-left transition hover:bg-[#0d0c0a]" data-testid={`review-annotation-${annotation.id}`} key={annotation.id} onClick={() => seekPreviewToFrame(annotation.frame)} type="button"><span className="font-mono text-[9px] text-[#b8943e]">{frameTimecode(annotation.frame, review.session.fps)}</span><span className="ml-2 text-[8px] uppercase tracking-[0.1em] text-[#5f5b54]">{annotation.scope === 'region' ? 'área' : annotation.scope === 'scene' ? 'cena' : 'ponto'}</span><p className="mt-1.5 line-clamp-2 text-xs leading-5 text-[#aaa49a]">{annotation.text}</p></button>)}</div> : <p className="mt-3 text-xs text-[#5f5b54]">Nenhum ajuste registrado nesta versão.</p>}
+                {review.annotations.length ? <div className="mt-3 grid gap-px bg-white/[0.06] sm:grid-cols-2">{review.annotations.slice(0, 6).map((annotation) => <button className="bg-[#090909] px-3 py-3 text-left transition hover:bg-[#0d0c0a]" data-testid={`review-annotation-${annotation.id}`} key={annotation.id} onClick={() => seekPreviewToFrame(annotation.frame)} type="button"><span className="font-mono text-[9px] text-[#b8943e]">{frameTimecode(annotation.frame, review.session.fps)}</span><span className="ml-2 text-[8px] uppercase tracking-[0.1em] text-[#5f5b54]">{annotation.scope === 'region' ? 'área' : annotation.scope === 'scene' ? 'cena' : 'ponto'} · {REVIEW_SCOPE_LABELS[annotation.applicationScope.kind]} · {annotation.affectedCount} alvo{annotation.affectedCount === 1 ? '' : 's'}</span><p className="mt-1.5 line-clamp-2 text-xs leading-5 text-[#aaa49a]">{annotation.text}</p></button>)}</div> : <p className="mt-3 text-xs text-[#5f5b54]">Nenhum ajuste registrado nesta versão.</p>}
               </div>
             </section>
           ) : null}
