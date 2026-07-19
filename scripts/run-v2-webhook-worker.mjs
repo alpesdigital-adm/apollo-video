@@ -5,11 +5,16 @@ import {
   runCoordinatedWebhookDeliveryWorkerLoop,
   runDiscoveredWebhookDeliveryWorkerLoop,
 } from '../src/v2/application/run-webhook-delivery-worker.ts'
-import {
+import * as importedRepositoryFactory from '../src/v2/infrastructure/repository-factory.ts'
+
+const repositoryFactory = importedRepositoryFactory.createWebhookDeliveryScheduler
+  ? importedRepositoryFactory
+  : importedRepositoryFactory.default
+const {
   createConfiguredWebhookSigningSecretProvider,
   createWebhookDeliveryScheduler,
   createWebhookWorkerShardCoordinator,
-} from '../src/v2/infrastructure/repository-factory.ts'
+} = repositoryFactory
 
 function configuredInteger(name, defaultValue, minimum, maximum) {
   const value = Number(process.env[name] ?? defaultValue)
