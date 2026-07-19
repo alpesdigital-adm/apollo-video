@@ -222,15 +222,27 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         recipeParameters: replayableManifest.recipeParameters,
         createdAt: clock().toISOString(),
       })
-      if (persisted.artifactId !== context.outputArtifactId || persisted.manifestId !== context.outputManifestId) throw new DomainError('PERSISTENCE_CONFLICT', 'Final export artifact identity did not converge')
+      if (persisted.artifactId !== context.outputArtifactId || persisted.manifestId !== context.outputManifestId) {
+        await dependencies.projects.convergeOutputIdentity({
+          workspaceId: operation.workspaceId,
+          operationId: operation.id,
+          reservedArtifactId: context.outputArtifactId,
+          reservedManifestId: context.outputManifestId,
+          persistedArtifactId: persisted.artifactId,
+          persistedManifestId: persisted.manifestId,
+          leaseOwner,
+          attempt,
+          now: clock().toISOString(),
+        })
+      }
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Final export lease was lost')
       await dependencies.projects.attachCompletedOutput({
         workspaceId: operation.workspaceId,
         operationId: operation.id,
         projectId: context.projectId,
         projectVersionId: context.projectVersionId,
-        outputArtifactId: context.outputArtifactId,
-        outputManifestId: context.outputManifestId,
+        outputArtifactId: persisted.artifactId,
+        outputManifestId: persisted.manifestId,
         originalFileName: context.originalFileName,
         createdAt: clock().toISOString(),
       })

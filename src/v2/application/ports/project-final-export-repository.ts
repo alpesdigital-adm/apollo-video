@@ -11,12 +11,6 @@ export interface ApprovedProjectFinalExportSource extends ProjectProxyRenderSour
 }
 
 export interface ProjectFinalExportRepository {
-  findReusableOutput(input: {
-    workspaceId: string
-    projectId: string
-    projectVersionId: string
-    inputHash: string
-  }): Promise<Readonly<{ artifactId: string }> | null>
   readApprovedCurrentSource(input: {
     workspaceId: string
     projectId: string
@@ -35,6 +29,17 @@ export interface ProjectFinalExportRepository {
     sourceArtifactId: string
     sourceManifestId: string
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null>
+  convergeOutputIdentity(input: {
+    workspaceId: string
+    operationId: string
+    reservedArtifactId: string
+    reservedManifestId: string
+    persistedArtifactId: string
+    persistedManifestId: string
+    leaseOwner: string
+    attempt: number
+    now: string
+  }): Promise<void>
   attachCompletedOutput(input: {
     workspaceId: string
     operationId: string

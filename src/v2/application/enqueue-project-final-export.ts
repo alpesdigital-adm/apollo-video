@@ -102,14 +102,8 @@ export function enqueueProjectFinalExportService(dependencies: {
     const replay = await dependencies.operations.findReplay({ workspaceId, clientId, idempotencyKey, requestFingerprint })
     if (replay) return replay
 
-    const reusableOutput = await dependencies.projects.findReusableOutput({
-      workspaceId,
-      projectId,
-      projectVersionId,
-      inputHash,
-    })
     const operationId = dependencies.createId('operation')
-    const outputArtifactId = reusableOutput?.artifactId ?? dependencies.createId('artifact')
+    const outputArtifactId = dependencies.createId('artifact')
     const outputManifestId = dependencies.createId('manifest')
     const approvedAt = dependencies.clock().toISOString()
     const operation = createQueuedPublicOperation({

@@ -27,41 +27,6 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     this.sourceReader = new PrismaProjectProxyRenderRepository(client)
   }
 
-  async findReusableOutput(input: {
-    workspaceId: string
-    projectId: string
-    projectVersionId: string
-    inputHash: string
-  }): Promise<Readonly<{ artifactId: string }> | null> {
-    const previous = await this.client.v2ProjectFinalExportOperation.findFirst({
-      where: {
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        projectVersionId: input.projectVersionId,
-        inputHash: input.inputHash,
-        operation: { status: 'succeeded' },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: { outputArtifactId: true, outputManifestId: true },
-    })
-    if (!previous) return null
-    const [artifact, manifest] = await Promise.all([
-      this.client.v2MediaArtifact.findFirst({
-        where: { id: previous.outputArtifactId, workspaceId: input.workspaceId, status: 'available' },
-        select: { id: true },
-      }),
-      this.client.v2MediaArtifactManifest.findFirst({
-        where: {
-          id: previous.outputManifestId,
-          workspaceId: input.workspaceId,
-          artifactId: previous.outputArtifactId,
-        },
-        select: { id: true },
-      }),
-    ])
-    return artifact && manifest ? Object.freeze({ artifactId: artifact.id }) : null
-  }
-
   private async readApproval(input: {
     workspaceId: string
     projectId: string
@@ -146,6 +111,42 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     ])
     if (!source || !approval) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
+  }
+
+  async convergeOutputIdentity(input: Parameters<ProjectFinalExportRepository['convergeOutputIdentity']>[0]): Promise<void> {
+    const now = new Date(input.now)
+    if (Number.isNaN(now.getTime())) throw new DomainError('PERSISTENCE_CONFLICT', 'Final export convergence time is invalid')
+    await this.client.$transaction(async (transaction) => {
+      const operation = await transaction.v2PublicOperation.updateMany({
+        where: {
+          id: input.operationId,
+          workspaceId: input.workspaceId,
+          type: 'project-final-export',
+          status: 'running',
+          targetType: 'media-artifact',
+          targetId: input.reservedArtifactId,
+          leaseOwner: input.leaseOwner,
+          attempt: input.attempt,
+          leaseExpiresAt: { gt: now },
+        },
+        data: { targetId: input.persistedArtifactId, updatedAt: now },
+      })
+      const context = await transaction.v2ProjectFinalExportOperation.updateMany({
+        where: {
+          operationId: input.operationId,
+          workspaceId: input.workspaceId,
+          outputArtifactId: input.reservedArtifactId,
+          outputManifestId: input.reservedManifestId,
+        },
+        data: {
+          outputArtifactId: input.persistedArtifactId,
+          outputManifestId: input.persistedManifestId,
+        },
+      })
+      if (operation.count !== 1 || context.count !== 1) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Final export output identity did not converge under its active lease')
+      }
+    })
   }
 
   async attachCompletedOutput(input: Parameters<ProjectFinalExportRepository['attachCompletedOutput']>[0]): Promise<void> {

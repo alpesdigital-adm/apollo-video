@@ -87,10 +87,7 @@ test('final export enqueue binds approval, exact Director evidence and 1080x1920
   }
   const ids = { operation: 0, artifact: 0, manifest: 0 }
   const enqueue = enqueueProjectFinalExportService({
-    projects: {
-      async readApprovedCurrentSource() { return approvedSource() },
-      async findReusableOutput() { return null },
-    },
+    projects: { async readApprovedCurrentSource() { return approvedSource() } },
     rights: { async findCurrent() { return { snapshot: rightsSnapshot(), revision: 'revision-1' } } },
     operations,
     clock: () => new Date('2026-07-19T01:05:00.000Z'),
@@ -122,40 +119,6 @@ test('final export enqueue binds approval, exact Director evidence and 1080x1920
   assert.equal(replay.operation.id, first.operation.id)
   assert.equal(created.requestFingerprint.length, 64)
   assert.deepEqual(ids, { operation: 1, artifact: 1, manifest: 1 })
-})
-
-test('final export reuses an identical available artifact while issuing fresh approval lineage', async () => {
-  const allocated = []
-  const enqueue = enqueueProjectFinalExportService({
-    projects: {
-      async readApprovedCurrentSource() { return approvedSource() },
-      async findReusableOutput(input) {
-        assert.match(input.inputHash, /^[a-f0-9]{64}$/)
-        return { artifactId: 'artifact-final-output-reused' }
-      },
-    },
-    rights: { async findCurrent() { return { snapshot: rightsSnapshot(), revision: 'revision-1' } } },
-    operations: {
-      async findReplay() { return null },
-      async createOrReplay(input) { return { operation: input.operation, context: input.context, replayed: false } },
-    },
-    clock: () => new Date('2026-07-19T01:06:00.000Z'),
-    createId(kind) { allocated.push(kind); return `${kind}-fresh` },
-  })
-  const result = await enqueue({
-    workspaceId,
-    projectId,
-    projectVersionId,
-    projectVersionHash: '1'.repeat(64),
-    format: '9:16',
-    approval: { approved: true, note: 'Nova aprovaÃ§Ã£o auditada.' },
-    actor: { type: 'api-client', id: 'client-final-export-test' },
-    idempotencyKey: 'final-export-reuse-1',
-  })
-
-  assert.equal(result.context.outputArtifactId, 'artifact-final-output-reused')
-  assert.equal(result.operation.target.id, 'artifact-final-output-reused')
-  assert.deepEqual(allocated, ['operation', 'manifest'])
 })
 
 test('final export enqueue fails closed without current rendering rights', async () => {
@@ -244,18 +207,32 @@ function createOperations() {
   }
 }
 
-function workerDependencies(operations, rightsProvider = () => rightsSnapshot()) {
+function workerDependencies(
+  operations,
+  rightsProvider = () => rightsSnapshot(),
+  persistedIdentity = { artifactId: 'artifact-final-output', manifestId: 'manifest-final-output' },
+) {
   let now = Date.parse('2026-07-19T01:00:00.000Z')
-  const calls = { rights: 0, rendered: 0, persisted: 0, attached: 0, failed: 0, cleaned: 0 }
+  const calls = { rights: 0, rendered: 0, persisted: 0, converged: 0, attached: 0, failed: 0, cleaned: 0 }
   return {
     calls,
     dependencies: {
       operations: operations.repository,
       projects: {
         async readImmutableApprovedSource() { return approvedSource() },
+        async convergeOutputIdentity(input) {
+          calls.converged += 1
+          assert.equal(input.reservedArtifactId, 'artifact-final-output')
+          assert.equal(input.reservedManifestId, 'manifest-final-output')
+          assert.equal(input.persistedArtifactId, persistedIdentity.artifactId)
+          assert.equal(input.persistedManifestId, persistedIdentity.manifestId)
+          assert.equal(input.leaseOwner, 'worker-final-export-deduplicated')
+          assert.equal(input.attempt, 1)
+        },
         async attachCompletedOutput(input) {
           calls.attached += 1
-          assert.equal(input.outputArtifactId, 'artifact-final-output')
+          assert.equal(input.outputArtifactId, persistedIdentity.artifactId)
+          assert.equal(input.outputManifestId, persistedIdentity.manifestId)
         },
         async markExportFailed() { calls.failed += 1 },
       },
@@ -280,7 +257,7 @@ function workerDependencies(operations, rightsProvider = () => rightsSnapshot())
           assert.equal(parameters.qualitySnapshotId, 'quality-snapshot-final-export-test')
           assert.deepEqual(parameters.outputSpec, { aspectRatio: '9:16', width: 1080, height: 1920, fps: 30 })
           assert.deepEqual(input.manifest.probe, { width: 1080, height: 1920, duration: 10, fps: 30 })
-          return { artifactId: input.artifactId, manifestId: input.manifestId, replayed: false }
+          return { ...persistedIdentity, replayed: false }
         },
       },
       storage: {
@@ -316,7 +293,7 @@ test('final export worker revalidates rights, persists lineage and completes the
   const { calls, dependencies } = workerDependencies(operations)
   const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-success')
 
-  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 1, attached: 1, failed: 0, cleaned: 1 })
+  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 1, converged: 0, attached: 1, failed: 0, cleaned: 1 })
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
 })
@@ -328,5 +305,25 @@ test('final export worker fails closed if rights are revoked before persistence'
 
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
   assert.equal(operations.operation.status, 'failed')
-  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 0, attached: 0, failed: 1, cleaned: 1 })
+  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 0, converged: 0, attached: 0, failed: 1, cleaned: 1 })
+})
+
+test('final export worker converges content deduplication under the active lease', async () => {
+  const operations = createOperations()
+  const persistedIdentity = {
+    artifactId: 'artifact-final-output-existing',
+    manifestId: 'manifest-final-output-existing',
+  }
+  const { calls, dependencies } = workerDependencies(
+    operations,
+    () => rightsSnapshot(),
+    persistedIdentity,
+  )
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)(
+    'worker-final-export-deduplicated',
+  )
+
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
+  assert.equal(calls.converged, 1)
+  assert.equal(calls.attached, 1)
 })
