@@ -37,6 +37,7 @@ import type { ProjectCreationRepository } from '../application/ports/project-cre
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
 import type { EditorialCommandRepository } from '../application/ports/editorial-command-repository.ts'
+import type { DirectorRunRepository } from '../application/ports/director-run-repository.ts'
 import type { ProjectProxyRenderRepository } from '../application/ports/project-proxy-render-repository.ts'
 import type { PublicOperationRepository } from '../application/ports/public-operation-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
@@ -90,6 +91,7 @@ import { PrismaProjectQueryRepository } from './prisma/project-query-repository.
 import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
 import { PrismaProjectMediaRepository } from './prisma/project-media-repository.ts'
 import { PrismaEditorialCommandRepository } from './prisma/editorial-command-repository.ts'
+import { PrismaDirectorRunRepository } from './prisma/director-run-repository.ts'
 import { PrismaProjectProxyRenderRepository } from './prisma/project-proxy-render-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
@@ -603,6 +605,10 @@ export function createProjectWorkspaceQueryRepository(): ProjectWorkspaceQueryRe
 
 export function createEditorialCommandRepository(): EditorialCommandRepository {
   return new PrismaEditorialCommandRepository(resolveV2Client())
+}
+
+export function createDirectorRunRepository(): DirectorRunRepository {
+  return new PrismaDirectorRunRepository(resolveV2Client())
 }
 
 export function createWorkspaceRepository(): WorkspaceRepository {

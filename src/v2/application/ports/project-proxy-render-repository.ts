@@ -1,11 +1,12 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
+import type { DirectedEditPlan } from '../../domain/director-run.ts'
 
 export interface ProjectProxyRenderSource {
   projectId: string
   projectVersionId: string
   editPlanSnapshotId: string
   editPlanHash: string
-  editPlan: Readonly<EditorialCutEditPlan>
+  editPlan: Readonly<EditorialCutEditPlan | DirectedEditPlan>
   format: string
   sourceArtifactId: string
   sourceManifestId: string

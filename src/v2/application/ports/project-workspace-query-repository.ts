@@ -28,6 +28,14 @@ export interface ProjectWorkspaceRecord {
   commands: readonly {
     id: string; type: string; baseVersionId: string; resultVersionId?: string; reason?: string; createdAt: string
   }[]
+  directorRuns: readonly {
+    id: string; status: string; plannerVersion: string; criticVersion: string;
+    baseVersionId: string; resultVersionId: string; treatmentSnapshotId: string;
+    storySnapshotId: string; qualitySnapshotId: string; qualityStatus: string;
+    qualityScore: number; decisionCount: number; assumptionCount: number;
+    subtitleCueCount: number; transitionCount: number; automaticZoom: boolean;
+    createdAt: string
+  }[]
   media: readonly ProjectWorkspaceMediaRecord[]
   transcripts: readonly {
     id: string; sourceArtifactId: string; language: string; provider: string; model: string;

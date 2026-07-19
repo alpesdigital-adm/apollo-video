@@ -1,4 +1,5 @@
 import type { EditorialCutClip } from '../apply-editorial-cut-command.ts'
+import type { DirectedSubtitleCue, DirectedTransition } from '../../domain/director-run.ts'
 
 export interface EditorialProxyRenderResult {
   outputPath: string
@@ -14,6 +15,8 @@ export interface EditorialProxyRenderer {
     clips: readonly Readonly<EditorialCutClip>[]
     fps: number
     format: string
+    subtitleCues?: readonly Readonly<DirectedSubtitleCue>[]
+    transitions?: readonly Readonly<DirectedTransition>[]
     signal?: AbortSignal
   }): Promise<Readonly<EditorialProxyRenderResult>>
   cleanup(operationId: string): Promise<void>

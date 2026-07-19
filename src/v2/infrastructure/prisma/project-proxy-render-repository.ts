@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { EditorialCutEditPlan } from '../../application/apply-editorial-cut-command.ts'
+import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { ProjectProxyRenderRepository, ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 
@@ -20,7 +21,7 @@ function hydrateSource(project: Awaited<ReturnType<PrismaProjectProxyRenderRepos
   const media = project?.mediaAssets[0]
   const manifest = media?.artifact.manifests[0]
   if (!project || !version || !media || !manifest) return null
-  const editPlan = parseRecord(version.editPlanSnapshot.contentJson, 'project proxy EditPlan') as unknown as EditorialCutEditPlan
+  const editPlan = parseRecord(version.editPlanSnapshot.contentJson, 'project proxy EditPlan') as unknown as EditorialCutEditPlan | DirectedEditPlan
   const manifestBody = parseRecord(manifest.manifestJson, 'project proxy source manifest')
   const artifactBody = manifestBody.artifact
   if (
@@ -122,6 +123,15 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
           role: 'editorial-proxy', originalFileName: input.originalFileName, createdAt: new Date(input.createdAt),
         },
         update: {},
+      })
+      await transaction.v2DirectorRun.updateMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          resultVersionId: input.projectVersionId,
+          status: { in: ['planned', 'rendering'] },
+        },
+        data: { status: 'succeeded' },
       })
     })
   }

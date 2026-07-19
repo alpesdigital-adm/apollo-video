@@ -94,7 +94,11 @@ function source() {
     editPlanHash: 'b'.repeat(64),
     editPlan: Object.freeze({
       fps: 30,
-      movementPolicy: Object.freeze({ automaticZoom: false }),
+      movementPolicy: Object.freeze({ automaticZoom: false, protectedOpeningFrames: 120 }),
+      subtitleTracks: Object.freeze([{ cues: Object.freeze([
+        Object.freeze({ id: 'cue-1', startFrame: 0, endFrame: 60, text: 'Legenda segura', anchor: 'bottom' }),
+      ]) }]),
+      transitions: Object.freeze([]),
       videoTracks: Object.freeze([{ kind: 'base-video', clips: Object.freeze([
         Object.freeze({ id: 'clip-1', sourceArtifactId: 'artifact-project-proxy-source', sourceInFrame: 0, sourceOutFrame: 300, timelineInFrame: 0, timelineOutFrame: 300, rate: 1 }),
       ]) }]),
@@ -132,7 +136,9 @@ function dependencies(operations, overrides = {}) {
       },
     },
     renderer: {
-      async render() {
+      async render(input) {
+        assert.deepEqual(input.subtitleCues, [{ id: 'cue-1', startFrame: 0, endFrame: 60, text: 'Legenda segura', anchor: 'bottom' }])
+        assert.deepEqual(input.transitions, [])
         return {
           outputPath: join(tmpdir(), 'project-proxy-worker-output.mp4'),
           sha256: 'd'.repeat(64),

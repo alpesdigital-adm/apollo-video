@@ -13,6 +13,16 @@ function parseJson(value: string, field: string): Record<string, unknown> {
   }
 }
 
+function parseJsonArray(value: string, field: string): unknown[] {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!Array.isArray(parsed)) throw new Error('invalid')
+    return parsed
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
+  }
+}
+
 function probeFromManifest(value: string): ProjectWorkspaceMediaRecord['probe'] {
   const manifest = parseJson(value, 'media manifest')
   const probe = manifest.probe
@@ -34,6 +44,11 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
           orderBy: { createdAt: 'desc' },
           take: 20,
           include: { resultVersion: { select: { id: true } } },
+        },
+        directorRuns: {
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          include: { qualitySnapshot: true, editPlanSnapshot: true },
         },
         mediaAssets: {
           orderBy: { createdAt: 'asc' },
@@ -98,6 +113,39 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
     const subtitlePolicy = editPlan && typeof editPlan.subtitlePolicy === 'object' && editPlan.subtitlePolicy !== null && !Array.isArray(editPlan.subtitlePolicy)
       ? editPlan.subtitlePolicy as Record<string, unknown>
       : {}
+    const directorRuns = project.directorRuns.map((run) => {
+      const quality = parseJson(run.qualitySnapshot.contentJson, 'Director quality report')
+      const directedPlan = parseJson(run.editPlanSnapshot.contentJson, 'Director EditPlan')
+      const decisions = parseJsonArray(run.decisionsJson, 'Director decisions')
+      const assumptions = parseJsonArray(run.assumptionsJson, 'Director assumptions')
+      const subtitleTracks = Array.isArray(directedPlan.subtitleTracks) ? directedPlan.subtitleTracks : []
+      const subtitleCueCount = subtitleTracks.reduce((total, track) => {
+        if (typeof track !== 'object' || track === null || Array.isArray(track)) return total
+        const cues = (track as Record<string, unknown>).cues
+        return total + (Array.isArray(cues) ? cues.length : 0)
+      }, 0)
+      return Object.freeze({
+        id: run.id,
+        status: run.status,
+        plannerVersion: run.plannerVersion,
+        criticVersion: run.criticVersion,
+        baseVersionId: run.baseVersionId,
+        resultVersionId: run.resultVersionId,
+        treatmentSnapshotId: run.treatmentSnapshotId,
+        storySnapshotId: run.storySnapshotId,
+        qualitySnapshotId: run.qualitySnapshotId,
+        qualityStatus: typeof quality.status === 'string' ? quality.status : 'unknown',
+        qualityScore: typeof quality.score === 'number' ? quality.score : 0,
+        decisionCount: decisions.length,
+        assumptionCount: assumptions.length,
+        subtitleCueCount,
+        transitionCount: Array.isArray(directedPlan.transitions) ? directedPlan.transitions.length : 0,
+        automaticZoom: typeof directedPlan.movementPolicy === 'object' && directedPlan.movementPolicy !== null && !Array.isArray(directedPlan.movementPolicy)
+          ? (directedPlan.movementPolicy as Record<string, unknown>).automaticZoom === true
+          : false,
+        createdAt: run.createdAt.toISOString(),
+      })
+    })
     return Object.freeze({
       project: Object.freeze({
         id: project.id, workspaceId: project.workspaceId, name: project.name, status: project.status,
@@ -125,6 +173,7 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
         ...(command.reason ? { reason: command.reason } : {}),
         createdAt: command.createdAt.toISOString(),
       }))),
+      directorRuns: Object.freeze(directorRuns),
       media: Object.freeze(media),
       transcripts: Object.freeze(transcripts),
       operationIds: Object.freeze([...project.proxyRenderOperations, ...project.mediaIngestOperations].map((item) => item.operationId)),

@@ -20,16 +20,16 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate de workspace, ingestão e primeiro proxy editorial V2:
+Estado auditado após o gate de workspace, ingestão, corte editorial e primeiro DirectorRun V2 materializado:
 
-- **95 de 1.259 microtarefas verificadas como efetivamente entregues (7,5%)**;
-- **1.164 microtarefas abertas ou aguardando nova comprovação**;
+- **99 de 1.259 microtarefas verificadas como efetivamente entregues (7,9%)**;
+- **1.160 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
 
-Esta porcentagem mede o PRD completo. Workspace, ingestão, Command editorial e o primeiro proxy materializado já são executáveis; o próximo gate vertical continua aberto porque Diretor, compiler, critic, legendas/transições e render final ainda não produziram o MP4 de aceite.
+Esta porcentagem mede o PRD completo. Workspace, ingestão, Command editorial, DirectorRun, critic e proxy legendado já são executáveis no ambiente local sobre o Postgres V2 real. O próximo gate continua aberto para aprovação/export final, implantação e E2E em produção; o proxy de aceite não deve ser relatado como final implantado.
 
 ---
 
@@ -41,16 +41,16 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 - [x] Tornar formato de saída e briefing opcional visíveis na criação do projeto. Evidência: criação visual em `src/app/page.tsx`, `POST /v1/projects`, projeto real 9:16 e regressões de contrato.
 - [x] Conectar o workspace de edição aos projetos, versões, operações e artifacts V2, sem ler o projeto SQLite legado. Evidência: `/projects/[id]` consome exclusivamente `GET /v1/projects/{projectId}` e exibe operação, master, proxy e transcript persistidos no Postgres.
-- [ ] Impedir punch-in automático nos quatro segundos iniciais e desativar zoom automático por padrão.
-- [ ] Limitar legendas a blocos curtos, respeitar âncora e manter a região de rosto/olhos livre.
+- [x] Impedir punch-in automático nos quatro segundos iniciais e desativar zoom automático por padrão. Evidência: `DirectorRun director-run-c6ad339c-c6f0-47c6-bc64-f7d170dfa9cf`, versão 5, `protectedOpeningFrames=120`, `automaticZoom=false`, zero effect tracks, hard checks aprovados e abertura revisada nos frames do artifact `artifact-c73a0ae4-5378-480d-aa6e-fa1c1a91562d`.
+- [x] Limitar legendas a blocos curtos, respeitar âncora e manter a região de rosto/olhos livre. Evidência: 53 cues de até 32 caracteres, duas linhas, âncora inferior e fallback seguro; render FFmpeg real 540×960 revisado em oito frames, com `subtitlesBounded=true` e `subtitlesFaceSafe=true` no QualityReport persistido.
 - [x] Expor corte editorial no modelo de `Command` V2, com nova versão imutável, alinhamento às palavras e retiming da transcrição. Evidência: `POST /v1/projects/{projectId}/commands` persistiu `edit-command-b57329af-711d-4cf7-8ba7-1625bab110f8`, criou a versão imutável 4 `project-version-1e752a92-7fb6-4a90-81f0-8d4f10a303e2`, compilou três ranges retidos e o worker materializou o EditPlan no artifact `artifact-c400737b-9170-4d74-a38b-cd78a530a5b9`.
 - [x] Criar regressões automatizadas para autenticação e cortes editoriais. Evidência: regressões da sessão/API, cinco testes do Command e critério editorial, duas regressões do worker durável, além do E2E FFmpeg em `tests/v2/ffmpeg-ingest.integration.mjs`, que gera e inspeciona um MP4 vertical real a partir de clips retidos; 447/447 testes gerais e 2/2 integrações de mídia aprovados.
 - [x] Publicar a nova autenticação própria do Apollo exclusivamente pela API `/v1/session`, com capabilities, schemas, OpenAPI e E2E; remover o Basic Auth do proxy. Evidência: `src/app/v1/session/route.ts`, capability registry, OpenAPI e testes de sessão/API.
 - [x] Importar o master do projeto de teste como artifact V2, promovendo bytes imutáveis, proxy, áudio e transcript pela operação pública de ingestão. Evidência: projeto `project-fe932791-32f4-4453-8b85-6ce35a711860`, operação `operation-b3bab0da-ded6-453c-809f-c637268de131` e master de 145.445.848 bytes.
 - [x] Aplicar via API V2 a remoção das falas que mencionem “31 de janeiro” e “1 de fevereiro”, além de “dois dias”/“dois dias de aula”, preservando continuidade e retiming. Evidência: a versão 4 exclui 36,26–58,12s e 86,58–87,76s; a operação durável `operation-eff0dcdf-f710-46d5-b6e1-43614245ab63` materializou um MP4 540×960 de 79,734s com SHA-256 `12614d44518da714f05b0024836ea60d943c27e7365ec92e46a74bc9d703d432`; a retranscrição do áudio renderizado não contém nenhuma das falas proibidas e preserva continuidade audível nos dois cortes.
-- [ ] Implementar a jornada executável V2: briefing → percepção → `TreatmentPlan` → `StoryPlan` → `EditPlan` → critic → proxy/final.
+- [x] Implementar a jornada executável V2: briefing → percepção → `TreatmentPlan` → `StoryPlan` → `EditPlan` → critic → proxy/final. Evidência: `POST /v1/projects/{projectId}/commands` com `type=run-director` persistiu Command `edit-command-77633ff0-f846-49db-a08a-2456aacb3b11`, cinco snapshots, versão imutável 5 e QualityReport; a operação `operation-92c27cad-7935-42bf-8a40-15f14e377bec` materializou o proxy revisável. A promoção/export final permanece explicitamente no item de E2E em produção abaixo.
 - [x] Remover da superfície executável da aplicação todas as chamadas às rotas e serviços legados. Evidência: schema antigo, 68 rotas `/api`, páginas/componentes antigos e `src/lib` removidos; `npm run lint` impede reintrodução e o build lista somente UI e `/v1` novos.
-- [ ] Revisar e corrigir continuidade, transições, enquadramento e posicionamento de legendas no vídeo renderizado.
+- [x] Revisar e corrigir continuidade, transições, enquadramento e posicionamento de legendas no vídeo renderizado. Evidência: MP4 `ec53c12190385e6196ee785f0e48a8c1efd7337b6dafde467909cc2ec9667e3b`, 79,734s, 540×960, duas emendas com straight cut e microfade de 24ms; oito frames inspecionados; retranscrição Groq com zero falas proibidas e continuidade nos contextos das emendas em 36,26s e 64,72s; preview API retornou byte range 206 e carregou na UI.
 - [ ] Executar o E2E completo em produção e entregar o MP4 final assistível.
 
 ---

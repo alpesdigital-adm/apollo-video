@@ -1018,6 +1018,33 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-workspace/v4': [
+      {
+        data: {
+          project: { id: projectId, workspaceId, name: 'Anuncio de descoberta', status: 'draft', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt },
+          version: { id: 'project-version-example-4', sequence: 4, baseHash: 'd'.repeat(64), createdAt },
+          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          commands: [{
+            id: 'edit-command-director-example-1', type: 'run-director', baseVersionId: 'project-version-example-3',
+            resultVersionId: 'project-version-example-4', reason: 'Planejar e revisar a composicao completa.', createdAt,
+          }],
+          directorRuns: [{
+            id: 'director-run-example-1', status: 'planned', plannerVersion: 'apollo-director-policy/v1', criticVersion: 'apollo-director-critic/v1',
+            baseVersionId: 'project-version-example-3', resultVersionId: 'project-version-example-4',
+            treatmentSnapshotId: 'project-snapshot-treatment-1', storySnapshotId: 'project-snapshot-story-1', qualitySnapshotId: 'project-snapshot-quality-1',
+            qualityStatus: 'approved-with-warnings', qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+          }],
+          media: [{
+            id: 'project-media-editorial-example-1', role: 'editorial-proxy', originalFileName: 'video-editorial.mp4',
+            artifactId: 'artifact-editorial-proxy-example-1', manifestId: 'manifest-editorial-proxy-example-1', mediaType: 'video', container: 'mp4',
+            byteSize: '1234567', sha256: 'e'.repeat(64), status: 'available', probe: { width: 540, height: 960, duration: 79.3, fps: 30 }, createdAt,
+          }],
+          transcripts: [], operationIds: [queuedProjectProxyRenderOperationExample.id], operations: [queuedProjectProxyRenderOperationExample],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/begin-media-upload-request/v2': [
       { projectId, fileName: 'gravacao-bruta.mp4', rightsConfirmed: true, kind: 'video', size: '104857600', mimeType: 'video/mp4', checksum: 'a'.repeat(64) },
     ],
@@ -1371,6 +1398,22 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         reason: 'Remover informações de data e duração que não pertencem à nova composição.',
       },
     ],
+    'apollo://schemas/apply-project-edit-command-request/v3': [
+      {
+        type: 'remove-spoken-content',
+        baseVersionId: 'project-version-example-1',
+        baseHash: 'a'.repeat(64),
+        sourceTranscriptId: 'transcript-example-1',
+        rules: [{ id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] }],
+        reason: 'Remover a duracao obsoleta.',
+      },
+      {
+        type: 'run-director',
+        baseVersionId: 'project-version-example-3',
+        baseHash: 'c'.repeat(64),
+        reason: 'Planejar, criticar e materializar a composicao completa.',
+      },
+    ],
     'apollo://schemas/project-edit-command-applied/v1': [
       {
         data: {
@@ -1401,6 +1444,44 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             outputDurationFrames: 2955, fps: 30, automaticZoom: false,
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
           },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-edit-command-applied/v2': [
+      {
+        data: {
+          command: {
+            id: 'edit-command-director-example-1', type: 'run-director',
+            baseVersionId: 'project-version-example-3', resultVersionId: 'project-version-example-4', createdAt,
+          },
+          version: {
+            id: 'project-version-example-4', sequence: 4, parentVersionId: 'project-version-example-3', baseHash: 'd'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', perception: 'project-snapshot-perception-1', treatment: 'project-snapshot-treatment-1',
+              story: 'project-snapshot-story-1', editPlan: 'project-snapshot-edit-plan-4', quality: 'project-snapshot-quality-1', policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          directorRun: {
+            id: 'director-run-example-1', status: 'planned', plannerVersion: 'apollo-director-policy/v1', criticVersion: 'apollo-director-critic/v1',
+            baseVersionId: 'project-version-example-3', resultVersionId: 'project-version-example-4',
+            perception: { snapshotId: 'project-snapshot-perception-1', summary: { speechCoverage: 0.78, visualCoverage: 'partial', faceCoverage: 'absent' } },
+            treatmentPlan: { snapshotId: 'project-snapshot-treatment-1', plan: { mode: 'talking-head', objective: 'discovery' } },
+            storyPlan: { snapshotId: 'project-snapshot-story-1', plan: { objective: 'discovery', blockCount: 3 } },
+            editPlan: { snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4', durationFrames: 2380, fps: 30, subtitleCueCount: 28, transitionCount: 2, automaticZoom: false },
+            qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
+            decisions: [
+              { id: 'decision-narrative-linear', category: 'narrative', choice: 'preserve-linear-narrative' },
+              { id: 'decision-motion-none', category: 'movement', choice: 'no_effect' },
+              { id: 'decision-layout-inset', category: 'layout', choice: 'landscape-inset-on-blurred-source' },
+              { id: 'decision-subtitle-bottom', category: 'subtitle', choice: 'bottom-face-safe-clean' },
+            ],
+            assumptions: ['Face detector indisponivel; aplicar safe area conservadora.'],
+            createdAt,
+          },
+          operation: queuedProjectProxyRenderOperationExample,
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

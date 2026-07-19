@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdir, rm, stat } from 'node:fs/promises'
+import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -26,6 +26,64 @@ function assertContained(root: string, candidate: string): void {
   if (rel.startsWith('..') || isAbsolute(rel)) throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial render work path escaped its root')
 }
 
+function assTimestamp(frame: number, fps: number): string {
+  const centiseconds = Math.max(0, Math.round(frame / fps * 100))
+  const hours = Math.floor(centiseconds / 360_000)
+  const minutes = Math.floor(centiseconds % 360_000 / 6_000)
+  const seconds = Math.floor(centiseconds % 6_000 / 100)
+  const fraction = centiseconds % 100
+  return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(fraction).padStart(2, '0')}`
+}
+
+function wrapAssText(value: string, maxCharacters = 20): string {
+  const lines: string[] = []
+  let line = ''
+  for (const word of value.replace(/[{}\\]/g, '').split(/\s+/).filter(Boolean)) {
+    const candidate = line ? `${line} ${word}` : word
+    if (line && candidate.length > maxCharacters && lines.length === 0) {
+      lines.push(line)
+      line = word
+    } else line = candidate
+  }
+  if (line) lines.push(line)
+  return lines.slice(0, 2).join('\\N')
+}
+
+function buildAssSubtitles(input: {
+  width: number
+  height: number
+  fps: number
+  cues: NonNullable<Parameters<EditorialProxyRenderer['render']>[0]['subtitleCues']>
+}): string {
+  const fontSize = input.width <= 640 ? 32 : 38
+  const marginHorizontal = Math.round(input.width * 0.07)
+  const marginVertical = Math.round(input.height * 0.075)
+  const events = input.cues.map((cue) =>
+    `Dialogue: 0,${assTimestamp(cue.startFrame, input.fps)},${assTimestamp(cue.endFrame, input.fps)},Default,,0,0,0,,${wrapAssText(cue.text)}`,
+  )
+  return [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    'WrapStyle: 2',
+    'ScaledBorderAndShadow: yes',
+    `PlayResX: ${input.width}`,
+    `PlayResY: ${input.height}`,
+    '',
+    '[V4+ Styles]',
+    'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding',
+    `Style: Default,Arial,${fontSize},&H00FFFFFF,&H0038AFE1,&H00111111,&H78000000,-1,0,0,0,100,100,0,0,3,1,0,2,${marginHorizontal},${marginHorizontal},${marginVertical},1`,
+    '',
+    '[Events]',
+    'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text',
+    ...events,
+    '',
+  ].join('\n')
+}
+
+function escapeSubtitleFilterPath(value: string): string {
+  return value.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
+}
+
 export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
   private readonly workRoot: string
   private readonly ffmpegPath: string
@@ -48,6 +106,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     if (!dimensions) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial proxy format is not supported')
     const directory = this.directory(input.operationId)
     const outputPath = join(directory, 'editorial-proxy.mp4')
+    const subtitlePath = join(directory, 'captions.ass')
     await mkdir(directory, { recursive: true })
     await rm(outputPath, { force: true })
     const filters: string[] = []
@@ -55,7 +114,15 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       const start = clip.sourceInFrame / input.fps
       const end = clip.sourceOutFrame / input.fps
       filters.push(`[0:v:0]trim=start_frame=${clip.sourceInFrame}:end_frame=${clip.sourceOutFrame},setpts=PTS-STARTPTS[v${index}]`)
-      filters.push(`[0:a:0]atrim=start=${start.toFixed(6)}:end=${end.toFixed(6)},asetpts=PTS-STARTPTS[a${index}]`)
+      const duration = end - start
+      const before = input.transitions?.find((transition) => transition.toClipId === clip.id)
+      const after = input.transitions?.find((transition) => transition.fromClipId === clip.id)
+      const fadeIn = before ? Math.min(duration / 4, before.audioFadeMs / 1000) : 0
+      const fadeOut = after ? Math.min(duration / 4, after.audioFadeMs / 1000) : 0
+      const audioFilters = [`atrim=start=${start.toFixed(6)}:end=${end.toFixed(6)}`, 'asetpts=PTS-STARTPTS']
+      if (fadeIn > 0) audioFilters.push(`afade=t=in:st=0:d=${fadeIn.toFixed(6)}`)
+      if (fadeOut > 0) audioFilters.push(`afade=t=out:st=${Math.max(0, duration - fadeOut).toFixed(6)}:d=${fadeOut.toFixed(6)}`)
+      filters.push(`[0:a:0]${audioFilters.join(',')}[a${index}]`)
     })
     const concatInputs = input.clips.map((_, index) => `[v${index}][a${index}]`).join('')
     filters.push(`${concatInputs}concat=n=${input.clips.length}:v=1:a=1[joinedv][outa]`)
@@ -63,7 +130,11 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     filters.push(`[joinedv]split=2[background0][foreground0]`)
     filters.push(`[background0]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background]`)
     filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease[foreground]`)
-    filters.push(`[background][foreground]overlay=(W-w)/2:(H-h)/2:shortest=1,format=yuv420p[outv]`)
+    filters.push(`[background][foreground]overlay=(W-w)/2:(H-h)/2:shortest=1,format=yuv420p[composed]`)
+    if (input.subtitleCues?.length) {
+      await writeFile(subtitlePath, buildAssSubtitles({ width, height, fps: input.fps, cues: input.subtitleCues }), 'utf8')
+      filters.push(`[composed]subtitles=filename='${escapeSubtitleFilterPath(subtitlePath)}'[outv]`)
+    } else filters.push('[composed]null[outv]')
     try {
       await execFileAsync(this.ffmpegPath, [
         '-hide_banner', '-loglevel', 'error', '-y', '-i', input.sourcePath,

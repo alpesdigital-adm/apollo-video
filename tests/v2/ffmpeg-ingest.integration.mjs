@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { access, mkdtemp, rm, stat } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -64,6 +64,13 @@ test('V2 editorial renderer materializes exact retained clips as a format-aware 
       { id: 'clip-1', sourceArtifactId: 'artifact-1', sourceInFrame: 0, sourceOutFrame: 10, timelineInFrame: 0, timelineOutFrame: 10, rate: 1 },
       { id: 'clip-2', sourceArtifactId: 'artifact-1', sourceInFrame: 20, sourceOutFrame: 30, timelineInFrame: 10, timelineOutFrame: 20, rate: 1 },
     ],
+    subtitleCues: [
+      { id: 'cue-1', startFrame: 0, endFrame: 10, text: 'Legenda curta', anchor: 'bottom' },
+      { id: 'cue-2', startFrame: 10, endFrame: 20, text: 'Área segura', anchor: 'bottom' },
+    ],
+    transitions: [
+      { id: 'transition-1', fromClipId: 'clip-1', toClipId: 'clip-2', atFrame: 10, type: 'straight-cut', audioFadeMs: 24, reason: 'Invisible same-scene cut.' },
+    ],
   })
 
   assert.equal(result.probe.width, 540)
@@ -73,6 +80,10 @@ test('V2 editorial renderer materializes exact retained clips as a format-aware 
   assert.match(result.sha256, /^[a-f0-9]{64}$/)
   assert.ok(result.byteSize > 0)
   await access(result.outputPath)
+  const captions = await readFile(join(root, 'work', 'operation-editorial-render-1', 'captions.ass'), 'utf8')
+  assert.match(captions, /Alignment,MarginL,MarginR,MarginV/)
+  assert.match(captions, /Legenda curta/)
+  assert.match(captions, /Área segura/)
 
   await renderer.cleanup('operation-editorial-render-1')
   await assert.rejects(() => access(result.outputPath), { code: 'ENOENT' })

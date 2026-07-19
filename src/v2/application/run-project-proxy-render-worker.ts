@@ -102,11 +102,17 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       })
       if (!source) throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable project render source disappeared')
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
-      if (source.editPlan.movementPolicy.automaticZoom || clips.length < 1) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
+      if (
+        source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
+        source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4)
+      ) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
+      const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
+      const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       await enter('rendering')
       const rendered = await dependencies.renderer.render({
         operationId: operation.id, sourcePath: resolveArtifactPath(dependencies.artifactRoot, source.sourceArtifactKey),
-        clips, fps: source.editPlan.fps, format: source.format, signal: abortController.signal,
+        clips, fps: source.editPlan.fps, format: source.format, subtitleCues, transitions,
+        signal: abortController.signal,
       })
       await enter('verifying')
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')

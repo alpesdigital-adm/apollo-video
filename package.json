@@ -22,7 +22,7 @@
     "test:integration:prisma": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-project-repository.integration.mjs",
     "test:integration:operations": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-public-operation.integration.mjs",
     "test:integration:webhooks": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-webhook-registration.integration.mjs",
-    "worker:v2:render": "tsx --env-file=.env scripts/run-v2-render-worker.mjs",
+    "worker:v2:render": "tsx --env-file=.env --env-file-if-exists=.env.local scripts/run-v2-render-worker.mjs",
     "worker:v2:ingest": "tsx --env-file=.env scripts/run-v2-ingest-worker.mjs",
     "worker:v2:webhook": "tsx --env-file=.env scripts/run-v2-webhook-worker.mjs",
     "mcp:v2": "tsx --env-file=.env scripts/run-v2-mcp.mjs",
