@@ -1,3 +1,5 @@
+ARG APOLLO_BUILD_REVISION=local
+
 FROM node:22-bookworm-slim AS dependencies
 
 WORKDIR /app
@@ -14,8 +16,11 @@ RUN npm ci && npm ci --prefix remotion
 
 FROM node:22-bookworm-slim AS build
 
+ARG APOLLO_BUILD_REVISION
+
 WORKDIR /app
-ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    APOLLO_BUILD_REVISION=$APOLLO_BUILD_REVISION
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl \
@@ -29,9 +34,12 @@ RUN mkdir -p public && npm run build
 
 FROM node:22-bookworm-slim AS runtime
 
+ARG APOLLO_BUILD_REVISION
+
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
+    APOLLO_BUILD_REVISION=$APOLLO_BUILD_REVISION \
     HOSTNAME=0.0.0.0 \
     PORT=3333
 
