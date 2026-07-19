@@ -141,7 +141,6 @@ async function waitForPoll(delayMs: number, signal: AbortSignal): Promise<void> 
   if (signal.aborted) return
   await new Promise<void>((resolve) => {
     const timer = setTimeout(done, delayMs)
-    timer.unref?.()
     signal.addEventListener('abort', done, { once: true })
     function done() {
       clearTimeout(timer)

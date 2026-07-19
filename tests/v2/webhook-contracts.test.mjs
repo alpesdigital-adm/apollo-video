@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { once } from 'node:events'
 import test from 'node:test'
 
 import { registerWebhookService } from '../../src/v2/application/register-webhook.ts'
@@ -1495,6 +1497,53 @@ test('coordinated worker runs only its leased shard and releases it on shutdown'
     },
   })
   assert.deepEqual(events, ['claim', 'run:1/3', 'release:1/3'])
+})
+
+test('idle webhook polling keeps the production daemon alive until shutdown', async () => {
+  const moduleUrl = new URL(
+    '../../src/v2/application/run-webhook-delivery-worker.ts',
+    import.meta.url,
+  ).href
+  const source = `
+    import * as importedWorker from ${JSON.stringify(moduleUrl)}
+    const worker = importedWorker.runCoordinatedWebhookDeliveryWorkerLoop
+      ? importedWorker
+      : importedWorker.default
+    const { runCoordinatedWebhookDeliveryWorkerLoop } = worker
+    const controller = new AbortController()
+    process.once('SIGTERM', () => controller.abort())
+    process.stdout.write('ready\\n')
+    await runCoordinatedWebhookDeliveryWorkerLoop({
+      signal: controller.signal,
+      claimShard: async () => null,
+      heartbeatShard: async () => true,
+      releaseShard: async () => true,
+      runAssignedShard: async () => {},
+      retryIntervalMs: 100,
+    })
+  `
+  const child = spawn(
+    process.execPath,
+    ['--import', 'tsx', '--input-type=module', '--eval', source],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  )
+  let stderr = ''
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk) => { stderr += chunk })
+  let exited = false
+  child.once('exit', () => { exited = true })
+
+  await Promise.race([
+    once(child.stdout, 'data'),
+    once(child, 'exit').then(([code, signal]) => {
+      throw new Error(`idle webhook daemon exited before readiness (${code}/${signal}): ${stderr}`)
+    }),
+  ])
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  assert.equal(exited, false, `idle webhook daemon exited unexpectedly: ${stderr}`)
+  child.kill('SIGTERM')
+  const [code, signal] = await once(child, 'exit')
+  assert.equal(code === 0 || signal === 'SIGTERM', true, stderr)
 })
 
 test('webhook endpoint administration paginates with filter-bound cursors and scoped reads', async () => {
