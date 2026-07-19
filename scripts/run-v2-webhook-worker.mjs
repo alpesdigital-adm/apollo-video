@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 
-import {
-  runCoordinatedWebhookDeliveryWorkerLoop,
-  runDiscoveredWebhookDeliveryWorkerLoop,
-} from '../src/v2/application/run-webhook-delivery-worker.ts'
+import * as importedWebhookWorker from '../src/v2/application/run-webhook-delivery-worker.ts'
 import * as importedRepositoryFactory from '../src/v2/infrastructure/repository-factory.ts'
 
+const webhookWorker = importedWebhookWorker.runCoordinatedWebhookDeliveryWorkerLoop
+  ? importedWebhookWorker
+  : importedWebhookWorker.default
+const {
+  runCoordinatedWebhookDeliveryWorkerLoop,
+  runDiscoveredWebhookDeliveryWorkerLoop,
+} = webhookWorker
 const repositoryFactory = importedRepositoryFactory.createWebhookDeliveryScheduler
   ? importedRepositoryFactory
   : importedRepositoryFactory.default
