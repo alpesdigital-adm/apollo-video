@@ -985,6 +985,78 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       { kind: 'video', size: '104857600', mimeType: 'video/mp4', checksum: 'a'.repeat(64) },
     ],
     'apollo://schemas/binary-media-content/v1': ['binary-media-bytes'],
+    'apollo://schemas/create-review-annotation-request/v1': [
+      {
+        projectVersionId: 'project-version-example-2',
+        proxyArtifactId: 'artifact-review-proxy-1',
+        proxyHash: 'e'.repeat(64),
+        frame: 315,
+        timeRangeMs: [10500, 10500],
+        scope: 'region',
+        region: { x: 0.18, y: 0.12, width: 0.42, height: 0.28 },
+        targetIds: [],
+        screenshotRef: `data:image/jpeg;base64,${Buffer.from('apollo-review-frame').toString('base64')}`,
+        text: 'Reposicionar a legenda abaixo do rosto.',
+      },
+    ],
+    'apollo://schemas/project-review/v1': [
+      {
+        data: {
+          session: {
+            projectVersionId: 'project-version-example-2',
+            proxyArtifactId: 'artifact-review-proxy-1',
+            proxyUrl: '/v1/artifacts/artifact-review-proxy-1/content',
+            proxyHash: 'e'.repeat(64),
+            fps: 30,
+            resolution: { width: 1080, height: 1920 },
+            durationFrames: 2400,
+            stale: false,
+          },
+          scenes: [{ id: 'scene:clip-example-1', label: 'Cena 1', startFrame: 0, endFrame: 900 }],
+          annotations: [{
+            id: 'd8f7ec49-b87c-4ca8-80a7-7840de71c650',
+            projectVersionId: 'project-version-example-2',
+            proxyArtifactId: 'artifact-review-proxy-1',
+            proxyHash: 'e'.repeat(64),
+            frame: 315,
+            timeRangeMs: [10500, 10500],
+            screenshotRef: `data:image/jpeg;base64,${Buffer.from('apollo-review-frame').toString('base64')}`,
+            scope: 'region',
+            region: { x: 0.18, y: 0.12, width: 0.42, height: 0.28 },
+            targetIds: [],
+            text: 'Reposicionar a legenda abaixo do rosto.',
+            author: { id: clientId, name: 'Editor Apollo', type: 'api-client' },
+            status: 'open',
+            createdAt,
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/review-annotation-created/v1': [
+      {
+        data: {
+          annotation: {
+            id: 'd8f7ec49-b87c-4ca8-80a7-7840de71c650',
+            projectVersionId: 'project-version-example-2',
+            proxyArtifactId: 'artifact-review-proxy-1',
+            proxyHash: 'e'.repeat(64),
+            frame: 315,
+            timeRangeMs: [10500, 10500],
+            screenshotRef: `data:image/jpeg;base64,${Buffer.from('apollo-review-frame').toString('base64')}`,
+            scope: 'region',
+            region: { x: 0.18, y: 0.12, width: 0.42, height: 0.28 },
+            targetIds: [],
+            text: 'Reposicionar a legenda abaixo do rosto.',
+            author: { id: clientId, name: 'Editor Apollo', type: 'api-client' },
+            status: 'open',
+            createdAt,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-workspace/v1': [
       {
         data: {

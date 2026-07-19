@@ -186,6 +186,13 @@ const requiredChecks = [
   'edit_commands_base_hash_check',
   'edit_commands_request_fingerprint_check',
   'project_proxy_render_operations_hash_check',
+  'review_annotations_proxy_hash_check',
+  'review_annotations_request_fingerprint_check',
+  'review_annotations_frame_time_check',
+  'review_annotations_scope_check',
+  'review_annotations_status_check',
+  'review_annotations_author_check',
+  'review_annotations_region_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

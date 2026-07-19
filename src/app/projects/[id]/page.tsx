@@ -2,7 +2,7 @@
 
 import { sha256 } from '@noble/hashes/sha256'
 import { useParams, useRouter } from 'next/navigation'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import LogoutButton from '@/components/LogoutButton'
 
@@ -38,6 +38,19 @@ interface WorkspaceData {
   operationIds: string[]
   operations: PublicOperation[]
 }
+interface ReviewSessionData {
+  projectVersionId: string; proxyArtifactId: string; proxyUrl: string; proxyHash: string; fps: number;
+  resolution: { width: number; height: number }; durationFrames: number; stale: boolean
+}
+interface ReviewSceneData { id: string; label: string; startFrame: number; endFrame: number }
+interface ReviewAnnotationData {
+  id: string; projectVersionId: string; proxyArtifactId: string; proxyHash: string; frame: number;
+  timeRangeMs: [number, number]; screenshotRef: string; scope: 'point' | 'region' | 'scene';
+  region?: { x: number; y: number; width: number; height: number }; targetIds: string[]; text: string;
+  author: { id: string; name: string; type: 'user' | 'api-client' }; status: 'open' | 'applied' | 'dismissed'; createdAt: string
+}
+interface ProjectReviewData { session: ReviewSessionData; scenes: ReviewSceneData[]; annotations: ReviewAnnotationData[] }
+type ReviewMode = 'idle' | 'marking' | 'composing'
 interface UploadSession {
   mode: 'single' | 'multipart'; expiresAt: string; maxParts: number;
   requiredHeaders: Record<string, string>; uploadUrl?: string; partSize?: string; partUrlTemplate?: string
@@ -75,6 +88,19 @@ function localSignedUrl(value: string): string {
   return url.toString()
 }
 
+function clamp01(value: number): number { return Math.min(1, Math.max(0, value)) }
+
+function frameTimecode(frame: number, fps: number): string {
+  if (!Number.isFinite(frame) || !Number.isFinite(fps) || fps <= 0) return '00:00:00:00'
+  const roundedFrame = Math.max(0, Math.round(frame))
+  const totalSeconds = Math.floor(roundedFrame / fps)
+  const frames = roundedFrame % Math.round(fps)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor(totalSeconds % 3600 / 60)
+  const seconds = totalSeconds % 60
+  return [hours, minutes, seconds, frames].map((value) => String(value).padStart(2, '0')).join(':')
+}
+
 async function hashFile(file: File, signal: AbortSignal, onProgress: (progress: number) => void): Promise<string> {
   const digest = sha256.create()
   const chunkSize = 8 * 1024 * 1024
@@ -102,6 +128,10 @@ export default function ProjectWorkspacePage() {
   const previewVideo = useRef<HTMLVideoElement>(null)
   const activeRequest = useRef<AbortController | null>(null)
   const pendingUpload = useRef<PendingUpload | null>(null)
+  const reviewPointerStart = useRef<{ x: number; y: number } | null>(null)
+  const previewLoadStartedAt = useRef(0)
+  const previewSeekStartedAt = useRef(0)
+  const previewSeekSamples = useRef<number[]>([])
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
@@ -113,6 +143,14 @@ export default function ProjectWorkspacePage() {
   const [directorRunning, setDirectorRunning] = useState(false)
   const [exportRunning, setExportRunning] = useState(false)
   const [previewState, setPreviewState] = useState<'idle' | 'loading' | 'ready' | 'playing' | 'paused' | 'error'>('idle')
+  const [review, setReview] = useState<ProjectReviewData | null>(null)
+  const [reviewMode, setReviewMode] = useState<ReviewMode>('idle')
+  const [reviewScope, setReviewScope] = useState<'point' | 'region' | 'scene'>('point')
+  const [reviewRegion, setReviewRegion] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const [reviewText, setReviewText] = useState('')
+  const [reviewSaving, setReviewSaving] = useState(false)
+  const [previewFrame, setPreviewFrame] = useState(0)
+  const [previewPerformance, setPreviewPerformance] = useState({ firstFrameMs: 0, seekP95Ms: 0, droppedFrameRate: 0 })
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -150,20 +188,61 @@ export default function ProjectWorkspacePage() {
 
   useEffect(() => { void loadWorkspace() }, [loadWorkspace])
 
+  const loadReview = useCallback(async (quiet = false) => {
+    try {
+      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/annotations?limit=50`, {
+        headers: { accept: 'application/json' },
+        cache: 'no-store',
+      })
+      if (response.status === 401) { router.replace('/login'); return }
+      const payload = await response.json() as ApiEnvelope<ProjectReviewData>
+      if (!response.ok || !payload.data) throw new Error(apiError(payload, 'Não foi possível abrir a revisão deste projeto.'))
+      setReview(payload.data)
+    } catch (error) {
+      if (!quiet && workspace?.media.length) setNotice(error instanceof Error ? error.message : 'Não foi possível abrir a revisão deste projeto.')
+    }
+  }, [projectId, router, workspace?.media.length])
+
+  useEffect(() => {
+    if (!workspace?.version || workspace.media.length === 0) return
+    void loadReview()
+  }, [loadReview, workspace?.media.length, workspace?.version])
+
   const activeOperation = workspace?.operations[0]
   useEffect(() => {
     if (!activeOperation || !['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status)) return
-    const timer = window.setInterval(() => void loadWorkspace(true), 2500)
+    const timer = window.setInterval(() => {
+      void loadWorkspace(true)
+      void loadReview(true)
+    }, 2500)
     return () => window.clearInterval(timer)
-  }, [activeOperation, loadWorkspace])
+  }, [activeOperation, loadReview, loadWorkspace])
 
   const finalOutput = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'final-output'), [workspace])
-  const editingProxy = useMemo(() => finalOutput ?? [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'editorial-proxy') ?? [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'editing-proxy'), [finalOutput, workspace])
+  const editingProxy = useMemo(() => {
+    const media = workspace?.media ?? []
+    return media.find((item) => item.artifactId === review?.session.proxyArtifactId)
+      ?? finalOutput
+      ?? [...media].reverse().find((item) => item.role === 'editorial-proxy')
+      ?? [...media].reverse().find((item) => item.role === 'editing-proxy')
+  }, [finalOutput, review?.session.proxyArtifactId, workspace])
   const sourceMasters = useMemo(() => (workspace?.media ?? []).filter((item) => item.role === 'source-master'), [workspace])
   const transcript = workspace?.transcripts[0]
   const latestDirectorRun = workspace?.directorRuns[0]
+  const currentReviewScene = useMemo(
+    () => review?.scenes.find((scene) => previewFrame >= scene.startFrame && previewFrame < scene.endFrame),
+    [previewFrame, review?.scenes],
+  )
 
-  useEffect(() => { setPreviewState('idle') }, [editingProxy?.artifactId])
+  useEffect(() => {
+    setPreviewState('idle')
+    setPreviewFrame(0)
+    setReviewMode('idle')
+    setReviewRegion(null)
+    previewLoadStartedAt.current = performance.now()
+    previewSeekSamples.current = []
+    setPreviewPerformance({ firstFrameMs: 0, seekP95Ms: 0, droppedFrameRate: 0 })
+  }, [editingProxy?.artifactId])
 
   function togglePreview(): void {
     const video = previewVideo.current
@@ -183,6 +262,160 @@ export default function ProjectWorkspacePage() {
     const payload = await response.json() as ApiEnvelope<T>
     if (!response.ok || !payload.data) throw new Error(apiError(payload, 'A API recusou a operação.'))
     return payload.data
+  }
+
+  function readPreviewPosition(): void {
+    const video = previewVideo.current
+    const fps = review?.session.fps ?? editingProxy?.probe?.fps ?? 30
+    if (!video) return
+    setPreviewFrame(Math.max(0, Math.round(video.currentTime * fps)))
+    const quality = typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null
+    if (quality) {
+      setPreviewPerformance((current) => ({
+        ...current,
+        droppedFrameRate: quality.totalVideoFrames ? quality.droppedVideoFrames / quality.totalVideoFrames : 0,
+      }))
+    }
+  }
+
+  function finishPreviewSeek(): void {
+    if (previewSeekStartedAt.current <= 0) return
+    previewSeekSamples.current.push(performance.now() - previewSeekStartedAt.current)
+    previewSeekStartedAt.current = 0
+    const sorted = [...previewSeekSamples.current].toSorted((left, right) => left - right)
+    const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)
+    setPreviewPerformance((current) => ({ ...current, seekP95Ms: Math.round(sorted[index] ?? 0) }))
+    readPreviewPosition()
+  }
+
+  function normalizedReviewPoint(event: ReactPointerEvent<HTMLDivElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    return {
+      x: clamp01((event.clientX - bounds.left) / bounds.width),
+      y: clamp01((event.clientY - bounds.top) / bounds.height),
+    }
+  }
+
+  function beginReviewMark(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (reviewMode !== 'marking' || review?.session.stale) return
+    previewVideo.current?.pause()
+    const point = normalizedReviewPoint(event)
+    reviewPointerStart.current = point
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setReviewRegion({ x: point.x, y: point.y, width: 0, height: 0 })
+  }
+
+  function moveReviewMark(event: ReactPointerEvent<HTMLDivElement>): void {
+    const start = reviewPointerStart.current
+    if (!start || reviewMode !== 'marking') return
+    const point = normalizedReviewPoint(event)
+    setReviewRegion({
+      x: Math.min(start.x, point.x),
+      y: Math.min(start.y, point.y),
+      width: Math.abs(point.x - start.x),
+      height: Math.abs(point.y - start.y),
+    })
+  }
+
+  function finishReviewMark(event: ReactPointerEvent<HTMLDivElement>): void {
+    const start = reviewPointerStart.current
+    if (!start || reviewMode !== 'marking') return
+    const point = normalizedReviewPoint(event)
+    const region = {
+      x: Math.min(start.x, point.x),
+      y: Math.min(start.y, point.y),
+      width: Math.abs(point.x - start.x),
+      height: Math.abs(point.y - start.y),
+    }
+    reviewPointerStart.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    if (region.width >= 0.015 && region.height >= 0.015) {
+      setReviewRegion(region)
+      setReviewScope('region')
+    } else {
+      setReviewRegion(null)
+      setReviewScope('point')
+    }
+    setReviewMode('composing')
+  }
+
+  function startReview(): void {
+    const video = previewVideo.current
+    if (!video || !review || review.session.stale) return
+    video.pause()
+    readPreviewPosition()
+    setReviewText('')
+    setReviewRegion(null)
+    setReviewScope('point')
+    setReviewMode('marking')
+  }
+
+  function cancelReview(): void {
+    reviewPointerStart.current = null
+    setReviewMode('idle')
+    setReviewRegion(null)
+    setReviewText('')
+    setReviewScope('point')
+  }
+
+  function captureReviewScreenshot(): string {
+    const video = previewVideo.current
+    if (!video?.videoWidth || !video.videoHeight) throw new Error('O frame ainda não está disponível para captura.')
+    const width = Math.min(480, video.videoWidth)
+    const height = Math.max(1, Math.round(width * video.videoHeight / video.videoWidth))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('O navegador não conseguiu capturar o frame da revisão.')
+    context.drawImage(video, 0, 0, width, height)
+    return canvas.toDataURL('image/jpeg', 0.76)
+  }
+
+  async function saveReviewAnnotation(): Promise<void> {
+    const video = previewVideo.current
+    if (!review || !video || !reviewText.trim() || review.session.stale) return
+    const fps = review.session.fps
+    const frame = Math.max(0, Math.min(review.session.durationFrames - 1, Math.round(video.currentTime * fps)))
+    const pointTimeMs = Math.round(frame / fps * 1000)
+    const scene = review.scenes.find((candidate) => frame >= candidate.startFrame && frame < candidate.endFrame)
+    if (reviewScope === 'scene' && !scene) {
+      setNotice('Este frame não está associado a uma cena da versão atual.')
+      return
+    }
+    setReviewSaving(true)
+    setNotice(null)
+    try {
+      const timeRangeMs: [number, number] = reviewScope === 'scene'
+        ? [Math.round(scene!.startFrame / fps * 1000), Math.round(scene!.endFrame / fps * 1000)]
+        : [pointTimeMs, pointTimeMs]
+      const result = await requestJson<{ annotation: ReviewAnnotationData; replayed: boolean }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/annotations`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+          body: JSON.stringify({
+            projectVersionId: review.session.projectVersionId,
+            proxyArtifactId: review.session.proxyArtifactId,
+            proxyHash: review.session.proxyHash,
+            frame,
+            timeRangeMs,
+            scope: reviewScope,
+            ...(reviewScope === 'region' && reviewRegion ? { region: reviewRegion } : {}),
+            targetIds: reviewScope === 'scene' ? [scene!.id] : [],
+            screenshotRef: captureReviewScreenshot(),
+            text: reviewText.trim(),
+          }),
+        },
+      )
+      setReview((current) => current ? { ...current, annotations: [result.annotation, ...current.annotations.filter((item) => item.id !== result.annotation.id)] } : current)
+      setNotice(`Ajuste registrado no frame ${frameTimecode(frame, fps)}. A versão do vídeo não foi alterada.`)
+      cancelReview()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível registrar o ajuste.')
+    } finally {
+      setReviewSaving(false)
+    }
   }
 
   async function beginOrResume(file: File, checksum: string): Promise<string> {
@@ -421,8 +654,57 @@ export default function ProjectWorkspacePage() {
           <div className="mt-5 flex min-h-[500px] items-center justify-center overflow-hidden rounded-2xl border border-white/[0.08] bg-[#030303] p-4 shadow-[0_30px_80px_rgba(0,0,0,.25)]">
             {editingProxy ? (
               <div className="relative flex max-h-[560px] max-w-full items-center justify-center overflow-hidden rounded-xl border border-white/[0.1] bg-black" style={{ aspectRatio: (workspace.project.format ?? '16:9').replace(':', ' / ') }}>
-                <video className="max-h-[560px] max-w-full object-contain" controls key={editingProxy.artifactId} onCanPlay={() => setPreviewState((current) => current === 'playing' ? current : 'ready')} onError={() => setPreviewState('error')} onPause={() => setPreviewState((current) => current === 'idle' ? current : 'paused')} onPlay={() => setPreviewState('playing')} playsInline preload="auto" ref={previewVideo} src={`/v1/artifacts/${encodeURIComponent(editingProxy.artifactId)}/content`} />
+                <video
+                  className="max-h-[560px] max-w-full object-contain"
+                  controls
+                  key={editingProxy.artifactId}
+                  onCanPlay={() => setPreviewState((current) => current === 'playing' ? current : 'ready')}
+                  onError={() => setPreviewState('error')}
+                  onLoadedData={() => setPreviewPerformance((current) => ({ ...current, firstFrameMs: Math.max(0, Math.round(performance.now() - previewLoadStartedAt.current)) }))}
+                  onLoadedMetadata={readPreviewPosition}
+                  onPause={() => setPreviewState((current) => current === 'idle' ? current : 'paused')}
+                  onPlay={() => setPreviewState('playing')}
+                  onSeeked={finishPreviewSeek}
+                  onSeeking={() => { previewSeekStartedAt.current = performance.now() }}
+                  onTimeUpdate={readPreviewPosition}
+                  playsInline
+                  preload="auto"
+                  ref={previewVideo}
+                  src={review?.session.proxyUrl ?? `/v1/artifacts/${encodeURIComponent(editingProxy.artifactId)}/content`}
+                />
                 <div aria-hidden="true" className="pointer-events-none absolute inset-[5%] rounded border border-white/[0.12]" />
+                <div
+                  aria-label={reviewMode === 'marking' ? 'Arraste sobre o frame para marcar a área do ajuste' : 'Marcações da revisão neste frame'}
+                  className={`absolute inset-0 touch-none ${reviewMode === 'marking' ? 'cursor-crosshair pointer-events-auto bg-[#dcae3f]/[0.025]' : 'pointer-events-none'}`}
+                  onPointerDown={beginReviewMark}
+                  onPointerMove={moveReviewMark}
+                  onPointerUp={finishReviewMark}
+                >
+                  {review?.annotations.filter((annotation) => annotation.frame === previewFrame && annotation.region).map((annotation) => (
+                    <span
+                      aria-hidden="true"
+                      className="absolute border border-[#d9aa3d]/55 bg-[#d9aa3d]/[0.07]"
+                      key={annotation.id}
+                      style={{
+                        left: `${annotation.region!.x * 100}%`, top: `${annotation.region!.y * 100}%`,
+                        width: `${annotation.region!.width * 100}%`, height: `${annotation.region!.height * 100}%`,
+                      }}
+                    />
+                  ))}
+                  {reviewRegion ? (
+                    <span
+                      aria-hidden="true"
+                      className="absolute border border-[#efbd45] bg-[#efbd45]/10 shadow-[0_0_0_1px_rgba(0,0,0,.55)]"
+                      style={{ left: `${reviewRegion.x * 100}%`, top: `${reviewRegion.y * 100}%`, width: `${reviewRegion.width * 100}%`, height: `${reviewRegion.height * 100}%` }}
+                    >
+                      <i className="absolute -left-1 -top-1 h-2 w-2 border-l border-t border-[#ffe29a]" />
+                      <i className="absolute -right-1 -top-1 h-2 w-2 border-r border-t border-[#ffe29a]" />
+                      <i className="absolute -bottom-1 -left-1 h-2 w-2 border-b border-l border-[#ffe29a]" />
+                      <i className="absolute -bottom-1 -right-1 h-2 w-2 border-b border-r border-[#ffe29a]" />
+                    </span>
+                  ) : null}
+                  {reviewMode === 'marking' ? <span className="absolute left-3 top-3 border-l-2 border-[#e7b33d] bg-black/70 px-3 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-[#f0ca72]">Arraste uma área ou clique num ponto</span> : null}
+                </div>
               </div>
             ) : (
               <div className="w-full max-w-2xl px-3 py-8 text-center">
@@ -440,7 +722,59 @@ export default function ProjectWorkspacePage() {
             )}
           </div>
 
-          {editingProxy ? <div className="mt-3 flex items-center justify-center gap-3"><button className="rounded-lg border border-white/[0.1] bg-white/[0.035] px-4 py-2 text-xs font-medium text-[#d6d0c7] transition hover:border-[#d9aa3d]/35 hover:text-white" onClick={togglePreview} type="button">{previewState === 'loading' ? 'Carregando previewâ€¦' : previewState === 'playing' ? 'Pausar preview' : 'Reproduzir preview'}</button>{previewState === 'error' ? <span className="text-[10px] text-[#d17a7a]">O preview nÃ£o carregou. Use o download final para validar o arquivo.</span> : null}</div> : null}
+          {editingProxy ? (
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+              <button className="rounded-lg border border-white/[0.1] bg-white/[0.035] px-4 py-2 text-xs font-medium text-[#d6d0c7] transition hover:border-[#d9aa3d]/35 hover:text-white" onClick={togglePreview} type="button">{previewState === 'loading' ? 'Carregando preview…' : previewState === 'playing' ? 'Pausar preview' : 'Reproduzir preview'}</button>
+              <button className="rounded-lg border border-[#d9aa3d]/25 bg-[#d9aa3d]/[0.06] px-4 py-2 text-xs font-semibold text-[#ddb858] transition hover:border-[#d9aa3d]/50 disabled:cursor-not-allowed disabled:opacity-35" disabled={!review || review.session.stale || previewState === 'error'} onClick={reviewMode === 'idle' ? startReview : cancelReview} type="button">{reviewMode === 'idle' ? 'Marcar ajuste' : 'Cancelar marcação'}</button>
+              <span className="border-l border-white/[0.08] pl-3 font-mono text-[10px] tabular-nums text-[#8e887e]">{frameTimecode(previewFrame, review?.session.fps ?? editingProxy.probe?.fps ?? 30)}</span>
+              {previewState === 'error' ? <span className="text-[10px] text-[#d17a7a]">O preview não carregou. Use o download final para validar o arquivo.</span> : null}
+            </div>
+          ) : null}
+
+          {review ? (
+            <section className="mt-5 border-y border-white/[0.08] bg-[#090909] py-5" aria-label="Mesa de revisão editorial">
+              <div className="flex flex-wrap items-start justify-between gap-4 px-1">
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-[#b58d31]">Mesa de revisão</p>
+                  <p className="mt-1 text-sm text-[#c9c3b9]">Pause, marque o frame e descreva o ajuste.</p>
+                </div>
+                <div className="flex flex-wrap justify-end gap-x-4 gap-y-1 font-mono text-[8px] uppercase tracking-[0.1em] text-[#625f58]">
+                  <span>{review.session.resolution.width}×{review.session.resolution.height}</span>
+                  <span>{review.session.fps.toFixed(2)} fps</span>
+                  <span title={review.session.proxyHash}>hash {review.session.proxyHash.slice(0, 8)}</span>
+                  <span>1º frame {previewPerformance.firstFrameMs || '—'} ms</span>
+                  <span>seek p95 {previewPerformance.seekP95Ms || '—'} ms</span>
+                  <span>drop {(previewPerformance.droppedFrameRate * 100).toFixed(2)}%</span>
+                </div>
+              </div>
+
+              {review.session.stale ? <div className="mt-4 border-l-2 border-[#d46f63] bg-[#d46f63]/[0.06] px-4 py-3 text-xs leading-5 text-[#d99288]">O proxy exibido pertence a uma versão anterior. Gere o proxy da versão atual antes de registrar ajustes.</div> : null}
+              {reviewMode === 'marking' ? <div className="mt-4 border-l-2 border-[#d9aa3d] bg-[#d9aa3d]/[0.045] px-4 py-3 text-xs text-[#c9ad6c]">O vídeo está pausado. Arraste sobre o frame para marcar uma área; um clique simples cria uma anotação pontual.</div> : null}
+
+              {reviewMode === 'composing' ? (
+                <div className="mt-4 grid gap-4 border-t border-white/[0.07] pt-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+                  <div>
+                    <label className="text-[9px] uppercase tracking-[0.16em] text-[#747067]" htmlFor="review-instruction">O que precisa mudar?</label>
+                    <textarea autoFocus className="mt-2 min-h-24 w-full resize-y border border-white/[0.1] bg-[#050505] px-3 py-3 text-sm leading-6 text-[#e3ddd3] outline-none transition placeholder:text-[#4e4b45] focus:border-[#d9aa3d]/55" id="review-instruction" maxLength={4000} onChange={(event) => setReviewText(event.target.value)} placeholder="Ex.: mover a legenda para não cobrir o rosto, somente neste trecho." value={reviewText} />
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button className={`border px-3 py-2 text-[10px] transition ${reviewScope === 'point' ? 'border-[#d9aa3d]/60 bg-[#d9aa3d]/10 text-[#e4bd62]' : 'border-white/[0.08] text-[#77736b] hover:text-white'}`} onClick={() => { setReviewScope('point'); setReviewRegion(null) }} type="button">Neste ponto</button>
+                      <button className={`border px-3 py-2 text-[10px] transition ${reviewScope === 'region' ? 'border-[#d9aa3d]/60 bg-[#d9aa3d]/10 text-[#e4bd62]' : 'border-white/[0.08] text-[#77736b] hover:text-white'} disabled:opacity-30`} disabled={!reviewRegion} onClick={() => setReviewScope('region')} type="button">Área marcada</button>
+                      <button className={`border px-3 py-2 text-[10px] transition ${reviewScope === 'scene' ? 'border-[#d9aa3d]/60 bg-[#d9aa3d]/10 text-[#e4bd62]' : 'border-white/[0.08] text-[#77736b] hover:text-white'} disabled:opacity-30`} disabled={!currentReviewScene} onClick={() => setReviewScope('scene')} type="button">{currentReviewScene ? `${currentReviewScene.label} inteira` : 'Cena indisponível'}</button>
+                    </div>
+                  </div>
+                  <div className="flex flex-col justify-between border-l border-white/[0.07] pl-4">
+                    <div><p className="font-mono text-[10px] text-[#d8ad49]">{frameTimecode(previewFrame, review.session.fps)}</p><p className="mt-2 text-[10px] leading-4 text-[#6f6b63]">Versão {workspace.version?.sequence ?? '—'} · o comentário será salvo sem alterar o vídeo.</p></div>
+                    <div className="mt-5 flex gap-2"><button className="flex-1 border border-white/[0.09] px-3 py-2 text-[10px] text-[#8b867d] hover:text-white" onClick={cancelReview} type="button">Cancelar</button><button className="flex-1 bg-[#dbae3f] px-3 py-2 text-[10px] font-bold text-[#171207] disabled:opacity-35" disabled={reviewSaving || !reviewText.trim()} onClick={() => void saveReviewAnnotation()} type="button">{reviewSaving ? 'Salvando…' : 'Registrar'}</button></div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-5 border-t border-white/[0.07] pt-4">
+                <div className="flex items-center justify-between"><p className="text-[9px] uppercase tracking-[0.17em] text-[#706c64]">Ajustes desta versão</p><span className="text-[9px] text-[#55524c]">{review.annotations.length} aberto{review.annotations.length === 1 ? '' : 's'}</span></div>
+                {review.annotations.length ? <div className="mt-3 grid gap-px bg-white/[0.06] sm:grid-cols-2">{review.annotations.slice(0, 6).map((annotation) => <button className="bg-[#090909] px-3 py-3 text-left transition hover:bg-[#0d0c0a]" key={annotation.id} onClick={() => { const video = previewVideo.current; if (video) { video.pause(); video.currentTime = annotation.frame / review.session.fps } }} type="button"><span className="font-mono text-[9px] text-[#b8943e]">{frameTimecode(annotation.frame, review.session.fps)}</span><span className="ml-2 text-[8px] uppercase tracking-[0.1em] text-[#5f5b54]">{annotation.scope === 'region' ? 'área' : annotation.scope === 'scene' ? 'cena' : 'ponto'}</span><p className="mt-1.5 line-clamp-2 text-xs leading-5 text-[#aaa49a]">{annotation.text}</p></button>)}</div> : <p className="mt-3 text-xs text-[#5f5b54]">Nenhum ajuste registrado nesta versão.</p>}
+              </div>
+            </section>
+          ) : null}
 
           {uploadPhase !== 'idle' && !editingProxy ? (
             <div className="mt-4 rounded-xl border border-white/[0.08] bg-[#0b0b0b] p-4">

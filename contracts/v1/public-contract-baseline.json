@@ -991,6 +991,68 @@
       "idempotency": "natural",
       "responseMediaType": "application/json"
     },
+    "apollo.projects.annotations.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-review-annotation-request/v1",
+      "outputSchemaRef": "apollo://schemas/review-annotation-created/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/annotations"
+      },
+      "toolName": "apollo.projects.annotations.create",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.annotations.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/project-review/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/annotations"
+      },
+      "toolName": "apollo.projects.annotations.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum current-version annotations to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.commands.apply": {
       "version": "3.0.0",
       "exposure": "public",
@@ -6131,6 +6193,202 @@
         }
       }
     },
+    "apollo://schemas/create-review-annotation-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "proxyArtifactId",
+        "proxyHash",
+        "frame",
+        "timeRangeMs",
+        "scope",
+        "targetIds",
+        "screenshotRef",
+        "text"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "proxyArtifactId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "proxyHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeRangeMs": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "prefixItems": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "integer",
+              "minimum": 0
+            }
+          ],
+          "items": false
+        },
+        "scope": {
+          "enum": [
+            "point",
+            "region",
+            "scene"
+          ]
+        },
+        "region": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "targetIds": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        "screenshotRef": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 750000,
+          "pattern": "^data:image/(?:jpeg|png);base64,"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "region"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "required": [
+              "region"
+            ],
+            "properties": {
+              "region": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "width": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  },
+                  "height": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "region": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "scene"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "targetIds": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
     "apollo://schemas/create-webhook-endpoint-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -10516,6 +10774,298 @@
             },
             "replayed": {
               "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-review/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "session",
+            "scenes",
+            "annotations"
+          ],
+          "properties": {
+            "session": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "projectVersionId",
+                "proxyArtifactId",
+                "proxyUrl",
+                "proxyHash",
+                "fps",
+                "resolution",
+                "durationFrames",
+                "stale"
+              ],
+              "properties": {
+                "projectVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "proxyArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "proxyUrl": {
+                  "type": "string",
+                  "pattern": "^/v1/artifacts/.+/content$"
+                },
+                "proxyHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "fps": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 120
+                },
+                "resolution": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "width",
+                    "height"
+                  ],
+                  "properties": {
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  }
+                },
+                "durationFrames": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "stale": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "scenes": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "label",
+                  "startFrame",
+                  "endFrame"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "startFrame": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "endFrame": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            },
+            "annotations": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "projectVersionId",
+                  "proxyArtifactId",
+                  "proxyHash",
+                  "frame",
+                  "timeRangeMs",
+                  "screenshotRef",
+                  "scope",
+                  "targetIds",
+                  "text",
+                  "author",
+                  "status",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "projectVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "proxyArtifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "proxyHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "frame": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "timeRangeMs": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "prefixItems": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    ],
+                    "items": false
+                  },
+                  "screenshotRef": {
+                    "type": "string",
+                    "minLength": 32,
+                    "maxLength": 750000,
+                    "pattern": "^data:image/(?:jpeg|png);base64,"
+                  },
+                  "scope": {
+                    "enum": [
+                      "point",
+                      "region",
+                      "scene"
+                    ]
+                  },
+                  "region": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "x",
+                      "y",
+                      "width",
+                      "height"
+                    ],
+                    "properties": {
+                      "x": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "y": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "width": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 1
+                      },
+                      "height": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 1
+                      }
+                    }
+                  },
+                  "targetIds": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "author": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "type"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "type": {
+                        "enum": [
+                          "user",
+                          "api-client"
+                        ]
+                      }
+                    }
+                  },
+                  "status": {
+                    "enum": [
+                      "open",
+                      "applied",
+                      "dismissed"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
             }
           }
         },
@@ -16080,6 +16630,198 @@
             "totalAssetBytes": {
               "type": "string",
               "pattern": "^(0|[1-9][0-9]*)$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/review-annotation-created/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "annotation",
+            "replayed"
+          ],
+          "properties": {
+            "annotation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "projectVersionId",
+                "proxyArtifactId",
+                "proxyHash",
+                "frame",
+                "timeRangeMs",
+                "screenshotRef",
+                "scope",
+                "targetIds",
+                "text",
+                "author",
+                "status",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "projectVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "proxyArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "proxyHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "frame": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "timeRangeMs": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  ],
+                  "items": false
+                },
+                "screenshotRef": {
+                  "type": "string",
+                  "minLength": 32,
+                  "maxLength": 750000,
+                  "pattern": "^data:image/(?:jpeg|png);base64,"
+                },
+                "scope": {
+                  "enum": [
+                    "point",
+                    "region",
+                    "scene"
+                  ]
+                },
+                "region": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                },
+                "targetIds": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "author": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name",
+                    "type"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "type": {
+                      "enum": [
+                        "user",
+                        "api-client"
+                      ]
+                    }
+                  }
+                },
+                "status": {
+                  "enum": [
+                    "open",
+                    "applied",
+                    "dismissed"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
             }
           }
         },

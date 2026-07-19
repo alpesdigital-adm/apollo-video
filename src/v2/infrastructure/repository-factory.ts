@@ -37,6 +37,7 @@ import type { RenderInputAssetAvailability } from '../application/ports/render-r
 import type { ProjectCreationRepository } from '../application/ports/project-creation-repository.ts'
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
+import type { ReviewAnnotationRepository } from '../application/ports/review-annotation-repository.ts'
 import type { EditorialCommandRepository } from '../application/ports/editorial-command-repository.ts'
 import type { DirectorRunRepository } from '../application/ports/director-run-repository.ts'
 import type { ProjectProxyRenderRepository } from '../application/ports/project-proxy-render-repository.ts'
@@ -91,6 +92,7 @@ import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-
 import { PrismaProjectCreationRepository } from './prisma/project-creation-repository.ts'
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
 import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
+import { PrismaReviewAnnotationRepository } from './prisma/review-annotation-repository.ts'
 import { PrismaProjectMediaRepository } from './prisma/project-media-repository.ts'
 import { PrismaEditorialCommandRepository } from './prisma/editorial-command-repository.ts'
 import { PrismaDirectorRunRepository } from './prisma/director-run-repository.ts'
@@ -639,6 +641,10 @@ export function createProjectQueryRepository(): ProjectQueryRepository {
 
 export function createProjectWorkspaceQueryRepository(): ProjectWorkspaceQueryRepository {
   return new PrismaProjectWorkspaceQueryRepository(resolveV2Client())
+}
+
+export function createReviewAnnotationRepository(): ReviewAnnotationRepository {
+  return new PrismaReviewAnnotationRepository(resolveV2Client())
 }
 
 export function createEditorialCommandRepository(): EditorialCommandRepository {

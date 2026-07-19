@@ -99,6 +99,81 @@ const searchableProjectSchema = {
   },
 }
 
+const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
+
+const normalizedReviewRegionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['x', 'y', 'width', 'height'],
+  properties: {
+    x: { type: 'number', minimum: 0, maximum: 1 },
+    y: { type: 'number', minimum: 0, maximum: 1 },
+    width: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+    height: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+  },
+}
+
+const reviewAnnotationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id', 'projectVersionId', 'proxyArtifactId', 'proxyHash', 'frame', 'timeRangeMs',
+    'screenshotRef', 'scope', 'targetIds', 'text', 'author', 'status', 'createdAt',
+  ],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    projectVersionId: idSchema,
+    proxyArtifactId: idSchema,
+    proxyHash: sha256Schema,
+    frame: { type: 'integer', minimum: 0 },
+    timeRangeMs: {
+      type: 'array', minItems: 2, maxItems: 2,
+      prefixItems: [{ type: 'integer', minimum: 0 }, { type: 'integer', minimum: 0 }],
+      items: false,
+    },
+    screenshotRef: { type: 'string', minLength: 32, maxLength: 750000, pattern: '^data:image/(?:jpeg|png);base64,' },
+    scope: { enum: ['point', 'region', 'scene'] },
+    region: normalizedReviewRegionSchema,
+    targetIds: { type: 'array', maxItems: 20, uniqueItems: true, items: idSchema },
+    text: { type: 'string', minLength: 1, maxLength: 4000 },
+    author: {
+      type: 'object', additionalProperties: false, required: ['id', 'name', 'type'],
+      properties: { id: idSchema, name: { type: 'string', minLength: 1, maxLength: 120 }, type: { enum: ['user', 'api-client'] } },
+    },
+    status: { enum: ['open', 'applied', 'dismissed'] },
+    createdAt: dateTimeSchema,
+  },
+}
+
+const reviewSessionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectVersionId', 'proxyArtifactId', 'proxyUrl', 'proxyHash', 'fps', 'resolution', 'durationFrames', 'stale'],
+  properties: {
+    projectVersionId: idSchema,
+    proxyArtifactId: idSchema,
+    proxyUrl: { type: 'string', pattern: '^/v1/artifacts/.+/content$' },
+    proxyHash: sha256Schema,
+    fps: { type: 'number', exclusiveMinimum: 0, maximum: 120 },
+    resolution: {
+      type: 'object', additionalProperties: false, required: ['width', 'height'],
+      properties: { width: { type: 'number', exclusiveMinimum: 0 }, height: { type: 'number', exclusiveMinimum: 0 } },
+    },
+    durationFrames: { type: 'integer', minimum: 1 },
+    stale: { type: 'boolean' },
+  },
+}
+
+const reviewSceneSchema = {
+  type: 'object', additionalProperties: false, required: ['id', 'label', 'startFrame', 'endFrame'],
+  properties: {
+    id: idSchema,
+    label: { type: 'string', minLength: 1, maxLength: 120 },
+    startFrame: { type: 'integer', minimum: 0 },
+    endFrame: { type: 'integer', minimum: 1 },
+  },
+}
+
 const apiClientSchema = {
   type: 'object',
   additionalProperties: false,
@@ -133,8 +208,6 @@ const apiCredentialSchema = {
     revokedAt: dateTimeSchema,
   },
 }
-
-const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
 
 const artifactSourceSchema = {
   type: 'object',
@@ -1970,6 +2043,50 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     type: 'string',
     format: 'binary',
   }),
+  defineSchema('create-review-annotation-request', 1, 'Create project review annotation request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['projectVersionId', 'proxyArtifactId', 'proxyHash', 'frame', 'timeRangeMs', 'scope', 'targetIds', 'screenshotRef', 'text'],
+    properties: {
+      projectVersionId: idSchema,
+      proxyArtifactId: idSchema,
+      proxyHash: sha256Schema,
+      frame: { type: 'integer', minimum: 0 },
+      timeRangeMs: reviewAnnotationSchema.properties.timeRangeMs,
+      scope: { enum: ['point', 'region', 'scene'] },
+      region: normalizedReviewRegionSchema,
+      targetIds: reviewAnnotationSchema.properties.targetIds,
+      screenshotRef: reviewAnnotationSchema.properties.screenshotRef,
+      text: reviewAnnotationSchema.properties.text,
+    },
+    allOf: [
+      {
+        if: { properties: { scope: { const: 'region' } }, required: ['scope'] },
+        then: { required: ['region'], properties: { region: normalizedReviewRegionSchema } },
+        else: { properties: { region: false } },
+      },
+      {
+        if: { properties: { scope: { const: 'scene' } }, required: ['scope'] },
+        then: { properties: { targetIds: { type: 'array', minItems: 1, maxItems: 1, uniqueItems: true, items: idSchema } } },
+      },
+    ],
+  }),
+  defineSchema('project-review', 1, 'Project review session and annotations',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['session', 'scenes', 'annotations'],
+      properties: {
+        session: reviewSessionSchema,
+        scenes: { type: 'array', maxItems: 1000, items: reviewSceneSchema },
+        annotations: { type: 'array', maxItems: 100, items: reviewAnnotationSchema },
+      },
+    }),
+  ),
+  defineSchema('review-annotation-created', 1, 'Review annotation creation response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['annotation', 'replayed'],
+      properties: { annotation: reviewAnnotationSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
   defineSchema('project-workspace', 1, 'Project editing workspace response',
     successSchema({
       type: 'object', additionalProperties: false,

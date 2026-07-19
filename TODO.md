@@ -22,8 +22,8 @@ Critério vigente para `[x]`:
 
 Estado auditado após o gate de workspace, ingestão, corte editorial e primeiro DirectorRun V2 materializado:
 
-- **100 de 1.259 microtarefas verificadas como efetivamente entregues (7,9%)**;
-- **1.159 microtarefas abertas ou aguardando nova comprovação**;
+- **102 de 1.259 microtarefas verificadas como efetivamente entregues (8,1%)**;
+- **1.157 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
@@ -44,7 +44,7 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 - [x] Impedir punch-in automático nos quatro segundos iniciais e desativar zoom automático por padrão. Evidência: `DirectorRun director-run-c6ad339c-c6f0-47c6-bc64-f7d170dfa9cf`, versão 5, `protectedOpeningFrames=120`, `automaticZoom=false`, zero effect tracks, hard checks aprovados e abertura revisada nos frames do artifact `artifact-c73a0ae4-5378-480d-aa6e-fa1c1a91562d`.
 - [x] Limitar legendas a blocos curtos, respeitar âncora e manter a região de rosto/olhos livre. Evidência: 53 cues de até 32 caracteres, duas linhas, âncora inferior e fallback seguro; render FFmpeg real 540×960 revisado em oito frames, com `subtitlesBounded=true` e `subtitlesFaceSafe=true` no QualityReport persistido.
 - [x] Expor corte editorial no modelo de `Command` V2, com nova versão imutável, alinhamento às palavras e retiming da transcrição. Evidência: `POST /v1/projects/{projectId}/commands` persistiu `edit-command-b57329af-711d-4cf7-8ba7-1625bab110f8`, criou a versão imutável 4 `project-version-1e752a92-7fb6-4a90-81f0-8d4f10a303e2`, compilou três ranges retidos e o worker materializou o EditPlan no artifact `artifact-c400737b-9170-4d74-a38b-cd78a530a5b9`.
-- [x] Criar regressões automatizadas para autenticação e cortes editoriais. Evidência: regressões da sessão/API, cinco testes do Command e critério editorial, duas regressões do worker durável, o E2E FFmpeg em `tests/v2/ffmpeg-ingest.integration.mjs` e a regressão do player final em `tests/v2/project-editor-ui.test.mjs`; 456/456 testes gerais aprovados.
+- [x] Criar regressões automatizadas para autenticação e cortes editoriais. Evidência: regressões da sessão/API, cinco testes do Command e critério editorial, duas regressões do worker durável, o E2E FFmpeg em `tests/v2/ffmpeg-ingest.integration.mjs` e a regressão do player final em `tests/v2/project-editor-ui.test.mjs`; 461/461 testes gerais aprovados.
 - [x] Publicar a nova autenticação própria do Apollo exclusivamente pela API `/v1/session`, com capabilities, schemas, OpenAPI e E2E; remover o Basic Auth do proxy. Evidência: `src/app/v1/session/route.ts`, capability registry, OpenAPI e testes de sessão/API.
 - [x] Importar o master do projeto de teste como artifact V2, promovendo bytes imutáveis, proxy, áudio e transcript pela operação pública de ingestão. Evidência: projeto `project-fe932791-32f4-4453-8b85-6ce35a711860`, operação `operation-b3bab0da-ded6-453c-809f-c637268de131` e master de 145.445.848 bytes.
 - [x] Aplicar via API V2 a remoção das falas que mencionem “31 de janeiro” e “1 de fevereiro”, além de “dois dias”/“dois dias de aula”, preservando continuidade e retiming. Evidência: a versão 4 exclui 36,26–58,12s e 86,58–87,76s; a operação durável `operation-eff0dcdf-f710-46d5-b6e1-43614245ab63` materializou um MP4 540×960 de 79,734s com SHA-256 `12614d44518da714f05b0024836ea60d943c27e7365ec92e46a74bc9d703d432`; a retranscrição do áudio renderizado não contém nenhuma das falas proibidas e preserva continuidade audível nos dois cortes.
@@ -897,9 +897,9 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.040 — ReviewAnnotation [FR-211]
 
-- [ ] Modelar frame, time range, screenshot, region, target IDs, texto, author e status. Evidência F1-040: ReviewAnnotation contém todos os campos.
+- [x] Modelar frame, time range, screenshot, region, target IDs, texto, author e status. Evidência F1-040: `V2ReviewAnnotation`, migration `20260719141000_review_annotations`, `review-system.ts` e `project-review.test.mjs` cobrem todos os campos, invariantes e três scopes.
 - [ ] Implementar clique/drag sobre preview com captura do contexto visual. Evidência F1-040: overlay normaliza região e liga screenshot ao frame do proxy.
-- [ ] Persistir annotation sem alterar a versão até aplicação explícita. Evidência F1-040: API grava comentário separado de ProjectVersion.
+- [x] Persistir annotation sem alterar a versão até aplicação explícita. Evidência F1-040: `GET/POST /v1/projects/{projectId}/annotations` e `prisma-review-annotation.integration.mjs` autenticam pela API pública, vinculam version/proxy/hash, provam replay idempotente no Postgres e mantêm uma única ProjectVersion.
 - [ ] Criar E2E de annotation pontual, regional e de cena. Evidência F1-040/T-FR-211: três escopos preservam version ID.
 
 ### F1.041 — Escopos de revisão [FR-212]

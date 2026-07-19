@@ -20,6 +20,7 @@
     "test:integration:artifacts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-media-artifact.integration.mjs",
     "test:integration:render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/remotion-renderer.integration.mjs",
     "test:integration:prisma": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-project-repository.integration.mjs",
+    "test:integration:review": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-review-annotation.integration.mjs",
     "test:integration:operations": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-public-operation.integration.mjs",
     "test:integration:webhooks": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-webhook-registration.integration.mjs",
     "worker:v2:render": "tsx --env-file=.env --env-file-if-exists=.env.local scripts/run-v2-render-worker.mjs",
