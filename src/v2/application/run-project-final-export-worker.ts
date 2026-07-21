@@ -10,6 +10,7 @@ import type { VerifiedMediaStorage } from './ports/media-ingest.ts'
 import type { EditorialProxyRenderer } from './ports/editorial-proxy-renderer.ts'
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
+import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 
 const NON_RETRYABLE_CODES = new Set([
@@ -48,6 +49,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   artifacts: MediaArtifactPersistenceRepository
   storage: VerifiedMediaStorage
   renderer: EditorialProxyRenderer
+  renderElementMaps: RenderElementMapRepository
   artifactRoot: string
   clock?: () => Date
   leaseDurationMs?: number
@@ -235,6 +237,14 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           now: clock().toISOString(),
         })
       }
+      await dependencies.renderElementMaps.persistOrReplay({
+        workspaceId: operation.workspaceId,
+        projectId: context.projectId,
+        projectVersionId: context.projectVersionId,
+        proxyArtifactId: persisted.artifactId,
+        map: rendered.renderElementMap,
+        createdAt: clock().toISOString(),
+      })
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Final export lease was lost')
       await dependencies.projects.attachCompletedOutput({
         workspaceId: operation.workspaceId,

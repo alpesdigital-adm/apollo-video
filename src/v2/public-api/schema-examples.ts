@@ -1155,6 +1155,47 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/render-element-hit-test/v1': [
+      {
+        data: {
+          map: {
+            schemaVersion: 'render-element-map/v1',
+            mapHash: 'f'.repeat(64),
+            proxyHash: 'e'.repeat(64),
+            fps: 30,
+            durationFrames: 2400,
+            canvas: { width: 1080, height: 1920 },
+            frame: 315,
+          },
+          selected: {
+            elementId: 'subtitle:cue-example-1',
+            type: 'subtitle',
+            clipId: 'clip-example-1',
+            sceneId: 'scene:clip-example-1',
+            sourceId: artifactId,
+            frame: 315,
+            bounds: { x: 162, y: 1560, width: 756, height: 128 },
+            zIndex: 20,
+            opacity: 1,
+            priority: 300,
+          },
+          chooserRequired: true,
+          candidates: [
+            {
+              elementId: 'subtitle:cue-example-1', type: 'subtitle', clipId: 'clip-example-1',
+              sceneId: 'scene:clip-example-1', sourceId: artifactId, frame: 315,
+              bounds: { x: 162, y: 1560, width: 756, height: 128 }, zIndex: 20, opacity: 1, priority: 300,
+            },
+            {
+              elementId: 'presenter:clip-example-1', type: 'presenter', clipId: 'clip-example-1',
+              sceneId: 'scene:clip-example-1', sourceId: artifactId, frame: 315,
+              bounds: { x: 0, y: 656, width: 1080, height: 608 }, zIndex: 10, opacity: 1, priority: 200,
+            },
+          ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-workspace/v1': [
       {
         data: {

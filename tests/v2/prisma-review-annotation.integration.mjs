@@ -46,6 +46,10 @@ test('review annotations persist idempotently without mutating the project versi
   const { PrismaReviewAnnotationRepository } = await import(
     '../../src/v2/infrastructure/prisma/review-annotation-repository.ts'
   )
+  const { PrismaRenderElementMapRepository } = await import(
+    '../../src/v2/infrastructure/prisma/render-element-map-repository.ts'
+  )
+  const { buildRenderElementMap } = await import('../../src/v2/domain/review-system.ts')
   const { PrismaWorkspaceRepository } = await import(
     '../../src/v2/infrastructure/prisma/workspace-repository.ts'
   )
@@ -62,6 +66,7 @@ test('review annotations persist idempotently without mutating the project versi
 
   const cleanup = async () => {
     await client.v2ReviewAnnotation.deleteMany({ where: { workspaceId } })
+    await client.v2RenderElementMap.deleteMany({ where: { workspaceId } })
     await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
     await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
@@ -188,6 +193,24 @@ test('review annotations persist idempotently without mutating the project versi
       },
     })
 
+    const renderElementMap = buildRenderElementMap({
+      proxyHash,
+      fps: 30,
+      durationFrames: 90,
+      canvas: { width: 1080, height: 1920 },
+      source: { width: 1920, height: 1080 },
+      clips: [{ id: 'clip-review-integration', sourceArtifactId: artifactId, timelineInFrame: 0, timelineOutFrame: 90 }],
+      subtitleCues: [{ id: 'cue-review-integration', startFrame: 0, endFrame: 90, text: 'Legenda segura' }],
+    })
+    await new PrismaRenderElementMapRepository(client).persistOrReplay({
+      workspaceId,
+      projectId: projectResult.project.id,
+      projectVersionId: projectResult.version.id,
+      proxyArtifactId: artifactId,
+      map: renderElementMap,
+      createdAt,
+    })
+
     const repository = new PrismaReviewAnnotationRepository(client)
     const port = await getFreePort()
     const baseUrl = `http://127.0.0.1:${port}`
@@ -215,6 +238,29 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(initialPayload.data.versions[0].current, true)
     assert.equal(initialPayload.data.scopeContext.options.length, 9)
     assert.equal(initialPayload.data.annotations.length, 0)
+
+    const elementQuery = new URLSearchParams({
+      projectVersionId: projectResult.version.id,
+      proxyArtifactId: artifactId,
+      proxyHash,
+      frame: '30',
+      x: '270',
+      y: '850',
+      displayWidth: '540',
+      displayHeight: '960',
+    })
+    const elementUrl = `${baseUrl}/v1/projects/${projectResult.project.id}/render-elements?${elementQuery.toString()}`
+    const elementResponse = await fetch(elementUrl, { headers: { authorization } })
+    const elementPayload = await elementResponse.json()
+    assert.equal(elementResponse.status, 200, JSON.stringify(elementPayload))
+    assert.equal(elementPayload.data.selected.type, 'subtitle')
+    assert.equal(elementPayload.data.chooserRequired, true)
+    assert.deepEqual(elementPayload.data.candidates.map((item) => item.type), ['subtitle', 'background'])
+    elementQuery.set('proxyHash', 'f'.repeat(64))
+    const mismatchResponse = await fetch(`${baseUrl}/v1/projects/${projectResult.project.id}/render-elements?${elementQuery.toString()}`, { headers: { authorization } })
+    const mismatchPayload = await mismatchResponse.json()
+    assert.equal(mismatchResponse.status, 409)
+    assert.equal(mismatchPayload.error.code, 'VERSION_CONFLICT')
 
     const annotationRequest = {
       projectVersionId: projectResult.version.id,

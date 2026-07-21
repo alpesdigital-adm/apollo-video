@@ -113,7 +113,7 @@ function source() {
 }
 
 function dependencies(operations, overrides = {}) {
-  const calls = { attached: 0, cleaned: 0, persisted: 0 }
+  const calls = { attached: 0, cleaned: 0, persisted: 0, mapped: 0 }
   const deps = {
     operations: operations.repository,
     projects: {
@@ -144,9 +144,18 @@ function dependencies(operations, overrides = {}) {
           sha256: 'd'.repeat(64),
           byteSize: 4096,
           probe: { width: 540, height: 960, duration: 10, fps: 30, codec: 'h264', container: 'mp4' },
+          renderElementMap: { schemaVersion: 'render-element-map/v1', proxyHash: 'd'.repeat(64), fps: 30, durationFrames: 300, canvas: { width: 540, height: 960 }, elements: [] },
         }
       },
       async cleanup() { calls.cleaned += 1 },
+    },
+    renderElementMaps: {
+      async persistOrReplay(input) {
+        calls.mapped += 1
+        assert.equal(input.proxyArtifactId, 'artifact-project-proxy-output')
+        assert.equal(input.map.proxyHash, 'd'.repeat(64))
+        return { record: {}, replayed: false }
+      },
     },
     artifactRoot: join(tmpdir(), 'apollo-project-proxy-worker-artifacts'),
     clock: createClock(),
@@ -165,7 +174,7 @@ test('project proxy worker materializes, attaches and settles the exact immutabl
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
   assert.deepEqual(operations.operation.result.resource, operations.operation.target)
-  assert.deepEqual(calls, { attached: 1, cleaned: 1, persisted: 1 })
+  assert.deepEqual(calls, { attached: 1, cleaned: 1, persisted: 1, mapped: 1 })
 })
 
 test('project proxy worker does not attach an output after losing its lease', async () => {
@@ -184,5 +193,5 @@ test('project proxy worker does not attach an output after losing its lease', as
 
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'lease-lost' })
   assert.equal(operations.operation.status, 'running')
-  assert.deepEqual(base.calls, { attached: 0, cleaned: 0, persisted: 0 })
+  assert.deepEqual(base.calls, { attached: 0, cleaned: 0, persisted: 0, mapped: 0 })
 })

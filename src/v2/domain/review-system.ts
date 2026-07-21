@@ -178,8 +178,14 @@ export function resolveReviewScope(input: {
   })
 }
 
+export const RENDER_ELEMENT_TYPES = Object.freeze([
+  'background', 'presenter', 'subtitle', 'b-roll', 'cta', 'transformation',
+] as const)
+export type RenderElementType = (typeof RENDER_ELEMENT_TYPES)[number]
+
 export interface RenderElement {
   elementId: string
+  type: RenderElementType
   clipId: string
   sceneId: string
   sourceId: string
@@ -190,23 +196,175 @@ export interface RenderElement {
   priority: number
 }
 export interface RenderElementMap {
+  schemaVersion: 'render-element-map/v1'
   proxyHash: string
+  fps: number
+  durationFrames: number
   canvas: { width: number; height: number }
   elements: readonly RenderElement[]
 }
 export function validateRenderElementMap(map: RenderElementMap, proxyHash: string) {
   if (map.proxyHash !== proxyHash) throw new DomainError('VERSION_CONFLICT', 'RenderElementMap hash does not match proxy')
-  return Object.freeze(map)
+  assertDomain(
+    map.schemaVersion === 'render-element-map/v1' && /^[a-f0-9]{64}$/.test(map.proxyHash) &&
+      Number.isFinite(map.fps) && map.fps > 0 && Number.isSafeInteger(map.durationFrames) && map.durationFrames > 0 &&
+      Number.isSafeInteger(map.canvas.width) && map.canvas.width > 0 &&
+      Number.isSafeInteger(map.canvas.height) && map.canvas.height > 0 && Array.isArray(map.elements),
+    'INVALID_ARGUMENT',
+    'RenderElementMap metadata is invalid',
+  )
+  const identities = new Set<string>()
+  const elements = map.elements.map((element) => {
+    const identity = `${element.frame}:${element.elementId}`
+    const bounds = element.bounds
+    assertDomain(
+      Boolean(element.elementId.trim()) && RENDER_ELEMENT_TYPES.includes(element.type) &&
+        Boolean(element.clipId.trim()) && Boolean(element.sceneId.trim()) && Boolean(element.sourceId.trim()) &&
+        Number.isSafeInteger(element.frame) && element.frame >= 0 && element.frame < map.durationFrames &&
+        [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) &&
+        bounds.x >= 0 && bounds.y >= 0 && bounds.width > 0 && bounds.height > 0 &&
+        bounds.x + bounds.width <= map.canvas.width && bounds.y + bounds.height <= map.canvas.height &&
+        Number.isSafeInteger(element.zIndex) && Number.isFinite(element.opacity) &&
+        element.opacity >= 0 && element.opacity <= 1 && Number.isSafeInteger(element.priority) &&
+        !identities.has(identity),
+      'INVALID_ARGUMENT',
+      'RenderElementMap element is invalid',
+    )
+    identities.add(identity)
+    return Object.freeze({ ...element, bounds: Object.freeze({ ...bounds }) })
+  })
+  return Object.freeze({
+    ...map,
+    canvas: Object.freeze({ ...map.canvas }),
+    elements: Object.freeze(elements),
+  })
 }
+
+function elementFrames(startFrame: number, endFrame: number, create: (frame: number) => RenderElement): RenderElement[] {
+  const elements: RenderElement[] = []
+  for (let frame = startFrame; frame < endFrame; frame += 1) elements.push(create(frame))
+  return elements
+}
+
+export function buildRenderElementMap(input: {
+  proxyHash: string
+  fps: number
+  durationFrames: number
+  canvas: { width: number; height: number }
+  source: { width: number; height: number }
+  clips: readonly Readonly<{
+    id: string
+    sourceArtifactId: string
+    timelineInFrame: number
+    timelineOutFrame: number
+  }>[]
+  subtitleCues?: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[]
+}): Readonly<RenderElementMap> {
+  assertDomain(
+    Number.isSafeInteger(input.source.width) && input.source.width > 0 &&
+      Number.isSafeInteger(input.source.height) && input.source.height > 0,
+    'INVALID_ARGUMENT',
+    'RenderElementMap source dimensions are invalid',
+  )
+  const scale = Math.min(input.canvas.width / input.source.width, input.canvas.height / input.source.height)
+  const foregroundWidth = Math.min(input.canvas.width, Math.round(input.source.width * scale))
+  const foregroundHeight = Math.min(input.canvas.height, Math.round(input.source.height * scale))
+  const foregroundBounds = Object.freeze({
+    x: Math.floor((input.canvas.width - foregroundWidth) / 2),
+    y: Math.floor((input.canvas.height - foregroundHeight) / 2),
+    width: foregroundWidth,
+    height: foregroundHeight,
+  })
+  const backgroundBounds = Object.freeze({ x: 0, y: 0, width: input.canvas.width, height: input.canvas.height })
+  const elements: RenderElement[] = []
+  for (const clip of input.clips) {
+    const sceneId = `scene:${clip.id}`
+    elements.push(...elementFrames(clip.timelineInFrame, clip.timelineOutFrame, (frame) => ({
+      elementId: `background:${clip.id}`,
+      type: 'background',
+      clipId: clip.id,
+      sceneId,
+      sourceId: clip.sourceArtifactId,
+      frame,
+      bounds: backgroundBounds,
+      zIndex: 0,
+      opacity: 1,
+      priority: 100,
+    })))
+    elements.push(...elementFrames(clip.timelineInFrame, clip.timelineOutFrame, (frame) => ({
+      elementId: `presenter:${clip.id}`,
+      type: 'presenter',
+      clipId: clip.id,
+      sceneId,
+      sourceId: clip.sourceArtifactId,
+      frame,
+      bounds: foregroundBounds,
+      zIndex: 10,
+      opacity: 1,
+      priority: 200,
+    })))
+  }
+  for (const cue of input.subtitleCues ?? []) {
+    const clip = input.clips.find((item) => cue.startFrame < item.timelineOutFrame && cue.endFrame > item.timelineInFrame)
+    if (!clip) continue
+    const fontSize = Math.max(32, Math.min(72, Math.round(input.canvas.width * 0.059)))
+    const lineCount = cue.text.trim().length > 20 ? 2 : 1
+    const width = Math.min(
+      Math.round(input.canvas.width * 0.86),
+      Math.max(Math.round(input.canvas.width * 0.28), Math.round(Math.min(20, cue.text.trim().length) * fontSize * 0.62)),
+    )
+    const height = Math.min(input.canvas.height, Math.round(lineCount * fontSize * 1.35))
+    const marginBottom = Math.round(input.canvas.height * 0.075)
+    const bounds = Object.freeze({
+      x: Math.max(0, Math.floor((input.canvas.width - width) / 2)),
+      y: Math.max(0, input.canvas.height - marginBottom - height),
+      width,
+      height,
+    })
+    elements.push(...elementFrames(cue.startFrame, cue.endFrame, (frame) => ({
+      elementId: `subtitle:${cue.id}`,
+      type: 'subtitle',
+      clipId: clip.id,
+      sceneId: `scene:${clip.id}`,
+      sourceId: clip.sourceArtifactId,
+      frame,
+      bounds,
+      zIndex: 20,
+      opacity: 1,
+      priority: 300,
+    })))
+  }
+  return validateRenderElementMap({
+    schemaVersion: 'render-element-map/v1',
+    proxyHash: input.proxyHash,
+    fps: input.fps,
+    durationFrames: input.durationFrames,
+    canvas: input.canvas,
+    elements,
+  }, input.proxyHash)
+}
+
+export function renderElementMapHash(map: RenderElementMap): string {
+  return createHash('sha256').update(JSON.stringify(map)).digest('hex')
+}
+
 export function hitTestRenderElements(
   map: RenderElementMap,
   input: { frame: number; x: number; y: number; displayWidth: number; displayHeight: number },
 ) {
+  assertDomain(
+    Number.isSafeInteger(input.frame) && input.frame >= 0 && input.frame < map.durationFrames &&
+      [input.x, input.y, input.displayWidth, input.displayHeight].every(Number.isFinite) &&
+      input.displayWidth > 0 && input.displayHeight > 0 && input.x >= 0 && input.y >= 0 &&
+      input.x <= input.displayWidth && input.y <= input.displayHeight,
+    'INVALID_ARGUMENT',
+    'Render element hit-test coordinates are invalid',
+  )
   const x = input.x / input.displayWidth * map.canvas.width
   const y = input.y / input.displayHeight * map.canvas.height
   const matches = map.elements
     .filter((item) => item.frame === input.frame && item.opacity > 0.05 && x >= item.bounds.x && y >= item.bounds.y && x <= item.bounds.x + item.bounds.width && y <= item.bounds.y + item.bounds.height)
-    .toSorted((left, right) => right.priority - left.priority || right.zIndex - left.zIndex)
+    .toSorted((left, right) => right.priority - left.priority || right.zIndex - left.zIndex || left.elementId.localeCompare(right.elementId))
   return Object.freeze({ selected: matches[0] ?? null, chooserRequired: matches.length > 1, candidates: Object.freeze(matches) })
 }
 

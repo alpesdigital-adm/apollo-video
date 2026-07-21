@@ -58,6 +58,15 @@ interface ReviewAnnotationData {
   author: { id: string; name: string; type: 'user' | 'api-client' }; status: 'open' | 'applied' | 'dismissed'; createdAt: string
 }
 interface ProjectReviewData { session: ReviewSessionData; versions: ReviewVersionData[]; scopeContext: ReviewScopeContextData; scenes: ReviewSceneData[]; annotations: ReviewAnnotationData[] }
+type RenderElementType = 'background' | 'presenter' | 'subtitle' | 'b-roll' | 'cta' | 'transformation'
+interface RenderElementData {
+  elementId: string; type: RenderElementType; clipId: string; sceneId: string; sourceId: string; frame: number;
+  bounds: { x: number; y: number; width: number; height: number }; zIndex: number; opacity: number; priority: number
+}
+interface RenderElementHitTestData {
+  map: { schemaVersion: 'render-element-map/v1'; mapHash: string; proxyHash: string; fps: number; durationFrames: number; canvas: { width: number; height: number }; frame: number };
+  selected: RenderElementData | null; chooserRequired: boolean; candidates: RenderElementData[]
+}
 type ReviewMode = 'idle' | 'marking' | 'composing'
 interface UploadSession {
   mode: 'single' | 'multipart'; expiresAt: string; maxParts: number;
@@ -83,6 +92,10 @@ const REVIEW_SCOPE_LABELS: Readonly<Record<ReviewApplicationScopeKind, string>> 
   formats: 'Formatos de saída',
   locales: 'Idiomas',
   recipes: 'Receitas de variação',
+})
+
+const RENDER_ELEMENT_LABELS: Readonly<Record<RenderElementType, string>> = Object.freeze({
+  background: 'Fundo', presenter: 'Apresentador', subtitle: 'Legenda', 'b-roll': 'B-roll', cta: 'CTA', transformation: 'Transformação',
 })
 
 function readableBytes(value: number | string): string {
@@ -149,6 +162,7 @@ export default function ProjectWorkspacePage() {
   const activeRequest = useRef<AbortController | null>(null)
   const pendingUpload = useRef<PendingUpload | null>(null)
   const reviewPointerStart = useRef<{ x: number; y: number } | null>(null)
+  const reviewElementLookup = useRef<AbortController | null>(null)
   const previewLoadStartedAt = useRef(0)
   const previewSeekStartedAt = useRef(0)
   const previewSeekSamples = useRef<number[]>([])
@@ -176,6 +190,11 @@ export default function ProjectWorkspacePage() {
   const [reviewRegion, setReviewRegion] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const [reviewText, setReviewText] = useState('')
   const [reviewSaving, setReviewSaving] = useState(false)
+  const [reviewElementResolution, setReviewElementResolution] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle')
+  const [reviewElementMap, setReviewElementMap] = useState<RenderElementHitTestData['map'] | null>(null)
+  const [reviewElementCandidates, setReviewElementCandidates] = useState<RenderElementData[]>([])
+  const [selectedReviewElement, setSelectedReviewElement] = useState<RenderElementData | null>(null)
+  const [reviewElementConfirmed, setReviewElementConfirmed] = useState(false)
   const [previewFrame, setPreviewFrame] = useState(0)
   const [previewPerformance, setPreviewPerformance] = useState({ firstFrameMs: 0, seekP95Ms: 0, droppedFrameRate: 0 })
 
@@ -214,6 +233,7 @@ export default function ProjectWorkspacePage() {
   }, [projectId, router, uploadPhase])
 
   useEffect(() => { void loadWorkspace() }, [loadWorkspace])
+  useEffect(() => () => reviewElementLookup.current?.abort(), [])
 
   const loadReview = useCallback(async (quiet = false, projectVersionId?: string) => {
     try {
@@ -362,6 +382,7 @@ export default function ProjectWorkspacePage() {
     }
     setReviewVersionLoading(true)
     setNotice(null)
+    resetReviewElementResolution()
     const loaded = await loadReview(false, version.id)
     if (!loaded) preservedPreviewTimeMs.current = null
     setReviewVersionLoading(false)
@@ -372,6 +393,64 @@ export default function ProjectWorkspacePage() {
     return {
       x: clamp01((event.clientX - bounds.left) / bounds.width),
       y: clamp01((event.clientY - bounds.top) / bounds.height),
+    }
+  }
+
+  function resetReviewElementResolution(): void {
+    reviewElementLookup.current?.abort()
+    reviewElementLookup.current = null
+    setReviewElementResolution('idle')
+    setReviewElementMap(null)
+    setReviewElementCandidates([])
+    setSelectedReviewElement(null)
+    setReviewElementConfirmed(false)
+  }
+
+  async function resolveReviewElements(point: { x: number; y: number }, displayWidth: number, displayHeight: number): Promise<void> {
+    const video = previewVideo.current
+    if (!review || !video) return
+    reviewElementLookup.current?.abort()
+    const controller = new AbortController()
+    reviewElementLookup.current = controller
+    const identity = review.session
+    const frame = Math.max(0, Math.min(identity.durationFrames - 1, Math.round(video.currentTime * identity.fps)))
+    const query = new URLSearchParams({
+      projectVersionId: identity.projectVersionId,
+      proxyArtifactId: identity.proxyArtifactId,
+      proxyHash: identity.proxyHash,
+      frame: String(frame),
+      x: String(point.x * displayWidth),
+      y: String(point.y * displayHeight),
+      displayWidth: String(displayWidth),
+      displayHeight: String(displayHeight),
+    })
+    setReviewElementResolution('loading')
+    setReviewElementMap(null)
+    setReviewElementCandidates([])
+    setSelectedReviewElement(null)
+    setReviewElementConfirmed(false)
+    try {
+      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/render-elements?${query.toString()}`, {
+        headers: { accept: 'application/json' }, cache: 'no-store', signal: controller.signal,
+      })
+      if (response.status === 401) { router.replace('/login'); return }
+      const payload = await response.json() as ApiEnvelope<RenderElementHitTestData>
+      if (response.status === 404) {
+        setReviewElementResolution('unavailable')
+        return
+      }
+      if (!response.ok || !payload.data) throw new Error(apiError(payload, 'Não foi possível identificar a camada renderizada.'))
+      setReviewElementMap(payload.data.map)
+      setReviewElementCandidates(payload.data.candidates)
+      setSelectedReviewElement(payload.data.selected)
+      setReviewElementConfirmed(!payload.data.chooserRequired)
+      setReviewElementResolution('ready')
+    } catch (error) {
+      if (controller.signal.aborted) return
+      setReviewElementResolution('error')
+      setNotice(error instanceof Error ? error.message : 'Não foi possível identificar a camada renderizada.')
+    } finally {
+      if (reviewElementLookup.current === controller) reviewElementLookup.current = null
     }
   }
 
@@ -400,6 +479,7 @@ export default function ProjectWorkspacePage() {
     const start = reviewPointerStart.current
     if (!start || reviewMode !== 'marking') return
     const point = normalizedReviewPoint(event)
+    const displayBounds = event.currentTarget.getBoundingClientRect()
     const region = {
       x: Math.min(start.x, point.x),
       y: Math.min(start.y, point.y),
@@ -419,6 +499,10 @@ export default function ProjectWorkspacePage() {
     setReviewGlobal(false)
     setReviewGlobalConfirmed(false)
     setReviewMode('composing')
+    const anchor = region.width >= 0.015 && region.height >= 0.015
+      ? { x: region.x + region.width / 2, y: region.y + region.height / 2 }
+      : point
+    void resolveReviewElements(anchor, displayBounds.width, displayBounds.height)
   }
 
   function startReview(): void {
@@ -433,6 +517,7 @@ export default function ProjectWorkspacePage() {
     setReviewGlobal(false)
     setReviewGlobalConfirmed(false)
     setReviewRangeDurationSeconds(5)
+    resetReviewElementResolution()
     setReviewMode('marking')
   }
 
@@ -446,6 +531,7 @@ export default function ProjectWorkspacePage() {
     setReviewGlobal(false)
     setReviewGlobalConfirmed(false)
     setReviewRangeDurationSeconds(5)
+    resetReviewElementResolution()
   }
 
   function captureReviewScreenshot(): string {
@@ -510,7 +596,7 @@ export default function ProjectWorkspacePage() {
             timeRangeMs,
             scope: reviewScope,
             ...(reviewScope === 'region' && reviewRegion ? { region: reviewRegion } : {}),
-            targetIds: reviewScope === 'scene' ? [scene!.id] : [],
+            targetIds: reviewScope === 'scene' ? [scene!.id] : selectedReviewElement && reviewElementConfirmed ? [selectedReviewElement.elementId] : [],
             applicationScope: { kind: reviewApplicationScope, global: reviewGlobal },
             ...(reviewGlobal ? { confirmedGlobal: reviewGlobalConfirmed } : {}),
             screenshotRef: captureReviewScreenshot(),
@@ -803,6 +889,24 @@ export default function ProjectWorkspacePage() {
                       }}
                     />
                   ))}
+                  {reviewMode === 'composing' && reviewElementMap ? reviewElementCandidates.map((candidate) => {
+                    const selected = selectedReviewElement?.elementId === candidate.elementId
+                    return (
+                      <span
+                        aria-hidden="true"
+                        className={`absolute ${selected ? 'border-2 border-[#f0bd42] bg-[#f0bd42]/[0.08] shadow-[0_0_18px_rgba(224,174,57,.22)]' : 'border border-dashed border-[#d8ad49]/35 bg-[#d8ad49]/[0.025]'}`}
+                        key={candidate.elementId}
+                        style={{
+                          left: `${candidate.bounds.x / reviewElementMap.canvas.width * 100}%`,
+                          top: `${candidate.bounds.y / reviewElementMap.canvas.height * 100}%`,
+                          width: `${candidate.bounds.width / reviewElementMap.canvas.width * 100}%`,
+                          height: `${candidate.bounds.height / reviewElementMap.canvas.height * 100}%`,
+                        }}
+                      >
+                        {selected ? <i className="absolute -top-5 left-0 bg-[#e0ae39] px-1.5 py-0.5 font-mono text-[7px] not-italic uppercase tracking-[0.12em] text-black">{RENDER_ELEMENT_LABELS[candidate.type]}</i> : null}
+                      </span>
+                    )
+                  }) : null}
                   {reviewRegion ? (
                     <span
                       aria-hidden="true"
@@ -891,6 +995,38 @@ export default function ProjectWorkspacePage() {
                 <div className="mt-4 grid gap-4 border-t border-white/[0.07] pt-4 lg:grid-cols-[minmax(0,1fr)_220px]">
                   <div>
                     <label className="text-[9px] uppercase tracking-[0.16em] text-[#747067]" htmlFor="review-instruction">O que precisa mudar?</label>
+                    <div className="mt-2 border border-white/[0.08] bg-[#050505] px-3 py-3" data-testid="review-layer-resolver">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[8px] font-semibold uppercase tracking-[0.17em] text-[#777168]">Camada sob a marcação</p>
+                        {reviewElementMap ? <span className="font-mono text-[7px] text-[#4f4b45]" title={reviewElementMap.mapHash}>mapa {reviewElementMap.mapHash.slice(0, 8)}</span> : null}
+                      </div>
+                      {reviewElementResolution === 'loading' ? <p className="mt-2 text-[10px] text-[#a8873c]">Lendo as camadas deste frame…</p> : null}
+                      {reviewElementResolution === 'unavailable' ? <p className="mt-2 text-[10px] leading-4 text-[#777168]">Esta versão histórica ainda não possui mapa de camadas. A anotação será registrada sem vínculo de elemento.</p> : null}
+                      {reviewElementResolution === 'error' ? <p className="mt-2 text-[10px] leading-4 text-[#c97870]">A identidade do mapa não confere com o preview. Reabra a versão antes de registrar.</p> : null}
+                      {reviewElementResolution === 'ready' && reviewElementCandidates.length === 0 ? <p className="mt-2 text-[10px] text-[#777168]">Nenhuma camada elegível neste ponto.</p> : null}
+                      {reviewElementResolution === 'ready' && reviewElementCandidates.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5" role={reviewElementCandidates.length > 1 ? 'radiogroup' : undefined} aria-label="Escolha a camada do ajuste">
+                          {reviewElementCandidates.map((candidate) => {
+                            const selected = selectedReviewElement?.elementId === candidate.elementId
+                            return (
+                              <button
+                                aria-checked={reviewElementCandidates.length > 1 ? selected && reviewElementConfirmed : undefined}
+                                className={`border px-2.5 py-2 text-left transition ${selected && reviewElementConfirmed ? 'border-[#d9aa3d]/70 bg-[#d9aa3d]/12 text-[#e4bd62]' : selected ? 'border-[#d9aa3d]/35 bg-[#d9aa3d]/[0.05] text-[#bda15e]' : 'border-white/[0.08] text-[#777168] hover:border-white/[0.18] hover:text-[#c9c3b9]'}`}
+                                data-testid="review-layer-option"
+                                key={candidate.elementId}
+                                onClick={() => { setSelectedReviewElement(candidate); setReviewElementConfirmed(true) }}
+                                role={reviewElementCandidates.length > 1 ? 'radio' : undefined}
+                                type="button"
+                              >
+                                <span className="block text-[9px] font-semibold">{RENDER_ELEMENT_LABELS[candidate.type]}</span>
+                                <span className="mt-0.5 block font-mono text-[7px] text-[#5f5a52]">{candidate.clipId}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : null}
+                      {reviewElementResolution === 'ready' && reviewElementCandidates.length > 1 && !reviewElementConfirmed ? <p className="mt-2 text-[9px] text-[#ad8c45]">Há camadas sobrepostas. Confirme qual delas deve receber o ajuste.</p> : null}
+                    </div>
                     <textarea autoFocus className="mt-2 min-h-24 w-full resize-y border border-white/[0.1] bg-[#050505] px-3 py-3 text-sm leading-6 text-[#e3ddd3] outline-none transition placeholder:text-[#4e4b45] focus:border-[#d9aa3d]/55" id="review-instruction" maxLength={4000} onChange={(event) => setReviewText(event.target.value)} placeholder="Ex.: mover a legenda para não cobrir o rosto, somente neste trecho." value={reviewText} />
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button className={`border px-3 py-2 text-[10px] transition ${reviewScope === 'point' ? 'border-[#d9aa3d]/60 bg-[#d9aa3d]/10 text-[#e4bd62]' : 'border-white/[0.08] text-[#77736b] hover:text-white'}`} onClick={() => { setReviewScope('point'); setReviewRegion(null) }} type="button">Neste ponto</button>
@@ -934,8 +1070,8 @@ export default function ProjectWorkspacePage() {
                     ) : null}
                   </div>
                   <div className="flex flex-col justify-between border-l border-white/[0.07] pl-4">
-                    <div><p className="font-mono text-[10px] text-[#d8ad49]">{frameTimecode(previewFrame, review.session.fps)}</p><p className="mt-2 text-[10px] leading-4 text-[#6f6b63]">Versão {review.versions.find((version) => version.id === review.session.projectVersionId)?.sequence ?? '—'} · {reviewGlobal ? `${selectedApplicationScopeOption?.affectedCount ?? 0} alvos declarados` : '1 alvo no formato e idioma atuais'}.</p></div>
-                    <div className="mt-5 flex gap-2"><button className="flex-1 border border-white/[0.09] px-3 py-2 text-[10px] text-[#8b867d] hover:text-white" onClick={cancelReview} type="button">Cancelar</button><button className="flex-1 bg-[#dbae3f] px-3 py-2 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-save" disabled={reviewSaving || !reviewText.trim() || !selectedApplicationScopeOption?.enabled || (reviewGlobal && !reviewGlobalConfirmed)} onClick={() => void saveReviewAnnotation()} type="button">{reviewSaving ? 'Salvando…' : 'Registrar'}</button></div>
+                    <div><p className="font-mono text-[10px] text-[#d8ad49]">{frameTimecode(previewFrame, review.session.fps)}</p>{selectedReviewElement && reviewElementConfirmed ? <p className="mt-2 text-[9px] font-medium uppercase tracking-[0.1em] text-[#a88842]">{RENDER_ELEMENT_LABELS[selectedReviewElement.type]} · {selectedReviewElement.sceneId}</p> : null}<p className="mt-2 text-[10px] leading-4 text-[#6f6b63]">Versão {review.versions.find((version) => version.id === review.session.projectVersionId)?.sequence ?? '—'} · {reviewGlobal ? `${selectedApplicationScopeOption?.affectedCount ?? 0} alvos declarados` : '1 alvo no formato e idioma atuais'}.</p></div>
+                    <div className="mt-5 flex gap-2"><button className="flex-1 border border-white/[0.09] px-3 py-2 text-[10px] text-[#8b867d] hover:text-white" onClick={cancelReview} type="button">Cancelar</button><button className="flex-1 bg-[#dbae3f] px-3 py-2 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-save" disabled={reviewSaving || !reviewText.trim() || !selectedApplicationScopeOption?.enabled || (reviewGlobal && !reviewGlobalConfirmed) || reviewElementResolution === 'loading' || reviewElementResolution === 'error' || (reviewElementCandidates.length > 1 && !reviewElementConfirmed)} onClick={() => void saveReviewAnnotation()} type="button">{reviewSaving ? 'Salvando…' : 'Registrar'}</button></div>
                   </div>
                 </div>
               ) : null}

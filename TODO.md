@@ -8,7 +8,7 @@
 
 ---
 
-## Auditoria de execução — 2026-07-18
+## Auditoria de execução — 2026-07-21
 
 Após o E2E revelar que a interface nova ainda acionava o pipeline legado, todas as caixas foram reavaliadas. O status anterior de 1.247/1.255 não representava produto entregue: misturava documentação, funções isoladas, fixtures e testes com jornadas integradas inexistentes.
 
@@ -20,10 +20,10 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate de workspace, ingestão, corte editorial e primeiro DirectorRun V2 materializado:
+Estado auditado após o gate F1.042, com o `RenderElementMap` integrado ao renderer, Postgres, API pública e mesa de revisão:
 
-- **107 de 1.259 microtarefas verificadas como efetivamente entregues (8,5%)**;
-- **1.152 microtarefas abertas ou aguardando nova comprovação**;
+- **118 de 1.259 microtarefas verificadas como efetivamente entregues (9,4%)**;
+- **1.141 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
@@ -911,11 +911,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.042 — RenderElementMap [FR-213]
 
-- [ ] Fazer renderer emitir bounds, z-index, element/clip/scene/source IDs por frame. Evidência F1-042: RenderElement contém geometria, ordem e quatro IDs.
-- [ ] Implementar hit-test respeitando transparência e priority. Evidência F1-042: opacidade <=.05 é ignorada e priority/z-index ordenam.
-- [ ] Mostrar chooser quando múltiplos elementos forem elegíveis. Evidência F1-042: resultado sinaliza chooser e candidates.
-- [ ] Validar map hash contra proxy hash. Evidência F1-042: mismatch produz VERSION_CONFLICT.
-- [ ] Criar visual/E2E para overlays sobrepostos e canvas redimensionado. Evidência F1-042/T-FR-213: coordenadas de display são convertidas ao canvas.
+- [x] Fazer renderer emitir bounds, z-index, element/clip/scene/source IDs por frame. Evidência F1-042: `buildRenderElementMap` materializa o schema imutável `render-element-map/v1`; os workers persistem o mapa associado ao artifact, versão e SHA-256, e o FFmpeg E2E verificou as referências exatas no MP4 renderizado.
+- [x] Implementar hit-test respeitando transparência e priority. Evidência F1-042: `hitTestRenderElementMap` ignora opacidade menor ou igual a 0,05, converte coordenadas para o canvas e ordena deterministicamente por prioridade, z-index e ID; `review-system.test.mjs` cobre sobreposição, transparência e redimensionamento.
+- [x] Mostrar chooser quando múltiplos elementos forem elegíveis. Evidência F1-042: a mesa de revisão consulta `GET /v1/projects/{projectId}/render-elements`, desenha os bounds elegíveis e exige escolha explícita no radiogroup antes de salvar uma marcação ambígua.
+- [x] Validar map hash contra proxy hash. Evidência F1-042: repositório e application service vinculam mapa, artifact e versão; `proxyHash` divergente retorna `VERSION_CONFLICT` HTTP 409, coberto por integração real com Postgres e rota Next.
+- [x] Criar visual/E2E para overlays sobrepostos e canvas redimensionado. Evidência F1-042/T-FR-213: teste visual real no projeto `project-fe932791-32f4-4453-8b85-6ce35a711860`, frame 60, apresentou `Legenda` e `Fundo`, selecionou `subtitle:subtitle-cue-2` e persistiu a annotation `32c10c5f-8c5e-4a74-9ff4-ad14eca8b0fc`; regressão de integração cobre o mesmo hit-test em canvas redimensionado.
 
 ### F1.043 — Patch automático [FR-214]
 

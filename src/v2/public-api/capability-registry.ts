@@ -17,7 +17,7 @@ export interface CapabilityQueryParameter {
   description: string
   required: boolean
   schema: Readonly<{
-    type: 'string' | 'integer' | 'boolean'
+    type: 'string' | 'integer' | 'number' | 'boolean'
     minimum?: number
     maximum?: number
     minLength?: number
@@ -699,6 +699,34 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     successStatuses: [201, 200],
     idempotency: 'required',
     requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.render-elements.resolve',
+    version: '1.0.0',
+    title: 'Resolve rendered elements at preview coordinates',
+    description: 'Hit-tests the immutable RenderElementMap for an exact ProjectVersion, artifact hash, frame and resized preview coordinate, returning ordered eligible layers.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/render-element-hit-test/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/render-elements' },
+    toolName: 'apollo.projects.render-elements.resolve',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'projectVersionId', description: 'Exact immutable project version displayed by the preview.', required: true, schema: { type: 'string', minLength: 3, maxLength: 128 } },
+      { name: 'proxyArtifactId', description: 'Exact displayed preview artifact.', required: true, schema: { type: 'string', minLength: 3, maxLength: 128 } },
+      { name: 'proxyHash', description: 'SHA-256 of the exact displayed preview artifact.', required: true, schema: { type: 'string', minLength: 64, maxLength: 64 } },
+      { name: 'frame', description: 'Zero-based preview frame to inspect.', required: true, schema: { type: 'integer', minimum: 0 } },
+      { name: 'x', description: 'Horizontal pointer coordinate in displayed preview pixels.', required: true, schema: { type: 'number', minimum: 0 } },
+      { name: 'y', description: 'Vertical pointer coordinate in displayed preview pixels.', required: true, schema: { type: 'number', minimum: 0 } },
+      { name: 'displayWidth', description: 'Displayed preview width in CSS pixels.', required: true, schema: { type: 'number', minimum: 0.001 } },
+      { name: 'displayHeight', description: 'Displayed preview height in CSS pixels.', required: true, schema: { type: 'number', minimum: 0.001 } },
+    ],
   },
   {
     id: 'apollo.artifacts.read',

@@ -101,6 +101,29 @@ const searchableProjectSchema = {
 
 const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
 
+const renderElementSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['elementId', 'type', 'clipId', 'sceneId', 'sourceId', 'frame', 'bounds', 'zIndex', 'opacity', 'priority'],
+  properties: {
+    elementId: idSchema,
+    type: { enum: ['background', 'presenter', 'subtitle', 'b-roll', 'cta', 'transformation'] },
+    clipId: idSchema,
+    sceneId: idSchema,
+    sourceId: idSchema,
+    frame: { type: 'integer', minimum: 0 },
+    bounds: {
+      type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'],
+      properties: {
+        x: { type: 'number', minimum: 0 }, y: { type: 'number', minimum: 0 },
+        width: { type: 'number', exclusiveMinimum: 0 }, height: { type: 'number', exclusiveMinimum: 0 },
+      },
+    },
+    zIndex: { type: 'integer' },
+    opacity: { type: 'number', minimum: 0, maximum: 1 },
+    priority: { type: 'integer' },
+  },
+}
+
 const normalizedReviewRegionSchema = {
   type: 'object',
   additionalProperties: false,
@@ -2206,6 +2229,33 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     successSchema({
       type: 'object', additionalProperties: false, required: ['annotation', 'replayed'],
       properties: { annotation: reviewAnnotationSchemaV2, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('render-element-hit-test', 1, 'Rendered element hit-test result for an exact immutable preview',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['map', 'selected', 'chooserRequired', 'candidates'],
+      properties: {
+        map: {
+          type: 'object', additionalProperties: false,
+          required: ['schemaVersion', 'mapHash', 'proxyHash', 'fps', 'durationFrames', 'canvas', 'frame'],
+          properties: {
+            schemaVersion: { const: 'render-element-map/v1' },
+            mapHash: sha256Schema,
+            proxyHash: sha256Schema,
+            fps: { type: 'number', exclusiveMinimum: 0 },
+            durationFrames: { type: 'integer', minimum: 1 },
+            canvas: {
+              type: 'object', additionalProperties: false, required: ['width', 'height'],
+              properties: { width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 } },
+            },
+            frame: { type: 'integer', minimum: 0 },
+          },
+        },
+        selected: { anyOf: [{ type: 'null' }, renderElementSchema] },
+        chooserRequired: { type: 'boolean' },
+        candidates: { type: 'array', maxItems: 32, items: renderElementSchema },
+      },
     }),
   ),
   defineSchema('project-workspace', 1, 'Project editing workspace response',

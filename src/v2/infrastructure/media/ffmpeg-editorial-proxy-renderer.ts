@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 
 import type { EditorialProxyRenderer } from '../../application/ports/editorial-proxy-renderer.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 
@@ -155,12 +156,26 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       const code = (error as NodeJS.ErrnoException).code
       throw new DomainError('RENDER_EXECUTION_FAILED', code === 'ABORT_ERR' ? 'Editorial proxy render was cancelled' : 'Editorial proxy render failed')
     }
-    const [metadata, sha256, probe] = await Promise.all([stat(outputPath), calculateFileSha256(outputPath), probeVideo(outputPath, { signal: input.signal })])
+    const [metadata, sha256, probe, sourceProbe] = await Promise.all([
+      stat(outputPath),
+      calculateFileSha256(outputPath),
+      probeVideo(outputPath, { signal: input.signal }),
+      probeVideo(input.sourcePath, { signal: input.signal }),
+    ])
     const expectedFrames = input.clips.reduce((total, clip) => total + clip.sourceOutFrame - clip.sourceInFrame, 0)
     if (!metadata.isFile() || metadata.size <= 0 || Math.abs(probe.duration * input.fps - expectedFrames) > 3 || probe.width !== width || probe.height !== height) {
       throw new DomainError('RENDER_OUTPUT_INVALID', 'Editorial proxy failed timing or dimension verification')
     }
-    return Object.freeze({ outputPath, sha256, byteSize: metadata.size, probe })
+    const renderElementMap = buildRenderElementMap({
+      proxyHash: sha256,
+      fps: input.fps,
+      durationFrames: expectedFrames,
+      canvas: { width, height },
+      source: { width: sourceProbe.width, height: sourceProbe.height },
+      clips: input.clips,
+      subtitleCues: input.subtitleCues,
+    })
+    return Object.freeze({ outputPath, sha256, byteSize: metadata.size, probe, renderElementMap })
   }
 
   async cleanup(operationId: string): Promise<void> {

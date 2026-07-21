@@ -1,11 +1,13 @@
 import type { EditorialCutClip } from '../apply-editorial-cut-command.ts'
 import type { DirectedSubtitleCue, DirectedTransition } from '../../domain/director-run.ts'
+import type { RenderElementMap } from '../../domain/review-system.ts'
 
 export interface EditorialProxyRenderResult {
   outputPath: string
   sha256: string
   byteSize: number
   probe: { width: number; height: number; duration: number; fps: number; codec: string; container: string }
+  renderElementMap: Readonly<RenderElementMap>
 }
 
 export interface EditorialProxyRenderer {

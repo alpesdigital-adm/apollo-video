@@ -52,6 +52,7 @@ model V2Workspace {
   editCommands                    V2EditCommand[]
   directorRuns                    V2DirectorRun[]
   reviewAnnotations               V2ReviewAnnotation[]
+  renderElementMaps               V2RenderElementMap[]
 
   @@map("workspaces")
 }
@@ -187,6 +188,7 @@ model V2Project {
   editCommands          V2EditCommand[]
   directorRuns          V2DirectorRun[]
   reviewAnnotations     V2ReviewAnnotation[]
+  renderElementMaps     V2RenderElementMap[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -259,6 +261,7 @@ model V2ProjectVersion {
   directorRunsAsBase    V2DirectorRun[]                 @relation("DirectorRunBaseVersion")
   directorRunAsResult   V2DirectorRun?                  @relation("DirectorRunResultVersion")
   reviewAnnotations     V2ReviewAnnotation[]
+  renderElementMaps     V2RenderElementMap[]
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -298,38 +301,38 @@ model V2EditCommand {
 }
 
 model V2ReviewAnnotation {
-  id                 String   @id @db.Uuid
-  workspaceId        String   @db.VarChar(128)
-  projectId          String   @db.VarChar(128)
-  projectVersionId   String   @db.VarChar(128)
-  proxyArtifactId    String   @db.VarChar(128)
-  proxyHash          String   @db.Char(64)
-  frame              Int
-  timeStartMs        Int
-  timeEndMs          Int
-  scope              String   @db.VarChar(16)
-  regionX            Float?
-  regionY            Float?
-  regionWidth        Float?
-  regionHeight       Float?
-  targetIdsJson      String   @db.Text
-  applicationScopeJson String @db.Text
-  affectedCount      Int
-  screenshotRef      String   @db.Text
-  text               String   @db.Text
-  authorType         String   @db.VarChar(32)
-  authorId           String   @db.VarChar(128)
-  authorName         String   @db.VarChar(120)
-  status             String   @default("open") @db.VarChar(16)
-  idempotencyKey     String   @db.VarChar(128)
-  requestFingerprint String   @db.Char(64)
-  createdAt          DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt          DateTime @updatedAt @db.Timestamptz(3)
+  id                   String   @id @db.Uuid
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  proxyArtifactId      String   @db.VarChar(128)
+  proxyHash            String   @db.Char(64)
+  frame                Int
+  timeStartMs          Int
+  timeEndMs            Int
+  scope                String   @db.VarChar(16)
+  regionX              Float?
+  regionY              Float?
+  regionWidth          Float?
+  regionHeight         Float?
+  targetIdsJson        String   @db.Text
+  applicationScopeJson String   @db.Text
+  affectedCount        Int
+  screenshotRef        String   @db.Text
+  text                 String   @db.Text
+  authorType           String   @db.VarChar(32)
+  authorId             String   @db.VarChar(128)
+  authorName           String   @db.VarChar(120)
+  status               String   @default("open") @db.VarChar(16)
+  idempotencyKey       String   @db.VarChar(128)
+  requestFingerprint   String   @db.Char(64)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime @updatedAt @db.Timestamptz(3)
 
-  workspace     V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project       V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  workspace      V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   projectVersion V2ProjectVersion @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  proxyArtifact V2MediaArtifact  @relation(fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  proxyArtifact  V2MediaArtifact  @relation(fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -337,6 +340,33 @@ model V2ReviewAnnotation {
   @@index([workspaceId, projectVersionId, status])
   @@index([workspaceId, proxyArtifactId])
   @@map("review_annotations")
+}
+
+model V2RenderElementMap {
+  id               String   @id @db.Uuid
+  workspaceId      String   @db.VarChar(128)
+  projectId        String   @db.VarChar(128)
+  projectVersionId String   @db.VarChar(128)
+  proxyArtifactId  String   @db.VarChar(128)
+  proxyHash        String   @db.Char(64)
+  mapHash          String   @db.Char(64)
+  schemaVersion    String   @db.VarChar(64)
+  fps              Float
+  durationFrames   Int
+  canvasWidth      Int
+  canvasHeight     Int
+  elementsJson     String   @db.Text
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace      V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion V2ProjectVersion @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  proxyArtifact  V2MediaArtifact  @relation(fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([workspaceId, projectVersionId, proxyArtifactId])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, proxyArtifactId, proxyHash])
+  @@map("render_element_maps")
 }
 
 model V2DirectorRun {
@@ -426,6 +456,7 @@ model V2MediaArtifact {
   projectAssets          V2ProjectMediaAsset[]
   transcriptSources      V2MediaTranscript[]
   reviewAnnotations      V2ReviewAnnotation[]
+  renderElementMaps      V2RenderElementMap[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])

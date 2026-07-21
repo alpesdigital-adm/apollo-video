@@ -38,6 +38,7 @@ import type { ProjectCreationRepository } from '../application/ports/project-cre
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
 import type { ReviewAnnotationRepository } from '../application/ports/review-annotation-repository.ts'
+import type { RenderElementMapRepository } from '../application/ports/render-element-map-repository.ts'
 import type { EditorialCommandRepository } from '../application/ports/editorial-command-repository.ts'
 import type { DirectorRunRepository } from '../application/ports/director-run-repository.ts'
 import type { ProjectProxyRenderRepository } from '../application/ports/project-proxy-render-repository.ts'
@@ -93,6 +94,7 @@ import { PrismaProjectCreationRepository } from './prisma/project-creation-repos
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
 import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
 import { PrismaReviewAnnotationRepository } from './prisma/review-annotation-repository.ts'
+import { PrismaRenderElementMapRepository } from './prisma/render-element-map-repository.ts'
 import { PrismaProjectMediaRepository } from './prisma/project-media-repository.ts'
 import { PrismaEditorialCommandRepository } from './prisma/editorial-command-repository.ts'
 import { PrismaDirectorRunRepository } from './prisma/director-run-repository.ts'
@@ -598,6 +600,7 @@ export function createProjectProxyRenderWorker(
     operations: createPublicOperationRepository(), projects: createProjectProxyRenderRepository(),
     artifacts: createMediaArtifactPersistenceRepository(environment), storage: createLocalMediaUploadStorageFromEnvironment(environment),
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment), artifactRoot, clock,
+    renderElementMaps: createRenderElementMapRepository(),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
@@ -622,6 +625,7 @@ export function createProjectFinalExportWorker(
     artifacts: createMediaArtifactPersistenceRepository(environment),
     storage: createLocalMediaUploadStorageFromEnvironment(environment),
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment),
+    renderElementMaps: createRenderElementMapRepository(),
     artifactRoot,
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
@@ -645,6 +649,10 @@ export function createProjectWorkspaceQueryRepository(): ProjectWorkspaceQueryRe
 
 export function createReviewAnnotationRepository(): ReviewAnnotationRepository {
   return new PrismaReviewAnnotationRepository(resolveV2Client())
+}
+
+export function createRenderElementMapRepository(): RenderElementMapRepository {
+  return new PrismaRenderElementMapRepository(resolveV2Client())
 }
 
 export function createEditorialCommandRepository(): EditorialCommandRepository {

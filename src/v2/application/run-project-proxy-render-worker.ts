@@ -8,6 +8,7 @@ import type { VerifiedMediaStorage } from './ports/media-ingest.ts'
 import type { EditorialProxyRenderer } from './ports/editorial-proxy-renderer.ts'
 import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
+import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 
 const NON_RETRYABLE_CODES = new Set(['INVALID_RENDER_INPUT', 'RENDER_OUTPUT_INVALID', 'PERSISTENCE_CONFLICT', 'PERSISTENCE_NOT_CONFIGURED'])
@@ -32,6 +33,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   artifacts: MediaArtifactPersistenceRepository
   storage: VerifiedMediaStorage
   renderer: EditorialProxyRenderer
+  renderElementMaps: RenderElementMapRepository
   artifactRoot: string
   clock?: () => Date
   leaseDurationMs?: number
@@ -131,6 +133,14 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         manifest, createdAt: clock().toISOString(),
       })
       if (persisted.artifactId !== context.outputArtifactId || persisted.manifestId !== context.outputManifestId) throw new DomainError('PERSISTENCE_CONFLICT', 'Project render artifact identity did not converge')
+      await dependencies.renderElementMaps.persistOrReplay({
+        workspaceId: operation.workspaceId,
+        projectId: context.projectId,
+        projectVersionId: context.projectVersionId,
+        proxyArtifactId: persisted.artifactId,
+        map: rendered.renderElementMap,
+        createdAt: clock().toISOString(),
+      })
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
       await dependencies.projects.attachCompletedOutput({
         workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
