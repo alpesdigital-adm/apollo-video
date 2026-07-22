@@ -20,10 +20,10 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F1.042, com o `RenderElementMap` integrado ao renderer, Postgres, API pública e mesa de revisão:
+Estado auditado após o gate F1.043, com propostas tipadas de patch, quatro gates de segurança, nova versão imutável, comparação e render integrados ao Postgres, API pública e mesa de revisão:
 
-- **118 de 1.259 microtarefas verificadas como efetivamente entregues (9,4%)**;
-- **1.141 microtarefas abertas ou aguardando nova comprovação**;
+- **123 de 1.259 microtarefas verificadas como efetivamente entregues (9,8%)**;
+- **1.136 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
@@ -919,11 +919,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.043 — Patch automático [FR-214]
 
-- [ ] Interpretar annotation em proposta tipada de PatchSet, nunca mutação livre. Evidência F1-043: seis operações allowlisted compõem patch.
-- [ ] Resolver ambiguidades, protected elements, policy e budget antes do commit. Evidência F1-043: quatro gates antecedem versão.
-- [ ] Exibir impact preview, custo e ranges invalidados. Evidência F1-043: proposal ready inclui impact estruturado.
-- [ ] Aplicar patch em nova versão e comparar resultado. Evidência F1-043: sucesso cria child version e comparison.
-- [ ] Criar E2E para correção válida, ambígua, proibida e falha de render. Evidência F1-043/T-FR-214: quatro caminhos testados.
+- [x] Interpretar annotation em proposta tipada de PatchSet, nunca mutação livre. Evidência F1-043: `review-system.ts` aceita somente `trim`, `replace-asset`, `update-text`, `update-layout`, `update-subtitle` e `move`, valida o payload específico de cada operação e rejeita campos/mutações arbitrárias; a API pública `POST /v1/projects/{projectId}/patch-proposals` persiste interpretação versionada e idempotente no Postgres.
+- [x] Resolver ambiguidades, protected elements, policy e budget antes do commit. Evidência F1-043: os gates `ambiguity`, `protected-elements`, `policy` e `budget` são calculados antes de existir `Command` ou versão; aplicação de proposta não pronta é recusada. O E2E isolado provou proposta ambígua com choices e proposta proibida sem mutar o projeto.
+- [x] Exibir impact preview, custo e ranges invalidados. Evidência F1-043: a mesa de revisão apresenta o “Dossiê de alteração” com os quatro gates, alvo, custo, artifacts, ranges invalidados e delta esperado; a proposta real `6af0acda-f597-4a6a-ae3b-1a65ba04e95d` apresentou custo zero, range `[2000,2000]`, proxy/final e delta de qualidade `+3` antes da confirmação.
+- [x] Aplicar patch em nova versão e comparar resultado. Evidência F1-043: confirmação explícita aplicou a proposta real sobre a V5 e criou a V6 imutável `project-version-1d425438-f4e5-4327-ba7c-60539c42e4be`, com parent V5, `Command`, hashes before/after diferentes, comparison persistida e render durável `operation-97527c5e-a689-43de-914f-9fa09483e504`; o artifact resultante `artifact-f755f68b-d49c-4150-afb1-8c20ec19e915` é MP4 H.264/AAC 540×960, 79,734s, 4.882.225 bytes, SHA-256 `e93e09b3637e956d9a7eafcfa56034284ea1a22b1ee9ca1a51e6a7430f58f969` e respondeu byte range 206.
+- [x] Criar E2E para correção válida, ambígua, proibida e falha de render. Evidência F1-043/T-FR-214: `prisma-review-patch.integration.mjs` executou os quatro caminhos sobre Postgres isolado e FFmpeg real, incluindo retry de falha; a suíte completa aprovou 468/468 regressões. O E2E de produção ainda revelou arredondamento de FPS entre JSON e PostgreSQL, corrigido pela canonicalização antes do hash e novamente comprovado com `30.000000097244733`; a mesma operação falha foi retomada e concluída na tentativa 2, sem criar uma operação substituta.
 
 ### F1.044 — Batch review [FR-215]
 
