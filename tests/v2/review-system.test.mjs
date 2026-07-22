@@ -1,4 +1,4 @@
-import test from'node:test';import assert from'node:assert/strict';import{PATCH_OPERATION_KINDS,applyPatchAsVersion,buildRenderElementMap,compileBatchReview,controlPreview,createReviewAnnotation,hitTestRenderElements,interpretReviewAnnotation,materializePatchEditPlan,previewMetrics,proposePatchFromAnnotation,resolveReviewScope,validatePatchOperation,validateRenderElementMap}from'../../src/v2/domain/review-system.ts'
+import test from'node:test';import assert from'node:assert/strict';import{PATCH_OPERATION_KINDS,applyPatchAsVersion,buildRenderElementMap,compileBatchReview,controlPreview,createReviewAnnotation,hitTestRenderElements,interpretReviewAnnotation,materializePatchEditPlan,previewMetrics,proposePatchFromAnnotation,renderElementMapHash,resolveReviewScope,validatePatchOperation,validateRenderElementMap}from'../../src/v2/domain/review-system.ts'
 const annotation=(overrides={})=>createReviewAnnotation({id:'a1',projectVersionId:'v1',frame:30,timeRangeMs:[1000,1000],screenshotRef:'shot',region:{x:.1,y:.2,width:.3,height:.2},targetIds:['el1'],applicationScope:{kind:'region',targetIds:['el1'],formatIds:['9:16'],localeIds:['pt-BR'],recipeIds:[],global:false},affectedCount:1,text:'Mover para cima',author:{id:'u1',name:'Ana'},status:'open',createdAt:'2026-01-01T00:00:00Z',...overrides})
 test('T-FR-210 controls active proxy by frame/time and exposes identity, stale state and performance p95',()=>{let session={projectVersionId:'v1',proxyUrl:'/p.mp4',proxyHash:'hash',fps:30,resolution:{width:1080,height:1920},stale:false,frame:0,playing:false};session=controlPreview(session,{type:'play'});session=controlPreview(session,{type:'seek-time',value:2});assert.equal(session.frame,60);assert.equal(session.playing,true);assert.deepEqual(previewMetrics({firstFrameMs:100,seekMs:[20,30,80,40],renderedFrames:100,droppedFrames:2}),{firstFrameMs:100,seekP95Ms:80,droppedFrameRate:.02})})
 test('T-FR-211 creates point, region and scene annotations without mutating ProjectVersion',()=>{const point=annotation({region:undefined,targetIds:[]});const region=annotation();const scene=annotation({targetIds:['scene-1'],region:undefined});assert.equal(point.projectVersionId,'v1');assert.equal(region.region.width,.3);assert.deepEqual(scene.targetIds,['scene-1']);assert.equal(point.status,'open')})
@@ -14,6 +14,11 @@ test('T-FR-213 emits and hit-tests overlapping render layers by transparency, pr
   const transparent={...map,elements:map.elements.map((item)=>item.type==='subtitle'?{...item,opacity:0}:item)}
   assert.equal(hitTestRenderElements(transparent,{frame:1,x:100,y:180,displayWidth:200,displayHeight:200}).selected.type,'presenter')
   assert.throws(()=>validateRenderElementMap(map,'b'.repeat(64)),(error)=>error?.code==='VERSION_CONFLICT')
+})
+test('T-FR-213 canonicalizes probe fps before hashing a persisted RenderElementMap',()=>{
+  const map=buildRenderElementMap({proxyHash:'a'.repeat(64),fps:30.000000097244733,durationFrames:60,canvas:{width:540,height:960},source:{width:1920,height:1080},clips:[{id:'clip-1',sourceArtifactId:'asset-1',timelineInFrame:0,timelineOutFrame:60}]})
+  assert.equal(map.fps,30)
+  assert.equal(renderElementMapHash(map),renderElementMapHash(validateRenderElementMap(JSON.parse(JSON.stringify(map)),map.proxyHash)))
 })
 test('T-FR-214 allowlists six typed operations and rejects free mutation payloads',()=>{
   assert.deepEqual(PATCH_OPERATION_KINDS,['trim','replace-asset','update-text','update-layout','update-subtitle','move'])

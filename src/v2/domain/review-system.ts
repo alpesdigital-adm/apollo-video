@@ -262,11 +262,15 @@ export function buildRenderElementMap(input: {
   composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
 }): Readonly<RenderElementMap> {
   assertDomain(
-    Number.isSafeInteger(input.source.width) && input.source.width > 0 &&
+    Number.isFinite(input.fps) && input.fps > 0 &&
+      Number.isSafeInteger(input.source.width) && input.source.width > 0 &&
       Number.isSafeInteger(input.source.height) && input.source.height > 0,
     'INVALID_ARGUMENT',
     'RenderElementMap source dimensions are invalid',
   )
+  // Probe rates can contain floating-point noise. Canonicalize before hashing
+  // so a PostgreSQL double-precision round trip preserves immutable identity.
+  const fps = Number(input.fps.toFixed(6))
   const scale = Math.min(input.canvas.width / input.source.width, input.canvas.height / input.source.height)
   const foregroundScale = input.composition?.foregroundScale ?? 1
   const foregroundWidth = Math.min(input.canvas.width, Math.round(input.source.width * scale * foregroundScale))
@@ -342,7 +346,7 @@ export function buildRenderElementMap(input: {
   return validateRenderElementMap({
     schemaVersion: 'render-element-map/v1',
     proxyHash: input.proxyHash,
-    fps: input.fps,
+    fps,
     durationFrames: input.durationFrames,
     canvas: input.canvas,
     elements,

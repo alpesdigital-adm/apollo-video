@@ -93,7 +93,7 @@ test('T-FR-214 public review patch E2E persists valid, ambiguous, prohibited and
     const brief = { schemaVersion: 1, objective: 'discovery', createdAt }
     const policies = { schemaVersion: 1, state: 'configured', reviewPatchPolicy: { version: 'review-patch-policy/1.0.0', allowedOperations: ['trim', 'replace-asset', 'update-text', 'update-layout', 'update-subtitle', 'move'], maxCostCents: 100, spentCostCents: 0 }, createdAt }
     const editPlan = {
-      schemaVersion: 2, state: 'compiled', id: `edit-plan-${versionId}`, projectVersionId: versionId, storyPlanId: 'story-patch-e2e', treatmentPlanId: 'treatment-patch-e2e', directorRunId: 'director-patch-e2e', fps: 30, durationFrames: 150,
+      schemaVersion: 2, state: 'compiled', id: `edit-plan-${versionId}`, projectVersionId: versionId, storyPlanId: 'story-patch-e2e', treatmentPlanId: 'treatment-patch-e2e', directorRunId: 'director-patch-e2e', fps: 30.000000097244733, durationFrames: 150,
       sources: [{ id: sourceArtifactId, artifactId: sourceArtifactId, kind: 'video', durationSeconds: 5 }],
       videoTracks: [{ id: 'track-primary-video', kind: 'base-video', clips: [{ id: 'clip-1', sourceArtifactId, sourceInFrame: 0, sourceOutFrame: 150, timelineInFrame: 0, timelineOutFrame: 150, rate: 1 }] }],
       overlayTracks: [], subtitleTracks: [{ id: 'track-captions', kind: 'captions', presetId: 'clean-color', anchor: 'center', faceProtection: true, maxLines: 2, maxCharactersPerBlock: 32, cues: [{ id: 'cue-1', startFrame: 0, endFrame: 120, text: 'Legenda de validação', anchor: 'center' }] }], audioTracks: [], effectTracks: [], markers: [], transitions: [],
