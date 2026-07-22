@@ -471,6 +471,12 @@ Job carrega `originVersionId`. Ao concluir:
 
 Annotations independentes podem virar um PatchSet atômico. Se uma falhar, policy define `all-or-nothing` por default.
 
+### 22.4 Patch automático individual
+
+Uma annotation aberta é interpretada em uma proposta persistida e vinculada à `baseVersionId`; ela nunca autoriza escrita livre no `EditPlan`. O vocabulário permitido é fechado em `trim`, `replace-asset`, `update-text`, `update-layout`, `update-subtitle` e `move`. Valores e targets são validados por operação antes de qualquer alteração.
+
+A proposta passa, nesta ordem lógica, pelos gates de ambiguidade, elementos protegidos, policy e budget. Enquanto um gate falhar, ela não pode criar Command nem versão. Uma proposta pronta inclui custo estimado, ranges e artifacts invalidados, targets alterados e delta de qualidade esperado. A aplicação exige confirmação humana/API explícita e chave idempotente; cria um Command `apply-review-patch`, um snapshot e uma ProjectVersion filha imutável, além do compare antes/depois. O render é assíncrono e seu sucesso ou erro permanece associado à proposta.
+
 ## 23. Dependency graph
 
 ### 23.1 Tipos de nós
@@ -666,4 +672,3 @@ Renderer não chama provider, DB, Director ou busca de biblioteca.
 - Semântica de rebase automático.
 - Persistência/consulta eficiente do dependency graph.
 - Granularidade de versions em batch edits.
-

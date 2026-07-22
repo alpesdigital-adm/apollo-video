@@ -81,3 +81,16 @@ test('annotation seek keeps the media position, visible timecode and performance
   assert.match(projectEditorSource, /data-testid="project-preview"/)
   assert.match(projectEditorSource, /data-testid="review-overlay"/)
 })
+
+test('T-FR-214 project editor exposes typed impact gates and explicit immutable patch confirmation', () => {
+  assert.match(projectEditorSource, /\/patch-proposals/)
+  assert.match(projectEditorSource, /data-testid="review-patch-impact"/)
+  assert.match(projectEditorSource, /PATCH_GATE_LABELS/)
+  assert.match(projectEditorSource, /Intenção/)
+  assert.match(projectEditorSource, /Proteções/)
+  assert.match(projectEditorSource, /Política/)
+  assert.match(projectEditorSource, /Budget/)
+  assert.match(projectEditorSource, /data-testid="review-patch-apply"/)
+  assert.match(projectEditorSource, /Confirmar e criar versão/)
+  assert.match(projectEditorSource, /data-testid="review-patch-comparison"/)
+})

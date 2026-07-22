@@ -59,9 +59,15 @@ function buildAssSubtitles(input: {
   const fontSize = Math.max(32, Math.min(72, Math.round(input.width * 0.059)))
   const marginHorizontal = Math.round(input.width * 0.07)
   const marginVertical = Math.round(input.height * 0.075)
-  const events = input.cues.map((cue) =>
-    `Dialogue: 0,${assTimestamp(cue.startFrame, input.fps)},${assTimestamp(cue.endFrame, input.fps)},Default,,0,0,0,,${wrapAssText(cue.text)}`,
-  )
+  const events = input.cues.map((cue) => {
+    const anchor = cue.anchor ?? 'bottom'
+    const override = anchor === 'bottom' ? ''
+      : anchor === 'lower-third' ? `{\\an2\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.76)})}`
+        : anchor === 'center' ? `{\\an5\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.5)})}`
+          : anchor === 'upper-third' ? `{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.3)})}`
+            : `{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.08)})}`
+    return `Dialogue: 0,${assTimestamp(cue.startFrame, input.fps)},${assTimestamp(cue.endFrame, input.fps)},Default,,0,0,0,,${override}${wrapAssText(cue.text)}`
+  })
   return [
     '[Script Info]',
     'ScriptType: v4.00+',
@@ -139,8 +145,10 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     const [width, height] = dimensions
     filters.push(`[joinedv]split=2[background0][foreground0]`)
     filters.push(`[background0]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background]`)
-    filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease[foreground]`)
-    filters.push(`[background][foreground]overlay=(W-w)/2:(H-h)/2:shortest=1,format=yuv420p[composed]`)
+    const foregroundScale = input.composition?.foregroundScale ?? 1
+    const verticalPosition = input.composition?.verticalPosition ?? 0.5
+    filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground]`)
+    filters.push(`[background][foreground]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[composed]`)
     if (input.subtitleCues?.length) {
       await writeFile(subtitlePath, buildAssSubtitles({ width, height, fps: input.fps, cues: input.subtitleCues }), 'utf8')
       filters.push(`[composed]subtitles=filename='${escapeSubtitleFilterPath(subtitlePath)}'[outv]`)
@@ -174,6 +182,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       source: { width: sourceProbe.width, height: sourceProbe.height },
       clips: input.clips,
       subtitleCues: input.subtitleCues,
+      composition: input.composition,
     })
     return Object.freeze({ outputPath, sha256, byteSize: metadata.size, probe, renderElementMap })
   }

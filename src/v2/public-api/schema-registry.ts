@@ -260,6 +260,97 @@ const reviewSceneSchema = {
   },
 }
 
+const patchRangeSchema = {
+  type: 'array', minItems: 2, maxItems: 2,
+  prefixItems: [{ type: 'integer', minimum: 0 }, { type: 'integer', minimum: 0 }],
+  items: false,
+}
+
+const patchOperationSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['op', 'targetId', 'value'],
+  properties: {
+    op: { enum: ['trim', 'replace-asset', 'update-text', 'update-layout', 'update-subtitle', 'move'] },
+    targetId: idSchema,
+    value: { type: 'object' },
+    rangeMs: patchRangeSchema,
+    choiceId: { type: 'string', minLength: 3, maxLength: 128 },
+  },
+}
+
+const patchProposalSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'workspaceId', 'projectId', 'annotationId', 'baseVersionId', 'status', 'interpretationVersion', 'choices', 'patch', 'impact', 'gates', 'createdAt', 'updatedAt'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    workspaceId: idSchema,
+    projectId: idSchema,
+    annotationId: { type: 'string', format: 'uuid' },
+    baseVersionId: idSchema,
+    status: { enum: ['ready', 'ambiguous', 'prohibited', 'budget-blocked', 'applied'] },
+    interpretationVersion: { type: 'string', minLength: 3, maxLength: 256 },
+    choices: { type: 'array', maxItems: 12, items: patchOperationSchema },
+    patch: {
+      anyOf: [{ type: 'null' }, {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'baseVersionId', 'operations', 'annotationIds', 'estimatedCost', 'invalidatedRanges'],
+        properties: {
+          id: idSchema, baseVersionId: idSchema,
+          operations: { type: 'array', minItems: 1, maxItems: 50, items: patchOperationSchema },
+          annotationIds: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: { type: 'string', format: 'uuid' } },
+          estimatedCost: { type: 'integer', minimum: 0 },
+          invalidatedRanges: { type: 'array', maxItems: 50, items: patchRangeSchema },
+        },
+      }],
+    },
+    impact: {
+      anyOf: [{ type: 'null' }, {
+        type: 'object', additionalProperties: false,
+        required: ['operationCount', 'cost', 'invalidatedRanges', 'changedTargets', 'expectedScoreDelta', 'invalidatedArtifacts'],
+        properties: {
+          operationCount: { type: 'integer', minimum: 1 }, cost: { type: 'integer', minimum: 0 },
+          invalidatedRanges: { type: 'array', maxItems: 50, items: patchRangeSchema },
+          changedTargets: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: idSchema },
+          expectedScoreDelta: { type: 'number' },
+          invalidatedArtifacts: { type: 'array', maxItems: 20, uniqueItems: true, items: { enum: ['proxy', 'final'] } },
+        },
+      }],
+    },
+    gates: {
+      type: 'array', minItems: 4, maxItems: 4,
+      items: {
+        type: 'object', additionalProperties: false, required: ['gate', 'passed', 'message', 'targetIds'],
+        properties: {
+          gate: { enum: ['ambiguity', 'protected-elements', 'policy', 'budget'] }, passed: { type: 'boolean' },
+          code: { enum: ['AMBIGUOUS_INTENT', 'PROTECTED_TARGET', 'POLICY_DENIED', 'BUDGET_EXCEEDED'] },
+          message: { type: 'string', minLength: 1, maxLength: 500 }, targetIds: { type: 'array', maxItems: 50, uniqueItems: true, items: idSchema },
+        },
+      },
+    },
+    resultCommandId: idSchema,
+    resultVersionId: idSchema,
+    renderOperationId: idSchema,
+    comparison: {
+      type: 'object', additionalProperties: false,
+      required: ['beforeVersionId', 'afterVersionId', 'beforeEditPlanHash', 'afterEditPlanHash', 'changedTargets', 'invalidatedRanges'],
+      properties: {
+        beforeVersionId: idSchema, afterVersionId: idSchema, beforeEditPlanHash: sha256Schema, afterEditPlanHash: sha256Schema,
+        changedTargets: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: idSchema },
+        invalidatedRanges: { type: 'array', maxItems: 50, items: patchRangeSchema },
+      },
+    },
+    render: {
+      type: 'object', additionalProperties: false, required: ['operationId', 'status', 'phase'],
+      properties: {
+        operationId: idSchema, status: { type: 'string' }, phase: { type: 'string' },
+        error: { type: 'object', additionalProperties: false, required: ['code', 'message'], properties: { code: { type: 'string' }, message: { type: 'string' } } },
+      },
+    },
+    createdAt: dateTimeSchema,
+    updatedAt: dateTimeSchema,
+  },
+}
+
 const apiClientSchema = {
   type: 'object',
   additionalProperties: false,
@@ -2229,6 +2320,33 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     successSchema({
       type: 'object', additionalProperties: false, required: ['annotation', 'replayed'],
       properties: { annotation: reviewAnnotationSchemaV2, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('create-review-patch-proposal-request', 1, 'Create an auditable patch proposal from one review annotation', {
+    type: 'object', additionalProperties: false, required: ['annotationId'],
+    properties: { annotationId: { type: 'string', format: 'uuid' }, selectedChoiceId: { type: 'string', minLength: 3, maxLength: 128 } },
+  }),
+  defineSchema('review-patch-proposal-created', 1, 'Persisted typed patch proposal and deterministic gate results',
+    successSchema({ type: 'object', additionalProperties: false, required: ['proposal', 'replayed'], properties: { proposal: patchProposalSchema, replayed: { type: 'boolean' } } }),
+  ),
+  defineSchema('review-patch-proposal', 1, 'Persisted typed patch proposal including render outcome when applied',
+    successSchema({ type: 'object', additionalProperties: false, required: ['proposal'], properties: { proposal: patchProposalSchema } }),
+  ),
+  defineSchema('apply-review-patch-request', 1, 'Explicit confirmation for a ready review patch proposal', {
+    type: 'object', additionalProperties: false, required: ['confirmed'], properties: { confirmed: { const: true } },
+  }),
+  defineSchema('review-patch-applied', 1, 'Immutable version, semantic comparison and durable proxy render operation created by a confirmed patch',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['proposal', 'command', 'version', 'comparison', 'operation', 'replayed'],
+      properties: {
+        proposal: patchProposalSchema,
+        command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'], properties: { id: idSchema, type: { const: 'apply-review-patch' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema } },
+        version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema, baseHash: sha256Schema, snapshotRefs: { type: 'object' }, createdAt: dateTimeSchema } },
+        comparison: patchProposalSchema.properties.comparison,
+        operation: publicOperationSchemaV4,
+        replayed: { type: 'boolean' },
+      },
     }),
   ),
   defineSchema('render-element-hit-test', 1, 'Rendered element hit-test result for an exact immutable preview',

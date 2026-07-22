@@ -168,6 +168,40 @@ const queuedProjectFinalExportOperationExample = {
   type: 'project-final-export',
   target: { type: 'media-artifact', id: 'artifact-final-example-1', manifestId: 'manifest-final-example-1' },
 }
+const reviewPatchProposalExample = {
+  id: '90000000-0000-4000-8000-000000000214',
+  workspaceId,
+  projectId,
+  annotationId: 'd8f7ec49-b87c-4ca8-80a7-7840de71c650',
+  baseVersionId: 'project-version-example-2',
+  status: 'ready',
+  interpretationVersion: 'review-patch-interpreter/1.0.0+review-patch-policy/1.0.0',
+  choices: [],
+  patch: {
+    id: 'patch-example-214',
+    baseVersionId: 'project-version-example-2',
+    operations: [{ op: 'update-layout', targetId: 'subtitle:subtitle-cue-2', value: { anchor: 'bottom', faceProtection: true }, rangeMs: [10500, 10500] }],
+    annotationIds: ['d8f7ec49-b87c-4ca8-80a7-7840de71c650'],
+    estimatedCost: 0,
+    invalidatedRanges: [[10500, 10500]],
+  },
+  impact: {
+    operationCount: 1,
+    cost: 0,
+    invalidatedRanges: [[10500, 10500]],
+    changedTargets: ['subtitle:subtitle-cue-2'],
+    expectedScoreDelta: 3,
+    invalidatedArtifacts: ['proxy', 'final'],
+  },
+  gates: [
+    { gate: 'ambiguity', passed: true, message: 'Uma interpretação tipada foi resolvida.', targetIds: ['subtitle:subtitle-cue-2'] },
+    { gate: 'protected-elements', passed: true, message: 'Nenhum alvo protegido será alterado.', targetIds: [] },
+    { gate: 'policy', passed: true, message: 'A operação é permitida pela policy ativa.', targetIds: ['subtitle:subtitle-cue-2'] },
+    { gate: 'budget', passed: true, message: 'O custo estimado cabe no budget restante.', targetIds: ['subtitle:subtitle-cue-2'] },
+  ],
+  createdAt,
+  updatedAt: createdAt,
+}
 const webhookSigningSecretRotationExample = {
   schemaVersion: 'webhook-signing-secret-rotation/v1',
   id: '20000000-0000-4000-8000-000000000010',
@@ -1150,6 +1184,53 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             status: 'open',
             createdAt,
           },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-review-patch-proposal-request/v1': [
+      { annotationId: reviewPatchProposalExample.annotationId },
+    ],
+    'apollo://schemas/review-patch-proposal-created/v1': [
+      { data: { proposal: reviewPatchProposalExample, replayed: false }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/review-patch-proposal/v1': [
+      { data: { proposal: reviewPatchProposalExample }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/apply-review-patch-request/v1': [
+      { confirmed: true },
+    ],
+    'apollo://schemas/review-patch-applied/v1': [
+      {
+        data: {
+          proposal: {
+            ...reviewPatchProposalExample,
+            status: 'applied',
+            resultCommandId: 'edit-command-example-214',
+            resultVersionId: 'project-version-example-3',
+            renderOperationId: queuedProjectProxyRenderOperationExample.id,
+            comparison: {
+              beforeVersionId: 'project-version-example-2',
+              afterVersionId: 'project-version-example-3',
+              beforeEditPlanHash: 'a'.repeat(64),
+              afterEditPlanHash: 'b'.repeat(64),
+              changedTargets: ['subtitle:subtitle-cue-2'],
+              invalidatedRanges: [[10500, 10500]],
+            },
+            render: { operationId: queuedProjectProxyRenderOperationExample.id, status: 'queued', phase: 'queued' },
+          },
+          command: { id: 'edit-command-example-214', type: 'apply-review-patch', baseVersionId: 'project-version-example-2', resultVersionId: 'project-version-example-3', createdAt },
+          version: {
+            id: 'project-version-example-3', sequence: 3, parentVersionId: 'project-version-example-2', baseHash: 'c'.repeat(64),
+            snapshotRefs: { brief: 'snapshot-brief-example-1', treatment: 'snapshot-treatment-example-1', story: 'snapshot-story-example-1', editPlan: 'snapshot-edit-plan-example-3', policies: 'snapshot-policies-example-1' },
+            createdAt,
+          },
+          comparison: {
+            beforeVersionId: 'project-version-example-2', afterVersionId: 'project-version-example-3', beforeEditPlanHash: 'a'.repeat(64), afterEditPlanHash: 'b'.repeat(64),
+            changedTargets: ['subtitle:subtitle-cue-2'], invalidatedRanges: [[10500, 10500]],
+          },
+          operation: queuedProjectProxyRenderOperationExample,
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

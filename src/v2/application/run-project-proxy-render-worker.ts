@@ -110,10 +110,11 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
       const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
+      const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       await enter('rendering')
       const rendered = await dependencies.renderer.render({
         operationId: operation.id, renderKind: 'proxy', sourcePath: resolveArtifactPath(dependencies.artifactRoot, source.sourceArtifactKey),
-        clips, fps: source.editPlan.fps, format: source.format, subtitleCues, transitions,
+        clips, fps: source.editPlan.fps, format: source.format, subtitleCues, transitions, ...(composition ? { composition } : {}),
         signal: abortController.signal,
       })
       await enter('verifying')

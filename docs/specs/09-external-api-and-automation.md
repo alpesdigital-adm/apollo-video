@@ -363,6 +363,9 @@ Padrão não prescreve implementação interna, mas fixa capacidades:
 /v1/projects/{projectId}/versions
 /v1/projects/{projectId}/commands
 /v1/projects/{projectId}/annotations
+/v1/projects/{projectId}/patch-proposals
+/v1/projects/{projectId}/patch-proposals/{proposalId}
+/v1/projects/{projectId}/patch-proposals/{proposalId}/apply
 /v1/projects/{projectId}/director-runs
 /v1/projects/{projectId}/quality-reports
 /v1/projects/{projectId}/renders
@@ -379,6 +382,8 @@ Padrão não prescreve implementação interna, mas fixa capacidades:
 ```
 
 Ações complexas usam verbos explícitos (`:preflight`, `:approve`, `:render`, `:retry`) em vez de fingir CRUD quando existe state transition.
+
+`POST .../patch-proposals` é o preflight persistido do ajuste: aceita uma annotation e, quando necessário, uma escolha de interpretação. `GET .../{proposalId}` expõe gates, impacto, comparação e operação de render. `POST .../{proposalId}/apply` exige `confirmed: true`, escopo de escrita e `Idempotency-Key`; agentes devem solicitar aprovação do host antes dessa chamada. Os três recursos também constam no catálogo de capabilities, schemas, exemplos e OpenAPI públicos.
 
 ## 15. Transferência de mídia
 

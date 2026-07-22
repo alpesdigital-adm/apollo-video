@@ -53,6 +53,7 @@ model V2Workspace {
   directorRuns                    V2DirectorRun[]
   reviewAnnotations               V2ReviewAnnotation[]
   renderElementMaps               V2RenderElementMap[]
+  reviewPatchProposals            V2ReviewPatchProposal[]
 
   @@map("workspaces")
 }
@@ -189,6 +190,7 @@ model V2Project {
   directorRuns          V2DirectorRun[]
   reviewAnnotations     V2ReviewAnnotation[]
   renderElementMaps     V2RenderElementMap[]
+  reviewPatchProposals  V2ReviewPatchProposal[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -262,6 +264,8 @@ model V2ProjectVersion {
   directorRunAsResult   V2DirectorRun?                  @relation("DirectorRunResultVersion")
   reviewAnnotations     V2ReviewAnnotation[]
   renderElementMaps     V2RenderElementMap[]
+  patchProposalsAsBase  V2ReviewPatchProposal[]         @relation("PatchProposalBaseVersion")
+  patchProposalAsResult V2ReviewPatchProposal?          @relation("PatchProposalResultVersion")
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -329,10 +333,11 @@ model V2ReviewAnnotation {
   createdAt            DateTime @default(now()) @db.Timestamptz(3)
   updatedAt            DateTime @updatedAt @db.Timestamptz(3)
 
-  workspace      V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project        V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  projectVersion V2ProjectVersion @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  proxyArtifact  V2MediaArtifact  @relation(fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace      V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion V2ProjectVersion        @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  proxyArtifact  V2MediaArtifact         @relation(fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  patchProposals V2ReviewPatchProposal[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -340,6 +345,46 @@ model V2ReviewAnnotation {
   @@index([workspaceId, projectVersionId, status])
   @@index([workspaceId, proxyArtifactId])
   @@map("review_annotations")
+}
+
+model V2ReviewPatchProposal {
+  id                      String    @id @db.Uuid
+  workspaceId             String    @db.VarChar(128)
+  projectId               String    @db.VarChar(128)
+  annotationId            String    @db.Uuid
+  baseVersionId           String    @db.VarChar(128)
+  status                  String    @db.VarChar(32)
+  interpretationVersion   String    @db.VarChar(128)
+  choicesJson             String    @db.Text
+  patchJson               String?   @db.Text
+  impactJson              String?   @db.Text
+  gatesJson               String    @db.Text
+  idempotencyKey          String    @db.VarChar(128)
+  requestFingerprint      String    @db.Char(64)
+  applyIdempotencyKey     String?   @db.VarChar(128)
+  applyRequestFingerprint String?   @db.Char(64)
+  resultCommandId         String?   @db.VarChar(128)
+  resultVersionId         String?   @db.VarChar(128)
+  renderOperationId       String?   @db.VarChar(128)
+  comparisonJson          String?   @db.Text
+  createdAt               DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime  @updatedAt @db.Timestamptz(3)
+  appliedAt               DateTime? @db.Timestamptz(3)
+
+  workspace       V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project         V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  annotation      V2ReviewAnnotation @relation(fields: [annotationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  baseVersion     V2ProjectVersion   @relation("PatchProposalBaseVersion", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  resultVersion   V2ProjectVersion?  @relation("PatchProposalResultVersion", fields: [resultVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  renderOperation V2PublicOperation? @relation(fields: [renderOperationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@unique([resultVersionId, workspaceId])
+  @@unique([renderOperationId, workspaceId])
+  @@index([workspaceId, projectId, annotationId, createdAt(sort: Desc)])
+  @@index([workspaceId, baseVersionId, status])
+  @@map("review_patch_proposals")
 }
 
 model V2RenderElementMap {
@@ -722,12 +767,13 @@ model V2PublicOperation {
   nextAttemptAt      DateTime? @db.Timestamptz(3)
   deadLetteredAt     DateTime? @db.Timestamptz(3)
 
-  workspace          V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  client             V2ApiClient                    @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  artifactRender     V2ArtifactRenderOperation?
-  mediaIngest        V2MediaIngestOperation?
-  projectProxyRender V2ProjectProxyRenderOperation?
-  projectFinalExport V2ProjectFinalExportOperation?
+  workspace           V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  client              V2ApiClient                    @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  artifactRender      V2ArtifactRenderOperation?
+  mediaIngest         V2MediaIngestOperation?
+  projectProxyRender  V2ProjectProxyRenderOperation?
+  projectFinalExport  V2ProjectFinalExportOperation?
+  reviewPatchProposal V2ReviewPatchProposal?
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])

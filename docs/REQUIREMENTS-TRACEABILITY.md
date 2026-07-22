@@ -113,7 +113,7 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-211 | ReviewAnnotation | S7 | D0,D3,D6 | annotation persiste contexto | integration |
 | FR-212 | Escopos | S7 | D3,D6 | current/all formats/locales | unit/e2e |
 | FR-213 | RenderElementMap | S7 | D3,D5 | hit-test seleciona layer correta | visual/e2e |
-| FR-214 | Patch automático | S1,S7 | D2,D3 | annotation vira command validado | e2e |
+| FR-214 | Patch automático | S1,S7 | D2,D3,D6 | annotation vira proposta gated, command e versão imutável | T-FR-214 unit/API/Postgres/render/visual |
 | FR-215 | Batch review | S7 | D3,D6 | comentários aplicam transação única | integration |
 | FR-216 | Edição manual | S2,S7 | D3,D6 | trim/replace/layout/text persistem | e2e |
 | FR-217 | Compare | S2,S7 | D3,D5,D6 | before/after e diff funcionam | e2e |

@@ -163,6 +163,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one version-bound review note without mutating the project or starting a provider job.',
     },
+    'apollo.projects.review-patches.propose': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists one impact proposal and four deterministic gates without mutating the project version.',
+    },
+    'apollo.projects.review-patches.apply': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Creates one reversible immutable version and queues its exact proxy render only after explicit impact confirmation.',
+    },
     'apollo.projects.proxy-renders.enqueue': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Queues one idempotent proxy render for the current immutable project version and EditPlan.',

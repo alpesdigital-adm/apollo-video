@@ -21,6 +21,7 @@ export interface EditorialProxyRenderer {
     outputSpec?: { width: number; height: number; fps: number }
     subtitleCues?: readonly Readonly<DirectedSubtitleCue>[]
     transitions?: readonly Readonly<DirectedTransition>[]
+    composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
     signal?: AbortSignal
   }): Promise<Readonly<EditorialProxyRenderResult>>
   cleanup(operationId: string): Promise<void>

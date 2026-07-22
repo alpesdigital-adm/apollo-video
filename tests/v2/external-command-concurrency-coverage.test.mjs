@@ -67,6 +67,12 @@ const coverage = Object.freeze({
   'apollo.projects.annotations.create': {
     mode: 'durable-covered', evidence: 'F1-040 version-bound annotation idempotency and Postgres integration E2E',
   },
+  'apollo.projects.review-patches.propose': {
+    mode: 'durable-covered', evidence: 'F1-043 version-bound persisted proposal and idempotent public API E2E',
+  },
+  'apollo.projects.review-patches.apply': {
+    mode: 'durable-covered', evidence: 'F1-043 transactional proposal transition, Command, snapshot and immutable child version E2E',
+  },
   'apollo.projects.commands.apply': {
     mode: 'durable-covered', evidence: 'typed Command, exact immutable base and transactional ProjectVersion persistence',
   },
@@ -128,7 +134,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    35,
+    37,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

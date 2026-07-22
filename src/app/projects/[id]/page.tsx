@@ -58,6 +58,17 @@ interface ReviewAnnotationData {
   author: { id: string; name: string; type: 'user' | 'api-client' }; status: 'open' | 'applied' | 'dismissed'; createdAt: string
 }
 interface ProjectReviewData { session: ReviewSessionData; versions: ReviewVersionData[]; scopeContext: ReviewScopeContextData; scenes: ReviewSceneData[]; annotations: ReviewAnnotationData[] }
+type PatchOperationKind = 'trim' | 'replace-asset' | 'update-text' | 'update-layout' | 'update-subtitle' | 'move'
+interface ReviewPatchProposalData {
+  id: string; annotationId: string; baseVersionId: string; status: 'ready' | 'ambiguous' | 'prohibited' | 'budget-blocked' | 'applied'; interpretationVersion: string;
+  choices: { choiceId?: string; op: PatchOperationKind; targetId: string; value: Record<string, unknown>; rangeMs?: [number, number] }[];
+  patch: null | { id: string; operations: { op: PatchOperationKind; targetId: string; value: Record<string, unknown>; rangeMs?: [number, number] }[]; estimatedCost: number; invalidatedRanges: [number, number][] };
+  impact: null | { operationCount: number; cost: number; invalidatedRanges: [number, number][]; changedTargets: string[]; expectedScoreDelta: number; invalidatedArtifacts: string[] };
+  gates: { gate: 'ambiguity' | 'protected-elements' | 'policy' | 'budget'; passed: boolean; code?: string; message: string; targetIds: string[] }[];
+  resultVersionId?: string; renderOperationId?: string; comparison?: { beforeVersionId: string; afterVersionId: string; beforeEditPlanHash: string; afterEditPlanHash: string; changedTargets: string[]; invalidatedRanges: [number, number][] };
+  render?: { operationId: string; status: string; phase: string; error?: { code: string; message: string } };
+  createdAt: string; updatedAt: string;
+}
 type RenderElementType = 'background' | 'presenter' | 'subtitle' | 'b-roll' | 'cta' | 'transformation'
 interface RenderElementData {
   elementId: string; type: RenderElementType; clipId: string; sceneId: string; sourceId: string; frame: number;
@@ -97,6 +108,14 @@ const REVIEW_SCOPE_LABELS: Readonly<Record<ReviewApplicationScopeKind, string>> 
 const RENDER_ELEMENT_LABELS: Readonly<Record<RenderElementType, string>> = Object.freeze({
   background: 'Fundo', presenter: 'Apresentador', subtitle: 'Legenda', 'b-roll': 'B-roll', cta: 'CTA', transformation: 'Transformação',
 })
+
+const PATCH_OPERATION_LABELS: Readonly<Record<PatchOperationKind, string>> = Object.freeze({
+  trim: 'Cortar trecho', 'replace-asset': 'Trocar mídia', 'update-text': 'Atualizar texto', 'update-layout': 'Reposicionar', 'update-subtitle': 'Ajustar legenda', move: 'Reordenar cena',
+})
+
+const PATCH_GATE_LABELS = Object.freeze({
+  ambiguity: 'Intenção', 'protected-elements': 'Proteções', policy: 'Política', budget: 'Budget',
+} satisfies Record<ReviewPatchProposalData['gates'][number]['gate'], string>)
 
 function readableBytes(value: number | string): string {
   const bytes = typeof value === 'string' ? Number(value) : value
@@ -197,6 +216,10 @@ export default function ProjectWorkspacePage() {
   const [reviewElementConfirmed, setReviewElementConfirmed] = useState(false)
   const [previewFrame, setPreviewFrame] = useState(0)
   const [previewPerformance, setPreviewPerformance] = useState({ firstFrameMs: 0, seekP95Ms: 0, droppedFrameRate: 0 })
+  const [reviewPatch, setReviewPatch] = useState<ReviewPatchProposalData | null>(null)
+  const [reviewPatchLoading, setReviewPatchLoading] = useState<string | null>(null)
+  const [reviewPatchApplying, setReviewPatchApplying] = useState(false)
+  const reviewPatchApplyKeyRef = useRef<{ proposalId: string; key: string } | null>(null)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -611,6 +634,59 @@ export default function ProjectWorkspacePage() {
       setNotice(error instanceof Error ? error.message : 'Não foi possível registrar o ajuste.')
     } finally {
       setReviewSaving(false)
+    }
+  }
+
+  async function proposeReviewPatch(annotationId: string, selectedChoiceId?: string): Promise<void> {
+    setReviewPatchLoading(annotationId)
+    setNotice(null)
+    try {
+      const result = await requestJson<{ proposal: ReviewPatchProposalData; replayed: boolean }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/patch-proposals`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+          body: JSON.stringify({ annotationId, ...(selectedChoiceId ? { selectedChoiceId } : {}) }),
+        },
+      )
+      reviewPatchApplyKeyRef.current = null
+      setReviewPatch(result.proposal)
+      setNotice(result.proposal.status === 'ready'
+        ? 'Proposta preparada. Revise o impacto antes de criar a nova versão.'
+        : result.proposal.status === 'ambiguous'
+          ? 'A annotation admite mais de uma leitura. Escolha a intenção correta.'
+          : 'A proposta foi bloqueada antes de qualquer alteração no projeto.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível preparar o ajuste.')
+    } finally {
+      setReviewPatchLoading(null)
+    }
+  }
+
+  async function applyReviewPatch(): Promise<void> {
+    if (!reviewPatch || reviewPatch.status !== 'ready') return
+    const idempotencyKey = reviewPatchApplyKeyRef.current?.proposalId === reviewPatch.id
+      ? reviewPatchApplyKeyRef.current.key
+      : crypto.randomUUID()
+    reviewPatchApplyKeyRef.current = { proposalId: reviewPatch.id, key: idempotencyKey }
+    setReviewPatchApplying(true)
+    setNotice(null)
+    try {
+      const result = await requestJson<{ proposal: ReviewPatchProposalData; version: { id: string; sequence: number }; operation: PublicOperation; replayed: boolean }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/patch-proposals/${encodeURIComponent(reviewPatch.id)}/apply`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
+          body: JSON.stringify({ confirmed: true }),
+        },
+      )
+      setReviewPatch(result.proposal)
+      setNotice(`Versão ${result.version.sequence} criada. O novo preview entrou na fila de renderização.`)
+      await Promise.all([loadWorkspace(true), loadReview(true)])
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar o ajuste.')
+    } finally {
+      setReviewPatchApplying(false)
     }
   }
 
@@ -1077,8 +1153,46 @@ export default function ProjectWorkspacePage() {
               ) : null}
 
               <div className="mt-5 border-t border-white/[0.07] pt-4">
-                <div className="flex items-center justify-between"><p className="text-[9px] uppercase tracking-[0.17em] text-[#706c64]">Ajustes desta versão</p><span className="text-[9px] text-[#55524c]">{review.annotations.length} aberto{review.annotations.length === 1 ? '' : 's'}</span></div>
-                {review.annotations.length ? <div className="mt-3 grid gap-px bg-white/[0.06] sm:grid-cols-2">{review.annotations.slice(0, 6).map((annotation) => <button className="bg-[#090909] px-3 py-3 text-left transition hover:bg-[#0d0c0a]" data-testid={`review-annotation-${annotation.id}`} key={annotation.id} onClick={() => seekPreviewToFrame(annotation.frame)} type="button"><span className="font-mono text-[9px] text-[#b8943e]">{frameTimecode(annotation.frame, review.session.fps)}</span><span className="ml-2 text-[8px] uppercase tracking-[0.1em] text-[#5f5b54]">{annotation.scope === 'region' ? 'área' : annotation.scope === 'scene' ? 'cena' : 'ponto'} · {REVIEW_SCOPE_LABELS[annotation.applicationScope.kind]} · {annotation.affectedCount} alvo{annotation.affectedCount === 1 ? '' : 's'}</span><p className="mt-1.5 line-clamp-2 text-xs leading-5 text-[#aaa49a]">{annotation.text}</p></button>)}</div> : <p className="mt-3 text-xs text-[#5f5b54]">Nenhum ajuste registrado nesta versão.</p>}
+                <div className="flex items-center justify-between"><p className="text-[9px] uppercase tracking-[0.17em] text-[#706c64]">Ajustes desta versão</p><span className="text-[9px] text-[#55524c]">{review.annotations.filter((item) => item.status === 'open').length} aberto{review.annotations.filter((item) => item.status === 'open').length === 1 ? '' : 's'}</span></div>
+                {review.annotations.length ? (
+                  <div className="mt-3 grid gap-px bg-white/[0.06] sm:grid-cols-2">
+                    {review.annotations.slice(0, 6).map((annotation) => (
+                      <article className={`bg-[#090909] px-3 py-3 transition ${reviewPatch?.annotationId === annotation.id ? 'shadow-[inset_2px_0_0_#d9aa3d]' : ''}`} data-testid={`review-annotation-${annotation.id}`} key={annotation.id}>
+                        <button className="block w-full text-left hover:text-white" onClick={() => seekPreviewToFrame(annotation.frame)} type="button">
+                          <span className="font-mono text-[9px] text-[#b8943e]">{frameTimecode(annotation.frame, review.session.fps)}</span>
+                          <span className="ml-2 text-[8px] uppercase tracking-[0.1em] text-[#5f5b54]">{annotation.scope === 'region' ? 'área' : annotation.scope === 'scene' ? 'cena' : 'ponto'} · {REVIEW_SCOPE_LABELS[annotation.applicationScope.kind]} · {annotation.affectedCount} alvo{annotation.affectedCount === 1 ? '' : 's'}</span>
+                          <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-[#aaa49a]">{annotation.text}</p>
+                        </button>
+                        <div className="mt-3 flex items-center justify-between border-t border-white/[0.05] pt-2">
+                          <span className={`text-[8px] uppercase tracking-[0.12em] ${annotation.status === 'open' ? 'text-[#716d65]' : 'text-[#5e9f74]'}`}>{annotation.status === 'open' ? 'aguarda decisão' : 'aplicado'}</span>
+                          {annotation.status === 'open' ? <button className="text-[9px] font-semibold text-[#d7aa42] hover:text-[#f0c65d] disabled:opacity-35" data-testid={`review-patch-propose-${annotation.id}`} disabled={reviewPatchLoading === annotation.id} onClick={() => void proposeReviewPatch(annotation.id)} type="button">{reviewPatchLoading === annotation.id ? 'Interpretando…' : 'Preparar ajuste →'}</button> : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : <p className="mt-3 text-xs text-[#5f5b54]">Nenhum ajuste registrado nesta versão.</p>}
+
+                {reviewPatch ? (
+                  <div className="mt-3 border border-[#8f6c22]/35 bg-[#0b0a08]" data-testid="review-patch-impact">
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
+                      <div><p className="text-[8px] uppercase tracking-[0.2em] text-[#8b7650]">Dossiê de alteração</p><p className="mt-1 text-sm font-medium text-[#d8d2c7]">{reviewPatch.patch?.operations[0] ? PATCH_OPERATION_LABELS[reviewPatch.patch.operations[0].op] : reviewPatch.status === 'ambiguous' ? 'Decisão necessária' : 'Aplicação bloqueada'}</p></div>
+                      <span className={`border px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.14em] ${reviewPatch.status === 'ready' ? 'border-[#bd8f29]/40 text-[#d9aa3d]' : reviewPatch.status === 'applied' ? 'border-[#4e9568]/40 text-[#6db886]' : 'border-[#b05d56]/35 text-[#c87870]'}`}>{reviewPatch.status === 'ready' ? 'pronto para confirmar' : reviewPatch.status === 'ambiguous' ? 'ambíguo' : reviewPatch.status === 'budget-blocked' ? 'budget excedido' : reviewPatch.status === 'applied' ? 'versão criada' : 'proibido'}</span>
+                    </div>
+                    <div className="grid gap-px bg-white/[0.06] sm:grid-cols-4">
+                      {reviewPatch.gates.map((gate) => <div className={`bg-[#090909] px-3 py-3 shadow-[inset_2px_0_0_var(--gate-color)] ${gate.passed ? '[--gate-color:#4e9568]' : '[--gate-color:#b05d56]'}`} key={gate.gate}><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${gate.passed ? 'bg-[#63ba84]' : 'bg-[#d36e65]'}`} /><p className="text-[8px] uppercase tracking-[0.13em] text-[#777168]">{PATCH_GATE_LABELS[gate.gate]}</p></div><p className="mt-2 text-[9px] leading-4 text-[#8d877d]">{gate.message}</p></div>)}
+                    </div>
+                    {reviewPatch.status === 'ambiguous' ? (
+                      <div className="px-4 py-4"><p className="text-[10px] leading-5 text-[#8d877d]">A instrução admite leituras diferentes. Escolha o efeito pretendido; os quatro gates serão executados novamente.</p><div className="mt-3 flex flex-wrap gap-2">{reviewPatch.choices.map((candidate) => <button className="border border-white/[0.1] px-3 py-2 text-[9px] text-[#bcb5aa] hover:border-[#a8802f]/60 hover:text-[#e0b852]" data-testid={`review-patch-choice-${candidate.choiceId}`} key={candidate.choiceId ?? `${candidate.op}:${candidate.targetId}`} onClick={() => void proposeReviewPatch(reviewPatch.annotationId, candidate.choiceId)} type="button">{PATCH_OPERATION_LABELS[candidate.op]} · {candidate.targetId}</button>)}</div></div>
+                    ) : null}
+                    {reviewPatch.impact ? (
+                      <div className="grid border-t border-white/[0.07] sm:grid-cols-[1fr_auto]">
+                        <div className="px-4 py-4"><div className="flex flex-wrap gap-x-5 gap-y-2 text-[9px]"><span className="text-[#777168]">Custo <strong className="ml-1 font-mono font-medium text-[#c7c0b5]">{reviewPatch.impact.cost}¢</strong></span><span className="text-[#777168]">Ranges <strong className="ml-1 font-mono font-medium text-[#c7c0b5]">{reviewPatch.impact.invalidatedRanges.length}</strong></span><span className="text-[#777168]">Invalida <strong className="ml-1 font-medium text-[#c7c0b5]">{reviewPatch.impact.invalidatedArtifacts.join(' + ')}</strong></span><span className="text-[#777168]">Delta esperado <strong className="ml-1 font-mono font-medium text-[#6db886]">+{reviewPatch.impact.expectedScoreDelta}</strong></span></div><p className="mt-3 truncate font-mono text-[9px] text-[#6b665e]">{reviewPatch.impact.changedTargets.join(', ')}</p></div>
+                        {reviewPatch.status === 'ready' ? <div className="flex items-center border-t border-white/[0.07] px-4 py-3 sm:border-l sm:border-t-0"><button className="bg-[#dbae3f] px-4 py-2.5 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-patch-apply" disabled={reviewPatchApplying} onClick={() => void applyReviewPatch()} type="button">{reviewPatchApplying ? 'Criando versão…' : 'Confirmar e criar versão'}</button></div> : null}
+                      </div>
+                    ) : null}
+                    {reviewPatch.status === 'applied' && reviewPatch.comparison ? <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#4e9568]/20 bg-[#4e9568]/[0.04] px-4 py-3" data-testid="review-patch-comparison"><p className="text-[9px] text-[#7ca88b]">Versão imutável criada · <span className="font-mono">{reviewPatch.comparison.beforeVersionId.slice(-8)} → {reviewPatch.comparison.afterVersionId.slice(-8)}</span></p><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f9a7c]">Render {reviewPatch.render?.status ?? 'queued'}</span></div> : null}
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}

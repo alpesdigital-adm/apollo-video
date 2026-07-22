@@ -68,6 +68,12 @@ const coverage = Object.freeze({
   'apollo.projects.annotations.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the current ProjectVersion, proxy artifact and proxy hash',
   },
+  'apollo.projects.review-patches.propose': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds the annotation and its immutable base ProjectVersion',
+  },
+  'apollo.projects.review-patches.apply': {
+    mode: 'idempotent-create', evidence: 'persisted proposal binds the immutable base and one transactional result version; request key replays it',
+  },
   'apollo.projects.commands.apply': {
     mode: 'base-version-bound-action', evidence: 'request binds immutable baseVersionId and baseHash before transactional mutation',
   },
@@ -180,7 +186,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 4,
-    'idempotent-create': 12,
+    'idempotent-create': 14,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,

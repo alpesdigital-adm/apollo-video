@@ -153,6 +153,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       await assertRights()
       const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
+      const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       await enter('rendering')
       const rendered = await dependencies.renderer.render({
         operationId: operation.id,
@@ -164,6 +165,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         outputSpec: context.outputSpec,
         subtitleCues,
         transitions,
+        ...(composition ? { composition } : {}),
         signal: abortController.signal,
       })
       await enter('verifying')
