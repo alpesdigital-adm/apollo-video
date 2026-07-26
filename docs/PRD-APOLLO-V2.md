@@ -1223,7 +1223,48 @@ Os fluxos principais devem funcionar por mouse e teclado: clique seleciona, drag
 
 ### FR-217 — Compare
 
-Antes/depois, diff e restore.
+O editor deve comparar duas `ProjectVersion` imutáveis do mesmo projeto sem reconstruir estado por heurística e sem alterar nenhuma delas. A comparação parte dos respectivos snapshots de `EditPlan v2`, calcula duração em tempo editorial, identidade de mapping de sincronização, score, issues e diff semântico limitado. A experiência principal não apresenta JSON bruto.
+
+Modos visuais obrigatórios:
+
+- **toggle:** alterna A/B preservando a posição de revisão;
+- **split:** apresenta os dois proxies lado a lado;
+- **overlay:** sobrepõe os proxies com opacidade controlável.
+
+O playhead só pode ser compartilhado quando ambas as versões declaram o mesmo mapping de sincronização. Na ausência ou divergência do mapping, os players permanecem independentes e a UI deve dizer isso explicitamente; o sistema não pode fingir alinhamento porque as durações são semelhantes. Versões de durações diferentes continuam comparáveis e exibem o delta exato em milissegundos.
+
+O painel deve mostrar:
+
+- IDs e sequências das versões;
+- duração antes/depois e delta;
+- score antes/depois e delta;
+- issues novas e resolvidas;
+- mudanças semânticas de timeline, source, inspector visual, composição, legendas e duração;
+- disponibilidade de proxy de cada lado.
+
+As ações são explícitas e API-first:
+
+- `accept` registra um Command `compare-action` na versão corrente e mantém o projeto em revisão;
+- `reopen` registra um Command `compare-action` e move o projeto para revisão editorial;
+- `restore` copia o snapshot escolhido para um novo `EditPlan` e uma nova `ProjectVersion` filha, registra `restoresVersionId` e enfileira um proxy.
+
+Aceitar ou reabrir exige que o lado “depois” ainda seja a versão corrente. Todas as ações exigem `baseVersionId`, `baseHash`, `expectedRevision` e `Idempotency-Key`; concorrência stale falha com `VERSION_CONFLICT`. Restore nunca reativa ou sobrescreve a linha histórica: A, B e a nova versão restaurada permanecem consultáveis.
+
+Contrato público:
+
+- `GET /v1/projects/{projectId}/version-comparisons?beforeVersionId=&afterVersionId=&mode=`;
+- `POST /v1/projects/{projectId}/version-comparisons`.
+
+Critérios de aceite:
+
+1. toggle, split e overlay usam proxies ligados às versões declaradas;
+2. mapping igual compartilha playhead; mapping ausente/divergente não compartilha;
+3. delta de duração de versões desiguais é exato;
+4. diff semântico e issues/scores aparecem antes da decisão;
+5. accept/reopen são Commands auditáveis;
+6. restore cria uma versão filha e não apaga nenhuma versão;
+7. UI e API chamam os mesmos application services;
+8. E2E cobre PostgreSQL, API HTTP e navegador real com versões de durações diferentes.
 
 ### FR-218 — Mask future
 

@@ -327,11 +327,25 @@ Cards mostram status real, percentuais baseados em steps/items, quality, outputs
 
 ## 25. Versões e compare
 
-- Compare split/overlay/toggle.
-- Sincronizar playhead entre versões quando timelines compatíveis.
-- Mostrar diff semântico ao lado.
-- Restore cria nova versão.
-- Version stale banner aparece se outro command foi aplicado.
+- O operador escolhe explicitamente “antes” e “depois” entre as versões imutáveis do projeto.
+- `toggle` alterna o proxy A/B; `split` mostra dois players; `overlay` empilha os proxies e oferece controle de opacidade.
+- Cada player é carregado pelo endpoint de revisão com `projectVersionId`; proxy ausente aparece como indisponível e nunca é substituído silenciosamente pelo atual.
+- Playhead compartilhado só é ativado quando a comparação retorna `synchronized=true` por mapping ID igual. Mapping ausente ou divergente mantém players independentes e exibe o estado textual.
+- Cards mostram delta de duração e score, issues resolvidas/adicionadas e diff semântico por categoria/target.
+- `accept`, `reopen` e `restore` ficam desabilitados se “depois” não for mais a versão corrente.
+- Accept/reopen persistem um Command; restore cria nova versão filha e novo proxy. As duas versões comparadas permanecem no rail.
+- Version stale recarrega base/hash/revision e exige uma nova comparação; nunca existe overwrite silencioso.
+
+### 25.1 Contrato de interação executável
+
+1. Selecionar A e B.
+2. Selecionar toggle, split ou overlay.
+3. `GET .../version-comparisons` devolve métricas/diff e informa se o playhead pode ser compartilhado.
+4. A UI busca separadamente os proxies version-bound.
+5. A ação escolhida envia `POST .../version-comparisons` com base/hash/revision e idempotency key.
+6. Accept/reopen atualizam o status auditavelmente; restore adiciona uma versão e atualiza timeline/review.
+
+O E2E mínimo usa versões com dois segundos de diferença, mapping incompatível, valida os três modos pela API e executa compare/restore em navegador real. O teste também comprova que A e B ainda existem após a versão restaurada.
 
 ## 26. Conflict UX
 

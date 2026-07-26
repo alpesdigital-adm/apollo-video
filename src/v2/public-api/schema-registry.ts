@@ -89,6 +89,60 @@ const manualTimelineSchema = {
     },
   },
 }
+const versionComparisonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'before', 'after', 'mode', 'synchronized', 'playheadMapping', 'durationDeltaMs',
+    'scoreDelta', 'issuesAdded', 'issuesResolved', 'semanticChanges', 'actions',
+    'versionsPreserved',
+  ],
+  properties: {
+    before: {
+      type: 'object', additionalProperties: false,
+      required: ['id', 'durationMs', 'score', 'issues'],
+      properties: {
+        id: idSchema, durationMs: { type: 'integer', minimum: 0 },
+        mappingId: idSchema, score: { type: 'number' },
+        issues: { type: 'array', maxItems: 1000, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 500 } },
+      },
+    },
+    after: {
+      type: 'object', additionalProperties: false,
+      required: ['id', 'durationMs', 'score', 'issues'],
+      properties: {
+        id: idSchema, durationMs: { type: 'integer', minimum: 0 },
+        mappingId: idSchema, score: { type: 'number' },
+        issues: { type: 'array', maxItems: 1000, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 500 } },
+      },
+    },
+    mode: { enum: ['toggle', 'split', 'overlay'] },
+    synchronized: { type: 'boolean' },
+    playheadMapping: { enum: ['shared', 'independent'] },
+    durationDeltaMs: { type: 'integer' },
+    scoreDelta: { type: 'number' },
+    issuesAdded: { type: 'array', maxItems: 1000, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 500 } },
+    issuesResolved: { type: 'array', maxItems: 1000, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 500 } },
+    semanticChanges: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['category', 'target', 'summary'],
+        properties: {
+          category: { enum: ['timeline', 'source', 'visual', 'composition', 'subtitle', 'duration'] },
+          target: idSchema,
+          summary: { type: 'string', minLength: 1, maxLength: 500 },
+        },
+      },
+    },
+    actions: {
+      type: 'array', minItems: 3, maxItems: 3,
+      prefixItems: [{ const: 'accept' }, { const: 'reopen' }, { const: 'restore' }],
+      items: false,
+    },
+    versionsPreserved: { const: true },
+  },
+}
 const apiMetaSchema = {
   type: 'object',
   additionalProperties: false,
@@ -3677,7 +3731,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               parentVersionId: idSchema,
               commandId: idSchema,
               commandType: { type: 'string', minLength: 1, maxLength: 80 },
-              action: { enum: ['apply', 'undo', 'redo'] },
+              action: { enum: ['apply', 'undo', 'redo', 'restore'] },
               restoresVersionId: idSchema,
               createdAt: dateTimeSchema,
             },
@@ -3686,14 +3740,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
-  defineSchema('apply-project-manual-edit-request', 1, 'Apply, undo or redo a scoped manual edit', {
+  defineSchema('apply-project-manual-edit-request', 1, 'Apply, undo, redo or restore a scoped manual edit', {
     type: 'object',
     additionalProperties: false,
     required: [
       'action', 'baseVersionId', 'baseHash', 'expectedRevision', 'variantId', 'targetId',
     ],
     properties: {
-      action: { enum: ['apply', 'undo', 'redo'] },
+      action: { enum: ['apply', 'undo', 'redo', 'restore'] },
       baseVersionId: idSchema,
       baseHash: sha256Schema,
       expectedRevision: { type: 'integer', minimum: 1 },
@@ -3715,7 +3769,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       {
         required: ['targetVersionId'],
         properties: {
-          action: { enum: ['undo', 'redo'] },
+          action: { enum: ['undo', 'redo', 'restore'] },
           operation: false,
           targetVersionId: {},
         },
@@ -3735,7 +3789,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             'scope', 'payload', 'createdAt',
           ],
           properties: {
-            id: idSchema, type: { const: 'manual-edit' }, action: { enum: ['apply', 'undo', 'redo'] },
+            id: idSchema, type: { const: 'manual-edit' }, action: { enum: ['apply', 'undo', 'redo', 'restore'] },
             baseVersionId: idSchema, resultVersionId: idSchema,
             scope: { type: 'object' }, payload: { type: 'object' }, createdAt: dateTimeSchema,
           },
@@ -3764,12 +3818,139 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           properties: {
             beforeVersionId: idSchema, afterVersionId: idSchema,
             beforeEditPlanHash: sha256Schema, afterEditPlanHash: sha256Schema,
-            action: { enum: ['apply', 'undo', 'redo'] }, targetId: idSchema,
+            action: { enum: ['apply', 'undo', 'redo', 'restore'] }, targetId: idSchema,
           },
         },
         operation: publicOperationSchemaV3,
         replayed: { type: 'boolean' },
       },
+    }),
+  ),
+  defineSchema('project-version-comparison', 1, 'Semantic and visual comparison of two immutable project versions',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['current', 'versions', 'comparison'],
+      properties: {
+        current: {
+          type: 'object', additionalProperties: false,
+          required: ['versionId', 'baseHash', 'revision'],
+          properties: {
+            versionId: idSchema, baseHash: sha256Schema,
+            revision: { type: 'integer', minimum: 1 },
+          },
+        },
+        versions: {
+          type: 'object', additionalProperties: false,
+          required: ['before', 'after'],
+          properties: {
+            before: {
+              type: 'object', additionalProperties: false,
+              required: ['id', 'sequence', 'editPlanHash'],
+              properties: {
+                id: idSchema, sequence: { type: 'integer', minimum: 1 },
+                editPlanHash: sha256Schema,
+              },
+            },
+            after: {
+              type: 'object', additionalProperties: false,
+              required: ['id', 'sequence', 'editPlanHash'],
+              properties: {
+                id: idSchema, sequence: { type: 'integer', minimum: 1 },
+                editPlanHash: sha256Schema,
+              },
+            },
+          },
+        },
+        comparison: versionComparisonSchema,
+      },
+    }),
+  ),
+  defineSchema('project-version-comparison-action-request', 1, 'Accept, reopen or restore a version comparison', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'action', 'beforeVersionId', 'afterVersionId', 'mode', 'baseVersionId',
+      'baseHash', 'expectedRevision', 'variantId',
+    ],
+    properties: {
+      action: { enum: ['accept', 'reopen', 'restore'] },
+      beforeVersionId: idSchema,
+      afterVersionId: idSchema,
+      mode: { enum: ['toggle', 'split', 'overlay'] },
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      expectedRevision: { type: 'integer', minimum: 1 },
+      variantId: idSchema,
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  }),
+  defineSchema('project-version-comparison-action-result', 1, 'Audited version comparison action result',
+    successSchema({
+      oneOf: [
+        {
+          type: 'object', additionalProperties: false,
+          required: [
+            'action', 'command', 'projectStatus', 'comparison',
+            'versionsPreserved', 'replayed',
+          ],
+          properties: {
+            action: { enum: ['accept', 'reopen'] },
+            command: {
+              type: 'object', additionalProperties: false,
+              required: ['id', 'type', 'baseVersionId', 'scope', 'payload', 'createdAt'],
+              properties: {
+                id: idSchema, type: { const: 'compare-action' }, baseVersionId: idSchema,
+                scope: { type: 'object' }, payload: { type: 'object' }, createdAt: dateTimeSchema,
+              },
+            },
+            projectStatus: { enum: ['reviewing-proxy', 'revising'] },
+            comparison: versionComparisonSchema,
+            versionsPreserved: { const: true },
+            replayed: { type: 'boolean' },
+          },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: [
+            'action', 'command', 'version', 'timeline', 'comparison',
+            'versionsPreserved', 'operation', 'replayed',
+          ],
+          properties: {
+            action: { const: 'restore' },
+            command: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'id', 'type', 'baseVersionId', 'resultVersionId',
+                'scope', 'payload', 'createdAt',
+              ],
+              properties: {
+                id: idSchema, type: { const: 'manual-edit' },
+                baseVersionId: idSchema, resultVersionId: idSchema,
+                scope: { type: 'object' }, payload: { type: 'object' }, createdAt: dateTimeSchema,
+              },
+            },
+            version: {
+              type: 'object', additionalProperties: false,
+              required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'],
+              properties: {
+                id: idSchema, sequence: { type: 'integer', minimum: 2 },
+                parentVersionId: idSchema, baseHash: sha256Schema,
+                snapshotRefs: {
+                  type: 'object', required: ['brief', 'editPlan', 'policies'],
+                  properties: { brief: idSchema, editPlan: idSchema, policies: idSchema },
+                },
+                createdAt: dateTimeSchema,
+              },
+            },
+            timeline: manualTimelineSchema,
+            comparison: versionComparisonSchema,
+            versionsPreserved: { const: true },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+      ],
     }),
   ),
   defineSchema('project-proxy-render-operation-accepted', 1, 'Accepted project proxy render operation',

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { stableSerialize } from './canonical-hash.ts'
 import { assertDomain, DomainError } from './errors.ts'
 
 export interface ManualInspectorPatch {
@@ -45,7 +46,7 @@ export interface ManualEditCommand {
   createdBy: string
 }
 
-export type ManualVersionAction = 'apply' | 'undo' | 'redo'
+export type ManualVersionAction = 'apply' | 'undo' | 'redo' | 'restore'
 
 export interface PersistedManualEditPayload {
   schemaVersion: 1
@@ -462,7 +463,7 @@ export function materializeManualEditPlan(input: {
 
 export function materializeManualRestorePlan(input: {
   targetEditPlan: Readonly<Record<string, unknown>>
-  action: 'undo' | 'redo'
+  action: 'undo' | 'redo' | 'restore'
   targetVersionId: string
   newVersionId: string
   createdAt: string
@@ -526,10 +527,178 @@ export interface VersionComparison {
   semanticChanges: readonly { category: string; target: string; summary: string }[]
 }
 
+export type VersionCompareMode = 'toggle' | 'split' | 'overlay'
+export type VersionCompareAction = 'accept' | 'reopen' | 'restore'
+
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+function comparisonIssues(plan: Record<string, unknown>): readonly string[] {
+  const quality = optionalRecord(plan.quality) ?? optionalRecord(plan.qualityReport)
+  const critic = optionalRecord(plan.critic)
+  const raw = Array.isArray(quality?.issues)
+    ? quality.issues
+    : Array.isArray(critic?.issues)
+      ? critic.issues
+      : []
+  return Object.freeze([...new Set(raw.map((item) => {
+    if (typeof item === 'string') return item.trim()
+    const record = optionalRecord(item)
+    return typeof record?.code === 'string'
+      ? record.code.trim()
+      : typeof record?.message === 'string'
+        ? record.message.trim()
+        : ''
+  }).filter((item) => item.length > 0))].toSorted())
+}
+
+function comparisonScore(plan: Record<string, unknown>): number {
+  const quality = optionalRecord(plan.quality) ?? optionalRecord(plan.qualityReport)
+  const director = optionalRecord(plan.director)
+  const candidates = [quality?.score, director?.qualityScore, plan.qualityScore]
+  const score = candidates.find((value) => typeof value === 'number' && Number.isFinite(value))
+  return typeof score === 'number' ? score : 0
+}
+
+function comparisonMappingId(plan: Record<string, unknown>): string | undefined {
+  const sync = optionalRecord(plan.sync) ?? optionalRecord(plan.synchronization)
+  const director = optionalRecord(plan.director)
+  const value = [plan.mappingId, plan.syncMappingId, sync?.mappingId, director?.syncMappingId]
+    .find((candidate) => typeof candidate === 'string' && candidate.trim().length > 0)
+  return typeof value === 'string' ? value.trim() : undefined
+}
+
+function comparisonDurationMs(plan: Record<string, unknown>): number {
+  const fps = Number(plan.fps)
+  const durationFrames = Number(plan.durationFrames)
+  assertDomain(
+    Number.isFinite(fps) && fps > 0 &&
+      Number.isSafeInteger(durationFrames) && durationFrames >= 0,
+    'PERSISTENCE_CONFLICT',
+    'Compared EditPlan duration is invalid',
+  )
+  return Math.round(durationFrames / fps * 1000)
+}
+
+function comparisonClips(plan: Record<string, unknown>): Map<string, Record<string, unknown>> {
+  const tracks = Array.isArray(plan.videoTracks) ? plan.videoTracks : []
+  const entries: [string, Record<string, unknown>][] = []
+  for (const rawTrack of tracks) {
+    const track = optionalRecord(rawTrack)
+    if (!track || !Array.isArray(track.clips)) continue
+    for (const rawClip of track.clips) {
+      const clip = optionalRecord(rawClip)
+      if (clip && typeof clip.id === 'string') entries.push([clip.id, clip])
+    }
+  }
+  return new Map(entries)
+}
+
+function semanticChangesBetweenPlans(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): readonly { category: string; target: string; summary: string }[] {
+  const changes: { category: string; target: string; summary: string }[] = []
+  const beforeClips = comparisonClips(before)
+  const afterClips = comparisonClips(after)
+  for (const id of [...new Set([...beforeClips.keys(), ...afterClips.keys()])].toSorted()) {
+    const left = beforeClips.get(id)
+    const right = afterClips.get(id)
+    if (!left) {
+      changes.push({ category: 'timeline', target: id, summary: 'Clip added.' })
+      continue
+    }
+    if (!right) {
+      changes.push({ category: 'timeline', target: id, summary: 'Clip removed.' })
+      continue
+    }
+    if (left.sourceArtifactId !== right.sourceArtifactId) {
+      changes.push({ category: 'source', target: id, summary: 'Source asset changed.' })
+    }
+    const timingFields = ['sourceInFrame', 'sourceOutFrame', 'timelineInFrame', 'timelineOutFrame']
+    if (timingFields.some((field) => left[field] !== right[field])) {
+      changes.push({ category: 'timeline', target: id, summary: 'Clip timing changed.' })
+    }
+    if (stableSerialize(left.manualInspector ?? null) !== stableSerialize(right.manualInspector ?? null)) {
+      changes.push({ category: 'visual', target: id, summary: 'Inspector settings changed.' })
+    }
+  }
+  if (stableSerialize(before.composition ?? null) !== stableSerialize(after.composition ?? null)) {
+    changes.push({ category: 'composition', target: 'project-composition', summary: 'Composition changed.' })
+  }
+  if (stableSerialize(before.subtitleTracks ?? []) !== stableSerialize(after.subtitleTracks ?? [])) {
+    changes.push({ category: 'subtitle', target: 'subtitle-tracks', summary: 'Subtitle content or style changed.' })
+  }
+  if (comparisonDurationMs(before) !== comparisonDurationMs(after)) {
+    changes.push({ category: 'duration', target: 'project-timeline', summary: 'Total duration changed.' })
+  }
+  return Object.freeze(changes.slice(0, 100).map((change) => Object.freeze(change)))
+}
+
+export function versionComparisonFromEditPlans(input: {
+  before: { id: string; editPlan: Readonly<Record<string, unknown>> }
+  after: { id: string; editPlan: Readonly<Record<string, unknown>> }
+  mode: VersionCompareMode
+}) {
+  assertDomain(
+    ['toggle', 'split', 'overlay'].includes(input.mode),
+    'INVALID_ARGUMENT',
+    'Version compare mode is invalid',
+  )
+  assertDomain(
+    input.before.id !== input.after.id,
+    'INVALID_ARGUMENT',
+    'Version comparison requires two different versions',
+  )
+  for (const [side, record] of Object.entries({
+    before: input.before,
+    after: input.after,
+  })) {
+    assertDomain(
+      /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(record.id) &&
+        record.editPlan.schemaVersion === 2 &&
+        record.editPlan.state === 'compiled',
+      'INVALID_ARGUMENT',
+      `${side} comparison version is invalid`,
+    )
+  }
+  const before = {
+    id: input.before.id,
+    durationMs: comparisonDurationMs(input.before.editPlan),
+    ...(comparisonMappingId(input.before.editPlan)
+      ? { mappingId: comparisonMappingId(input.before.editPlan)! }
+      : {}),
+    score: comparisonScore(input.before.editPlan),
+    issues: comparisonIssues(input.before.editPlan),
+  }
+  const after = {
+    id: input.after.id,
+    durationMs: comparisonDurationMs(input.after.editPlan),
+    ...(comparisonMappingId(input.after.editPlan)
+      ? { mappingId: comparisonMappingId(input.after.editPlan)! }
+      : {}),
+    score: comparisonScore(input.after.editPlan),
+    issues: comparisonIssues(input.after.editPlan),
+  }
+  return Object.freeze({
+    before: Object.freeze(before),
+    after: Object.freeze(after),
+    ...compareVersions({
+      before,
+      after,
+      semanticChanges: semanticChangesBetweenPlans(input.before.editPlan, input.after.editPlan),
+    }, input.mode),
+  })
+}
+
 export function compareVersions(
   input: VersionComparison,
-  mode: 'toggle' | 'split' | 'overlay',
+  mode: VersionCompareMode,
 ) {
+  assertDomain(['toggle', 'split', 'overlay'].includes(mode), 'INVALID_ARGUMENT', 'Version compare mode is invalid')
   const synchronized = Boolean(
     input.before.mappingId && input.before.mappingId === input.after.mappingId,
   )

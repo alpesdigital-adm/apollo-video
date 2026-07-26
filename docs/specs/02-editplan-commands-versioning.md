@@ -499,11 +499,32 @@ A aplicação exige `confirmed: true`, `Idempotency-Key` e aprovação humana pa
 
 - `action=apply` com uma operação fechada `trim`, `split`, `move`, `replace` ou `inspect`;
 - `action=undo` com o pai direto como `targetVersionId`;
-- `action=redo` com uma versão compilada do mesmo projeto como `targetVersionId`.
+- `action=redo` com uma versão compilada do mesmo projeto como `targetVersionId`;
+- `action=restore` quando o compare escolhe um snapshot histórico para criar uma nova versão corrente.
 
 O envelope exige `baseVersionId`, `baseHash`, `expectedRevision`, `variantId`, `targetId` e `Idempotency-Key`. `scope.clipIds` registra o target e `scope.outputSpecIds` registra a variante. Uma transação serializável cria Command `manual-edit`, novo snapshot, versão filha, compare e outbox; o `currentVersionId` avança por compare-and-swap. Falha ou corrida não deixa versão, snapshot, Command ou evento parcial.
 
 Undo/redo clonam o conteúdo do snapshot escolhido, atribuem nova identidade de EditPlan/ProjectVersion e registram `restoresVersionId`. A versão restaurada nunca se torna mutável e nenhuma linha histórica é removida. Após commit, a mesma rota enfileira um proxy durável preso à nova versão.
+
+### 22.7 Compare version-bound
+
+`GET /v1/projects/{projectId}/version-comparisons` exige `beforeVersionId`, `afterVersionId` e `mode=toggle|split|overlay`. As duas versões são resolvidas no mesmo workspace/projeto e seus snapshots de `EditPlan v2` são comparados. O resultado inclui:
+
+- duração antes/depois e delta em milissegundos;
+- `mappingId` e `playheadMapping=shared|independent`;
+- score antes/depois e delta;
+- issues adicionadas/resolvidas;
+- mudanças semânticas limitadas de timeline, source, inspector, composição, legendas e duração;
+- `versionsPreserved=true`.
+
+Um mapping só é `shared` quando ambos os snapshots possuem a mesma identidade explícita. Duração semelhante, clip ID semelhante ou ausência de mapping não autoriza sincronismo inferido.
+
+`POST /v1/projects/{projectId}/version-comparisons` aceita `accept`, `reopen` e `restore`. O envelope inclui as duas versões, modo, `baseVersionId`, `baseHash`, `expectedRevision`, `variantId` e `Idempotency-Key`.
+
+- `accept` e `reopen` exigem que `afterVersionId` seja a versão corrente; uma transação serializável cria Command `compare-action`, altera apenas o status do projeto por compare-and-swap e grava `project.status.changed` na outbox;
+- `restore` executa o mesmo handler `manual-edit` com `action=restore`, cria snapshot e ProjectVersion filha, mantém A/B intactas e enfileira proxy durável;
+- replay da mesma chave/fingerprint devolve o mesmo Command/versão;
+- chave reutilizada com outro payload ou base stale falha sem escrita parcial.
 
 ## 23. Dependency graph
 

@@ -364,6 +364,7 @@ Padrão não prescreve implementação interna, mas fixa capacidades:
 /v1/projects/{projectId}/commands
 /v1/projects/{projectId}/timeline
 /v1/projects/{projectId}/manual-edits
+/v1/projects/{projectId}/version-comparisons
 /v1/projects/{projectId}/annotations
 /v1/projects/{projectId}/patch-proposals
 /v1/projects/{projectId}/patch-proposals/{proposalId}
@@ -391,6 +392,8 @@ Ações complexas usam verbos explícitos (`:preflight`, `:approve`, `:render`, 
 `POST .../patch-proposals` é o preflight persistido do ajuste: aceita uma annotation e, quando necessário, uma escolha de interpretação. `GET .../{proposalId}` expõe gates, impacto, comparação e operação de render. `POST .../{proposalId}/apply` exige `confirmed: true`, escopo de escrita e `Idempotency-Key`; agentes devem solicitar aprovação do host antes dessa chamada. Os três recursos também constam no catálogo de capabilities, schemas, exemplos e OpenAPI públicos.
 
 `POST .../patch-batches` recebe de duas a cem `proposalIds` prontos e o modo opcional `all-or-nothing` ou `partial-retry`; omissão sempre significa aplicação atômica. `GET .../{batchId}` expõe patch compilado, impacto, conflitos simétricos e resultado por annotation. `POST .../{batchId}/apply` exige confirmação explícita, aprovação do host para agentes e idempotência; cria uma única versão ou não altera o projeto. As capabilities `apollo.projects.review-patch-batches.propose`, `.read` e `.apply` possuem schemas/exemplos/OpenAPI e usam os mesmos application services da mesa de revisão.
+
+`GET .../version-comparisons?beforeVersionId=&afterVersionId=&mode=` compara dois snapshots imutáveis e retorna duração, mapping de playhead, score, issues e diff semântico. `POST .../version-comparisons` registra `accept`/`reopen` como Command ou materializa `restore` em uma nova child version. A capability de escrita exige base version/hash/revision e idempotência; restore enfileira proxy, mas nenhuma ação apaga as versões comparadas. As capabilities `apollo.projects.version-comparisons.read` e `.act`, seus schemas, exemplos, regras de segurança de agente e OpenAPI são a fonte pública usada pela GUI.
 
 ## 15. Transferência de mídia
 

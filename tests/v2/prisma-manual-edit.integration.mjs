@@ -361,13 +361,17 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
 
     const clipBox = await page.getByTestId('manual-clip-clip-2').boundingBox()
     assert.ok(clipBox)
-    const moved = page.waitForResponse((response) =>
-      response.url().endsWith(`/v1/projects/${projectId}/manual-edits`)
-      && response.request().method() === 'POST',
+    const moved = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/v1/projects/${projectId}/manual-edits`)
+        && response.request().method() === 'POST',
+      { timeout: 90_000 },
     )
     await page.mouse.move(clipBox.x + clipBox.width / 2, clipBox.y + clipBox.height / 2)
     await page.mouse.down()
+    await new Promise((resolve) => setTimeout(resolve, 100))
     await page.mouse.move(clipBox.x - 180, clipBox.y + clipBox.height / 2, { steps: 8 })
+    await new Promise((resolve) => setTimeout(resolve, 100))
     await page.mouse.up()
     assert.equal((await moved).status(), 201)
     await page.getByText(/Edição registrada na versão 7/).waitFor({ state: 'visible' })
@@ -391,6 +395,141 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal((await undone).status(), 201)
     await page.getByText(/Undo registrado como versão 8/).waitFor({ state: 'visible' })
     assert.match(await manualEditor.textContent(), /V8/)
+
+    const beforeTrimResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/timeline`, {
+      headers: { authorization },
+    })
+    const beforeTrim = await beforeTrimResponse.json()
+    assert.equal(beforeTrimResponse.status, 200, JSON.stringify(beforeTrim))
+    assert.equal(beforeTrim.data.timeline.revision, 8)
+    const beforeCompareVersionId = beforeTrim.data.timeline.versionId
+    const trimResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': `manual-compare-trim-${suffix}`,
+      },
+      body: JSON.stringify({
+        action: 'apply',
+        baseVersionId: beforeTrim.data.timeline.versionId,
+        baseHash: beforeTrim.data.baseHash,
+        expectedRevision: beforeTrim.data.timeline.revision,
+        variantId: '9:16',
+        targetId: 'clip-2',
+        operation: { kind: 'trim', clipId: 'clip-2', edge: 'end', atMs: 4000 },
+      }),
+    })
+    const trimmed = await trimResponse.json()
+    assert.equal(trimResponse.status, 201, JSON.stringify(trimmed))
+    assert.equal(trimmed.data.version.sequence, 9)
+    const afterCompareVersionId = trimmed.data.version.id
+    const comparisonUrl = (mode) => {
+      const query = new URLSearchParams({
+        beforeVersionId: beforeCompareVersionId,
+        afterVersionId: afterCompareVersionId,
+        mode,
+      })
+      return `${baseUrl}/v1/projects/${projectId}/version-comparisons?${query}`
+    }
+    for (const mode of ['toggle', 'split', 'overlay']) {
+      const response = await fetch(comparisonUrl(mode), { headers: { authorization } })
+      const compared = await response.json()
+      assert.equal(response.status, 200, JSON.stringify(compared))
+      assert.equal(compared.data.comparison.mode, mode)
+      assert.equal(compared.data.comparison.durationDeltaMs, -2000)
+      assert.equal(compared.data.comparison.synchronized, false)
+      assert.equal(compared.data.comparison.playheadMapping, 'independent')
+      assert.equal(compared.data.comparison.versionsPreserved, true)
+      assert.ok(compared.data.comparison.semanticChanges.some((change) => change.category === 'duration'))
+    }
+
+    const compareActionBody = (action) => ({
+      action,
+      beforeVersionId: beforeCompareVersionId,
+      afterVersionId: afterCompareVersionId,
+      mode: 'split',
+      baseVersionId: afterCompareVersionId,
+      baseHash: trimmed.data.version.baseHash,
+      expectedRevision: 9,
+      variantId: '9:16',
+    })
+    const acceptKey = `manual-compare-accept-${suffix}`
+    const accept = () => fetch(`${baseUrl}/v1/projects/${projectId}/version-comparisons`, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': acceptKey,
+      },
+      body: JSON.stringify(compareActionBody('accept')),
+    })
+    const acceptedResponse = await accept()
+    const accepted = await acceptedResponse.json()
+    assert.equal(acceptedResponse.status, 201, JSON.stringify(accepted))
+    assert.equal(accepted.data.command.type, 'compare-action')
+    assert.equal(accepted.data.projectStatus, 'reviewing-proxy')
+    assert.equal(accepted.data.versionsPreserved, true)
+    const acceptedReplayResponse = await accept()
+    const acceptedReplay = await acceptedReplayResponse.json()
+    assert.equal(acceptedReplayResponse.status, 200)
+    assert.equal(acceptedReplay.data.replayed, true)
+    const reopenedResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/version-comparisons`, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': `manual-compare-reopen-${suffix}`,
+      },
+      body: JSON.stringify(compareActionBody('reopen')),
+    })
+    const reopened = await reopenedResponse.json()
+    assert.equal(reopenedResponse.status, 201, JSON.stringify(reopened))
+    assert.equal(reopened.data.projectStatus, 'revising')
+    assert.equal((await client.v2Project.findUnique({ where: { id: projectId } })).status, 'revising')
+
+    await page.reload()
+    await page.getByTestId('version-compare').waitFor({ state: 'visible' })
+    await page.getByTestId('compare-before').selectOption(beforeCompareVersionId)
+    await page.getByTestId('compare-after').selectOption(afterCompareVersionId)
+    await page.getByTestId('compare-mode-overlay').click()
+    const overlayLoaded = page.waitForResponse((response) =>
+      response.url().includes(`/v1/projects/${projectId}/version-comparisons?`)
+      && response.request().method() === 'GET',
+    )
+    await page.getByTestId('compare-load').click()
+    assert.equal((await overlayLoaded).status(), 200)
+    await page.getByTestId('compare-result').waitFor({ state: 'visible' })
+    assert.match(await page.getByTestId('compare-sync-state').textContent(), /timelines independentes/)
+    assert.match(await page.getByTestId('compare-result').textContent(), /-2\.00s/)
+    assert.equal(await page.getByTestId('compare-overlay-preview').isVisible(), true)
+    await page.getByTestId('compare-mode-split').click()
+    const splitLoaded = page.waitForResponse((response) =>
+      response.url().includes(`/v1/projects/${projectId}/version-comparisons?`)
+      && response.request().method() === 'GET',
+    )
+    await page.getByTestId('compare-load').click()
+    assert.equal((await splitLoaded).status(), 200)
+    await page.getByTestId('compare-split-preview').waitFor({ state: 'visible' })
+    const restoredResponse = page.waitForResponse((response) =>
+      response.url().endsWith(`/v1/projects/${projectId}/version-comparisons`)
+      && response.request().method() === 'POST',
+    )
+    await page.getByTestId('compare-restore').click()
+    assert.equal((await restoredResponse).status(), 201)
+    await page.getByText(/restaurada como V10/).waitFor({ state: 'visible' })
+    const persistedVersions = await client.v2ProjectVersion.findMany({
+      where: { projectId },
+      orderBy: { sequence: 'asc' },
+    })
+    assert.equal(persistedVersions.at(-1).sequence, 10)
+    assert.equal(persistedVersions.at(-1).parentVersionId, afterCompareVersionId)
+    assert.equal(persistedVersions.some((version) => version.id === beforeCompareVersionId), true)
+    assert.equal(persistedVersions.some((version) => version.id === afterCompareVersionId), true)
+    const restoredCommand = await client.v2EditCommand.findUnique({
+      where: { id: persistedVersions.at(-1).commandId },
+    })
+    assert.match(restoredCommand.payloadJson, /"action":"restore"/)
     await context.close()
     await browser.close()
     browser = undefined

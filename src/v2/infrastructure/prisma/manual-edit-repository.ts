@@ -86,7 +86,7 @@ function hydrateStoredCommand(
   ) as unknown as PersistedManualEditPayload
   if (
     payload.schemaVersion !== 1 ||
-    !['apply', 'undo', 'redo'].includes(payload.action) ||
+    !['apply', 'undo', 'redo', 'restore'].includes(payload.action) ||
     !Number.isInteger(payload.expectedRevision)
   ) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored manual command payload is inconsistent')
@@ -207,12 +207,12 @@ export class PrismaManualEditRepository implements ManualEditRepository {
       : undefined
     if (input.targetVersionId && !targetRow) return null
     const history = project.versions.map((row) => {
-      let action: 'apply' | 'undo' | 'redo' | undefined
+      let action: 'apply' | 'undo' | 'redo' | 'restore' | undefined
       let restoresVersionId: string | undefined
       if (row.command?.type === 'manual-edit') {
         const payload = parseRecord(row.command.payloadJson, 'manual history payload')
-        if (['apply', 'undo', 'redo'].includes(String(payload.action))) {
-          action = payload.action as 'apply' | 'undo' | 'redo'
+        if (['apply', 'undo', 'redo', 'restore'].includes(String(payload.action))) {
+          action = payload.action as 'apply' | 'undo' | 'redo' | 'restore'
         }
         if (typeof payload.restoresVersionId === 'string') {
           restoresVersionId = payload.restoresVersionId

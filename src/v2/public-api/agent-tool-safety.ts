@@ -163,6 +163,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version from an exact revision and queues its exact proxy render.',
     },
+    'apollo.projects.version-comparisons.act': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Records one reversible version comparison decision or restores a prior snapshot as a new immutable child version.',
+    },
     'apollo.projects.annotations.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one version-bound review note without mutating the project or starting a provider job.',

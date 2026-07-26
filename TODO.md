@@ -942,11 +942,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.046 — Compare [FR-217]
 
-- [ ] Implementar before/after por toggle, split ou overlay. Evidência F1-046: compare suporta três modos.
-- [ ] Sincronizar playhead quando mappings forem compatíveis. Evidência F1-046: mapping ID compartilhado habilita playhead único.
-- [ ] Exibir diff semântico e scores/issues antes/depois. Evidência F1-046: resultado inclui deltas e issues added/resolved.
-- [ ] Permitir aceitar, reabrir ou restaurar sem apagar versões. Evidência F1-046: ações são explícitas e versionsPreserved permanece true.
-- [ ] Criar E2E com versões de durações diferentes. Evidência F1-046/T-FR-217: fixture mede delta de 2s e mapping incompatível.
+- [x] Implementar before/after por toggle, split ou overlay. Evidência F1-046: o workspace oferece seletor imutável A/B e os modos `toggle`, `split` e `overlay` sobre proxies vinculados a cada ProjectVersion; o modo overlay inclui opacidade regulável e todos os modos usam `GET /v1/projects/{projectId}/version-comparisons`.
+- [x] Sincronizar playhead quando mappings forem compatíveis. Evidência F1-046: o comparador calcula compatibilidade pelo mapping ID explícito e duração; somente `synchronized` espelha play/pause/seek entre players, enquanto versões incompatíveis recebem o estado `independent` e nunca forçam tempos equivalentes.
+- [x] Exibir diff semântico e scores/issues antes/depois. Evidência F1-046: o domínio calcula mudanças limitadas de clips, fontes, ranges, inspector, composição, legendas e duração, além de score delta e issues adicionadas/resolvidas; schemas, exemplos, capabilities e OpenAPI públicos foram validados no mesmo build.
+- [x] Permitir aceitar, reabrir ou restaurar sem apagar versões. Evidência F1-046: `POST /v1/projects/{projectId}/version-comparisons` persiste Commands `compare-action` para aceitar/reabrir e cria uma nova child version auditável para restaurar; base/hash/revision, transação serializable, idempotência e `versionsPreserved=true` impedem sobrescrita do histórico.
+- [x] Criar E2E com versões de durações diferentes. Evidência F1-046/T-FR-217: Chromium real e API pública compararam V8 de 6s com V9 de 4s nos três modos, confirmaram delta de −2s e mapping incompatível, aceitaram, reabriram e restauraram em V10 preservando V8/V9 sobre PostgreSQL 16 vazio com 48 migrations; regressão completa 472/472, typecheck, 80 capabilities/137 schemas/163 exemplos/70 paths, arquitetura V2-only, linguagem, schema e build aprovados.
 
 ### F1.047 — Proxy first [FR-230]
 

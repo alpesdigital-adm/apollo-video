@@ -22,7 +22,7 @@ export interface ManualEditContext extends ManualEditVersionRecord {
     parentVersionId?: string
     commandId?: string
     commandType?: string
-    action?: 'apply' | 'undo' | 'redo'
+    action?: 'apply' | 'undo' | 'redo' | 'restore'
     restoresVersionId?: string
     createdAt: string
   }>[]
@@ -38,7 +38,7 @@ export interface ManualEditResult {
     afterVersionId: string
     beforeEditPlanHash: string
     afterEditPlanHash: string
-    action: 'apply' | 'undo' | 'redo'
+    action: 'apply' | 'undo' | 'redo' | 'restore'
     targetId: string
   }>
   replayed: boolean

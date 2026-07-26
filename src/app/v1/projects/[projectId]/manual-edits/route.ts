@@ -136,7 +136,7 @@ export async function POST(
       'targetId', 'operation', 'targetVersionId', 'reason',
     ]) as ManualEditBody
     if (
-      !['apply', 'undo', 'redo'].includes(String(body.action)) ||
+      !['apply', 'undo', 'redo', 'restore'].includes(String(body.action)) ||
       typeof body.baseVersionId !== 'string' ||
       typeof body.baseHash !== 'string' ||
       typeof body.expectedRevision !== 'number' ||
@@ -159,7 +159,7 @@ export async function POST(
       baseVersionId: body.baseVersionId,
       baseHash: body.baseHash,
       expectedRevision: body.expectedRevision,
-      action: body.action as 'apply' | 'undo' | 'redo',
+      action: body.action as 'apply' | 'undo' | 'redo' | 'restore',
       variantId: body.variantId,
       targetId: body.targetId,
       ...(body.operation !== undefined ? { operation: parseOperation(body.operation) } : {}),

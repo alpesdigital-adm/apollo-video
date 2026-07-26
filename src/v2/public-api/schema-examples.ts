@@ -168,6 +168,35 @@ const queuedProjectFinalExportOperationExample = {
   type: 'project-final-export',
   target: { type: 'media-artifact', id: 'artifact-final-example-1', manifestId: 'manifest-final-example-1' },
 }
+const versionComparisonExample = {
+  before: {
+    id: 'project-version-example-4',
+    durationMs: 10000,
+    mappingId: 'sync-mapping-example-1',
+    score: 0.72,
+    issues: ['SUBTITLE_FACE_OVERLAP'],
+  },
+  after: {
+    id: 'project-version-example-5',
+    durationMs: 12000,
+    mappingId: 'sync-mapping-example-1',
+    score: 0.91,
+    issues: ['PATTERN_BREAK_DENSITY'],
+  },
+  mode: 'split',
+  synchronized: true,
+  playheadMapping: 'shared',
+  durationDeltaMs: 2000,
+  scoreDelta: 0.19,
+  issuesAdded: ['PATTERN_BREAK_DENSITY'],
+  issuesResolved: ['SUBTITLE_FACE_OVERLAP'],
+  semanticChanges: [
+    { category: 'timeline', target: 'clip-example-1', summary: 'Clip timing changed.' },
+    { category: 'duration', target: 'project-timeline', summary: 'Total duration changed.' },
+  ],
+  actions: ['accept', 'reopen', 'restore'],
+  versionsPreserved: true,
+}
 const reviewPatchProposalExample = {
   id: '90000000-0000-4000-8000-000000000214',
   workspaceId,
@@ -1872,6 +1901,29 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         targetVersionId: 'project-version-example-4',
       },
     ],
+    'apollo://schemas/project-version-comparison-action-request/v1': [
+      {
+        action: 'accept',
+        beforeVersionId: 'project-version-example-4',
+        afterVersionId: 'project-version-example-5',
+        mode: 'split',
+        baseVersionId: 'project-version-example-5',
+        baseHash: 'e'.repeat(64),
+        expectedRevision: 5,
+        variantId: 'output-spec-9x16',
+        reason: 'A versão depois resolve o problema sem introduzir bloqueios.',
+      },
+      {
+        action: 'restore',
+        beforeVersionId: 'project-version-example-4',
+        afterVersionId: 'project-version-example-5',
+        mode: 'overlay',
+        baseVersionId: 'project-version-example-5',
+        baseHash: 'e'.repeat(64),
+        expectedRevision: 5,
+        variantId: 'output-spec-9x16',
+      },
+    ],
     'apollo://schemas/project-edit-command-applied/v1': [
       {
         data: {
@@ -2028,6 +2080,111 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             action: 'apply',
             targetId: 'clip-example-1',
           },
+          operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-version-comparison/v1': [
+      {
+        data: {
+          current: {
+            versionId: 'project-version-example-5',
+            baseHash: 'e'.repeat(64),
+            revision: 5,
+          },
+          versions: {
+            before: {
+              id: 'project-version-example-4',
+              sequence: 4,
+              editPlanHash: '4'.repeat(64),
+            },
+            after: {
+              id: 'project-version-example-5',
+              sequence: 5,
+              editPlanHash: '5'.repeat(64),
+            },
+          },
+          comparison: versionComparisonExample,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-version-comparison-action-result/v1': [
+      {
+        data: {
+          action: 'accept',
+          command: {
+            id: 'compare-command-example-1',
+            type: 'compare-action',
+            baseVersionId: 'project-version-example-5',
+            scope: { project: true },
+            payload: {
+              schemaVersion: 1,
+              action: 'accept',
+              expectedRevision: 5,
+              beforeVersionId: 'project-version-example-4',
+              afterVersionId: 'project-version-example-5',
+              mode: 'split',
+              comparison: versionComparisonExample,
+            },
+            createdAt,
+          },
+          projectStatus: 'reviewing-proxy',
+          comparison: versionComparisonExample,
+          versionsPreserved: true,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          action: 'restore',
+          command: {
+            id: 'manual-restore-command-example-1',
+            type: 'manual-edit',
+            baseVersionId: 'project-version-example-5',
+            resultVersionId: 'project-version-example-6',
+            scope: { project: true },
+            payload: {
+              schemaVersion: 1,
+              action: 'restore',
+              expectedRevision: 5,
+              variantId: 'output-spec-9x16',
+              targetId: 'project-edit-plan',
+              restoresVersionId: 'project-version-example-4',
+            },
+            createdAt,
+          },
+          version: {
+            id: 'project-version-example-6',
+            sequence: 6,
+            parentVersionId: 'project-version-example-5',
+            baseHash: 'f'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1',
+              editPlan: 'project-snapshot-edit-plan-6',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          timeline: {
+            versionId: 'project-version-example-6',
+            revision: 6,
+            clips: [{
+              id: 'clip-example-1',
+              sourceId: 'artifact-example-1',
+              startMs: 0,
+              endMs: 10000,
+              track: 0,
+              selected: false,
+              inspector: {},
+            }],
+            snapPointsMs: [0, 10000],
+          },
+          comparison: versionComparisonExample,
+          versionsPreserved: true,
           operation: queuedProjectProxyRenderOperationExample,
           replayed: false,
         },

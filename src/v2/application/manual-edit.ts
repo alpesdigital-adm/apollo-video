@@ -95,7 +95,7 @@ export function applyManualEditService(dependencies: {
       'expectedRevision is invalid',
     )
     assertDomain(
-      ['apply', 'undo', 'redo'].includes(request.action),
+      ['apply', 'undo', 'redo', 'restore'].includes(request.action),
       'INVALID_ARGUMENT',
       'Manual edit action is invalid',
     )
@@ -180,6 +180,13 @@ export function applyManualEditService(dependencies: {
         targetVersionId !== context.version.id,
         'INVALID_ARGUMENT',
         'Redo target must differ from the current version',
+      )
+    }
+    if (request.action === 'restore') {
+      assertDomain(
+        targetVersionId !== context.version.id,
+        'INVALID_ARGUMENT',
+        'Restore target must differ from the current version',
       )
     }
     const createdAt = dependencies.clock().toISOString()

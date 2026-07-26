@@ -89,7 +89,7 @@ interface ManualTimelineData {
   baseHash: string; editPlanHash: string;
   history: {
     id: string; sequence: number; parentVersionId?: string; commandId?: string; commandType?: string;
-    action?: 'apply' | 'undo' | 'redo'; restoresVersionId?: string; createdAt: string;
+    action?: 'apply' | 'undo' | 'redo' | 'restore'; restoresVersionId?: string; createdAt: string;
   }[];
 }
 type ManualOperation =
@@ -105,6 +105,22 @@ interface ManualEditAppliedData {
   comparison: {
     beforeVersionId: string; afterVersionId: string; beforeEditPlanHash: string; afterEditPlanHash: string;
     action: 'apply' | 'undo' | 'redo'; targetId: string;
+  };
+}
+type VersionCompareMode = 'toggle' | 'split' | 'overlay'
+interface VersionComparisonData {
+  current: { versionId: string; baseHash: string; revision: number };
+  versions: {
+    before: { id: string; sequence: number; editPlanHash: string };
+    after: { id: string; sequence: number; editPlanHash: string };
+  };
+  comparison: {
+    before: { id: string; durationMs: number; mappingId?: string; score: number; issues: string[] };
+    after: { id: string; durationMs: number; mappingId?: string; score: number; issues: string[] };
+    mode: VersionCompareMode; synchronized: boolean; playheadMapping: 'shared' | 'independent';
+    durationDeltaMs: number; scoreDelta: number; issuesAdded: string[]; issuesResolved: string[];
+    semanticChanges: { category: string; target: string; summary: string }[];
+    actions: ['accept', 'reopen', 'restore']; versionsPreserved: true;
   };
 }
 type RenderElementType = 'background' | 'presenter' | 'subtitle' | 'b-roll' | 'cta' | 'transformation'
@@ -268,6 +284,16 @@ export default function ProjectWorkspacePage() {
   const [manualSelectedClipId, setManualSelectedClipId] = useState<string | null>(null)
   const [manualBusy, setManualBusy] = useState(false)
   const [manualInspector, setManualInspector] = useState<ManualTimelineClipData['inspector']>({})
+  const compareBeforeVideo = useRef<HTMLVideoElement>(null)
+  const compareAfterVideo = useRef<HTMLVideoElement>(null)
+  const [compareBeforeVersionId, setCompareBeforeVersionId] = useState<string | null>(null)
+  const [compareAfterVersionId, setCompareAfterVersionId] = useState<string | null>(null)
+  const [compareMode, setCompareMode] = useState<VersionCompareMode>('split')
+  const [versionComparison, setVersionComparison] = useState<VersionComparisonData | null>(null)
+  const [comparePreviews, setComparePreviews] = useState<{ before?: string; after?: string }>({})
+  const [compareToggleSide, setCompareToggleSide] = useState<'before' | 'after'>('after')
+  const [compareOverlayOpacity, setCompareOverlayOpacity] = useState(0.5)
+  const [compareBusy, setCompareBusy] = useState(false)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -401,6 +427,26 @@ export default function ProjectWorkspacePage() {
   useEffect(() => {
     setManualInspector(manualSelectedClip ? { ...manualSelectedClip.inspector } : {})
   }, [manualSelectedClip])
+  useEffect(() => {
+    const timeline = manualTimeline?.timeline
+    const history = manualTimeline?.history ?? []
+    if (!timeline || history.length < 2) {
+      setCompareBeforeVersionId(null)
+      setCompareAfterVersionId(null)
+      setVersionComparison(null)
+      setComparePreviews({})
+      return
+    }
+    const ids = new Set(history.map((version) => version.id))
+    const current = history.find((version) => version.id === timeline.versionId)
+    const fallbackBefore = current?.parentVersionId
+      ?? history.find((version) => version.id !== timeline.versionId)?.id
+      ?? null
+    setCompareAfterVersionId((selected) =>
+      selected && ids.has(selected) ? selected : timeline.versionId)
+    setCompareBeforeVersionId((selected) =>
+      selected && ids.has(selected) && selected !== timeline.versionId ? selected : fallbackBefore)
+  }, [manualTimeline?.history, manualTimeline?.timeline])
 
   useEffect(() => {
     setPreviewState('idle')
@@ -590,6 +636,115 @@ export default function ProjectWorkspacePage() {
       action: 'apply',
       operation: { kind: 'inspect', clipId: manualSelectedClip.id, patch },
     })
+  }
+
+  async function loadVersionComparison(): Promise<void> {
+    if (!compareBeforeVersionId || !compareAfterVersionId || compareBusy) return
+    if (compareBeforeVersionId === compareAfterVersionId) {
+      setNotice('Escolha duas versões diferentes para comparar.')
+      return
+    }
+    setCompareBusy(true)
+    setNotice(null)
+    try {
+      const query = new URLSearchParams({
+        beforeVersionId: compareBeforeVersionId,
+        afterVersionId: compareAfterVersionId,
+        mode: compareMode,
+      })
+      const comparison = await requestJson<VersionComparisonData>(
+        `/v1/projects/${encodeURIComponent(projectId)}/version-comparisons?${query.toString()}`,
+      )
+      const loadProxy = async (versionId: string): Promise<string | undefined> => {
+        try {
+          const reviewQuery = new URLSearchParams({ limit: '1', projectVersionId: versionId })
+          const versionReview = await requestJson<ProjectReviewData>(
+            `/v1/projects/${encodeURIComponent(projectId)}/annotations?${reviewQuery.toString()}`,
+          )
+          return versionReview.session.proxyUrl
+        } catch {
+          return undefined
+        }
+      }
+      const [before, after] = await Promise.all([
+        loadProxy(comparison.versions.before.id),
+        loadProxy(comparison.versions.after.id),
+      ])
+      setVersionComparison(comparison)
+      setComparePreviews({
+        ...(before ? { before } : {}),
+        ...(after ? { after } : {}),
+      })
+      setCompareToggleSide('after')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível comparar estas versões.')
+    } finally {
+      setCompareBusy(false)
+    }
+  }
+
+  async function submitVersionComparisonAction(
+    action: 'accept' | 'reopen' | 'restore',
+  ): Promise<void> {
+    if (!versionComparison || compareBusy) return
+    setCompareBusy(true)
+    setNotice(null)
+    try {
+      const result = await requestJson<{
+        action: typeof action
+        projectStatus?: string
+        version?: { id: string; sequence: number }
+      }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/version-comparisons`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': `compare-${crypto.randomUUID()}`,
+          },
+          body: JSON.stringify({
+            action,
+            beforeVersionId: versionComparison.versions.before.id,
+            afterVersionId: versionComparison.versions.after.id,
+            mode: versionComparison.comparison.mode,
+            baseVersionId: versionComparison.current.versionId,
+            baseHash: versionComparison.current.baseHash,
+            expectedRevision: versionComparison.current.revision,
+            variantId: workspace?.project.format ?? '9:16',
+          }),
+        },
+      )
+      setNotice(
+        action === 'restore'
+          ? `Versão anterior restaurada como V${result.version?.sequence ?? 'nova'}, sem apagar o histórico.`
+          : action === 'accept'
+            ? 'Comparação aceita e decisão registrada.'
+            : 'Edição reaberta e decisão registrada.',
+      )
+      setVersionComparison(null)
+      setComparePreviews({})
+      await loadWorkspace(true)
+      await loadManualTimeline(true)
+      await loadReview(true)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível registrar a decisão da comparação.')
+      await loadManualTimeline(true)
+    } finally {
+      setCompareBusy(false)
+    }
+  }
+
+  function synchronizeComparedVideo(
+    source: HTMLVideoElement,
+    target: HTMLVideoElement | null,
+  ): void {
+    if (!versionComparison?.comparison.synchronized || !target) return
+    if (Math.abs(target.currentTime - source.currentTime) > 0.08) {
+      const maximum = Number.isFinite(target.duration)
+        ? Math.max(0, target.duration - 0.001)
+        : source.currentTime
+      target.currentTime = Math.min(source.currentTime, maximum)
+    }
   }
 
   function readPreviewPosition(): void {
@@ -1533,6 +1688,227 @@ export default function ProjectWorkspacePage() {
                     >
                       {manualBusy ? 'Criando versão…' : 'Aplicar inspector'}
                     </button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {manualTimeline && manualTimeline.history.length >= 2 ? (
+            <section
+              aria-label="Comparar versões"
+              className="mt-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
+              data-testid="version-compare"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#7167ff]" />
+                    <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#9a92ff]">Compare imutável</p>
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#706c64]">Antes/depois com playhead compartilhado somente quando o mapping é compatível.</p>
+                </div>
+                <div className="flex flex-wrap items-end gap-2">
+                  <label>
+                    <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#55514c]">Antes</span>
+                    <select
+                      className="border border-white/[0.09] bg-[#050505] px-2 py-2 text-[9px] text-[#aaa49a]"
+                      data-testid="compare-before"
+                      onChange={(event) => {
+                        setCompareBeforeVersionId(event.target.value)
+                        setVersionComparison(null)
+                      }}
+                      value={compareBeforeVersionId ?? ''}
+                    >
+                      {manualTimeline.history.map((version) => (
+                        <option className="bg-[#111]" key={version.id} value={version.id}>V{version.sequence}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#55514c]">Depois</span>
+                    <select
+                      className="border border-white/[0.09] bg-[#050505] px-2 py-2 text-[9px] text-[#aaa49a]"
+                      data-testid="compare-after"
+                      onChange={(event) => {
+                        setCompareAfterVersionId(event.target.value)
+                        setVersionComparison(null)
+                      }}
+                      value={compareAfterVersionId ?? ''}
+                    >
+                      {manualTimeline.history.map((version) => (
+                        <option className="bg-[#111]" key={version.id} value={version.id}>V{version.sequence}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="bg-[#7167ff] px-4 py-2 text-[9px] font-bold text-white disabled:opacity-35"
+                    data-testid="compare-load"
+                    disabled={compareBusy || !compareBeforeVersionId || !compareAfterVersionId || compareBeforeVersionId === compareAfterVersionId}
+                    onClick={() => void loadVersionComparison()}
+                    type="button"
+                  >
+                    {compareBusy ? 'Comparando…' : 'Comparar'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.07] px-4 py-3">
+                {(['toggle', 'split', 'overlay'] as const).map((mode) => (
+                  <button
+                    aria-pressed={compareMode === mode}
+                    className={`border px-3 py-2 text-[8px] uppercase tracking-[0.12em] ${compareMode === mode ? 'border-[#7167ff]/60 bg-[#7167ff]/15 text-[#b9b4ff]' : 'border-white/[0.08] text-[#777168]'}`}
+                    data-testid={`compare-mode-${mode}`}
+                    key={mode}
+                    onClick={() => {
+                      setCompareMode(mode)
+                      setVersionComparison(null)
+                    }}
+                    type="button"
+                  >
+                    {mode}
+                  </button>
+                ))}
+                {versionComparison ? (
+                  <span className={`ml-auto border px-3 py-1.5 font-mono text-[8px] ${versionComparison.comparison.synchronized ? 'border-[#63ba84]/30 text-[#75c992]' : 'border-[#d9aa3d]/30 text-[#d7b35f]'}`} data-testid="compare-sync-state">
+                    {versionComparison.comparison.synchronized ? 'playhead compartilhado' : 'timelines independentes'}
+                  </span>
+                ) : null}
+              </div>
+
+              {versionComparison ? (
+                <div data-testid="compare-result">
+                  <div className="grid gap-3 border-b border-white/[0.07] p-4 sm:grid-cols-3">
+                    <div className="border border-white/[0.07] bg-[#050505] p-3">
+                      <p className="text-[7px] uppercase tracking-[0.13em] text-[#5f5a53]">Duração</p>
+                      <p className="mt-1 font-mono text-sm text-[#d5cec4]">{versionComparison.comparison.durationDeltaMs >= 0 ? '+' : ''}{(versionComparison.comparison.durationDeltaMs / 1000).toFixed(2)}s</p>
+                    </div>
+                    <div className="border border-white/[0.07] bg-[#050505] p-3">
+                      <p className="text-[7px] uppercase tracking-[0.13em] text-[#5f5a53]">Score</p>
+                      <p className="mt-1 font-mono text-sm text-[#d5cec4]">{versionComparison.comparison.scoreDelta >= 0 ? '+' : ''}{versionComparison.comparison.scoreDelta.toFixed(2)}</p>
+                    </div>
+                    <div className="border border-white/[0.07] bg-[#050505] p-3">
+                      <p className="text-[7px] uppercase tracking-[0.13em] text-[#5f5a53]">Issues</p>
+                      <p className="mt-1 font-mono text-sm text-[#d5cec4]">{versionComparison.comparison.issuesResolved.length} resolvidas · {versionComparison.comparison.issuesAdded.length} novas</p>
+                    </div>
+                  </div>
+
+                  <div className="border-b border-white/[0.07] bg-[#030303] p-4">
+                    {compareMode === 'toggle' ? (
+                      <div>
+                        <div className="mb-3 flex justify-center gap-2">
+                          {(['before', 'after'] as const).map((side) => (
+                            <button
+                              aria-pressed={compareToggleSide === side}
+                              className={`border px-4 py-2 text-[8px] uppercase ${compareToggleSide === side ? 'border-[#7167ff]/60 bg-[#7167ff]/15 text-[#c1bcff]' : 'border-white/[0.08] text-[#716d66]'}`}
+                              key={side}
+                              onClick={() => setCompareToggleSide(side)}
+                              type="button"
+                            >
+                              {side === 'before' ? `Antes · V${versionComparison.versions.before.sequence}` : `Depois · V${versionComparison.versions.after.sequence}`}
+                            </button>
+                          ))}
+                        </div>
+                        {comparePreviews[compareToggleSide] ? (
+                          <video
+                            className="mx-auto max-h-[440px] w-full bg-black object-contain"
+                            controls
+                            data-testid="compare-toggle-video"
+                            key={`${compareToggleSide}:${comparePreviews[compareToggleSide]}`}
+                            ref={compareToggleSide === 'before' ? compareBeforeVideo : compareAfterVideo}
+                            src={comparePreviews[compareToggleSide]}
+                          />
+                        ) : <p className="py-16 text-center text-[10px] text-[#5f5a53]">Esta versão ainda não possui proxy revisável.</p>}
+                      </div>
+                    ) : compareMode === 'split' ? (
+                      <div className="grid gap-2 md:grid-cols-2" data-testid="compare-split-preview">
+                        {(['before', 'after'] as const).map((side) => {
+                          const preview = comparePreviews[side]
+                          const target = side === 'before' ? compareAfterVideo : compareBeforeVideo
+                          return (
+                            <div className="overflow-hidden border border-white/[0.08] bg-black" key={side}>
+                              <p className="border-b border-white/[0.07] bg-[#0b0b0b] px-3 py-2 font-mono text-[8px] text-[#777168]">
+                                {side === 'before' ? `ANTES · V${versionComparison.versions.before.sequence}` : `DEPOIS · V${versionComparison.versions.after.sequence}`}
+                              </p>
+                              {preview ? (
+                                <video
+                                  className="aspect-video w-full object-contain"
+                                  controls
+                                  muted
+                                  onPause={() => { if (versionComparison.comparison.synchronized) target.current?.pause() }}
+                                  onPlay={() => { if (versionComparison.comparison.synchronized) void target.current?.play() }}
+                                  onTimeUpdate={(event) => synchronizeComparedVideo(event.currentTarget, target.current)}
+                                  ref={side === 'before' ? compareBeforeVideo : compareAfterVideo}
+                                  src={preview}
+                                />
+                              ) : <p className="py-16 text-center text-[10px] text-[#5f5a53]">Proxy indisponível</p>}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="relative mx-auto aspect-video max-h-[520px] overflow-hidden bg-black" data-testid="compare-overlay-preview">
+                          {comparePreviews.before ? (
+                            <video
+                              className="absolute inset-0 h-full w-full object-contain"
+                              controls
+                              muted
+                              onTimeUpdate={(event) => synchronizeComparedVideo(event.currentTarget, compareAfterVideo.current)}
+                              ref={compareBeforeVideo}
+                              src={comparePreviews.before}
+                            />
+                          ) : null}
+                          {comparePreviews.after ? (
+                            <video
+                              aria-label="Versão depois sobreposta"
+                              className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+                              muted
+                              ref={compareAfterVideo}
+                              src={comparePreviews.after}
+                              style={{ opacity: compareOverlayOpacity }}
+                            />
+                          ) : null}
+                        </div>
+                        <label className="mx-auto mt-3 flex max-w-lg items-center gap-3 text-[8px] uppercase tracking-[0.12em] text-[#6d6860]">
+                          Antes
+                          <input
+                            className="w-full accent-[#7167ff]"
+                            max="1"
+                            min="0"
+                            onChange={(event) => setCompareOverlayOpacity(Number(event.target.value))}
+                            step="0.05"
+                            type="range"
+                            value={compareOverlayOpacity}
+                          />
+                          Depois
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+                    <div>
+                      <p className="text-[8px] font-semibold uppercase tracking-[0.17em] text-[#827b70]">Diff semântico</p>
+                      <div className="mt-2 space-y-1.5" data-testid="compare-semantic-diff">
+                        {versionComparison.comparison.semanticChanges.length ? versionComparison.comparison.semanticChanges.map((change, index) => (
+                          <div className="flex gap-3 border border-white/[0.06] bg-[#050505] px-3 py-2 text-[9px]" key={`${change.category}:${change.target}:${index}`}>
+                            <span className="font-mono uppercase text-[#7167ff]">{change.category}</span>
+                            <span className="text-[#9d978e]">{change.summary}</span>
+                            <span className="ml-auto truncate font-mono text-[#55514c]">{change.target}</span>
+                          </div>
+                        )) : <p className="text-[9px] text-[#5f5a53]">Nenhuma alteração semântica detectada.</p>}
+                      </div>
+                    </div>
+                    <div className="border border-white/[0.07] bg-[#050505] p-3">
+                      <p className="text-[8px] font-semibold uppercase tracking-[0.17em] text-[#827b70]">Decisão</p>
+                      <p className="mt-2 text-[9px] leading-4 text-[#625e57]">Aceitar e reabrir registram Command. Restaurar cria uma nova child version; A e B permanecem intactas.</p>
+                      <div className="mt-3 grid gap-2">
+                        <button className="bg-[#7167ff] px-3 py-2 text-[9px] font-bold text-white disabled:opacity-35" data-testid="compare-accept" disabled={compareBusy || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('accept')} type="button">Aceitar depois</button>
+                        <button className="border border-white/[0.1] px-3 py-2 text-[9px] text-[#aaa49a] disabled:opacity-35" data-testid="compare-reopen" disabled={compareBusy || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('reopen')} type="button">Reabrir edição</button>
+                        <button className="border border-[#d9aa3d]/30 px-3 py-2 text-[9px] text-[#d7b35f] disabled:opacity-35" data-testid="compare-restore" disabled={compareBusy || versionComparison.versions.after.id !== versionComparison.current.versionId} onClick={() => void submitVersionComparisonAction('restore')} type="button">Restaurar antes como nova versão</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : null}
