@@ -974,12 +974,12 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.050 — Ciclo fechado de qualidade
 
-- [ ] Implementar hard validators técnicos, policy e de integridade. Evidência T-FR-219: hard issues bloqueiam final.
-- [ ] Implementar asset critic antes de inserir mídia gerada/reutilizada. Evidência T-FR-219: relevância, continuidade, qualidade, direitos e novidade.
-- [ ] Implementar proxy critic por rubrica, formato e range. Evidência T-FR-219: crítica localizada por range.
-- [ ] Compilar issues em patches elegíveis e rerender mínimo. Evidência T-FR-219: range mínimo agregado.
-- [ ] Encerrar por aprovação, convergência, budget, issue não corrigível ou revisão humana. Evidência T-FR-219: cinco razões terminais cobertas.
-- [ ] Versionar reports e medir regressão no dataset de referência. Evidência T-FR-219: quality-report/v1 com fingerprint e delta.
+- [x] Implementar hard validators técnicos, policy e de integridade. Entregue em `ed0de22`: o servidor importa evidências técnicas, de policy e integridade do proxy persistido, valida novamente os direitos atuais e bloqueia o final diante de qualquer hard issue. T-FR-219 e E2E PostgreSQL provam rejeição de aprovação injetada, conflito de versão e término `uncorrectable` após revogação de direitos.
+- [x] Implementar asset critic antes de inserir mídia gerada/reutilizada. Entregue em `ed0de22`: cada seleção persistida é criticada por relevância, continuidade, qualidade e novidade, enquanto os direitos são reavaliados pelo snapshot vigente dentro da transação. O E2E comprova que evidência antiga da seleção não autoriza um asset posteriormente revogado.
+- [x] Implementar proxy critic por rubrica, formato e range. Entregue em `ed0de22`: o servidor deriva objetivo, formato e especificação do projeto/proxy, aplica a rubrica estratégica versionada e localiza problemas de densidade em ranges mensurados. O cliente fornece somente evidências mensuradas, sem controlar veredito ou aprovação.
+- [x] Compilar issues em patches elegíveis e rerender mínimo. Entregue em `ed0de22`: issues são compiladas deterministicamente em `replace_asset`/`adjust`, ranges sobrepostos são unidos e ranges independentes permanecem separados. O E2E confirma `[[2000,3500],[7000,7500]]`, sem expandir indevidamente para o casco total.
+- [x] Encerrar por aprovação, convergência, budget, issue não corrigível ou revisão humana. Entregue em `ed0de22`: as cinco razões terminais possuem regras determinísticas e cobertura T-FR-219; o E2E público cobre aprovação, convergência e problema incorrigível em iterações persistidas.
+- [x] Versionar reports e medir regressão no dataset de referência. Entregue em `ed0de22`: `closed-quality-report/v1` vincula versão, iteração anterior, proxy, assets, rubrica, ranges, dataset server-side, score, delta, patches, budget e decisão em fingerprint canônico; `quality-iteration/v1` adiciona hash integral imutável e a leitura recompõe ambos, rejeitando adulteração. E2E PostgreSQL e 476/476 testes aprovados.
 
 ### F1.051 — Gate do MVP Core [AC-001 a AC-015]
 
