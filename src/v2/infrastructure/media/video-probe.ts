@@ -17,6 +17,7 @@ export interface VideoProbeResult {
   fps: number
   duration: number
   codec: string
+  audioCodec: string
   container: string
 }
 
@@ -95,16 +96,18 @@ export async function probeVideo(
     throw new DomainError('RENDER_OUTPUT_INVALID', 'Video probe returned invalid JSON')
   }
   const video = payload.streams?.find((stream) => stream.codec_type === 'video')
+  const audio = payload.streams?.find((stream) => stream.codec_type === 'audio')
   const width = positiveNumber(video?.width)
   const height = positiveNumber(video?.height)
   const fps = parseRate(video?.avg_frame_rate) || parseRate(video?.r_frame_rate)
   const duration = positiveNumber(payload.format?.duration) || positiveNumber(video?.duration)
   const codec = typeof video?.codec_name === 'string' ? video.codec_name.trim() : ''
+  const audioCodec = typeof audio?.codec_name === 'string' ? audio.codec_name.trim() : ''
   const formatName = typeof payload.format?.format_name === 'string'
-    ? payload.format.format_name.split(',')[0]?.trim() ?? ''
+    ? payload.format.format_name.trim()
     : ''
-  if (!width || !height || !fps || !duration || !codec || !formatName) {
+  if (!width || !height || !fps || !duration || !codec || !audioCodec || !formatName) {
     throw new DomainError('RENDER_OUTPUT_INVALID', 'Video probe metadata is incomplete')
   }
-  return Object.freeze({ width, height, fps, duration, codec, container: formatName })
+  return Object.freeze({ width, height, fps, duration, codec, audioCodec, container: formatName })
 }

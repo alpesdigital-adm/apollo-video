@@ -65,6 +65,9 @@ function approvedSource() {
     qualitySnapshotHash: '3'.repeat(64),
     qualityStatus: 'approved',
     qualityScore: 0.97,
+    proxyReviewId: 'proxy-review-final-export-test',
+    proxyReviewHash: '7'.repeat(64),
+    proxyArtifactId: 'artifact-proxy-final-export-test',
     sourceArtifactId,
     sourceManifestId,
     sourceArtifactKey: 'workspaces/final-export/masters/source.mp4',
@@ -110,7 +113,12 @@ test('final export enqueue binds approval, exact Director evidence and 1080x1920
   assert.equal(first.operation.type, 'project-final-export')
   assert.equal(first.context.directorRunId, 'director-run-final-export-test')
   assert.equal(first.context.qualitySnapshotHash, '3'.repeat(64))
-  assert.deepEqual(first.context.outputSpec, { aspectRatio: '9:16', width: 1080, height: 1920, fps: 30 })
+  assert.deepEqual(first.context.outputSpec, {
+    aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
+    codec: 'h264', audioCodec: 'aac', container: 'mp4', quality: 'final',
+  })
+  assert.equal(first.context.proxyReviewId, 'proxy-review-final-export-test')
+  assert.equal(first.context.proxyReviewHash, '7'.repeat(64))
   assert.deepEqual(first.context.approval, {
     actorType: 'api-client', actorId: 'client-final-export-test',
     approvedAt: '2026-07-19T01:05:00.000Z', note: 'Aprovado para publicação.',
@@ -160,12 +168,18 @@ function createOperations() {
     directorRunId: 'director-run-final-export-test',
     qualitySnapshotId: 'quality-snapshot-final-export-test',
     qualitySnapshotHash: '3'.repeat(64),
+    proxyReviewId: 'proxy-review-final-export-test',
+    proxyReviewHash: '7'.repeat(64),
+    proxyArtifactId: 'artifact-proxy-final-export-test',
     sourceArtifactId,
     sourceManifestId,
     inputHash: '5'.repeat(64),
     outputArtifactId: 'artifact-final-output',
     outputManifestId: 'manifest-final-output',
-    outputSpec: { aspectRatio: '9:16', width: 1080, height: 1920, fps: 30 },
+    outputSpec: {
+      aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
+      codec: 'h264', audioCodec: 'aac', container: 'mp4', quality: 'final',
+    },
     approval: { actorType: 'api-client', actorId: 'client-final-export-test', approvedAt: '2026-07-19T01:00:00.000Z' },
     originalFileName: 'gravacao-bruta-final-1080x1920.mp4',
   })
@@ -213,7 +227,7 @@ function workerDependencies(
   persistedIdentity = { artifactId: 'artifact-final-output', manifestId: 'manifest-final-output' },
 ) {
   let now = Date.parse('2026-07-19T01:00:00.000Z')
-  const calls = { rights: 0, rendered: 0, persisted: 0, mapped: 0, converged: 0, attached: 0, failed: 0, cleaned: 0 }
+  const calls = { rights: 0, rendered: 0, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 0, failed: 0, cleaned: 0 }
   return {
     calls,
     dependencies: {
@@ -233,6 +247,19 @@ function workerDependencies(
           calls.attached += 1
           assert.equal(input.outputArtifactId, persistedIdentity.artifactId)
           assert.equal(input.outputManifestId, persistedIdentity.manifestId)
+        },
+        async recordAttempt(input) {
+          calls.attempts += 1
+          assert.equal(input.operationId, 'operation-final-export-test')
+          assert.equal(input.attempt, 1)
+          assert.equal(input.validators.length >= 1, true)
+          if (input.status === 'promoted') {
+            assert.equal(input.output.artifactId, persistedIdentity.artifactId)
+            assert.equal(input.output.manifestId, persistedIdentity.manifestId)
+            assert.equal(input.output.sha256, '6'.repeat(64))
+          } else {
+            assert.equal(input.error.code.length > 0, true)
+          }
         },
         async markExportFailed() { calls.failed += 1 },
       },
@@ -255,7 +282,11 @@ function workerDependencies(
           const parameters = JSON.parse(input.recipeParameters.canonicalJson)
           assert.equal(parameters.directorRunId, 'director-run-final-export-test')
           assert.equal(parameters.qualitySnapshotId, 'quality-snapshot-final-export-test')
-          assert.deepEqual(parameters.outputSpec, { aspectRatio: '9:16', width: 1080, height: 1920, fps: 30 })
+          assert.deepEqual(parameters.outputSpec, {
+            aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
+            codec: 'h264', audioCodec: 'aac', container: 'mp4', quality: 'final',
+          })
+          assert.equal(parameters.proxyReviewId, 'proxy-review-final-export-test')
           assert.deepEqual(input.manifest.probe, { width: 1080, height: 1920, duration: 10, fps: 30 })
           return { ...persistedIdentity, replayed: false }
         },
@@ -271,11 +302,14 @@ function workerDependencies(
           calls.rendered += 1
           assert.equal(input.renderKind, 'final')
           assert.equal(input.fps, 30)
-          assert.deepEqual(input.outputSpec, { aspectRatio: '9:16', width: 1080, height: 1920, fps: 30 })
+          assert.deepEqual(input.outputSpec, {
+            aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
+            codec: 'h264', audioCodec: 'aac', container: 'mp4', quality: 'final',
+          })
           return {
             outputPath: join(tmpdir(), 'apollo-final-export-output.mp4'),
             sha256: '6'.repeat(64), byteSize: 8192,
-            probe: { width: 1080, height: 1920, duration: 10, fps: 30, codec: 'h264', container: 'mp4' },
+            probe: { width: 1080, height: 1920, duration: 10, fps: 30, codec: 'h264', audioCodec: 'aac', container: 'mp4' },
             renderElementMap: { schemaVersion: 'render-element-map/v1', proxyHash: '6'.repeat(64), fps: 30, durationFrames: 300, canvas: { width: 1080, height: 1920 }, elements: [] },
           }
         },
@@ -302,7 +336,7 @@ test('final export worker revalidates rights, persists lineage and completes the
   const { calls, dependencies } = workerDependencies(operations)
   const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-success')
 
-  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 1, mapped: 1, converged: 0, attached: 1, failed: 0, cleaned: 1 })
+  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 1, mapped: 1, converged: 0, attached: 1, attempts: 1, failed: 0, cleaned: 1 })
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
 })
@@ -314,7 +348,7 @@ test('final export worker fails closed if rights are revoked before persistence'
 
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
   assert.equal(operations.operation.status, 'failed')
-  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 0, mapped: 0, converged: 0, attached: 0, failed: 1, cleaned: 1 })
+  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 1, failed: 1, cleaned: 1 })
 })
 
 test('final export worker converges content deduplication under the active lease', async () => {

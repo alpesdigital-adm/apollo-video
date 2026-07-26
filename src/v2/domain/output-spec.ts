@@ -4,6 +4,13 @@ export const OUTPUT_ASPECT_RATIOS = ['9:16', '16:9', '4:5', '1:1', '21:9'] as co
 
 export type OutputAspectRatio = (typeof OUTPUT_ASPECT_RATIOS)[number]
 
+export const FINAL_OUTPUT_PROFILE = Object.freeze({
+  codec: 'h264' as const,
+  audioCodec: 'aac' as const,
+  container: 'mp4' as const,
+  quality: 'final' as const,
+})
+
 export interface NormalizedInsets {
   top: number
   right: number

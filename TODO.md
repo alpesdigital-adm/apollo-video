@@ -958,11 +958,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.048 — Final render [FR-231]
 
-- [ ] Exigir ProjectVersion/variants aprovadas e inputs não stale. Evidência F1-048: precondition valida approval, variants e stale.
-- [ ] Criar job idempotente de final com qualidade e codec do OutputSpec. Evidência F1-048: key/fingerprint convergem ou falham em mismatch.
-- [ ] Executar validators pós-render e gerar checksum/manifest. Evidência F1-048: SHA-256 e manifest reconstructable seguem bytes validados.
-- [ ] Promover artifact atomicamente e preservar tentativas falhas. Evidência F1-048: histórico mantém failed antes do promoted.
-- [ ] Criar E2E de aprovação, render, download e reconstrução. Evidência F1-048/T-FR-231: jornada produz grant elegível e verifica bytes pelo manifest.
+- [x] Exigir ProjectVersion/variants aprovadas e inputs não stale. Evidência F1-048: `POST /v1/projects/{projectId}/exports` exige aprovação explícita e vincula atomicamente versão/hash atuais, `EditPlan`, `DirectorRun`, `QualityReport`, `ProxyReview` liberado e source master com direitos; versão/hash/formato divergentes falham fechados antes do job, e o worker relê exatamente essas identidades imutáveis.
+- [x] Criar job idempotente de final com qualidade e codec do OutputSpec. Evidência F1-048: fingerprint inclui aprovação, versão, revisão do proxy e perfil final persistido `1080x1920@30 / h264 / aac / mp4 / final`; replay da mesma key converge no mesmo operationId e payload diferente retorna conflito, comprovados por teste unitário e E2E.
+- [x] Executar validators pós-render e gerar checksum/manifest. Evidência F1-048: worker valida codec de vídeo/áudio, container, canvas, FPS, duração, SHA-256/bytes e `RenderElementMap`; só então persiste manifest v3 replayable com source lineage, parâmetros protegidos e vínculo da aceitação editorial.
+- [x] Promover artifact atomicamente e preservar tentativas falhas. Evidência F1-048: content-addressed promotion reconfere SHA/bytes, tentativas append-only `failed|promoted` são cercadas pelo lease no PostgreSQL e expostas por `GET /v1/operations/{operationId}/final-export-attempts`; E2E preservou `failed` antes de `promoted`.
+- [x] Criar E2E de aprovação, render, download e reconstrução. Evidência F1-048/T-FR-231: `prisma-final-export.integration.mjs` passou em PostgreSQL 16 vazio com 50 migrations e FFmpeg real, cobrindo aprovação, stale/mismatch, falha transitória, retry, render 1080x1920 H.264/AAC, API de tentativas, grant assinado, range, download, checksum, manifest, reconstrução e FFprobe. Regressão: 474/474, typecheck, build, arquitetura V2-only, linguagem, DB e contrato público com 84 capabilities/141 schemas/167 exemplos/73 paths.
 
 ### F1.049 — AssetBrief e seleção de B-roll
 

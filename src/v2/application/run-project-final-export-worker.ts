@@ -82,11 +82,14 @@ export function runNextProjectFinalExportOperationService(dependencies: {
     if (claimed.context.kind !== 'project-final-export') throw new DomainError('PERSISTENCE_CONFLICT', 'Final export worker claimed an incompatible operation')
     const { operation, context } = claimed
     const attempt = claimed.lease.attempt
+    const attemptStartedAt = claimedAt.toISOString()
     const abortController = new AbortController()
     let stopped = false
     let leaseLost = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let renewal: Promise<boolean> | undefined
+    let attemptRecorded = false
+    let validators: Array<{ code: string; passed: boolean; message: string }> = []
     const command = (now: Date) => ({ operationId: operation.id, leaseOwner, attempt, now: now.toISOString() })
     const heartbeat = async () => {
       if (stopped || leaseLost) return false
@@ -138,6 +141,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         directorRunId: context.directorRunId,
         qualitySnapshotId: context.qualitySnapshotId,
         qualitySnapshotHash: context.qualitySnapshotHash,
+        proxyReviewId: context.proxyReviewId,
+        proxyReviewHash: context.proxyReviewHash,
+        proxyArtifactId: context.proxyArtifactId,
         sourceArtifactId: context.sourceArtifactId,
         sourceManifestId: context.sourceManifestId,
       })
@@ -148,6 +154,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
         source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4) ||
         source.format !== context.outputSpec.aspectRatio ||
+        source.proxyReviewId !== context.proxyReviewId ||
+        source.proxyReviewHash !== context.proxyReviewHash ||
+        source.proxyArtifactId !== context.proxyArtifactId ||
         Math.abs(source.editPlan.fps - context.outputSpec.fps) > 0.01
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Approved EditPlan or final OutputSpec is not safe to render')
       await assertRights()
@@ -170,7 +179,62 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       })
       await enter('verifying')
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Final export lease was lost')
-      if (rendered.probe.width !== context.outputSpec.width || rendered.probe.height !== context.outputSpec.height || Math.abs(rendered.probe.fps - context.outputSpec.fps) > 0.01) {
+      const expectedFrames = clips.reduce(
+        (total, clip) => total + clip.sourceOutFrame - clip.sourceInFrame,
+        0,
+      )
+      const expectedDurationSeconds = expectedFrames / context.outputSpec.fps
+      const durationToleranceSeconds = Math.max(0.1, 3 / context.outputSpec.fps)
+      validators = [
+        {
+          code: 'FINAL_CODEC',
+          passed: rendered.probe.codec === context.outputSpec.codec,
+          message: `Video codec must be ${context.outputSpec.codec}.`,
+        },
+        {
+          code: 'FINAL_AUDIO_CODEC',
+          passed: rendered.probe.audioCodec === context.outputSpec.audioCodec,
+          message: `Audio codec must be ${context.outputSpec.audioCodec}.`,
+        },
+        {
+          code: 'FINAL_CONTAINER',
+          passed: rendered.probe.container.includes(context.outputSpec.container),
+          message: `Container must include ${context.outputSpec.container}.`,
+        },
+        {
+          code: 'FINAL_CANVAS',
+          passed: rendered.probe.width === context.outputSpec.width &&
+            rendered.probe.height === context.outputSpec.height,
+          message: 'Canvas must match the approved OutputSpec.',
+        },
+        {
+          code: 'FINAL_FPS',
+          passed: Math.abs(rendered.probe.fps - context.outputSpec.fps) <= 0.01,
+          message: 'Frame rate must match the approved OutputSpec.',
+        },
+        {
+          code: 'FINAL_DURATION',
+          passed: Math.abs(rendered.probe.duration - expectedDurationSeconds) <= durationToleranceSeconds,
+          message: 'Duration must match the compiled EditPlan.',
+        },
+        {
+          code: 'FINAL_CHECKSUM',
+          passed: /^[a-f0-9]{64}$/.test(rendered.sha256) &&
+            Number.isSafeInteger(rendered.byteSize) &&
+            rendered.byteSize > 0,
+          message: 'Output must have a valid SHA-256 checksum and positive byte size.',
+        },
+        {
+          code: 'FINAL_ELEMENT_MAP',
+          passed: rendered.renderElementMap.proxyHash === rendered.sha256 &&
+            rendered.renderElementMap.canvas.width === context.outputSpec.width &&
+            rendered.renderElementMap.canvas.height === context.outputSpec.height &&
+            rendered.renderElementMap.durationFrames === expectedFrames &&
+            Math.abs(rendered.renderElementMap.fps - context.outputSpec.fps) <= 0.01,
+          message: 'RenderElementMap must match final output identity and timing.',
+        },
+      ]
+      if (validators.some((validator) => !validator.passed)) {
         throw new DomainError('RENDER_OUTPUT_INVALID', 'Final export does not match its approved OutputSpec')
       }
       await assertRights()
@@ -182,6 +246,10 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         extension: 'mp4',
         prefix: 'final-exports',
       })
+      if (
+        stored.sha256 !== rendered.sha256 ||
+        stored.byteSize !== rendered.byteSize
+      ) throw new DomainError('RENDER_OUTPUT_INVALID', 'Promoted final output checksum or byte size changed')
       const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-final/1.0.0').digest('hex')
       const replayableManifest = createReplayableMediaArtifactManifest({
         artifactKey: stored.key,
@@ -200,6 +268,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             directorRunId: context.directorRunId,
             qualitySnapshotId: context.qualitySnapshotId,
             qualitySnapshotHash: context.qualitySnapshotHash,
+            proxyReviewId: context.proxyReviewId,
+            proxyReviewHash: context.proxyReviewHash,
+            proxyArtifactId: context.proxyArtifactId,
             outputSpec: context.outputSpec,
             approval: context.approval,
           },
@@ -248,6 +319,24 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         createdAt: clock().toISOString(),
       })
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Final export lease was lost')
+      const attemptCompletedAt = clock().toISOString()
+      await dependencies.projects.recordAttempt({
+        workspaceId: operation.workspaceId,
+        operationId: operation.id,
+        leaseOwner,
+        attempt,
+        status: 'promoted',
+        validators,
+        output: {
+          artifactId: persisted.artifactId,
+          manifestId: persisted.manifestId,
+          sha256: stored.sha256,
+          byteSize: stored.byteSize,
+        },
+        startedAt: attemptStartedAt,
+        completedAt: attemptCompletedAt,
+      })
+      attemptRecorded = true
       await dependencies.projects.attachCompletedOutput({
         workspaceId: operation.workspaceId,
         operationId: operation.id,
@@ -268,6 +357,32 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       if (leaseLost) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       const failedAt = clock()
       const failure = safeFailure(error)
+      if (!attemptRecorded) {
+        if (validators.length === 0) {
+          validators = [{
+            code: 'FINAL_WORKFLOW',
+            passed: false,
+            message: 'Final workflow did not reach post-render validation.',
+          }]
+        }
+        try {
+          await dependencies.projects.recordAttempt({
+            workspaceId: operation.workspaceId,
+            operationId: operation.id,
+            leaseOwner,
+            attempt,
+            status: 'failed',
+            validators,
+            error: { code: failure.code, message: failure.message },
+            startedAt: attemptStartedAt,
+            completedAt: failedAt.toISOString(),
+          })
+          attemptRecorded = true
+        } catch {
+          leaseLost = true
+          return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
+        }
+      }
       const nextAttemptAt = failure.retryable && attempt < operation.maxAttempts
         ? new Date(failedAt.getTime() + calculatePublicOperationRetryDelayMs({ attempt, baseDelayMs: retryBaseDelayMs, maxDelayMs: retryMaxDelayMs })).toISOString()
         : undefined

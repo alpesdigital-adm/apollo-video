@@ -6,7 +6,7 @@ export interface EditorialProxyRenderResult {
   outputPath: string
   sha256: string
   byteSize: number
-  probe: { width: number; height: number; duration: number; fps: number; codec: string; container: string }
+  probe: { width: number; height: number; duration: number; fps: number; codec: string; audioCodec: string; container: string }
   renderElementMap: Readonly<RenderElementMap>
 }
 

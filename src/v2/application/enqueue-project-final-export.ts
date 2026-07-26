@@ -1,6 +1,11 @@
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
-import { OUTPUT_ASPECT_RATIOS, OUTPUT_PRESETS, type OutputAspectRatio } from '../domain/output-spec.ts'
+import {
+  FINAL_OUTPUT_PROFILE,
+  OUTPUT_ASPECT_RATIOS,
+  OUTPUT_PRESETS,
+  type OutputAspectRatio,
+} from '../domain/output-spec.ts'
 import { createQueuedPublicOperation } from '../domain/public-operation.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
@@ -128,6 +133,9 @@ export function enqueueProjectFinalExportService(dependencies: {
         directorRunId: source.directorRunId,
         qualitySnapshotId: source.qualitySnapshotId,
         qualitySnapshotHash: source.qualitySnapshotHash,
+        proxyReviewId: source.proxyReviewId,
+        proxyReviewHash: source.proxyReviewHash,
+        proxyArtifactId: source.proxyArtifactId,
         sourceArtifactId: source.sourceArtifactId,
         sourceManifestId: source.sourceManifestId,
         inputHash,
@@ -138,6 +146,7 @@ export function enqueueProjectFinalExportService(dependencies: {
           width: outputSpec.width,
           height: outputSpec.height,
           fps: outputSpec.fps,
+          ...FINAL_OUTPUT_PROFILE,
         },
         approval: {
           actorType: request.actor.type,

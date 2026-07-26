@@ -204,13 +204,19 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     row.targetId !== finalExportDetail.outputArtifactId ||
     row.workspaceId !== finalExportDetail.workspaceId ||
     ![finalExportDetail.projectId, finalExportDetail.projectVersionId, finalExportDetail.editPlanSnapshotId,
-      finalExportDetail.directorRunId, finalExportDetail.qualitySnapshotId, finalExportDetail.sourceArtifactId,
+      finalExportDetail.directorRunId, finalExportDetail.qualitySnapshotId,
+      finalExportDetail.proxyReviewId, finalExportDetail.proxyArtifactId, finalExportDetail.sourceArtifactId,
       finalExportDetail.sourceManifestId, finalExportDetail.outputArtifactId,
       finalExportDetail.outputManifestId, finalExportDetail.approvedById].every((value) => ID_PATTERN.test(value)) ||
-    ![finalExportDetail.projectVersionHash, finalExportDetail.qualitySnapshotHash, finalExportDetail.inputHash].every((value) => SHA256_PATTERN.test(value)) ||
+    ![finalExportDetail.projectVersionHash, finalExportDetail.qualitySnapshotHash,
+      finalExportDetail.proxyReviewHash, finalExportDetail.inputHash].every((value) => SHA256_PATTERN.test(value)) ||
     !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(finalExportDetail.outputAspectRatio) ||
     ![finalExportDetail.outputWidth, finalExportDetail.outputHeight, finalExportDetail.outputFps].every((value) => Number.isSafeInteger(value) && value > 0) ||
     finalExportDetail.outputWidth % 2 !== 0 || finalExportDetail.outputHeight % 2 !== 0 ||
+    finalExportDetail.outputCodec !== 'h264' ||
+    finalExportDetail.outputAudioCodec !== 'aac' ||
+    finalExportDetail.outputContainer !== 'mp4' ||
+    finalExportDetail.outputQuality !== 'final' ||
     !['api-client', 'user'].includes(finalExportDetail.approvedByType) ||
     finalExportDetail.originalFileName.trim().length < 1
   )) {
@@ -359,6 +365,9 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         directorRunId: finalExportDetail!.directorRunId,
         qualitySnapshotId: finalExportDetail!.qualitySnapshotId,
         qualitySnapshotHash: finalExportDetail!.qualitySnapshotHash,
+        proxyReviewId: finalExportDetail!.proxyReviewId,
+        proxyReviewHash: finalExportDetail!.proxyReviewHash,
+        proxyArtifactId: finalExportDetail!.proxyArtifactId,
         sourceArtifactId: finalExportDetail!.sourceArtifactId,
         sourceManifestId: finalExportDetail!.sourceManifestId,
         inputHash: finalExportDetail!.inputHash,
@@ -369,6 +378,10 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
           width: finalExportDetail!.outputWidth,
           height: finalExportDetail!.outputHeight,
           fps: finalExportDetail!.outputFps,
+          codec: finalExportDetail!.outputCodec as 'h264',
+          audioCodec: finalExportDetail!.outputAudioCodec as 'aac',
+          container: finalExportDetail!.outputContainer as 'mp4',
+          quality: finalExportDetail!.outputQuality as 'final',
         },
         approval: {
           actorType: finalExportDetail!.approvedByType as 'api-client' | 'user',
@@ -681,15 +694,21 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       (finalExportContext && (
         ![finalExportContext.projectId, finalExportContext.projectVersionId, finalExportContext.editPlanSnapshotId,
           finalExportContext.directorRunId, finalExportContext.qualitySnapshotId,
+          finalExportContext.proxyReviewId, finalExportContext.proxyArtifactId,
           finalExportContext.sourceArtifactId, finalExportContext.sourceManifestId,
           finalExportContext.outputArtifactId, finalExportContext.outputManifestId,
           finalExportContext.approval.actorId].every((value) => ID_PATTERN.test(value)) ||
-        ![finalExportContext.projectVersionHash, finalExportContext.qualitySnapshotHash, finalExportContext.inputHash].every((value) => SHA256_PATTERN.test(value)) ||
+        ![finalExportContext.projectVersionHash, finalExportContext.qualitySnapshotHash,
+          finalExportContext.proxyReviewHash, finalExportContext.inputHash].every((value) => SHA256_PATTERN.test(value)) ||
         finalExportContext.outputArtifactId !== input.operation.target.id ||
         finalExportContext.outputManifestId !== input.operation.target.manifestId ||
         !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(finalExportContext.outputSpec.aspectRatio) ||
         ![finalExportContext.outputSpec.width, finalExportContext.outputSpec.height, finalExportContext.outputSpec.fps].every((value) => Number.isSafeInteger(value) && value > 0) ||
         finalExportContext.outputSpec.width % 2 !== 0 || finalExportContext.outputSpec.height % 2 !== 0 ||
+        finalExportContext.outputSpec.codec !== 'h264' ||
+        finalExportContext.outputSpec.audioCodec !== 'aac' ||
+        finalExportContext.outputSpec.container !== 'mp4' ||
+        finalExportContext.outputSpec.quality !== 'final' ||
         finalExportContext.approval.actorType !== 'api-client' || Number.isNaN(Date.parse(finalExportContext.approval.approvedAt)) ||
         (finalExportContext.approval.note !== undefined && (finalExportContext.approval.note.length < 1 || finalExportContext.approval.note.length > 1000)) ||
         finalExportContext.originalFileName.trim().length < 1 || finalExportContext.originalFileName.length > 240
@@ -783,6 +802,17 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                 include: { qualitySnapshot: true },
                 take: 1,
               },
+              proxyReviews: {
+                where: {
+                  id: finalExportContext.proxyReviewId,
+                  projectVersionId: finalExportContext.projectVersionId,
+                  reviewHash: finalExportContext.proxyReviewHash,
+                  proxyArtifactId: finalExportContext.proxyArtifactId,
+                  status: 'ready-for-final',
+                  finalAllowed: true,
+                },
+                take: 1,
+              },
               mediaAssets: {
                 where: { artifactId: finalExportContext.sourceArtifactId, role: 'source-master' },
                 include: { artifact: { include: { manifests: { where: { id: finalExportContext.sourceManifestId }, take: 1 } } } },
@@ -791,7 +821,8 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             },
           })
           if (
-            !source || source.versions.length !== 1 || source.directorRuns.length !== 1 || source.mediaAssets.length !== 1 ||
+            !source || source.versions.length !== 1 || source.directorRuns.length !== 1 ||
+            source.proxyReviews.length !== 1 || source.mediaAssets.length !== 1 ||
             source.mediaAssets[0]!.artifact.manifests.length !== 1 ||
             source.directorRuns[0]!.qualitySnapshot.contentHash !== finalExportContext.qualitySnapshotHash
           ) {
@@ -877,6 +908,9 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               directorRunId: finalExportContext!.directorRunId,
               qualitySnapshotId: finalExportContext!.qualitySnapshotId,
               qualitySnapshotHash: finalExportContext!.qualitySnapshotHash,
+              proxyReviewId: finalExportContext!.proxyReviewId,
+              proxyReviewHash: finalExportContext!.proxyReviewHash,
+              proxyArtifactId: finalExportContext!.proxyArtifactId,
               sourceArtifactId: finalExportContext!.sourceArtifactId,
               sourceManifestId: finalExportContext!.sourceManifestId,
               inputHash: finalExportContext!.inputHash,
@@ -886,6 +920,10 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               outputWidth: finalExportContext!.outputSpec.width,
               outputHeight: finalExportContext!.outputSpec.height,
               outputFps: finalExportContext!.outputSpec.fps,
+              outputCodec: finalExportContext!.outputSpec.codec,
+              outputAudioCodec: finalExportContext!.outputSpec.audioCodec,
+              outputContainer: finalExportContext!.outputSpec.container,
+              outputQuality: finalExportContext!.outputSpec.quality,
               approvedByType: finalExportContext!.approval.actorType,
               approvedById: finalExportContext!.approval.actorId,
               approvalNote: finalExportContext!.approval.note,

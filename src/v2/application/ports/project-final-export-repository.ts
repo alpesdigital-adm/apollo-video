@@ -13,6 +13,44 @@ export interface ApprovedProjectFinalExportSource extends ProjectProxyRenderSour
   proxyArtifactId: string
 }
 
+export interface ProjectFinalExportAttemptHistory {
+  operationId: string
+  projectId: string
+  projectVersionId: string
+  proxyReviewId: string
+  outputSpec: Readonly<{
+    aspectRatio: '9:16' | '16:9' | '4:5' | '1:1' | '21:9'
+    width: number
+    height: number
+    fps: number
+    codec: 'h264'
+    audioCodec: 'aac'
+    container: 'mp4'
+    quality: 'final'
+  }>
+  attempts: readonly Readonly<{
+    attempt: number
+    status: 'failed' | 'promoted'
+    validators: readonly Readonly<{
+      code: string
+      passed: boolean
+      message: string
+    }>[]
+    output?: Readonly<{
+      artifactId: string
+      manifestId: string
+      sha256: string
+      byteSize: number
+    }>
+    error?: Readonly<{
+      code: string
+      message: string
+    }>
+    startedAt: string
+    completedAt: string
+  }>[]
+}
+
 export interface ProjectFinalExportRepository {
   readApprovedCurrentSource(input: {
     workspaceId: string
@@ -29,6 +67,9 @@ export interface ProjectFinalExportRepository {
     directorRunId: string
     qualitySnapshotId: string
     qualitySnapshotHash: string
+    proxyReviewId: string
+    proxyReviewHash: string
+    proxyArtifactId: string
     sourceArtifactId: string
     sourceManifestId: string
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null>
@@ -58,4 +99,32 @@ export interface ProjectFinalExportRepository {
     operationId: string
     projectId: string
   }): Promise<void>
+  recordAttempt(input: {
+    workspaceId: string
+    operationId: string
+    leaseOwner: string
+    attempt: number
+    status: 'failed' | 'promoted'
+    validators: readonly Readonly<{
+      code: string
+      passed: boolean
+      message: string
+    }>[]
+    output?: Readonly<{
+      artifactId: string
+      manifestId: string
+      sha256: string
+      byteSize: number
+    }>
+    error?: Readonly<{
+      code: string
+      message: string
+    }>
+    startedAt: string
+    completedAt: string
+  }): Promise<void>
+  readAttemptHistory(input: {
+    workspaceId: string
+    operationId: string
+  }): Promise<Readonly<ProjectFinalExportAttemptHistory> | null>
 }

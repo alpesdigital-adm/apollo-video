@@ -31,6 +31,7 @@ test('foundation registry exposes health and discovery without scopes', () => {
       'apollo.contracts.openapi.read',
       'apollo.contracts.schemas.read',
       'apollo.media.uploads.content.put',
+      'apollo.media.download-grants.consume',
     ],
   )
   assert.ok(visible.every((capability) => Object.isFrozen(capability)))

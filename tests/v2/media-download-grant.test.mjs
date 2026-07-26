@@ -37,6 +37,15 @@ test('download grant is short, artifact-scoped, idempotent and stores only token
   assert.equal(first.grant.expiresAt, '2026-07-16T23:05:00.000Z')
   const token = new URL(first.downloadUrl).searchParams.get('token')
   assert.ok(token)
+  assert.equal(new URL(first.downloadUrl).pathname, `/v1/media/download-grants/${first.grant.id}/content`)
+  assert.deepEqual(signer.verify(token), {
+    grantId: first.grant.id,
+    workspaceId: actor.workspaceId,
+    clientId: actor.clientId,
+    artifactId: artifact.id,
+    expiresAt: first.grant.expiresAt,
+  })
+  assert.throws(() => signer.verify(`${token.slice(0, -1)}x`), /invalid/)
   assert.equal(JSON.stringify([...grants.records.values()]).includes(token), false)
   assert.match([...grants.records.values()][0].tokenHash, /^[a-f0-9]{64}$/)
 })

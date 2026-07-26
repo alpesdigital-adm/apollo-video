@@ -2296,6 +2296,38 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-final-export-attempt-history/v1': [
+      {
+        data: {
+          operationId: 'operation-project-final-example-1',
+          projectId,
+          projectVersionId: 'project-version-example-4',
+          proxyReviewId: 'proxy-review-example-1',
+          outputSpec: {
+            aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
+            codec: 'h264', audioCodec: 'aac', container: 'mp4', quality: 'final',
+          },
+          attempts: [
+            {
+              attempt: 1,
+              status: 'promoted',
+              validators: [
+                { code: 'FINAL_CHECKSUM', passed: true, message: 'Output checksum and byte size are valid.' },
+              ],
+              output: {
+                artifactId: 'artifact-final-example-1',
+                manifestId: 'manifest-final-example-1',
+                sha256: 'e'.repeat(64),
+                byteSize: 1048576,
+              },
+              startedAt: createdAt,
+              completedAt: createdAt,
+            },
+          ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/api-client-list/v1': [
       { data: { clients: [] }, meta: { apiVersion: 'v1' } },
     ],

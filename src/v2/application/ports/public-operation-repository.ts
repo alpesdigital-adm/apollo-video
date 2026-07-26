@@ -42,6 +42,9 @@ export interface ProjectFinalExportOperationContext {
   directorRunId: string
   qualitySnapshotId: string
   qualitySnapshotHash: string
+  proxyReviewId: string
+  proxyReviewHash: string
+  proxyArtifactId: string
   sourceArtifactId: string
   sourceManifestId: string
   inputHash: string
@@ -52,6 +55,10 @@ export interface ProjectFinalExportOperationContext {
     width: number
     height: number
     fps: number
+    codec: 'h264'
+    audioCodec: 'aac'
+    container: 'mp4'
+    quality: 'final'
   }
   approval: {
     actorType: 'api-client' | 'user'

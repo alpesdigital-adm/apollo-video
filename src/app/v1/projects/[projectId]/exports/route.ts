@@ -53,10 +53,18 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       actor: { type: 'api-client', id: actor.clientId },
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
     })
+    const outputSpec = result.context.kind === 'project-final-export'
+      ? {
+          aspectRatio: result.context.outputSpec.aspectRatio,
+          width: result.context.outputSpec.width,
+          height: result.context.outputSpec.height,
+          fps: result.context.outputSpec.fps,
+        }
+      : undefined
     return NextResponse.json(presentSuccess({
       operation: presentPublicOperation(result.operation),
       approval: result.context.kind === 'project-final-export' ? result.context.approval : undefined,
-      outputSpec: result.context.kind === 'project-final-export' ? result.context.outputSpec : undefined,
+      outputSpec,
       replayed: result.replayed,
     }), { status: 202, headers: publicApiHeaders(requestId) })
   } catch (error) {

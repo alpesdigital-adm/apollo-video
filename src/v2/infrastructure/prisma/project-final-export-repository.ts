@@ -3,8 +3,10 @@ import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   ApprovedProjectFinalExportSource,
+  ProjectFinalExportAttemptHistory,
   ProjectFinalExportRepository,
 } from '../../application/ports/project-final-export-repository.ts'
+import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { PrismaProjectProxyRenderRepository } from './project-proxy-render-repository.ts'
 
@@ -22,8 +24,10 @@ function parseQuality(value: string): { status: string; score: number } {
 
 export class PrismaProjectFinalExportRepository implements ProjectFinalExportRepository {
   private readonly sourceReader: PrismaProjectProxyRenderRepository
+  private readonly client: PrismaClient
 
-  constructor(private readonly client: PrismaClient) {
+  constructor(client: PrismaClient) {
+    this.client = client
     this.sourceReader = new PrismaProjectProxyRenderRepository(client)
   }
 
@@ -35,6 +39,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     directorRunId?: string
     qualitySnapshotId?: string
     qualitySnapshotHash?: string
+    proxyReviewId?: string
+    proxyReviewHash?: string
+    proxyArtifactId?: string
     requireCurrent: boolean
   }) {
     const project = await this.client.v2Project.findFirst({
@@ -66,6 +73,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
             projectVersionId: input.projectVersionId,
             finalAllowed: true,
             status: 'ready-for-final',
+            ...(input.proxyReviewId ? { id: input.proxyReviewId } : {}),
+            ...(input.proxyReviewHash ? { reviewHash: input.proxyReviewHash } : {}),
+            ...(input.proxyArtifactId ? { proxyArtifactId: input.proxyArtifactId } : {}),
           },
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: 1,
@@ -120,6 +130,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     directorRunId: string
     qualitySnapshotId: string
     qualitySnapshotHash: string
+    proxyReviewId: string
+    proxyReviewHash: string
+    proxyArtifactId: string
     sourceArtifactId: string
     sourceManifestId: string
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null> {
@@ -219,6 +232,203 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         status: 'rendering-final',
       },
       data: { status: 'failed' },
+    })
+  }
+
+  async recordAttempt(
+    input: Parameters<ProjectFinalExportRepository['recordAttempt']>[0],
+  ): Promise<void> {
+    const startedAt = new Date(input.startedAt)
+    const completedAt = new Date(input.completedAt)
+    const validValidators = input.validators.length >= 1 &&
+      input.validators.length <= 100 &&
+      input.validators.every((validator) =>
+        /^[A-Z][A-Z0-9_]{2,63}$/.test(validator.code) &&
+        validator.message.trim().length >= 1 &&
+        validator.message.length <= 500)
+    if (
+      !Number.isSafeInteger(input.attempt) || input.attempt < 1 ||
+      Number.isNaN(startedAt.getTime()) ||
+      Number.isNaN(completedAt.getTime()) ||
+      completedAt < startedAt ||
+      !validValidators ||
+      (input.status === 'promoted' && (
+        !input.output ||
+        input.error !== undefined ||
+        !/^[a-f0-9]{64}$/.test(input.output.sha256) ||
+        !Number.isSafeInteger(input.output.byteSize) ||
+        input.output.byteSize < 1
+      )) ||
+      (input.status === 'failed' && (
+        input.output !== undefined ||
+        !input.error ||
+        input.error.code.trim().length < 1 ||
+        input.error.message.trim().length < 1
+      ))
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Final export attempt is invalid')
+    const validatorsJson = stableSerialize(input.validators)
+    await this.client.$transaction(async (transaction) => {
+      const existing = await transaction.v2ProjectFinalExportAttempt.findUnique({
+        where: {
+          operationId_attempt: {
+            operationId: input.operationId,
+            attempt: input.attempt,
+          },
+        },
+      })
+      if (existing) {
+        const converged =
+          existing.workspaceId === input.workspaceId &&
+          existing.status === input.status &&
+          existing.validatorsJson === validatorsJson &&
+          existing.outputArtifactId === (input.output?.artifactId ?? null) &&
+          existing.outputManifestId === (input.output?.manifestId ?? null) &&
+          existing.outputSha256 === (input.output?.sha256 ?? null) &&
+          existing.outputByteSize === (input.output ? BigInt(input.output.byteSize) : null) &&
+          existing.errorCode === (input.error?.code ?? null) &&
+          existing.errorMessage === (input.error?.message ?? null) &&
+          existing.startedAt.getTime() === startedAt.getTime() &&
+          existing.completedAt.getTime() === completedAt.getTime()
+        if (!converged) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Final export attempt identity did not converge')
+        }
+        return
+      }
+      const operation = await transaction.v2ProjectFinalExportOperation.findFirst({
+        where: {
+          operationId: input.operationId,
+          workspaceId: input.workspaceId,
+          operation: {
+            status: 'running',
+            leaseOwner: input.leaseOwner,
+            attempt: input.attempt,
+            leaseExpiresAt: { gt: completedAt },
+          },
+        },
+        select: { operationId: true },
+      })
+      if (!operation) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Final export attempt lost its active lease')
+      }
+      await transaction.v2ProjectFinalExportAttempt.create({
+        data: {
+          operationId: input.operationId,
+          workspaceId: input.workspaceId,
+          attempt: input.attempt,
+          status: input.status,
+          validatorsJson,
+          outputArtifactId: input.output?.artifactId,
+          outputManifestId: input.output?.manifestId,
+          outputSha256: input.output?.sha256,
+          outputByteSize: input.output ? BigInt(input.output.byteSize) : undefined,
+          errorCode: input.error?.code,
+          errorMessage: input.error?.message,
+          startedAt,
+          completedAt,
+        },
+      })
+    })
+  }
+
+  async readAttemptHistory(input: {
+    workspaceId: string
+    operationId: string
+  }): Promise<Readonly<ProjectFinalExportAttemptHistory> | null> {
+    const record = await this.client.v2ProjectFinalExportOperation.findFirst({
+      where: {
+        operationId: input.operationId,
+        workspaceId: input.workspaceId,
+      },
+      select: {
+        operationId: true,
+        projectId: true,
+        projectVersionId: true,
+        proxyReviewId: true,
+        outputAspectRatio: true,
+        outputWidth: true,
+        outputHeight: true,
+        outputFps: true,
+        outputCodec: true,
+        outputAudioCodec: true,
+        outputContainer: true,
+        outputQuality: true,
+        attempts: {
+          orderBy: { attempt: 'asc' },
+          take: 100,
+        },
+      },
+    })
+    if (!record) return null
+    if (
+      !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(record.outputAspectRatio) ||
+      record.outputCodec !== 'h264' ||
+      record.outputAudioCodec !== 'aac' ||
+      record.outputContainer !== 'mp4' ||
+      record.outputQuality !== 'final'
+    ) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored final export profile is invalid')
+    }
+    const attempts = record.attempts.map((attempt) => {
+      let validators: ProjectFinalExportAttemptHistory['attempts'][number]['validators']
+      try {
+        const parsed = JSON.parse(attempt.validatorsJson) as unknown
+        if (
+          !Array.isArray(parsed) ||
+          parsed.length < 1 ||
+          parsed.length > 100 ||
+          !parsed.every((validator) =>
+            typeof validator === 'object' &&
+            validator !== null &&
+            !Array.isArray(validator) &&
+            typeof (validator as Record<string, unknown>).code === 'string' &&
+            typeof (validator as Record<string, unknown>).passed === 'boolean' &&
+            typeof (validator as Record<string, unknown>).message === 'string')
+        ) throw new Error('invalid')
+        validators = parsed as ProjectFinalExportAttemptHistory['attempts'][number]['validators']
+      } catch {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Stored final export validators are invalid')
+      }
+      const byteSize = attempt.outputByteSize === null ? undefined : Number(attempt.outputByteSize)
+      if (byteSize !== undefined && (!Number.isSafeInteger(byteSize) || byteSize < 1)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Stored final export byte size is invalid')
+      }
+      return Object.freeze({
+        attempt: attempt.attempt,
+        status: attempt.status as 'failed' | 'promoted',
+        validators: Object.freeze(validators.map((validator) => Object.freeze({ ...validator }))),
+        ...(attempt.outputArtifactId && attempt.outputManifestId && attempt.outputSha256 && byteSize !== undefined
+          ? {
+              output: Object.freeze({
+                artifactId: attempt.outputArtifactId,
+                manifestId: attempt.outputManifestId,
+                sha256: attempt.outputSha256,
+                byteSize,
+              }),
+            }
+          : {}),
+        ...(attempt.errorCode && attempt.errorMessage
+          ? { error: Object.freeze({ code: attempt.errorCode, message: attempt.errorMessage }) }
+          : {}),
+        startedAt: attempt.startedAt.toISOString(),
+        completedAt: attempt.completedAt.toISOString(),
+      })
+    })
+    return Object.freeze({
+      operationId: record.operationId,
+      projectId: record.projectId,
+      projectVersionId: record.projectVersionId,
+      proxyReviewId: record.proxyReviewId,
+      outputSpec: Object.freeze({
+        aspectRatio: record.outputAspectRatio as ProjectFinalExportAttemptHistory['outputSpec']['aspectRatio'],
+        width: record.outputWidth,
+        height: record.outputHeight,
+        fps: record.outputFps,
+        codec: 'h264',
+        audioCodec: 'aac',
+        container: 'mp4',
+        quality: 'final',
+      }),
+      attempts: Object.freeze(attempts),
     })
   }
 }

@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 
 import type { MediaDownloadGrantSigner } from '../../application/ports/media-download-grant-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -17,9 +17,56 @@ export class HmacMediaDownloadGrantSigner implements MediaDownloadGrantSigner {
     const payload = Buffer.from(JSON.stringify({ v: 1, gid: input.grantId, wid: input.workspaceId, cid: input.clientId, aid: input.artifactId, exp: input.expiresAt })).toString('base64url')
     const signature = createHmac('sha256', this.options.secret).update(payload).digest('base64url')
     const token = `${payload}.${signature}`
-    const downloadUrl = new URL(`grants/${encodeURIComponent(input.grantId)}/content`, this.baseUrl)
+    const downloadUrl = new URL(`v1/media/download-grants/${encodeURIComponent(input.grantId)}/content`, this.baseUrl)
     downloadUrl.searchParams.set('token', token)
     return Object.freeze({ token, downloadUrl: downloadUrl.toString() })
+  }
+
+  verify(tokenValue: string) {
+    const token = tokenValue.trim()
+    if (token.length < 32 || token.length > 4096) {
+      throw new DomainError('MEDIA_DOWNLOAD_GRANT_REJECTED', 'Media download grant token is invalid')
+    }
+    const [payload, suppliedSignature, ...rest] = token.split('.')
+    if (!payload || !suppliedSignature || rest.length > 0) {
+      throw new DomainError('MEDIA_DOWNLOAD_GRANT_REJECTED', 'Media download grant token is invalid')
+    }
+    const expectedSignature = createHmac('sha256', this.options.secret).update(payload).digest()
+    let supplied: Buffer
+    try {
+      supplied = Buffer.from(suppliedSignature, 'base64url')
+    } catch {
+      throw new DomainError('MEDIA_DOWNLOAD_GRANT_REJECTED', 'Media download grant token is invalid')
+    }
+    if (supplied.length !== expectedSignature.length || !timingSafeEqual(supplied, expectedSignature)) {
+      throw new DomainError('MEDIA_DOWNLOAD_GRANT_REJECTED', 'Media download grant token is invalid')
+    }
+    let claims: unknown
+    try {
+      claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    } catch {
+      throw new DomainError('MEDIA_DOWNLOAD_GRANT_REJECTED', 'Media download grant token is invalid')
+    }
+    if (
+      typeof claims !== 'object' || claims === null || Array.isArray(claims) ||
+      Object.keys(claims).some((key) => !['v', 'gid', 'wid', 'cid', 'aid', 'exp'].includes(key)) ||
+      (claims as Record<string, unknown>).v !== 1 ||
+      !['gid', 'wid', 'cid', 'aid', 'exp'].every((key) => {
+        const value = (claims as Record<string, unknown>)[key]
+        return typeof value === 'string' && value.length >= 3 && value.length <= 128
+      }) ||
+      Number.isNaN(Date.parse((claims as Record<string, string>).exp))
+    ) {
+      throw new DomainError('MEDIA_DOWNLOAD_GRANT_REJECTED', 'Media download grant token is invalid')
+    }
+    const parsed = claims as Record<'gid' | 'wid' | 'cid' | 'aid' | 'exp', string>
+    return Object.freeze({
+      grantId: parsed.gid,
+      workspaceId: parsed.wid,
+      clientId: parsed.cid,
+      artifactId: parsed.aid,
+      expiresAt: new Date(parsed.exp).toISOString(),
+    })
   }
 }
 

@@ -2178,6 +2178,105 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV4 },
     }),
   ),
+  defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operationId', 'projectId', 'projectVersionId', 'proxyReviewId', 'outputSpec', 'attempts'],
+      properties: {
+        operationId: idSchema,
+        projectId: idSchema,
+        projectVersionId: idSchema,
+        proxyReviewId: idSchema,
+        outputSpec: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['aspectRatio', 'width', 'height', 'fps', 'codec', 'audioCodec', 'container', 'quality'],
+          properties: {
+            aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+            width: { type: 'integer', minimum: 2, multipleOf: 2 },
+            height: { type: 'integer', minimum: 2, multipleOf: 2 },
+            fps: { type: 'integer', minimum: 1, maximum: 120 },
+            codec: { const: 'h264' },
+            audioCodec: { const: 'aac' },
+            container: { const: 'mp4' },
+            quality: { const: 'final' },
+          },
+        },
+        attempts: {
+          type: 'array',
+          maxItems: 100,
+          items: {
+            oneOf: [
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['attempt', 'status', 'validators', 'error', 'startedAt', 'completedAt'],
+                properties: {
+                  attempt: { type: 'integer', minimum: 1 },
+                  status: { const: 'failed' },
+                  validators: {
+                    type: 'array', minItems: 1, maxItems: 100,
+                    items: {
+                      type: 'object', additionalProperties: false,
+                      required: ['code', 'passed', 'message'],
+                      properties: {
+                        code: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' },
+                        passed: { type: 'boolean' },
+                        message: { type: 'string', minLength: 1, maxLength: 500 },
+                      },
+                    },
+                  },
+                  error: {
+                    type: 'object', additionalProperties: false, required: ['code', 'message'],
+                    properties: {
+                      code: { type: 'string', minLength: 1, maxLength: 64 },
+                      message: { type: 'string', minLength: 1, maxLength: 500 },
+                    },
+                  },
+                  startedAt: dateTimeSchema,
+                  completedAt: dateTimeSchema,
+                },
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['attempt', 'status', 'validators', 'output', 'startedAt', 'completedAt'],
+                properties: {
+                  attempt: { type: 'integer', minimum: 1 },
+                  status: { const: 'promoted' },
+                  validators: {
+                    type: 'array', minItems: 1, maxItems: 100,
+                    items: {
+                      type: 'object', additionalProperties: false,
+                      required: ['code', 'passed', 'message'],
+                      properties: {
+                        code: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' },
+                        passed: { type: 'boolean' },
+                        message: { type: 'string', minLength: 1, maxLength: 500 },
+                      },
+                    },
+                  },
+                  output: {
+                    type: 'object', additionalProperties: false,
+                    required: ['artifactId', 'manifestId', 'sha256', 'byteSize'],
+                    properties: {
+                      artifactId: idSchema,
+                      manifestId: idSchema,
+                      sha256: sha256Schema,
+                      byteSize: { type: 'integer', minimum: 1 },
+                    },
+                  },
+                  startedAt: dateTimeSchema,
+                  completedAt: dateTimeSchema,
+                },
+              },
+            ],
+          },
+        },
+      },
+    }),
+  ),
   defineSchema('public-operation-list', 1, 'Public operation list response',
     successSchema({
       type: 'object',
