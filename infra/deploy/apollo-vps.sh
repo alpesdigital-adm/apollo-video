@@ -38,7 +38,41 @@ docker run --rm \
   --add-host host.docker.internal:host-gateway \
   --network easypanel \
   "${IMAGE}" \
-  npm run db:v2:migrate:deploy
+  sh -lc '
+    set -e
+    node -e "
+      const net = require(\"node:net\");
+      const url = new URL(process.env.V2_DATABASE_URL);
+      const host = url.hostname;
+      const port = Number(url.port || 5432);
+      const deadline = Date.now() + 30_000;
+      const connect = () => {
+        let settled = false;
+        const socket = net.connect({ host, port });
+        socket.setTimeout(2_000);
+        socket.once(\"connect\", () => {
+          if (settled) return;
+          settled = true;
+          socket.end();
+          process.exit(0);
+        });
+        const retry = () => {
+          if (settled) return;
+          settled = true;
+          socket.destroy();
+          if (Date.now() >= deadline) {
+            console.error(\"PostgreSQL unavailable at \" + host + \":\" + port + \" after 30s\");
+            process.exit(1);
+          }
+          setTimeout(connect, 500);
+        };
+        socket.once(\"error\", retry);
+        socket.once(\"timeout\", retry);
+      };
+      connect();
+    "
+    npm run db:v2:migrate:deploy
+  '
 
 remove_container "${CONTAINER}"
 remove_container "${INGEST_WORKER}"
