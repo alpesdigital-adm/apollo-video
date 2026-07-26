@@ -61,15 +61,30 @@ test('T-FR-218 validates AssetBrief and candidates strictly and produces determi
 })
 
 test('T-FR-219 quality loop blocks hard technical/policy/integrity and critiques assets before insertion', () => {
-  const issues = critiqueAsset({ relevance: .3, continuity: .9, quality: .9, rightsApproved: false, novelty: .4, rangeMs: [1000, 2500], assetId: 'a1' })
+  const issues = critiqueAsset({ relevance: .3, continuity: .9, quality: .9, rightsApproved: false, novelty: .4, rangeMs: [1000, 2500], assetId: 'asset-a1' })
   const validation = validateQuality({ technical: [], policy: issues.filter((item) => item.category === 'policy'), integrity: [{ code: 'CLAIM', severity: 'hard', category: 'integrity', correctable: false }], assets: issues, proxy: [] })
-  assert.equal(validation.finalBlocked, true); assert.ok(validation.hardIssues.some((item) => item.code === 'ASSET_RIGHTS'))
+  assert.equal(validation.finalBlocked, true)
+  assert.ok(validation.hardIssues.some((item) => item.code === 'ASSET_RIGHTS'))
+  assert.equal(validation.hardByCategory.policy, 1)
+  assert.equal(validation.hardByCategory.integrity, 1)
 })
 
 test('T-FR-219 proxy critic localizes issues and compiler requests only minimal rerender', () => {
-  const issues = critiqueProxy({ format: '9:16', rubric: { hook: .4, clarity: .9 }, ranges: [{ startMs: 2000, endMs: 3500, density: .95 }] })
+  const issues = critiqueProxy({
+    format: '9:16',
+    spec: { width: 960, height: 540 },
+    rubric: { hook: .4, clarity: .9 },
+    ranges: [
+      { startMs: 2000, endMs: 3500, density: .95 },
+      { startMs: 7000, endMs: 7500, density: .96 },
+    ],
+  })
   const compiled = compileQualityPatches(issues)
-  assert.deepEqual(compiled.minimalRerenderRangeMs, [2000, 3500]); assert.ok(compiled.patches.some((item) => item.issueCode === 'PATTERN_DENSITY'))
+  assert.deepEqual(compiled.minimalRerenderRangesMs, [[2000, 3500], [7000, 7500]])
+  assert.deepEqual(compiled.minimalRerenderRangeMs, [2000, 7500])
+  assert.equal(compiled.fullRerenderRequired, true)
+  assert.ok(compiled.patches.some((item) => item.issueCode === 'PATTERN_DENSITY'))
+  assert.ok(issues.some((item) => item.code === 'PROXY_FORMAT_MISMATCH' && item.severity === 'hard'))
 })
 
 test('T-FR-219 closes on every terminal reason and versions regression reports', () => {
@@ -77,8 +92,8 @@ test('T-FR-219 closes on every terminal reason and versions regression reports',
   assert.equal(decideQualityIteration({ ...base, approved: true }).terminalReason, 'approval')
   assert.equal(decideQualityIteration({ ...base, iteration: 2, scoreDelta: 0 }).terminalReason, 'convergence')
   assert.equal(decideQualityIteration({ ...base, remainingBudget: 0 }).terminalReason, 'budget')
-  assert.equal(decideQualityIteration({ ...base, issues: [{ code: 'X', severity: 'hard', category: 'policy', correctable: false }] }).terminalReason, 'uncorrectable')
+  assert.equal(decideQualityIteration({ ...base, issues: [{ code: 'POLICY_X', severity: 'hard', category: 'policy', correctable: false }] }).terminalReason, 'uncorrectable')
   assert.equal(decideQualityIteration({ ...base, iteration: 5 }).terminalReason, 'human_review')
-  const report = createQualityReport({ versionId: 'v2', datasetId: 'reference-v1', score: .8, baselineScore: .85, issues: [] })
-  assert.equal(report.regressed, true); assert.match(report.id, /^qr_/)
+  const report = createQualityReport({ versionId: 'version-2', datasetId: 'reference-v1', score: 80, baselineScore: 85, issues: [] })
+  assert.equal(report.regressed, true); assert.match(report.id, /^quality-report-/)
 })

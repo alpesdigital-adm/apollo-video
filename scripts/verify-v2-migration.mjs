@@ -199,6 +199,15 @@ const requiredChecks = [
   'render_element_maps_schema_check',
   'render_element_maps_dimensions_check',
   'render_element_maps_elements_json_check',
+  'quality_iterations_hashes_check',
+  'quality_iterations_sequence_check',
+  'quality_iterations_score_check',
+  'quality_iterations_json_bounds_check',
+  'quality_iterations_decision_check',
+  'quality_iterations_creator_check',
+  'quality_iterations_idempotency_check',
+  'quality_iteration_asset_selections_hash_check',
+  'quality_iteration_asset_selections_ordinal_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

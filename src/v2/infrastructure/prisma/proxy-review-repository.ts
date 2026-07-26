@@ -60,7 +60,7 @@ function parseIssueArray(value: string, field: string): readonly Readonly<ProxyQ
   return Object.freeze(issues)
 }
 
-function hydrateReview(row: StoredProxyReview): Readonly<PersistedProxyReview> {
+export function hydrateProxyReview(row: StoredProxyReview): Readonly<PersistedProxyReview> {
   const parsedSpec = parseJson(row.specJson, 'proxy review spec')
   const spec = parsedSpec as Record<string, unknown>
   if (
@@ -156,7 +156,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           existing.projectId !== input.projectId ||
           existing.reviewHash !== input.review.reviewHash
         ) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy review identity did not converge')
-        return hydrateReview(existing)
+        return hydrateProxyReview(existing)
       }
       const createdAt = new Date(input.createdAt)
       if (Number.isNaN(createdAt.getTime())) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy review creation time is invalid')
@@ -219,7 +219,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           }),
         },
       })
-      return hydrateReview(row)
+      return hydrateProxyReview(row)
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   }
 
@@ -234,7 +234,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     })
-    return row ? hydrateReview(row) : null
+    return row ? hydrateProxyReview(row) : null
   }
 
   private async findDecisionReplay(input: {
@@ -263,7 +263,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
       where: { id: decision.proxyReviewId },
     })
     if (!review) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy review decision lost its review')
-    return Object.freeze({ review: hydrateReview(review), decision: hydrateDecision(decision), replayed: true })
+    return Object.freeze({ review: hydrateProxyReview(review), decision: hydrateDecision(decision), replayed: true })
   }
 
   async acknowledgeWarnings(
@@ -291,7 +291,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
             where: { id: existing.proxyReviewId },
           })
           return Object.freeze({
-            review: hydrateReview(review),
+            review: hydrateProxyReview(review),
             decision: hydrateDecision(existing),
             replayed: true,
           })
@@ -326,7 +326,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
             currentRevision: reviewRow.revision,
           })
         }
-        const hydrated = hydrateReview(reviewRow)
+        const hydrated = hydrateProxyReview(reviewRow)
         const warnings = [...hydrated.technicalIssues, ...hydrated.criticIssues]
           .filter((issue) => issue.severity === 'warning')
         const hard = [...hydrated.technicalIssues, ...hydrated.criticIssues]
@@ -429,7 +429,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           where: { id: input.proxyReviewId },
         })
         return Object.freeze({
-          review: hydrateReview(review),
+          review: hydrateProxyReview(review),
           decision: hydrateDecision(decision),
           replayed: false,
         })

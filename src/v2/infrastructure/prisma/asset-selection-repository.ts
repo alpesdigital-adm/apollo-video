@@ -86,7 +86,7 @@ function parseRightsEvidence(
   return Object.freeze(evidence)
 }
 
-function hydrateSelection(row: StoredSelection): Readonly<PersistedAssetSelection> {
+export function hydrateAssetSelection(row: StoredSelection): Readonly<PersistedAssetSelection> {
   const briefValue = parseJson(row.briefJson, 'asset brief')
   if (typeof briefValue !== 'object' || briefValue === null || Array.isArray(briefValue)) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored asset brief is invalid')
@@ -200,7 +200,7 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
         },
       },
     })
-    return row ? hydrateSelection(row) : null
+    return row ? hydrateAssetSelection(row) : null
   }
 
   async persist(
@@ -224,7 +224,7 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
               'Idempotency key was used with a different asset selection request',
             )
           }
-          return Object.freeze({ selection: hydrateSelection(existing), replayed: true })
+          return Object.freeze({ selection: hydrateAssetSelection(existing), replayed: true })
         }
         const [project, artifacts] = await Promise.all([
           transaction.v2Project.findFirst({
@@ -307,7 +307,7 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
             createdAt: new Date(selection.createdAt),
           },
         })
-        return Object.freeze({ selection: hydrateSelection(row), replayed: false })
+        return Object.freeze({ selection: hydrateAssetSelection(row), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
@@ -352,6 +352,6 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: input.limit,
     })
-    return Object.freeze(rows.map(hydrateSelection))
+    return Object.freeze(rows.map(hydrateAssetSelection))
   }
 }

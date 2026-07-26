@@ -367,6 +367,277 @@ const assetSelectionSchema = {
     createdAt: dateTimeSchema,
   },
 }
+const qualitySha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
+const qualityIssueSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['code', 'severity', 'category', 'message', 'correctable'],
+  properties: {
+    code: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,79}$' },
+    severity: { enum: ['hard', 'warning'] },
+    category: {
+      enum: ['technical', 'policy', 'integrity', 'asset', 'editorial'],
+    },
+    message: { type: 'string', minLength: 1, maxLength: 500 },
+    rangeMs: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 2,
+      prefixItems: [
+        { type: 'integer', minimum: 0 },
+        { type: 'integer', minimum: 1 },
+      ],
+      items: false,
+    },
+    targetId: idSchema,
+    correctable: { type: 'boolean' },
+  },
+}
+const qualityRubricEvidenceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['criterionId', 'score', 'evidence'],
+  properties: {
+    criterionId: {
+      enum: [
+        'hook-clarity', 'problem-recognition', 'trust-building', 'offer-clarity',
+        'proof-strength', 'cta-clarity', 'friction-reduction',
+        'narrative-integrity', 'legibility', 'rights-compliance',
+      ],
+    },
+    score: { type: 'number', minimum: 0, maximum: 100 },
+    evidence: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 20,
+      items: { type: 'string', minLength: 1, maxLength: 500 },
+    },
+  },
+}
+const qualityRangeMetricSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['startMs', 'endMs', 'density'],
+  properties: {
+    startMs: { type: 'integer', minimum: 0 },
+    endMs: { type: 'integer', minimum: 1 },
+    density: { type: 'number', minimum: 0, maximum: 1 },
+  },
+}
+const qualityIterationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'projectId', 'projectVersionId',
+    'projectVersionHash', 'iteration', 'previousIterationId', 'proxyEvidence',
+    'assetPlacements', 'rubric', 'rangeMetrics', 'dataset', 'score',
+    'regression', 'regressed', 'validation', 'issues', 'patches',
+    'minimalRerenderRangesMs', 'fullRerenderRequired', 'budget', 'decision',
+    'reportFingerprint', 'recordHash', 'createdBy', 'createdAt',
+  ],
+  properties: {
+    schemaVersion: { const: 'quality-iteration/v1' },
+    id: idSchema,
+    projectId: idSchema,
+    projectVersionId: idSchema,
+    projectVersionHash: qualitySha256Schema,
+    iteration: { type: 'integer', minimum: 1 },
+    previousIterationId: { oneOf: [idSchema, { type: 'null' }] },
+    proxyEvidence: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'id', 'reviewHash', 'revision', 'status', 'finalAllowed', 'spec',
+        'technicalIssues', 'criticIssues',
+      ],
+      properties: {
+        id: idSchema,
+        reviewHash: qualitySha256Schema,
+        revision: { type: 'integer', minimum: 1 },
+        status: { enum: ['blocked', 'warning-ack-required', 'ready-for-final'] },
+        finalAllowed: { type: 'boolean' },
+        spec: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['width', 'height', 'codec', 'container', 'quality', 'reusableRanges'],
+          properties: {
+            width: { type: 'integer', minimum: 2, maximum: 8192 },
+            height: { type: 'integer', minimum: 2, maximum: 8192 },
+            codec: { const: 'h264' },
+            container: { const: 'mp4' },
+            quality: { const: 'review' },
+            reusableRanges: { const: true },
+          },
+        },
+        technicalIssues: {
+          type: 'array', maxItems: 500, items: qualityIssueSchema,
+        },
+        criticIssues: {
+          type: 'array', maxItems: 500, items: qualityIssueSchema,
+        },
+      },
+    },
+    assetPlacements: {
+      type: 'array',
+      maxItems: 100,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'selectionId', 'selectionHash', 'rangeMs', 'selectedArtifactId',
+          'selectedSource', 'relevance', 'continuity', 'quality', 'novelty',
+          'rightsApproved', 'rightsReasonCodes',
+        ],
+        properties: {
+          selectionId: idSchema,
+          selectionHash: qualitySha256Schema,
+          rangeMs: qualityIssueSchema.properties.rangeMs,
+          selectedArtifactId: idSchema,
+          selectedSource: { enum: ['library', 'stock', 'generated'] },
+          relevance: { type: 'number', minimum: 0, maximum: 1 },
+          continuity: { type: 'number', minimum: 0, maximum: 1 },
+          quality: { type: 'number', minimum: 0, maximum: 1 },
+          novelty: { type: 'number', minimum: 0, maximum: 1 },
+          rightsApproved: { type: 'boolean' },
+          rightsReasonCodes: {
+            type: 'array',
+            maxItems: 64,
+            uniqueItems: true,
+            items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,79}$' },
+          },
+          rightsSnapshotId: idSchema,
+          rightsSnapshotHash: qualitySha256Schema,
+        },
+      },
+    },
+    rubric: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'version', 'objective', 'threshold', 'evidence'],
+      properties: {
+        id: idSchema,
+        version: { type: 'integer', minimum: 1 },
+        objective: {
+          enum: [
+            'discovery', 'awareness', 'warming', 'lead-generation', 'sale',
+            'whatsapp', 'booking', 'download',
+          ],
+        },
+        threshold: { type: 'number', minimum: 0, maximum: 100 },
+        evidence: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 10,
+          items: qualityRubricEvidenceSchema,
+        },
+      },
+    },
+    rangeMetrics: {
+      type: 'array', maxItems: 200, items: qualityRangeMetricSchema,
+    },
+    dataset: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'version', 'baselineScore', 'fingerprint'],
+      properties: {
+        id: idSchema,
+        version: { type: 'integer', minimum: 1 },
+        baselineScore: { type: 'number', minimum: 0, maximum: 100 },
+        fingerprint: qualitySha256Schema,
+      },
+    },
+    score: { type: 'number', minimum: 0, maximum: 100 },
+    regression: { type: 'number', minimum: -100, maximum: 100 },
+    regressed: { type: 'boolean' },
+    validation: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'valid', 'finalBlocked', 'hardIssueCount', 'warningIssueCount',
+        'hardByCategory',
+      ],
+      properties: {
+        valid: { type: 'boolean' },
+        finalBlocked: { type: 'boolean' },
+        hardIssueCount: { type: 'integer', minimum: 0, maximum: 500 },
+        warningIssueCount: { type: 'integer', minimum: 0, maximum: 500 },
+        hardByCategory: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['technical', 'policy', 'integrity', 'asset', 'editorial'],
+          properties: Object.fromEntries(
+            ['technical', 'policy', 'integrity', 'asset', 'editorial']
+              .map((category) => [
+                category,
+                { type: 'integer', minimum: 0, maximum: 500 },
+              ]),
+          ),
+        },
+      },
+    },
+    issues: { type: 'array', maxItems: 500, items: qualityIssueSchema },
+    patches: {
+      type: 'array',
+      maxItems: 500,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['type', 'targetId', 'issueCode'],
+        properties: {
+          type: { enum: ['replace_asset', 'adjust'] },
+          targetId: idSchema,
+          issueCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{1,79}$' },
+          rangeMs: qualityIssueSchema.properties.rangeMs,
+        },
+      },
+    },
+    minimalRerenderRangesMs: {
+      type: 'array',
+      maxItems: 500,
+      items: qualityIssueSchema.properties.rangeMs,
+    },
+    fullRerenderRequired: { type: 'boolean' },
+    budget: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['limitUnits', 'consumedUnits', 'remainingUnits', 'iterationCostUnits'],
+      properties: {
+        limitUnits: { type: 'integer', minimum: 1, maximum: 1000 },
+        consumedUnits: { type: 'integer', minimum: 0, maximum: 1000 },
+        remainingUnits: { type: 'integer', minimum: 0, maximum: 1000 },
+        iterationCostUnits: { type: 'integer', minimum: 0, maximum: 1002 },
+      },
+    },
+    decision: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['continue', 'terminalReason'],
+      properties: {
+        continue: { type: 'boolean' },
+        terminalReason: {
+          oneOf: [
+            {
+              enum: [
+                'approval', 'convergence', 'budget', 'uncorrectable',
+                'human_review',
+              ],
+            },
+            { type: 'null' },
+          ],
+        },
+      },
+    },
+    reportFingerprint: qualitySha256Schema,
+    recordHash: qualitySha256Schema,
+    createdBy: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id'],
+      properties: { type: { const: 'api-client' }, id: idSchema },
+    },
+    createdAt: dateTimeSchema,
+  },
+}
 const apiMetaSchema = {
   type: 'object',
   additionalProperties: false,
@@ -4358,6 +4629,76 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['selections'],
       properties: {
         selections: { type: 'array', maxItems: 100, items: assetSelectionSchema },
+      },
+    }),
+  ),
+  defineSchema('project-quality-iteration-request', 1, 'Run one deterministic closed-loop quality iteration against exact server evidence', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'projectVersionId', 'projectVersionHash', 'proxyReviewId',
+      'proxyReviewHash', 'expectedProxyReviewRevision', 'assetPlacements',
+      'rubricEvidence', 'rangeMetrics', 'datasetId', 'datasetVersion',
+      'budgetLimitUnits',
+    ],
+    properties: {
+      projectVersionId: idSchema,
+      projectVersionHash: sha256Schema,
+      proxyReviewId: idSchema,
+      proxyReviewHash: sha256Schema,
+      expectedProxyReviewRevision: { type: 'integer', minimum: 1 },
+      assetPlacements: {
+        type: 'array',
+        maxItems: 100,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['selectionId', 'startMs', 'endMs'],
+          properties: {
+            selectionId: idSchema,
+            startMs: { type: 'integer', minimum: 0 },
+            endMs: { type: 'integer', minimum: 1 },
+          },
+        },
+      },
+      rubricEvidence: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 10,
+        items: qualityRubricEvidenceSchema,
+      },
+      rangeMetrics: {
+        type: 'array',
+        maxItems: 200,
+        items: qualityRangeMetricSchema,
+      },
+      datasetId: idSchema,
+      datasetVersion: { type: 'integer', minimum: 1 },
+      budgetLimitUnits: { type: 'integer', minimum: 1, maximum: 1000 },
+    },
+  }),
+  defineSchema('project-quality-iteration-created', 1, 'Immutable closed-loop quality report and patch decision',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['iteration', 'replayed'],
+      properties: {
+        iteration: qualityIterationSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-quality-iteration-list', 1, 'Immutable closed-loop quality iteration history',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['iterations'],
+      properties: {
+        iterations: {
+          type: 'array',
+          maxItems: 100,
+          items: qualityIterationSchema,
+        },
       },
     }),
   ),

@@ -29,6 +29,7 @@
     "mcp:v2": "tsx --env-file=.env scripts/run-v2-mcp.mjs",
     "test:integration:api": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/public-project-api.integration.mjs",
     "test:integration:asset-selection": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-asset-selection.integration.mjs",
+    "test:integration:quality-iteration": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-quality-iteration.integration.mjs",
     "api:v1:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-public-contracts.mjs",
     "api:v1:baseline:update": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/update-public-contract-baseline.mjs",
     "remotion:dev": "cd remotion && npx remotion studio src/index.ts",

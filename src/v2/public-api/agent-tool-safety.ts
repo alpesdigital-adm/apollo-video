@@ -199,6 +199,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable selection audit without mutating the project version or starting provider work.',
     },
+    'apollo.projects.quality-iterations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable quality report from exact server evidence without approving final export or mutating the project version.',
+    },
     'apollo.projects.final-exports.enqueue': {
       impact: 'bounded', confirmation: 'human-approval',
       reason: 'Publishes one approved high-resolution final artifact bound to an exact immutable project version.',

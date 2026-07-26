@@ -59,6 +59,7 @@ model V2Workspace {
   proxyReviews                    V2ProxyReview[]
   proxyReviewDecisions            V2ProxyReviewDecision[]
   assetSelections                 V2AssetSelection[]
+  qualityIterations               V2QualityIteration[]
 
   @@map("workspaces")
 }
@@ -84,6 +85,7 @@ model V2ApiClient {
   createdWebhookEndpoints     V2WebhookEndpoint[]     @relation("WebhookEndpointCreator")
   createdWebhookSubscriptions V2WebhookSubscription[] @relation("WebhookSubscriptionCreator")
   proxyReviewDecisions        V2ProxyReviewDecision[]
+  qualityIterations           V2QualityIteration[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -201,6 +203,7 @@ model V2Project {
   proxyReviews          V2ProxyReview[]
   proxyReviewDecisions  V2ProxyReviewDecision[]
   assetSelections       V2AssetSelection[]
+  qualityIterations     V2QualityIteration[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -280,6 +283,7 @@ model V2ProjectVersion {
   patchBatchAsResult    V2ReviewPatchBatch?             @relation("PatchBatchResultVersion")
   proxyReviews          V2ProxyReview[]
   assetSelections       V2AssetSelection[]
+  qualityIterations     V2QualityIteration[]
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -567,21 +571,21 @@ model V2MediaArtifact {
   rightsRevision          Int      @default(0)
   createdAt               DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace              V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  manifests              V2MediaArtifactManifest[]
-  lineageUses            V2MediaArtifactLineage[]         @relation("MediaLineageSource")
-  rightsSnapshots        V2AssetRightsSnapshot[]          @relation("AssetRightsSnapshots")
-  currentRightsSnapshot  V2AssetRightsSnapshot?           @relation("CurrentAssetRights", fields: [currentRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  consentEvidenceFor     V2AssetRightsSnapshot[]          @relation("ConsentDocument")
-  materializationTargets V2MaterializationAuthorization[] @relation("MaterializationTarget")
-  renderOperationTargets V2ArtifactRenderOperation[]      @relation("ArtifactRenderTarget")
-  downloadGrants         V2MediaDownloadGrant[]
-  projectAssets          V2ProjectMediaAsset[]
-  transcriptSources      V2MediaTranscript[]
-  reviewAnnotations      V2ReviewAnnotation[]
-  renderElementMaps      V2RenderElementMap[]
-  proxyReviews           V2ProxyReview[]
-  selectedByAssetSelections V2AssetSelection[] @relation("AssetSelectionSelectedArtifact")
+  workspace                 V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  manifests                 V2MediaArtifactManifest[]
+  lineageUses               V2MediaArtifactLineage[]         @relation("MediaLineageSource")
+  rightsSnapshots           V2AssetRightsSnapshot[]          @relation("AssetRightsSnapshots")
+  currentRightsSnapshot     V2AssetRightsSnapshot?           @relation("CurrentAssetRights", fields: [currentRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  consentEvidenceFor        V2AssetRightsSnapshot[]          @relation("ConsentDocument")
+  materializationTargets    V2MaterializationAuthorization[] @relation("MaterializationTarget")
+  renderOperationTargets    V2ArtifactRenderOperation[]      @relation("ArtifactRenderTarget")
+  downloadGrants            V2MediaDownloadGrant[]
+  projectAssets             V2ProjectMediaAsset[]
+  transcriptSources         V2MediaTranscript[]
+  reviewAnnotations         V2ReviewAnnotation[]
+  renderElementMaps         V2RenderElementMap[]
+  proxyReviews              V2ProxyReview[]
+  selectedByAssetSelections V2AssetSelection[]               @relation("AssetSelectionSelectedArtifact")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -740,10 +744,11 @@ model V2AssetSelection {
   createdById             String   @db.VarChar(128)
   createdAt               DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace        V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project          V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  projectVersion   V2ProjectVersion @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  selectedArtifact V2MediaArtifact? @relation("AssetSelectionSelectedArtifact", fields: [selectedArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace         V2Workspace                        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project           V2Project                          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion    V2ProjectVersion                   @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  selectedArtifact  V2MediaArtifact?                   @relation("AssetSelectionSelectedArtifact", fields: [selectedArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  qualityIterations V2QualityIterationAssetSelection[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -752,6 +757,77 @@ model V2AssetSelection {
   @@index([workspaceId, auditId])
   @@index([workspaceId, selectedArtifactId])
   @@map("asset_selections")
+}
+
+model V2QualityIteration {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  projectVersionHash   String   @db.Char(64)
+  iteration            Int
+  previousIterationId  String?  @db.VarChar(128)
+  proxyReviewId        String   @db.VarChar(128)
+  proxyReviewHash      String   @db.Char(64)
+  proxyReviewRevision  Int
+  proxyEvidenceJson    String   @db.Text
+  assetPlacementsJson  String   @db.Text
+  rubricJson           String   @db.Text
+  rangeMetricsJson     String   @db.Text
+  datasetJson          String   @db.Text
+  score                Float
+  regression           Float
+  regressed            Boolean
+  validationJson       String   @db.Text
+  issuesJson           String   @db.Text
+  patchesJson          String   @db.Text
+  rerenderRangesJson   String   @db.Text
+  fullRerenderRequired Boolean
+  budgetJson           String   @db.Text
+  decisionContinue     Boolean
+  terminalReason       String?  @db.VarChar(32)
+  reportFingerprint    String   @db.Char(64)
+  recordHash           String   @db.Char(64)
+  idempotencyKey       String   @db.VarChar(128)
+  requestFingerprint   String   @db.Char(64)
+  createdByType        String   @db.VarChar(32)
+  createdById          String   @db.VarChar(80)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace       V2Workspace                        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project         V2Project                          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion  V2ProjectVersion                   @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  proxyReview     V2ProxyReview                      @relation(fields: [proxyReviewId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy       V2ApiClient                        @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  previous        V2QualityIteration?                @relation("QualityIterationPrevious", fields: [previousIterationId], references: [id], onDelete: Restrict)
+  nextIterations  V2QualityIteration[]               @relation("QualityIterationPrevious")
+  assetSelections V2QualityIterationAssetSelection[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@unique([projectVersionId, iteration])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, projectVersionId, iteration(sort: Desc)])
+  @@index([workspaceId, proxyReviewId, proxyReviewRevision])
+  @@index([workspaceId, terminalReason, createdAt(sort: Desc)])
+  @@index([previousIterationId])
+  @@map("quality_iterations")
+}
+
+model V2QualityIterationAssetSelection {
+  qualityIterationId String @db.VarChar(128)
+  workspaceId        String @db.VarChar(128)
+  assetSelectionId   String @db.VarChar(128)
+  selectionHash      String @db.Char(64)
+  ordinal            Int
+
+  qualityIteration V2QualityIteration @relation(fields: [qualityIterationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  assetSelection   V2AssetSelection   @relation(fields: [assetSelectionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@id([qualityIterationId, assetSelectionId])
+  @@unique([qualityIterationId, ordinal])
+  @@index([workspaceId, assetSelectionId])
+  @@map("quality_iteration_asset_selections")
 }
 
 model V2AssetRightsSnapshot {
@@ -984,14 +1060,15 @@ model V2ProxyReview {
   createdAt            DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt            DateTime  @updatedAt @db.Timestamptz(3)
 
-  workspace      V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project        V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  projectVersion V2ProjectVersion              @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  operation      V2ProjectProxyRenderOperation @relation(fields: [operationId, workspaceId], references: [operationId, workspaceId], onDelete: Restrict)
-  proxyArtifact  V2MediaArtifact               @relation(fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  proxyManifest  V2MediaArtifactManifest       @relation(fields: [proxyManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  decisions      V2ProxyReviewDecision[]
-  finalExports   V2ProjectFinalExportOperation[]
+  workspace         V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project           V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion    V2ProjectVersion                @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  operation         V2ProjectProxyRenderOperation   @relation(fields: [operationId, workspaceId], references: [operationId, workspaceId], onDelete: Restrict)
+  proxyArtifact     V2MediaArtifact                 @relation(fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  proxyManifest     V2MediaArtifactManifest         @relation(fields: [proxyManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  decisions         V2ProxyReviewDecision[]
+  finalExports      V2ProjectFinalExportOperation[]
+  qualityIterations V2QualityIteration[]
 
   @@unique([id, workspaceId])
   @@unique([operationId, workspaceId])
@@ -1062,13 +1139,13 @@ model V2ProjectFinalExportOperation {
   originalFileName    String   @db.VarChar(240)
   createdAt           DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace       V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  operation       V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  project         V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  version         V2ProjectVersion  @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  directorRun     V2DirectorRun     @relation(fields: [directorRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  qualitySnapshot V2ProjectSnapshot @relation("FinalExportQualitySnapshot", fields: [qualitySnapshotId], references: [id], onDelete: Restrict)
-  proxyReview     V2ProxyReview      @relation(fields: [proxyReviewId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace       V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  operation       V2PublicOperation             @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  project         V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  version         V2ProjectVersion              @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  directorRun     V2DirectorRun                 @relation(fields: [directorRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  qualitySnapshot V2ProjectSnapshot             @relation("FinalExportQualitySnapshot", fields: [qualitySnapshotId], references: [id], onDelete: Restrict)
+  proxyReview     V2ProxyReview                 @relation(fields: [proxyReviewId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   attempts        V2ProjectFinalExportAttempt[]
 
   @@unique([operationId, workspaceId])
@@ -1082,19 +1159,19 @@ model V2ProjectFinalExportOperation {
 }
 
 model V2ProjectFinalExportAttempt {
-  operationId        String   @db.VarChar(128)
-  workspaceId       String   @db.VarChar(128)
-  attempt           Int
-  status            String   @db.VarChar(16)
-  validatorsJson    String   @db.Text
-  outputArtifactId  String?  @db.VarChar(128)
-  outputManifestId  String?  @db.VarChar(128)
-  outputSha256      String?  @db.Char(64)
-  outputByteSize    BigInt?
-  errorCode         String?  @db.VarChar(64)
-  errorMessage      String?  @db.VarChar(500)
-  startedAt         DateTime @db.Timestamptz(3)
-  completedAt       DateTime @db.Timestamptz(3)
+  operationId      String   @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  attempt          Int
+  status           String   @db.VarChar(16)
+  validatorsJson   String   @db.Text
+  outputArtifactId String?  @db.VarChar(128)
+  outputManifestId String?  @db.VarChar(128)
+  outputSha256     String?  @db.Char(64)
+  outputByteSize   BigInt?
+  errorCode        String?  @db.VarChar(64)
+  errorMessage     String?  @db.VarChar(500)
+  startedAt        DateTime @db.Timestamptz(3)
+  completedAt      DateTime @db.Timestamptz(3)
 
   workspace V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   operation V2ProjectFinalExportOperation @relation(fields: [operationId, workspaceId], references: [operationId, workspaceId], onDelete: Cascade)

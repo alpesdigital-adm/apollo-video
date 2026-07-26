@@ -71,7 +71,7 @@ function draftFromSnapshot(snapshot: AssetRightsSnapshot): AssetRightsDraft {
   }
 }
 
-function hydrateRights(row: V2AssetRightsSnapshot): AssetRightsSnapshot {
+export function hydrateAssetRights(row: V2AssetRightsSnapshot): AssetRightsSnapshot {
   const snapshot = createAssetRightsSnapshot({
     id: row.id,
     workspaceId: row.workspaceId,
@@ -220,7 +220,7 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
       artifactId: artifact.id,
       revision: assetRightsRevision(artifact.id, artifact.rightsRevision),
       snapshot: artifact.currentRightsSnapshot
-        ? hydrateRights(artifact.currentRightsSnapshot)
+        ? hydrateAssetRights(artifact.currentRightsSnapshot)
         : null,
     }
   }
@@ -238,7 +238,7 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
       artifacts.map((artifact) => [
         artifact.id,
         artifact.currentRightsSnapshot
-          ? hydrateRights(artifact.currentRightsSnapshot)
+          ? hydrateAssetRights(artifact.currentRightsSnapshot)
           : null,
       ]),
     )
@@ -273,7 +273,7 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
           return {
             artifactId: artifact.id,
             revision: currentRevision,
-            snapshot: hydrateRights(existing),
+            snapshot: hydrateAssetRights(existing),
             replayed: true,
           }
         }
@@ -323,7 +323,7 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
           return {
             artifactId: artifact.id,
             revision: assetRightsRevision(artifact.id, nextRevisionNumber),
-            snapshot: hydrateRights(existing),
+            snapshot: hydrateAssetRights(existing),
             replayed: false,
           }
         }
@@ -347,7 +347,7 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
         return {
           artifactId: artifact.id,
           revision: assetRightsRevision(artifact.id, nextRevisionNumber),
-          snapshot: hydrateRights(created),
+          snapshot: hydrateAssetRights(created),
           replayed: false,
         }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
@@ -382,7 +382,7 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
           return {
             artifactId: prototype.artifactId,
             revision: assetRightsRevision(artifact.id, artifact.rightsRevision),
-            snapshot: hydrateRights(existing),
+            snapshot: hydrateAssetRights(existing),
             replayed: true,
           }
         }
