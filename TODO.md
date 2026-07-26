@@ -20,10 +20,10 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F1.043, com propostas tipadas de patch, quatro gates de segurança, nova versão imutável, comparação e render integrados ao Postgres, API pública e mesa de revisão:
+Estado auditado após o gate F1.044, com revisão em lote atômica, conflitos explicáveis, retry parcial explícito, transação serializável, API pública e mesa de revisão:
 
-- **123 de 1.259 microtarefas verificadas como efetivamente entregues (9,8%)**;
-- **1.136 microtarefas abertas ou aguardando nova comprovação**;
+- **127 de 1.259 microtarefas verificadas como efetivamente entregues (10,1%)**;
+- **1.132 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
@@ -927,10 +927,10 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.044 — Batch review [FR-215]
 
-- [ ] Permitir selecionar múltiplas annotations compatíveis. Evidência F1-044: batch recebe coleção e propostas.
-- [ ] Compilar PatchSet único ou explicar conflitos entre comentários. Evidência F1-044: mesmo target divergente gera conflict IDs.
-- [ ] Aplicar all-or-nothing por default e registrar resultado por annotation. Evidência F1-044: conflito marca rolled-back para todos.
-- [ ] Testar transação, rollback e retry parcial quando explicitamente escolhido. Evidência F1-044/T-FR-215: atomic e partial-retry cobertos.
+- [x] Permitir selecionar múltiplas annotations compatíveis. Evidência F1-044: a mesa de revisão da imagem de produção `02dc8d9` seleciona annotations abertas, cria suas propostas em paralelo e publica 2–100 `proposalIds` em `POST /v1/projects/{projectId}/patch-batches`; capability, schema, exemplo e OpenAPI foram validados no mesmo build.
+- [x] Compilar PatchSet único ou explicar conflitos entre comentários. Evidência F1-044: `compileBatchReview` deduplica operações idênticas e produz conflict IDs simétricos para o mesmo target divergente; em produção o lote `9adb8b89-5916-4a3c-acbc-f04a4737a82d` retornou patch nulo e os IDs `27ea6cb9-c31b-4da9-b222-d83edf04e80b`/`f02660df-9ef8-4a7f-84ec-1c108c1e23c0`.
+- [x] Aplicar all-or-nothing por default e registrar resultado por annotation. Evidência F1-044: a API omite `mode` como `all-or-nothing`; o E2E produtivo registrou os dois itens como `rolled-back` e manteve a ProjectVersion `project-version-1d425438-f4e5-4327-ba7c-60539c42e4be` inalterada. O caminho compatível no Postgres isolado criou exatamente um Command, snapshot, versão e operação durável de proxy pela API HTTP.
+- [x] Testar transação, rollback e retry parcial quando explicitamente escolhido. Evidência F1-044/T-FR-215: `prisma-review-patch-batch.integration.mjs` aplicou lote compatível, conflito atômico, `partial-retry` explícito e falha injetada após updates intermediários em PostgreSQL 16 vazio com 46 migrations; nenhuma escrita parcial sobreviveu. Build, arquitetura V2-only, contratos e 469/469 regressões passaram; imagem `02dc8d9` implantada com app e três workers em zero reinícios.
 
 ### F1.045 — Edição manual [FR-216]
 
