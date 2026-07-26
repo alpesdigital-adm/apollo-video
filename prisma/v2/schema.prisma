@@ -58,6 +58,7 @@ model V2Workspace {
   reviewPatchBatches              V2ReviewPatchBatch[]
   proxyReviews                    V2ProxyReview[]
   proxyReviewDecisions            V2ProxyReviewDecision[]
+  assetSelections                 V2AssetSelection[]
 
   @@map("workspaces")
 }
@@ -199,6 +200,7 @@ model V2Project {
   reviewPatchBatches    V2ReviewPatchBatch[]
   proxyReviews          V2ProxyReview[]
   proxyReviewDecisions  V2ProxyReviewDecision[]
+  assetSelections       V2AssetSelection[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -277,6 +279,7 @@ model V2ProjectVersion {
   patchBatchesAsBase    V2ReviewPatchBatch[]            @relation("PatchBatchBaseVersion")
   patchBatchAsResult    V2ReviewPatchBatch?             @relation("PatchBatchResultVersion")
   proxyReviews          V2ProxyReview[]
+  assetSelections       V2AssetSelection[]
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -578,6 +581,7 @@ model V2MediaArtifact {
   reviewAnnotations      V2ReviewAnnotation[]
   renderElementMaps      V2RenderElementMap[]
   proxyReviews           V2ProxyReview[]
+  selectedByAssetSelections V2AssetSelection[] @relation("AssetSelectionSelectedArtifact")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -710,6 +714,44 @@ model V2MediaArtifactLineage {
   @@unique([manifestId, sourceArtifactId, role])
   @@index([workspaceId, sourceArtifactId])
   @@map("media_artifact_lineage")
+}
+
+model V2AssetSelection {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  projectVersionId        String   @db.VarChar(128)
+  projectVersionHash      String   @db.Char(64)
+  briefJson               String   @db.Text
+  briefHash               String   @db.Char(64)
+  candidatesJson          String   @db.Text
+  candidatesHash          String   @db.Char(64)
+  rightsEvidenceJson      String   @db.Text
+  evaluationsJson         String   @db.Text
+  decision                String   @db.VarChar(16)
+  selectedArtifactId      String?  @db.VarChar(128)
+  selectedSource          String?  @db.VarChar(16)
+  searchStoppedBeforeJson String   @db.Text
+  auditId                 String   @db.VarChar(96)
+  selectionHash           String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  requestFingerprint      String   @db.Char(64)
+  createdByType           String   @db.VarChar(32)
+  createdById             String   @db.VarChar(128)
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace        V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion   V2ProjectVersion @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  selectedArtifact V2MediaArtifact? @relation("AssetSelectionSelectedArtifact", fields: [selectedArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, projectVersionId, createdAt(sort: Desc)])
+  @@index([workspaceId, auditId])
+  @@index([workspaceId, selectedArtifactId])
+  @@map("asset_selections")
 }
 
 model V2AssetRightsSnapshot {

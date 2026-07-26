@@ -222,6 +222,151 @@ const proxyReviewSchema = {
     updatedAt: dateTimeSchema,
   },
 }
+const assetBriefSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['intention', 'content', 'style', 'durationMs', 'entry', 'exit', 'prohibited'],
+  properties: {
+    intention: { type: 'string', minLength: 1, maxLength: 500 },
+    content: {
+      type: 'array', minItems: 1, maxItems: 32, uniqueItems: true,
+      items: { type: 'string', minLength: 1, maxLength: 120 },
+    },
+    style: {
+      type: 'array', minItems: 1, maxItems: 24, uniqueItems: true,
+      items: { type: 'string', minLength: 1, maxLength: 120 },
+    },
+    durationMs: {
+      type: 'object', additionalProperties: false, required: ['min', 'max'],
+      properties: {
+        min: { type: 'integer', minimum: 100, maximum: 120000 },
+        max: { type: 'integer', minimum: 100, maximum: 120000 },
+      },
+    },
+    entry: { type: 'string', minLength: 1, maxLength: 120 },
+    exit: { type: 'string', minLength: 1, maxLength: 120 },
+    prohibited: {
+      type: 'array', maxItems: 32, uniqueItems: true,
+      items: { type: 'string', minLength: 1, maxLength: 120 },
+    },
+  },
+}
+const assetCandidateInputSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'artifactId', 'source', 'content', 'style', 'durationMs',
+    'quality', 'continuity', 'novelty', 'literalness',
+  ],
+  properties: {
+    artifactId: idSchema,
+    source: { enum: ['library', 'stock', 'generated'] },
+    content: {
+      type: 'array', minItems: 1, maxItems: 64, uniqueItems: true,
+      items: { type: 'string', minLength: 1, maxLength: 120 },
+    },
+    style: {
+      type: 'array', minItems: 1, maxItems: 32, uniqueItems: true,
+      items: { type: 'string', minLength: 1, maxLength: 120 },
+    },
+    durationMs: { type: 'integer', minimum: 100, maximum: 120000 },
+    quality: { type: 'number', minimum: 0, maximum: 1 },
+    continuity: { type: 'number', minimum: 0, maximum: 1 },
+    novelty: { type: 'number', minimum: 0, maximum: 1 },
+    literalness: { type: 'number', minimum: 0, maximum: 1 },
+  },
+}
+const assetSelectionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'projectId', 'projectVersionId', 'projectVersionHash',
+    'brief', 'briefHash', 'candidates', 'candidatesHash', 'rightsEvidence',
+    'decision', 'selectedArtifactId', 'selectedSource', 'evaluations',
+    'searchStoppedBefore', 'auditId', 'selectionHash', 'createdBy', 'createdAt',
+  ],
+  properties: {
+    schemaVersion: { const: 'asset-selection/v1' },
+    id: idSchema,
+    projectId: idSchema,
+    projectVersionId: idSchema,
+    projectVersionHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    brief: assetBriefSchema,
+    briefHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    candidates: {
+      type: 'array', maxItems: 100,
+      items: {
+        ...assetCandidateInputSchema,
+        required: [...assetCandidateInputSchema.required, 'rights'],
+        properties: {
+          ...assetCandidateInputSchema.properties,
+          rights: { enum: ['approved', 'unknown', 'denied'] },
+        },
+      },
+    },
+    candidatesHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    rightsEvidence: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['artifactId', 'artifactSha256', 'outcome', 'reasonCodes'],
+        properties: {
+          artifactId: idSchema,
+          artifactSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          outcome: { enum: ['allow', 'deny'] },
+          reasonCodes: {
+            type: 'array', maxItems: 64, uniqueItems: true,
+            items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,79}$' },
+          },
+          rightsSnapshotId: idSchema,
+          rightsSnapshotHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          validUntil: dateTimeSchema,
+        },
+      },
+    },
+    decision: { enum: ['use_asset', 'no_insert'] },
+    selectedArtifactId: { oneOf: [idSchema, { type: 'null' }] },
+    selectedSource: {
+      oneOf: [{ enum: ['library', 'stock', 'generated'] }, { type: 'null' }],
+    },
+    evaluations: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['candidateId', 'source', 'score', 'verdict', 'reasons', 'dimensions'],
+        properties: {
+          candidateId: idSchema,
+          source: { enum: ['library', 'stock', 'generated'] },
+          score: { type: 'number', minimum: 0, maximum: 1 },
+          verdict: { enum: ['accepted', 'rejected'] },
+          reasons: {
+            type: 'array', maxItems: 16, uniqueItems: true,
+            items: { type: 'string', minLength: 1, maxLength: 80 },
+          },
+          dimensions: {
+            type: 'object', additionalProperties: false,
+            required: ['relevance', 'continuity', 'quality', 'rights', 'novelty', 'literalness'],
+            properties: Object.fromEntries(
+              ['relevance', 'continuity', 'quality', 'rights', 'novelty', 'literalness']
+                .map((dimension) => [dimension, { type: 'number', minimum: 0, maximum: 1 }]),
+            ),
+          },
+        },
+      },
+    },
+    searchStoppedBefore: {
+      type: 'array', maxItems: 2, uniqueItems: true,
+      items: { enum: ['library', 'stock', 'generated'] },
+    },
+    auditId: { type: 'string', pattern: '^asset_selection_[a-f0-9]{64}$' },
+    selectionHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    createdBy: {
+      type: 'object', additionalProperties: false, required: ['type', 'id'],
+      properties: { type: { const: 'api-client' }, id: idSchema },
+    },
+    createdAt: dateTimeSchema,
+  },
+}
 const apiMetaSchema = {
   type: 'object',
   additionalProperties: false,
@@ -4181,6 +4326,38 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           },
         },
         replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-asset-selection-request', 1, 'Select one visual asset against an exact immutable project version', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['projectVersionId', 'projectVersionHash', 'brief', 'candidates'],
+    properties: {
+      projectVersionId: idSchema,
+      projectVersionHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      brief: assetBriefSchema,
+      candidates: { type: 'array', maxItems: 100, items: assetCandidateInputSchema },
+    },
+  }),
+  defineSchema('project-asset-selection-created', 1, 'Immutable asset selection audit result',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['selection', 'replayed'],
+      properties: {
+        selection: assetSelectionSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-asset-selection-list', 1, 'Immutable asset selection audit history',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['selections'],
+      properties: {
+        selections: { type: 'array', maxItems: 100, items: assetSelectionSchema },
       },
     }),
   ),

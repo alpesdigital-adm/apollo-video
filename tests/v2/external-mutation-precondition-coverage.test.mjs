@@ -95,6 +95,9 @@ const coverage = Object.freeze({
   'apollo.projects.proxy-reviews.acknowledge-warnings': {
     mode: 'explicit-precondition', mechanism: 'body-revision', evidence: 'request binds proxyReviewId, projectVersionId, baseRevision review hash and expectedRevision; hard issues are never acknowledgeable',
   },
+  'apollo.projects.asset-selections.create': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds projectVersionId/projectVersionHash and the serializable commit rechecks current version, artifacts and rights snapshots',
+  },
   'apollo.projects.final-exports.enqueue': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds explicit approval, current immutable ProjectVersion, EditPlan, DirectorRun, QualitySnapshot and source artifact identity',
   },
@@ -201,7 +204,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 16,
+    'idempotent-create': 17,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,

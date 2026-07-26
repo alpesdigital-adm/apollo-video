@@ -1,23 +1,63 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluateAssetCandidate, selectAsset } from '../../src/v2/domain/asset-selection.ts'
+import {
+  createAssetBrief,
+  evaluateAssetCandidate,
+  selectAsset,
+} from '../../src/v2/domain/asset-selection.ts'
 import { compileQualityPatches, createQualityReport, critiqueAsset, critiqueProxy, decideQualityIteration, validateQuality } from '../../src/v2/application/closed-quality-loop.ts'
 
 const brief = { intention: 'explicar benefício', content: ['dashboard', 'resultado'], style: ['clean'], durationMs: { min: 1000, max: 5000 }, entry: 'cut', exit: 'cut', prohibited: ['dinheiro falso'] }
-const candidate = (patch = {}) => ({ id: 'library-1', source: 'library', content: ['dashboard', 'resultado'], style: ['clean'], durationMs: 2500, rights: 'approved', quality: .9, continuity: .85, novelty: .5, ...patch })
+const candidate = (patch = {}) => ({
+  id: 'library-1',
+  source: 'library',
+  content: ['dashboard', 'resultado'],
+  style: ['clean'],
+  durationMs: 2500,
+  rights: 'approved',
+  quality: .9,
+  continuity: .85,
+  novelty: .5,
+  literalness: .2,
+  ...patch,
+})
 
 test('T-FR-218 AssetBrief evaluates correct, literal, irrelevant and conflicting inserts', () => {
   assert.equal(evaluateAssetCandidate(brief, candidate()).verdict, 'accepted')
-  assert.ok(evaluateAssetCandidate(brief, candidate({ id: 'literal', novelty: .95 })).reasons.includes('too-literal-or-novel'))
+  assert.ok(evaluateAssetCandidate(brief, candidate({ id: 'literal', literalness: .95 })).reasons.includes('too-literal'))
+  assert.ok(evaluateAssetCandidate(brief, candidate({ id: 'novel', novelty: .95 })).reasons.includes('excessive-novelty'))
   assert.ok(evaluateAssetCandidate(brief, candidate({ id: 'irrelevant', content: ['praia'] })).reasons.includes('irrelevant'))
   assert.ok(evaluateAssetCandidate(brief, candidate({ id: 'conflict', style: ['chaotic'] })).reasons.includes('visual-conflict'))
 })
 
 test('T-FR-218 searches library before stock/generation, audits rejects and supports no_insert', () => {
-  const result = selectAsset(brief, [candidate({ id: 'stock', source: 'stock' }), candidate()])
+  const result = selectAsset(brief, [
+    candidate({ id: 'stock', source: 'stock', quality: 1 }),
+    candidate({ id: 'library-rejected', rights: 'denied' }),
+    candidate(),
+  ])
   assert.equal(result.selectedId, 'library-1'); assert.deepEqual(result.searchStoppedBefore, ['stock', 'generated'])
+  assert.equal(result.evaluations.some((item) => item.candidateId === 'library-rejected'), true)
+  assert.equal(result.evaluations.some((item) => item.candidateId === 'stock'), false)
   const none = selectAsset(brief, [candidate({ id: 'bad', rights: 'denied' })])
   assert.equal(none.decision, 'no_insert'); assert.equal(none.evaluations[0].verdict, 'rejected'); assert.match(none.auditId, /^asset_selection_/)
+})
+
+test('T-FR-218 validates AssetBrief and candidates strictly and produces deterministic audits', () => {
+  const normalized = createAssetBrief({
+    ...brief,
+    intention: '  explicar   benefício ',
+    content: ['DASHBOARD', 'RESULTADO'],
+  })
+  assert.equal(normalized.intention, 'explicar benefício')
+  assert.deepEqual(normalized.content, ['dashboard', 'resultado'])
+  assert.throws(() => createAssetBrief({ ...brief, content: [] }), /invalid number of terms/)
+  assert.throws(() => selectAsset(brief, [candidate({ quality: 1.1 })]), /candidate is invalid/)
+  assert.throws(() => selectAsset(brief, [candidate(), candidate()]), /identities must be unique/)
+  const first = selectAsset(brief, [candidate({ id: 'library-b' }), candidate({ id: 'library-a' })])
+  const second = selectAsset(brief, [candidate({ id: 'library-a' }), candidate({ id: 'library-b' })])
+  assert.equal(first.selectedId, 'library-a')
+  assert.equal(first.auditId, second.auditId)
 })
 
 test('T-FR-219 quality loop blocks hard technical/policy/integrity and critiques assets before insertion', () => {

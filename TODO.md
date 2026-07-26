@@ -966,11 +966,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.049 — AssetBrief e seleção de B-roll
 
-- [ ] Implementar `AssetBrief` com intenção, conteúdo, estilo, duração, entrada/saída e elementos proibidos. Evidência F1-049: contrato tipado e validado em `asset-selection.ts`.
-- [ ] Pesquisar biblioteca antes de stock/geração e registrar candidates descartados. Evidência F1-049: ordem determinística e auditId preservam avaliações.
-- [ ] Avaliar relevância, continuidade, qualidade, rights e excesso de novidade. Evidência T-FR-218: score multidimensional com motivos explícitos.
-- [ ] Permitir decisão “não usar insert” quando nenhum candidate for adequado. Evidência T-FR-218: todos rejeitados retornam `no_insert`.
-- [ ] Criar eval de inserts corretos, literais demais, irrelevantes e visualmente conflitantes. Evidência T-FR-218: quatro classes cobertas.
+- [x] Implementar `AssetBrief` com intenção, conteúdo, estilo, duração, entrada/saída e elementos proibidos. Evidência F1-049: `asset-selection.ts` normaliza e valida limites, tipos, duplicatas e duração; `POST /v1/projects/{projectId}/asset-selections` publica o contrato estrito, rejeita campos extras e vincula a seleção ao `projectVersionId/projectVersionHash` exatos.
+- [x] Pesquisar biblioteca antes de stock/geração e registrar candidates descartados. Evidência F1-049: `selectAsset` percorre `library → stock → generated`, ordena score/identidade deterministicamente, preserva todas as avaliações realizadas e registra `searchStoppedBefore`, `auditId` SHA-256 e `selectionHash`; o E2E comprovou que stock melhor pontuado não é consultado quando a biblioteca contém um candidato aprovado.
+- [x] Avaliar relevância, continuidade, qualidade, rights e excesso de novidade. Evidência T-FR-218: score multidimensional registra relevância, continuidade, qualidade, direitos, novidade e literalidade com motivos explícitos; direitos não são aceitos do cliente, são reavaliados por `evaluateAssetUse` e seus snapshots são conferidos novamente dentro da transação PostgreSQL serializável.
+- [x] Permitir decisão “não usar insert” quando nenhum candidate for adequado. Evidência T-FR-218: candidato sem direitos aprovados retorna e persiste `no_insert` com `selectedArtifactId/selectedSource = null`; API E2E comprovou a resposta, a listagem imutável e o fail-closed contra tentativa de injetar `rights: approved`.
+- [x] Criar eval de inserts corretos, literais demais, irrelevantes e visualmente conflitantes. Evidência T-FR-218: fixtures cobrem `accepted`, `too-literal`, `excessive-novelty`, `irrelevant` e `visual-conflict`; E2E real em PostgreSQL vazio com 51 migrations cobriu criação, rejeições auditadas, replay, payload divergente, versão stale, `no_insert`, GET e detecção de hash adulterado. Regressão: 475/475; build, typecheck, arquitetura V2-only, linguagem, DB e contrato público passaram com 86 capabilities/144 schemas/171 exemplos/74 paths.
 
 ### F1.050 — Ciclo fechado de qualidade
 

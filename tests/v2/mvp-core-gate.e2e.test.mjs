@@ -36,7 +36,7 @@ test('T-AC-001..016 executes the complete MVP Core gate with automatic evidence'
   assert.equal(planVisualMontage({ durationMs: 30000, sourceAudioId: 'audio', beatBoundariesMs: [10000, 20000], availableVisualIds: ['broll'] }).mode, 'visual-montage')
   refs.set('AC-006', 'talking-head and voiceover compilation')
   const brief = { intention: 'support claim', content: ['proof'], style: ['clean'], durationMs: { min: 500, max: 3000 }, entry: 'cut', exit: 'cut', prohibited: [] }
-  const bad = { id: 'generated-bad', source: 'generated', content: ['unrelated'], style: ['chaos'], durationMs: 1000, rights: 'approved', quality: .8, continuity: .2, novelty: .95 }
+  const bad = { id: 'generated-bad', source: 'generated', content: ['unrelated'], style: ['chaos'], durationMs: 1000, rights: 'approved', quality: .8, continuity: .2, novelty: .95, literalness: .95 }
   assert.equal(selectAsset(brief, [bad]).decision, 'no_insert'); refs.set('AC-007', 'generated-bad rejected and substitution requested')
   const issue = critiqueAsset({ relevance: .2, continuity: .9, quality: .9, rightsApproved: true, novelty: .2, rangeMs: [1000, 2000], assetId: 'bad' })
   assert.deepEqual(compileQualityPatches(issue).minimalRerenderRangeMs, [1000, 2000]); refs.set('AC-008', 'localized proxy hard issue')

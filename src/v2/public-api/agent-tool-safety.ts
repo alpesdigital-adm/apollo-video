@@ -195,6 +195,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'human-approval',
       reason: 'Consciously accepts only non-hard warnings on one exact post-render proxy review; hard issues remain unacknowledgeable.',
     },
+    'apollo.projects.asset-selections.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable selection audit without mutating the project version or starting provider work.',
+    },
     'apollo.projects.final-exports.enqueue': {
       impact: 'bounded', confirmation: 'human-approval',
       reason: 'Publishes one approved high-resolution final artifact bound to an exact immutable project version.',
