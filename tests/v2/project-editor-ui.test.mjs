@@ -94,3 +94,15 @@ test('T-FR-214 project editor exposes typed impact gates and explicit immutable 
   assert.match(projectEditorSource, /Confirmar e criar versão/)
   assert.match(projectEditorSource, /data-testid="review-patch-comparison"/)
 })
+
+test('T-FR-215 project editor batches selected annotations with explicit atomic or partial semantics', () => {
+  assert.match(projectEditorSource, /reviewBatchSelection/)
+  assert.match(projectEditorSource, /Promise\.all\(/)
+  assert.match(projectEditorSource, /\/patch-batches/)
+  assert.match(projectEditorSource, /prepareReviewPatchBatch\('all-or-nothing'\)/)
+  assert.match(projectEditorSource, /prepareReviewPatchBatch\('partial-retry'\)/)
+  assert.match(projectEditorSource, /data-testid="review-batch-toolbar"/)
+  assert.match(projectEditorSource, /data-testid="review-batch-impact"/)
+  assert.match(projectEditorSource, /Caderno do lote/)
+  assert.match(projectEditorSource, /Confirmar lote/)
+})

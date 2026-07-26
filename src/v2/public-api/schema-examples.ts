@@ -202,6 +202,60 @@ const reviewPatchProposalExample = {
   createdAt,
   updatedAt: createdAt,
 }
+const reviewPatchProposalTwoId = '90000000-0000-4000-8000-000000000215'
+const reviewPatchAnnotationTwoId = 'd8f7ec49-b87c-4ca8-80a7-7840de71c651'
+const reviewPatchBatchExample = {
+  id: '91000000-0000-4000-8000-000000000215',
+  workspaceId,
+  projectId,
+  baseVersionId: 'project-version-example-2',
+  mode: 'all-or-nothing',
+  status: 'ready',
+  patch: {
+    id: 'patch-batch-example-215',
+    baseVersionId: 'project-version-example-2',
+    operations: [
+      reviewPatchProposalExample.patch.operations[0],
+      { op: 'move', targetId: 'clip:clip-example-2', value: { toFrame: 420 }, rangeMs: [14000, 17000] },
+    ],
+    annotationIds: [reviewPatchProposalExample.annotationId, reviewPatchAnnotationTwoId],
+    estimatedCost: 0,
+    invalidatedRanges: [[10500, 10500], [14000, 17000]],
+  },
+  impact: {
+    operationCount: 2,
+    cost: 0,
+    invalidatedRanges: [[10500, 10500], [14000, 17000]],
+    changedTargets: ['clip:clip-example-2', 'subtitle:subtitle-cue-2'],
+    expectedScoreDelta: 4,
+    invalidatedArtifacts: ['proxy', 'final'],
+  },
+  conflicts: [],
+  items: [
+    {
+      id: '92000000-0000-4000-8000-000000000215',
+      annotationId: reviewPatchProposalExample.annotationId,
+      proposalId: reviewPatchProposalExample.id,
+      status: 'included',
+      operation: reviewPatchProposalExample.patch.operations[0],
+      conflictIds: [],
+      createdAt,
+      updatedAt: createdAt,
+    },
+    {
+      id: '92000000-0000-4000-8000-000000000216',
+      annotationId: reviewPatchAnnotationTwoId,
+      proposalId: reviewPatchProposalTwoId,
+      status: 'included',
+      operation: { op: 'move', targetId: 'clip:clip-example-2', value: { toFrame: 420 }, rangeMs: [14000, 17000] },
+      conflictIds: [],
+      createdAt,
+      updatedAt: createdAt,
+    },
+  ],
+  createdAt,
+  updatedAt: createdAt,
+}
 const webhookSigningSecretRotationExample = {
   schemaVersion: 'webhook-signing-secret-rotation/v1',
   id: '20000000-0000-4000-8000-000000000010',
@@ -1229,6 +1283,54 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           comparison: {
             beforeVersionId: 'project-version-example-2', afterVersionId: 'project-version-example-3', beforeEditPlanHash: 'a'.repeat(64), afterEditPlanHash: 'b'.repeat(64),
             changedTargets: ['subtitle:subtitle-cue-2'], invalidatedRanges: [[10500, 10500]],
+          },
+          operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-review-patch-batch-request/v1': [
+      { proposalIds: [reviewPatchProposalExample.id, reviewPatchProposalTwoId], mode: 'all-or-nothing' },
+    ],
+    'apollo://schemas/review-patch-batch-created/v1': [
+      { data: { batch: reviewPatchBatchExample, replayed: false }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/review-patch-batch/v1': [
+      { data: { batch: reviewPatchBatchExample }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/apply-review-patch-batch-request/v1': [
+      { confirmed: true },
+    ],
+    'apollo://schemas/review-patch-batch-applied/v1': [
+      {
+        data: {
+          batch: {
+            ...reviewPatchBatchExample,
+            status: 'applied',
+            items: reviewPatchBatchExample.items.map((item) => ({ ...item, status: 'applied' })),
+            resultCommandId: 'edit-command-example-215',
+            resultVersionId: 'project-version-example-3',
+            renderOperationId: queuedProjectProxyRenderOperationExample.id,
+            comparison: {
+              beforeVersionId: 'project-version-example-2',
+              afterVersionId: 'project-version-example-3',
+              beforeEditPlanHash: 'a'.repeat(64),
+              afterEditPlanHash: 'b'.repeat(64),
+              changedTargets: ['clip:clip-example-2', 'subtitle:subtitle-cue-2'],
+              invalidatedRanges: [[10500, 10500], [14000, 17000]],
+            },
+            render: { operationId: queuedProjectProxyRenderOperationExample.id, status: 'queued', phase: 'queued' },
+          },
+          command: { id: 'edit-command-example-215', type: 'apply-review-patch-batch', baseVersionId: 'project-version-example-2', resultVersionId: 'project-version-example-3', createdAt },
+          version: {
+            id: 'project-version-example-3', sequence: 3, parentVersionId: 'project-version-example-2', baseHash: 'c'.repeat(64),
+            snapshotRefs: { brief: 'snapshot-brief-example-1', treatment: 'snapshot-treatment-example-1', story: 'snapshot-story-example-1', editPlan: 'snapshot-edit-plan-example-3', policies: 'snapshot-policies-example-1' },
+            createdAt,
+          },
+          comparison: {
+            beforeVersionId: 'project-version-example-2', afterVersionId: 'project-version-example-3', beforeEditPlanHash: 'a'.repeat(64), afterEditPlanHash: 'b'.repeat(64),
+            changedTargets: ['clip:clip-example-2', 'subtitle:subtitle-cue-2'], invalidatedRanges: [[10500, 10500], [14000, 17000]],
           },
           operation: queuedProjectProxyRenderOperationExample,
           replayed: false,

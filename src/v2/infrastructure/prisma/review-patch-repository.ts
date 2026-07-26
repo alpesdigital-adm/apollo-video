@@ -22,7 +22,7 @@ function parseJson<T>(value: string, field: string): T {
   }
 }
 
-function hydrateAnnotation(row: {
+export function hydrateReviewAnnotation(row: {
   id: string; projectVersionId: string; proxyArtifactId: string; proxyHash: string; frame: number; timeStartMs: number; timeEndMs: number
   screenshotRef: string; scope: string; regionX: number | null; regionY: number | null; regionWidth: number | null; regionHeight: number | null
   targetIdsJson: string; applicationScopeJson: string; affectedCount: number; text: string; authorId: string; authorName: string; authorType: string
@@ -48,7 +48,7 @@ function hydrateAnnotation(row: {
   })
 }
 
-function hydrateVersion(row: {
+export function hydrateReviewPatchVersion(row: {
   id: string; workspaceId: string; projectId: string; sequence: number; parentVersionId: string | null
   briefSnapshotId: string; treatmentSnapshotId: string | null; storySnapshotId: string | null; editPlanSnapshotId: string
   policiesSnapshotId: string; baseHash: string; createdBy: string; commandId: string | null; createdAt: Date
@@ -75,7 +75,7 @@ function hydrateVersion(row: {
 
 type ProposalRow = Prisma.V2ReviewPatchProposalGetPayload<{ include: { renderOperation: true } }>
 
-function hydrateProposal(row: ProposalRow): Readonly<ReviewPatchProposal> {
+export function hydrateReviewPatchProposal(row: ProposalRow): Readonly<ReviewPatchProposal> {
   const operation = row.renderOperation
   return Object.freeze({
     id: row.id,
@@ -104,7 +104,11 @@ function isPrismaCode(error: unknown, code: string): boolean {
 }
 
 export class PrismaReviewPatchRepository implements ReviewPatchRepository {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) {
+    this.client = client
+  }
 
   private proposalById(input: { workspaceId: string; projectId: string; proposalId: string }) {
     return this.client.v2ReviewPatchProposal.findFirst({
@@ -118,7 +122,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       where: { workspaceId_projectId_idempotencyKey: input },
       include: { renderOperation: true },
     })
-    return row ? Object.freeze({ requestFingerprint: row.requestFingerprint, proposal: hydrateProposal(row) }) : null
+    return row ? Object.freeze({ requestFingerprint: row.requestFingerprint, proposal: hydrateReviewPatchProposal(row) }) : null
   }
 
   private async contextForAnnotation(input: { workspaceId: string; projectId: string; annotationId: string }): Promise<Readonly<ReviewPatchProposalContext> | null> {
@@ -138,8 +142,8 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     const editPlan = parseJson<Record<string, unknown>>(version.editPlanSnapshot.contentJson, 'review patch EditPlan')
     const policies = parseJson<Record<string, unknown>>(version.policiesSnapshot.contentJson, 'review patch policies')
     return Object.freeze({
-      annotation: hydrateAnnotation(annotation),
-      currentVersion: hydrateVersion(version),
+      annotation: hydrateReviewAnnotation(annotation),
+      currentVersion: hydrateReviewPatchVersion(version),
       editPlan: Object.freeze(editPlan),
       editPlanHash: version.editPlanSnapshot.contentHash,
       policies: Object.freeze(policies),
@@ -172,19 +176,19 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       },
       include: { renderOperation: true },
     })
-    return hydrateProposal(row)
+    return hydrateReviewPatchProposal(row)
   }
 
   async readProposal(input: { workspaceId: string; projectId: string; proposalId: string }) {
     const row = await this.proposalById(input)
-    return row ? hydrateProposal(row) : null
+    return row ? hydrateReviewPatchProposal(row) : null
   }
 
   async readApplyContext(input: { workspaceId: string; projectId: string; proposalId: string }): Promise<Readonly<ReviewPatchApplyContext> | null> {
     const row = await this.proposalById(input)
     if (!row) return null
     const context = await this.contextForAnnotation({ workspaceId: input.workspaceId, projectId: input.projectId, annotationId: row.annotationId })
-    return context ? Object.freeze({ ...context, proposal: hydrateProposal(row) }) : null
+    return context ? Object.freeze({ ...context, proposal: hydrateReviewPatchProposal(row) }) : null
   }
 
   async readAppliedResult(input: { workspaceId: string; projectId: string; proposalId: string; applyIdempotencyKey: string; applyRequestFingerprint: string }): Promise<Readonly<ReviewPatchApplyResult> | null> {
@@ -210,9 +214,9 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       createdAt: commandRow.createdAt.toISOString(),
     })
     return Object.freeze({
-      proposal: hydrateProposal(proposal),
+      proposal: hydrateReviewPatchProposal(proposal),
       command,
-      version: hydrateVersion(proposal.resultVersion),
+      version: hydrateReviewPatchVersion(proposal.resultVersion),
       editPlan: Object.freeze(parseJson<Record<string, unknown>>(proposal.resultVersion.editPlanSnapshot.contentJson, 'applied review patch EditPlan')),
       comparison: Object.freeze(parseJson<NonNullable<ReviewPatchProposal['comparison']>>(proposal.comparisonJson, 'patch comparison')),
       replayed: true,
@@ -281,6 +285,6 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     if (!operation) throw new DomainError('PERSISTENCE_CONFLICT', 'Patch render operation does not target the applied version')
     if (proposal.renderOperationId && proposal.renderOperationId !== input.renderOperationId) throw new DomainError('PERSISTENCE_CONFLICT', 'Patch proposal already has another render operation')
     const row = await this.client.v2ReviewPatchProposal.update({ where: { id: proposal.id }, data: { renderOperationId: input.renderOperationId }, include: { renderOperation: true } })
-    return hydrateProposal(row)
+    return hydrateReviewPatchProposal(row)
   }
 }

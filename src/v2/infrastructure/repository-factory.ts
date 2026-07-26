@@ -95,6 +95,7 @@ import { PrismaProjectQueryRepository } from './prisma/project-query-repository.
 import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
 import { PrismaReviewAnnotationRepository } from './prisma/review-annotation-repository.ts'
 import { PrismaReviewPatchRepository } from './prisma/review-patch-repository.ts'
+import { PrismaReviewPatchBatchRepository } from './prisma/review-patch-batch-repository.ts'
 import { PrismaRenderElementMapRepository } from './prisma/render-element-map-repository.ts'
 import { PrismaProjectMediaRepository } from './prisma/project-media-repository.ts'
 import { PrismaEditorialCommandRepository } from './prisma/editorial-command-repository.ts'
@@ -654,6 +655,10 @@ export function createReviewAnnotationRepository(): ReviewAnnotationRepository {
 
 export function createReviewPatchRepository() {
   return new PrismaReviewPatchRepository(resolveV2Client())
+}
+
+export function createReviewPatchBatchRepository() {
+  return new PrismaReviewPatchBatchRepository(resolveV2Client())
 }
 
 export function createRenderElementMapRepository(): RenderElementMapRepository {

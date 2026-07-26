@@ -171,6 +171,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'human-approval',
       reason: 'Creates one reversible immutable version and queues its exact proxy render only after explicit impact confirmation.',
     },
+    'apollo.projects.review-patch-batches.propose': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Compiles two to one hundred ready proposals and records conflicts without changing the active project version.',
+    },
+    'apollo.projects.review-patch-batches.apply': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Creates one reversible immutable version from the explicitly reviewed batch and queues its exact proxy render.',
+    },
     'apollo.projects.proxy-renders.enqueue': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Queues one idempotent proxy render for the current immutable project version and EditPlan.',

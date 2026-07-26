@@ -73,6 +73,12 @@ const coverage = Object.freeze({
   'apollo.projects.review-patches.apply': {
     mode: 'durable-covered', evidence: 'F1-043 transactional proposal transition, Command, snapshot and immutable child version E2E',
   },
+  'apollo.projects.review-patch-batches.propose': {
+    mode: 'durable-covered', evidence: 'F1-044 persisted proposal set, deterministic conflict report and public API E2E',
+  },
+  'apollo.projects.review-patch-batches.apply': {
+    mode: 'durable-covered', evidence: 'F1-044 serializable all-or-nothing transaction, rollback injection, partial retry and public API E2E',
+  },
   'apollo.projects.commands.apply': {
     mode: 'durable-covered', evidence: 'typed Command, exact immutable base and transactional ProjectVersion persistence',
   },
@@ -134,7 +140,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    37,
+    39,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

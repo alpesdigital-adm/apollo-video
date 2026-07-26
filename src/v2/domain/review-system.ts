@@ -748,37 +748,90 @@ export function applyPatchAsVersion(input: { patch: PatchSet; currentVersionId: 
 
 export function compileBatchReview(input: {
   annotations: readonly ReviewAnnotation[]
-  proposals: readonly { annotationId: string; operation: PatchOperation }[]
+  proposals: readonly { annotationId: string; operation: PatchOperation; estimatedCost?: number }[]
   baseVersionId: string
   mode?: 'all-or-nothing' | 'partial-retry'
 }) {
-  const byTarget = new Map<string, PatchOperation>()
-  const conflicts: string[] = []
-  for (const proposal of input.proposals) {
-    const previous = byTarget.get(proposal.operation.targetId)
-    if (previous && JSON.stringify(previous) !== JSON.stringify(proposal.operation)) conflicts.push(proposal.annotationId)
-    else byTarget.set(proposal.operation.targetId, proposal.operation)
+  assertDomain(input.annotations.length >= 2 && input.annotations.length <= 100, 'INVALID_ARGUMENT', 'Batch review requires between 2 and 100 annotations')
+  const annotationIds = input.annotations.map((annotation) => annotation.id)
+  assertDomain(new Set(annotationIds).size === annotationIds.length, 'INVALID_ARGUMENT', 'Batch review annotations cannot contain duplicates')
+  assertDomain(input.proposals.length === annotationIds.length, 'INVALID_ARGUMENT', 'Batch review requires one proposal per annotation')
+  assertDomain(
+    input.proposals.every((proposal) => annotationIds.includes(proposal.annotationId)) &&
+      new Set(input.proposals.map((proposal) => proposal.annotationId)).size === input.proposals.length,
+    'INVALID_ARGUMENT',
+    'Batch review proposals must map one-to-one to the selected annotations',
+  )
+  assertDomain(input.annotations.every((annotation) => annotation.projectVersionId === input.baseVersionId), 'VERSION_CONFLICT', 'Batch annotations must target the same base version')
+
+  const normalized = input.proposals.map((proposal) => Object.freeze({
+    ...proposal,
+    operation: validatePatchOperation(proposal.operation),
+    estimatedCost: proposal.estimatedCost ?? 0,
+  }))
+  assertDomain(normalized.every((proposal) => Number.isSafeInteger(proposal.estimatedCost) && proposal.estimatedCost >= 0), 'INVALID_ARGUMENT', 'Batch proposal cost must be a non-negative integer')
+
+  const byTarget = new Map<string, typeof normalized>()
+  for (const proposal of normalized) {
+    const entries = byTarget.get(proposal.operation.targetId) ?? []
+    entries.push(proposal)
+    byTarget.set(proposal.operation.targetId, entries)
   }
-  if (conflicts.length && input.mode !== 'partial-retry') {
+  const conflicts = new Set<string>()
+  const conflictPeers = new Map<string, Set<string>>()
+  for (const entries of byTarget.values()) {
+    const signatures = new Set(entries.map((entry) => JSON.stringify(entry.operation)))
+    if (signatures.size <= 1) continue
+    for (const entry of entries) {
+      conflicts.add(entry.annotationId)
+      const peers = conflictPeers.get(entry.annotationId) ?? new Set<string>()
+      for (const candidate of entries) if (candidate.annotationId !== entry.annotationId) peers.add(candidate.annotationId)
+      conflictPeers.set(entry.annotationId, peers)
+    }
+  }
+  const conflictIds = [...conflicts].toSorted()
+  if (conflictIds.length && input.mode !== 'partial-retry') {
     return Object.freeze({
       status: 'conflict' as const,
       patch: null,
-      conflicts: Object.freeze(conflicts),
-      results: Object.freeze(input.annotations.map((annotation) => ({ annotationId: annotation.id, status: 'rolled-back' }))),
+      conflicts: Object.freeze(conflictIds),
+      results: Object.freeze(input.annotations.map((annotation) => Object.freeze({
+        annotationId: annotation.id,
+        status: 'rolled-back' as const,
+        conflictIds: Object.freeze([...(conflictPeers.get(annotation.id) ?? [])].toSorted()),
+      }))),
     })
   }
-  const accepted = input.proposals.filter((proposal) => !conflicts.includes(proposal.annotationId))
+  const accepted = normalized.filter((proposal) => !conflicts.has(proposal.annotationId))
+  if (!accepted.length) {
+    return Object.freeze({
+      status: 'conflict' as const,
+      patch: null,
+      conflicts: Object.freeze(conflictIds),
+      results: Object.freeze(input.annotations.map((annotation) => Object.freeze({
+        annotationId: annotation.id,
+        status: 'retryable' as const,
+        conflictIds: Object.freeze([...(conflictPeers.get(annotation.id) ?? [])].toSorted()),
+      }))),
+    })
+  }
+  const operations = [...new Map(accepted.map((proposal) => [JSON.stringify(proposal.operation), proposal.operation])).values()]
+  const invalidatedRanges = [...new Map(operations.flatMap((operation) => operation.rangeMs ? [[JSON.stringify(operation.rangeMs), operation.rangeMs] as const] : [])).values()]
   return Object.freeze({
-    status: conflicts.length ? 'partial' as const : 'ready' as const,
+    status: conflictIds.length ? 'partial' as const : 'ready' as const,
     patch: Object.freeze({
       id: `batch_${input.annotations.map((item) => item.id).join('_')}`,
       baseVersionId: input.baseVersionId,
-      operations: Object.freeze(accepted.map((item) => item.operation)),
+      operations: Object.freeze(operations),
       annotationIds: Object.freeze(accepted.map((item) => item.annotationId)),
-      estimatedCost: 0,
-      invalidatedRanges: Object.freeze(accepted.flatMap((item) => item.operation.rangeMs ? [item.operation.rangeMs] : [])),
+      estimatedCost: accepted.reduce((total, proposal) => total + proposal.estimatedCost, 0),
+      invalidatedRanges: Object.freeze(invalidatedRanges),
     }),
-    conflicts: Object.freeze(conflicts),
-    results: Object.freeze(input.annotations.map((annotation) => ({ annotationId: annotation.id, status: conflicts.includes(annotation.id) ? 'retryable' : 'included' }))),
+    conflicts: Object.freeze(conflictIds),
+    results: Object.freeze(input.annotations.map((annotation) => Object.freeze({
+      annotationId: annotation.id,
+      status: conflicts.has(annotation.id) ? 'retryable' as const : 'included' as const,
+      conflictIds: Object.freeze([...(conflictPeers.get(annotation.id) ?? [])].toSorted()),
+    }))),
   })
 }

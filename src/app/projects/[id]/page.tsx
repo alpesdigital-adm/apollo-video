@@ -69,6 +69,17 @@ interface ReviewPatchProposalData {
   render?: { operationId: string; status: string; phase: string; error?: { code: string; message: string } };
   createdAt: string; updatedAt: string;
 }
+interface ReviewPatchBatchData {
+  id: string; baseVersionId: string; mode: 'all-or-nothing' | 'partial-retry'; status: 'ready' | 'conflict' | 'partial' | 'applied';
+  patch: ReviewPatchProposalData['patch']; impact: ReviewPatchProposalData['impact']; conflicts: string[];
+  items: {
+    id: string; annotationId: string; proposalId: string; status: 'included' | 'rolled-back' | 'retryable' | 'applied';
+    operation: { op: PatchOperationKind; targetId: string; value: Record<string, unknown>; rangeMs?: [number, number] } | null;
+    conflictIds: string[]; reasonCode?: 'ATOMIC_CONFLICT' | 'TARGET_CONFLICT'; createdAt: string; updatedAt: string;
+  }[];
+  resultVersionId?: string; renderOperationId?: string; comparison?: ReviewPatchProposalData['comparison']; render?: ReviewPatchProposalData['render'];
+  createdAt: string; updatedAt: string;
+}
 type RenderElementType = 'background' | 'presenter' | 'subtitle' | 'b-roll' | 'cta' | 'transformation'
 interface RenderElementData {
   elementId: string; type: RenderElementType; clipId: string; sceneId: string; sourceId: string; frame: number;
@@ -220,6 +231,11 @@ export default function ProjectWorkspacePage() {
   const [reviewPatchLoading, setReviewPatchLoading] = useState<string | null>(null)
   const [reviewPatchApplying, setReviewPatchApplying] = useState(false)
   const reviewPatchApplyKeyRef = useRef<{ proposalId: string; key: string } | null>(null)
+  const [reviewBatchSelection, setReviewBatchSelection] = useState<string[]>([])
+  const [reviewPatchBatch, setReviewPatchBatch] = useState<ReviewPatchBatchData | null>(null)
+  const [reviewPatchBatchLoading, setReviewPatchBatchLoading] = useState(false)
+  const [reviewPatchBatchApplying, setReviewPatchBatchApplying] = useState(false)
+  const reviewPatchBatchApplyKeyRef = useRef<{ batchId: string; key: string } | null>(null)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -690,6 +706,85 @@ export default function ProjectWorkspacePage() {
     }
   }
 
+  function toggleReviewBatchAnnotation(annotationId: string): void {
+    setReviewBatchSelection((current) => current.includes(annotationId)
+      ? current.filter((id) => id !== annotationId)
+      : [...current, annotationId])
+    setReviewPatchBatch(null)
+    reviewPatchBatchApplyKeyRef.current = null
+  }
+
+  async function prepareReviewPatchBatch(mode: 'all-or-nothing' | 'partial-retry'): Promise<void> {
+    if (reviewBatchSelection.length < 2) return
+    setReviewPatchBatchLoading(true)
+    setNotice(null)
+    try {
+      const proposals = await Promise.all(reviewBatchSelection.map((annotationId) => requestJson<{ proposal: ReviewPatchProposalData; replayed: boolean }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/patch-proposals`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+          body: JSON.stringify({ annotationId }),
+        },
+      )))
+      const blocked = proposals.find((result) => result.proposal.status !== 'ready')
+      if (blocked) {
+        setReviewPatch(blocked.proposal)
+        setNotice(blocked.proposal.status === 'ambiguous'
+          ? 'Uma annotation do lote precisa de decisão antes da compilação.'
+          : 'Uma annotation do lote foi bloqueada pelos gates de segurança.')
+        return
+      }
+      const result = await requestJson<{ batch: ReviewPatchBatchData; replayed: boolean }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/patch-batches`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+          body: JSON.stringify({ proposalIds: proposals.map((entry) => entry.proposal.id), mode }),
+        },
+      )
+      reviewPatchBatchApplyKeyRef.current = null
+      setReviewPatchBatch(result.batch)
+      setNotice(result.batch.status === 'ready'
+        ? 'Lote compatível. Revise o impacto único antes de criar a versão.'
+        : result.batch.status === 'partial'
+          ? 'Conflitos isolados. Somente o subconjunto não conflitante poderá ser aplicado.'
+          : 'O lote foi revertido integralmente porque existem instruções conflitantes.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível preparar o lote de revisão.')
+    } finally {
+      setReviewPatchBatchLoading(false)
+    }
+  }
+
+  async function applyReviewPatchBatch(): Promise<void> {
+    if (!reviewPatchBatch || !['ready', 'partial'].includes(reviewPatchBatch.status)) return
+    const idempotencyKey = reviewPatchBatchApplyKeyRef.current?.batchId === reviewPatchBatch.id
+      ? reviewPatchBatchApplyKeyRef.current.key
+      : crypto.randomUUID()
+    reviewPatchBatchApplyKeyRef.current = { batchId: reviewPatchBatch.id, key: idempotencyKey }
+    setReviewPatchBatchApplying(true)
+    setNotice(null)
+    try {
+      const result = await requestJson<{ batch: ReviewPatchBatchData; version: { id: string; sequence: number }; operation: PublicOperation; replayed: boolean }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/patch-batches/${encodeURIComponent(reviewPatchBatch.id)}/apply`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
+          body: JSON.stringify({ confirmed: true }),
+        },
+      )
+      setReviewPatchBatch(result.batch)
+      setReviewBatchSelection([])
+      setNotice(`Versão ${result.version.sequence} criada com ${result.batch.items.filter((item) => item.status === 'applied').length} ajustes atômicos. O preview entrou na fila.`)
+      await Promise.all([loadWorkspace(true), loadReview(true)])
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar o lote de revisão.')
+    } finally {
+      setReviewPatchBatchApplying(false)
+    }
+  }
+
   async function beginOrResume(file: File, checksum: string): Promise<string> {
     const storageKey = `apollo:v2:upload:${projectId}:${checksum}`
     const savedId = window.localStorage.getItem(storageKey)
@@ -1154,15 +1249,27 @@ export default function ProjectWorkspacePage() {
 
               <div className="mt-5 border-t border-white/[0.07] pt-4">
                 <div className="flex items-center justify-between"><p className="text-[9px] uppercase tracking-[0.17em] text-[#706c64]">Ajustes desta versão</p><span className="text-[9px] text-[#55524c]">{review.annotations.filter((item) => item.status === 'open').length} aberto{review.annotations.filter((item) => item.status === 'open').length === 1 ? '' : 's'}</span></div>
+                {reviewBatchSelection.length ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border border-[#8f6c22]/30 bg-[#0c0a06] px-3 py-2.5" data-testid="review-batch-toolbar">
+                    <div className="flex items-center gap-3"><span className="grid h-6 w-6 place-items-center rounded-full border border-[#bd8f29]/40 font-mono text-[9px] text-[#e0b852]">{reviewBatchSelection.length}</span><div><p className="text-[9px] font-medium text-[#c5bdaf]">Ajustes selecionados</p><p className="mt-0.5 text-[8px] text-[#666056]">O lote padrão é integral: conflito não altera nenhuma annotation.</p></div></div>
+                    <div className="flex flex-wrap gap-2">
+                      <button className="border border-white/[0.1] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#a8802f]/50 hover:text-[#dfb752] disabled:opacity-30" disabled={reviewPatchBatchLoading || reviewBatchSelection.length < 2} onClick={() => void prepareReviewPatchBatch('partial-retry')} type="button">Separar conflitos</button>
+                      <button className="bg-[#dbae3f] px-3 py-2 text-[9px] font-bold text-[#171207] disabled:opacity-30" data-testid="review-batch-prepare" disabled={reviewPatchBatchLoading || reviewBatchSelection.length < 2} onClick={() => void prepareReviewPatchBatch('all-or-nothing')} type="button">{reviewPatchBatchLoading ? 'Compilando…' : 'Preparar lote'}</button>
+                    </div>
+                  </div>
+                ) : null}
                 {review.annotations.length ? (
                   <div className="mt-3 grid gap-px bg-white/[0.06] sm:grid-cols-2">
                     {review.annotations.slice(0, 6).map((annotation) => (
-                      <article className={`bg-[#090909] px-3 py-3 transition ${reviewPatch?.annotationId === annotation.id ? 'shadow-[inset_2px_0_0_#d9aa3d]' : ''}`} data-testid={`review-annotation-${annotation.id}`} key={annotation.id}>
-                        <button className="block w-full text-left hover:text-white" onClick={() => seekPreviewToFrame(annotation.frame)} type="button">
-                          <span className="font-mono text-[9px] text-[#b8943e]">{frameTimecode(annotation.frame, review.session.fps)}</span>
-                          <span className="ml-2 text-[8px] uppercase tracking-[0.1em] text-[#5f5b54]">{annotation.scope === 'region' ? 'área' : annotation.scope === 'scene' ? 'cena' : 'ponto'} · {REVIEW_SCOPE_LABELS[annotation.applicationScope.kind]} · {annotation.affectedCount} alvo{annotation.affectedCount === 1 ? '' : 's'}</span>
-                          <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-[#aaa49a]">{annotation.text}</p>
-                        </button>
+                      <article className={`bg-[#090909] px-3 py-3 transition ${reviewPatch?.annotationId === annotation.id || reviewBatchSelection.includes(annotation.id) ? 'shadow-[inset_2px_0_0_#d9aa3d]' : ''}`} data-testid={`review-annotation-${annotation.id}`} key={annotation.id}>
+                        <div className="flex items-start gap-2.5">
+                          {annotation.status === 'open' ? <input aria-label={`Selecionar ajuste ${frameTimecode(annotation.frame, review.session.fps)}`} checked={reviewBatchSelection.includes(annotation.id)} className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[#d9aa3d]" data-testid={`review-batch-select-${annotation.id}`} onChange={() => toggleReviewBatchAnnotation(annotation.id)} type="checkbox" /> : <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#4e9568]" />}
+                          <button className="block min-w-0 flex-1 text-left hover:text-white" onClick={() => seekPreviewToFrame(annotation.frame)} type="button">
+                            <span className="font-mono text-[9px] text-[#b8943e]">{frameTimecode(annotation.frame, review.session.fps)}</span>
+                            <span className="ml-2 text-[8px] uppercase tracking-[0.1em] text-[#5f5b54]">{annotation.scope === 'region' ? 'área' : annotation.scope === 'scene' ? 'cena' : 'ponto'} · {REVIEW_SCOPE_LABELS[annotation.applicationScope.kind]} · {annotation.affectedCount} alvo{annotation.affectedCount === 1 ? '' : 's'}</span>
+                            <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-[#aaa49a]">{annotation.text}</p>
+                          </button>
+                        </div>
                         <div className="mt-3 flex items-center justify-between border-t border-white/[0.05] pt-2">
                           <span className={`text-[8px] uppercase tracking-[0.12em] ${annotation.status === 'open' ? 'text-[#716d65]' : 'text-[#5e9f74]'}`}>{annotation.status === 'open' ? 'aguarda decisão' : 'aplicado'}</span>
                           {annotation.status === 'open' ? <button className="text-[9px] font-semibold text-[#d7aa42] hover:text-[#f0c65d] disabled:opacity-35" data-testid={`review-patch-propose-${annotation.id}`} disabled={reviewPatchLoading === annotation.id} onClick={() => void proposeReviewPatch(annotation.id)} type="button">{reviewPatchLoading === annotation.id ? 'Interpretando…' : 'Preparar ajuste →'}</button> : null}
@@ -1191,6 +1298,28 @@ export default function ProjectWorkspacePage() {
                       </div>
                     ) : null}
                     {reviewPatch.status === 'applied' && reviewPatch.comparison ? <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#4e9568]/20 bg-[#4e9568]/[0.04] px-4 py-3" data-testid="review-patch-comparison"><p className="text-[9px] text-[#7ca88b]">Versão imutável criada · <span className="font-mono">{reviewPatch.comparison.beforeVersionId.slice(-8)} → {reviewPatch.comparison.afterVersionId.slice(-8)}</span></p><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f9a7c]">Render {reviewPatch.render?.status ?? 'queued'}</span></div> : null}
+                  </div>
+                ) : null}
+                {reviewPatchBatch ? (
+                  <div className="mt-3 border border-[#8f6c22]/35 bg-[#0b0a08]" data-testid="review-batch-impact">
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
+                      <div><p className="text-[8px] uppercase tracking-[0.2em] text-[#8b7650]">Caderno do lote</p><p className="mt-1 text-sm font-medium text-[#d8d2c7]">{reviewPatchBatch.items.length} decisões · uma versão</p></div>
+                      <span className={`border px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.14em] ${reviewPatchBatch.status === 'ready' ? 'border-[#bd8f29]/40 text-[#d9aa3d]' : reviewPatchBatch.status === 'applied' ? 'border-[#4e9568]/40 text-[#6db886]' : reviewPatchBatch.status === 'partial' ? 'border-[#a47d2d]/40 text-[#cda54a]' : 'border-[#b05d56]/35 text-[#c87870]'}`}>{reviewPatchBatch.status === 'ready' ? 'lote compatível' : reviewPatchBatch.status === 'partial' ? 'subconjunto seguro' : reviewPatchBatch.status === 'applied' ? 'versão criada' : 'revertido por conflito'}</span>
+                    </div>
+                    <div className="divide-y divide-white/[0.06]">
+                      {reviewPatchBatch.items.map((item, index) => {
+                        const annotation = review.annotations.find((candidate) => candidate.id === item.annotationId)
+                        const successful = item.status === 'included' || item.status === 'applied'
+                        return <div className="grid grid-cols-[28px_1fr_auto] items-center gap-3 px-4 py-3" key={item.id}><span className={`grid h-5 w-5 place-items-center rounded-full border font-mono text-[8px] ${successful ? 'border-[#4e9568]/50 text-[#69ae80]' : 'border-[#a95a53]/50 text-[#c9756e]'}`}>{index + 1}</span><div className="min-w-0"><p className="truncate text-[10px] text-[#aaa49a]">{annotation?.text ?? item.annotationId}</p><p className="mt-1 truncate font-mono text-[8px] text-[#5f5a52]">{item.operation ? `${PATCH_OPERATION_LABELS[item.operation.op]} · ${item.operation.targetId}` : 'sem operação'}</p></div><span className={`text-[8px] uppercase tracking-[0.1em] ${successful ? 'text-[#6aa37b]' : 'text-[#bd716a]'}`}>{item.status === 'rolled-back' ? 'rollback' : item.status === 'retryable' ? 'revisar' : item.status === 'applied' ? 'aplicado' : 'incluído'}</span></div>
+                      })}
+                    </div>
+                    {reviewPatchBatch.impact ? (
+                      <div className="grid border-t border-white/[0.07] sm:grid-cols-[1fr_auto]">
+                        <div className="px-4 py-4"><div className="flex flex-wrap gap-x-5 gap-y-2 text-[9px]"><span className="text-[#777168]">Operações <strong className="ml-1 font-mono font-medium text-[#c7c0b5]">{reviewPatchBatch.impact.operationCount}</strong></span><span className="text-[#777168]">Custo <strong className="ml-1 font-mono font-medium text-[#c7c0b5]">{reviewPatchBatch.impact.cost}¢</strong></span><span className="text-[#777168]">Ranges <strong className="ml-1 font-mono font-medium text-[#c7c0b5]">{reviewPatchBatch.impact.invalidatedRanges.length}</strong></span><span className="text-[#777168]">Delta <strong className="ml-1 font-mono font-medium text-[#6db886]">+{reviewPatchBatch.impact.expectedScoreDelta}</strong></span></div><p className="mt-3 text-[9px] leading-4 text-[#6b665e]">{reviewPatchBatch.mode === 'all-or-nothing' ? 'Transação integral: qualquer mudança concorrente reverte o lote inteiro.' : 'Retry parcial explícito: itens conflitantes permanecem abertos.'}</p></div>
+                        {['ready', 'partial'].includes(reviewPatchBatch.status) ? <div className="flex items-center border-t border-white/[0.07] px-4 py-3 sm:border-l sm:border-t-0"><button className="bg-[#dbae3f] px-4 py-2.5 text-[10px] font-bold text-[#171207] disabled:opacity-35" data-testid="review-batch-apply" disabled={reviewPatchBatchApplying} onClick={() => void applyReviewPatchBatch()} type="button">{reviewPatchBatchApplying ? 'Criando versão…' : 'Confirmar lote'}</button></div> : null}
+                      </div>
+                    ) : <div className="border-t border-[#b05d56]/20 bg-[#b05d56]/[0.04] px-4 py-3"><p className="text-[9px] leading-4 text-[#bd716a]">Nenhuma alteração foi aplicada. Separe os conflitos para gerar um lote parcial explícito.</p></div>}
+                    {reviewPatchBatch.status === 'applied' && reviewPatchBatch.comparison ? <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#4e9568]/20 bg-[#4e9568]/[0.04] px-4 py-3"><p className="text-[9px] text-[#7ca88b]">Versão imutável criada · <span className="font-mono">{reviewPatchBatch.comparison.beforeVersionId.slice(-8)} → {reviewPatchBatch.comparison.afterVersionId.slice(-8)}</span></p><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f9a7c]">Render {reviewPatchBatch.render?.status ?? 'queued'}</span></div> : null}
                   </div>
                 ) : null}
               </div>

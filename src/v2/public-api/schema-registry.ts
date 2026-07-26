@@ -351,6 +351,47 @@ const patchProposalSchema = {
   },
 }
 
+const patchBatchSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'workspaceId', 'projectId', 'baseVersionId', 'mode', 'status', 'patch', 'impact', 'conflicts', 'items', 'createdAt', 'updatedAt'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    workspaceId: idSchema,
+    projectId: idSchema,
+    baseVersionId: idSchema,
+    mode: { enum: ['all-or-nothing', 'partial-retry'] },
+    status: { enum: ['ready', 'conflict', 'partial', 'applied'] },
+    patch: patchProposalSchema.properties.patch,
+    impact: patchProposalSchema.properties.impact,
+    conflicts: { type: 'array', maxItems: 100, uniqueItems: true, items: { type: 'string', format: 'uuid' } },
+    items: {
+      type: 'array', minItems: 2, maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'annotationId', 'proposalId', 'status', 'operation', 'conflictIds', 'createdAt', 'updatedAt'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          annotationId: { type: 'string', format: 'uuid' },
+          proposalId: { type: 'string', format: 'uuid' },
+          status: { enum: ['included', 'rolled-back', 'retryable', 'applied'] },
+          operation: { anyOf: [{ type: 'null' }, patchOperationSchema] },
+          conflictIds: { type: 'array', maxItems: 100, uniqueItems: true, items: { type: 'string', format: 'uuid' } },
+          reasonCode: { enum: ['ATOMIC_CONFLICT', 'TARGET_CONFLICT'] },
+          createdAt: dateTimeSchema,
+          updatedAt: dateTimeSchema,
+        },
+      },
+    },
+    resultCommandId: idSchema,
+    resultVersionId: idSchema,
+    renderOperationId: idSchema,
+    comparison: patchProposalSchema.properties.comparison,
+    render: patchProposalSchema.properties.render,
+    createdAt: dateTimeSchema,
+    updatedAt: dateTimeSchema,
+  },
+}
+
 const apiClientSchema = {
   type: 'object',
   additionalProperties: false,
@@ -2344,6 +2385,36 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'], properties: { id: idSchema, type: { const: 'apply-review-patch' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema } },
         version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema, baseHash: sha256Schema, snapshotRefs: { type: 'object' }, createdAt: dateTimeSchema } },
         comparison: patchProposalSchema.properties.comparison,
+        operation: publicOperationSchemaV4,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('create-review-patch-batch-request', 1, 'Compile compatible review patch proposals with atomic or explicit partial-retry semantics', {
+    type: 'object', additionalProperties: false, required: ['proposalIds'],
+    properties: {
+      proposalIds: { type: 'array', minItems: 2, maxItems: 100, uniqueItems: true, items: { type: 'string', format: 'uuid' } },
+      mode: { enum: ['all-or-nothing', 'partial-retry'], default: 'all-or-nothing' },
+    },
+  }),
+  defineSchema('review-patch-batch-created', 1, 'Persisted batch patch compilation and per-annotation outcomes',
+    successSchema({ type: 'object', additionalProperties: false, required: ['batch', 'replayed'], properties: { batch: patchBatchSchema, replayed: { type: 'boolean' } } }),
+  ),
+  defineSchema('review-patch-batch', 1, 'Persisted batch patch including conflicts, comparison and render outcome',
+    successSchema({ type: 'object', additionalProperties: false, required: ['batch'], properties: { batch: patchBatchSchema } }),
+  ),
+  defineSchema('apply-review-patch-batch-request', 1, 'Explicit confirmation for a ready or explicitly partial batch patch', {
+    type: 'object', additionalProperties: false, required: ['confirmed'], properties: { confirmed: { const: true } },
+  }),
+  defineSchema('review-patch-batch-applied', 1, 'Atomic immutable version and durable proxy render created by a confirmed batch patch',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['batch', 'command', 'version', 'comparison', 'operation', 'replayed'],
+      properties: {
+        batch: patchBatchSchema,
+        command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'], properties: { id: idSchema, type: { const: 'apply-review-patch-batch' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema } },
+        version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema, baseHash: sha256Schema, snapshotRefs: { type: 'object' }, createdAt: dateTimeSchema } },
+        comparison: patchBatchSchema.properties.comparison,
         operation: publicOperationSchemaV4,
         replayed: { type: 'boolean' },
       },

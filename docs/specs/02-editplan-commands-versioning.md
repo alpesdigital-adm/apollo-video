@@ -477,6 +477,20 @@ Uma annotation aberta é interpretada em uma proposta persistida e vinculada à 
 
 A proposta passa, nesta ordem lógica, pelos gates de ambiguidade, elementos protegidos, policy e budget. Enquanto um gate falhar, ela não pode criar Command nem versão. Uma proposta pronta inclui custo estimado, ranges e artifacts invalidados, targets alterados e delta de qualidade esperado. A aplicação exige confirmação humana/API explícita e chave idempotente; cria um Command `apply-review-patch`, um snapshot e uma ProjectVersion filha imutável, além do compare antes/depois. O render é assíncrono e seu sucesso ou erro permanece associado à proposta.
 
+### 22.5 Batch review integrado
+
+Um lote aceita de duas a cem propostas `ready`, sem duplicatas, ligadas a annotations abertas e à mesma `baseVersionId` corrente. Cada proposta deve resolver exatamente uma operação tipada; gates individuais continuam sendo precondição e nunca são recalculados ou contornados pelo lote.
+
+O compilador agrupa operações por `targetId`:
+
+- assinaturas idênticas são deduplicadas no `PatchSet`;
+- assinaturas divergentes tornam todos os participantes conflitantes e registram IDs pares;
+- `all-or-nothing`, default, devolve patch nulo e `rolled-back` para todos os itens;
+- `partial-retry`, somente quando pedido explicitamente, inclui os itens seguros e mantém conflitantes `retryable`;
+- lote sem item seguro nunca é aplicável.
+
+A aplicação exige `confirmed: true`, `Idempotency-Key` e aprovação humana para uso como agent tool. Uma transação serializável cria exatamente um Command `apply-review-patch-batch`, um snapshot, uma ProjectVersion filha, o compare e o evento de outbox; move somente annotations/propostas incluídas para `applied`. Mudança concorrente em versão, annotation ou proposta aborta toda a transação. Após commit, uma operação durável de proxy é vinculada ao lote. Replay com a mesma chave e fingerprint reconstrói o mesmo resultado; chave reutilizada com outro payload falha.
+
 ## 23. Dependency graph
 
 ### 23.1 Tipos de nós
