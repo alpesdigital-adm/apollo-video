@@ -93,7 +93,11 @@ function source() {
     editPlanSnapshotId: 'snapshot-edit-plan-proxy-test',
     editPlanHash: 'b'.repeat(64),
     editPlan: Object.freeze({
+      schemaVersion: 2,
+      state: 'compiled',
+      projectVersionId: 'project-version-proxy-test',
       fps: 30,
+      durationFrames: 300,
       movementPolicy: Object.freeze({ automaticZoom: false, protectedOpeningFrames: 120 }),
       subtitleTracks: Object.freeze([{ cues: Object.freeze([
         Object.freeze({ id: 'cue-1', startFrame: 0, endFrame: 60, text: 'Legenda segura', anchor: 'bottom' }),
@@ -109,11 +113,13 @@ function source() {
     sourceArtifactKey: 'workspaces/project-proxy-test/masters/source.mp4',
     sourceSha256: 'c'.repeat(64),
     originalFileName: 'source.mp4',
+    uploadReceivedAt: '2026-07-18T21:58:00.000Z',
+    criticIssues: Object.freeze([]),
   })
 }
 
 function dependencies(operations, overrides = {}) {
-  const calls = { attached: 0, cleaned: 0, persisted: 0, mapped: 0 }
+  const calls = { attached: 0, cleaned: 0, persisted: 0, mapped: 0, reviewed: 0 }
   const deps = {
     operations: operations.repository,
     projects: {
@@ -157,6 +163,19 @@ function dependencies(operations, overrides = {}) {
         return { record: {}, replayed: false }
       },
     },
+    proxyReviews: {
+      async persistGenerated(input) {
+        calls.reviewed += 1
+        assert.equal(input.review.proxyArtifactId, 'artifact-project-proxy-output')
+        assert.equal(input.review.status, 'ready-for-final')
+        assert.equal(input.review.finalAllowed, true)
+        assert.equal(input.review.spec.codec, 'h264')
+        assert.equal(input.review.spec.width, 540)
+        assert.equal(input.review.spec.height, 960)
+        assert.ok(input.review.timeToFirstProxyMs >= 120_000)
+        return { ...input.review, id: input.id }
+      },
+    },
     artifactRoot: join(tmpdir(), 'apollo-project-proxy-worker-artifacts'),
     clock: createClock(),
     leaseDurationMs: 10_000,
@@ -174,7 +193,7 @@ test('project proxy worker materializes, attaches and settles the exact immutabl
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
   assert.deepEqual(operations.operation.result.resource, operations.operation.target)
-  assert.deepEqual(calls, { attached: 1, cleaned: 1, persisted: 1, mapped: 1 })
+  assert.deepEqual(calls, { attached: 1, cleaned: 1, persisted: 1, mapped: 1, reviewed: 1 })
 })
 
 test('project proxy worker does not attach an output after losing its lease', async () => {
@@ -193,5 +212,5 @@ test('project proxy worker does not attach an output after losing its lease', as
 
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'lease-lost' })
   assert.equal(operations.operation.status, 'running')
-  assert.deepEqual(base.calls, { attached: 0, cleaned: 0, persisted: 0, mapped: 0 })
+  assert.deepEqual(base.calls, { attached: 0, cleaned: 0, persisted: 0, mapped: 0, reviewed: 0 })
 })

@@ -7,8 +7,10 @@ import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-
 import type { VerifiedMediaStorage } from './ports/media-ingest.ts'
 import type { EditorialProxyRenderer } from './ports/editorial-proxy-renderer.ts'
 import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-repository.ts'
+import type { ProxyReviewRepository } from './ports/proxy-review-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
+import { evaluateRenderedProxy } from './render-workflow.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 
 const NON_RETRYABLE_CODES = new Set(['INVALID_RENDER_INPUT', 'RENDER_OUTPUT_INVALID', 'PERSISTENCE_CONFLICT', 'PERSISTENCE_NOT_CONFIGURED'])
@@ -34,6 +36,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   storage: VerifiedMediaStorage
   renderer: EditorialProxyRenderer
   renderElementMaps: RenderElementMapRepository
+  proxyReviews: ProxyReviewRepository
   artifactRoot: string
   clock?: () => Date
   leaseDurationMs?: number
@@ -147,6 +150,37 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
         projectVersionId: context.projectVersionId, outputArtifactId: context.outputArtifactId, outputManifestId: context.outputManifestId,
         originalFileName: context.originalFileName, createdAt: clock().toISOString(),
+      })
+      const reviewedAt = clock().toISOString()
+      const review = evaluateRenderedProxy({
+        projectVersionId: context.projectVersionId,
+        proxyArtifactId: persisted.artifactId,
+        proxyManifestId: persisted.manifestId,
+        proxySha256: stored.sha256,
+        inputHash: context.inputHash,
+        format: source.format,
+        sourceSha256: source.sourceSha256,
+        editPlanHash: source.editPlanHash,
+        expectedDurationMs: Math.round(source.editPlan.durationFrames / source.editPlan.fps * 1_000),
+        uploadReceivedAt: source.uploadReceivedAt,
+        renderCompletedAt: reviewedAt,
+        probe: rendered.probe,
+        map: rendered.renderElementMap,
+        ...('composition' in source.editPlan
+          ? {
+              faceSafeRegion: source.editPlan.composition.faceSafeFallback,
+              subtitleSafeRegion: source.editPlan.composition.subtitleSafeRegion,
+            }
+          : {}),
+        criticIssues: source.criticIssues,
+      })
+      await dependencies.proxyReviews.persistGenerated({
+        id: `proxy-review-${createHash('sha256').update(operation.id).digest('hex').slice(0, 32)}`,
+        workspaceId: operation.workspaceId,
+        projectId: context.projectId,
+        operationId: operation.id,
+        review,
+        createdAt: reviewedAt,
       })
       stopHeartbeat()
       const succeeded = await dependencies.operations.succeed(command(clock()))

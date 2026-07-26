@@ -141,3 +141,18 @@ test('T-FR-217 project editor compares immutable previews and exposes explicit p
   assert.match(projectEditorSource, /submitVersionComparisonAction\('restore'\)/)
   assert.match(projectEditorSource, /sem apagar o histórico/)
 })
+
+test('T-FR-230 project editor exposes the persisted proxy verdict and blocks final export until release', () => {
+  assert.match(projectEditorSource, /\/proxy-reviews/)
+  assert.match(projectEditorSource, /data-testid="proxy-review-gate"/)
+  assert.match(projectEditorSource, /Laudo do proxy/)
+  assert.match(projectEditorSource, /Correção obrigatória/)
+  assert.match(projectEditorSource, /Ressalvas para decidir/)
+  assert.match(projectEditorSource, /Liberado para alta/)
+  assert.match(projectEditorSource, /data-testid="proxy-review-issues"/)
+  assert.match(projectEditorSource, /data-testid="proxy-review-acknowledge"/)
+  assert.match(projectEditorSource, /baseRevision: proxyReview\.reviewHash/)
+  assert.match(projectEditorSource, /expectedRevision: proxyReview\.revision/)
+  assert.match(projectEditorSource, /proxyReview\?\.projectVersionId !== workspace\.version\?\.id \|\| !proxyReview\.finalAllowed/)
+  assert.match(projectEditorSource, /Aguardando liberação do proxy/)
+})

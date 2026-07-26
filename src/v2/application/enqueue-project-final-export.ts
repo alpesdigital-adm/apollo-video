@@ -60,7 +60,7 @@ export function enqueueProjectFinalExportService(dependencies: {
       projectVersionId,
       projectVersionHash,
     })
-    if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Current project version does not have an approved DirectorRun and QualityReport')
+    if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Current project version does not have an approved DirectorRun, QualityReport and post-render proxy review')
     assertDomain(source.format === request.format, 'INVALID_OUTPUT_SPEC', 'Final export format must match the approved project format')
     const outputSpec = OUTPUT_PRESETS[source.format as OutputAspectRatio]
     assertDomain(Boolean(outputSpec), 'INVALID_OUTPUT_SPEC', 'Approved project format has no final export preset')
@@ -85,6 +85,9 @@ export function enqueueProjectFinalExportService(dependencies: {
       directorRunId: source.directorRunId,
       qualitySnapshotId: source.qualitySnapshotId,
       qualitySnapshotHash: source.qualitySnapshotHash,
+      proxyReviewId: source.proxyReviewId,
+      proxyReviewHash: source.proxyReviewHash,
+      proxyArtifactId: source.proxyArtifactId,
       sourceArtifactId: source.sourceArtifactId,
       sourceManifestId: source.sourceManifestId,
       sourceSha256: source.sourceSha256,

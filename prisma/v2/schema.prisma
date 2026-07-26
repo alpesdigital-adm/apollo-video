@@ -55,6 +55,8 @@ model V2Workspace {
   renderElementMaps               V2RenderElementMap[]
   reviewPatchProposals            V2ReviewPatchProposal[]
   reviewPatchBatches              V2ReviewPatchBatch[]
+  proxyReviews                    V2ProxyReview[]
+  proxyReviewDecisions            V2ProxyReviewDecision[]
 
   @@map("workspaces")
 }
@@ -79,6 +81,7 @@ model V2ApiClient {
   mediaDownloadGrants         V2MediaDownloadGrant[]
   createdWebhookEndpoints     V2WebhookEndpoint[]     @relation("WebhookEndpointCreator")
   createdWebhookSubscriptions V2WebhookSubscription[] @relation("WebhookSubscriptionCreator")
+  proxyReviewDecisions        V2ProxyReviewDecision[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -193,6 +196,8 @@ model V2Project {
   renderElementMaps     V2RenderElementMap[]
   reviewPatchProposals  V2ReviewPatchProposal[]
   reviewPatchBatches    V2ReviewPatchBatch[]
+  proxyReviews          V2ProxyReview[]
+  proxyReviewDecisions  V2ProxyReviewDecision[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -270,6 +275,7 @@ model V2ProjectVersion {
   patchProposalAsResult V2ReviewPatchProposal?          @relation("PatchProposalResultVersion")
   patchBatchesAsBase    V2ReviewPatchBatch[]            @relation("PatchBatchBaseVersion")
   patchBatchAsResult    V2ReviewPatchBatch?             @relation("PatchBatchResultVersion")
+  proxyReviews          V2ProxyReview[]
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -570,6 +576,7 @@ model V2MediaArtifact {
   transcriptSources      V2MediaTranscript[]
   reviewAnnotations      V2ReviewAnnotation[]
   renderElementMaps      V2RenderElementMap[]
+  proxyReviews           V2ProxyReview[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -625,6 +632,7 @@ model V2MediaArtifactManifest {
   materializations  V2MaterializationAuthorization[]
   renderOperations  V2ArtifactRenderOperation[]
   transcriptSources V2MediaTranscript[]
+  proxyReviews      V2ProxyReview[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, manifestHash])
@@ -896,6 +904,7 @@ model V2ProjectProxyRenderOperation {
   operation V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   project   V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   version   V2ProjectVersion  @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  review    V2ProxyReview?
 
   @@unique([operationId, workspaceId])
   @@unique([workspaceId, projectVersionId, inputHash])
@@ -903,6 +912,77 @@ model V2ProjectProxyRenderOperation {
   @@index([workspaceId, sourceArtifactId])
   @@index([workspaceId, outputArtifactId])
   @@map("project_proxy_render_operations")
+}
+
+model V2ProxyReview {
+  id                   String    @id @db.VarChar(128)
+  workspaceId          String    @db.VarChar(128)
+  projectId            String    @db.VarChar(128)
+  projectVersionId     String    @db.VarChar(128)
+  operationId          String    @unique @db.VarChar(128)
+  proxyArtifactId      String    @db.VarChar(128)
+  proxyManifestId      String    @db.VarChar(128)
+  inputHash            String    @db.Char(64)
+  rangeCacheKey        String    @db.Char(64)
+  specJson             String    @db.Text
+  status               String    @db.VarChar(32)
+  technicalIssuesJson  String    @db.Text
+  criticIssuesJson     String    @db.Text
+  warningsAcknowledged Boolean   @default(false)
+  finalAllowed         Boolean   @default(false)
+  reviewHash           String    @db.Char(64)
+  revision             Int       @default(1)
+  uploadReceivedAt     DateTime  @db.Timestamptz(3)
+  renderCompletedAt    DateTime  @db.Timestamptz(3)
+  timeToFirstProxyMs   BigInt
+  acknowledgedByType   String?   @db.VarChar(32)
+  acknowledgedById     String?   @db.VarChar(128)
+  acknowledgedAt       DateTime? @db.Timestamptz(3)
+  createdAt            DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime  @updatedAt @db.Timestamptz(3)
+
+  workspace      V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion V2ProjectVersion              @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  operation      V2ProjectProxyRenderOperation @relation(fields: [operationId, workspaceId], references: [operationId, workspaceId], onDelete: Restrict)
+  proxyArtifact  V2MediaArtifact               @relation(fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  proxyManifest  V2MediaArtifactManifest       @relation(fields: [proxyManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  decisions      V2ProxyReviewDecision[]
+
+  @@unique([id, workspaceId])
+  @@unique([operationId, workspaceId])
+  @@unique([workspaceId, projectVersionId, inputHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, projectVersionId, status])
+  @@index([workspaceId, proxyArtifactId])
+  @@index([workspaceId, finalAllowed, updatedAt(sort: Desc)])
+  @@map("proxy_reviews")
+}
+
+model V2ProxyReviewDecision {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  proxyReviewId      String   @db.VarChar(128)
+  action             String   @db.VarChar(32)
+  actorType          String   @db.VarChar(32)
+  actorId            String   @db.VarChar(80)
+  baseReviewHash     String   @db.Char(64)
+  resultReviewHash   String   @db.Char(64)
+  idempotencyKey     String   @db.VarChar(128)
+  requestFingerprint String   @db.Char(64)
+  createdAt          DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  review    V2ProxyReview @relation(fields: [proxyReviewId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  actor     V2ApiClient   @relation(fields: [actorId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@index([workspaceId, proxyReviewId, createdAt(sort: Desc)])
+  @@index([workspaceId, actorId, createdAt(sort: Desc)])
+  @@map("proxy_review_decisions")
 }
 
 model V2ProjectFinalExportOperation {

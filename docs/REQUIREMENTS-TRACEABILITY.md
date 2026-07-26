@@ -117,7 +117,7 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-215 | Batch review | S7 | D3,D6 | 2–100 propostas compilam PatchSet único; conflito atômico não muda versão; partial-retry é explícito | T-FR-215 domínio + Postgres serializável/rollback + API HTTP + UI |
 | FR-216 | Edição manual | S2,S7 | D3,D6 | timeline deriva do EditPlan corrente; trim/split/move/replace/inspector persistem como Command + snapshot + versão; undo/redo criam versões filhas; API e mouse/teclado usam o mesmo service | T-FR-216 domínio + PostgreSQL serializável/idempotência/conflito + API HTTP + UI mouse/teclado |
 | FR-217 | Compare | S2,S7 | D3,D5,D6 | toggle/split/overlay usam snapshots e proxies version-bound; playhead só sincroniza com mapping compartilhado; duração, score, issues e diff semântico são explícitos; accept/reopen persistem Command e restore cria child version sem apagar A/B | T-FR-217 domínio + PostgreSQL serializável/idempotência/conflito + API HTTP nos três modos + Chromium com versões de durações diferentes |
-| FR-230 | Proxy first | S1,S7 | D4,D5 | proxy antecede final | workflow |
+| FR-230 | Proxy first | S1,S7 | D3,D4,D5,D6 | worker persiste proxy H.264 + laudo version-bound; hard bloqueia, warning exige decisão CAS append-only; final lê somente `ready-for-final`; UI/API exibem o mesmo estado e medem upload→proxy real | T-FR-230 domínio + worker + PostgreSQL limpo/49 migrations + API Bearer/idempotência/conflito + Chromium/sessão |
 | FR-231 | Final render | S2 | D3,D4,D5 | output aprovado gera artifact | e2e |
 
 ## F2 — Lotes, reuso e formatos

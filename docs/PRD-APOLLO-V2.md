@@ -1332,7 +1332,51 @@ Todo render aponta para inputs, segmentos, providers, prompts, configs, avaliaç
 
 ### FR-230 — Proxy first
 
-Render de revisão antes do final.
+O workflow deve materializar uma cópia de revisão antes de permitir qualquer
+render final. O proxy é uma saída version-bound: identifica exatamente
+`ProjectVersion`, `EditPlan`, source, operação, artifact e manifest que o
+produziram. Uma saída antiga, sem laudo ou pertencente a outra versão nunca
+autoriza o final.
+
+O contrato inicial de proxy usa H.264/MP4 e resolução proporcional ao formato:
+540×960 em 9:16, 960×540 em 16:9, 640×800 em 4:5, 720×720 em 1:1 e 1050×450 em
+21:9. Cada laudo publica uma `rangeCacheKey` canônica para reaproveitamento de
+ranges imutáveis sem confundir versões, fontes ou formatos.
+
+Depois da gravação do artifact e do manifest, o workflow executa validadores de
+codec, container, resolução, duração, canvas e identidade do
+`RenderElementMap`. Em seguida agrega a crítica editorial localizada, incluindo
+range temporal e target quando disponíveis. Conflito de legenda com região
+facial protegida é hard issue; saída da área segura é warning.
+
+O estado do laudo é fechado:
+
+- `blocked`: contém hard issue e `finalAllowed=false`; não há ação humana capaz
+  de ignorar o bloqueio;
+- `warning-ack-required`: não há hard issue, mas existe warning ainda não
+  reconhecido; `finalAllowed=false`;
+- `ready-for-final`: não há issue pendente ou um operador registrou
+  conscientemente as ressalvas; `finalAllowed=true`.
+
+O reconhecimento de warnings é uma decisão append-only, idempotente e protegida
+por `reviewHash` + `revision`. Toda divergência concorrente falha fechada. API e
+interface consultam o mesmo laudo persistido; a interface não pode habilitar a
+exportação por estado local. A medição `timeToFirstProxyMs` usa o timestamp real
+de recebimento do upload e o término efetivo do render, nunca um cronômetro
+simulado no cliente.
+
+Critérios de aceite:
+
+1. o worker persiste o laudo somente depois de artifact, manifest e
+   `RenderElementMap` convergirem;
+2. o repositório de export final exige laudo `ready-for-final` da versão exata;
+3. `GET /v1/projects/{projectId}/proxy-reviews` expõe o laudo com
+   `projects:read`;
+4. `POST /v1/projects/{projectId}/proxy-reviews` registra
+   `acknowledge-warnings` com `projects:approve`, `Idempotency-Key`,
+   `baseRevision` e `expectedRevision`;
+5. teste E2E deve cobrir migração limpa, PostgreSQL, Bearer API, sessão humana,
+   interface, replay idempotente e rejeição de decisão stale.
 
 ### FR-231 — Final render
 

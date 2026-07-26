@@ -8,6 +8,9 @@ export interface ApprovedProjectFinalExportSource extends ProjectProxyRenderSour
   qualitySnapshotHash: string
   qualityStatus: 'approved' | 'approved-with-warnings'
   qualityScore: number
+  proxyReviewId: string
+  proxyReviewHash: string
+  proxyArtifactId: string
 }
 
 export interface ProjectFinalExportRepository {

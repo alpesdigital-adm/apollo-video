@@ -61,11 +61,26 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
           take: 1,
           include: { qualitySnapshot: true },
         },
+        proxyReviews: {
+          where: {
+            projectVersionId: input.projectVersionId,
+            finalAllowed: true,
+            status: 'ready-for-final',
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 1,
+          select: {
+            id: true,
+            reviewHash: true,
+            proxyArtifactId: true,
+          },
+        },
       },
     })
     const version = project?.versions[0]
     const directorRun = project?.directorRuns[0]
-    if (!project || !version || !directorRun) return null
+    const proxyReview = project?.proxyReviews[0]
+    if (!project || !version || !directorRun || !proxyReview) return null
     if (input.qualitySnapshotHash && directorRun.qualitySnapshot.contentHash !== input.qualitySnapshotHash) return null
     const quality = parseQuality(directorRun.qualitySnapshot.contentJson)
     if (!['approved', 'approved-with-warnings'].includes(quality.status)) return null
@@ -76,6 +91,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       qualitySnapshotHash: directorRun.qualitySnapshot.contentHash,
       qualityStatus: quality.status as 'approved' | 'approved-with-warnings',
       qualityScore: quality.score,
+      proxyReviewId: proxyReview.id,
+      proxyReviewHash: proxyReview.reviewHash,
+      proxyArtifactId: proxyReview.proxyArtifactId,
     })
   }
 

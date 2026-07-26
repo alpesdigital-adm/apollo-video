@@ -123,6 +123,39 @@ interface VersionComparisonData {
     actions: ['accept', 'reopen', 'restore']; versionsPreserved: true;
   };
 }
+interface ProxyReviewIssueData {
+  code: string
+  severity: 'hard' | 'warning'
+  category: 'technical' | 'policy' | 'integrity' | 'editorial'
+  message: string
+  rangeMs?: [number, number]
+  targetId?: string
+  correctable: boolean
+}
+interface ProxyReviewData {
+  id: string
+  projectId: string
+  projectVersionId: string
+  operationId: string
+  proxyArtifactId: string
+  proxyManifestId: string
+  inputHash: string
+  rangeCacheKey: string
+  spec: { width: number; height: number; codec: 'h264'; container: 'mp4'; quality: 'review'; reusableRanges: true }
+  status: 'blocked' | 'warning-ack-required' | 'ready-for-final'
+  technicalIssues: ProxyReviewIssueData[]
+  criticIssues: ProxyReviewIssueData[]
+  warningsAcknowledged: boolean
+  finalAllowed: boolean
+  uploadReceivedAt: string
+  renderCompletedAt: string
+  timeToFirstProxyMs: number
+  reviewHash: string
+  revision: number
+  acknowledgedBy?: { type: 'api-client'; id: string; at: string }
+  createdAt: string
+  updatedAt: string
+}
 type RenderElementType = 'background' | 'presenter' | 'subtitle' | 'b-roll' | 'cta' | 'transformation'
 interface RenderElementData {
   elementId: string; type: RenderElementType; clipId: string; sceneId: string; sourceId: string; frame: number;
@@ -294,6 +327,8 @@ export default function ProjectWorkspacePage() {
   const [compareToggleSide, setCompareToggleSide] = useState<'before' | 'after'>('after')
   const [compareOverlayOpacity, setCompareOverlayOpacity] = useState(0.5)
   const [compareBusy, setCompareBusy] = useState(false)
+  const [proxyReview, setProxyReview] = useState<ProxyReviewData | null>(null)
+  const [proxyReviewBusy, setProxyReviewBusy] = useState(false)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -386,10 +421,37 @@ export default function ProjectWorkspacePage() {
     }
   }, [projectId, router, workspace?.media.length])
 
+  const loadProxyReview = useCallback(async (quiet = false, projectVersionId?: string) => {
+    try {
+      const query = new URLSearchParams()
+      if (projectVersionId) query.set('projectVersionId', projectVersionId)
+      const suffix = query.size ? `?${query.toString()}` : ''
+      const response = await fetch(
+        `/v1/projects/${encodeURIComponent(projectId)}/proxy-reviews${suffix}`,
+        { headers: { accept: 'application/json' }, cache: 'no-store' },
+      )
+      if (response.status === 401) { router.replace('/login'); return }
+      if (response.status === 404) {
+        setProxyReview(null)
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{ review: ProxyReviewData }>
+      if (!response.ok || !payload.data?.review) {
+        throw new Error(apiError(payload, 'Não foi possível carregar o laudo do proxy.'))
+      }
+      setProxyReview(payload.data.review)
+    } catch (error) {
+      if (!quiet) {
+        setNotice(error instanceof Error ? error.message : 'Não foi possível carregar o laudo do proxy.')
+      }
+    }
+  }, [projectId, router])
+
   useEffect(() => {
     if (!workspace?.version || workspace.media.length === 0) return
     void loadReview()
-  }, [loadReview, workspace?.media.length, workspace?.version])
+    void loadProxyReview(true, workspace.version.id)
+  }, [loadProxyReview, loadReview, workspace?.media.length, workspace?.version?.id])
 
   const activeOperation = workspace?.operations[0]
   useEffect(() => {
@@ -397,9 +459,10 @@ export default function ProjectWorkspacePage() {
     const timer = window.setInterval(() => {
       void loadWorkspace(true)
       void loadReview(true, selectedReviewVersionId.current ?? undefined)
+      void loadProxyReview(true, workspace?.version?.id)
     }, 2500)
     return () => window.clearInterval(timer)
-  }, [activeOperation, loadReview, loadWorkspace])
+  }, [activeOperation, loadProxyReview, loadReview, loadWorkspace, workspace?.version?.id])
 
   const finalOutput = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'final-output'), [workspace])
   const editingProxy = useMemo(() => {
@@ -1301,8 +1364,17 @@ export default function ProjectWorkspacePage() {
   }
 
   async function exportFinal() {
-    if (!workspace?.version || !workspace.project.format || !latestDirectorRun || latestDirectorRun.resultVersionId !== workspace.version.id || latestDirectorRun.status !== 'succeeded' || latestDirectorRun.qualityStatus === 'blocked') {
-      setNotice('A exportação final exige a versão atual aprovada pelo DirectorRun e pelo critic.')
+    if (
+      !workspace?.version ||
+      !workspace.project.format ||
+      !latestDirectorRun ||
+      latestDirectorRun.resultVersionId !== workspace.version.id ||
+      latestDirectorRun.status !== 'succeeded' ||
+      latestDirectorRun.qualityStatus === 'blocked' ||
+      proxyReview?.projectVersionId !== workspace.version.id ||
+      !proxyReview.finalAllowed
+    ) {
+      setNotice('A exportação final exige o DirectorRun aprovado e o laudo do proxy liberado para esta versão.')
       return
     }
     setExportRunning(true)
@@ -1324,6 +1396,44 @@ export default function ProjectWorkspacePage() {
       setNotice(error instanceof Error ? error.message : 'Não foi possível iniciar a exportação final.')
     } finally {
       setExportRunning(false)
+    }
+  }
+
+  async function acknowledgeProxyWarnings() {
+    if (
+      !workspace?.version ||
+      !proxyReview ||
+      proxyReview.projectVersionId !== workspace.version.id ||
+      proxyReview.status !== 'warning-ack-required' ||
+      proxyReviewBusy
+    ) return
+    setProxyReviewBusy(true)
+    setNotice(null)
+    try {
+      const result = await requestJson<{ review: ProxyReviewData; replayed: boolean }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/proxy-reviews`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': `proxy-warning-${crypto.randomUUID()}`,
+          },
+          body: JSON.stringify({
+            action: 'acknowledge-warnings',
+            proxyReviewId: proxyReview.id,
+            projectVersionId: workspace.version.id,
+            baseRevision: proxyReview.reviewHash,
+            expectedRevision: proxyReview.revision,
+          }),
+        },
+      )
+      setProxyReview(result.review)
+      setNotice('Ressalvas registradas. Esta versão está liberada para o render final.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível registrar a decisão sobre as ressalvas.')
+      await loadProxyReview(true, workspace.version.id)
+    } finally {
+      setProxyReviewBusy(false)
     }
   }
 
@@ -1404,8 +1514,53 @@ export default function ProjectWorkspacePage() {
             {workspace.editPlan?.state === 'compiled' ? <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Zoom automático {workspace.editPlan.automaticZoom ? 'ativo' : 'desativado'}</span><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Proteção facial {workspace.editPlan.subtitleFaceProtection ? 'ativa' : 'pendente'}</span></div> : null}
             {latestDirectorRun ? <div className="mt-3 grid grid-cols-2 gap-2 text-center"><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.subtitleCueCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">blocos de legenda</span></div><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.transitionCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">transições</span></div></div> : null}
             {workspace.editPlan?.state === 'compiled' && transcript ? <button className="mt-4 w-full rounded-lg bg-[#dbae3f] px-3 py-2.5 text-xs font-semibold text-[#171207] transition hover:bg-[#e5bb50] disabled:cursor-not-allowed disabled:opacity-45" disabled={directorRunning || exportRunning || Boolean(activeOperation && ['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status))} onClick={() => void runDirector()} type="button">{directorRunning ? 'Diretor planejando…' : latestDirectorRun ? 'Executar nova direção V2' : 'Executar Diretor V2'}</button> : null}
-            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && latestDirectorRun.qualityStatus !== 'blocked' ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || Boolean(activeOperation && ['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status))} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final'}</button> : null}
+            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && latestDirectorRun.qualityStatus !== 'blocked' ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || proxyReview?.projectVersionId !== workspace.version?.id || !proxyReview.finalAllowed || Boolean(activeOperation && ['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status))} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : proxyReview?.finalAllowed ? finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final' : 'Aguardando liberação do proxy'}</button> : null}
             {finalOutput ? <a className="mt-2 block w-full rounded-lg border border-white/[0.08] px-3 py-2.5 text-center text-xs text-[#aaa49a] transition hover:border-white/[0.16] hover:text-white" download={finalOutput.originalFileName} href={`/v1/artifacts/${encodeURIComponent(finalOutput.artifactId)}/content`}>Baixar MP4 final</a> : null}
+          </div>
+          <div className="mt-5 overflow-hidden rounded-xl border border-white/[0.07] bg-[#0d0d0d]" data-testid="proxy-review-gate">
+            <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+              <div>
+                <p className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#716d65]">Laudo do proxy</p>
+                <p className="mt-1 text-xs font-medium text-[#d8d2c8]">
+                  {!proxyReview ? 'Aguardando materialização' : proxyReview.status === 'blocked' ? 'Correção obrigatória' : proxyReview.status === 'warning-ack-required' ? 'Ressalvas para decidir' : 'Liberado para alta'}
+                </p>
+              </div>
+              <span
+                className={`h-2.5 w-2.5 rounded-full ${!proxyReview ? 'bg-[#46433e]' : proxyReview.status === 'blocked' ? 'bg-[#d46868] shadow-[0_0_10px_rgba(212,104,104,.5)]' : proxyReview.status === 'warning-ack-required' ? 'bg-[#d9aa3d] shadow-[0_0_10px_rgba(217,170,61,.45)]' : 'bg-[#63ba84] shadow-[0_0_10px_rgba(99,186,132,.45)]'}`}
+              />
+            </div>
+            {proxyReview ? (
+              <div className="p-4">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+                  <div><p className="text-[8px] uppercase tracking-[0.14em] text-[#625f58]">Cópia de revisão</p><p className="mt-1 font-mono text-[10px] text-[#aaa49a]">{proxyReview.spec.codec.toUpperCase()} · {proxyReview.spec.width}×{proxyReview.spec.height}</p></div>
+                  <div><p className="text-[8px] uppercase tracking-[0.14em] text-[#625f58]">Primeiro proxy</p><p className="mt-1 font-mono text-[10px] text-[#aaa49a]">{(proxyReview.timeToFirstProxyMs / 1000).toFixed(1)}s</p></div>
+                  <div><p className="text-[8px] uppercase tracking-[0.14em] text-[#625f58]">Bloqueios</p><p className="mt-1 font-mono text-[10px] text-[#d57c7c]">{[...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.severity === 'hard').length}</p></div>
+                  <div><p className="text-[8px] uppercase tracking-[0.14em] text-[#625f58]">Ressalvas</p><p className="mt-1 font-mono text-[10px] text-[#d3af5d]">{[...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.severity === 'warning').length}</p></div>
+                </div>
+                {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].length ? (
+                  <div className="mt-3 space-y-1.5" data-testid="proxy-review-issues">
+                    {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].slice(0, 4).map((issue) => (
+                      <div className="flex items-start gap-2 border-l border-white/[0.09] pl-2 text-[9px] leading-4 text-[#8e8980]" key={`${issue.code}:${issue.targetId ?? 'proxy'}`}>
+                        <span className={issue.severity === 'hard' ? 'text-[#dc7777]' : 'text-[#d5ae52]'}>{issue.severity === 'hard' ? '!' : '△'}</span>
+                        <span>{issue.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="mt-3 text-[9px] leading-4 text-[#78aa87]">Codec, canvas, duração, mapa e crítica editorial aprovados.</p>}
+                {proxyReview.status === 'warning-ack-required' ? (
+                  <button
+                    className="mt-4 w-full rounded-lg border border-[#d9aa3d]/25 bg-[#d9aa3d]/[0.08] px-3 py-2.5 text-[10px] font-semibold text-[#d8b45c] transition hover:bg-[#d9aa3d]/[0.13] disabled:opacity-45"
+                    data-testid="proxy-review-acknowledge"
+                    disabled={proxyReviewBusy}
+                    onClick={() => void acknowledgeProxyWarnings()}
+                    type="button"
+                  >
+                    {proxyReviewBusy ? 'Registrando decisão…' : 'Estou ciente · liberar render final'}
+                  </button>
+                ) : null}
+                <p className="mt-3 truncate font-mono text-[7px] text-[#4f4c47]" title={proxyReview.rangeCacheKey}>range {proxyReview.rangeCacheKey.slice(0, 16)}</p>
+              </div>
+            ) : <p className="px-4 py-4 text-[9px] leading-4 text-[#716d65]">O render editorial criará uma cópia leve e reutilizável antes de qualquer exportação final.</p>}
           </div>
         </aside>
 

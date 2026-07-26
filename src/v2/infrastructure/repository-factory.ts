@@ -44,6 +44,7 @@ import type { ManualEditRepository } from '../application/ports/manual-edit-repo
 import type { VersionCompareRepository } from '../application/ports/version-compare-repository.ts'
 import type { DirectorRunRepository } from '../application/ports/director-run-repository.ts'
 import type { ProjectProxyRenderRepository } from '../application/ports/project-proxy-render-repository.ts'
+import type { ProxyReviewRepository } from '../application/ports/proxy-review-repository.ts'
 import type { ProjectFinalExportRepository } from '../application/ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from '../application/ports/public-operation-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
@@ -105,6 +106,7 @@ import { PrismaManualEditRepository } from './prisma/manual-edit-repository.ts'
 import { PrismaVersionCompareRepository } from './prisma/version-compare-repository.ts'
 import { PrismaDirectorRunRepository } from './prisma/director-run-repository.ts'
 import { PrismaProjectProxyRenderRepository } from './prisma/project-proxy-render-repository.ts'
+import { PrismaProxyReviewRepository } from './prisma/proxy-review-repository.ts'
 import { PrismaProjectFinalExportRepository } from './prisma/project-final-export-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
@@ -183,6 +185,10 @@ export function createProjectMediaRepository(): ProjectMediaRepository {
 
 export function createProjectProxyRenderRepository(): ProjectProxyRenderRepository {
   return new PrismaProjectProxyRenderRepository(resolveV2Client())
+}
+
+export function createProxyReviewRepository(): ProxyReviewRepository {
+  return new PrismaProxyReviewRepository(resolveV2Client())
 }
 
 export function createProjectFinalExportRepository(): ProjectFinalExportRepository {
@@ -607,6 +613,7 @@ export function createProjectProxyRenderWorker(
     artifacts: createMediaArtifactPersistenceRepository(environment), storage: createLocalMediaUploadStorageFromEnvironment(environment),
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment), artifactRoot, clock,
     renderElementMaps: createRenderElementMapRepository(),
+    proxyReviews: createProxyReviewRepository(),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),

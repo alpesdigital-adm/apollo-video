@@ -4,6 +4,7 @@ import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 import type { EditorialCutEditPlan } from '../../application/apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { ProjectProxyRenderRepository, ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
+import type { ProxyQualityIssue } from '../../application/render-workflow.ts'
 import { DomainError } from '../../domain/errors.ts'
 
 function parseRecord(value: string, field: string): Record<string, unknown> {
@@ -14,6 +15,36 @@ function parseRecord(value: string, field: string): Record<string, unknown> {
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
   }
+}
+
+function parseCriticIssues(value: string | undefined): readonly Readonly<ProxyQualityIssue>[] {
+  if (!value) return Object.freeze([])
+  const quality = parseRecord(value, 'project proxy QualityReport')
+  if (!Array.isArray(quality.issues)) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy QualityReport is invalid')
+  return Object.freeze(quality.issues.map((candidate) => {
+    if (
+      typeof candidate !== 'object' || candidate === null || Array.isArray(candidate) ||
+      typeof candidate.code !== 'string' ||
+      !['hard', 'warning'].includes(String(candidate.severity)) ||
+      !['technical', 'policy', 'integrity', 'editorial'].includes(String(candidate.category)) ||
+      typeof candidate.message !== 'string' ||
+      typeof candidate.correctable !== 'boolean'
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy QualityReport issue is invalid')
+    const range = candidate.rangeMs
+    if (
+      range !== undefined &&
+      (!Array.isArray(range) || range.length !== 2 || range.some((item) => !Number.isSafeInteger(item) || item < 0))
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy QualityReport range is invalid')
+    return Object.freeze({
+      code: candidate.code,
+      severity: candidate.severity as 'hard' | 'warning',
+      category: candidate.category as ProxyQualityIssue['category'],
+      message: candidate.message,
+      ...(range ? { rangeMs: Object.freeze([range[0], range[1]] as [number, number]) } : {}),
+      ...(typeof candidate.targetId === 'string' ? { targetId: candidate.targetId } : {}),
+      correctable: candidate.correctable,
+    })
+  }))
 }
 
 function hydrateSource(project: Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>): Readonly<ProjectProxyRenderSource> | null {
@@ -41,6 +72,8 @@ function hydrateSource(project: Awaited<ReturnType<PrismaProjectProxyRenderRepos
     sourceArtifactKey: (artifactBody as Record<string, unknown>).artifactKey as string,
     sourceSha256: media.artifact.sha256,
     originalFileName: media.originalFileName,
+    uploadReceivedAt: (media.upload?.createdAt ?? media.createdAt).toISOString(),
+    criticIssues: parseCriticIssues(version.directorRunAsResult?.qualitySnapshot.contentJson),
   })
 }
 
@@ -67,23 +100,24 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
             : {},
           orderBy: { sequence: 'desc' as const },
           take: 1,
-          include: { editPlanSnapshot: true },
+          include: {
+            editPlanSnapshot: true,
+            directorRunAsResult: { include: { qualitySnapshot: true } },
+          },
         },
         mediaAssets: {
           where: { role: 'source-master', ...(input.sourceArtifactId ? { artifactId: input.sourceArtifactId } : {}) },
           orderBy: { createdAt: 'desc' as const },
           take: 1,
-          include: {
-            artifact: {
-              include: {
-                manifests: {
-                  where: input.sourceManifestId ? { id: input.sourceManifestId } : {},
-                  orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
-                  take: 1,
-                },
+          include: { upload: { select: { createdAt: true } }, artifact: {
+            include: {
+              manifests: {
+                where: input.sourceManifestId ? { id: input.sourceManifestId } : {},
+                orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
+                take: 1,
               },
             },
-          },
+          } },
         },
       },
     })
@@ -94,8 +128,23 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       where: { id: input.projectId, workspaceId: input.workspaceId },
       select: {
         id: true, format: true, currentVersionId: true,
-        versions: { where: { currentForProjects: { some: { id: input.projectId, workspaceId: input.workspaceId } } }, take: 1, include: { editPlanSnapshot: true } },
-        mediaAssets: { where: { role: 'source-master' }, orderBy: { createdAt: 'desc' }, take: 1, include: { artifact: { include: { manifests: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 } } } } },
+        versions: {
+          where: { currentForProjects: { some: { id: input.projectId, workspaceId: input.workspaceId } } },
+          take: 1,
+          include: {
+            editPlanSnapshot: true,
+            directorRunAsResult: { include: { qualitySnapshot: true } },
+          },
+        },
+        mediaAssets: {
+          where: { role: 'source-master' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: {
+            upload: { select: { createdAt: true } },
+            artifact: { include: { manifests: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 } } },
+          },
+        },
       },
     })
     return hydrateSource(project as Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>)

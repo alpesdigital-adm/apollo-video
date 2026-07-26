@@ -38,3 +38,30 @@ O bootstrap administrativo inicial é operacional. Depois dele, criação/rotaç
 Alterações editoriais usam o mesmo contrato para UI, IA e integrações. `POST /v1/projects/{projectId}/commands`, com scope `projects:write`, aplica atualmente o Command `remove-spoken-content`. A requisição deve informar `Idempotency-Key`, `baseVersionId`, `baseHash`, `sourceTranscriptId` e regras de frases. O servidor rejeita base obsoleta, confirma as frases na transcrição alinhada, cria uma nova `ProjectVersion` imutável e retima o plano sem sobrescrever a versão anterior.
 
 Os contratos completos e exemplos são descobertos em `GET /v1/capabilities`, `GET /v1/openapi.json` e nos schemas `apply-project-edit-command-request/v1`, `project-edit-command-applied/v1` e `project-workspace/v2`.
+
+## Revisão do proxy antes da alta
+
+`GET /v1/projects/{projectId}/proxy-reviews` consulta o laudo persistido do
+proxy corrente ou recebe `projectVersionId` para ler uma versão específica. A
+resposta informa OutputSpec, issues técnicas/editoriais, ranges afetados,
+`timeToFirstProxyMs`, hash/revision e `finalAllowed`. A consulta exige
+`projects:read`.
+
+Warnings não são ignorados implicitamente. Para liberar conscientemente uma
+versão sem hard issues, use `POST /v1/projects/{projectId}/proxy-reviews` com
+scope `projects:approve`, `Idempotency-Key` e:
+
+```json
+{
+  "action": "acknowledge-warnings",
+  "proxyReviewId": "proxy-review-...",
+  "projectVersionId": "project-version-...",
+  "baseRevision": "<reviewHash retornado pelo GET>",
+  "expectedRevision": 1
+}
+```
+
+A mesma chave e o mesmo payload repetem a decisão sem duplicá-la. Hash/revision
+stale retornam conflito; qualquer hard issue retorna precondition failure. O
+endpoint de export final volta a validar o laudo no PostgreSQL, portanto a
+liberação não depende do estado da tela nem pode ser forjada no cliente.

@@ -1,5 +1,6 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
+import type { ProxyQualityIssue } from '../render-workflow.ts'
 
 export interface ProjectProxyRenderSource {
   projectId: string
@@ -13,6 +14,8 @@ export interface ProjectProxyRenderSource {
   sourceArtifactKey: string
   sourceSha256: string
   originalFileName: string
+  uploadReceivedAt: string
+  criticIssues: readonly Readonly<ProxyQualityIssue>[]
 }
 
 export interface ProjectProxyRenderRepository {

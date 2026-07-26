@@ -197,6 +197,44 @@ const versionComparisonExample = {
   actions: ['accept', 'reopen', 'restore'],
   versionsPreserved: true,
 }
+const proxyReviewExample = {
+  id: 'proxy-review-example-1',
+  projectId,
+  projectVersionId: 'project-version-example-5',
+  operationId: 'operation-project-proxy-example-1',
+  proxyArtifactId: 'artifact-editorial-proxy-example-1',
+  proxyManifestId: 'manifest-editorial-proxy-example-1',
+  inputHash: '8'.repeat(64),
+  rangeCacheKey: '9'.repeat(64),
+  spec: {
+    width: 540,
+    height: 960,
+    codec: 'h264',
+    container: 'mp4',
+    quality: 'review',
+    reusableRanges: true,
+  },
+  status: 'warning-ack-required',
+  technicalIssues: [],
+  criticIssues: [{
+    code: 'PATTERN_DENSITY',
+    severity: 'warning',
+    category: 'editorial',
+    message: 'Pattern breaks are dense in this range.',
+    rangeMs: [2000, 4200],
+    targetId: 'scene-example-1',
+    correctable: true,
+  }],
+  warningsAcknowledged: false,
+  finalAllowed: false,
+  uploadReceivedAt: '2026-07-12T19:58:00.000Z',
+  renderCompletedAt: createdAt,
+  timeToFirstProxyMs: 120000,
+  reviewHash: 'a'.repeat(64),
+  revision: 1,
+  createdAt,
+  updatedAt: createdAt,
+}
 const reviewPatchProposalExample = {
   id: '90000000-0000-4000-8000-000000000214',
   workspaceId,
@@ -2195,6 +2233,47 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       {
         data: {
           operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-proxy-review-response/v1': [
+      {
+        data: { review: proxyReviewExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-proxy-review-warning-acknowledgement-request/v1': [
+      {
+        action: 'acknowledge-warnings',
+        proxyReviewId: proxyReviewExample.id,
+        projectVersionId: proxyReviewExample.projectVersionId,
+        baseRevision: proxyReviewExample.reviewHash,
+        expectedRevision: 1,
+      },
+    ],
+    'apollo://schemas/project-proxy-review-warning-acknowledgement-result/v1': [
+      {
+        data: {
+          review: {
+            ...proxyReviewExample,
+            status: 'ready-for-final',
+            warningsAcknowledged: true,
+            finalAllowed: true,
+            reviewHash: 'b'.repeat(64),
+            revision: 2,
+            acknowledgedBy: { type: 'api-client', id: clientId, at: createdAt },
+          },
+          decision: {
+            id: 'proxy-review-decision-example-1',
+            proxyReviewId: proxyReviewExample.id,
+            action: 'acknowledge-warnings',
+            actor: { type: 'api-client', id: clientId },
+            baseReviewHash: proxyReviewExample.reviewHash,
+            resultReviewHash: 'b'.repeat(64),
+            createdAt,
+          },
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

@@ -950,11 +950,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.047 — Proxy first [FR-230]
 
-- [ ] Criar workflow que materializa proxy antes de autorizar final. Evidência F1-047: proxy retorna finalAllowed false até revisão.
-- [ ] Definir resolução/codec e ranges reaproveitáveis do proxy. Evidência F1-047: H.264 540×960 e rangeCacheKey.
-- [ ] Executar hard validators e critic localizado após render. Evidência F1-047: validator agrega technical e critic issues.
-- [ ] Bloquear final em issue hard; permitir aprovação consciente de warnings. Evidência F1-047: hard sempre bloqueia; warning exige acknowledged.
-- [ ] Medir tempo do upload ao primeiro proxy revisável. Evidência F1-047/T-FR-230: métrica usa timestamps reais.
+- [x] Criar workflow que materializa proxy antes de autorizar final. Evidência F1-047: o worker persiste `ProxyReview` somente depois de artifact, manifest, mapa e vínculo do output convergirem; o repositório de export final exige laudo `ready-for-final` da ProjectVersion exata, e UI/API mantêm `finalAllowed=false` enquanto a revisão estiver pendente.
+- [x] Definir resolução/codec e ranges reaproveitáveis do proxy. Evidência F1-047: OutputSpecs públicos e testados usam H.264/MP4 proporcional em 9:16, 16:9, 4:5, 1:1 e 21:9 (540×960 no 9:16), com `rangeCacheKey` canônica ligada a versão, source, EditPlan, formato e spec.
+- [x] Executar hard validators e critic localizado após render. Evidência F1-047: `evaluateRenderedProxy` valida codec, container, canvas, resolução, duração e identidade/duração do RenderElementMap, agrega issues do critic com range/target e detecta legenda sobre região facial ou fora da área segura.
+- [x] Bloquear final em issue hard; permitir aprovação consciente de warnings. Evidência F1-047: hard issue sempre produz `blocked` sem bypass; warning produz `warning-ack-required` e só vira `ready-for-final` por decisão append-only em `POST /proxy-reviews`, com scope `projects:approve`, idempotência e CAS de reviewHash/revision. O botão final também falha fechado.
+- [x] Medir tempo do upload ao primeiro proxy revisável. Evidência F1-047/T-FR-230: `timeToFirstProxyMs` deriva de `V2MediaUpload.createdAt`/recebimento real e término do render; E2E confirmou 65s em PostgreSQL 16 vazio com 49 migrations, Bearer API, login/sessão, Chromium, decisão pela UI, replay e conflito stale. Regressão: 474/474, typecheck, 82 capabilities/140 schemas/166 exemplos/71 paths, arquitetura V2-only, linguagem e schema aprovados.
 
 ### F1.048 — Final render [FR-231]
 

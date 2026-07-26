@@ -91,6 +91,9 @@ const coverage = Object.freeze({
   'apollo.projects.proxy-renders.enqueue': {
     mode: 'durable-covered', evidence: 'project proxy render operation, fenced worker lease and immutable EditPlan identity',
   },
+  'apollo.projects.proxy-reviews.acknowledge-warnings': {
+    mode: 'durable-covered', evidence: 'F1-047 serializable exact-review CAS, append-only decision, idempotent replay and public API E2E',
+  },
   'apollo.projects.final-exports.enqueue': {
     mode: 'durable-covered', evidence: 'final export operation binds explicit approval, immutable ProjectVersion, DirectorRun and QualitySnapshot',
   },
@@ -146,7 +149,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    41,
+    42,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,
