@@ -934,11 +934,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F1.045 — Edição manual [FR-216]
 
-- [ ] Implementar seleção, trim, split, move, replace e snapping no timeline view model. Evidência F1-045: seis gestos alteram modelo imutável e snap em 120ms.
-- [ ] Implementar inspector de layout, texto, legenda, cor, movimento e áudio MVP. Evidência F1-045: inspector tipa as seis dimensões por clip.
-- [ ] Gerar Commands com scope e optimistic concurrency para cada gesto. Evidência F1-045: command exige project/variant/target, base e revision.
-- [ ] Implementar undo/redo como versões auditáveis. Evidência F1-045: restore cria child version com action e command.
-- [ ] Criar E2E por teclado e mouse dos fluxos principais. Evidência F1-045/T-FR-216: interações mapeiam split, select e move.
+- [x] Implementar seleção, trim, split, move, replace e snapping no timeline view model. Evidência F1-045: `manual-editing.ts` materializa os seis gestos no EditPlan imutável; a timeline API-backed do editor seleciona, apara, divide, move por pointer e substitui fonte, com snapping determinístico de 120ms validado no PostgreSQL isolado.
+- [x] Implementar inspector de layout, texto, legenda, cor, movimento e áudio MVP. Evidência F1-045: o inspector persiste patch tipado por clip nas seis dimensões, recompõe o EditPlan e enfileira novo proxy; o teste integrado confirmou texto, LUT, movimento e ganho sem alterar o snapshot-base.
+- [x] Gerar Commands com scope e optimistic concurrency para cada gesto. Evidência F1-045: `POST /v1/projects/{projectId}/manual-edits` exige project/variant/target, `baseVersionId`, `baseHash`, `expectedRevision` e idempotency key; transação serializable com compare-and-swap rejeitou base stale e repetiu a resposta idempotente.
+- [x] Implementar undo/redo como versões auditáveis. Evidência F1-045: undo e redo restauram snapshots existentes criando novas child versions e Commands `manual-edit`, sem reescrever histórico; o E2E PostgreSQL percorreu revisions 1–8 e conferiu os `restoresVersionId`.
+- [x] Criar E2E por teclado e mouse dos fluxos principais. Evidência F1-045/T-FR-216: navegador Chromium real autenticou pela API, selecionou `clip-2`, arrastou-o por mouse para gerar V7 e executou `Ctrl+Z` para gerar V8; o mesmo teste cobre API HTTP, Postgres vazio com 47 migrations, inspector, split/snap, replace, conflito, replay, undo/redo e fila de proxy. Regressão completa: 470/470, typecheck, contratos, arquitetura V2-only, linguagem, schema e build.
 
 ### F1.046 — Compare [FR-217]
 

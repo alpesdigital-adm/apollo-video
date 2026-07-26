@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
+import { existsSync } from 'node:fs'
 import net from 'node:net'
 import test from 'node:test'
 
@@ -37,6 +38,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaManualEditRepository } = await import('../../src/v2/infrastructure/prisma/manual-edit-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
+  const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
 
   const client = new PrismaClient()
   const repository = new PrismaManualEditRepository(client)
@@ -47,8 +49,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const sourceB = `manual-artifact-b-${suffix}`
   const initialVersionId = `manual-version-${suffix}`
   const createdAt = new Date('2026-07-26T17:30:00.000Z')
+  const uiUsername = `manual-user-${suffix}`
+  const uiPassword = `Manual-E2E-${suffix}-secure`
+  const uiSessionSecret = `manual-session-secret-${suffix}-at-least-32-characters`
   let clockTick = 0
   let server
+  let browser
 
   const cleanup = async () => {
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
@@ -281,7 +287,16 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     let serverLogs = ''
     server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '-p', String(port)], {
       cwd: process.cwd(),
-      env: { ...process.env, NODE_ENV: 'production', __NEXT_PROCESSED_ENV: 'true', APOLLO_API_ENVIRONMENT: 'production' },
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        __NEXT_PROCESSED_ENV: 'true',
+        APOLLO_API_ENVIRONMENT: 'production',
+        APOLLO_UI_USERNAME: uiUsername,
+        APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `manual-salt-${suffix}`),
+        APOLLO_UI_SESSION_SECRET: uiSessionSecret,
+        APOLLO_UI_API_CLIENT_ID: issued.client.id,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     server.stdout.on('data', (chunk) => { serverLogs += String(chunk) })
@@ -318,7 +333,69 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(publicApplied.data.version.sequence, 6)
     assert.equal(publicApplied.data.operation.status, 'queued')
     assert.equal(publicApplied.data.timeline.clips.find((clip) => clip.id === 'clip-2').sourceId, sourceB)
+
+    const executablePath = [
+      process.env.PLAYWRIGHT_CHROME_EXECUTABLE,
+      'C:/Program Files/Google/Chrome/Application/chrome.exe',
+      'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium',
+    ].find((candidate) => candidate && existsSync(candidate))
+    assert.ok(executablePath, 'set PLAYWRIGHT_CHROME_EXECUTABLE to run the manual editor browser E2E')
+    const { chromium } = await import('playwright-core')
+    browser = await chromium.launch({ executablePath, headless: true })
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+    const page = await context.newPage()
+    await page.goto(`${baseUrl}/login?next=${encodeURIComponent(`/projects/${projectId}`)}`)
+    await page.locator('input[name="username"]').fill(uiUsername)
+    await page.locator('input[name="password"]').fill(uiPassword)
+    await page.getByRole('button', { name: 'Entrar no Apollo' }).click()
+    await page.waitForURL(`**/projects/${projectId}`)
+    const manualEditor = page.getByTestId('manual-editor')
+    await manualEditor.waitFor({ state: 'visible' })
+    await page.getByTestId('manual-clip-clip-2').click()
+    await assert.doesNotReject(async () => {
+      await page.getByTestId('manual-selected-clip').waitFor({ state: 'visible' })
+      assert.equal(await page.getByTestId('manual-selected-clip').textContent(), 'clip-2')
+    })
+
+    const clipBox = await page.getByTestId('manual-clip-clip-2').boundingBox()
+    assert.ok(clipBox)
+    const moved = page.waitForResponse((response) =>
+      response.url().endsWith(`/v1/projects/${projectId}/manual-edits`)
+      && response.request().method() === 'POST',
+    )
+    await page.mouse.move(clipBox.x + clipBox.width / 2, clipBox.y + clipBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(clipBox.x - 180, clipBox.y + clipBox.height / 2, { steps: 8 })
+    await page.mouse.up()
+    assert.equal((await moved).status(), 201)
+    await page.getByText(/Edição registrada na versão 7/).waitFor({ state: 'visible' })
+
+    const undoButton = page.getByTestId('manual-undo')
+    let undoReady = false
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (await undoButton.isEnabled()) {
+        undoReady = true
+        break
+      }
+      await page.waitForTimeout(100)
+    }
+    assert.equal(undoReady, true, 'manual history must enable undo after the mouse Command is persisted')
+    const undone = page.waitForResponse((response) =>
+      response.url().endsWith(`/v1/projects/${projectId}/manual-edits`)
+      && response.request().method() === 'POST',
+    )
+    await manualEditor.focus()
+    await page.keyboard.press('Control+z')
+    assert.equal((await undone).status(), 201)
+    await page.getByText(/Undo registrado como versão 8/).waitFor({ state: 'visible' })
+    assert.match(await manualEditor.textContent(), /V8/)
+    await context.close()
+    await browser.close()
+    browser = undefined
   } finally {
+    if (browser) await browser.close()
     if (server && server.exitCode === null) {
       server.kill()
       await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))])
