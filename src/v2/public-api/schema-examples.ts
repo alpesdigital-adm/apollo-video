@@ -1847,6 +1847,31 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         reason: 'Planejar, criticar e materializar a composicao completa.',
       },
     ],
+    'apollo://schemas/apply-project-manual-edit-request/v1': [
+      {
+        action: 'apply',
+        baseVersionId: 'project-version-example-4',
+        baseHash: 'd'.repeat(64),
+        expectedRevision: 4,
+        variantId: 'output-spec-9x16',
+        targetId: 'clip-example-1',
+        operation: {
+          kind: 'split',
+          clipId: 'clip-example-1',
+          atMs: 3120,
+        },
+        reason: 'Separar a frase para ajustar o ritmo.',
+      },
+      {
+        action: 'undo',
+        baseVersionId: 'project-version-example-5',
+        baseHash: 'e'.repeat(64),
+        expectedRevision: 5,
+        variantId: 'output-spec-9x16',
+        targetId: 'clip-example-1',
+        targetVersionId: 'project-version-example-4',
+      },
+    ],
     'apollo://schemas/project-edit-command-applied/v1': [
       {
         data: {
@@ -1913,6 +1938,95 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             ],
             assumptions: ['Face detector indisponivel; aplicar safe area conservadora.'],
             createdAt,
+          },
+          operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-manual-timeline/v1': [
+      {
+        data: {
+          timeline: {
+            versionId: 'project-version-example-4',
+            revision: 4,
+            clips: [{
+              id: 'clip-example-1',
+              sourceId: 'artifact-example-1',
+              startMs: 0,
+              endMs: 5000,
+              track: 0,
+              selected: true,
+              inspector: {},
+            }],
+            snapPointsMs: [0, 5000],
+          },
+          baseHash: 'd'.repeat(64),
+          editPlanHash: '4'.repeat(64),
+          history: [{
+            id: 'project-version-example-4',
+            sequence: 4,
+            parentVersionId: 'project-version-example-3',
+            commandId: 'edit-command-director-example-1',
+            commandType: 'run-director',
+            createdAt,
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-manual-edit-applied/v1': [
+      {
+        data: {
+          command: {
+            id: 'manual-edit-command-example-1',
+            type: 'manual-edit',
+            action: 'apply',
+            baseVersionId: 'project-version-example-4',
+            resultVersionId: 'project-version-example-5',
+            scope: {
+              clipIds: ['clip-example-1'],
+              outputSpecIds: ['output-spec-9x16'],
+            },
+            payload: {
+              schemaVersion: 1,
+              action: 'apply',
+              expectedRevision: 4,
+              variantId: 'output-spec-9x16',
+              targetId: 'clip-example-1',
+              operation: { kind: 'split', clipId: 'clip-example-1', atMs: 3120 },
+            },
+            createdAt,
+          },
+          version: {
+            id: 'project-version-example-5',
+            sequence: 5,
+            parentVersionId: 'project-version-example-4',
+            baseHash: 'e'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1',
+              editPlan: 'project-snapshot-edit-plan-5',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          timeline: {
+            versionId: 'project-version-example-5',
+            revision: 5,
+            clips: [
+              { id: 'clip-example-1:a', sourceId: 'artifact-example-1', startMs: 0, endMs: 3120, track: 0, selected: true, inspector: {} },
+              { id: 'clip-example-1:b', sourceId: 'artifact-example-1', startMs: 3120, endMs: 5000, track: 0, selected: false, inspector: {} },
+            ],
+            snapPointsMs: [0, 3120, 5000],
+          },
+          comparison: {
+            beforeVersionId: 'project-version-example-4',
+            afterVersionId: 'project-version-example-5',
+            beforeEditPlanHash: '4'.repeat(64),
+            afterEditPlanHash: '5'.repeat(64),
+            action: 'apply',
+            targetId: 'clip-example-1',
           },
           operation: queuedProjectProxyRenderOperationExample,
           replayed: false,

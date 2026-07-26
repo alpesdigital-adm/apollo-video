@@ -115,7 +115,7 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-213 | RenderElementMap | S7 | D3,D5 | hit-test seleciona layer correta | visual/e2e |
 | FR-214 | Patch automático | S1,S7 | D2,D3,D6 | annotation vira proposta gated, command e versão imutável | T-FR-214 unit/API/Postgres/render/visual |
 | FR-215 | Batch review | S7 | D3,D6 | 2–100 propostas compilam PatchSet único; conflito atômico não muda versão; partial-retry é explícito | T-FR-215 domínio + Postgres serializável/rollback + API HTTP + UI |
-| FR-216 | Edição manual | S2,S7 | D3,D6 | trim/replace/layout/text persistem | e2e |
+| FR-216 | Edição manual | S2,S7 | D3,D6 | timeline deriva do EditPlan corrente; trim/split/move/replace/inspector persistem como Command + snapshot + versão; undo/redo criam versões filhas; API e mouse/teclado usam o mesmo service | T-FR-216 domínio + PostgreSQL serializável/idempotência/conflito + API HTTP + UI mouse/teclado |
 | FR-217 | Compare | S2,S7 | D3,D5,D6 | before/after e diff funcionam | e2e |
 | FR-230 | Proxy first | S1,S7 | D4,D5 | proxy antecede final | workflow |
 | FR-231 | Final render | S2 | D3,D4,D5 | output aprovado gera artifact | e2e |

@@ -159,6 +159,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',
     },
+    'apollo.projects.manual-edits.apply': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one reversible immutable project version from an exact revision and queues its exact proxy render.',
+    },
     'apollo.projects.annotations.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one version-bound review note without mutating the project or starting a provider job.',

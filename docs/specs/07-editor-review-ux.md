@@ -187,6 +187,16 @@ Default tolerance visual: 8px convertida para frames no zoom atual. Alt/Option d
 
 - Drag com ghost preview.
 - Drop inválido mostra razão antes de soltar.
+
+### Contrato executável do editor manual MVP
+
+- A timeline é carregada por `GET /v1/projects/{projectId}/timeline`; ela mostra a `ProjectVersion`/revision corrente e pontos de snap.
+- Clique seleciona localmente e sincroniza o preview; drag confirmado envia `move`.
+- `S`, `Delete`, trim, split, replace e inspector enviam `POST /v1/projects/{projectId}/manual-edits`.
+- Cada request carrega base, hash, revision, variante e target; resposta stale recarrega a timeline em vez de sobrescrever.
+- Inspector cobre layout, texto, preset de legenda, cor/LUT, movimento e ganho de áudio.
+- Undo/redo mostram a versão que será restaurada e criam nova versão; nunca movem o ponteiro do projeto diretamente para um snapshot antigo.
+- Após sucesso, a UI preserva o timecode, apresenta o número da nova versão e acompanha o proxy durável.
 - Base exclusive track não aceita overlap sem command de replace/transition.
 - Reorder narrativo de bloco deve avisar impacto em subtitles/áudio/variants.
 

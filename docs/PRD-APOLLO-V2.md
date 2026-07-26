@@ -1205,6 +1205,22 @@ A confirmação cria um único Command `apply-review-patch-batch`, um snapshot d
 
 Trim, split, reorder, fontes, câmeras, layouts, crop, posição, tamanho, texto, legenda, cor, LUT, áudio e formato.
 
+A timeline manual não mantém um estado paralelo ao Diretor. A leitura parte do `EditPlan v2` compilado da `ProjectVersion` corrente e expõe `versionId`, `baseHash`, `revision`, clips, tracks e pontos de snap. Seleção permanece responsiva no cliente; todo gesto que muda conteúdo é enviado pela API como Command `manual-edit`, com `scope` explícito de projeto, variante e target.
+
+O MVP deve materializar `trim`, `split`, `move/reorder`, `replace` e alterações pelo inspector. O inspector possui campos tipados para layout, texto, preset de legenda, cor/LUT, movimento e ganho de áudio. Campos ainda não consumidos por um renderer posterior continuam dentro do EditPlan e de sua lineage, nunca em estado local não auditável. Snapping usa tolerância inicial de 120 ms e o servidor recalcula ranges e continuidade em frames.
+
+Cada mutação exige `baseVersionId`, `baseHash`, `expectedRevision` e `Idempotency-Key`. O commit serializável cria exatamente um `V2EditCommand`, um snapshot de EditPlan, uma ProjectVersion filha e um evento de outbox. A mudança de `currentVersionId` usa compare-and-swap; base stale produz `VERSION_CONFLICT` e nenhuma escrita parcial.
+
+Undo e redo também são Commands `manual-edit`. Undo restaura o snapshot compilado do pai direto em uma nova versão filha; redo restaura uma versão indicada e pertencente ao mesmo projeto, igualmente em uma nova versão. Nenhuma operação apaga versões, snapshots, Commands ou lineage. A resposta retorna comparação antes/depois e enfileira o proxy correspondente à nova versão.
+
+A superfície pública mínima é:
+
+- `GET /v1/projects/{projectId}/timeline`, para timeline, snap points e histórico imutável;
+- `POST /v1/projects/{projectId}/manual-edits`, para apply, undo e redo;
+- os mesmos application services para UI, agentes e integrações externas.
+
+Os fluxos principais devem funcionar por mouse e teclado: clique seleciona, drag reordena, `S` divide no playhead, `Delete` apara até o playhead, `Ctrl/Cmd+Z` desfaz e `Ctrl/Cmd+Shift+Z` refaz. O E2E precisa provar resposta visual, Command persistida, versão filha, optimistic concurrency, replay idempotente e novo proxy.
+
 ### FR-217 — Compare
 
 Antes/depois, diff e restore.

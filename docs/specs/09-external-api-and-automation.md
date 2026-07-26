@@ -362,6 +362,8 @@ Padrão não prescreve implementação interna, mas fixa capacidades:
 /v1/projects/{projectId}
 /v1/projects/{projectId}/versions
 /v1/projects/{projectId}/commands
+/v1/projects/{projectId}/timeline
+/v1/projects/{projectId}/manual-edits
 /v1/projects/{projectId}/annotations
 /v1/projects/{projectId}/patch-proposals
 /v1/projects/{projectId}/patch-proposals/{proposalId}

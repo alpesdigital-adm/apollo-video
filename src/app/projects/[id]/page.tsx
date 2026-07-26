@@ -80,6 +80,33 @@ interface ReviewPatchBatchData {
   resultVersionId?: string; renderOperationId?: string; comparison?: ReviewPatchProposalData['comparison']; render?: ReviewPatchProposalData['render'];
   createdAt: string; updatedAt: string;
 }
+interface ManualTimelineClipData {
+  id: string; sourceId: string; startMs: number; endMs: number; track: number; selected: boolean;
+  inspector: { layout?: string; text?: string; subtitle?: string; color?: string; motion?: string; audioGain?: number }
+}
+interface ManualTimelineData {
+  timeline: { versionId: string; revision: number; clips: ManualTimelineClipData[]; snapPointsMs: number[] };
+  baseHash: string; editPlanHash: string;
+  history: {
+    id: string; sequence: number; parentVersionId?: string; commandId?: string; commandType?: string;
+    action?: 'apply' | 'undo' | 'redo'; restoresVersionId?: string; createdAt: string;
+  }[];
+}
+type ManualOperation =
+  | { kind: 'trim'; clipId: string; edge: 'start' | 'end'; atMs: number }
+  | { kind: 'split'; clipId: string; atMs: number }
+  | { kind: 'move'; clipId: string; startMs: number; track: number }
+  | { kind: 'replace'; clipId: string; sourceId: string }
+  | { kind: 'inspect'; clipId: string; patch: ManualTimelineClipData['inspector'] }
+interface ManualEditAppliedData {
+  timeline: ManualTimelineData['timeline'];
+  version: { id: string; sequence: number; baseHash: string };
+  operation: PublicOperation;
+  comparison: {
+    beforeVersionId: string; afterVersionId: string; beforeEditPlanHash: string; afterEditPlanHash: string;
+    action: 'apply' | 'undo' | 'redo'; targetId: string;
+  };
+}
 type RenderElementType = 'background' | 'presenter' | 'subtitle' | 'b-roll' | 'cta' | 'transformation'
 interface RenderElementData {
   elementId: string; type: RenderElementType; clipId: string; sceneId: string; sourceId: string; frame: number;
@@ -236,6 +263,11 @@ export default function ProjectWorkspacePage() {
   const [reviewPatchBatchLoading, setReviewPatchBatchLoading] = useState(false)
   const [reviewPatchBatchApplying, setReviewPatchBatchApplying] = useState(false)
   const reviewPatchBatchApplyKeyRef = useRef<{ batchId: string; key: string } | null>(null)
+  const manualDragStart = useRef<{ clipId: string; clientX: number; boundsLeft: number; boundsWidth: number } | null>(null)
+  const [manualTimeline, setManualTimeline] = useState<ManualTimelineData | null>(null)
+  const [manualSelectedClipId, setManualSelectedClipId] = useState<string | null>(null)
+  const [manualBusy, setManualBusy] = useState(false)
+  const [manualInspector, setManualInspector] = useState<ManualTimelineClipData['inspector']>({})
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -271,8 +303,42 @@ export default function ProjectWorkspacePage() {
     }
   }, [projectId, router, uploadPhase])
 
+  const loadManualTimeline = useCallback(async (quiet = false) => {
+    try {
+      const response = await fetch(
+        `/v1/projects/${encodeURIComponent(projectId)}/timeline`,
+        { headers: { accept: 'application/json' }, cache: 'no-store' },
+      )
+      if (response.status === 401) { router.replace('/login'); return }
+      const payload = await response.json() as ApiEnvelope<ManualTimelineData>
+      if (!response.ok || !payload.data) {
+        if (response.status === 428 || response.status === 409) {
+          setManualTimeline(null)
+          return
+        }
+        throw new Error(apiError(payload, 'Não foi possível carregar a timeline manual.'))
+      }
+      setManualTimeline(payload.data)
+      setManualSelectedClipId((current) =>
+        payload.data!.timeline.clips.some((clip) => clip.id === current)
+          ? current
+          : payload.data!.timeline.clips[0]?.id ?? null)
+    } catch (error) {
+      if (!quiet) {
+        setNotice(error instanceof Error ? error.message : 'Não foi possível carregar a timeline manual.')
+      }
+    }
+  }, [projectId, router])
+
   useEffect(() => { void loadWorkspace() }, [loadWorkspace])
   useEffect(() => () => reviewElementLookup.current?.abort(), [])
+  useEffect(() => {
+    if (workspace?.editPlan?.state !== 'compiled' || !workspace.version) {
+      setManualTimeline(null)
+      return
+    }
+    void loadManualTimeline(true)
+  }, [loadManualTimeline, workspace?.editPlan?.state, workspace?.version])
 
   const loadReview = useCallback(async (quiet = false, projectVersionId?: string) => {
     try {
@@ -328,6 +394,13 @@ export default function ProjectWorkspacePage() {
     () => review?.scopeContext.options.find((option) => option.kind === reviewApplicationScope),
     [review?.scopeContext.options, reviewApplicationScope],
   )
+  const manualSelectedClip = useMemo(
+    () => manualTimeline?.timeline.clips.find((clip) => clip.id === manualSelectedClipId),
+    [manualSelectedClipId, manualTimeline?.timeline.clips],
+  )
+  useEffect(() => {
+    setManualInspector(manualSelectedClip ? { ...manualSelectedClip.inspector } : {})
+  }, [manualSelectedClip])
 
   useEffect(() => {
     setPreviewState('idle')
@@ -359,6 +432,164 @@ export default function ProjectWorkspacePage() {
     const payload = await response.json() as ApiEnvelope<T>
     if (!response.ok || !payload.data) throw new Error(apiError(payload, 'A API recusou a operação.'))
     return payload.data
+  }
+
+  async function submitManualEdit(input: {
+    action: 'apply' | 'undo' | 'redo'
+    operation?: ManualOperation
+    targetVersionId?: string
+  }): Promise<void> {
+    if (!manualTimeline || !workspace?.version || manualBusy) return
+    const selectedId = input.operation?.clipId ?? manualSelectedClipId ?? 'project-edit-plan'
+    const video = previewVideo.current
+    if (video) {
+      video.pause()
+      preservedPreviewTimeMs.current = Math.round(video.currentTime * 1000)
+    }
+    setManualBusy(true)
+    setNotice(null)
+    try {
+      const result = await requestJson<ManualEditAppliedData>(
+        `/v1/projects/${encodeURIComponent(projectId)}/manual-edits`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': `manual-${crypto.randomUUID()}`,
+          },
+          body: JSON.stringify({
+            action: input.action,
+            baseVersionId: manualTimeline.timeline.versionId,
+            baseHash: manualTimeline.baseHash,
+            expectedRevision: manualTimeline.timeline.revision,
+            variantId: workspace.project.format ?? '9:16',
+            targetId: selectedId,
+            ...(input.operation ? { operation: input.operation } : {}),
+            ...(input.targetVersionId ? { targetVersionId: input.targetVersionId } : {}),
+          }),
+        },
+      )
+      setManualTimeline((current) => current ? {
+        ...current,
+        timeline: result.timeline,
+        baseHash: result.version.baseHash,
+        editPlanHash: result.comparison.afterEditPlanHash,
+      } : current)
+      setManualSelectedClipId(
+        result.timeline.clips.find((clip) => clip.id === selectedId)?.id
+          ?? result.timeline.clips.find((clip) => clip.id.startsWith(`${selectedId}:`))?.id
+          ?? result.timeline.clips[0]?.id
+          ?? null,
+      )
+      setNotice(
+        input.action === 'apply'
+          ? `Edição registrada na versão ${result.version.sequence}. O novo proxy entrou na fila.`
+          : `${input.action === 'undo' ? 'Undo' : 'Redo'} registrado como versão ${result.version.sequence}.`,
+      )
+      await loadWorkspace(true)
+      await loadManualTimeline(true)
+      await loadReview(true)
+    } catch (error) {
+      preservedPreviewTimeMs.current = null
+      setNotice(error instanceof Error ? error.message : 'Não foi possível aplicar a edição manual.')
+      await loadManualTimeline(true)
+    } finally {
+      setManualBusy(false)
+    }
+  }
+
+  function selectManualClip(clip: ManualTimelineClipData): void {
+    setManualSelectedClipId(clip.id)
+    setManualInspector({ ...clip.inspector })
+    const fps = review?.session.fps ?? editingProxy?.probe?.fps ?? 30
+    seekPreviewToFrame(Math.round(clip.startMs / 1000 * fps))
+  }
+
+  function manualPointerDown(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    clipId: string,
+  ): void {
+    const bounds = event.currentTarget.parentElement?.getBoundingClientRect()
+    if (!bounds) return
+    manualDragStart.current = {
+      clipId,
+      clientX: event.clientX,
+      boundsLeft: bounds.left,
+      boundsWidth: bounds.width,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function manualPointerUp(event: ReactPointerEvent<HTMLButtonElement>): void {
+    const drag = manualDragStart.current
+    manualDragStart.current = null
+    if (!drag || drag.clipId !== event.currentTarget.dataset.clipId) return
+    const clip = manualTimeline?.timeline.clips.find((candidate) => candidate.id === drag.clipId)
+    if (!clip || Math.abs(event.clientX - drag.clientX) < 8) {
+      if (clip) selectManualClip(clip)
+      return
+    }
+    const durationMs = Math.max(1, ...(manualTimeline?.timeline.clips.map((item) => item.endMs) ?? [1]))
+    const startMs = Math.max(
+      0,
+      Math.min(durationMs - (clip.endMs - clip.startMs), (event.clientX - drag.boundsLeft) / drag.boundsWidth * durationMs),
+    )
+    void submitManualEdit({
+      action: 'apply',
+      operation: { kind: 'move', clipId: clip.id, startMs, track: clip.track },
+    })
+  }
+
+  function manualKeyboard(event: React.KeyboardEvent<HTMLElement>): void {
+    if (!manualSelectedClip || manualBusy) return
+    const target = event.target as HTMLElement
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+    const pointerMs = previewVideo.current
+      ? Math.round(previewVideo.current.currentTime * 1000)
+      : manualSelectedClip.startMs
+    if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+      event.preventDefault()
+      const current = manualTimeline?.history.find((version) => version.id === manualTimeline.timeline.versionId)
+      const targetVersionId = event.shiftKey
+        ? (current?.action === 'undo' ? current.parentVersionId : undefined)
+        : current?.parentVersionId
+      if (targetVersionId) {
+        void submitManualEdit({
+          action: event.shiftKey ? 'redo' : 'undo',
+          targetVersionId,
+        })
+      }
+    } else if (event.key.toLowerCase() === 's') {
+      event.preventDefault()
+      void submitManualEdit({
+        action: 'apply',
+        operation: { kind: 'split', clipId: manualSelectedClip.id, atMs: pointerMs },
+      })
+    } else if (event.key === 'Delete') {
+      event.preventDefault()
+      void submitManualEdit({
+        action: 'apply',
+        operation: { kind: 'trim', clipId: manualSelectedClip.id, edge: 'end', atMs: pointerMs },
+      })
+    }
+  }
+
+  function submitManualInspector(): void {
+    if (!manualSelectedClip) return
+    const patch = Object.fromEntries(
+      Object.entries(manualInspector).filter(([, value]) =>
+        typeof value === 'number'
+          ? Number.isFinite(value)
+          : typeof value === 'string' && value.trim().length > 0),
+    ) as ManualTimelineClipData['inspector']
+    if (Object.keys(patch).length === 0) {
+      setNotice('Informe ao menos um ajuste no inspector.')
+      return
+    }
+    void submitManualEdit({
+      action: 'apply',
+      operation: { kind: 'inspect', clipId: manualSelectedClip.id, patch },
+    })
   }
 
   function readPreviewPosition(): void {
@@ -968,6 +1199,17 @@ export default function ProjectWorkspacePage() {
   const briefText = typeof ownerInput === 'object' && ownerInput !== null && !Array.isArray(ownerInput) && typeof (ownerInput as Record<string, unknown>).text === 'string'
     ? (ownerInput as Record<string, unknown>).text as string
     : ''
+  const manualDurationMs = Math.max(
+    1,
+    ...(manualTimeline?.timeline.clips.map((clip) => clip.endMs) ?? [1]),
+  )
+  const currentManualHistory = manualTimeline?.history.find(
+    (version) => version.id === manualTimeline.timeline.versionId,
+  )
+  const undoTargetVersionId = currentManualHistory?.parentVersionId
+  const redoTargetVersionId = currentManualHistory?.action === 'undo'
+    ? currentManualHistory.parentVersionId
+    : undefined
 
   if (loading) return <main className="grid min-h-screen place-items-center bg-[#070707] text-[#8d887f]"><span className="animate-pulse text-sm">Abrindo sala de produção…</span></main>
   if (!workspace) return <main className="grid min-h-screen place-items-center bg-[#070707] px-6 text-center text-[#c8c2b8]"><div><p>{notice ?? 'Projeto não encontrado.'}</p><button className="mt-4 text-sm text-[#d9ad44]" onClick={() => router.push('/')} type="button">Voltar aos projetos</button></div></main>
@@ -1116,6 +1358,185 @@ export default function ProjectWorkspacePage() {
               <span className="border-l border-white/[0.08] pl-3 font-mono text-[10px] tabular-nums text-[#8e887e]">{frameTimecode(previewFrame, review?.session.fps ?? editingProxy.probe?.fps ?? 30)}</span>
               {previewState === 'error' ? <span className="text-[10px] text-[#d17a7a]">O preview não carregou. Use o download final para validar o arquivo.</span> : null}
             </div>
+          ) : null}
+
+          {manualTimeline?.timeline.clips.length ? (
+            <section
+              aria-label="Editor manual da timeline"
+              className="mt-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
+              data-testid="manual-editor"
+              onKeyDown={manualKeyboard}
+              tabIndex={0}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#d9aa3d]" />
+                    <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#b58d31]">Timeline manual V2</p>
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#706c64]">
+                    V{manualTimeline.timeline.revision} · snap 120 ms · S divide · Delete apara · Ctrl+Z desfaz
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="border border-white/[0.08] px-3 py-2 text-[9px] text-[#918b82] hover:border-white/[0.18] hover:text-white disabled:opacity-30"
+                    data-testid="manual-undo"
+                    disabled={manualBusy || !undoTargetVersionId}
+                    onClick={() => undoTargetVersionId && void submitManualEdit({ action: 'undo', targetVersionId: undoTargetVersionId })}
+                    type="button"
+                  >
+                    ↶ Desfazer
+                  </button>
+                  <button
+                    className="border border-white/[0.08] px-3 py-2 text-[9px] text-[#918b82] hover:border-white/[0.18] hover:text-white disabled:opacity-30"
+                    data-testid="manual-redo"
+                    disabled={manualBusy || !redoTargetVersionId}
+                    onClick={() => redoTargetVersionId && void submitManualEdit({ action: 'redo', targetVersionId: redoTargetVersionId })}
+                    type="button"
+                  >
+                    ↷ Refazer
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-b border-white/[0.07] bg-[#050505] px-4 py-4">
+                <div className="mb-2 flex justify-between font-mono text-[8px] text-[#4f4c47]">
+                  <span>00:00</span>
+                  <span>{(manualDurationMs / 1000).toFixed(1)}s</span>
+                </div>
+                <div className="relative h-16 overflow-hidden border border-white/[0.07] bg-[#0d0d0d]" data-testid="manual-track">
+                  <span className="absolute inset-y-0 left-0 z-10 w-12 border-r border-white/[0.08] bg-[#111] px-2 pt-2 text-[7px] uppercase tracking-[0.12em] text-[#5f5a53]">V1</span>
+                  <div className="absolute inset-y-0 left-12 right-0">
+                    {manualTimeline.timeline.clips.map((clip, index) => {
+                      const selected = clip.id === manualSelectedClipId
+                      return (
+                        <button
+                          aria-pressed={selected}
+                          className={`absolute inset-y-2 overflow-hidden border px-2 text-left transition ${selected ? 'z-10 border-[#e2b344]/70 bg-[#a47a24]/25 text-[#eccb7b] shadow-[0_0_18px_rgba(220,170,54,.12)]' : 'border-white/[0.1] bg-[#181818] text-[#8d887f] hover:border-[#d9aa3d]/35'}`}
+                          data-clip-id={clip.id}
+                          data-testid={`manual-clip-${clip.id}`}
+                          key={clip.id}
+                          onPointerDown={(event) => manualPointerDown(event, clip.id)}
+                          onPointerUp={manualPointerUp}
+                          style={{
+                            left: `${clip.startMs / manualDurationMs * 100}%`,
+                            width: `${Math.max(2.5, (clip.endMs - clip.startMs) / manualDurationMs * 100)}%`,
+                          }}
+                          title={`${clip.id} · ${(clip.endMs - clip.startMs) / 1000}s`}
+                          type="button"
+                        >
+                          <span className="block truncate font-mono text-[8px]">{index + 1} · {clip.id}</span>
+                          <span className="mt-1 block truncate text-[7px] text-[#67625b]">{(clip.endMs - clip.startMs).toFixed(0)} ms</span>
+                        </button>
+                      )
+                    })}
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 z-20 w-px bg-[#e7b642] shadow-[0_0_7px_rgba(231,182,66,.5)]"
+                      style={{ left: `${Math.min(100, previewFrame / (review?.session.fps ?? editingProxy?.probe?.fps ?? 30) * 1000 / manualDurationMs * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {manualSelectedClip ? (
+                <div className="grid lg:grid-cols-[minmax(0,1fr)_280px]">
+                  <div className="border-b border-white/[0.07] p-4 lg:border-b-0 lg:border-r">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="mr-auto font-mono text-[9px] text-[#8a847b]" data-testid="manual-selected-clip">{manualSelectedClip.id}</span>
+                      <button
+                        className="border border-white/[0.09] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#d9aa3d]/40 hover:text-white disabled:opacity-30"
+                        disabled={manualBusy}
+                        onClick={() => void submitManualEdit({ action: 'apply', operation: { kind: 'trim', clipId: manualSelectedClip.id, edge: 'start', atMs: Math.round((previewVideo.current?.currentTime ?? manualSelectedClip.startMs / 1000) * 1000) } })}
+                        type="button"
+                      >
+                        Aparar início
+                      </button>
+                      <button
+                        className="border border-white/[0.09] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#d9aa3d]/40 hover:text-white disabled:opacity-30"
+                        disabled={manualBusy}
+                        onClick={() => void submitManualEdit({ action: 'apply', operation: { kind: 'split', clipId: manualSelectedClip.id, atMs: Math.round((previewVideo.current?.currentTime ?? manualSelectedClip.startMs / 1000) * 1000) } })}
+                        type="button"
+                      >
+                        Dividir no cursor
+                      </button>
+                      <button
+                        className="border border-white/[0.09] px-3 py-2 text-[9px] text-[#aaa49a] hover:border-[#d9aa3d]/40 hover:text-white disabled:opacity-30"
+                        disabled={manualBusy}
+                        onClick={() => void submitManualEdit({ action: 'apply', operation: { kind: 'trim', clipId: manualSelectedClip.id, edge: 'end', atMs: Math.round((previewVideo.current?.currentTime ?? manualSelectedClip.endMs / 1000) * 1000) } })}
+                        type="button"
+                      >
+                        Aparar fim
+                      </button>
+                      <label className="flex items-center gap-2 border border-white/[0.09] px-3 py-1.5 text-[8px] uppercase tracking-[0.1em] text-[#706b63]">
+                        Substituir
+                        <select
+                          className="max-w-36 bg-transparent text-[9px] normal-case text-[#b3ada4] outline-none"
+                          data-testid="manual-replace"
+                          disabled={manualBusy}
+                          onChange={(event) => {
+                            if (event.target.value && event.target.value !== manualSelectedClip.sourceId) {
+                              void submitManualEdit({ action: 'apply', operation: { kind: 'replace', clipId: manualSelectedClip.id, sourceId: event.target.value } })
+                            }
+                          }}
+                          value={manualSelectedClip.sourceId}
+                        >
+                          {sourceMasters.map((media) => <option className="bg-[#111]" key={media.artifactId} value={media.artifactId}>{media.originalFileName}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                    <p className="mt-3 text-[9px] leading-4 text-[#5f5a53]">
+                      Arraste o clipe para reordenar. O gesto vira uma Command com base, revision e scope; o servidor retima a trilha e cria uma versão filha.
+                    </p>
+                  </div>
+
+                  <div className="p-4" data-testid="manual-inspector">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[8px] font-semibold uppercase tracking-[0.17em] text-[#827b70]">Inspector</p>
+                      <span className="text-[7px] uppercase tracking-[0.12em] text-[#4e4a45]">layout · texto · cor · motion · áudio</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {([
+                        ['layout', 'Layout'], ['text', 'Texto'], ['subtitle', 'Legenda'],
+                        ['color', 'Cor / LUT'], ['motion', 'Movimento'],
+                      ] as const).map(([field, label]) => (
+                        <label className={field === 'text' ? 'col-span-2' : ''} key={field}>
+                          <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#55514c]">{label}</span>
+                          <input
+                            className="w-full border border-white/[0.08] bg-[#050505] px-2 py-2 text-[9px] text-[#b7b0a7] outline-none focus:border-[#d9aa3d]/45"
+                            onChange={(event) => setManualInspector((current) => ({ ...current, [field]: event.target.value }))}
+                            placeholder={label}
+                            value={manualInspector[field] ?? ''}
+                          />
+                        </label>
+                      ))}
+                      <label>
+                        <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#55514c]">Ganho</span>
+                        <input
+                          className="w-full border border-white/[0.08] bg-[#050505] px-2 py-2 text-[9px] text-[#b7b0a7] outline-none focus:border-[#d9aa3d]/45"
+                          max="4"
+                          min="0"
+                          onChange={(event) => setManualInspector((current) => ({ ...current, audioGain: Number(event.target.value) }))}
+                          step="0.05"
+                          type="number"
+                          value={manualInspector.audioGain ?? 1}
+                        />
+                      </label>
+                    </div>
+                    <button
+                      className="mt-3 w-full bg-[#dbae3f] px-3 py-2 text-[9px] font-bold text-[#171207] disabled:opacity-35"
+                      data-testid="manual-inspector-apply"
+                      disabled={manualBusy}
+                      onClick={submitManualInspector}
+                      type="button"
+                    >
+                      {manualBusy ? 'Criando versão…' : 'Aplicar inspector'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
           ) : null}
 
           {review ? (

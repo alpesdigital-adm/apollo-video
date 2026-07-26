@@ -13,6 +13,82 @@ export interface PublicSchemaDefinition {
 
 const idSchema = { type: 'string', minLength: 3, maxLength: 128 }
 const dateTimeSchema = { type: 'string', format: 'date-time' }
+const manualInspectorSchema = {
+  type: 'object',
+  additionalProperties: false,
+  minProperties: 1,
+  properties: {
+    layout: { type: 'string', minLength: 1, maxLength: 500 },
+    text: { type: 'string', minLength: 1, maxLength: 500 },
+    subtitle: { type: 'string', minLength: 1, maxLength: 500 },
+    color: { type: 'string', minLength: 1, maxLength: 500 },
+    motion: { type: 'string', minLength: 1, maxLength: 500 },
+    audioGain: { type: 'number', minimum: 0, maximum: 4 },
+  },
+}
+const manualGestureSchema = {
+  oneOf: [
+    {
+      type: 'object', additionalProperties: false, required: ['kind', 'clipId'],
+      properties: { kind: { const: 'select' }, clipId: idSchema },
+    },
+    {
+      type: 'object', additionalProperties: false, required: ['kind', 'clipId', 'edge', 'atMs'],
+      properties: {
+        kind: { const: 'trim' }, clipId: idSchema, edge: { enum: ['start', 'end'] },
+        atMs: { type: 'number', minimum: 0 },
+      },
+    },
+    {
+      type: 'object', additionalProperties: false, required: ['kind', 'clipId', 'atMs'],
+      properties: { kind: { const: 'split' }, clipId: idSchema, atMs: { type: 'number', minimum: 0 } },
+    },
+    {
+      type: 'object', additionalProperties: false, required: ['kind', 'clipId', 'startMs', 'track'],
+      properties: {
+        kind: { const: 'move' }, clipId: idSchema, startMs: { type: 'number', minimum: 0 },
+        track: { type: 'integer', minimum: 0, maximum: 63 },
+      },
+    },
+    {
+      type: 'object', additionalProperties: false, required: ['kind', 'clipId', 'sourceId'],
+      properties: { kind: { const: 'replace' }, clipId: idSchema, sourceId: idSchema },
+    },
+    {
+      type: 'object', additionalProperties: false, required: ['kind', 'clipId', 'patch'],
+      properties: { kind: { const: 'inspect' }, clipId: idSchema, patch: manualInspectorSchema },
+    },
+  ],
+}
+const manualTimelineSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['versionId', 'revision', 'clips', 'snapPointsMs'],
+  properties: {
+    versionId: idSchema,
+    revision: { type: 'integer', minimum: 1 },
+    clips: {
+      type: 'array', maxItems: 10000,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'sourceId', 'startMs', 'endMs', 'track', 'selected', 'inspector'],
+        properties: {
+          id: idSchema, sourceId: idSchema,
+          startMs: { type: 'number', minimum: 0 }, endMs: { type: 'number', exclusiveMinimum: 0 },
+          track: { type: 'integer', minimum: 0, maximum: 63 }, selected: { type: 'boolean' },
+          inspector: {
+            type: 'object', additionalProperties: false,
+            properties: manualInspectorSchema.properties,
+          },
+        },
+      },
+    },
+    snapPointsMs: {
+      type: 'array', maxItems: 50000, uniqueItems: true,
+      items: { type: 'number', minimum: 0 },
+    },
+  },
+}
 const apiMetaSchema = {
   type: 'object',
   additionalProperties: false,
@@ -3577,6 +3653,123 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           },
         },
       ],
+    }),
+  ),
+  defineSchema('project-manual-timeline', 1, 'Current manual editing timeline and immutable history',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['timeline', 'baseHash', 'editPlanHash', 'history'],
+      properties: {
+        timeline: manualTimelineSchema,
+        baseHash: sha256Schema,
+        editPlanHash: sha256Schema,
+        history: {
+          type: 'array',
+          maxItems: 40,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['id', 'sequence', 'createdAt'],
+            properties: {
+              id: idSchema,
+              sequence: { type: 'integer', minimum: 1 },
+              parentVersionId: idSchema,
+              commandId: idSchema,
+              commandType: { type: 'string', minLength: 1, maxLength: 80 },
+              action: { enum: ['apply', 'undo', 'redo'] },
+              restoresVersionId: idSchema,
+              createdAt: dateTimeSchema,
+            },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema('apply-project-manual-edit-request', 1, 'Apply, undo or redo a scoped manual edit', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'action', 'baseVersionId', 'baseHash', 'expectedRevision', 'variantId', 'targetId',
+    ],
+    properties: {
+      action: { enum: ['apply', 'undo', 'redo'] },
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      expectedRevision: { type: 'integer', minimum: 1 },
+      variantId: idSchema,
+      targetId: idSchema,
+      operation: manualGestureSchema,
+      targetVersionId: idSchema,
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    oneOf: [
+      {
+        required: ['operation'],
+        properties: {
+          action: { const: 'apply' },
+          operation: {},
+          targetVersionId: false,
+        },
+      },
+      {
+        required: ['targetVersionId'],
+        properties: {
+          action: { enum: ['undo', 'redo'] },
+          operation: false,
+          targetVersionId: {},
+        },
+      },
+    ],
+  }),
+  defineSchema('project-manual-edit-applied', 1, 'Applied manual edit with immutable version and proxy operation',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['command', 'version', 'timeline', 'comparison', 'operation', 'replayed'],
+      properties: {
+        command: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'id', 'type', 'action', 'baseVersionId', 'resultVersionId',
+            'scope', 'payload', 'createdAt',
+          ],
+          properties: {
+            id: idSchema, type: { const: 'manual-edit' }, action: { enum: ['apply', 'undo', 'redo'] },
+            baseVersionId: idSchema, resultVersionId: idSchema,
+            scope: { type: 'object' }, payload: { type: 'object' }, createdAt: dateTimeSchema,
+          },
+        },
+        version: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'],
+          properties: {
+            id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema,
+            baseHash: sha256Schema,
+            snapshotRefs: {
+              type: 'object',
+              required: ['brief', 'editPlan', 'policies'],
+              properties: { brief: idSchema, editPlan: idSchema, policies: idSchema },
+            },
+            createdAt: dateTimeSchema,
+          },
+        },
+        timeline: manualTimelineSchema,
+        comparison: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'beforeVersionId', 'afterVersionId', 'beforeEditPlanHash',
+            'afterEditPlanHash', 'action', 'targetId',
+          ],
+          properties: {
+            beforeVersionId: idSchema, afterVersionId: idSchema,
+            beforeEditPlanHash: sha256Schema, afterEditPlanHash: sha256Schema,
+            action: { enum: ['apply', 'undo', 'redo'] }, targetId: idSchema,
+          },
+        },
+        operation: publicOperationSchemaV3,
+        replayed: { type: 'boolean' },
+      },
     }),
   ),
   defineSchema('project-proxy-render-operation-accepted', 1, 'Accepted project proxy render operation',

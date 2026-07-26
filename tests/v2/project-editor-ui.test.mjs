@@ -106,3 +106,22 @@ test('T-FR-215 project editor batches selected annotations with explicit atomic 
   assert.match(projectEditorSource, /Caderno do lote/)
   assert.match(projectEditorSource, /Confirmar lote/)
 })
+
+test('T-FR-216 project editor exposes the API-backed timeline, inspector and keyboard/mouse gestures', () => {
+  assert.match(projectEditorSource, /\/timeline/)
+  assert.match(projectEditorSource, /\/manual-edits/)
+  assert.match(projectEditorSource, /data-testid="manual-editor"/)
+  assert.match(projectEditorSource, /data-testid=\{`manual-clip-\$\{clip\.id\}`\}/)
+  assert.match(projectEditorSource, /onPointerDown=\{\(event\) => manualPointerDown\(event, clip\.id\)\}/)
+  assert.match(projectEditorSource, /onPointerUp=\{manualPointerUp\}/)
+  assert.match(projectEditorSource, /onKeyDown=\{manualKeyboard\}/)
+  assert.match(projectEditorSource, /event\.key\.toLowerCase\(\) === 's'/)
+  assert.match(projectEditorSource, /event\.key === 'Delete'/)
+  assert.match(projectEditorSource, /data-testid="manual-inspector"/)
+  for (const field of ['layout', 'text', 'subtitle', 'color', 'motion', 'audioGain']) {
+    assert.match(projectEditorSource, new RegExp(field))
+  }
+  assert.match(projectEditorSource, /data-testid="manual-undo"/)
+  assert.match(projectEditorSource, /data-testid="manual-redo"/)
+  assert.match(projectEditorSource, /expectedRevision: manualTimeline\.timeline\.revision/)
+})

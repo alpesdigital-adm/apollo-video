@@ -491,6 +491,20 @@ O compilador agrupa operações por `targetId`:
 
 A aplicação exige `confirmed: true`, `Idempotency-Key` e aprovação humana para uso como agent tool. Uma transação serializável cria exatamente um Command `apply-review-patch-batch`, um snapshot, uma ProjectVersion filha, o compare e o evento de outbox; move somente annotations/propostas incluídas para `applied`. Mudança concorrente em versão, annotation ou proposta aborta toda a transação. Após commit, uma operação durável de proxy é vinculada ao lote. Replay com a mesma chave e fingerprint reconstrói o mesmo resultado; chave reutilizada com outro payload falha.
 
+### 22.6 Edição manual integrada
+
+`GET /v1/projects/{projectId}/timeline` projeta o `EditPlan v2` compilado corrente em um view model imutável com `versionId`, `revision`, clips, track index e snap points. Essa projeção não é fonte de verdade e pode ser reconstruída a qualquer momento pelo snapshot.
+
+`POST /v1/projects/{projectId}/manual-edits` aceita:
+
+- `action=apply` com uma operação fechada `trim`, `split`, `move`, `replace` ou `inspect`;
+- `action=undo` com o pai direto como `targetVersionId`;
+- `action=redo` com uma versão compilada do mesmo projeto como `targetVersionId`.
+
+O envelope exige `baseVersionId`, `baseHash`, `expectedRevision`, `variantId`, `targetId` e `Idempotency-Key`. `scope.clipIds` registra o target e `scope.outputSpecIds` registra a variante. Uma transação serializável cria Command `manual-edit`, novo snapshot, versão filha, compare e outbox; o `currentVersionId` avança por compare-and-swap. Falha ou corrida não deixa versão, snapshot, Command ou evento parcial.
+
+Undo/redo clonam o conteúdo do snapshot escolhido, atribuem nova identidade de EditPlan/ProjectVersion e registram `restoresVersionId`. A versão restaurada nunca se torna mutável e nenhuma linha histórica é removida. Após commit, a mesma rota enfileira um proxy durável preso à nova versão.
+
 ## 23. Dependency graph
 
 ### 23.1 Tipos de nós
