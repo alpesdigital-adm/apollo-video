@@ -810,6 +810,104 @@ const speechCatalogRunExample = {
   recordHash: '2'.repeat(64),
   active: true,
 }
+const evidenceProducerExample = {
+  provider: 'apollo',
+  model: 'evidence-catalog',
+  version: '1.0.0',
+  confidence: 0.96,
+}
+const evidenceObservationProvenanceExample = {
+  source: 'evidence-observation',
+  provider: evidenceProducerExample.provider,
+  model: evidenceProducerExample.model,
+  version: evidenceProducerExample.version,
+  confidence: 0.96,
+  observedAt: createdAt,
+}
+const evidenceObservationExample = {
+  value: 'A conversão aumentou vinte por cento',
+  normalizedValue: 'a conversao aumentou vinte por cento',
+  provenance: evidenceObservationProvenanceExample,
+}
+const evidenceSegmentExample = {
+  schemaVersion: 'evidence-segment/v1',
+  id: 'evidence-segment-example-1',
+  workspaceId,
+  projectId,
+  sourceSpeechSegmentId: speechSegmentExample.id,
+  sourceSpeechSegmentHash: speechSegmentExample.segmentHash,
+  sourceTranscriptId: speechSegmentExample.sourceTranscriptId,
+  sourceTranscriptHash: speechSegmentExample.sourceTranscriptHash,
+  sourceArtifactId: speechSegmentExample.sourceArtifactId,
+  rightsSnapshotId: 'rights-snapshot-example-1',
+  rightsStatus: 'approved',
+  consentStatus: 'approved',
+  category: 'testimonial',
+  speaker: speechSegmentExample.speaker,
+  speakerId: speechSegmentExample.speakerId,
+  claim: evidenceObservationExample,
+  result: {
+    value: 'Vinte por cento no período medido',
+    normalizedValue: 'vinte por cento no periodo medido',
+    provenance: {
+      ...evidenceObservationProvenanceExample,
+      confidence: 0.94,
+    },
+  },
+  context: {
+    value: 'Resultado observado no período medido',
+    normalizedValue: 'resultado observado no periodo medido',
+    provenance: {
+      ...evidenceObservationProvenanceExample,
+      confidence: 0.95,
+    },
+  },
+  qualifiers: [{
+    value: 'Sem atribuição causal',
+    normalizedValue: 'sem atribuicao causal',
+    provenance: {
+      ...evidenceObservationProvenanceExample,
+      confidence: 0.98,
+    },
+  }],
+  subject: {
+    value: 'Cliente A',
+    normalizedValue: 'cliente a',
+    provenance: {
+      ...evidenceObservationProvenanceExample,
+      confidence: 0.99,
+    },
+  },
+  attribution: {
+    value: 'Depoimento do Cliente A',
+    normalizedValue: 'depoimento do cliente a',
+    provenance: {
+      ...evidenceObservationProvenanceExample,
+      confidence: 0.99,
+    },
+  },
+  compatibleOfferIds: ['offer-example-1'],
+  compatibleAudienceTags: ['empreendedores'],
+  compatibleObjections: ['preço'],
+  credibilityScore: 0.91,
+  specificityScore: 0.94,
+  authenticityScore: 0.93,
+  sourceRangeMs: [1000, 2500],
+  contextRangeMs: [500, 3000],
+  handlesMs: { before: 500, after: 500 },
+  exactTranscript: speechSegmentExample.exactText,
+  frameRefs: ['frame-example-30', 'frame-example-75'],
+  adjacentEvidenceIds: [],
+  requiresContext: true,
+  integrityStatus: 'context-required',
+  integrityReasons: [],
+  producer: evidenceProducerExample,
+  integrityPolicyVersion: 'evidence-integrity/v1',
+  physicalMaterialized: false,
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  evidenceHash: '3'.repeat(64),
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -2419,6 +2517,82 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             rightsStatus: 'approved',
             eligibleForReuse: true,
             blockedReasons: [],
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/catalog-evidence-segment-request/v1': [
+      {
+        sourceSpeechSegmentId: evidenceSegmentExample.sourceSpeechSegmentId,
+        expectedSpeechSegmentHash:
+          evidenceSegmentExample.sourceSpeechSegmentHash,
+        category: evidenceSegmentExample.category,
+        claim: {
+          value: evidenceSegmentExample.claim.value,
+          confidence: 0.96,
+        },
+        result: {
+          value: evidenceSegmentExample.result.value,
+          confidence: 0.94,
+        },
+        context: {
+          value: evidenceSegmentExample.context.value,
+          confidence: 0.95,
+        },
+        qualifiers: [{
+          value: evidenceSegmentExample.qualifiers[0].value,
+          confidence: 0.98,
+        }],
+        subject: {
+          value: evidenceSegmentExample.subject.value,
+          confidence: 0.99,
+        },
+        attribution: {
+          value: evidenceSegmentExample.attribution.value,
+          confidence: 0.99,
+        },
+        compatibleOfferIds: evidenceSegmentExample.compatibleOfferIds,
+        compatibleAudienceTags:
+          evidenceSegmentExample.compatibleAudienceTags,
+        compatibleObjections:
+          evidenceSegmentExample.compatibleObjections,
+        credibilityScore: evidenceSegmentExample.credibilityScore,
+        specificityScore: evidenceSegmentExample.specificityScore,
+        authenticityScore: evidenceSegmentExample.authenticityScore,
+        contextRangeMs: evidenceSegmentExample.contextRangeMs,
+        frameRefs: evidenceSegmentExample.frameRefs,
+        adjacentEvidenceIds: evidenceSegmentExample.adjacentEvidenceIds,
+        requiresContext: true,
+        producer: evidenceProducerExample,
+      },
+    ],
+    'apollo://schemas/evidence-segment-cataloged/v1': [
+      {
+        data: {
+          evidence: evidenceSegmentExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/evidence-segment-search-results/v1': [
+      {
+        data: {
+          results: [{
+            evidence: evidenceSegmentExample,
+            matchedBy: ['text', 'category', 'offer', 'objection'],
+            reuseDecision: {
+              allowed: true,
+              reasons: [],
+              requiredContextRangeMs:
+                evidenceSegmentExample.contextRangeMs,
+              requiredAdjacentEvidenceIds: [],
+              requiredQualifierValues: [
+                evidenceSegmentExample.qualifiers[0].value,
+              ],
+              rightsSnapshotId: evidenceSegmentExample.rightsSnapshotId,
+            },
           }],
         },
         meta: { apiVersion: 'v1' },

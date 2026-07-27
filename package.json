@@ -35,6 +35,7 @@
     "test:integration:project-duplication": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-project-duplication.integration.mjs",
     "test:integration:mvp-core-gate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-mvp-core-gate.integration.mjs",
     "test:integration:speech-segments": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-speech-segment-catalog.integration.mjs",
+    "test:integration:evidence-segments": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-speech-segment-catalog.integration.mjs",
     "test:e2e:mvp-core-full": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/mvp-core-full-journey.e2e.mjs",
     "api:v1:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-public-contracts.mjs",
     "api:v1:baseline:update": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/update-public-contract-baseline.mjs",

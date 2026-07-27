@@ -80,7 +80,7 @@ function array(value: unknown, field: string): readonly unknown[] {
   return value
 }
 
-function storedTranscript(row: {
+export function hydrateStoredMediaTranscript(row: {
   transcriptJson: string
   transcriptHash: string
 }) {
@@ -224,7 +224,7 @@ function parseVisual(value: string): CatalogedSpeechSegment['visual'] {
   })
 }
 
-function hydrateSegment(
+export function hydrateStoredSpeechSegment(
   row: V2SpeechSegment,
 ): Readonly<CatalogedSpeechSegment> {
   const words = parseWords(row.wordsJson)
@@ -309,7 +309,7 @@ function hydrateRun(
   const segments = Object.freeze(
     [...row.segments]
       .sort((left, right) => left.sourceSegmentId - right.sourceSegmentId)
-      .map(hydrateSegment),
+      .map(hydrateStoredSpeechSegment),
   )
   const content = Object.freeze({
     schemaVersion: 'speech-segment-catalog-run/v1' as const,
@@ -416,7 +416,7 @@ implements SpeechSegmentCatalogRepository {
       projectId: row.projectId,
       sourceTranscriptId: row.id,
       sourceArtifactId: row.sourceArtifactId,
-      transcript: storedTranscript(row),
+      transcript: hydrateStoredMediaTranscript(row),
     })
   }
 
@@ -504,7 +504,7 @@ implements SpeechSegmentCatalogRepository {
         }
         if (
           transcript.transcriptHash !== run.sourceTranscriptHash ||
-          storedTranscript(transcript).transcriptHash !==
+          hydrateStoredMediaTranscript(transcript).transcriptHash !==
             run.sourceTranscriptHash
         ) {
           throw new DomainError(
@@ -685,7 +685,7 @@ implements SpeechSegmentCatalogRepository {
           : [`rights-${rightsStatus}`],
       )
       return Object.freeze({
-        segment: hydrateSegment(row),
+        segment: hydrateStoredSpeechSegment(row),
         matchedBy,
         rightsStatus,
         eligibleForReuse: blockedReasons.length === 0,

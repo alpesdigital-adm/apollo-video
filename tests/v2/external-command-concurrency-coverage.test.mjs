@@ -73,6 +73,9 @@ const coverage = Object.freeze({
   'apollo.projects.speech-segments.catalog': {
     mode: 'durable-covered', evidence: 'F2-001 exact transcript-hash binding, immutable virtual segment rows, one active serializable run and idempotent public API E2E',
   },
+  'apollo.projects.evidence-segments.catalog': {
+    mode: 'durable-covered', evidence: 'F2-002 exact SpeechSegment-hash and rights-snapshot binding, immutable serializable persistence and idempotent public API E2E',
+  },
   'apollo.projects.annotations.create': {
     mode: 'durable-covered', evidence: 'F1-040 version-bound annotation idempotency and Postgres integration E2E',
   },
@@ -164,7 +167,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    47,
+    48,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

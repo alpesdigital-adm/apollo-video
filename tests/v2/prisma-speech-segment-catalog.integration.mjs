@@ -40,7 +40,7 @@ async function waitForServer(baseUrl, child) {
   throw new Error('Next server did not become ready')
 }
 
-test('T-FR-043 catalogs and searches immutable virtual speech segments through the public API and PostgreSQL', {
+test('T-FR-043/T-FR-044 catalogs speech and evidence segments through the public API and PostgreSQL', {
   skip:
     process.env.APOLLO_SPEECH_SEGMENT_E2E !== '1' &&
     'set APOLLO_SPEECH_SEGMENT_E2E=1 and use an isolated V2 database',
@@ -282,7 +282,7 @@ test('T-FR-043 catalogs and searches immutable virtual speech segments through t
         allowedUses: ['rendering'],
         prohibitedUses: [],
         allowedLocales: ['pt-BR'],
-        consent: { status: 'not-required', allowedUses: [] },
+        consent: { status: 'approved', allowedUses: ['rendering'] },
       },
       actor: { type: 'api-client', id: issued.client.id },
     })
@@ -497,6 +497,201 @@ test('T-FR-043 catalogs and searches immutable virtual speech segments through t
     )
     assert.equal(unauthenticated.status, 401)
 
+    const sourceSpeech = catalogPayload.data.run.segments[0]
+    const evidenceBody = {
+      sourceSpeechSegmentId: sourceSpeech.id,
+      expectedSpeechSegmentHash: sourceSpeech.segmentHash,
+      category: 'financial-result',
+      claim: {
+        value: 'Uma reflexão completa gera resultado',
+        confidence: 0.98,
+      },
+      result: {
+        value: 'Resultado observado no período medido',
+        confidence: 0.95,
+      },
+      context: {
+        value: 'Caso individual sem atribuição causal',
+        confidence: 0.97,
+      },
+      qualifiers: [{
+        value: 'No período medido e sem garantia de resultado',
+        confidence: 0.99,
+      }],
+      subject: { value: 'Cliente E2E', confidence: 0.99 },
+      attribution: {
+        value: 'Depoimento autorizado do Cliente E2E',
+        confidence: 0.99,
+      },
+      compatibleOfferIds: ['offer-e2e-approved'],
+      compatibleAudienceTags: ['empreendedores'],
+      compatibleObjections: ['preço'],
+      credibilityScore: 0.91,
+      specificityScore: 0.94,
+      authenticityScore: 0.93,
+      contextRangeMs: [0, 1000],
+      frameRefs: ['frame-e2e-0', 'frame-e2e-27'],
+      adjacentEvidenceIds: [],
+      requiresContext: true,
+      producer: {
+        provider: 'apollo',
+        model: 'evidence-catalog',
+        version: '1.0.0',
+        confidence: 0.96,
+      },
+    }
+    const evidenceKey = `evidence-catalog-${suffix}`
+    const evidenceResponse = await fetch(
+      `${baseUrl}/v1/projects/${projectId}/evidence-segments`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': evidenceKey,
+        },
+        body: JSON.stringify(evidenceBody),
+      },
+    )
+    const evidencePayload = await evidenceResponse.json()
+    assert.equal(
+      evidenceResponse.status,
+      201,
+      JSON.stringify(evidencePayload),
+    )
+    assert.equal(evidencePayload.data.replayed, false)
+    assert.equal(
+      evidencePayload.data.evidence.exactTranscript,
+      sourceSpeech.exactText,
+    )
+    assert.equal(
+      evidencePayload.data.evidence.sourceSpeechSegmentHash,
+      sourceSpeech.segmentHash,
+    )
+    assert.equal(
+      evidencePayload.data.evidence.integrityStatus,
+      'context-required',
+    )
+    assert.equal(evidencePayload.data.evidence.consentStatus, 'approved')
+    assert.equal(
+      evidencePayload.data.evidence.physicalMaterialized,
+      false,
+    )
+    assert.deepEqual(
+      evidencePayload.data.evidence.contextRangeMs,
+      [0, 1000],
+    )
+    assert.deepEqual(
+      evidencePayload.data.evidence.handlesMs,
+      { before: 0, after: 100 },
+    )
+    assert.equal('requestFingerprint' in evidencePayload.data.evidence, false)
+    assert.equal('idempotencyKey' in evidencePayload.data.evidence, false)
+
+    const evidenceReplay = await fetch(
+      `${baseUrl}/v1/projects/${projectId}/evidence-segments`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': evidenceKey,
+        },
+        body: JSON.stringify(evidenceBody),
+      },
+    )
+    const evidenceReplayPayload = await evidenceReplay.json()
+    assert.equal(evidenceReplay.status, 200)
+    assert.equal(evidenceReplayPayload.data.replayed, true)
+    assert.equal(
+      evidenceReplayPayload.data.evidence.id,
+      evidencePayload.data.evidence.id,
+    )
+
+    const evidenceMismatch = await fetch(
+      `${baseUrl}/v1/projects/${projectId}/evidence-segments`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': evidenceKey,
+        },
+        body: JSON.stringify({
+          ...evidenceBody,
+          credibilityScore: 0.5,
+        }),
+      },
+    )
+    assert.equal(evidenceMismatch.status, 409)
+
+    const deniedEvidenceSearch = new URL(
+      `${baseUrl}/v1/projects/${projectId}/evidence-segments`,
+    )
+    deniedEvidenceSearch.searchParams.set(
+      'q',
+      'reflexão completa gera resultado',
+    )
+    deniedEvidenceSearch.searchParams.set(
+      'category',
+      'financial-result',
+    )
+    deniedEvidenceSearch.searchParams.set('subject', 'cliente e2e')
+    deniedEvidenceSearch.searchParams.set(
+      'offerId',
+      'offer-e2e-approved',
+    )
+    deniedEvidenceSearch.searchParams.set('objection', 'preço')
+    deniedEvidenceSearch.searchParams.set(
+      'intendedClaim',
+      evidenceBody.claim.value,
+    )
+    deniedEvidenceSearch.searchParams.set('includedContext', 'false')
+    const deniedEvidenceResponse = await fetch(deniedEvidenceSearch, {
+      headers: { authorization },
+    })
+    const deniedEvidencePayload = await deniedEvidenceResponse.json()
+    assert.equal(
+      deniedEvidenceResponse.status,
+      200,
+      JSON.stringify(deniedEvidencePayload),
+    )
+    assert.equal(deniedEvidencePayload.data.results.length, 1)
+    assert.equal(
+      deniedEvidencePayload.data.results[0].reuseDecision.allowed,
+      false,
+    )
+    assert.deepEqual(
+      deniedEvidencePayload.data.results[0].reuseDecision.reasons,
+      ['CONTEXT_REQUIRED'],
+    )
+
+    const allowedEvidenceSearch = new URL(deniedEvidenceSearch)
+    allowedEvidenceSearch.searchParams.set('includedContext', 'true')
+    const allowedEvidenceResponse = await fetch(allowedEvidenceSearch, {
+      headers: { authorization },
+    })
+    const allowedEvidencePayload = await allowedEvidenceResponse.json()
+    assert.equal(allowedEvidenceResponse.status, 200)
+    assert.equal(
+      allowedEvidencePayload.data.results[0].reuseDecision.allowed,
+      true,
+    )
+    assert.deepEqual(
+      allowedEvidencePayload.data.results[0].matchedBy,
+      ['text', 'category', 'subject', 'offer', 'objection'],
+    )
+    assert.deepEqual(
+      allowedEvidencePayload.data.results[0].reuseDecision
+        .requiredQualifierValues,
+      [evidenceBody.qualifiers[0].value],
+    )
+
+    const unauthenticatedEvidence = await fetch(
+      `${baseUrl}/v1/projects/${projectId}/evidence-segments`,
+    )
+    assert.equal(unauthenticatedEvidence.status, 401)
+
     assert.equal(
       await client.v2MediaArtifact.count({ where: { workspaceId } }),
       artifactCountBefore,
@@ -518,12 +713,68 @@ test('T-FR-043 catalogs and searches immutable virtual speech segments through t
       }),
       4,
     )
+    assert.equal(
+      await client.v2EvidenceSegment.count({
+        where: {
+          workspaceId,
+          projectId,
+          physicalMaterialized: false,
+        },
+      }),
+      1,
+    )
     await assert.rejects(
       client.v2SpeechSegment.update({
         where: { id: catalogPayload.data.run.segments[0].id },
         data: { physicalMaterialized: true },
       }),
       /speech_segments_virtual_check/,
+    )
+    await assert.rejects(
+      client.v2EvidenceSegment.update({
+        where: { id: evidencePayload.data.evidence.id },
+        data: { physicalMaterialized: true },
+      }),
+      /evidence_segments_policy_check/,
+    )
+
+    const rotatedRights = await setAssetRightsService({
+      repository: new PrismaAssetRightsRepository(client),
+      clock: () => new Date(createdAt.getTime() + 1_000),
+      createId: () => `speech-e2e-rights-rotated-${suffix}`,
+    })({
+      workspaceId,
+      artifactId,
+      baseRevision: assetRightsRevision(artifactId, 1),
+      draft: {
+        status: 'approved',
+        allowedUses: ['evidence-reuse', 'rendering'],
+        prohibitedUses: [],
+        allowedLocales: ['pt-BR'],
+        consent: {
+          status: 'approved',
+          allowedUses: ['evidence-reuse', 'rendering'],
+        },
+      },
+      actor: { type: 'api-client', id: issued.client.id },
+    })
+    assert.equal(rotatedRights.replayed, false)
+    assert.notEqual(
+      rotatedRights.snapshot.id,
+      evidencePayload.data.evidence.rightsSnapshotId,
+    )
+    const staleEvidenceResponse = await fetch(allowedEvidenceSearch, {
+      headers: { authorization },
+    })
+    const staleEvidencePayload = await staleEvidenceResponse.json()
+    assert.equal(staleEvidenceResponse.status, 200)
+    assert.equal(
+      staleEvidencePayload.data.results[0].reuseDecision.allowed,
+      false,
+    )
+    assert.deepEqual(
+      staleEvidencePayload.data.results[0].reuseDecision.reasons,
+      ['RIGHTS_SNAPSHOT_STALE'],
     )
 
     const concurrentResponses = await Promise.all([

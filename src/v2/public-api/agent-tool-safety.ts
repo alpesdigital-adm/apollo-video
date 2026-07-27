@@ -167,6 +167,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable virtual catalog bound to an exact transcript hash without materializing media or starting provider work.',
     },
+    'apollo.projects.evidence-segments.catalog': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable virtual proof record bound to an exact SpeechSegment hash and current rights snapshot without materializing media.',
+    },
     'apollo.projects.commands.apply': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',

@@ -74,6 +74,9 @@ const coverage = Object.freeze({
   'apollo.projects.speech-segments.catalog': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the exact transcript ID/hash, extraction policy, producer and annotations; serializable persistence rechecks transcript, artifact and actor before activating the immutable run',
   },
+  'apollo.projects.evidence-segments.catalog': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds the exact SpeechSegment ID/hash, claim/context metadata and current rights/consent snapshot; serializable persistence rechecks source, rights, artifact and actor',
+  },
   'apollo.projects.annotations.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the current ProjectVersion, proxy artifact and proxy hash',
   },
@@ -216,7 +219,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 21,
+    'idempotent-create': 22,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,

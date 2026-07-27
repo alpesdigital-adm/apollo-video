@@ -63,6 +63,7 @@ model V2Workspace {
   mvpCoreGates                    V2MvpCoreGate[]
   speechCatalogRuns               V2SpeechSegmentCatalogRun[]
   speechSegments                  V2SpeechSegment[]
+  evidenceSegments                V2EvidenceSegment[]
 
   @@map("workspaces")
 }
@@ -91,6 +92,7 @@ model V2ApiClient {
   qualityIterations           V2QualityIteration[]
   mvpCoreGates                V2MvpCoreGate[]
   speechCatalogRuns           V2SpeechSegmentCatalogRun[]
+  evidenceSegments            V2EvidenceSegment[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -217,6 +219,7 @@ model V2Project {
   mvpCoreGatesAsCompanion V2MvpCoreGate[]                 @relation("MvpCoreGateCompanionProject")
   speechCatalogRuns       V2SpeechSegmentCatalogRun[]
   speechSegments          V2SpeechSegment[]
+  evidenceSegments        V2EvidenceSegment[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -606,6 +609,7 @@ model V2MediaArtifact {
   transcriptSources         V2MediaTranscript[]
   speechCatalogRuns         V2SpeechSegmentCatalogRun[]
   speechSegments            V2SpeechSegment[]
+  evidenceSegments          V2EvidenceSegment[]
   reviewAnnotations         V2ReviewAnnotation[]
   renderElementMaps         V2RenderElementMap[]
   proxyReviews              V2ProxyReview[]
@@ -927,6 +931,7 @@ model V2AssetRightsSnapshot {
   currentForArtifacts V2MediaArtifact[]    @relation("CurrentAssetRights")
   consentDocument     V2MediaArtifact?     @relation("ConsentDocument", fields: [consentDocumentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   decisions           V2AssetUseDecision[]
+  evidenceSegments    V2EvidenceSegment[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, sequence])
@@ -1288,6 +1293,7 @@ model V2MediaTranscript {
   sourceManifest    V2MediaArtifactManifest     @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   speechCatalogRuns V2SpeechSegmentCatalogRun[]
   speechSegments    V2SpeechSegment[]
+  evidenceSegments  V2EvidenceSegment[]
 
   @@unique([id, workspaceId])
   @@unique([sourceArtifactId, transcriptHash])
@@ -1369,6 +1375,7 @@ model V2SpeechSegment {
   catalogRun       V2SpeechSegmentCatalogRun @relation(fields: [catalogRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   sourceTranscript V2MediaTranscript         @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   sourceArtifact   V2MediaArtifact           @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  evidenceSegments V2EvidenceSegment[]
 
   @@unique([id, workspaceId])
   @@unique([catalogRunId, sourceSegmentId])
@@ -1382,6 +1389,83 @@ model V2SpeechSegment {
   @@index([workspaceId, wardrobeNormalized])
   @@index([workspaceId, settingNormalized])
   @@map("speech_segments")
+}
+
+model V2EvidenceSegment {
+  id                         String   @id @db.VarChar(128)
+  workspaceId                String   @db.VarChar(128)
+  projectId                  String   @db.VarChar(128)
+  sourceSpeechSegmentId      String   @db.VarChar(128)
+  sourceSpeechSegmentHash    String   @db.Char(64)
+  sourceTranscriptId         String   @db.VarChar(128)
+  sourceTranscriptHash       String   @db.Char(64)
+  sourceArtifactId           String   @db.VarChar(128)
+  rightsSnapshotId           String   @db.VarChar(128)
+  rightsStatus               String   @db.VarChar(32)
+  consentStatus              String   @db.VarChar(32)
+  category                   String   @db.VarChar(32)
+  speakerJson                String   @db.Text
+  speakerId                  String   @db.VarChar(240)
+  claimJson                  String   @db.Text
+  claimNormalized            String   @db.Text
+  resultJson                 String?  @db.Text
+  resultNormalized           String?  @db.Text
+  contextJson                String   @db.Text
+  contextNormalized          String   @db.Text
+  qualifiersJson             String   @db.Text
+  qualifiersNormalized       String   @db.Text
+  subjectJson                String   @db.Text
+  subjectNormalized          String   @db.VarChar(240)
+  attributionJson            String   @db.Text
+  attributionNormalized      String   @db.VarChar(240)
+  compatibleOfferIdsJson     String   @db.Text
+  compatibleAudienceTagsJson String   @db.Text
+  compatibleObjectionsJson   String   @db.Text
+  objectionsNormalized       String   @db.Text
+  credibilityScore           Float
+  specificityScore           Float
+  authenticityScore          Float
+  sourceStartMs              Int
+  sourceEndMs                Int
+  contextStartMs             Int
+  contextEndMs               Int
+  handleBeforeMs             Int
+  handleAfterMs              Int
+  exactTranscript            String   @db.Text
+  frameRefsJson              String   @db.Text
+  adjacentEvidenceIdsJson    String   @db.Text
+  requiresContext            Boolean
+  integrityStatus            String   @db.VarChar(32)
+  integrityReasonsJson       String   @db.Text
+  producerJson               String   @db.Text
+  integrityPolicyVersion     String   @db.VarChar(64)
+  physicalMaterialized       Boolean  @default(false)
+  requestFingerprint         String   @db.Char(64)
+  idempotencyKey             String   @db.VarChar(128)
+  createdByType              String   @db.VarChar(32)
+  createdById                String   @db.VarChar(80)
+  createdAt                  DateTime @default(now()) @db.Timestamptz(3)
+  evidenceHash               String   @db.Char(64)
+
+  workspace           V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project             V2Project             @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceSpeechSegment V2SpeechSegment       @relation(fields: [sourceSpeechSegmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceTranscript    V2MediaTranscript     @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact      V2MediaArtifact       @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  rightsSnapshot      V2AssetRightsSnapshot @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy           V2ApiClient           @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@unique([workspaceId, evidenceHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceSpeechSegmentId])
+  @@index([workspaceId, sourceArtifactId, sourceStartMs])
+  @@index([workspaceId, category, integrityStatus])
+  @@index([workspaceId, subjectNormalized])
+  @@index([workspaceId, attributionNormalized])
+  @@index([workspaceId, rightsSnapshotId])
+  @@map("evidence_segments")
 }
 
 model V2ArtifactRenderOperation {
