@@ -71,6 +71,9 @@ const coverage = Object.freeze({
   'apollo.projects.mvp-core-gates.run': {
     mode: 'idempotent-create', evidence: 'request additionally binds both current project versions and hashes; the server derives all 50 checks from PostgreSQL and rechecks both versions before serializable persistence',
   },
+  'apollo.projects.speech-segments.catalog': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds the exact transcript ID/hash, extraction policy, producer and annotations; serializable persistence rechecks transcript, artifact and actor before activating the immutable run',
+  },
   'apollo.projects.annotations.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the current ProjectVersion, proxy artifact and proxy hash',
   },
@@ -213,7 +216,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 20,
+    'idempotent-create': 21,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,

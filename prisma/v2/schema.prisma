@@ -61,6 +61,8 @@ model V2Workspace {
   assetSelections                 V2AssetSelection[]
   qualityIterations               V2QualityIteration[]
   mvpCoreGates                    V2MvpCoreGate[]
+  speechCatalogRuns               V2SpeechSegmentCatalogRun[]
+  speechSegments                  V2SpeechSegment[]
 
   @@map("workspaces")
 }
@@ -78,16 +80,17 @@ model V2ApiClient {
   updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
   lastUsedAt  DateTime? @db.Timestamptz(3)
 
-  workspace                   V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace                   V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   credentials                 V2ApiCredential[]
   operations                  V2PublicOperation[]
   mediaUploads                V2MediaUpload[]
   mediaDownloadGrants         V2MediaDownloadGrant[]
-  createdWebhookEndpoints     V2WebhookEndpoint[]     @relation("WebhookEndpointCreator")
-  createdWebhookSubscriptions V2WebhookSubscription[] @relation("WebhookSubscriptionCreator")
+  createdWebhookEndpoints     V2WebhookEndpoint[]         @relation("WebhookEndpointCreator")
+  createdWebhookSubscriptions V2WebhookSubscription[]     @relation("WebhookSubscriptionCreator")
   proxyReviewDecisions        V2ProxyReviewDecision[]
   qualityIterations           V2QualityIteration[]
   mvpCoreGates                V2MvpCoreGate[]
+  speechCatalogRuns           V2SpeechSegmentCatalogRun[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -172,46 +175,48 @@ model V2MediaUploadPart {
 }
 
 model V2Project {
-  id               String   @id @db.VarChar(128)
-  workspaceId      String   @db.VarChar(128)
-  name             String   @db.VarChar(120)
-  status           String   @default("draft") @db.VarChar(32)
-  objective        String?  @db.VarChar(64)
-  format           String?  @db.VarChar(16)
-  locale           String?  @db.VarChar(35)
-  ownerId          String?  @db.VarChar(128)
-  currentVersionId String?  @db.VarChar(128)
-  duplicatedFromProjectId String? @db.VarChar(128)
-  createdByType    String   @db.VarChar(32)
-  createdById      String   @db.VarChar(128)
-  createdAt        DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  name                    String   @db.VarChar(120)
+  status                  String   @default("draft") @db.VarChar(32)
+  objective               String?  @db.VarChar(64)
+  format                  String?  @db.VarChar(16)
+  locale                  String?  @db.VarChar(35)
+  ownerId                 String?  @db.VarChar(128)
+  currentVersionId        String?  @db.VarChar(128)
+  duplicatedFromProjectId String?  @db.VarChar(128)
+  createdByType           String   @db.VarChar(32)
+  createdById             String   @db.VarChar(128)
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime @updatedAt @db.Timestamptz(3)
 
-  workspace             V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  versions              V2ProjectVersion[]              @relation("ProjectVersions")
-  snapshots             V2ProjectSnapshot[]
-  currentVersion        V2ProjectVersion?               @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  duplicatedFromProject V2Project?                      @relation("ProjectDuplicateSource", fields: [duplicatedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  duplicates            V2Project[]                     @relation("ProjectDuplicateSource")
-  versionsForkedFrom    V2ProjectVersion[]              @relation("ForkedFromProject")
-  mediaUploads          V2MediaUpload[]
-  mediaAssets           V2ProjectMediaAsset[]
-  mediaTranscripts      V2MediaTranscript[]
-  mediaIngestOperations V2MediaIngestOperation[]
-  proxyRenderOperations V2ProjectProxyRenderOperation[]
-  finalExportOperations V2ProjectFinalExportOperation[]
-  editCommands          V2EditCommand[]
-  directorRuns          V2DirectorRun[]
-  reviewAnnotations     V2ReviewAnnotation[]
-  renderElementMaps     V2RenderElementMap[]
-  reviewPatchProposals  V2ReviewPatchProposal[]
-  reviewPatchBatches    V2ReviewPatchBatch[]
-  proxyReviews          V2ProxyReview[]
-  proxyReviewDecisions  V2ProxyReviewDecision[]
-  assetSelections       V2AssetSelection[]
-  qualityIterations     V2QualityIteration[]
-  mvpCoreGatesAsPrimary V2MvpCoreGate[]          @relation("MvpCoreGatePrimaryProject")
-  mvpCoreGatesAsCompanion V2MvpCoreGate[]        @relation("MvpCoreGateCompanionProject")
+  workspace               V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  versions                V2ProjectVersion[]              @relation("ProjectVersions")
+  snapshots               V2ProjectSnapshot[]
+  currentVersion          V2ProjectVersion?               @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  duplicatedFromProject   V2Project?                      @relation("ProjectDuplicateSource", fields: [duplicatedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  duplicates              V2Project[]                     @relation("ProjectDuplicateSource")
+  versionsForkedFrom      V2ProjectVersion[]              @relation("ForkedFromProject")
+  mediaUploads            V2MediaUpload[]
+  mediaAssets             V2ProjectMediaAsset[]
+  mediaTranscripts        V2MediaTranscript[]
+  mediaIngestOperations   V2MediaIngestOperation[]
+  proxyRenderOperations   V2ProjectProxyRenderOperation[]
+  finalExportOperations   V2ProjectFinalExportOperation[]
+  editCommands            V2EditCommand[]
+  directorRuns            V2DirectorRun[]
+  reviewAnnotations       V2ReviewAnnotation[]
+  renderElementMaps       V2RenderElementMap[]
+  reviewPatchProposals    V2ReviewPatchProposal[]
+  reviewPatchBatches      V2ReviewPatchBatch[]
+  proxyReviews            V2ProxyReview[]
+  proxyReviewDecisions    V2ProxyReviewDecision[]
+  assetSelections         V2AssetSelection[]
+  qualityIterations       V2QualityIteration[]
+  mvpCoreGatesAsPrimary   V2MvpCoreGate[]                 @relation("MvpCoreGatePrimaryProject")
+  mvpCoreGatesAsCompanion V2MvpCoreGate[]                 @relation("MvpCoreGateCompanionProject")
+  speechCatalogRuns       V2SpeechSegmentCatalogRun[]
+  speechSegments          V2SpeechSegment[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -271,35 +276,35 @@ model V2ProjectVersion {
   commandId           String?  @db.VarChar(128)
   createdAt           DateTime @default(now()) @db.Timestamptz(3)
 
-  project               V2Project                       @relation("ProjectVersions", fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  currentForProjects    V2Project[]                     @relation("CurrentProjectVersion")
-  parent                V2ProjectVersion?               @relation("VersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
-  children              V2ProjectVersion[]              @relation("VersionParent")
-  forkedFromProject     V2Project?                      @relation("ForkedFromProject", fields: [forkedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  forkedFromVersion     V2ProjectVersion?               @relation("ForkedFromVersion", fields: [forkedFromVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  forkedVersions        V2ProjectVersion[]              @relation("ForkedFromVersion")
-  briefSnapshot         V2ProjectSnapshot               @relation("BriefSnapshot", fields: [briefSnapshotId], references: [id], onDelete: Restrict)
-  treatmentSnapshot     V2ProjectSnapshot?              @relation("TreatmentSnapshot", fields: [treatmentSnapshotId], references: [id], onDelete: Restrict)
-  storySnapshot         V2ProjectSnapshot?              @relation("StorySnapshot", fields: [storySnapshotId], references: [id], onDelete: Restrict)
-  editPlanSnapshot      V2ProjectSnapshot               @relation("EditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
-  policiesSnapshot      V2ProjectSnapshot               @relation("PoliciesSnapshot", fields: [policiesSnapshotId], references: [id], onDelete: Restrict)
-  command               V2EditCommand?                  @relation("CommandResultVersion", fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  commandsBasedOn       V2EditCommand[]                 @relation("CommandBaseVersion")
-  proxyRenderOperations V2ProjectProxyRenderOperation[]
-  finalExportOperations V2ProjectFinalExportOperation[]
-  directorRunsAsBase    V2DirectorRun[]                 @relation("DirectorRunBaseVersion")
-  directorRunAsResult   V2DirectorRun?                  @relation("DirectorRunResultVersion")
-  reviewAnnotations     V2ReviewAnnotation[]
-  renderElementMaps     V2RenderElementMap[]
-  patchProposalsAsBase  V2ReviewPatchProposal[]         @relation("PatchProposalBaseVersion")
-  patchProposalAsResult V2ReviewPatchProposal?          @relation("PatchProposalResultVersion")
-  patchBatchesAsBase    V2ReviewPatchBatch[]            @relation("PatchBatchBaseVersion")
-  patchBatchAsResult    V2ReviewPatchBatch?             @relation("PatchBatchResultVersion")
-  proxyReviews          V2ProxyReview[]
-  assetSelections       V2AssetSelection[]
-  qualityIterations     V2QualityIteration[]
-  mvpCoreGatesAsPrimary V2MvpCoreGate[]          @relation("MvpCoreGatePrimaryVersion")
-  mvpCoreGatesAsCompanion V2MvpCoreGate[]        @relation("MvpCoreGateCompanionVersion")
+  project                 V2Project                       @relation("ProjectVersions", fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  currentForProjects      V2Project[]                     @relation("CurrentProjectVersion")
+  parent                  V2ProjectVersion?               @relation("VersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  children                V2ProjectVersion[]              @relation("VersionParent")
+  forkedFromProject       V2Project?                      @relation("ForkedFromProject", fields: [forkedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  forkedFromVersion       V2ProjectVersion?               @relation("ForkedFromVersion", fields: [forkedFromVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  forkedVersions          V2ProjectVersion[]              @relation("ForkedFromVersion")
+  briefSnapshot           V2ProjectSnapshot               @relation("BriefSnapshot", fields: [briefSnapshotId], references: [id], onDelete: Restrict)
+  treatmentSnapshot       V2ProjectSnapshot?              @relation("TreatmentSnapshot", fields: [treatmentSnapshotId], references: [id], onDelete: Restrict)
+  storySnapshot           V2ProjectSnapshot?              @relation("StorySnapshot", fields: [storySnapshotId], references: [id], onDelete: Restrict)
+  editPlanSnapshot        V2ProjectSnapshot               @relation("EditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
+  policiesSnapshot        V2ProjectSnapshot               @relation("PoliciesSnapshot", fields: [policiesSnapshotId], references: [id], onDelete: Restrict)
+  command                 V2EditCommand?                  @relation("CommandResultVersion", fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  commandsBasedOn         V2EditCommand[]                 @relation("CommandBaseVersion")
+  proxyRenderOperations   V2ProjectProxyRenderOperation[]
+  finalExportOperations   V2ProjectFinalExportOperation[]
+  directorRunsAsBase      V2DirectorRun[]                 @relation("DirectorRunBaseVersion")
+  directorRunAsResult     V2DirectorRun?                  @relation("DirectorRunResultVersion")
+  reviewAnnotations       V2ReviewAnnotation[]
+  renderElementMaps       V2RenderElementMap[]
+  patchProposalsAsBase    V2ReviewPatchProposal[]         @relation("PatchProposalBaseVersion")
+  patchProposalAsResult   V2ReviewPatchProposal?          @relation("PatchProposalResultVersion")
+  patchBatchesAsBase      V2ReviewPatchBatch[]            @relation("PatchBatchBaseVersion")
+  patchBatchAsResult      V2ReviewPatchBatch?             @relation("PatchBatchResultVersion")
+  proxyReviews            V2ProxyReview[]
+  assetSelections         V2AssetSelection[]
+  qualityIterations       V2QualityIteration[]
+  mvpCoreGatesAsPrimary   V2MvpCoreGate[]                 @relation("MvpCoreGatePrimaryVersion")
+  mvpCoreGatesAsCompanion V2MvpCoreGate[]                 @relation("MvpCoreGateCompanionVersion")
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -599,6 +604,8 @@ model V2MediaArtifact {
   downloadGrants            V2MediaDownloadGrant[]
   projectAssets             V2ProjectMediaAsset[]
   transcriptSources         V2MediaTranscript[]
+  speechCatalogRuns         V2SpeechSegmentCatalogRun[]
+  speechSegments            V2SpeechSegment[]
   reviewAnnotations         V2ReviewAnnotation[]
   renderElementMaps         V2RenderElementMap[]
   proxyReviews              V2ProxyReview[]
@@ -1275,15 +1282,106 @@ model V2MediaTranscript {
   transcriptJson   String   @db.Text
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace      V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project        V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  sourceArtifact V2MediaArtifact         @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  sourceManifest V2MediaArtifactManifest @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace         V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project           V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact    V2MediaArtifact             @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceManifest    V2MediaArtifactManifest     @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  speechCatalogRuns V2SpeechSegmentCatalogRun[]
+  speechSegments    V2SpeechSegment[]
 
+  @@unique([id, workspaceId])
   @@unique([sourceArtifactId, transcriptHash])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId])
   @@map("media_transcripts")
+}
+
+model V2SpeechSegmentCatalogRun {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  sourceTranscriptId      String   @db.VarChar(128)
+  sourceTranscriptHash    String   @db.Char(64)
+  sourceArtifactId        String   @db.VarChar(128)
+  extractionPolicyVersion String   @db.VarChar(64)
+  producerJson            String   @db.Text
+  annotationsJson         String   @db.Text
+  annotationsHash         String   @db.Char(64)
+  segmentCount            Int
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  recordHash              String   @db.Char(64)
+  active                  Boolean  @default(true)
+  createdByType           String   @db.VarChar(32)
+  createdById             String   @db.VarChar(80)
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceTranscript V2MediaTranscript @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact   V2MediaArtifact   @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy        V2ApiClient       @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  segments         V2SpeechSegment[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@index([workspaceId, projectId, active, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceTranscriptId, active, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId, active])
+  @@map("speech_segment_catalog_runs")
+}
+
+model V2SpeechSegment {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  catalogRunId             String   @db.VarChar(128)
+  sourceTranscriptId       String   @db.VarChar(128)
+  sourceTranscriptHash     String   @db.Char(64)
+  sourceArtifactId         String   @db.VarChar(128)
+  sourceSegmentId          Int
+  exactText                String   @db.Text
+  normalizedText           String   @db.Text
+  wordsJson                String   @db.Text
+  speakerJson              String   @db.Text
+  speakerId                String   @db.VarChar(240)
+  speakerNormalized        String   @db.VarChar(240)
+  startMs                  Int
+  endMs                    Int
+  completeThoughtScore     Float
+  classification           String   @db.VarChar(32)
+  visualJson               String   @db.Text
+  emotionNormalized        String?  @db.VarChar(240)
+  expressionNormalized     String?  @db.VarChar(240)
+  wardrobeNormalized       String?  @db.VarChar(240)
+  settingNormalized        String?  @db.VarChar(240)
+  colorsNormalized         String   @db.Text
+  intentionsJson           String   @db.Text
+  intentionsNormalized     String   @db.Text
+  extractionProvenanceJson String   @db.Text
+  extractionPolicyVersion  String   @db.VarChar(64)
+  physicalMaterialized     Boolean  @default(false)
+  segmentHash              String   @db.Char(64)
+  createdAt                DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace        V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  catalogRun       V2SpeechSegmentCatalogRun @relation(fields: [catalogRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceTranscript V2MediaTranscript         @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact   V2MediaArtifact           @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([catalogRunId, sourceSegmentId])
+  @@unique([catalogRunId, segmentHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, catalogRunId, sourceSegmentId])
+  @@index([workspaceId, sourceArtifactId, startMs])
+  @@index([workspaceId, speakerNormalized])
+  @@index([workspaceId, classification, completeThoughtScore(sort: Desc)])
+  @@index([workspaceId, emotionNormalized])
+  @@index([workspaceId, wardrobeNormalized])
+  @@index([workspaceId, settingNormalized])
+  @@map("speech_segments")
 }
 
 model V2ArtifactRenderOperation {

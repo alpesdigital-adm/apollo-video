@@ -163,6 +163,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Persists one immutable fail-closed audit report derived only from existing server-side evidence.',
     },
+    'apollo.projects.speech-segments.catalog': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable virtual catalog bound to an exact transcript hash without materializing media or starting provider work.',
+    },
     'apollo.projects.commands.apply': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',

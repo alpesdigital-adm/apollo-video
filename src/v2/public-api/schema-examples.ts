@@ -683,6 +683,133 @@ const mvpCoreGateExample = {
   createdAt,
   recordHash: 'd'.repeat(64),
 }
+const speechCatalogProducerExample = {
+  provider: 'apollo',
+  model: 'speech-catalog',
+  version: '1.0.0',
+  confidence: 0.94,
+}
+const speechObservationProvenanceExample = {
+  source: 'catalog-observation',
+  provider: speechCatalogProducerExample.provider,
+  model: speechCatalogProducerExample.model,
+  version: speechCatalogProducerExample.version,
+  confidence: 0.92,
+  observedAt: createdAt,
+}
+const speechObservationExample = {
+  value: 'Confiante',
+  normalizedValue: 'confiante',
+  provenance: speechObservationProvenanceExample,
+}
+const speechSegmentExample = {
+  schemaVersion: 'speech-segment/v1',
+  id: 'speech-segment-example-1',
+  workspaceId,
+  projectId,
+  catalogRunId: 'speech-catalog-run-example-1',
+  sourceTranscriptId: 'transcript-example-1',
+  sourceTranscriptHash: 'e'.repeat(64),
+  sourceArtifactId: artifactId,
+  sourceSegmentId: 10,
+  exactText: 'Uma ideia completa muda a direção do vídeo.',
+  normalizedText: 'uma ideia completa muda a direcao do video',
+  words: [
+    { word: 'Uma', startMs: 1000, endMs: 1150, confidence: 0.96 },
+    { word: 'ideia', startMs: 1160, endMs: 1340, confidence: 0.96 },
+    { word: 'completa', startMs: 1350, endMs: 1600, confidence: 0.96 },
+    { word: 'muda', startMs: 1610, endMs: 1780, confidence: 0.96 },
+    { word: 'a', startMs: 1790, endMs: 1840, confidence: 0.96 },
+    { word: 'direção', startMs: 1850, endMs: 2100, confidence: 0.96 },
+    { word: 'do', startMs: 2110, endMs: 2200, confidence: 0.96 },
+    { word: 'vídeo.', startMs: 2210, endMs: 2500, confidence: 0.96 },
+  ],
+  speaker: {
+    value: 'person-specialist',
+    normalizedValue: 'person specialist',
+    provenance: {
+      ...speechObservationProvenanceExample,
+      confidence: 0.99,
+    },
+  },
+  speakerId: 'person-specialist',
+  rangeMs: [1000, 2500],
+  completeThoughtScore: 0.93,
+  classification: 'complete-thought',
+  visual: {
+    emotion: speechObservationExample,
+    expression: {
+      value: 'Sorriso leve',
+      normalizedValue: 'sorriso leve',
+      provenance: {
+        ...speechObservationProvenanceExample,
+        confidence: 0.88,
+      },
+    },
+    wardrobe: {
+      value: 'Camisa azul',
+      normalizedValue: 'camisa azul',
+      provenance: {
+        ...speechObservationProvenanceExample,
+        confidence: 0.95,
+      },
+    },
+    setting: {
+      value: 'Estúdio claro',
+      normalizedValue: 'estudio claro',
+      provenance: {
+        ...speechObservationProvenanceExample,
+        confidence: 0.9,
+      },
+    },
+    colors: [{
+      value: 'Azul',
+      normalizedValue: 'azul',
+      provenance: {
+        ...speechObservationProvenanceExample,
+        confidence: 0.9,
+      },
+    }],
+  },
+  intentions: [{
+    value: 'Hook de autoridade',
+    normalizedValue: 'hook de autoridade',
+    provenance: {
+      ...speechObservationProvenanceExample,
+      confidence: 0.94,
+    },
+  }],
+  extractionProvenance: {
+    source: 'transcript',
+    provider: 'groq',
+    model: 'whisper-large-v3',
+    version: 'media-transcript/v1',
+    confidence: 0.96,
+    observedAt: createdAt,
+  },
+  extractionPolicyVersion: 'speech-segment-extraction/v1',
+  physicalMaterialized: false,
+  createdAt,
+  segmentHash: 'f'.repeat(64),
+}
+const speechCatalogRunExample = {
+  schemaVersion: 'speech-segment-catalog-run/v1',
+  id: speechSegmentExample.catalogRunId,
+  workspaceId,
+  projectId,
+  sourceTranscriptId: speechSegmentExample.sourceTranscriptId,
+  sourceTranscriptHash: speechSegmentExample.sourceTranscriptHash,
+  sourceArtifactId: speechSegmentExample.sourceArtifactId,
+  extractionPolicyVersion: 'speech-segment-extraction/v1',
+  producer: speechCatalogProducerExample,
+  annotationsHash: '1'.repeat(64),
+  segments: [speechSegmentExample],
+  segmentCount: 1,
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  recordHash: '2'.repeat(64),
+  active: true,
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -2244,6 +2371,56 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/mvp-core-gate-list/v1': [
       {
         data: { gates: [mvpCoreGateExample] },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/catalog-speech-segments-request/v1': [
+      {
+        sourceTranscriptId: speechSegmentExample.sourceTranscriptId,
+        expectedTranscriptHash: speechSegmentExample.sourceTranscriptHash,
+        extractionPolicyVersion: 'speech-segment-extraction/v1',
+        producer: speechCatalogProducerExample,
+        annotations: [{
+          sourceSegmentId: speechSegmentExample.sourceSegmentId,
+          speaker: { value: 'person-specialist', confidence: 0.99 },
+          visual: {
+            emotion: { value: 'Confiante', confidence: 0.92 },
+            expression: { value: 'Sorriso leve', confidence: 0.88 },
+            wardrobe: { value: 'Camisa azul', confidence: 0.95 },
+            setting: { value: 'Estúdio claro', confidence: 0.9 },
+            colors: [{ value: 'Azul', confidence: 0.9 }],
+          },
+          intentions: [
+            { value: 'Hook de autoridade', confidence: 0.94 },
+          ],
+        }],
+      },
+    ],
+    'apollo://schemas/speech-segment-cataloged/v1': [
+      {
+        data: {
+          run: speechCatalogRunExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/speech-segment-search-results/v1': [
+      {
+        data: {
+          results: [{
+            segment: speechSegmentExample,
+            matchedBy: [
+              'speech',
+              'intention',
+              'person',
+              'wardrobe',
+            ],
+            rightsStatus: 'approved',
+            eligibleForReuse: true,
+            blockedReasons: [],
+          }],
+        },
         meta: { apiVersion: 'v1' },
       },
     ],

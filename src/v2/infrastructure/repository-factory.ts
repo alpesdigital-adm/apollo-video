@@ -28,6 +28,7 @@ import type { AssetRightsRepository } from '../application/ports/asset-rights-re
 import type { AssetSelectionRepository } from '../application/ports/asset-selection-repository.ts'
 import type { QualityIterationRepository } from '../application/ports/quality-iteration-repository.ts'
 import type { MvpCoreGateRepository } from '../application/ports/mvp-core-gate-repository.ts'
+import type { SpeechSegmentCatalogRepository } from '../application/ports/speech-segment-catalog-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -94,6 +95,7 @@ import { PrismaAssetRightsRepository } from './prisma/asset-rights-repository.ts
 import { PrismaAssetSelectionRepository } from './prisma/asset-selection-repository.ts'
 import { PrismaQualityIterationRepository } from './prisma/quality-iteration-repository.ts'
 import { PrismaMvpCoreGateRepository } from './prisma/mvp-core-gate-repository.ts'
+import { PrismaSpeechSegmentCatalogRepository } from './prisma/speech-segment-catalog-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -176,6 +178,10 @@ export function createQualityIterationRepository(): QualityIterationRepository {
 
 export function createMvpCoreGateRepository(): MvpCoreGateRepository {
   return new PrismaMvpCoreGateRepository(resolveV2Client())
+}
+
+export function createSpeechSegmentCatalogRepository(): SpeechSegmentCatalogRepository {
+  return new PrismaSpeechSegmentCatalogRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {
