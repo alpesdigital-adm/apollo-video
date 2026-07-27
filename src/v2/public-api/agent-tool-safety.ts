@@ -175,6 +175,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable hierarchy of virtual chapters and moments bound to an exact video artifact, manifest and rights snapshot without materializing media.',
     },
+    'apollo.projects.validated-segments.catalog': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable historical validation record bound to exact source hashes and current rights while preserving an explicit non-causal protected envelope.',
+    },
     'apollo.projects.commands.apply': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',

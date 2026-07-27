@@ -1066,6 +1066,94 @@ const longFormIndexRunExample = {
   recordHash: 'b'.repeat(64),
   active: true,
 }
+const validatedSegmentExample = {
+  schemaVersion: 'validated-segment/v1',
+  id: 'validated-segment-example-1',
+  workspaceId,
+  projectId,
+  sourceArtifactId: 'artifact-validated-example-1',
+  sourceArtifactSha256: 'c'.repeat(64),
+  sourceManifestId: 'manifest-validated-example-1',
+  sourceManifestHash: 'd'.repeat(64),
+  sourceSpeechSegmentId: 'speech-segment-validated-example-1',
+  sourceSpeechSegmentHash: 'e'.repeat(64),
+  scope: {
+    unit: 'hook',
+    evidenceScope: 'opening-edit',
+  },
+  wholeVideoValidated: false,
+  source: {
+    platform: 'instagram',
+    publicationRef: 'reel-example-validated-1',
+    accountRef: '@especialista',
+    url: 'https://www.instagram.com/reel/example-validated-1/',
+    observedAt: '2026-07-01T12:00:00.000Z',
+  },
+  performance: {
+    metric: 'three-second-hold-rate',
+    value: 0.81,
+    unit: 'ratio',
+    sampleSize: 25000,
+    period: {
+      start: '2026-07-01T12:00:00.000Z',
+      end: '2026-07-08T12:00:00.000Z',
+    },
+    comparison: {
+      label: 'Median of the previous ten publications',
+      value: 0.56,
+      unit: 'ratio',
+    },
+  },
+  protectedEnvelope: {
+    schemaVersion: 'protected-validation-envelope/v1',
+    sourceArtifactId: 'artifact-validated-example-1',
+    sourceArtifactSha256: 'c'.repeat(64),
+    sourceRangeMs: [1000, 8000],
+    sourceSpeechSegmentId: 'speech-segment-validated-example-1',
+    sourceSpeechSegmentHash: 'e'.repeat(64),
+    exactCopy: 'Este hook foi observado no material publicado.',
+    speakerId: 'person-specialist',
+    protectedAspects: ['copy', 'take', 'timing', 'opening'],
+    copyProtected: true,
+    takeProtected: true,
+    timingProtected: true,
+    openingProtected: true,
+    envelopeHash: 'f'.repeat(64),
+  },
+  rightsSnapshotId,
+  rightsStatus: 'approved',
+  consentStatus: 'not-required',
+  validatedAt: '2026-07-10T12:00:00.000Z',
+  expiresAt: '2027-01-10T12:00:00.000Z',
+  claimPolicyVersion: 'historical-association/v1',
+  causalClaimAllowed: false,
+  policyVersion: 'validated-segment/v1',
+  physicalMaterialized: false,
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  validatedSegmentHash: '1'.repeat(64),
+}
+const validatedSegmentReuseDecisionExample = {
+  schemaVersion: 'validated-segment-reuse-decision/v1',
+  validatedSegmentId: validatedSegmentExample.id,
+  targetRecipe: {
+    id: 'recipe-new-ad-example-1',
+    role: 'hook',
+    objective: 'lead-generation',
+    format: '9:16',
+    locale: 'pt-BR',
+  },
+  requestedChanges: [],
+  claim: 'historical-association',
+  compatible: true,
+  reasons: [],
+  protectedAspects:
+    validatedSegmentExample.protectedEnvelope.protectedAspects,
+  wholeVideoValidated: false,
+  causalClaimAllowed: false,
+  performanceInterpretation: 'historical-association',
+  evaluatedAt: createdAt,
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -2898,6 +2986,80 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             eligibleForReuse: true,
             blockedReasons: [],
           }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/catalog-validated-segment-request/v1': [
+      {
+        sourceArtifactId: validatedSegmentExample.sourceArtifactId,
+        expectedArtifactSha256:
+          validatedSegmentExample.sourceArtifactSha256,
+        sourceManifestId: validatedSegmentExample.sourceManifestId,
+        expectedManifestHash:
+          validatedSegmentExample.sourceManifestHash,
+        sourceSpeechSegmentId:
+          validatedSegmentExample.sourceSpeechSegmentId,
+        expectedSpeechSegmentHash:
+          validatedSegmentExample.sourceSpeechSegmentHash,
+        policyVersion: 'validated-segment/v1',
+        scope: validatedSegmentExample.scope,
+        source: validatedSegmentExample.source,
+        performance: validatedSegmentExample.performance,
+        validatedAt: validatedSegmentExample.validatedAt,
+        expiresAt: validatedSegmentExample.expiresAt,
+      },
+    ],
+    'apollo://schemas/validated-segment-cataloged/v1': [
+      {
+        data: {
+          segment: validatedSegmentExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/validated-segment-search-results/v1': [
+      {
+        data: {
+          results: [{
+            segment: validatedSegmentExample,
+            matchedBy: [
+              'text',
+              'platform',
+              'unit',
+              'evidence-scope',
+              'metric',
+              'active-at',
+            ],
+            currentRightsSnapshotId: rightsSnapshotId,
+            currentRightsStatus: 'approved',
+            currentConsentStatus: 'not-required',
+            eligibleForReuse: true,
+            blockedReasons: [],
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/preflight-validated-segment-reuse-request/v1': [
+      {
+        targetRecipe:
+          validatedSegmentReuseDecisionExample.targetRecipe,
+        requestedChanges: [],
+        claim: 'historical-association',
+      },
+      {
+        targetRecipe:
+          validatedSegmentReuseDecisionExample.targetRecipe,
+        requestedChanges: ['copy'],
+        claim: 'causality',
+      },
+    ],
+    'apollo://schemas/validated-segment-reuse-preflight/v1': [
+      {
+        data: {
+          decision: validatedSegmentReuseDecisionExample,
         },
         meta: { apiVersion: 'v1' },
       },

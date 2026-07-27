@@ -2412,6 +2412,168 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.validated-segments.catalog": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/catalog-validated-segment-request/v1",
+      "outputSchemaRef": "apollo://schemas/validated-segment-cataloged/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/validated-segments"
+      },
+      "toolName": "apollo.projects.validated-segments.catalog",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.validated-segments.reuse-preflight": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "inputSchemaRef": "apollo://schemas/preflight-validated-segment-reuse-request/v1",
+      "outputSchemaRef": "apollo://schemas/validated-segment-reuse-preflight/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/validated-segments/{validatedSegmentId}/reuse-preflight"
+      },
+      "toolName": "apollo.projects.validated-segments.reuse-preflight",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.validated-segments.search": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/validated-segment-search-results/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/validated-segments"
+      },
+      "toolName": "apollo.projects.validated-segments.search",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "q",
+          "description": "Publication, metric, protected copy or speaker text.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        {
+          "name": "sourceArtifactId",
+          "description": "Exact validated source artifact.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "platform",
+          "description": "Exact normalized publication platform.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "unit",
+          "description": "Explicit validation unit.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "hook",
+              "segment",
+              "whole-video"
+            ]
+          }
+        },
+        {
+          "name": "evidenceScope",
+          "description": "Scope actually supported by performance evidence.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "copy",
+              "spoken-take",
+              "opening-edit"
+            ]
+          }
+        },
+        {
+          "name": "metric",
+          "description": "Exact normalized performance metric.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "activeOnly",
+          "description": "Exclude validation records expired at request time.",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        {
+          "name": "limit",
+          "description": "Maximum search results.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.version-comparisons.act": {
       "version": "1.0.0",
       "exposure": "public",
@@ -8423,6 +8585,213 @@
               }
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/catalog-validated-segment-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceArtifactId",
+        "expectedArtifactSha256",
+        "sourceManifestId",
+        "expectedManifestHash",
+        "policyVersion",
+        "scope",
+        "source",
+        "performance",
+        "validatedAt"
+      ],
+      "dependentRequired": {
+        "sourceSpeechSegmentId": [
+          "expectedSpeechSegmentHash"
+        ],
+        "expectedSpeechSegmentHash": [
+          "sourceSpeechSegmentId"
+        ]
+      },
+      "properties": {
+        "sourceArtifactId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedArtifactSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceManifestId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedManifestHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceSpeechSegmentId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedSpeechSegmentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "policyVersion": {
+          "const": "validated-segment/v1"
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unit",
+            "evidenceScope"
+          ],
+          "properties": {
+            "unit": {
+              "enum": [
+                "hook",
+                "segment",
+                "whole-video"
+              ]
+            },
+            "evidenceScope": {
+              "enum": [
+                "copy",
+                "spoken-take",
+                "opening-edit"
+              ]
+            }
+          }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "platform",
+            "publicationRef",
+            "observedAt"
+          ],
+          "properties": {
+            "platform": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "publicationRef": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "accountRef": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2000
+            },
+            "observedAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "performance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "metric",
+            "value",
+            "unit",
+            "sampleSize",
+            "period"
+          ],
+          "properties": {
+            "metric": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0
+            },
+            "unit": {
+              "enum": [
+                "ratio",
+                "percent",
+                "seconds",
+                "count",
+                "currency",
+                "score"
+              ]
+            },
+            "sampleSize": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000000000
+            },
+            "period": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "start",
+                "end"
+              ],
+              "properties": {
+                "start": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "end": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "comparison": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label",
+                "value",
+                "unit"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                },
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "unit": {
+                  "enum": [
+                    "ratio",
+                    "percent",
+                    "seconds",
+                    "count",
+                    "currency",
+                    "score"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "validatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     },
@@ -15658,6 +16027,81 @@
               }
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/preflight-validated-segment-reuse-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetRecipe",
+        "requestedChanges",
+        "claim"
+      ],
+      "properties": {
+        "targetRecipe": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "role",
+            "objective",
+            "format",
+            "locale"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "role": {
+              "enum": [
+                "hook",
+                "body",
+                "cta",
+                "proof",
+                "whole-video"
+              ]
+            },
+            "objective": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "format": {
+              "enum": [
+                "9:16",
+                "16:9",
+                "4:5",
+                "1:1",
+                "21:9"
+              ]
+            },
+            "locale": {
+              "type": "string",
+              "pattern": "^[a-z]{2,3}(?:-[A-Z]{2})?$"
+            }
+          }
+        },
+        "requestedChanges": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "copy",
+              "take",
+              "timing",
+              "opening"
+            ]
+          }
+        },
+        "claim": {
+          "enum": [
+            "historical-association",
+            "causality"
+          ]
         }
       }
     },
@@ -36781,6 +37225,1070 @@
             "expiresAt": {
               "type": "string",
               "format": "date-time"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/validated-segment-cataloged/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "segment",
+            "replayed"
+          ],
+          "properties": {
+            "segment": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "sourceArtifactId",
+                "sourceArtifactSha256",
+                "sourceManifestId",
+                "sourceManifestHash",
+                "scope",
+                "wholeVideoValidated",
+                "source",
+                "performance",
+                "protectedEnvelope",
+                "rightsSnapshotId",
+                "rightsStatus",
+                "consentStatus",
+                "validatedAt",
+                "claimPolicyVersion",
+                "causalClaimAllowed",
+                "policyVersion",
+                "physicalMaterialized",
+                "createdBy",
+                "createdAt",
+                "validatedSegmentHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "validated-segment/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceArtifactSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sourceManifestId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceManifestHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sourceSpeechSegmentId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceSpeechSegmentHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "scope": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "unit",
+                    "evidenceScope"
+                  ],
+                  "properties": {
+                    "unit": {
+                      "enum": [
+                        "hook",
+                        "segment",
+                        "whole-video"
+                      ]
+                    },
+                    "evidenceScope": {
+                      "enum": [
+                        "copy",
+                        "spoken-take",
+                        "opening-edit"
+                      ]
+                    }
+                  }
+                },
+                "wholeVideoValidated": {
+                  "type": "boolean"
+                },
+                "source": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "platform",
+                    "publicationRef",
+                    "observedAt"
+                  ],
+                  "properties": {
+                    "platform": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "publicationRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    },
+                    "accountRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri",
+                      "maxLength": 2000
+                    },
+                    "observedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "performance": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "metric",
+                    "value",
+                    "unit",
+                    "sampleSize",
+                    "period"
+                  ],
+                  "properties": {
+                    "metric": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "value": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "unit": {
+                      "enum": [
+                        "ratio",
+                        "percent",
+                        "seconds",
+                        "count",
+                        "currency",
+                        "score"
+                      ]
+                    },
+                    "sampleSize": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10000000000
+                    },
+                    "period": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "start",
+                        "end"
+                      ],
+                      "properties": {
+                        "start": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "end": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "comparison": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "label",
+                        "value",
+                        "unit"
+                      ],
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "value": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "unit": {
+                          "enum": [
+                            "ratio",
+                            "percent",
+                            "seconds",
+                            "count",
+                            "currency",
+                            "score"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "protectedEnvelope": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "sourceArtifactId",
+                    "sourceArtifactSha256",
+                    "sourceRangeMs",
+                    "protectedAspects",
+                    "copyProtected",
+                    "takeProtected",
+                    "timingProtected",
+                    "openingProtected",
+                    "envelopeHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "protected-validation-envelope/v1"
+                    },
+                    "sourceArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sourceArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceRangeMs": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "sourceSpeechSegmentId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sourceSpeechSegmentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "exactCopy": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 20000
+                    },
+                    "speakerId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "protectedAspects": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 4,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "copyProtected": {
+                      "type": "boolean"
+                    },
+                    "takeProtected": {
+                      "type": "boolean"
+                    },
+                    "timingProtected": {
+                      "type": "boolean"
+                    },
+                    "openingProtected": {
+                      "type": "boolean"
+                    },
+                    "envelopeHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "rightsSnapshotId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "rightsStatus": {
+                  "enum": [
+                    "approved",
+                    "restricted",
+                    "unknown",
+                    "expired",
+                    "revoked"
+                  ]
+                },
+                "consentStatus": {
+                  "enum": [
+                    "approved",
+                    "not-required",
+                    "restricted",
+                    "unknown",
+                    "expired",
+                    "revoked"
+                  ]
+                },
+                "validatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "claimPolicyVersion": {
+                  "const": "historical-association/v1"
+                },
+                "causalClaimAllowed": {
+                  "const": false
+                },
+                "policyVersion": {
+                  "const": "validated-segment/v1"
+                },
+                "physicalMaterialized": {
+                  "const": false
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "api-client"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "validatedSegmentHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/validated-segment-reuse-preflight/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decision"
+          ],
+          "properties": {
+            "decision": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "validatedSegmentId",
+                "targetRecipe",
+                "requestedChanges",
+                "claim",
+                "compatible",
+                "reasons",
+                "protectedAspects",
+                "wholeVideoValidated",
+                "causalClaimAllowed",
+                "performanceInterpretation",
+                "evaluatedAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "validated-segment-reuse-decision/v1"
+                },
+                "validatedSegmentId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "targetRecipe": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "role",
+                    "objective",
+                    "format",
+                    "locale"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "role": {
+                      "enum": [
+                        "hook",
+                        "body",
+                        "cta",
+                        "proof",
+                        "whole-video"
+                      ]
+                    },
+                    "objective": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "format": {
+                      "enum": [
+                        "9:16",
+                        "16:9",
+                        "4:5",
+                        "1:1",
+                        "21:9"
+                      ]
+                    },
+                    "locale": {
+                      "type": "string",
+                      "pattern": "^[a-z]{2,3}(?:-[A-Z]{2})?$"
+                    }
+                  }
+                },
+                "requestedChanges": {
+                  "type": "array",
+                  "maxItems": 4,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "copy",
+                      "take",
+                      "timing",
+                      "opening"
+                    ]
+                  }
+                },
+                "claim": {
+                  "enum": [
+                    "historical-association",
+                    "causality"
+                  ]
+                },
+                "compatible": {
+                  "type": "boolean"
+                },
+                "reasons": {
+                  "type": "array",
+                  "maxItems": 32,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "protectedAspects": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 4,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "copy",
+                      "take",
+                      "timing",
+                      "opening"
+                    ]
+                  }
+                },
+                "wholeVideoValidated": {
+                  "type": "boolean"
+                },
+                "causalClaimAllowed": {
+                  "const": false
+                },
+                "performanceInterpretation": {
+                  "const": "historical-association"
+                },
+                "evaluatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/validated-segment-search-results/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "results"
+          ],
+          "properties": {
+            "results": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "segment",
+                  "matchedBy",
+                  "currentRightsStatus",
+                  "currentConsentStatus",
+                  "eligibleForReuse",
+                  "blockedReasons"
+                ],
+                "properties": {
+                  "segment": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "workspaceId",
+                      "projectId",
+                      "sourceArtifactId",
+                      "sourceArtifactSha256",
+                      "sourceManifestId",
+                      "sourceManifestHash",
+                      "scope",
+                      "wholeVideoValidated",
+                      "source",
+                      "performance",
+                      "protectedEnvelope",
+                      "rightsSnapshotId",
+                      "rightsStatus",
+                      "consentStatus",
+                      "validatedAt",
+                      "claimPolicyVersion",
+                      "causalClaimAllowed",
+                      "policyVersion",
+                      "physicalMaterialized",
+                      "createdBy",
+                      "createdAt",
+                      "validatedSegmentHash"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "validated-segment/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "workspaceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "projectId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceManifestId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceManifestHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceSpeechSegmentId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceSpeechSegmentHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "scope": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "unit",
+                          "evidenceScope"
+                        ],
+                        "properties": {
+                          "unit": {
+                            "enum": [
+                              "hook",
+                              "segment",
+                              "whole-video"
+                            ]
+                          },
+                          "evidenceScope": {
+                            "enum": [
+                              "copy",
+                              "spoken-take",
+                              "opening-edit"
+                            ]
+                          }
+                        }
+                      },
+                      "wholeVideoValidated": {
+                        "type": "boolean"
+                      },
+                      "source": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "platform",
+                          "publicationRef",
+                          "observedAt"
+                        ],
+                        "properties": {
+                          "platform": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "publicationRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "accountRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "url": {
+                            "type": "string",
+                            "format": "uri",
+                            "maxLength": 2000
+                          },
+                          "observedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      },
+                      "performance": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "metric",
+                          "value",
+                          "unit",
+                          "sampleSize",
+                          "period"
+                        ],
+                        "properties": {
+                          "metric": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "value": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "unit": {
+                            "enum": [
+                              "ratio",
+                              "percent",
+                              "seconds",
+                              "count",
+                              "currency",
+                              "score"
+                            ]
+                          },
+                          "sampleSize": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 10000000000
+                          },
+                          "period": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "start",
+                              "end"
+                            ],
+                            "properties": {
+                              "start": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "end": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          },
+                          "comparison": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "label",
+                              "value",
+                              "unit"
+                            ],
+                            "properties": {
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 240
+                              },
+                              "value": {
+                                "type": "number",
+                                "minimum": 0
+                              },
+                              "unit": {
+                                "enum": [
+                                  "ratio",
+                                  "percent",
+                                  "seconds",
+                                  "count",
+                                  "currency",
+                                  "score"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "protectedEnvelope": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "sourceArtifactId",
+                          "sourceArtifactSha256",
+                          "sourceRangeMs",
+                          "protectedAspects",
+                          "copyProtected",
+                          "takeProtected",
+                          "timingProtected",
+                          "openingProtected",
+                          "envelopeHash"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": "protected-validation-envelope/v1"
+                          },
+                          "sourceArtifactId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "sourceArtifactSha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "sourceRangeMs": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "sourceSpeechSegmentId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "sourceSpeechSegmentHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "exactCopy": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 20000
+                          },
+                          "speakerId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "protectedAspects": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "uniqueItems": true,
+                            "items": {
+                              "enum": [
+                                "copy",
+                                "take",
+                                "timing",
+                                "opening"
+                              ]
+                            }
+                          },
+                          "copyProtected": {
+                            "type": "boolean"
+                          },
+                          "takeProtected": {
+                            "type": "boolean"
+                          },
+                          "timingProtected": {
+                            "type": "boolean"
+                          },
+                          "openingProtected": {
+                            "type": "boolean"
+                          },
+                          "envelopeHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "rightsSnapshotId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "rightsStatus": {
+                        "enum": [
+                          "approved",
+                          "restricted",
+                          "unknown",
+                          "expired",
+                          "revoked"
+                        ]
+                      },
+                      "consentStatus": {
+                        "enum": [
+                          "approved",
+                          "not-required",
+                          "restricted",
+                          "unknown",
+                          "expired",
+                          "revoked"
+                        ]
+                      },
+                      "validatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "expiresAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "claimPolicyVersion": {
+                        "const": "historical-association/v1"
+                      },
+                      "causalClaimAllowed": {
+                        "const": false
+                      },
+                      "policyVersion": {
+                        "const": "validated-segment/v1"
+                      },
+                      "physicalMaterialized": {
+                        "const": false
+                      },
+                      "createdBy": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "id"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "api-client"
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "validatedSegmentHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  },
+                  "matchedBy": {
+                    "type": "array",
+                    "maxItems": 7,
+                    "uniqueItems": true,
+                    "items": {
+                      "enum": [
+                        "text",
+                        "source-artifact",
+                        "platform",
+                        "unit",
+                        "evidence-scope",
+                        "metric",
+                        "active-at"
+                      ]
+                    }
+                  },
+                  "currentRightsSnapshotId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "currentRightsStatus": {
+                    "enum": [
+                      "approved",
+                      "restricted",
+                      "unknown",
+                      "expired",
+                      "revoked"
+                    ]
+                  },
+                  "currentConsentStatus": {
+                    "enum": [
+                      "approved",
+                      "not-required",
+                      "restricted",
+                      "unknown",
+                      "expired",
+                      "revoked"
+                    ]
+                  },
+                  "eligibleForReuse": {
+                    "type": "boolean"
+                  },
+                  "blockedReasons": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  }
+                }
+              }
             }
           }
         },
