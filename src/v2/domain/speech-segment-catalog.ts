@@ -195,16 +195,64 @@ function milliseconds(seconds: number): number {
   return Math.round(seconds * 1_000)
 }
 
-function alignedWords(
+function wordsBySegment(
   transcriptWords: readonly TranscriptWord[],
-  source: Readonly<TranscriptSegment>,
-): readonly TranscriptWord[] {
-  const tolerance = 0.05
-  return transcriptWords.filter(
-    (word) =>
-      word.start + tolerance >= source.start &&
-      word.end <= source.end + tolerance,
+  transcriptSegments: readonly TranscriptSegment[],
+): ReadonlyMap<number, readonly TranscriptWord[]> {
+  const result = new Map<number, readonly TranscriptWord[]>()
+  let cursor = 0
+
+  for (const source of transcriptSegments) {
+    assertDomain(
+      cursor < transcriptWords.length,
+      'INVALID_ARGUMENT',
+      `Transcript segment ${source.id} has no aligned words`,
+    )
+    const target = normalizeSpeechText(source.text)
+    const start = cursor
+    let candidate = ''
+    let matched = false
+
+    while (cursor < transcriptWords.length) {
+      const normalizedWord = normalizeSpeechText(
+        transcriptWords[cursor].word,
+      )
+      candidate = candidate.length > 0
+        ? `${candidate} ${normalizedWord}`
+        : normalizedWord
+      cursor += 1
+
+      if (candidate === target) {
+        matched = true
+        break
+      }
+      if (!target.startsWith(`${candidate} `)) break
+    }
+
+    assertDomain(
+      matched,
+      'INVALID_ARGUMENT',
+      `Transcript segment ${source.id} text does not match its word alignment`,
+    )
+    result.set(source.id, Object.freeze(transcriptWords.slice(start, cursor)))
+  }
+
+  assertDomain(
+    cursor === transcriptWords.length,
+    'INVALID_ARGUMENT',
+    'Transcript contains aligned words outside its segments',
   )
+  return result
+}
+
+function alignedRange(
+  source: Readonly<TranscriptSegment>,
+  words: readonly TranscriptWord[],
+): readonly [number, number] {
+  return Object.freeze([
+    milliseconds(Math.min(source.start, words[0].start)),
+    milliseconds(Math.max(source.end, words[words.length - 1].end)),
+  ])
 }
 
 function thoughtAssessment(
@@ -349,10 +397,14 @@ export function catalogSpeechSegments(input: {
     catalogProducer,
     input.createdAt,
   )
+  const alignedWords = wordsBySegment(
+    input.transcript.words,
+    input.transcript.segments,
+  )
 
   return Object.freeze(
     input.transcript.segments.map((source) => {
-      const words = alignedWords(input.transcript.words, source)
+      const words = alignedWords.get(source.id) ?? []
       assertDomain(
         source.end > source.start && words.length > 0,
         'INVALID_ARGUMENT',
@@ -469,10 +521,7 @@ export function catalogSpeechSegments(input: {
         ),
         speaker,
         speakerId: speaker.value,
-        rangeMs: Object.freeze([
-          milliseconds(source.start),
-          milliseconds(source.end),
-        ]) as readonly [number, number],
+        rangeMs: alignedRange(source, words),
         completeThoughtScore: assessment.score,
         classification: assessment.classification,
         visual: observedVisual,

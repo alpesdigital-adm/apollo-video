@@ -157,6 +157,66 @@ test('T-FR-043 preserves exact text, normalized text and word-level alignment', 
   assert.equal(normalizeSpeechText('  GESTÃO — Medieval!  '), 'gestao medieval')
 })
 
+test('T-FR-043 aligns ordered text across overlapping provider timestamps and expands the virtual range', () => {
+  const transcript = createMediaTranscript({
+    language: 'pt-BR',
+    text: 'Comunicação do Brasil. Eu continuo.',
+    provider: 'fixture',
+    model: 'provider-rounded-boundaries',
+    words: [
+      { word: 'Comunicação', start: 0, end: 0.42 },
+      { word: 'do', start: 0.42, end: 0.5 },
+      { word: 'Brasil.', start: 0.5, end: 1.2 },
+      { word: 'Eu', start: 1.1, end: 1.2 },
+      { word: 'continuo.', start: 1.2, end: 1.8 },
+    ],
+    segments: [
+      {
+        id: 1,
+        start: 0,
+        end: 0.98,
+        text: 'Comunicação do Brasil.',
+        confidence: 0.95,
+      },
+      {
+        id: 2,
+        start: 1.1,
+        end: 1.8,
+        text: 'Eu continuo.',
+        confidence: 0.95,
+      },
+    ],
+  })
+  const segments = catalogSpeechSegments({
+    workspaceId: 'workspace-speech-boundary',
+    projectId: 'project-speech-boundary',
+    catalogRunId: 'speech-catalog-run-boundary',
+    sourceTranscriptId: 'transcript-speech-boundary',
+    sourceArtifactId: 'artifact-speech-boundary',
+    transcript,
+    producer: {
+      provider: 'apollo',
+      model: 'speech-catalog',
+      version: '1.0.0',
+      confidence: 0.95,
+    },
+    annotations: [],
+    createdAt,
+    createSegmentId: (sourceSegmentId) =>
+      `speech-segment-boundary-${sourceSegmentId}`,
+  })
+
+  assert.deepEqual(
+    segments.map((segment) => segment.words.map((word) => word.word)),
+    [
+      ['Comunicação', 'do', 'Brasil.'],
+      ['Eu', 'continuo.'],
+    ],
+  )
+  assert.deepEqual(segments[0].rangeMs, [0, 1200])
+  assert.deepEqual(segments[1].rangeMs, [1100, 1800])
+})
+
 test('T-FR-043 attaches confidence and provenance to visual, speaker and intention observations', () => {
   const [segment] = catalog()
   assert.equal(segment.visual.emotion.value, 'Confiante')
@@ -205,7 +265,7 @@ test('T-FR-043 fails closed for unknown annotation targets and missing word alig
       },
       annotations: [],
     }),
-    /has no aligned words/,
+    /does not match its word alignment/,
   )
   assert.throws(
     () => catalogSpeechSegments({
