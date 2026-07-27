@@ -20,15 +20,15 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.006, com a jornada integral do MVP Core e os
-seis primeiros slices de reutilização semântica operando sobre PostgreSQL V2,
+Estado auditado após o gate F2.007, com a jornada integral do MVP Core e os
+sete primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **203 de 1.259 microtarefas verificadas como efetivamente entregues (16,1%)**;
-- **1.056 microtarefas abertas ou aguardando nova comprovação**;
+- **208 de 1.259 microtarefas verificadas como efetivamente entregues (16,5%)**;
+- **1.051 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 a F2.006 foram entregues, mas não encerram o
+  permanecem abertos; F2.001 a F2.007 foram entregues, mas não encerram o
   gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
