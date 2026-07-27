@@ -64,6 +64,9 @@ model V2Workspace {
   speechCatalogRuns               V2SpeechSegmentCatalogRun[]
   speechSegments                  V2SpeechSegment[]
   evidenceSegments                V2EvidenceSegment[]
+  longFormIndexRuns               V2LongFormIndexRun[]
+  longFormChapters                V2LongFormChapter[]
+  longFormMoments                 V2LongFormMoment[]
 
   @@map("workspaces")
 }
@@ -93,6 +96,7 @@ model V2ApiClient {
   mvpCoreGates                V2MvpCoreGate[]
   speechCatalogRuns           V2SpeechSegmentCatalogRun[]
   evidenceSegments            V2EvidenceSegment[]
+  longFormIndexRuns           V2LongFormIndexRun[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -220,6 +224,9 @@ model V2Project {
   speechCatalogRuns       V2SpeechSegmentCatalogRun[]
   speechSegments          V2SpeechSegment[]
   evidenceSegments        V2EvidenceSegment[]
+  longFormIndexRuns       V2LongFormIndexRun[]
+  longFormChapters        V2LongFormChapter[]
+  longFormMoments         V2LongFormMoment[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -610,6 +617,9 @@ model V2MediaArtifact {
   speechCatalogRuns         V2SpeechSegmentCatalogRun[]
   speechSegments            V2SpeechSegment[]
   evidenceSegments          V2EvidenceSegment[]
+  longFormIndexRuns         V2LongFormIndexRun[]
+  longFormChapters          V2LongFormChapter[]
+  longFormMoments           V2LongFormMoment[]
   reviewAnnotations         V2ReviewAnnotation[]
   renderElementMaps         V2RenderElementMap[]
   proxyReviews              V2ProxyReview[]
@@ -670,6 +680,7 @@ model V2MediaArtifactManifest {
   renderOperations  V2ArtifactRenderOperation[]
   transcriptSources V2MediaTranscript[]
   proxyReviews      V2ProxyReview[]
+  longFormIndexRuns V2LongFormIndexRun[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, manifestHash])
@@ -932,6 +943,7 @@ model V2AssetRightsSnapshot {
   consentDocument     V2MediaArtifact?     @relation("ConsentDocument", fields: [consentDocumentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   decisions           V2AssetUseDecision[]
   evidenceSegments    V2EvidenceSegment[]
+  longFormIndexRuns   V2LongFormIndexRun[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, sequence])
@@ -1466,6 +1478,139 @@ model V2EvidenceSegment {
   @@index([workspaceId, attributionNormalized])
   @@index([workspaceId, rightsSnapshotId])
   @@map("evidence_segments")
+}
+
+model V2LongFormIndexRun {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceArtifactSha256 String   @db.Char(64)
+  sourceManifestId     String   @db.VarChar(128)
+  sourceManifestHash   String   @db.Char(64)
+  durationMs           Int
+  rightsSnapshotId     String   @db.VarChar(128)
+  rightsStatus         String   @db.VarChar(32)
+  consentStatus        String   @db.VarChar(32)
+  indexPolicyVersion   String   @db.VarChar(64)
+  producerJson         String   @db.Text
+  chapterCount         Int
+  momentCount          Int
+  hierarchyHash        String   @db.Char(64)
+  requestFingerprint   String   @db.Char(64)
+  idempotencyKey       String   @db.VarChar(128)
+  recordHash           String   @db.Char(64)
+  active               Boolean  @default(true)
+  createdByType        String   @db.VarChar(32)
+  createdById          String   @db.VarChar(80)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace      V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact V2MediaArtifact         @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceManifest V2MediaArtifactManifest @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  rightsSnapshot V2AssetRightsSnapshot   @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy      V2ApiClient             @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  chapters       V2LongFormChapter[]
+  moments        V2LongFormMoment[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@index([workspaceId, projectId, active, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId, active, createdAt(sort: Desc)])
+  @@index([workspaceId, rightsSnapshotId])
+  @@map("long_form_index_runs")
+}
+
+model V2LongFormChapter {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  indexRunId           String   @db.VarChar(128)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceChapterId      String   @db.VarChar(128)
+  ordinal              Int
+  titleJson            String   @db.Text
+  titleNormalized      String   @db.VarChar(240)
+  topicPathJson        String   @db.Text
+  topicPathNormalized  String   @db.Text
+  startMs              Int
+  endMs                Int
+  physicalMaterialized Boolean  @default(false)
+  indexPolicyVersion   String   @db.VarChar(64)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+  chapterHash          String   @db.Char(64)
+
+  workspace      V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  indexRun       V2LongFormIndexRun @relation(fields: [indexRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact V2MediaArtifact    @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  moments        V2LongFormMoment[]
+
+  @@unique([id, workspaceId])
+  @@unique([indexRunId, sourceChapterId])
+  @@unique([indexRunId, chapterHash])
+  @@unique([indexRunId, ordinal])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, indexRunId, startMs])
+  @@index([workspaceId, sourceArtifactId, startMs])
+  @@index([workspaceId, titleNormalized])
+  @@map("long_form_chapters")
+}
+
+model V2LongFormMoment {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  indexRunId            String   @db.VarChar(128)
+  chapterId             String   @db.VarChar(128)
+  sourceArtifactId      String   @db.VarChar(128)
+  sourceMomentId        String   @db.VarChar(128)
+  ordinal               Int
+  topicJson             String   @db.Text
+  topicNormalized       String   @db.VarChar(500)
+  summaryJson           String   @db.Text
+  summaryNormalized     String   @db.Text
+  keyQuoteJson          String?  @db.Text
+  keyQuoteNormalized    String?  @db.Text
+  speakerIdsJson        String   @db.Text
+  speakersNormalized    String   @db.Text
+  rangesJson            String   @db.Text
+  recommendedRangeIndex Int
+  recommendedStartMs    Int
+  recommendedEndMs      Int
+  evidenceSpanIdsJson   String   @db.Text
+  salience              Float
+  hookPotential         Float
+  standaloneScore       Float
+  contextScore          Float
+  insightDensity        Float
+  rolesJson             String   @db.Text
+  rolesNormalized       String   @db.Text
+  tagsJson              String   @db.Text
+  tagsNormalized        String   @db.Text
+  searchTextNormalized  String   @db.Text
+  physicalMaterialized  Boolean  @default(false)
+  indexPolicyVersion    String   @db.VarChar(64)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  momentHash            String   @db.Char(64)
+
+  workspace      V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  indexRun       V2LongFormIndexRun @relation(fields: [indexRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  chapter        V2LongFormChapter  @relation(fields: [chapterId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact V2MediaArtifact    @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([indexRunId, sourceMomentId])
+  @@unique([indexRunId, momentHash])
+  @@unique([indexRunId, ordinal])
+  @@index([workspaceId, projectId, salience(sort: Desc), createdAt(sort: Desc)])
+  @@index([workspaceId, indexRunId, recommendedStartMs])
+  @@index([workspaceId, chapterId, salience(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId, recommendedStartMs])
+  @@index([workspaceId, topicNormalized])
+  @@map("long_form_moments")
 }
 
 model V2ArtifactRenderOperation {

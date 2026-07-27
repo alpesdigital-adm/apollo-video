@@ -908,6 +908,164 @@ const evidenceSegmentExample = {
   createdAt,
   evidenceHash: '3'.repeat(64),
 }
+const longFormProducerExample = {
+  provider: 'apollo',
+  model: 'long-form-indexer',
+  version: '1.0.0',
+  confidence: 0.96,
+}
+const longFormObservation = (
+  value: string,
+  normalizedValue: string,
+  confidence = 0.96,
+) => ({
+  value,
+  normalizedValue,
+  provenance: {
+    source: 'long-form-analysis',
+    provider: longFormProducerExample.provider,
+    model: longFormProducerExample.model,
+    version: longFormProducerExample.version,
+    confidence,
+    observedAt: createdAt,
+  },
+})
+const longFormChapterTrafficId = 'long-form-chapter-example-traffic'
+const longFormChapterOfferId = 'long-form-chapter-example-offer'
+const longFormMomentTrafficId = 'long-form-moment-example-traffic'
+const longFormMomentOfferId = 'long-form-moment-example-offer'
+const longFormChapterTrafficExample = {
+  schemaVersion: 'long-form-chapter/v1',
+  id: longFormChapterTrafficId,
+  workspaceId,
+  projectId,
+  indexRunId: 'long-form-index-run-example-1',
+  sourceArtifactId: 'artifact-long-form-example-1',
+  sourceChapterId: 'source-chapter-traffic',
+  title: longFormObservation('TrÃ¡fego pago', 'trafego pago'),
+  topicPath: ['Marketing', 'TrÃ¡fego pago'],
+  rangeMs: [0, 3_600_000],
+  momentIds: [longFormMomentTrafficId],
+  physicalMaterialized: false,
+  indexPolicyVersion: 'long-form-index/v1',
+  createdAt,
+  chapterHash: '4'.repeat(64),
+}
+const longFormChapterOfferExample = {
+  schemaVersion: 'long-form-chapter/v1',
+  id: longFormChapterOfferId,
+  workspaceId,
+  projectId,
+  indexRunId: 'long-form-index-run-example-1',
+  sourceArtifactId: 'artifact-long-form-example-1',
+  sourceChapterId: 'source-chapter-offer',
+  title: longFormObservation('ConstruÃ§Ã£o da oferta', 'construcao da oferta'),
+  topicPath: ['Marketing', 'Oferta'],
+  rangeMs: [3_600_000, 7_200_000],
+  momentIds: [longFormMomentOfferId],
+  physicalMaterialized: false,
+  indexPolicyVersion: 'long-form-index/v1',
+  createdAt,
+  chapterHash: '5'.repeat(64),
+}
+const longFormMomentTrafficExample = {
+  schemaVersion: 'long-form-moment/v1',
+  id: longFormMomentTrafficId,
+  workspaceId,
+  projectId,
+  indexRunId: 'long-form-index-run-example-1',
+  chapterId: longFormChapterTrafficId,
+  sourceArtifactId: 'artifact-long-form-example-1',
+  sourceMomentId: 'source-moment-traffic-analysis',
+  topic: longFormObservation('AnÃ¡lise de campanhas', 'analise de campanhas'),
+  summary: longFormObservation(
+    'Como identificar uma campanha que precisa de ajuste.',
+    'como identificar uma campanha que precisa de ajuste',
+  ),
+  keyQuote: longFormObservation(
+    'O contexto muda a leitura da mÃ©trica.',
+    'o contexto muda a leitura da metrica',
+  ),
+  speakerIds: ['person-specialist'],
+  rangesMs: [[100_000, 130_000]],
+  recommendedRangeIndex: 0,
+  recommendedRangeMs: [100_000, 130_000],
+  evidenceSpanIds: ['speech-segment-example-1'],
+  salience: 0.82,
+  hookPotential: 0.71,
+  standaloneScore: 0.84,
+  contextScore: 0.89,
+  insightDensity: 0.8,
+  roles: ['education'],
+  tags: ['campaign-analysis'],
+  physicalMaterialized: false,
+  indexPolicyVersion: 'long-form-index/v1',
+  createdAt,
+  momentHash: '6'.repeat(64),
+}
+const longFormMomentOfferExample = {
+  schemaVersion: 'long-form-moment/v1',
+  id: longFormMomentOfferId,
+  workspaceId,
+  projectId,
+  indexRunId: 'long-form-index-run-example-1',
+  chapterId: longFormChapterOfferId,
+  sourceArtifactId: 'artifact-long-form-example-1',
+  sourceMomentId: 'source-moment-offer-construction',
+  topic: longFormObservation('Oferta', 'oferta'),
+  summary: longFormObservation(
+    'ConstruÃ§Ã£o da oferta a partir do problema central.',
+    'construcao da oferta a partir do problema central',
+  ),
+  keyQuote: longFormObservation(
+    'A oferta organiza a transformaÃ§Ã£o.',
+    'a oferta organiza a transformacao',
+  ),
+  speakerIds: ['person-specialist', 'person-host'],
+  rangesMs: [[4_000_000, 4_030_000]],
+  recommendedRangeIndex: 0,
+  recommendedRangeMs: [4_000_000, 4_030_000],
+  evidenceSpanIds: ['speech-segment-example-2'],
+  salience: 0.93,
+  hookPotential: 0.88,
+  standaloneScore: 0.91,
+  contextScore: 0.86,
+  insightDensity: 0.9,
+  roles: ['education', 'story'],
+  tags: ['offer'],
+  physicalMaterialized: false,
+  indexPolicyVersion: 'long-form-index/v1',
+  createdAt,
+  momentHash: '7'.repeat(64),
+}
+const longFormIndexRunExample = {
+  schemaVersion: 'long-form-index-run/v1',
+  id: 'long-form-index-run-example-1',
+  workspaceId,
+  projectId,
+  sourceArtifactId: 'artifact-long-form-example-1',
+  sourceArtifactSha256: '8'.repeat(64),
+  sourceManifestId: 'manifest-long-form-example-1',
+  sourceManifestHash: '9'.repeat(64),
+  durationMs: 7_200_000,
+  rightsSnapshotId: 'rights-snapshot-example-1',
+  rightsStatus: 'approved',
+  consentStatus: 'not-required',
+  indexPolicyVersion: 'long-form-index/v1',
+  producer: longFormProducerExample,
+  chapters: [
+    longFormChapterTrafficExample,
+    longFormChapterOfferExample,
+  ],
+  moments: [longFormMomentTrafficExample, longFormMomentOfferExample],
+  chapterCount: 2,
+  momentCount: 2,
+  hierarchyHash: 'a'.repeat(64),
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  recordHash: 'b'.repeat(64),
+  active: true,
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -2593,6 +2751,152 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               ],
               rightsSnapshotId: evidenceSegmentExample.rightsSnapshotId,
             },
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/catalog-long-form-moments-request/v1': [
+      {
+        sourceArtifactId: longFormIndexRunExample.sourceArtifactId,
+        expectedArtifactSha256:
+          longFormIndexRunExample.sourceArtifactSha256,
+        sourceManifestId: longFormIndexRunExample.sourceManifestId,
+        expectedManifestHash: longFormIndexRunExample.sourceManifestHash,
+        indexPolicyVersion: 'long-form-index/v1',
+        producer: longFormProducerExample,
+        chapters: [
+          {
+            sourceChapterId:
+              longFormChapterTrafficExample.sourceChapterId,
+            title: {
+              value: longFormChapterTrafficExample.title.value,
+              confidence: 0.96,
+            },
+            topicPath: longFormChapterTrafficExample.topicPath,
+            rangeMs: longFormChapterTrafficExample.rangeMs,
+          },
+          {
+            sourceChapterId:
+              longFormChapterOfferExample.sourceChapterId,
+            title: {
+              value: longFormChapterOfferExample.title.value,
+              confidence: 0.96,
+            },
+            topicPath: longFormChapterOfferExample.topicPath,
+            rangeMs: longFormChapterOfferExample.rangeMs,
+          },
+        ],
+        moments: [
+          {
+            sourceMomentId:
+              longFormMomentTrafficExample.sourceMomentId,
+            sourceChapterId:
+              longFormChapterTrafficExample.sourceChapterId,
+            topic: {
+              value: longFormMomentTrafficExample.topic.value,
+              confidence: 0.96,
+            },
+            summary: {
+              value: longFormMomentTrafficExample.summary.value,
+              confidence: 0.96,
+            },
+            keyQuote: {
+              value: longFormMomentTrafficExample.keyQuote.value,
+              confidence: 0.96,
+            },
+            speakerIds: longFormMomentTrafficExample.speakerIds,
+            rangesMs: longFormMomentTrafficExample.rangesMs,
+            recommendedRangeIndex: 0,
+            evidenceSpanIds:
+              longFormMomentTrafficExample.evidenceSpanIds,
+            salience: longFormMomentTrafficExample.salience,
+            hookPotential: longFormMomentTrafficExample.hookPotential,
+            standaloneScore:
+              longFormMomentTrafficExample.standaloneScore,
+            contextScore: longFormMomentTrafficExample.contextScore,
+            insightDensity:
+              longFormMomentTrafficExample.insightDensity,
+            roles: longFormMomentTrafficExample.roles,
+            tags: longFormMomentTrafficExample.tags,
+          },
+          {
+            sourceMomentId:
+              longFormMomentOfferExample.sourceMomentId,
+            sourceChapterId:
+              longFormChapterOfferExample.sourceChapterId,
+            topic: {
+              value: longFormMomentOfferExample.topic.value,
+              confidence: 0.97,
+            },
+            summary: {
+              value: longFormMomentOfferExample.summary.value,
+              confidence: 0.97,
+            },
+            keyQuote: {
+              value: longFormMomentOfferExample.keyQuote.value,
+              confidence: 0.97,
+            },
+            speakerIds: longFormMomentOfferExample.speakerIds,
+            rangesMs: longFormMomentOfferExample.rangesMs,
+            recommendedRangeIndex: 0,
+            evidenceSpanIds:
+              longFormMomentOfferExample.evidenceSpanIds,
+            salience: longFormMomentOfferExample.salience,
+            hookPotential: longFormMomentOfferExample.hookPotential,
+            standaloneScore:
+              longFormMomentOfferExample.standaloneScore,
+            contextScore: longFormMomentOfferExample.contextScore,
+            insightDensity:
+              longFormMomentOfferExample.insightDensity,
+            roles: longFormMomentOfferExample.roles,
+            tags: longFormMomentOfferExample.tags,
+          },
+        ],
+      },
+    ],
+    'apollo://schemas/long-form-moments-cataloged/v1': [
+      {
+        data: {
+          run: longFormIndexRunExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/long-form-moment-search-results/v1': [
+      {
+        data: {
+          results: [{
+            moment: longFormMomentOfferExample,
+            chapter: longFormChapterOfferExample,
+            matchedBy: ['text', 'speaker', 'role', 'salience'],
+            preview: {
+              sourceArtifactId:
+                longFormMomentOfferExample.sourceArtifactId,
+              masterDurationMs: 7_200_000,
+              requestedContextMs: { before: 10_000, after: 10_000 },
+              primary: {
+                sourceRangeMs:
+                  longFormMomentOfferExample.recommendedRangeMs,
+                previewRangeMs: [3_990_000, 4_040_000],
+                clippedBefore: false,
+                clippedAfter: false,
+              },
+              ranges: [{
+                sourceRangeMs:
+                  longFormMomentOfferExample.recommendedRangeMs,
+                previewRangeMs: [3_990_000, 4_040_000],
+                clippedBefore: false,
+                clippedAfter: false,
+              }],
+            },
+            rightsSnapshotId:
+              longFormIndexRunExample.rightsSnapshotId,
+            rightsStatus: 'approved',
+            consentStatus: 'not-required',
+            eligibleForReuse: true,
+            blockedReasons: [],
           }],
         },
         meta: { apiVersion: 'v1' },
