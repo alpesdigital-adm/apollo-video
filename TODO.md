@@ -1044,11 +1044,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.004 — ValidatedSegment [FR-046]
 
-- [ ] Modelar validation source, scope, date, performance evidence e expiry. Evidência T-FR-046.
-- [ ] Separar “hook validado” de “vídeo inteiro validado”. Evidência: `scope` explícito e `wholeVideoValidated` derivado.
-- [ ] Criar protected envelope para copy, take, timing e opening conforme escopo. Evidência T-FR-046.
-- [ ] Impedir alegação de causalidade além da evidência registrada. Evidência T-FR-046: causalidade sempre bloqueada.
-- [ ] Testar uso compatível e incompatível em nova recipe. Evidência T-FR-046.
+- [x] Modelar validation source, scope, date, performance evidence e expiry. Entregue em `a91f0a4`: `validated_segments` preserva fonte, publicação, período, métrica, amostra, comparação, validação, expiração, direitos, provenance e hashes canônicos; valores/cronologia são validados no domínio e no PostgreSQL.
+- [x] Separar “hook validado” de “vídeo inteiro validado”. Entregue em `a91f0a4`: `scope.unit` é explícito, hook/segment exigem `SpeechSegment`, whole-video o proíbe e `wholeVideoValidated` é derivado e protegido por constraint SQL.
+- [x] Criar protected envelope para copy, take, timing e opening conforme escopo. Entregue em `a91f0a4`: `protected-validation-envelope/v1` deriva `copy`, `copy+take` ou `copy+take+timing+opening`, preserva fonte/range/copy/speaker e possui hash de integridade.
+- [x] Impedir alegação de causalidade além da evidência registrada. Entregue em `a91f0a4`: policy `historical-association/v1`, domínio, preflight e constraint impedem causalidade; smoke bloqueou `CAUSALITY_NOT_SUPPORTED`.
+- [x] Testar uso compatível e incompatível em nova recipe. Entregue em `a91f0a4`: T-FR-046 5/5, regressão 498/498, E2E API/PostgreSQL 1/1 e smoke real com recipe compatível e bloqueios de role/copy/timing/causalidade; build, contratos, auditorias, migração 58 e quatro containers aprovados.
 
 ### F2.005 — Busca híbrida [FR-048]
 
