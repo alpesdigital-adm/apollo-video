@@ -150,7 +150,7 @@ Testes:
 
 Resultados antes do deploy:
 
-- unit/regressão: 484/484;
+- unit/regressão: 485/485;
 - integração PostgreSQL/API: 1/1;
 - build Next.js: aprovado;
 - typecheck: aprovado;
@@ -160,6 +160,45 @@ Resultados antes do deploy:
 
 ## 7. Evidência de produção
 
-Esta seção só será preenchida após migration, smoke autenticado e consulta
-direta no PostgreSQL de produção. O `TODO.md` não deve ser marcado antes
-dessa comprovação.
+Implantação aprovada em 2026-07-27:
+
+- implementação base: commit `3fd3e55`;
+- correção validada contra timestamps sobrepostos do transcript real:
+  commit/imagem `fbbd4c5`;
+- backup anterior à migration:
+  `/opt/backups/apollo-video/apollo_video_v2-20260727T121702Z.dump`,
+  SHA-256
+  `d2df3ea3dd380311f73bf8231945f38d567859bc5d57baddf0e2eaadbc111cd9`;
+- migration `20260727123000_speech_segment_catalog` aplicada; 55/55
+  migrations reconhecidas e nenhuma pendente após o deploy corrigido;
+- aplicação, ingest worker, render worker e webhook worker executando
+  `apollo-video:fbbd4c5`, saudáveis e com zero reinícios;
+- health, OpenAPI e capability discovery responderam HTTP 200;
+- OpenAPI publicou `POST` e `GET`
+  `/v1/projects/{projectId}/speech-segments`;
+- discovery autenticado publicou
+  `apollo.projects.speech-segments.catalog` e
+  `apollo.projects.speech-segments.search`.
+
+Smoke autenticado no projeto
+`project-fe932791-32f4-4453-8b85-6ce35a711860`:
+
+- `POST` inicial: HTTP 201;
+- replay com a mesma idempotency key: HTTP 200 e o mesmo run;
+- busca combinada por fala, intenção, pessoa, emoção, roupa e cenário:
+  HTTP 200 e um resultado;
+- chamada sem credencial: HTTP 401;
+- run persistido:
+  `speech-catalog-run-0a57512a-e85a-4cd6-9bc4-6f32821f310c`;
+- 31/31 segmentos e 294/294 palavras catalogados;
+- todos os segmentos persistidos com `physicalMaterialized=false`;
+- resultado com direitos aprovados e `eligibleForReuse=true`;
+- artifacts físicos permaneceram em 7 antes e depois da catalogação.
+
+O primeiro smoke na imagem `3fd3e55` detectou com segurança uma divergência
+entre ranges arredondados dos segmentos e timestamps sobrepostos das palavras:
+a API retornou HTTP 422 e não persistiu catálogo nem artifact. A política foi
+corrigida para alinhar o texto exato pela ordem canônica das palavras e expandir
+o range virtual até os limites das palavras correspondentes. A fixture de
+regressão reproduz esse formato e o transcript de produção passou integralmente
+antes e depois da implantação de `fbbd4c5`.

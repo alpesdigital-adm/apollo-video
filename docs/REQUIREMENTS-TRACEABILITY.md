@@ -124,7 +124,7 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 
 | Req | Título | Spec | Dep. | Evidência de aceite | Teste |
 |---|---|---|---|---|---|
-| FR-043 | SpeechSegment | S3 | D1,D2 | frase/range/alignment pesquisáveis | integration |
+| FR-043 | SpeechSegment | S3 | D1,D2 | frase/range/alignment pesquisáveis; API pública cataloga e busca segmentos virtuais com metadados/proveniência sem criar mídia | T-FR-043 5/5 + PostgreSQL/API E2E 1/1 + produção `fbbd4c5`, run `speech-catalog-run-0a57512a-e85a-4cd6-9bc4-6f32821f310c` |
 | FR-044 | EvidenceSegment | S3 | D1,D7 | claim/qualifier/consent preservados | policy |
 | FR-045 | LongFormMoment | S3 | D1,D2 | chapter/moment indexados | integration |
 | FR-046 | ValidatedSegment | S3 | D1,D7 | validationScope/protected envelope | integration |
