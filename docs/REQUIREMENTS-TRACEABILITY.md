@@ -130,7 +130,7 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-046 | ValidatedSegment | S3 | D1,D7 | validationScope/protected envelope | integration |
 | FR-048 | Busca híbrida | S3 | D1,D2 | filtros+OCR+vector+rerank | retrieval eval |
 | FR-053 | Processamento hierárquico | S1,S3 | D1,D2,D4 | long-form não exige visão integral | T-FR-053 + API/PostgreSQL E2E + smoke de produção |
-| FR-080 | ProductionBatch | S4 | D0,D1,D4 | lote e items independentes | integration |
+| FR-080 | ProductionBatch | S4 | D0,D1,D4 | lote e items independentes | T-FR-080 + API/PostgreSQL E2E + E2E visual e smoke de produção |
 | FR-081 | Script alignment | S4 | D1,D2 | roteiro↔fala↔range com confidence | golden |
 | FR-082 | Biblioteca de takes | S3,S4 | D1,D2 | alternates classificados | integration |
 | FR-083 | Compatibility graph | S4 | D2,D7 | hard failures e scores explicáveis | unit/golden |

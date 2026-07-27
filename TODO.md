@@ -1068,11 +1068,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.007 — ProductionBatch [FR-080]
 
-- [ ] Modelar batch, items, source groups, recipes, variants, budget e status agregado. Evidência T-FR-080.
-- [ ] Manter estado, erro, retry e artifacts independentes por item. Evidência T-FR-080/T-FR-087.
-- [ ] Criar UI de criação, acompanhamento e filtro do lote. Evidência: `/batches` com filtros e seleção em massa.
-- [ ] Calcular progresso a partir de steps/items reais. Evidência T-FR-080.
-- [ ] Testar batch parcialmente concluído, cancelado e retomado. Evidência T-FR-080.
+- [x] Modelar batch, items, source groups, recipes, variants, budget e status agregado. Entregue em `f44395d`: aggregate com definição imutável, matriz explícita, budget, hashes, constraints PostgreSQL e cinco capabilities públicas; smoke persistiu 3 de 4 combinações possíveis sem produto cartesiano.
+- [x] Manter estado, erro, retry e artifacts independentes por item. Entregue em `f44395d`: quatro steps por item, erro/custo/cache/attempt próprios, vínculo relacional de artifacts e retry isolado preservando lineage e custo. Evidência T-FR-080/T-FR-087.
+- [x] Criar UI de criação, acompanhamento e filtro do lote. Entregue em `f44395d`: `/batches` API-first com materiais autorizados, matriz por célula, filtros, detalhe, ações individuais/em massa e layout desktop/mobile; E2E de produção sem erro de console ou overflow.
+- [x] Calcular progresso a partir de steps/items reais. Entregue em `f44395d`: aggregate ignora percentual externo e deriva status, contagens, percentual e custo das 12 etapas persistidas; fixture parcial comprovou 41%, 5 concluídas, 1 falha e 4 canceladas.
+- [x] Testar batch parcialmente concluído, cancelado e retomado. Entregue em `f44395d`: E2E API/PostgreSQL real em banco reconstruído, regressão 519/519 e smoke de produção `production-batch-c9f53905-8c22-4710-92c2-e1f61423037d` com cancel/revision 2 e resume/revision 3. Evidência completa em `docs/quality/production-batch-v1.md`.
 
 ### F2.008 — Importação e script alignment [FR-081]
 
