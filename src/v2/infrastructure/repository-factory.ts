@@ -33,6 +33,7 @@ import type { EvidenceSegmentRepository } from '../application/ports/evidence-se
 import type { LongFormIndexRepository } from '../application/ports/long-form-index-repository.ts'
 import type { ValidatedSegmentRepository } from '../application/ports/validated-segment-repository.ts'
 import type { SemanticSearchRepository } from '../application/ports/semantic-search-repository.ts'
+import type { HierarchicalProcessingRepository } from '../application/ports/hierarchical-processing-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -104,6 +105,7 @@ import { PrismaEvidenceSegmentRepository } from './prisma/evidence-segment-repos
 import { PrismaLongFormIndexRepository } from './prisma/long-form-index-repository.ts'
 import { PrismaValidatedSegmentRepository } from './prisma/validated-segment-repository.ts'
 import { PrismaSemanticSearchRepository } from './prisma/semantic-search-repository.ts'
+import { PrismaHierarchicalProcessingRepository } from './prisma/hierarchical-processing-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -206,6 +208,11 @@ export function createValidatedSegmentRepository(): ValidatedSegmentRepository {
 
 export function createSemanticSearchRepository(): SemanticSearchRepository {
   return new PrismaSemanticSearchRepository(resolveV2Client())
+}
+
+export function createHierarchicalProcessingRepository():
+HierarchicalProcessingRepository {
+  return new PrismaHierarchicalProcessingRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {

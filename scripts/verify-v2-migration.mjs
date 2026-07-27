@@ -214,6 +214,17 @@ const requiredChecks = [
   'mvp_core_gates_result_check',
   'mvp_core_gates_report_bounds_check',
   'mvp_core_gates_actor_check',
+  'hierarchical_processing_runs_hashes_check',
+  'hierarchical_processing_runs_policy_check',
+  'hierarchical_processing_runs_bounds_check',
+  'hierarchical_processing_runs_previous_check',
+  'hierarchical_processing_runs_rights_check',
+  'hierarchical_processing_runs_json_check',
+  'hierarchical_processing_chunks_range_check',
+  'hierarchical_processing_chunks_hash_json_check',
+  'hierarchical_tier_executions_tier_check',
+  'hierarchical_tier_executions_status_check',
+  'hierarchical_tier_executions_bounds_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))
