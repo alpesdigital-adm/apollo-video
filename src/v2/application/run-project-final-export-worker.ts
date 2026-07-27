@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
-import { createReplayableMediaArtifactManifest } from '../domain/media-artifact.ts'
+import { createReconstructableMediaArtifactManifest } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
+import { createRenderInputSpec } from '../domain/render-input.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { VerifiedMediaStorage } from './ports/media-ingest.ts'
@@ -11,7 +12,9 @@ import type { EditorialProxyRenderer } from './ports/editorial-proxy-renderer.ts
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
+import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
+import { calculateVersionHash } from './version-hash.ts'
 
 const NON_RETRYABLE_CODES = new Set([
   'INVALID_RENDER_INPUT',
@@ -88,13 +91,23 @@ export function runNextProjectFinalExportOperationService(dependencies: {
     let leaseLost = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let renewal: Promise<boolean> | undefined
+    let leaseCommandTail: Promise<void> = Promise.resolve()
     let attemptRecorded = false
     let validators: Array<{ code: string; passed: boolean; message: string }> = []
     const command = (now: Date) => ({ operationId: operation.id, leaseOwner, attempt, now: now.toISOString() })
+    const withLeaseCommand = <T>(action: () => Promise<T>): Promise<T> => {
+      const result = leaseCommandTail.then(action)
+      leaseCommandTail = result.then(
+        () => undefined,
+        () => undefined,
+      )
+      return result
+    }
     const heartbeat = async () => {
       if (stopped || leaseLost) return false
       if (renewal) return renewal
-      renewal = (async () => {
+      renewal = withLeaseCommand(async () => {
+        if (stopped || leaseLost) return !leaseLost
         try {
           const now = clock()
           const renewed = await dependencies.operations.heartbeat({ ...command(now), leaseUntil: leaseWindow(now) })
@@ -107,7 +120,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         } finally {
           renewal = undefined
         }
-      })()
+      })
       return renewal
     }
     const scheduleHeartbeat = () => {
@@ -117,19 +130,33 @@ export function runNextProjectFinalExportOperationService(dependencies: {
     }
     const stopHeartbeat = () => { stopped = true; if (timer) clearTimeout(timer) }
     const enter = async (phase: 'rendering' | 'verifying' | 'persisting') => {
-      const entered = await dependencies.operations.advancePhase({ ...command(clock()), phase })
+      const entered = await withLeaseCommand(() =>
+        dependencies.operations.advancePhase({ ...command(clock()), phase }))
       if (!entered) { leaseLost = true; abortController.abort(); throw new DomainError('RENDER_EXECUTION_FAILED', 'Final export lease was lost') }
     }
-    const assertRights = async () => {
-      const rights = await dependencies.rights.findCurrent(operation.workspaceId, context.sourceArtifactId)
-      const decision = evaluateAssetUse(rights?.snapshot ?? null, {
-        workspaceId: operation.workspaceId,
-        use: 'rendering',
-        locale: sourceLocale,
-      }, clock())
-      if (decision.outcome !== 'allow') throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Source master rights no longer permit final export', { reasonCodes: decision.reasonCodes })
+    const assertRights = async (
+      artifactIds: readonly string[],
+      locale: string,
+    ) => {
+      for (const artifactId of artifactIds) {
+        const rights = await dependencies.rights.findCurrent(
+          operation.workspaceId,
+          artifactId,
+        )
+        const decision = evaluateAssetUse(rights?.snapshot ?? null, {
+          workspaceId: operation.workspaceId,
+          use: 'rendering',
+          locale,
+        }, clock())
+        if (decision.outcome !== 'allow') {
+          throw new DomainError(
+            'ASSET_RIGHTS_BLOCKED',
+            'A render source no longer permits final export',
+            { artifactId, reasonCodes: decision.reasonCodes },
+          )
+        }
+      }
     }
-    let sourceLocale = 'pt-BR'
     try {
       scheduleHeartbeat()
       const source = await dependencies.projects.readImmutableApprovedSource({
@@ -148,9 +175,28 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         sourceManifestId: context.sourceManifestId,
       })
       if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Immutable approved final export source disappeared')
-      sourceLocale = source.locale
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+      const immutableInputHash = calculateVersionHash({
+        kind: 'project-final-export/v1',
+        projectId: context.projectId,
+        projectVersionId: context.projectVersionId,
+        projectVersionHash: context.projectVersionHash,
+        editPlanSnapshotId: source.editPlanSnapshotId,
+        editPlanHash: source.editPlanHash,
+        directorRunId: source.directorRunId,
+        qualitySnapshotId: source.qualitySnapshotId,
+        qualitySnapshotHash: source.qualitySnapshotHash,
+        proxyReviewId: source.proxyReviewId,
+        proxyReviewHash: source.proxyReviewHash,
+        proxyArtifactId: source.proxyArtifactId,
+        sourceArtifactId: source.sourceArtifactId,
+        sourceManifestId: source.sourceManifestId,
+        sourceSha256: source.sourceSha256,
+        renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+        outputSpec: context.outputSpec,
+      })
       if (
+        immutableInputHash !== context.inputHash ||
         source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
         source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4) ||
         source.format !== context.outputSpec.aspectRatio ||
@@ -159,7 +205,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         source.proxyArtifactId !== context.proxyArtifactId ||
         Math.abs(source.editPlan.fps - context.outputSpec.fps) > 0.01
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Approved EditPlan or final OutputSpec is not safe to render')
-      await assertRights()
+      const renderSourceIds = source.renderSources.map((asset) => asset.artifactId)
+      await assertRights(renderSourceIds, source.locale)
       const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
@@ -167,7 +214,11 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       const rendered = await dependencies.renderer.render({
         operationId: operation.id,
         renderKind: 'final',
-        sourcePath: resolveArtifactPath(dependencies.artifactRoot, source.sourceArtifactKey),
+        sources: source.renderSources.map((asset) => ({
+          artifactId: asset.artifactId,
+          path: resolveArtifactPath(dependencies.artifactRoot, asset.artifactKey),
+          mediaType: asset.mediaType,
+        })),
         clips,
         fps: context.outputSpec.fps,
         format: source.format,
@@ -237,7 +288,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       if (validators.some((validator) => !validator.passed)) {
         throw new DomainError('RENDER_OUTPUT_INVALID', 'Final export does not match its approved OutputSpec')
       }
-      await assertRights()
+      await assertRights(renderSourceIds, source.locale)
       await enter('persisting')
       const stored = await dependencies.storage.promoteDerived({
         workspaceId: operation.workspaceId,
@@ -251,7 +302,50 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         stored.byteSize !== rendered.byteSize
       ) throw new DomainError('RENDER_OUTPUT_INVALID', 'Promoted final output checksum or byte size changed')
       const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-final/1.0.0').digest('hex')
-      const replayableManifest = createReplayableMediaArtifactManifest({
+      const renderInput = createRenderInputSpec({
+        schemaVersion: 'render-input/v1',
+        renderer: {
+          id: 'ffmpeg',
+          version: 'static',
+          digest: toolDigest,
+        },
+        composition: {
+          id: 'apollo-editorial',
+          version: 'v1',
+          propsSchemaRef: 'apollo://render-props/apollo-editorial/v1',
+        },
+        plan: {
+          id: source.editPlan.id,
+          versionId: source.projectVersionId,
+          hash: source.editPlanHash,
+        },
+        output: {
+          id: `final-${context.outputSpec.aspectRatio.replace(':', '-')}`,
+          locale: source.locale,
+          aspectRatio: context.outputSpec.aspectRatio,
+          width: context.outputSpec.width,
+          height: context.outputSpec.height,
+          fps: context.outputSpec.fps,
+          safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+          durationInFrames: expectedFrames,
+        },
+        assets: source.renderSources.map((asset, ordinal) => ({
+          id: `asset-${ordinal + 1}`,
+          artifactId: asset.artifactId,
+          artifactKey: asset.artifactKey,
+          kind: asset.mediaType,
+          role: asset.role,
+          ordinal,
+          sha256: asset.sha256,
+          byteSize: asset.byteSize,
+        })),
+        props: {
+          editPlan: source.editPlan,
+          outputSpec: context.outputSpec,
+          sourceArtifactIds: source.renderSources.map((asset) => asset.artifactId),
+        },
+      })
+      const reconstructableManifest = createReconstructableMediaArtifactManifest({
         artifactKey: stored.key,
         artifactSha256: stored.sha256,
         byteSize: stored.byteSize,
@@ -275,26 +369,31 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             approval: context.approval,
           },
         },
-        sources: [{
-          artifactKey: source.sourceArtifactKey,
-          sha256: source.sourceSha256,
-          role: 'source-master',
+        sources: source.renderSources.map((asset) => ({
+          artifactKey: asset.artifactKey,
+          sha256: asset.sha256,
+          role: asset.role,
           execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
-        }],
+        })),
         probe: {
           width: rendered.probe.width,
           height: rendered.probe.height,
           duration: rendered.probe.duration,
           fps: rendered.probe.fps,
         },
+        renderInput,
       })
       const persisted = await dependencies.artifacts.persistOrReplay({
         workspaceId: operation.workspaceId,
         artifactId: context.outputArtifactId,
         manifestId: context.outputManifestId,
-        lineageIds: [`lineage-${createHash('sha256').update(`${operation.workspaceId}:${context.inputHash}:${context.outputManifestId}:final`).digest('hex')}`],
-        manifest: replayableManifest.manifest,
-        recipeParameters: replayableManifest.recipeParameters,
+        lineageIds: source.renderSources.map((asset, index) =>
+          `lineage-${createHash('sha256')
+            .update(`${operation.workspaceId}:${context.inputHash}:${context.outputManifestId}:final:${asset.artifactId}:${index}`)
+            .digest('hex')}`),
+        manifest: reconstructableManifest.manifest,
+        recipeParameters: reconstructableManifest.recipeParameters,
+        renderInput: reconstructableManifest.renderInput,
         createdAt: clock().toISOString(),
       })
       if (persisted.artifactId !== context.outputArtifactId || persisted.manifestId !== context.outputManifestId) {
@@ -348,7 +447,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         createdAt: clock().toISOString(),
       })
       stopHeartbeat()
-      const succeeded = await dependencies.operations.succeed(command(clock()))
+      const succeeded = await withLeaseCommand(() =>
+        dependencies.operations.succeed(command(clock())))
       if (!succeeded) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       await dependencies.renderer.cleanup(operation.id).catch(() => undefined)
       return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
@@ -386,7 +486,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       const nextAttemptAt = failure.retryable && attempt < operation.maxAttempts
         ? new Date(failedAt.getTime() + calculatePublicOperationRetryDelayMs({ attempt, baseDelayMs: retryBaseDelayMs, maxDelayMs: retryMaxDelayMs })).toISOString()
         : undefined
-      const failed = await dependencies.operations.failOrRetry({ ...command(failedAt), error: failure, ...(nextAttemptAt ? { nextAttemptAt } : {}) })
+      const failed = await withLeaseCommand(() =>
+        dependencies.operations.failOrRetry({ ...command(failedAt), error: failure, ...(nextAttemptAt ? { nextAttemptAt } : {}) }))
       if (!failed) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       if (failed.operation.status === 'failed') await dependencies.projects.markExportFailed({ workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId })
       await dependencies.renderer.cleanup(operation.id).catch(() => undefined)

@@ -7,7 +7,7 @@ import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 
 const baseHash = 'a'.repeat(64)
 
-function compiledEditorialPlan() {
+function compiledEditorialPlan(selectedInsert = false) {
   const words = [
     ['Seja', 0, 8], ['bem-vindo.', 8, 24],
     ['Comunicar', 34, 48], ['bem', 48, 56], ['muda', 56, 66], ['resultados.', 66, 88],
@@ -31,7 +31,20 @@ function compiledEditorialPlan() {
     sources: Object.freeze([{ id: 'source-1', artifactId: 'artifact-master-1', kind: 'video', durationSeconds: 14 }]),
     videoTracks: Object.freeze([{ id: 'track-base', kind: 'base-video', clips: Object.freeze([
       Object.freeze({ id: 'clip-1', sourceArtifactId: 'artifact-master-1', sourceInFrame: 0, sourceOutFrame: 100, timelineInFrame: 0, timelineOutFrame: 100, rate: 1 }),
-      Object.freeze({ id: 'clip-2', sourceArtifactId: 'artifact-master-1', sourceInFrame: 160, sourceOutFrame: 260, timelineInFrame: 100, timelineOutFrame: 200, rate: 1 }),
+      Object.freeze({
+        id: 'clip-2',
+        sourceArtifactId: selectedInsert ? 'artifact-selected-insert-1' : 'artifact-master-1',
+        sourceInFrame: selectedInsert ? 0 : 160,
+        sourceOutFrame: selectedInsert ? 100 : 260,
+        timelineInFrame: 100,
+        timelineOutFrame: 200,
+        rate: 1,
+        ...(selectedInsert ? {
+          audioSourceArtifactId: 'artifact-master-1',
+          audioSourceInFrame: 160,
+          audioSourceOutFrame: 260,
+        } : {}),
+      }),
       Object.freeze({ id: 'clip-3', sourceArtifactId: 'artifact-master-1', sourceInFrame: 320, sourceOutFrame: 420, timelineInFrame: 200, timelineOutFrame: 300, rate: 1 }),
     ]) }]),
     overlayTracks: Object.freeze([]), subtitleTracks: Object.freeze([]), audioTracks: Object.freeze([]), effectTracks: Object.freeze([]),
@@ -61,7 +74,8 @@ function compiledEditorialPlan() {
 }
 
 class InMemoryDirectorRepository {
-  constructor() {
+  constructor(options = {}) {
+    this.selectedInsert = options.selectedInsert ?? false
     this.currentVersion = createProjectVersion({
       id: 'project-version-4', workspaceId: 'workspace-1', projectId: 'project-1', sequence: 4,
       parentVersionId: 'project-version-3',
@@ -83,7 +97,7 @@ class InMemoryDirectorRepository {
       currentVersion: this.currentVersion,
       brief: { productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } } },
       policies: { automaticZoom: false, faceProtection: true },
-      editPlan: compiledEditorialPlan(),
+      editPlan: compiledEditorialPlan(this.selectedInsert),
       transcript: {
         id: 'transcript-1', sourceArtifactId: 'artifact-master-1', language: 'pt-BR',
         provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64),
@@ -103,8 +117,8 @@ class InMemoryDirectorRepository {
   }
 }
 
-function fixture() {
-  const repository = new InMemoryDirectorRepository()
+function fixture(options = {}) {
+  const repository = new InMemoryDirectorRepository(options)
   const counters = new Map()
   let event = 0
   const service = runProjectDirectorService({
@@ -182,4 +196,18 @@ test('Director V2 replays exactly and rejects payload or version drift', async (
     () => stale.service(request({ baseHash: 'c'.repeat(64), idempotency: { key: 'director-stale' } })),
     (error) => error instanceof DomainError && error.code === 'VERSION_CONFLICT',
   )
+})
+
+test('Director V2 preserves a selected B-roll insert with bound source audio and an explicit decision', async () => {
+  const { service } = fixture({ selectedInsert: true })
+  const result = await service(request())
+  const insertedClip = result.run.editPlan.videoTracks[0].clips[1]
+
+  assert.equal(insertedClip.sourceArtifactId, 'artifact-selected-insert-1')
+  assert.equal(insertedClip.audioSourceArtifactId, 'artifact-master-1')
+  assert.equal(result.run.treatmentPlan.mode, 'talking-head')
+  assert.equal(result.run.decisions.some((decision) =>
+    decision.category === 'insert' && decision.choice === 'use_selected_insert'), true)
+  assert.equal(result.run.assumptions.some((assumption) =>
+    assumption.includes('asset-selection') && assumption.includes('rights')), true)
 })

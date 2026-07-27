@@ -47,10 +47,17 @@ function parseCriticIssues(value: string | undefined): readonly Readonly<ProxyQu
   }))
 }
 
-function hydrateSource(project: Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>): Readonly<ProjectProxyRenderSource> | null {
+function hydrateSource(
+  project: Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>,
+  expected?: { sourceArtifactId?: string; sourceManifestId?: string },
+): Readonly<ProjectProxyRenderSource> | null {
   const version = project?.versions[0]
-  const media = project?.mediaAssets[0]
-  const manifest = media?.artifact.manifests[0]
+  const media = project?.mediaAssets.find((item) =>
+    item.role === 'source-master' &&
+    (!expected?.sourceArtifactId || item.artifactId === expected.sourceArtifactId))
+  const manifest = expected?.sourceManifestId
+    ? media?.artifact.manifests.find((item) => item.id === expected.sourceManifestId)
+    : media?.artifact.manifests[0]
   if (!project || !version || !media || !manifest) return null
   const editPlan = parseRecord(version.editPlanSnapshot.contentJson, 'project proxy EditPlan') as unknown as EditorialCutEditPlan | DirectedEditPlan
   const manifestBody = parseRecord(manifest.manifestJson, 'project proxy source manifest')
@@ -60,6 +67,52 @@ function hydrateSource(project: Awaited<ReturnType<PrismaProjectProxyRenderRepos
     typeof artifactBody !== 'object' || artifactBody === null || Array.isArray(artifactBody) ||
     typeof (artifactBody as Record<string, unknown>).artifactKey !== 'string'
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy source is inconsistent')
+  const clips = editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+  const referencedArtifactIds = [...new Set(clips.flatMap((clip) => [
+    clip.sourceArtifactId,
+    clip.audioSourceArtifactId ?? clip.sourceArtifactId,
+  ]))].sort()
+  const renderSources = referencedArtifactIds.map((artifactId) => {
+    const link = project.mediaAssets.find((item) => item.artifactId === artifactId)
+    const sourceManifest = link?.artifact.manifests[0]
+    const sourceBody = sourceManifest
+      ? parseRecord(sourceManifest.manifestJson, `project render source manifest ${sourceManifest.id}`)
+      : null
+    const sourceArtifact = sourceBody?.artifact
+    if (
+      !link ||
+      !sourceManifest ||
+      link.artifact.status !== 'available' ||
+      !['video', 'audio'].includes(link.artifact.mediaType) ||
+      typeof sourceArtifact !== 'object' ||
+      sourceArtifact === null ||
+      Array.isArray(sourceArtifact) ||
+      typeof (sourceArtifact as Record<string, unknown>).artifactKey !== 'string'
+    ) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        `Referenced render source ${artifactId} is unavailable`,
+      )
+    }
+    return Object.freeze({
+      artifactId,
+      manifestId: sourceManifest.id,
+      artifactKey: (sourceArtifact as Record<string, unknown>).artifactKey as string,
+      sha256: link.artifact.sha256,
+      byteSize: Number(link.artifact.byteSize),
+      mediaType: link.artifact.mediaType as 'video' | 'audio',
+      container: link.artifact.container,
+      role: link.role === 'source-master'
+        ? 'source-master' as const
+        : 'selected-insert' as const,
+    })
+  })
+  if (!renderSources.some((item) => item.artifactId === media.artifactId)) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Compiled EditPlan no longer references its source master audio or video',
+    )
+  }
   return Object.freeze({
     projectId: project.id,
     projectVersionId: version.id,
@@ -71,6 +124,7 @@ function hydrateSource(project: Awaited<ReturnType<PrismaProjectProxyRenderRepos
     sourceManifestId: manifest.id,
     sourceArtifactKey: (artifactBody as Record<string, unknown>).artifactKey as string,
     sourceSha256: media.artifact.sha256,
+    renderSources: Object.freeze(renderSources),
     originalFileName: media.originalFileName,
     uploadReceivedAt: (media.upload?.createdAt ?? media.createdAt).toISOString(),
     criticIssues: parseCriticIssues(version.directorRunAsResult?.qualitySnapshot.contentJson),
@@ -97,7 +151,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         versions: {
           where: input.projectVersionId
             ? { id: input.projectVersionId, ...(input.editPlanSnapshotId ? { editPlanSnapshotId: input.editPlanSnapshotId } : {}) }
-            : {},
+            : { currentForProjects: { some: { id: input.projectId, workspaceId: input.workspaceId } } },
           orderBy: { sequence: 'desc' as const },
           take: 1,
           include: {
@@ -106,15 +160,12 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
           },
         },
         mediaAssets: {
-          where: { role: 'source-master', ...(input.sourceArtifactId ? { artifactId: input.sourceArtifactId } : {}) },
-          orderBy: { createdAt: 'desc' as const },
-          take: 1,
+          orderBy: [{ role: 'asc' as const }, { createdAt: 'desc' as const }],
           include: { upload: { select: { createdAt: true } }, artifact: {
             include: {
               manifests: {
-                where: input.sourceManifestId ? { id: input.sourceManifestId } : {},
                 orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
-                take: 1,
+                take: 8,
               },
             },
           } },
@@ -124,34 +175,11 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   }
 
   async readCurrentSource(input: { workspaceId: string; projectId: string }) {
-    const project = await this.client.v2Project.findFirst({
-      where: { id: input.projectId, workspaceId: input.workspaceId },
-      select: {
-        id: true, format: true, currentVersionId: true,
-        versions: {
-          where: { currentForProjects: { some: { id: input.projectId, workspaceId: input.workspaceId } } },
-          take: 1,
-          include: {
-            editPlanSnapshot: true,
-            directorRunAsResult: { include: { qualitySnapshot: true } },
-          },
-        },
-        mediaAssets: {
-          where: { role: 'source-master' },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          include: {
-            upload: { select: { createdAt: true } },
-            artifact: { include: { manifests: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 } } },
-          },
-        },
-      },
-    })
-    return hydrateSource(project as Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>)
+    return hydrateSource(await this.queryProject(input))
   }
 
   async readImmutableSource(input: { workspaceId: string; projectId: string; projectVersionId: string; editPlanSnapshotId: string; sourceArtifactId: string; sourceManifestId: string }) {
-    return hydrateSource(await this.queryProject(input))
+    return hydrateSource(await this.queryProject(input), input)
   }
 
   async attachCompletedOutput(input: Parameters<ProjectProxyRenderRepository['attachCompletedOutput']>[0]): Promise<void> {

@@ -1,5 +1,10 @@
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
+import {
+  MVP_CORE_ACCEPTANCE_CRITERIA,
+  MVP_CORE_CRITERION_CHECKS,
+  MVP_CORE_EVIDENCE_RESOURCE_TYPES,
+} from '../domain/mvp-core-gate.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
 
@@ -13,6 +18,158 @@ export interface PublicSchemaDefinition {
 
 const idSchema = { type: 'string', minLength: 3, maxLength: 128 }
 const dateTimeSchema = { type: 'string', format: 'date-time' }
+const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
+const mvpCoreCheckCodes = Object.values(MVP_CORE_CRITERION_CHECKS).flat()
+const mvpCoreEvidenceReferenceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'id'],
+  properties: {
+    type: { enum: MVP_CORE_EVIDENCE_RESOURCE_TYPES },
+    id: idSchema,
+    hash: sha256Schema,
+  },
+}
+const mvpCoreCriterionEvidenceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'criterion',
+    'source',
+    'automatic',
+    'passed',
+    'missingChecks',
+    'checks',
+  ],
+  properties: {
+    criterion: { enum: MVP_CORE_ACCEPTANCE_CRITERIA },
+    source: { const: 'server' },
+    automatic: { const: true },
+    passed: { type: 'boolean' },
+    missingChecks: {
+      type: 'array',
+      maxItems: 6,
+      uniqueItems: true,
+      items: { enum: mvpCoreCheckCodes },
+    },
+    checks: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 6,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'passed', 'references'],
+        properties: {
+          code: { enum: mvpCoreCheckCodes },
+          passed: { type: 'boolean' },
+          references: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 16,
+            items: mvpCoreEvidenceReferenceSchema,
+          },
+        },
+      },
+    },
+  },
+}
+const mvpCoreGateReportSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion',
+    'gate',
+    'workspaceId',
+    'primaryProjectId',
+    'companionProjectId',
+    'approved',
+    'covered',
+    'passed',
+    'total',
+    'missing',
+    'failed',
+    'serverEvidenceOnly',
+    'evidence',
+    'evaluatedAt',
+    'fingerprint',
+  ],
+  properties: {
+    schemaVersion: { const: 'mvp-core-gate-report/v1' },
+    gate: { const: 'mvp-core/v1' },
+    workspaceId: idSchema,
+    primaryProjectId: idSchema,
+    companionProjectId: idSchema,
+    approved: { type: 'boolean' },
+    covered: { type: 'integer', minimum: 0, maximum: 16 },
+    passed: { type: 'integer', minimum: 0, maximum: 16 },
+    total: { const: 16 },
+    missing: {
+      type: 'array',
+      maxItems: 16,
+      uniqueItems: true,
+      items: { enum: MVP_CORE_ACCEPTANCE_CRITERIA },
+    },
+    failed: {
+      type: 'array',
+      maxItems: 16,
+      uniqueItems: true,
+      items: { enum: MVP_CORE_ACCEPTANCE_CRITERIA },
+    },
+    serverEvidenceOnly: { const: true },
+    evidence: {
+      type: 'array',
+      maxItems: 16,
+      items: mvpCoreCriterionEvidenceSchema,
+    },
+    evaluatedAt: dateTimeSchema,
+    fingerprint: sha256Schema,
+  },
+}
+const mvpCoreGateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion',
+    'id',
+    'workspaceId',
+    'primaryProjectId',
+    'companionProjectId',
+    'primaryVersionId',
+    'companionVersionId',
+    'primaryVersionHash',
+    'companionVersionHash',
+    'report',
+    'reportFingerprint',
+    'createdBy',
+    'createdAt',
+    'recordHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'mvp-core-gate/v1' },
+    id: idSchema,
+    workspaceId: idSchema,
+    primaryProjectId: idSchema,
+    companionProjectId: idSchema,
+    primaryVersionId: idSchema,
+    companionVersionId: idSchema,
+    primaryVersionHash: sha256Schema,
+    companionVersionHash: sha256Schema,
+    report: mvpCoreGateReportSchema,
+    reportFingerprint: sha256Schema,
+    createdBy: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id'],
+      properties: {
+        type: { const: 'api-client' },
+        id: idSchema,
+      },
+    },
+    createdAt: dateTimeSchema,
+    recordHash: sha256Schema,
+  },
+}
 const manualInspectorSchema = {
   type: 'object',
   additionalProperties: false,
@@ -723,8 +880,6 @@ const searchableProjectSchema = {
     ownerId: idSchema,
   },
 }
-
-const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
 
 const renderElementSchema = {
   type: 'object', additionalProperties: false,
@@ -4061,6 +4216,128 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           },
         },
         replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('duplicate-project-request', 1, 'Copy-on-write project duplication request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['expectedVersionId', 'expectedVersionHash'],
+    properties: {
+      expectedVersionId: idSchema,
+      expectedVersionHash: sha256Schema,
+      name: { type: 'string', minLength: 1, maxLength: 120 },
+    },
+  }),
+  defineSchema('project-duplicated', 1, 'Copy-on-write project duplication response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'project',
+        'version',
+        'sharedArtifactIds',
+        'copiedBytes',
+        'replayed',
+      ],
+      properties: {
+        project: {
+          ...searchableProjectSchema,
+          required: [
+            ...searchableProjectSchema.required,
+            'duplicatedFromProjectId',
+          ],
+          properties: {
+            ...searchableProjectSchema.properties,
+            duplicatedFromProjectId: idSchema,
+          },
+        },
+        version: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'id',
+            'sequence',
+            'baseHash',
+            'forkedFromProjectId',
+            'forkedFromVersionId',
+            'snapshotRefs',
+            'createdAt',
+          ],
+          properties: {
+            id: idSchema,
+            sequence: { const: 1 },
+            baseHash: sha256Schema,
+            forkedFromProjectId: idSchema,
+            forkedFromVersionId: idSchema,
+            snapshotRefs: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['brief', 'editPlan', 'policies'],
+              properties: {
+                brief: idSchema,
+                treatment: idSchema,
+                story: idSchema,
+                editPlan: idSchema,
+                policies: idSchema,
+              },
+            },
+            createdAt: dateTimeSchema,
+          },
+        },
+        sharedArtifactIds: {
+          type: 'array',
+          maxItems: 10000,
+          uniqueItems: true,
+          items: idSchema,
+        },
+        copiedBytes: { const: 0 },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('run-mvp-core-gate-request', 1, 'Server-evaluated MVP Core gate request', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'primaryVersionId',
+      'primaryVersionHash',
+      'companionProjectId',
+      'companionVersionId',
+      'companionVersionHash',
+      'duplicateProjectId',
+    ],
+    properties: {
+      primaryVersionId: idSchema,
+      primaryVersionHash: sha256Schema,
+      companionProjectId: idSchema,
+      companionVersionId: idSchema,
+      companionVersionHash: sha256Schema,
+      duplicateProjectId: idSchema,
+    },
+  }),
+  defineSchema('mvp-core-gate-executed', 1, 'Persisted server-evaluated MVP Core gate response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gate', 'replayed'],
+      properties: {
+        gate: mvpCoreGateSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('mvp-core-gate-list', 1, 'Persisted MVP Core gate history',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gates'],
+      properties: {
+        gates: {
+          type: 'array',
+          maxItems: 100,
+          items: mvpCoreGateSchema,
+        },
       },
     }),
   ),

@@ -27,6 +27,9 @@ interface DirectorSourceEditPlan {
     clips: readonly Readonly<{
       id: string
       sourceArtifactId: string
+      audioSourceArtifactId?: string
+      audioSourceInFrame?: number
+      audioSourceOutFrame?: number
       sourceInFrame: number
       sourceOutFrame: number
       timelineInFrame: number

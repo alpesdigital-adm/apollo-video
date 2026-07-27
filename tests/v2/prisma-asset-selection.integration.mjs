@@ -291,6 +291,16 @@ test('T-FR-218 selects library first, verifies rights server-side, persists reje
     assert.equal(selection.rightsEvidence.every((evidence) => evidence.outcome === 'allow'), true)
     assert.match(selection.auditId, /^asset_selection_[a-f0-9]{64}$/)
     assert.match(selection.selectionHash, /^[a-f0-9]{64}$/)
+    const selectedInsert = await client.v2ProjectMediaAsset.findUnique({
+      where: {
+        projectId_artifactId_role: {
+          projectId,
+          artifactId: artifactIds.acceptedLibrary,
+          role: 'selected-insert',
+        },
+      },
+    })
+    assert.equal(selectedInsert?.workspaceId, workspaceId)
 
     const replayResponse = await fetch(
       `${baseUrl}/v1/projects/${projectId}/asset-selections`,
@@ -387,6 +397,18 @@ test('T-FR-218 selects library first, verifies rights server-side, persists reje
     assert.equal(
       noInsertPayload.data.selection.evaluations[0].reasons.includes('rights-unavailable'),
       true,
+    )
+    assert.equal(
+      await client.v2ProjectMediaAsset.findUnique({
+        where: {
+          projectId_artifactId_role: {
+            projectId,
+            artifactId: artifactIds.deniedGenerated,
+            role: 'selected-insert',
+          },
+        },
+      }),
+      null,
     )
 
     const listResponse = await fetch(

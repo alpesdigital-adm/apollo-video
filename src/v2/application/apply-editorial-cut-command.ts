@@ -44,6 +44,9 @@ export interface EditorialExclusionOverrideInput extends SourceTimeRange {
 export interface EditorialCutClip {
   id: string
   sourceArtifactId: string
+  audioSourceArtifactId?: string
+  audioSourceInFrame?: number
+  audioSourceOutFrame?: number
   sourceInFrame: number
   sourceOutFrame: number
   timelineInFrame: number

@@ -25,7 +25,7 @@ export async function GET(
       projects: createProjectWorkspaceQueryRepository(),
       operations: createPublicOperationRepository(),
     })({ workspaceId: actor.workspaceId, projectId })
-    const legacyWorkspace = {
+    const publicWorkspace = {
       project: workspace.project,
       ...(workspace.version ? { version: workspace.version } : {}),
       ...(workspace.brief ? { brief: workspace.brief } : {}),
@@ -36,7 +36,7 @@ export async function GET(
 
     return NextResponse.json(
       presentSuccess({
-        ...legacyWorkspace,
+        ...publicWorkspace,
         operations: workspace.operations.map(presentPublicOperation),
       }),
       { headers: publicApiHeaders(requestId) },

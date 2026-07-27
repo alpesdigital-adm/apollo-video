@@ -31,6 +31,7 @@ export interface Project {
   locale?: string
   ownerId?: string
   currentVersionId?: string
+  duplicatedFromProjectId?: string
   createdBy: Readonly<CommandActor>
   createdAt: string
 }
@@ -62,7 +63,13 @@ export function createProject(input: ProjectInput): Readonly<Project> {
     'Unsupported project status',
     { status: input.status },
   )
-  for (const [field, value] of Object.entries({ objective: input.objective, format: input.format, locale: input.locale, ownerId: input.ownerId })) {
+  for (const [field, value] of Object.entries({
+    objective: input.objective,
+    format: input.format,
+    locale: input.locale,
+    ownerId: input.ownerId,
+    duplicatedFromProjectId: input.duplicatedFromProjectId,
+  })) {
     assertDomain(value === undefined || value.trim().length > 0, 'INVALID_PROJECT', `Project ${field} cannot be blank`)
   }
   assertDomain(

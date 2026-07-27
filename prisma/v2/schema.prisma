@@ -60,6 +60,7 @@ model V2Workspace {
   proxyReviewDecisions            V2ProxyReviewDecision[]
   assetSelections                 V2AssetSelection[]
   qualityIterations               V2QualityIteration[]
+  mvpCoreGates                    V2MvpCoreGate[]
 
   @@map("workspaces")
 }
@@ -86,6 +87,7 @@ model V2ApiClient {
   createdWebhookSubscriptions V2WebhookSubscription[] @relation("WebhookSubscriptionCreator")
   proxyReviewDecisions        V2ProxyReviewDecision[]
   qualityIterations           V2QualityIteration[]
+  mvpCoreGates                V2MvpCoreGate[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -179,6 +181,7 @@ model V2Project {
   locale           String?  @db.VarChar(35)
   ownerId          String?  @db.VarChar(128)
   currentVersionId String?  @db.VarChar(128)
+  duplicatedFromProjectId String? @db.VarChar(128)
   createdByType    String   @db.VarChar(32)
   createdById      String   @db.VarChar(128)
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
@@ -188,6 +191,9 @@ model V2Project {
   versions              V2ProjectVersion[]              @relation("ProjectVersions")
   snapshots             V2ProjectSnapshot[]
   currentVersion        V2ProjectVersion?               @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  duplicatedFromProject V2Project?                      @relation("ProjectDuplicateSource", fields: [duplicatedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  duplicates            V2Project[]                     @relation("ProjectDuplicateSource")
+  versionsForkedFrom    V2ProjectVersion[]              @relation("ForkedFromProject")
   mediaUploads          V2MediaUpload[]
   mediaAssets           V2ProjectMediaAsset[]
   mediaTranscripts      V2MediaTranscript[]
@@ -204,6 +210,8 @@ model V2Project {
   proxyReviewDecisions  V2ProxyReviewDecision[]
   assetSelections       V2AssetSelection[]
   qualityIterations     V2QualityIteration[]
+  mvpCoreGatesAsPrimary V2MvpCoreGate[]          @relation("MvpCoreGatePrimaryProject")
+  mvpCoreGatesAsCompanion V2MvpCoreGate[]        @relation("MvpCoreGateCompanionProject")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -212,6 +220,7 @@ model V2Project {
   @@index([workspaceId, format])
   @@index([workspaceId, locale])
   @@index([workspaceId, ownerId])
+  @@index([workspaceId, duplicatedFromProjectId])
   @@map("projects")
 }
 
@@ -250,6 +259,8 @@ model V2ProjectVersion {
   projectId           String   @db.VarChar(128)
   sequence            Int
   parentVersionId     String?  @db.VarChar(128)
+  forkedFromProjectId String?  @db.VarChar(128)
+  forkedFromVersionId String?  @db.VarChar(128)
   briefSnapshotId     String   @db.VarChar(128)
   treatmentSnapshotId String?  @db.VarChar(128)
   storySnapshotId     String?  @db.VarChar(128)
@@ -264,6 +275,9 @@ model V2ProjectVersion {
   currentForProjects    V2Project[]                     @relation("CurrentProjectVersion")
   parent                V2ProjectVersion?               @relation("VersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
   children              V2ProjectVersion[]              @relation("VersionParent")
+  forkedFromProject     V2Project?                      @relation("ForkedFromProject", fields: [forkedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  forkedFromVersion     V2ProjectVersion?               @relation("ForkedFromVersion", fields: [forkedFromVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  forkedVersions        V2ProjectVersion[]              @relation("ForkedFromVersion")
   briefSnapshot         V2ProjectSnapshot               @relation("BriefSnapshot", fields: [briefSnapshotId], references: [id], onDelete: Restrict)
   treatmentSnapshot     V2ProjectSnapshot?              @relation("TreatmentSnapshot", fields: [treatmentSnapshotId], references: [id], onDelete: Restrict)
   storySnapshot         V2ProjectSnapshot?              @relation("StorySnapshot", fields: [storySnapshotId], references: [id], onDelete: Restrict)
@@ -284,11 +298,14 @@ model V2ProjectVersion {
   proxyReviews          V2ProxyReview[]
   assetSelections       V2AssetSelection[]
   qualityIterations     V2QualityIteration[]
+  mvpCoreGatesAsPrimary V2MvpCoreGate[]          @relation("MvpCoreGatePrimaryVersion")
+  mvpCoreGatesAsCompanion V2MvpCoreGate[]        @relation("MvpCoreGateCompanionVersion")
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
   @@unique([commandId, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([workspaceId, forkedFromProjectId, forkedFromVersionId])
   @@map("project_versions")
 }
 
@@ -828,6 +845,45 @@ model V2QualityIterationAssetSelection {
   @@unique([qualityIterationId, ordinal])
   @@index([workspaceId, assetSelectionId])
   @@map("quality_iteration_asset_selections")
+}
+
+model V2MvpCoreGate {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  primaryProjectId     String   @db.VarChar(128)
+  companionProjectId   String   @db.VarChar(128)
+  primaryVersionId     String   @db.VarChar(128)
+  companionVersionId   String   @db.VarChar(128)
+  primaryVersionHash   String   @db.Char(64)
+  companionVersionHash String   @db.Char(64)
+  approved             Boolean
+  covered              Int
+  passed               Int
+  total                Int
+  reportJson           String   @db.Text
+  reportFingerprint    String   @db.Char(64)
+  recordHash           String   @db.Char(64)
+  idempotencyKey       String   @db.VarChar(128)
+  requestFingerprint   String   @db.Char(64)
+  createdByType        String   @db.VarChar(32)
+  createdById          String   @db.VarChar(80)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace        V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  primaryProject   V2Project        @relation("MvpCoreGatePrimaryProject", fields: [primaryProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  companionProject V2Project        @relation("MvpCoreGateCompanionProject", fields: [companionProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  primaryVersion   V2ProjectVersion @relation("MvpCoreGatePrimaryVersion", fields: [primaryVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  companionVersion V2ProjectVersion @relation("MvpCoreGateCompanionVersion", fields: [companionVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy        V2ApiClient      @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, primaryProjectId, idempotencyKey])
+  @@index([workspaceId, primaryProjectId, createdAt(sort: Desc)])
+  @@index([workspaceId, companionProjectId, createdAt(sort: Desc)])
+  @@index([workspaceId, approved, createdAt(sort: Desc)])
+  @@index([workspaceId, primaryVersionId])
+  @@index([workspaceId, companionVersionId])
+  @@map("mvp_core_gates")
 }
 
 model V2AssetRightsSnapshot {

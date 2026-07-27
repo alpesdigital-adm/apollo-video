@@ -14,7 +14,11 @@ export interface EditorialProxyRenderer {
   render(input: {
     operationId: string
     renderKind: 'proxy' | 'final'
-    sourcePath: string
+    sources: readonly Readonly<{
+      artifactId: string
+      path: string
+      mediaType: 'video' | 'audio'
+    }>[]
     clips: readonly Readonly<EditorialCutClip>[]
     fps: number
     format: string

@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { enqueueProjectFinalExportService } from '../../src/v2/application/enqueue-project-final-export.ts'
+import { projectRenderSourcesFingerprint } from '../../src/v2/application/project-render-sources.ts'
 import { runNextProjectFinalExportOperationService } from '../../src/v2/application/run-project-final-export-worker.ts'
+import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
@@ -48,6 +50,10 @@ function approvedSource() {
     editPlanSnapshotId: 'snapshot-edit-plan-final-test',
     editPlanHash: '2'.repeat(64),
     editPlan: Object.freeze({
+      schemaVersion: 2,
+      state: 'compiled',
+      id: 'edit-plan-final-export-test',
+      projectVersionId,
       fps: 30.000000097244733,
       movementPolicy: Object.freeze({ automaticZoom: false, protectedOpeningFrames: 120 }),
       subtitleTracks: Object.freeze([{ cues: Object.freeze([
@@ -72,7 +78,49 @@ function approvedSource() {
     sourceManifestId,
     sourceArtifactKey: 'workspaces/final-export/masters/source.mp4',
     sourceSha256: '4'.repeat(64),
+    renderSources: Object.freeze([Object.freeze({
+      artifactId: sourceArtifactId,
+      manifestId: sourceManifestId,
+      artifactKey: 'workspaces/final-export/masters/source.mp4',
+      sha256: '4'.repeat(64),
+      byteSize: 4096,
+      mediaType: 'video',
+      container: 'mp4',
+      role: 'source-master',
+    })]),
     originalFileName: 'gravacao-bruta.mp4',
+  })
+}
+
+function finalInputHash() {
+  const source = approvedSource()
+  return calculateVersionHash({
+    kind: 'project-final-export/v1',
+    projectId,
+    projectVersionId,
+    projectVersionHash: source.projectVersionHash,
+    editPlanSnapshotId: source.editPlanSnapshotId,
+    editPlanHash: source.editPlanHash,
+    directorRunId: source.directorRunId,
+    qualitySnapshotId: source.qualitySnapshotId,
+    qualitySnapshotHash: source.qualitySnapshotHash,
+    proxyReviewId: source.proxyReviewId,
+    proxyReviewHash: source.proxyReviewHash,
+    proxyArtifactId: source.proxyArtifactId,
+    sourceArtifactId: source.sourceArtifactId,
+    sourceManifestId: source.sourceManifestId,
+    sourceSha256: source.sourceSha256,
+    renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+    outputSpec: {
+      aspectRatio: '9:16',
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      codec: 'h264',
+      audioCodec: 'aac',
+      container: 'mp4',
+      quality: 'final',
+    },
   })
 }
 
@@ -173,7 +221,7 @@ function createOperations() {
     proxyArtifactId: 'artifact-proxy-final-export-test',
     sourceArtifactId,
     sourceManifestId,
-    inputHash: '5'.repeat(64),
+    inputHash: finalInputHash(),
     outputArtifactId: 'artifact-final-output',
     outputManifestId: 'manifest-final-output',
     outputSpec: {
@@ -275,10 +323,19 @@ function workerDependencies(
           calls.persisted += 1
           assert.equal(input.manifest.recipe.id, 'editorial-final')
           assert.deepEqual(input.lineageIds, [
-            `lineage-${createHash('sha256').update(`${workspaceId}:${'5'.repeat(64)}:manifest-final-output:final`).digest('hex')}`,
+            `lineage-${createHash('sha256').update(`${workspaceId}:${finalInputHash()}:manifest-final-output:final:${sourceArtifactId}:0`).digest('hex')}`,
           ])
-          assert.equal(input.manifest.schemaVersion, 'media-artifact-manifest/v3')
+          assert.equal(input.manifest.schemaVersion, 'media-artifact-manifest/v4')
           assert.equal(input.manifest.recipe.parametersRef, input.recipeParameters.ref)
+          assert.equal(input.manifest.renderInput.ref, input.renderInput.ref)
+          assert.equal(input.manifest.renderInput.inputHash, input.renderInput.inputHash)
+          const renderInput = JSON.parse(input.renderInput.canonicalJson)
+          assert.equal(renderInput.plan.versionId, projectVersionId)
+          assert.equal(renderInput.output.aspectRatio, '9:16')
+          assert.deepEqual(
+            renderInput.assets.map((asset) => asset.artifactId),
+            [sourceArtifactId],
+          )
           const parameters = JSON.parse(input.recipeParameters.canonicalJson)
           assert.equal(parameters.directorRunId, 'director-run-final-export-test')
           assert.equal(parameters.qualitySnapshotId, 'quality-snapshot-final-export-test')
@@ -302,6 +359,18 @@ function workerDependencies(
           calls.rendered += 1
           assert.equal(input.renderKind, 'final')
           assert.equal(input.fps, 30)
+          assert.deepEqual(input.sources, [{
+            artifactId: sourceArtifactId,
+            path: join(
+              tmpdir(),
+              'apollo-final-export-artifacts',
+              'workspaces',
+              'final-export',
+              'masters',
+              'source.mp4',
+            ),
+            mediaType: 'video',
+          }])
           assert.deepEqual(input.outputSpec, {
             aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
             codec: 'h264', audioCodec: 'aac', container: 'mp4', quality: 'final',
@@ -338,6 +407,42 @@ test('final export worker revalidates rights, persists lineage and completes the
 
   assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 1, mapped: 1, converged: 0, attached: 1, attempts: 1, failed: 0, cleaned: 1 })
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
+  assert.equal(operations.operation.status, 'succeeded')
+})
+
+test('final export worker serializes heartbeats with fenced phase transitions', async () => {
+  const operations = createOperations()
+  const { dependencies } = workerDependencies(operations)
+  const originalHeartbeat = operations.repository.heartbeat.bind(
+    operations.repository,
+  )
+  const originalAdvancePhase = operations.repository.advancePhase.bind(
+    operations.repository,
+  )
+  let phaseTransitionActive = false
+  let heartbeatRacedPhase = false
+  operations.repository.advancePhase = async (input) => {
+    phaseTransitionActive = true
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    phaseTransitionActive = false
+    if (heartbeatRacedPhase) return false
+    return originalAdvancePhase(input)
+  }
+  operations.repository.heartbeat = async (input) => {
+    if (phaseTransitionActive) heartbeatRacedPhase = true
+    return originalHeartbeat(input)
+  }
+  dependencies.heartbeatIntervalMs = 1
+
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)(
+    'worker-final-export-heartbeat-fence',
+  )
+
+  assert.equal(heartbeatRacedPhase, false)
+  assert.deepEqual(outcome, {
+    operationId: 'operation-final-export-test',
+    status: 'succeeded',
+  })
   assert.equal(operations.operation.status, 'succeeded')
 })
 

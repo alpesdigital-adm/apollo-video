@@ -65,8 +65,8 @@ assertSetContains(
   'indexes',
 )
 assertSetContains(
-  names(committed, /ADD CONSTRAINT "([^"]+)" FOREIGN KEY/g),
-  names(generated, /ADD CONSTRAINT "([^"]+)" FOREIGN KEY/g),
+  names(committed, /ADD CONSTRAINT "([^"]+)"\s+FOREIGN KEY/g),
+  names(generated, /ADD CONSTRAINT "([^"]+)"\s+FOREIGN KEY/g),
   'foreign keys',
 )
 
@@ -83,6 +83,7 @@ const requiredChecks = [
   'project_snapshots_hash_check',
   'project_versions_sequence_check',
   'project_versions_hash_check',
+  'project_versions_fork_identity_check',
   'idempotency_records_status_check',
   'idempotency_records_fingerprint_check',
   'media_artifacts_hash_check',
@@ -208,6 +209,11 @@ const requiredChecks = [
   'quality_iterations_idempotency_check',
   'quality_iteration_asset_selections_hash_check',
   'quality_iteration_asset_selections_ordinal_check',
+  'mvp_core_gates_project_identity_check',
+  'mvp_core_gates_hashes_check',
+  'mvp_core_gates_result_check',
+  'mvp_core_gates_report_bounds_check',
+  'mvp_core_gates_actor_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))
@@ -216,5 +222,5 @@ for (const constraint of requiredChecks) {
 console.log(
   `V2 migration verified: ${names(generated, /CREATE TABLE "([^"]+)"/g).size} tables, ` +
     `${names(generated, /CREATE (?:UNIQUE )?INDEX "([^"]+)"/g).size} indexes, ` +
-    `${names(generated, /ADD CONSTRAINT "([^"]+)" FOREIGN KEY/g).size} foreign keys`,
+    `${names(generated, /ADD CONSTRAINT "([^"]+)"\s+FOREIGN KEY/g).size} foreign keys`,
 )

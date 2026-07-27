@@ -2,6 +2,7 @@ import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createQueuedPublicOperation } from '../domain/public-operation.ts'
 import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
+import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { calculateVersionHash } from './version-hash.ts'
 
 function validateId(value: string, field: string): string {
@@ -33,7 +34,9 @@ export function enqueueProjectProxyRenderService(dependencies: {
       kind: 'project-proxy-render/v1', projectId, projectVersionId: source.projectVersionId,
       editPlanSnapshotId: source.editPlanSnapshotId, editPlanHash: source.editPlanHash,
       sourceArtifactId: source.sourceArtifactId, sourceManifestId: source.sourceManifestId,
-      sourceSha256: source.sourceSha256, format: source.format,
+      sourceSha256: source.sourceSha256,
+      renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+      format: source.format,
     })
     const requestFingerprint = calculateVersionHash({ type: 'project-proxy-render', projectId, inputHash })
     const replay = await dependencies.operations.findReplay({ workspaceId, clientId, idempotencyKey, requestFingerprint })

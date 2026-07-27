@@ -10,6 +10,7 @@ import { createQueuedPublicOperation } from '../domain/public-operation.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
+import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { calculateVersionHash } from './version-hash.ts'
 
 function validateId(value: string, field: string): string {
@@ -69,15 +70,31 @@ export function enqueueProjectFinalExportService(dependencies: {
     assertDomain(source.format === request.format, 'INVALID_OUTPUT_SPEC', 'Final export format must match the approved project format')
     const outputSpec = OUTPUT_PRESETS[source.format as OutputAspectRatio]
     assertDomain(Boolean(outputSpec), 'INVALID_OUTPUT_SPEC', 'Approved project format has no final export preset')
+    const finalOutputSpec = Object.freeze({
+      aspectRatio: outputSpec.aspectRatio,
+      width: outputSpec.width,
+      height: outputSpec.height,
+      fps: outputSpec.fps,
+      ...FINAL_OUTPUT_PROFILE,
+    })
 
-    const rightsRecord = await dependencies.rights.findCurrent(workspaceId, source.sourceArtifactId)
-    const rightsDecision = evaluateAssetUse(rightsRecord?.snapshot ?? null, {
-      workspaceId,
-      use: 'rendering',
-      locale: source.locale,
-    }, dependencies.clock())
-    if (rightsDecision.outcome !== 'allow') {
-      throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Source master rights do not permit final export', { reasonCodes: rightsDecision.reasonCodes })
+    for (const asset of source.renderSources) {
+      const rightsRecord = await dependencies.rights.findCurrent(
+        workspaceId,
+        asset.artifactId,
+      )
+      const rightsDecision = evaluateAssetUse(rightsRecord?.snapshot ?? null, {
+        workspaceId,
+        use: 'rendering',
+        locale: source.locale,
+      }, dependencies.clock())
+      if (rightsDecision.outcome !== 'allow') {
+        throw new DomainError(
+          'ASSET_RIGHTS_BLOCKED',
+          'A render source does not permit final export',
+          { artifactId: asset.artifactId, reasonCodes: rightsDecision.reasonCodes },
+        )
+      }
     }
 
     const inputHash = calculateVersionHash({
@@ -96,7 +113,8 @@ export function enqueueProjectFinalExportService(dependencies: {
       sourceArtifactId: source.sourceArtifactId,
       sourceManifestId: source.sourceManifestId,
       sourceSha256: source.sourceSha256,
-      outputSpec,
+      renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+      outputSpec: finalOutputSpec,
     })
     const requestFingerprint = calculateVersionHash({
       type: 'project-final-export',
@@ -141,13 +159,7 @@ export function enqueueProjectFinalExportService(dependencies: {
         inputHash,
         outputArtifactId,
         outputManifestId,
-        outputSpec: {
-          aspectRatio: outputSpec.aspectRatio,
-          width: outputSpec.width,
-          height: outputSpec.height,
-          fps: outputSpec.fps,
-          ...FINAL_OUTPUT_PROFILE,
-        },
+        outputSpec: finalOutputSpec,
         approval: {
           actorType: request.actor.type,
           actorId: clientId,

@@ -2,6 +2,17 @@ import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { ProxyQualityIssue } from '../render-workflow.ts'
 
+export interface ProjectRenderSourceAsset {
+  artifactId: string
+  manifestId: string
+  artifactKey: string
+  sha256: string
+  byteSize: number
+  mediaType: 'video' | 'audio'
+  container: string
+  role: 'source-master' | 'selected-insert'
+}
+
 export interface ProjectProxyRenderSource {
   projectId: string
   projectVersionId: string
@@ -13,6 +24,7 @@ export interface ProjectProxyRenderSource {
   sourceManifestId: string
   sourceArtifactKey: string
   sourceSha256: string
+  renderSources: readonly Readonly<ProjectRenderSourceAsset>[]
   originalFileName: string
   uploadReceivedAt: string
   criticIssues: readonly Readonly<ProxyQualityIssue>[]

@@ -314,7 +314,16 @@ export function buildRenderElementMap(input: {
   for (const cue of input.subtitleCues ?? []) {
     const clip = input.clips.find((item) => cue.startFrame < item.timelineOutFrame && cue.endFrame > item.timelineInFrame)
     if (!clip) continue
-    const fontSize = Math.max(32, Math.min(72, Math.round(input.canvas.width * 0.059)))
+    const fontSize = Math.max(
+      32,
+      Math.min(
+        72,
+        Math.round(Math.min(
+          input.canvas.width * 0.059,
+          input.canvas.height * 0.067,
+        )),
+      ),
+    )
     const lineCount = cue.text.trim().length > 20 ? 2 : 1
     const width = Math.min(
       Math.round(input.canvas.width * 0.86),

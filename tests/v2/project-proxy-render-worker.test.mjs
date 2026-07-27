@@ -10,7 +10,9 @@ import {
   startPublicOperationAttempt,
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
+import { projectRenderSourcesFingerprint } from '../../src/v2/application/project-render-sources.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
+import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 
 function createClock() {
   let current = Date.parse('2026-07-18T22:00:00.000Z')
@@ -18,6 +20,7 @@ function createClock() {
 }
 
 function createOperations() {
+  const immutableSource = source()
   let operation = createQueuedPublicOperation({
     id: 'operation-project-proxy-test',
     workspaceId: 'workspace-project-proxy-test',
@@ -40,7 +43,18 @@ function createOperations() {
     editPlanSnapshotId: 'snapshot-edit-plan-proxy-test',
     sourceArtifactId: 'artifact-project-proxy-source',
     sourceManifestId: 'manifest-project-proxy-source',
-    inputHash: 'a'.repeat(64),
+    inputHash: calculateVersionHash({
+      kind: 'project-proxy-render/v1',
+      projectId: immutableSource.projectId,
+      projectVersionId: immutableSource.projectVersionId,
+      editPlanSnapshotId: immutableSource.editPlanSnapshotId,
+      editPlanHash: immutableSource.editPlanHash,
+      sourceArtifactId: immutableSource.sourceArtifactId,
+      sourceManifestId: immutableSource.sourceManifestId,
+      sourceSha256: immutableSource.sourceSha256,
+      renderSourcesFingerprint: projectRenderSourcesFingerprint(immutableSource.renderSources),
+      format: immutableSource.format,
+    }),
     outputArtifactId: 'artifact-project-proxy-output',
     outputManifestId: 'manifest-project-proxy-output',
     originalFileName: 'source-editorial.mp4',
@@ -112,6 +126,16 @@ function source() {
     sourceManifestId: 'manifest-project-proxy-source',
     sourceArtifactKey: 'workspaces/project-proxy-test/masters/source.mp4',
     sourceSha256: 'c'.repeat(64),
+    renderSources: Object.freeze([Object.freeze({
+      artifactId: 'artifact-project-proxy-source',
+      manifestId: 'manifest-project-proxy-source',
+      artifactKey: 'workspaces/project-proxy-test/masters/source.mp4',
+      sha256: 'c'.repeat(64),
+      byteSize: 4096,
+      mediaType: 'video',
+      container: 'mp4',
+      role: 'source-master',
+    })]),
     originalFileName: 'source.mp4',
     uploadReceivedAt: '2026-07-18T21:58:00.000Z',
     criticIssues: Object.freeze([]),
@@ -143,6 +167,18 @@ function dependencies(operations, overrides = {}) {
     },
     renderer: {
       async render(input) {
+        assert.deepEqual(input.sources, [{
+          artifactId: 'artifact-project-proxy-source',
+          path: join(
+            tmpdir(),
+            'apollo-project-proxy-worker-artifacts',
+            'workspaces',
+            'project-proxy-test',
+            'masters',
+            'source.mp4',
+          ),
+          mediaType: 'video',
+        }])
         assert.deepEqual(input.subtitleCues, [{ id: 'cue-1', startFrame: 0, endFrame: 60, text: 'Legenda segura', anchor: 'bottom' }])
         assert.deepEqual(input.transitions, [])
         return {

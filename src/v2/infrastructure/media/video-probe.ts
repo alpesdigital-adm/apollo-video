@@ -44,7 +44,12 @@ function resolveBinary(environment: NodeJS.ProcessEnv): string {
 
 export async function probeVideo(
   filePath: string,
-  options: { timeoutMs?: number; signal?: AbortSignal; environment?: NodeJS.ProcessEnv } = {},
+  options: {
+    timeoutMs?: number
+    signal?: AbortSignal
+    environment?: NodeJS.ProcessEnv
+    requireAudio?: boolean
+  } = {},
 ): Promise<Readonly<VideoProbeResult>> {
   if (!isAbsolute(filePath)) {
     throw new DomainError('INVALID_ARGUMENT', 'Video probe path must be absolute')
@@ -106,7 +111,16 @@ export async function probeVideo(
   const formatName = typeof payload.format?.format_name === 'string'
     ? payload.format.format_name.trim()
     : ''
-  if (!width || !height || !fps || !duration || !codec || !audioCodec || !formatName) {
+  const requireAudio = options.requireAudio ?? true
+  if (
+    !width ||
+    !height ||
+    !fps ||
+    !duration ||
+    !codec ||
+    (requireAudio && !audioCodec) ||
+    !formatName
+  ) {
     throw new DomainError('RENDER_OUTPUT_INVALID', 'Video probe metadata is incomplete')
   }
   return Object.freeze({ width, height, fps, duration, codec, audioCodec, container: formatName })

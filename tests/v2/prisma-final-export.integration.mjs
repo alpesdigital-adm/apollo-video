@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import net from 'node:net'
 import { dirname, isAbsolute, join } from 'node:path'
@@ -79,7 +79,6 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
   const createdAt = new Date('2026-07-26T20:00:00.000Z')
   const sourceArtifactKey = `workspaces/final-export-e2e-${suffix}/masters/source.mp4`
   const sourcePath = join(artifactRoot, ...sourceArtifactKey.split('/'))
-  const hiddenSourcePath = `${sourcePath}.temporarily-missing`
   let server
   let serverLogs = ''
 
@@ -566,7 +565,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     })
     assert.equal(staleResponse.status, 422, JSON.stringify(await staleResponse.json()))
 
-    const worker = createProjectFinalExportWorker({
+    const workerEnvironment = {
       ...process.env,
       APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
       APOLLO_V2_RENDER_LEASE_MS: '120000',
@@ -575,20 +574,21 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       APOLLO_V2_WORKER_RETRY_MAX_MS: '1',
       APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'final-export-e2e-key',
       APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url'),
-    })
-    await rename(sourcePath, hiddenSourcePath)
-    let failedOutcome
-    try {
-      failedOutcome = await worker(`final-export-worker-failed-${suffix}`)
-    } finally {
-      await rename(hiddenSourcePath, sourcePath)
     }
+    const failingWorker = createProjectFinalExportWorker({
+      ...workerEnvironment,
+      FFMPEG_PATH: process.execPath,
+    })
+    const failedOutcome = await failingWorker(
+      `final-export-worker-failed-${suffix}`,
+    )
     assert.deepEqual(failedOutcome, { operationId, status: 'retrying' })
     const failedAttempt = await client.v2ProjectFinalExportAttempt.findUnique({
       where: { operationId_attempt: { operationId, attempt: 1 } },
     })
     assert.equal(failedAttempt?.status, 'failed')
     await new Promise((resolve) => setTimeout(resolve, 25))
+    const worker = createProjectFinalExportWorker(workerEnvironment)
     const completedOutcome = await worker(`final-export-worker-promoted-${suffix}`)
     assert.deepEqual(completedOutcome, { operationId, status: 'succeeded' })
 
@@ -654,7 +654,10 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     assert.equal(finalArtifact.sha256, output.sha256)
     assert.equal(Number(finalArtifact.byteSize), downloadedBytes.byteLength)
     const finalManifest = JSON.parse(finalArtifact.manifests[0].manifestJson)
-    assert.equal(finalManifest.schemaVersion, 'media-artifact-manifest/v3')
+    assert.equal(finalManifest.schemaVersion, 'media-artifact-manifest/v4')
+    assert.match(finalManifest.renderInput.ref, /^render-input\/sha256\/[a-f0-9]{64}$/)
+    assert.match(finalManifest.renderInput.inputHash, /^[a-f0-9]{64}$/)
+    assert.ok(finalArtifact.manifests[0].renderInputRef)
     assert.equal(finalManifest.artifact.sha256, output.sha256)
     assert.equal(finalManifest.artifact.byteSize, downloadedBytes.byteLength)
     assert.equal(reconstructFinal({

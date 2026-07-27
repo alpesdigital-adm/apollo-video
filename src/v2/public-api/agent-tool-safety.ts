@@ -155,6 +155,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one empty draft project with no provider or external side effect.',
     },
+    'apollo.projects.duplicates.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one reversible copy-on-write project while sharing immutable snapshots and artifact bytes.',
+    },
+    'apollo.projects.mvp-core-gates.run': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists one immutable fail-closed audit report derived only from existing server-side evidence.',
+    },
     'apollo.projects.commands.apply': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',

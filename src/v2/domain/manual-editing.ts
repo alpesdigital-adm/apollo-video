@@ -443,7 +443,15 @@ export function materializeManualEditPlan(input: {
       'INVALID_ARGUMENT',
       'Replacement source is not available in this project',
     )
+    const durationFrames = clipDurationFrames(located.clip)
+    if (located.clip.audioSourceArtifactId === undefined) {
+      located.clip.audioSourceArtifactId = located.clip.sourceArtifactId
+      located.clip.audioSourceInFrame = located.clip.sourceInFrame
+      located.clip.audioSourceOutFrame = located.clip.sourceOutFrame
+    }
     located.clip.sourceArtifactId = operation.sourceId
+    located.clip.sourceInFrame = 0
+    located.clip.sourceOutFrame = durationFrames
   } else if (operation.kind === 'inspect') {
     applyInspectorToPlan(plan, located.clip, operation.patch)
   }

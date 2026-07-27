@@ -11,7 +11,9 @@ import type { ProxyReviewRepository } from './ports/proxy-review-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import { evaluateRenderedProxy } from './render-workflow.ts'
+import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
+import { calculateVersionHash } from './version-hash.ts'
 
 const NON_RETRYABLE_CODES = new Set(['INVALID_RENDER_INPUT', 'RENDER_OUTPUT_INVALID', 'PERSISTENCE_CONFLICT', 'PERSISTENCE_NOT_CONFIGURED'])
 
@@ -69,11 +71,21 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
     let leaseLost = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let renewal: Promise<boolean> | undefined
+    let leaseCommandTail: Promise<void> = Promise.resolve()
     const command = (now: Date) => ({ operationId: operation.id, leaseOwner, attempt, now: now.toISOString() })
+    const withLeaseCommand = <T>(action: () => Promise<T>): Promise<T> => {
+      const result = leaseCommandTail.then(action)
+      leaseCommandTail = result.then(
+        () => undefined,
+        () => undefined,
+      )
+      return result
+    }
     const heartbeat = async () => {
       if (stopped || leaseLost) return false
       if (renewal) return renewal
-      renewal = (async () => {
+      renewal = withLeaseCommand(async () => {
+        if (stopped || leaseLost) return !leaseLost
         try {
           const now = clock()
           const renewed = await dependencies.operations.heartbeat({ ...command(now), leaseUntil: leaseWindow(now) })
@@ -86,7 +98,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         } finally {
           renewal = undefined
         }
-      })()
+      })
       return renewal
     }
     const scheduleHeartbeat = () => {
@@ -96,7 +108,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
     }
     const stopHeartbeat = () => { stopped = true; if (timer) clearTimeout(timer) }
     const enter = async (phase: 'rendering' | 'verifying' | 'persisting') => {
-      const entered = await dependencies.operations.advancePhase({ ...command(clock()), phase })
+      const entered = await withLeaseCommand(() =>
+        dependencies.operations.advancePhase({ ...command(clock()), phase }))
       if (!entered) { leaseLost = true; abortController.abort(); throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost') }
     }
     try {
@@ -107,7 +120,20 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       })
       if (!source) throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable project render source disappeared')
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+      const immutableInputHash = calculateVersionHash({
+        kind: 'project-proxy-render/v1',
+        projectId: context.projectId,
+        projectVersionId: source.projectVersionId,
+        editPlanSnapshotId: source.editPlanSnapshotId,
+        editPlanHash: source.editPlanHash,
+        sourceArtifactId: source.sourceArtifactId,
+        sourceManifestId: source.sourceManifestId,
+        sourceSha256: source.sourceSha256,
+        renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+        format: source.format,
+      })
       if (
+        immutableInputHash !== context.inputHash ||
         source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
         source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4)
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
@@ -116,7 +142,13 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       await enter('rendering')
       const rendered = await dependencies.renderer.render({
-        operationId: operation.id, renderKind: 'proxy', sourcePath: resolveArtifactPath(dependencies.artifactRoot, source.sourceArtifactKey),
+        operationId: operation.id,
+        renderKind: 'proxy',
+        sources: source.renderSources.map((asset) => ({
+          artifactId: asset.artifactId,
+          path: resolveArtifactPath(dependencies.artifactRoot, asset.artifactKey),
+          mediaType: asset.mediaType,
+        })),
         clips, fps: source.editPlan.fps, format: source.format, subtitleCues, transitions, ...(composition ? { composition } : {}),
         signal: abortController.signal,
       })
@@ -128,12 +160,20 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
         recipe: { id: 'editorial-proxy', version: '1.0.0', parameters: { inputHash: context.inputHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format } },
-        sources: [{ artifactKey: source.sourceArtifactKey, sha256: source.sourceSha256, role: 'source-master', execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } } }],
+        sources: source.renderSources.map((asset) => ({
+          artifactKey: asset.artifactKey,
+          sha256: asset.sha256,
+          role: asset.role,
+          execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
+        })),
         probe: { width: rendered.probe.width, height: rendered.probe.height, duration: rendered.probe.duration, fps: rendered.probe.fps },
       })
       const persisted = await dependencies.artifacts.persistOrReplay({
         workspaceId: operation.workspaceId, artifactId: context.outputArtifactId, manifestId: context.outputManifestId,
-        lineageIds: [`lineage-${createHash('sha256').update(`${operation.workspaceId}:${context.inputHash}`).digest('hex')}`],
+        lineageIds: source.renderSources.map((asset, index) =>
+          `lineage-${createHash('sha256')
+            .update(`${operation.workspaceId}:${context.inputHash}:${asset.artifactId}:${index}`)
+            .digest('hex')}`),
         manifest, createdAt: clock().toISOString(),
       })
       if (persisted.artifactId !== context.outputArtifactId || persisted.manifestId !== context.outputManifestId) throw new DomainError('PERSISTENCE_CONFLICT', 'Project render artifact identity did not converge')
@@ -183,7 +223,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         createdAt: reviewedAt,
       })
       stopHeartbeat()
-      const succeeded = await dependencies.operations.succeed(command(clock()))
+      const succeeded = await withLeaseCommand(() =>
+        dependencies.operations.succeed(command(clock())))
       if (!succeeded) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       await dependencies.renderer.cleanup(operation.id).catch(() => undefined)
       return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
@@ -193,7 +234,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const failedAt = clock()
       const failure = safeFailure(error)
       const nextAttemptAt = failure.retryable && attempt < operation.maxAttempts ? new Date(failedAt.getTime() + calculatePublicOperationRetryDelayMs({ attempt, baseDelayMs: retryBaseDelayMs, maxDelayMs: retryMaxDelayMs })).toISOString() : undefined
-      const failed = await dependencies.operations.failOrRetry({ ...command(failedAt), error: failure, ...(nextAttemptAt ? { nextAttemptAt } : {}) })
+      const failed = await withLeaseCommand(() =>
+        dependencies.operations.failOrRetry({ ...command(failedAt), error: failure, ...(nextAttemptAt ? { nextAttemptAt } : {}) }))
       if (!failed) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       await dependencies.renderer.cleanup(operation.id).catch(() => undefined)
       return Object.freeze({ operationId: operation.id, status: failed.operation.status === 'retrying' ? 'retrying' as const : 'failed' as const })

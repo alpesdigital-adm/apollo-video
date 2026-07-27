@@ -1,5 +1,9 @@
 import type { PublicSchemaDefinition } from './schema-registry.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
+import {
+  MVP_CORE_ACCEPTANCE_CRITERIA,
+  MVP_CORE_CRITERION_CHECKS,
+} from '../domain/mvp-core-gate.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 const projectId = 'project-example-1'
@@ -624,6 +628,60 @@ const webhookReplayDeliverySummaryExample = {
 const webhookReplayDeliveryExample = {
   ...webhookReplayDeliverySummaryExample,
   attempts: [webhookAttemptExample],
+}
+const mvpCorePrimaryVersionId = 'project-version-mvp-primary-1'
+const mvpCoreCompanionProjectId = 'project-mvp-companion-1'
+const mvpCoreCompanionVersionId = 'project-version-mvp-companion-1'
+const mvpCoreDuplicateProjectId = 'project-mvp-duplicate-1'
+const mvpCoreEvidenceExample = MVP_CORE_ACCEPTANCE_CRITERIA.map(
+  (criterion) => ({
+    criterion,
+    source: 'server',
+    automatic: true,
+    passed: true,
+    missingChecks: [],
+    checks: MVP_CORE_CRITERION_CHECKS[criterion].map((code) => ({
+      code,
+      passed: true,
+      references: [{
+        type: criterion === 'AC-001' ? 'workspace' : 'project',
+        id: criterion === 'AC-001' ? workspaceId : projectId,
+      }],
+    })),
+  }),
+)
+const mvpCoreReportExample = {
+  schemaVersion: 'mvp-core-gate-report/v1',
+  gate: 'mvp-core/v1',
+  workspaceId,
+  primaryProjectId: projectId,
+  companionProjectId: mvpCoreCompanionProjectId,
+  approved: true,
+  covered: 16,
+  passed: 16,
+  total: 16,
+  missing: [],
+  failed: [],
+  serverEvidenceOnly: true,
+  evidence: mvpCoreEvidenceExample,
+  evaluatedAt: createdAt,
+  fingerprint: 'c'.repeat(64),
+}
+const mvpCoreGateExample = {
+  schemaVersion: 'mvp-core-gate/v1',
+  id: 'mvp-core-gate-example-1',
+  workspaceId,
+  primaryProjectId: projectId,
+  companionProjectId: mvpCoreCompanionProjectId,
+  primaryVersionId: mvpCorePrimaryVersionId,
+  companionVersionId: mvpCoreCompanionVersionId,
+  primaryVersionHash: 'a'.repeat(64),
+  companionVersionHash: 'b'.repeat(64),
+  report: mvpCoreReportExample,
+  reportFingerprint: mvpCoreReportExample.fingerprint,
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  recordHash: 'd'.repeat(64),
 }
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
@@ -2118,6 +2176,74 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           },
           replayed: false,
         },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/duplicate-project-request/v1': [
+      {
+        expectedVersionId: 'project-version-example-1',
+        expectedVersionHash: 'a'.repeat(64),
+        name: 'Anúncio de descoberta — variação',
+      },
+    ],
+    'apollo://schemas/project-duplicated/v1': [
+      {
+        data: {
+          project: {
+            id: 'project-duplicate-example-1',
+            workspaceId,
+            name: 'Anúncio de descoberta — variação',
+            status: 'draft',
+            objective: 'discovery',
+            format: '9:16',
+            locale: 'pt-BR',
+            ownerId: clientId,
+            currentVersionId: 'project-version-duplicate-example-1',
+            duplicatedFromProjectId: projectId,
+            createdAt,
+          },
+          version: {
+            id: 'project-version-duplicate-example-1',
+            sequence: 1,
+            baseHash: 'b'.repeat(64),
+            forkedFromProjectId: projectId,
+            forkedFromVersionId: 'project-version-example-1',
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1',
+              editPlan: 'project-snapshot-edit-plan-1',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          sharedArtifactIds: ['artifact-example-source-1'],
+          copiedBytes: 0,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/run-mvp-core-gate-request/v1': [
+      {
+        primaryVersionId: mvpCorePrimaryVersionId,
+        primaryVersionHash: 'a'.repeat(64),
+        companionProjectId: mvpCoreCompanionProjectId,
+        companionVersionId: mvpCoreCompanionVersionId,
+        companionVersionHash: 'b'.repeat(64),
+        duplicateProjectId: mvpCoreDuplicateProjectId,
+      },
+    ],
+    'apollo://schemas/mvp-core-gate-executed/v1': [
+      {
+        data: {
+          gate: mvpCoreGateExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/mvp-core-gate-list/v1': [
+      {
+        data: { gates: [mvpCoreGateExample] },
         meta: { apiVersion: 'v1' },
       },
     ],

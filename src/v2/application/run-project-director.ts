@@ -207,6 +207,7 @@ function buildDecisions(input: {
   transcriptRef: string
   editPlanRef: string
   policyRef: string
+  hasSelectedInsert: boolean
 }): readonly Readonly<DirectorDecision>[] {
   return validateDirectorDecisions([
     {
@@ -240,8 +241,12 @@ function buildDecisions(input: {
       alternatives: ['short-dissolve'],
     },
     {
-      id: 'decision-insert-none', category: 'insert', choice: 'no_insert',
-      reason: 'No rights-approved supporting asset is linked to the project, so the Director omits B-roll instead of fabricating relevance.',
+      id: 'decision-insert-selection',
+      category: 'insert',
+      choice: input.hasSelectedInsert ? 'use_selected_insert' : 'no_insert',
+      reason: input.hasSelectedInsert
+        ? 'The compiled timeline contains a rights-approved selected insert; preserve it as an intentional B-roll cutaway.'
+        : 'No rights-approved supporting asset is linked to the project, so the Director omits B-roll instead of fabricating relevance.',
       evidenceRefs: [input.editPlanRef, input.policyRef], confidence: 1,
       alternatives: ['request-library-search'],
     },
@@ -339,6 +344,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const objective = resolveStrategicObjective(context.project.objective)
     const clips = context.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
     assertDomain(clips.length > 0 && context.editPlan.retimedTranscript.words.length > 0, 'INVALID_COMMAND', 'Director requires a compiled editorial timeline and retimed transcript')
+    const hasSelectedInsert = clips.some(
+      (clip) => clip.sourceArtifactId !== context.transcript.sourceArtifactId,
+    )
     const createdAt = dependencies.clock().toISOString()
     const directorRunId = dependencies.createId('director-run')
     const commandId = dependencies.createId('edit-command')
@@ -356,7 +364,10 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     })
     const treatmentBase = createTreatmentPlan({
       objective: objective.id,
-      mode: 'talking-head',
+      mode: hasSelectedInsert &&
+        clips.every((clip) => Boolean(clip.audioSourceArtifactId))
+        ? 'visual-montage'
+        : 'talking-head',
       rubric: { id: `${objective.rubricId}/v1`, version: 1, proofRequired: false },
       policy: { snapshotId: context.currentVersion.snapshotRefs.policies, maxPatternBreaksPer30s: 2, forbiddenEffects: ['zoom'] },
       perception: {
@@ -373,10 +384,13 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       transcriptRef: context.transcript.id,
       editPlanRef: context.currentVersion.snapshotRefs.editPlan,
       policyRef: context.currentVersion.snapshotRefs.policies,
+      hasSelectedInsert,
     })
     const assumptions = Object.freeze([
       'Face detector evidence is unavailable; use a conservative caption-safe region below the source inset.',
-      'No rights-approved B-roll candidate is linked; omission is safer than an irrelevant insert.',
+      hasSelectedInsert
+        ? 'The selected insert already passed the asset-selection and rights gates.'
+        : 'No rights-approved B-roll candidate is linked; omission is safer than an irrelevant insert.',
     ])
     const subtitleCues = buildSubtitleCues({
       words: context.editPlan.retimedTranscript.words,
@@ -411,8 +425,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         background: 'blurred-source' as const,
         foregroundScale: 1 as const,
         verticalPosition: 0.5 as const,
-        faceSafeFallback: Object.freeze([0.14, 0.08, 0.72, 0.57] as const),
-        subtitleSafeRegion: Object.freeze([0.08, 0.72, 0.84, 0.2] as const),
+        faceSafeFallback: Object.freeze([0.14, 0.08, 0.72, 0.56] as const),
+        subtitleSafeRegion: Object.freeze([0.08, 0.7, 0.84, 0.24] as const),
       }),
       director: Object.freeze({ plannerVersion: PLANNER_VERSION, decisions, assumptions }),
       movementPolicy: Object.freeze({ automaticZoom: false as const, protectedOpeningFrames: Math.max(context.editPlan.movementPolicy.protectedOpeningFrames, Math.round(context.editPlan.fps * 4)) }),

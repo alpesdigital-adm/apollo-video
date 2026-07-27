@@ -27,6 +27,7 @@ import type { ApiClientAdministrationRepository } from '../application/ports/api
 import type { AssetRightsRepository } from '../application/ports/asset-rights-repository.ts'
 import type { AssetSelectionRepository } from '../application/ports/asset-selection-repository.ts'
 import type { QualityIterationRepository } from '../application/ports/quality-iteration-repository.ts'
+import type { MvpCoreGateRepository } from '../application/ports/mvp-core-gate-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -37,6 +38,7 @@ import type { ProtectedRenderInputStore } from '../application/ports/protected-r
 import type { RenderInputAssetResolver } from '../application/ports/render-input-asset-resolver.ts'
 import type { RenderInputAssetAvailability } from '../application/ports/render-reconstruction-readiness.ts'
 import type { ProjectCreationRepository } from '../application/ports/project-creation-repository.ts'
+import type { ProjectDuplicationRepository } from '../application/ports/project-duplication-repository.ts'
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
 import type { ReviewAnnotationRepository } from '../application/ports/review-annotation-repository.ts'
@@ -91,6 +93,7 @@ import { PrismaArtifactRenderCheckpointRepository } from './prisma/artifact-rend
 import { PrismaAssetRightsRepository } from './prisma/asset-rights-repository.ts'
 import { PrismaAssetSelectionRepository } from './prisma/asset-selection-repository.ts'
 import { PrismaQualityIterationRepository } from './prisma/quality-iteration-repository.ts'
+import { PrismaMvpCoreGateRepository } from './prisma/mvp-core-gate-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -98,6 +101,7 @@ import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repositor
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
 import { PrismaProjectCreationRepository } from './prisma/project-creation-repository.ts'
+import { PrismaProjectDuplicationRepository } from './prisma/project-duplication-repository.ts'
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
 import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
 import { PrismaReviewAnnotationRepository } from './prisma/review-annotation-repository.ts'
@@ -168,6 +172,10 @@ export function createAssetSelectionRepository(): AssetSelectionRepository {
 
 export function createQualityIterationRepository(): QualityIterationRepository {
   return new PrismaQualityIterationRepository(resolveV2Client())
+}
+
+export function createMvpCoreGateRepository(): MvpCoreGateRepository {
+  return new PrismaMvpCoreGateRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {
@@ -662,6 +670,10 @@ export function createProjectFinalExportWorker(
 
 export function createProjectCreationRepository(): ProjectCreationRepository {
   return new PrismaProjectCreationRepository(resolveV2Client())
+}
+
+export function createProjectDuplicationRepository(): ProjectDuplicationRepository {
+  return new PrismaProjectDuplicationRepository(resolveV2Client())
 }
 
 export function createProjectQueryRepository(): ProjectQueryRepository {

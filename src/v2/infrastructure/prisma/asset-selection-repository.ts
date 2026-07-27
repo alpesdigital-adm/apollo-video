@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import {
   Prisma,
   type PrismaClient,
@@ -307,6 +309,28 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
             createdAt: new Date(selection.createdAt),
           },
         })
+        if (selection.result.selectedId) {
+          const selectedArtifact = artifactsById.get(selection.result.selectedId)!
+          await transaction.v2ProjectMediaAsset.upsert({
+            where: {
+              projectId_artifactId_role: {
+                projectId: selection.projectId,
+                artifactId: selectedArtifact.id,
+                role: 'selected-insert',
+              },
+            },
+            create: {
+              id: randomUUID(),
+              workspaceId: selection.workspaceId,
+              projectId: selection.projectId,
+              artifactId: selectedArtifact.id,
+              role: 'selected-insert',
+              originalFileName: `${selectedArtifact.id}.${selectedArtifact.container}`,
+              createdAt: new Date(selection.createdAt),
+            },
+            update: {},
+          })
+        }
         return Object.freeze({ selection: hydrateAssetSelection(row), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
