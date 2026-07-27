@@ -20,15 +20,15 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.002, com a jornada integral do MVP Core e os
-dois primeiros slices de reutilização semântica operando sobre PostgreSQL V2,
+Estado auditado após o gate F2.006, com a jornada integral do MVP Core e os
+seis primeiros slices de reutilização semântica operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **184 de 1.259 microtarefas verificadas como efetivamente entregues (14,6%)**;
-- **1.075 microtarefas abertas ou aguardando nova comprovação**;
+- **203 de 1.259 microtarefas verificadas como efetivamente entregues (16,1%)**;
+- **1.056 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 e F2.002 foram entregues, mas não encerram o
+  permanecem abertos; F2.001 a F2.006 foram entregues, mas não encerram o
   gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
@@ -1060,11 +1060,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.006 — Processamento hierárquico [FR-053]
 
-- [ ] Dividir long-form em chunks com overlap e time mapping preservado. Evidência T-FR-053.
-- [ ] Processar sinais baratos antes de visão/LLM caros. Evidência: execution order tipada.
-- [ ] Agregar chunks em moments/chapters sem perder evidence spans. Evidência T-FR-053.
-- [ ] Reprocessar somente tiers invalidados por nova versão de modelo. Evidência T-FR-053: invalidação transitiva.
-- [ ] Medir memória, custo e tempo em fixtures de 30min e 2h. Evidência T-FR-053.
+- [x] Dividir long-form em chunks com overlap e time mapping preservado. Entregue em `cbbf889`/`c083986`: policy `overlapping-time-chunks/v1`, chave física por run + identidade lógica do chunk, T-FR-053 6/6, E2E PostgreSQL de 2h e smoke real com 2 chunks/31 evidence spans.
+- [x] Processar sinais baratos antes de visão/LLM caros. Entregue em `cbbf889`: DAG tipado `cheap-signals → vision|language → aggregation`, execution order persistida, constraints SQL e API pública; a execução real confirmou os quatro tiers nessa ordem.
+- [x] Agregar chunks em moments/chapters sem perder evidence spans. Entregue em `cbbf889`/`c083986`: invariantes recusam perda no tier de linguagem e na agregação; smoke persistiu 2 moments, 1 chapter e todos os 31 spans, com manifests técnico/transcript independentes validados.
+- [x] Reprocessar somente tiers invalidados por nova versão de modelo. Entregue em `cbbf889`/`c083986`: mudança apenas de visão invalidou `vision, aggregation`; produção persistiu statuses `reused, processed, reused, processed`, output hashes verificados e exactly-one active run.
+- [x] Medir memória, custo e tempo em fixtures de 30min e 2h. Entregue em `cbbf889`: budget preflight/final e `hierarchical-processing-measurement/v1`; fixtures bounded e smoke mediu 28.418 bytes, 12 minor units e 18 ms. Regressão 511/511, E2E 1/1, build/typecheck/auditorias verdes e produção `c083986` com quatro containers sem restart. Evidência completa em `docs/quality/hierarchical-processing-v1.md`.
 
 ### F2.007 — ProductionBatch [FR-080]
 
