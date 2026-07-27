@@ -20,15 +20,16 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.001, com a jornada integral do MVP Core e o
-primeiro slice de reutilização semântica operando sobre PostgreSQL V2, API
-pública e implantação em produção:
+Estado auditado após o gate F2.002, com a jornada integral do MVP Core e os
+dois primeiros slices de reutilização semântica operando sobre PostgreSQL V2,
+API pública e implantação em produção:
 
-- **180 de 1.259 microtarefas verificadas como efetivamente entregues (14,3%)**;
-- **1.079 microtarefas abertas ou aguardando nova comprovação**;
+- **184 de 1.259 microtarefas verificadas como efetivamente entregues (14,6%)**;
+- **1.075 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 foi entregue, mas não encerra o gate F2;
+  permanecem abertos; F2.001 e F2.002 foram entregues, mas não encerram o
+  gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
 
@@ -37,6 +38,9 @@ DirectorRun, critic, proxy legendado, revisão/correção, duplicação e export
 finais 9:16/16:9 já são executáveis pela API V2 sobre Postgres. O gate
 automático 16/16 foi concluído. O catálogo virtual de SpeechSegments também
 é executável pela API pública sobre o transcript real de produção, sem criar
+artifacts físicos. Evidências editoriais agora podem ser catalogadas e
+pesquisadas pela API pública com claim, qualifier, contexto, atribuição,
+consentimento, direitos e preflight fail-closed preservados, também sem criar
 artifacts físicos. Isso não conclui as demais capacidades F2–F5 nem autoriza
 marcar contratos isolados como produto entregue.
 
@@ -1026,10 +1030,10 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.002 — EvidenceSegment [FR-044]
 
-- [ ] Modelar claim, qualifier, subject, attribution, consent, context window e integrity status. Evidência T-FR-044.
-- [ ] Vincular transcript exato, frames e evidências adjacentes necessárias. Evidência: `EvidenceSegment` preserva refs e range.
-- [ ] Impedir uso isolado quando qualifier/contexto for obrigatório. Evidência T-FR-044.
-- [ ] Criar policy tests de testemunho, resultado financeiro, antes/depois e hearsay. Evidência T-FR-044.
+- [x] Modelar claim, qualifier, subject, attribution, consent, context window e integrity status. Entregue em `674948b`: `evidence_segments`, policy `evidence-integrity/v1`, API pública e smoke `evidence-segment-69a6bb40-0ee7-4864-ba24-c100d3e5689a` persistiram o snapshot íntegro e virtual em produção.
+- [x] Vincular transcript exato, frames e evidências adjacentes necessárias. Entregue em `674948b`: hashes e refs imutáveis da fala/transcript/artifact, ranges/handles, `frameRefs`, `adjacentEvidenceIds`, E2E PostgreSQL e smoke com o `SpeechSegment` real `speech-segment-81438b35-d9c4-443b-9fea-8bc2c20a77a2`.
+- [x] Impedir uso isolado quando qualifier/contexto for obrigatório. Entregue em `674948b`: preflight público falha fechado para ausência de claim/contexto, drift, oferta/objeção incompatível e direitos revogados, expirados ou substituídos; E2E comprovou `CONTEXT_REQUIRED` e `RIGHTS_SNAPSHOT_STALE`.
+- [x] Criar policy tests de testemunho, resultado financeiro, antes/depois e hearsay. Entregue em `674948b`: T-FR-044 4/4, regressão 489/489, E2E API/PostgreSQL 1/1, build/typecheck/arquitetura aprovados e smoke autenticado em produção.
 
 ### F2.003 — LongFormMoment [FR-045]
 

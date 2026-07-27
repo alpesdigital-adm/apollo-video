@@ -151,6 +151,42 @@ O E2E comprova:
 
 ## 7. Evidência de produção
 
-A implantação e o smoke autenticado serão registrados nesta seção somente após
-backup, migration, substituição saudável dos containers e verificação direta
-da API e do PostgreSQL.
+Implantação aprovada em 2026-07-27:
+
+- commit, release e imagem: `674948b` / `apollo-video:674948b`;
+- archive do commit verificado antes do build:
+  SHA-256 `35459f7b2d47d65d0bce331a986593d681a358bbf10c77c92c89c120964784f2`;
+- backup anterior à migration:
+  `/opt/backups/apollo-video/apollo_video_v2-20260727T131212Z.dump`;
+- SHA-256 do backup:
+  `5635d096b1e529e89f6c4c30d4e4f0255a61d8811a891078e6609e3cc5071b93`;
+- `pg_restore --list` aprovou o backup;
+- migration `20260727140000_evidence_segment_catalog` aplicada;
+- 56 migrations reconhecidas e nenhuma pendente;
+- aplicação, ingest worker, render worker e webhook worker executando
+  `apollo-video:674948b`, saudáveis e com zero reinícios;
+- build revision dentro do container: `674948b`;
+- health, OpenAPI e capability discovery responderam HTTP 200;
+- OpenAPI publicou `POST` e `GET`
+  `/v1/projects/{projectId}/evidence-segments`;
+- discovery autenticado publicou as capabilities de catálogo e busca.
+
+Smoke autenticado no projeto
+`project-fe932791-32f4-4453-8b85-6ce35a711860`:
+
+- fonte real:
+  `speech-segment-81438b35-d9c4-443b-9fea-8bc2c20a77a2`;
+- evidência:
+  `evidence-segment-69a6bb40-0ee7-4864-ba24-c100d3e5689a`;
+- hash:
+  `e93b131627c2543c2ded2299e87be872e0d994dfe258b89955de0c2ed65ea062`;
+- criação HTTP 201;
+- replay com a mesma idempotency key HTTP 200 e a mesma identidade;
+- busca/preflight HTTP 200, `allowed=true`;
+- chamada sem credencial HTTP 401;
+- transcript e hash da fonte permaneceram exatos;
+- `integrityStatus=valid` e `physicalMaterialized=false`;
+- fingerprints e idempotency keys internos não foram expostos;
+- PostgreSQL confirmou duas evidências de diagnóstico, ambas virtuais, zero
+  registros inválidos e o smoke pelo ID/hash exatos;
+- artifacts físicos permaneceram em 7 antes e depois do catálogo.
