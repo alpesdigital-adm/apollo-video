@@ -1076,12 +1076,12 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.008 — Importação e script alignment [FR-081]
 
-- [ ] Importar roteiro com hooks, corpos, provas e CTAs identificáveis. Evidência T-FR-081.
-- [ ] Normalizar blocos sem apagar texto original ou ordem do documento. Evidência T-FR-081.
-- [ ] Alinhar bloco → transcript words → source range com confidence/evidence. Evidência T-FR-081.
-- [ ] Classificar exact, near, partial, missing e extra take. Evidência T-FR-081.
-- [ ] Criar UI de revisão dos alinhamentos incertos. Evidência: estado `review` e ação Revisar por item em `/batches`.
-- [ ] Construir golden set com paráfrase, repetição, erro e gravação fora de ordem. Evidência T-FR-081.
+- [x] Importar roteiro com hooks, corpos, provas e CTAs identificáveis. Entregue em `8eb7377`: parser bilíngue preserva rótulos, offsets e texto exato; API/UI e T-FR-081 comprovados em produção.
+- [x] Normalizar blocos sem apagar texto original ou ordem do documento. Entregue em `8eb7377`: normalização/tokens são derivados; hidratação valida slices, ordem e hashes do `rawText`.
+- [x] Alinhar bloco → transcript words → source range com confidence/evidence. Entregue em `8eb7377`: ranges monotônicos, índices de palavras, timecodes e componentes de confidence canônicos; smoke usou 12 palavras persistidas.
+- [x] Classificar exact, near, partial, missing e extra take. Entregue em `8eb7377`: classes e desvios tipados, extras com range/hash próprios e incerteza sem aprovação inventada.
+- [x] Criar UI de revisão dos alinhamentos incertos. Entregue em `8eb7377`: `Roteiro & takes` e modal responsivo em `/batches`, decisões por bloco/extra e replay idempotente do review.
+- [x] Construir golden set com paráfrase, repetição, erro e gravação fora de ordem. Entregue em `8eb7377`: T-FR-081 cobre esses quatro casos, exact/partial/missing/extra, ambiguidade, claims, concorrência e adulteração. Evidência completa em `docs/quality/script-alignment-v1.md`.
 
 ### F2.009 — Biblioteca de takes [FR-082]
 
