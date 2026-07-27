@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  alignScriptBlocks,
   applyBatchEdit,
   batchProgress,
   buildCompatibilityGraph,
@@ -12,7 +11,6 @@ import {
   createProductionBatch,
   deriveBatchStatus,
   hydrateProductionBatch,
-  importScriptBlocks,
   previewBatchEdit,
   resumeProductionBatch,
   retryBatchStep,
@@ -415,29 +413,6 @@ test('T-FR-080 rejects incompatible dimensions, stale transitions, and integrity
     }),
     /state does not match/,
   )
-})
-
-test('T-FR-081 imports ordered originals and classifies exact/near/partial/missing/extra alignments', () => {
-  const blocks = importScriptBlocks([
-    { role: 'hook', text: 'A frase exata' },
-    { role: 'body', text: 'Uma fala quase igual agora' },
-    { role: 'cta', text: 'Texto ausente completo' },
-  ])
-  assert.equal(blocks[0].originalText, 'A frase exata')
-  const transcript = 'Uma gravacao fora ordem A frase exata Uma fala quase igual'
-    .split(' ')
-    .map((word, index) => ({
-      word,
-      startMs: index * 100,
-      endMs: index * 100 + 90,
-    }))
-  const aligned = alignScriptBlocks(blocks, transcript)
-  assert.ok(aligned.some((entry) => entry.kind === 'exact'))
-  assert.ok(aligned.some((entry) =>
-    entry.kind === 'partial' || entry.kind === 'near'))
-  assert.ok(aligned.some((entry) => entry.kind === 'missing'))
-  assert.ok(aligned.some((entry) => entry.kind === 'extra-take'))
-  assert.ok(aligned.filter((entry) => entry.reviewRequired).length)
 })
 
 test('T-FR-082 groups retakes, scores five dimensions, and protects a manual primary', () => {

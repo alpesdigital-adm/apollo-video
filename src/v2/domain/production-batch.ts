@@ -1,5 +1,6 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain, DomainError } from './errors.ts'
+import type { ScriptBlockRole } from './script-alignment.ts'
 
 const stableOperationId = (value: unknown) => { const text = JSON.stringify(value); let hash = 2166136261; for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 16777619); return (hash >>> 0).toString(16).padStart(8, '0') }
 
@@ -1009,16 +1010,6 @@ export function resumeProductionBatch(input: {
     items: Object.freeze(items),
     updatedAt: normalizedInstant(input.now, 'resume.now'),
   })
-}
-
-export type ScriptBlockRole = 'hook' | 'body' | 'proof' | 'cta'
-export interface ScriptBlock { id: string; role: ScriptBlockRole; originalText: string; normalizedText: string; documentOrder: number }
-export function importScriptBlocks(input: readonly { role: ScriptBlockRole; text: string }[]) { return Object.freeze(input.map((block, index) => Object.freeze({ id: `script_${index}`, role: block.role, originalText: block.text, normalizedText: block.text.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim(), documentOrder: index }))) }
-export interface TranscriptWord { word: string; startMs: number; endMs: number }
-export type AlignmentKind = 'exact' | 'near' | 'partial' | 'missing' | 'extra-take'
-const tokens = (text: string) => text.toLowerCase().replace(/[^a-z0-9áàâãéêíóôõúç\s]/gi, '').split(/\s+/).filter(Boolean)
-export function alignScriptBlocks(blocks: readonly ScriptBlock[], transcript: readonly TranscriptWord[]) {
-  const transcriptTokens = transcript.map((word) => word.word.toLowerCase()); const used = new Set<number>(); const alignments = blocks.map((block) => { const wanted = tokens(block.originalText); let best = { start: -1, overlap: 0 }; for (let start = 0; start < transcriptTokens.length; start++) { const window = transcriptTokens.slice(start, start + wanted.length + 2); const overlap = wanted.filter((word) => window.includes(word)).length / Math.max(1, wanted.length); if (overlap > best.overlap) best = { start, overlap } } const kind: AlignmentKind = best.overlap === 1 ? 'exact' : best.overlap >= .75 ? 'near' : best.overlap >= .35 ? 'partial' : 'missing'; const count = Math.max(1, Math.min(wanted.length + 2, transcript.length - Math.max(0, best.start))); const indices = best.start < 0 ? [] : Array.from({ length: count }, (_, i) => best.start + i); indices.forEach((index) => used.add(index)); const rangeMs = kind === 'missing' ? null : [transcript[best.start].startMs, transcript[Math.min(transcript.length - 1, best.start + count - 1)].endMs] as const; return Object.freeze({ blockId: block.id, kind, confidence: Number(best.overlap.toFixed(3)), rangeMs, evidenceWordIndices: Object.freeze(indices), reviewRequired: kind === 'partial' || kind === 'missing' }) }); const extra = transcript.map((word, index) => ({ word, index })).filter(({ index }) => !used.has(index)).map(({ word, index }) => Object.freeze({ blockId: null, kind: 'extra-take' as const, confidence: 1, rangeMs: Object.freeze([word.startMs, word.endMs]) as readonly [number, number], evidenceWordIndices: Object.freeze([index]), reviewRequired: true })); return Object.freeze([...alignments, ...extra])
 }
 
 export interface Take { id: string; artifactId: string; scriptBlockId?: string; inferredIntention?: string; rangeMs: readonly [number, number]; retakeBoundaryId: string; scores: { completeness: number; performance: number; audio: number; video: number; integrity: number }; status: 'primary' | 'alternate' | 'rejected' | 'needs-review'; protected: boolean }

@@ -51,6 +51,112 @@ interface MediaRecord {
   probe?: { width: number; height: number; duration: number; fps: number }
 }
 
+type ScriptRole =
+  | 'hook'
+  | 'body'
+  | 'proof'
+  | 'objection'
+  | 'bridge'
+  | 'offer'
+  | 'cta'
+
+interface TranscriptSummary {
+  id: string
+  sourceArtifactId: string
+  language: string
+  transcriptHash: string
+  text: string
+  wordCount: number
+}
+
+interface ScriptCandidate {
+  id: string
+  transcriptId: string
+  sourceArtifactId: string
+  kind: 'exact' | 'near' | 'partial'
+  sourceRangeMs: [number, number]
+  spokenText: string
+  metrics: { total: number }
+  deviations: {
+    kind: string
+    reasonCode: string
+    plannedTokens: string[]
+    spokenTokens: string[]
+  }[]
+}
+
+interface ScriptBlockAlignment {
+  blockId: string
+  role: ScriptRole
+  documentOrder: number
+  kind: 'exact' | 'near' | 'partial' | 'missing'
+  confidence: number
+  reviewStatus:
+    | 'auto-linked'
+    | 'review-required'
+    | 'accepted'
+    | 'marked-missing'
+  ambiguous: boolean
+  reasonCodes: string[]
+  selectedCandidate: ScriptCandidate | null
+  alternatives: ScriptCandidate[]
+}
+
+interface ScriptExtraTake {
+  id: string
+  transcriptId: string
+  sourceArtifactId: string
+  sourceRangeMs: [number, number]
+  spokenText: string
+  reviewStatus: 'review-required' | 'accepted' | 'rejected'
+}
+
+interface ScriptAlignmentRun {
+  id: string
+  status: 'completed' | 'review-required' | 'reviewed'
+  revision: number
+  document: {
+    title: string
+    locale: string
+    rawText: string
+    blocks: {
+      id: string
+      role: ScriptRole
+      plannedText: string
+      documentOrder: number
+    }[]
+  }
+  alignments: ScriptBlockAlignment[]
+  extraTakes: ScriptExtraTake[]
+  summary: {
+    blockCount: number
+    exactCount: number
+    nearCount: number
+    partialCount: number
+    missingCount: number
+    extraTakeCount: number
+    ambiguousCount: number
+    reviewRequiredCount: number
+    resolvedReviewCount: number
+    averageConfidence: number
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+type ScriptReviewDecision =
+  | {
+      targetKind: 'block'
+      blockId: string
+      resolution: 'accept' | 'mark-missing' | 'select-alternative'
+      candidateId?: string
+    }
+  | {
+      targetKind: 'extra-take'
+      extraTakeId: string
+      resolution: 'accept-extra' | 'reject-extra'
+    }
+
 interface BatchStep {
   step: StepName
   sequence: number
@@ -146,6 +252,23 @@ const STEP_LABELS: Record<StepName, string> = {
   reviewing: 'Revisão',
 }
 
+const SCRIPT_ROLE_LABELS: Record<ScriptRole, string> = {
+  hook: 'Hook',
+  body: 'Corpo',
+  proof: 'Prova',
+  objection: 'Objeção',
+  bridge: 'Ponte',
+  offer: 'Oferta',
+  cta: 'CTA',
+}
+
+const SCRIPT_KIND_LABELS: Record<ScriptBlockAlignment['kind'], string> = {
+  exact: 'Exato',
+  near: 'Próximo',
+  partial: 'Parcial',
+  missing: 'Ausente',
+}
+
 const FORMATS = [
   { id: '9:16', name: 'Vertical', use: 'Reels · Shorts' },
   { id: '16:9', name: 'Horizontal', use: 'YouTube · sites' },
@@ -179,6 +302,14 @@ function elapsed(instant: string) {
   if (seconds < 3600) return `há ${Math.floor(seconds / 60)} min`
   if (seconds < 86_400) return `há ${Math.floor(seconds / 3600)} h`
   return new Date(instant).toLocaleDateString('pt-BR')
+}
+
+function timecode(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  const tenths = Math.floor((milliseconds % 1000) / 100)
+  return `${minutes}:${String(seconds).padStart(2, '0')}.${tenths}`
 }
 
 function stepTone(state: StepState) {
@@ -236,6 +367,23 @@ export default function BatchesPage() {
   const [locale, setLocale] = useState('pt-BR')
   const [budget, setBudget] = useState('25.00')
   const idempotencyKey = useRef<string | null>(null)
+  const [detailView, setDetailView] =
+    useState<'script' | 'outputs'>('script')
+  const [batchTranscripts, setBatchTranscripts] =
+    useState<TranscriptSummary[]>([])
+  const [alignments, setAlignments] = useState<ScriptAlignmentRun[]>([])
+  const [activeAlignmentId, setActiveAlignmentId] =
+    useState<string | null>(null)
+  const [alignmentLoading, setAlignmentLoading] = useState(false)
+  const [scriptComposerOpen, setScriptComposerOpen] = useState(false)
+  const [scriptTitle, setScriptTitle] = useState('')
+  const [scriptLocale, setScriptLocale] = useState('pt-BR')
+  const [scriptRawText, setScriptRawText] = useState('')
+  const [scriptSourceIds, setScriptSourceIds] =
+    useState<Set<string>>(new Set())
+  const [scriptRoleHints, setScriptRoleHints] =
+    useState<Record<string, ScriptRole | ''>>({})
+  const scriptIdempotencyKey = useRef<string | null>(null)
 
   const fetchBatches = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true)
@@ -330,19 +478,125 @@ export default function BatchesPage() {
   }, [composerOpen, projectId, router])
 
   useEffect(() => {
-    if (!composerOpen) return
+    if (!composerOpen && !scriptComposerOpen) return
     function close(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !busy) setComposerOpen(false)
+      if (event.key === 'Escape' && !busy) {
+        setComposerOpen(false)
+        setScriptComposerOpen(false)
+      }
     }
     window.addEventListener('keydown', close)
     return () => window.removeEventListener('keydown', close)
-  }, [busy, composerOpen])
+  }, [busy, composerOpen, scriptComposerOpen])
 
   const selectedBatch = useMemo(
     () => batches.find((batch) => batch.id === selectedBatchId) ?? null,
     [batches, selectedBatchId],
   )
+  const selectedBatchKey = selectedBatch
+    ? `${selectedBatch.id}:${selectedBatch.projectId}`
+    : ''
+
+  useEffect(() => {
+    if (!selectedBatch) {
+      setBatchTranscripts([])
+      setAlignments([])
+      setActiveAlignmentId(null)
+      return
+    }
+    const controller = new AbortController()
+    async function loadScriptWorkspace() {
+      setAlignmentLoading(true)
+      try {
+        const [workspaceResponse, alignmentsResponse] = await Promise.all([
+          fetch(
+            `/v1/projects/${encodeURIComponent(selectedBatch!.projectId)}/workspace`,
+            {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+              cache: 'no-store',
+            },
+          ),
+          fetch(
+            `/v1/batches/${encodeURIComponent(selectedBatch!.id)}/script-alignments?limit=50`,
+            {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+              cache: 'no-store',
+            },
+          ),
+        ])
+        if (
+          workspaceResponse.status === 401 ||
+          alignmentsResponse.status === 401
+        ) {
+          router.replace('/login')
+          return
+        }
+        const workspacePayload = await workspaceResponse.json() as
+          ApiEnvelope<{ transcripts: TranscriptSummary[] }>
+        const alignmentsPayload = await alignmentsResponse.json() as
+          ApiEnvelope<{ alignments: ScriptAlignmentRun[] }>
+        if (!workspaceResponse.ok || !workspacePayload.data) {
+          throw new Error(apiError(
+            workspacePayload,
+            'Não foi possível carregar as transcrições do lote.',
+          ))
+        }
+        if (!alignmentsResponse.ok || !alignmentsPayload.data) {
+          throw new Error(apiError(
+            alignmentsPayload,
+            'Não foi possível carregar os alinhamentos.',
+          ))
+        }
+        const allowedArtifacts = new Set(
+          selectedBatch!.sourceGroups.flatMap((group) =>
+            group.sourceArtifactIds),
+        )
+        const transcripts = workspacePayload.data.transcripts
+          .filter((transcript) =>
+            allowedArtifacts.has(transcript.sourceArtifactId))
+        setBatchTranscripts(transcripts)
+        setScriptSourceIds(new Set(
+          transcripts.map((transcript) => transcript.id),
+        ))
+        setScriptRoleHints((current) => Object.fromEntries(
+          transcripts.map((transcript) => [
+            transcript.id,
+            current[transcript.id] ?? '',
+          ]),
+        ))
+        const runs = alignmentsPayload.data.alignments
+        setAlignments(runs)
+        setActiveAlignmentId((current) =>
+          current && runs.some((run) => run.id === current)
+            ? current
+            : runs[0]?.id ?? null)
+        const project = projects.find((candidate) =>
+          candidate.id === selectedBatch!.projectId)
+        setScriptLocale(project?.locale || 'pt-BR')
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : 'Não foi possível carregar o roteiro do lote.',
+        )
+      } finally {
+        if (!controller.signal.aborted) setAlignmentLoading(false)
+      }
+    }
+    void loadScriptWorkspace()
+    return () => controller.abort()
+    // selectedBatchKey is stable across polling revisions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBatchKey, router])
+
   const selectedProject = projects.find((project) => project.id === projectId)
+  const activeAlignment = alignments.find((alignment) =>
+    alignment.id === activeAlignmentId) ?? alignments[0] ?? null
   const eligibleMedia = projectMedia.filter((media) => media.status === 'available' && media.rightsStatus === 'approved')
   const blockedMedia = projectMedia.filter((media) => media.status !== 'available' || media.rightsStatus !== 'approved')
   const recipes = useMemo(
@@ -603,6 +857,171 @@ export default function BatchesPage() {
     setNotice(`${completed} lote${completed === 1 ? '' : 's'} ${action === 'cancel' ? 'cancelado' : 'retomados'} pela API.`)
   }
 
+  function openScriptComposer() {
+    if (!selectedBatch) return
+    setScriptTitle(
+      activeAlignment?.document.title ||
+      `Roteiro · ${selectedBatch.name}`,
+    )
+    if (!scriptRawText) {
+      setScriptRawText([
+        'HOOK 1: ',
+        '',
+        'CORPO 1: ',
+        '',
+        'PROVA 1: ',
+        '',
+        'CTA 1: ',
+      ].join('\n'))
+    }
+    setScriptComposerOpen(true)
+    scriptIdempotencyKey.current = null
+  }
+
+  function toggleScriptSource(transcriptId: string) {
+    setScriptSourceIds((current) => {
+      const next = new Set(current)
+      if (next.has(transcriptId)) next.delete(transcriptId)
+      else next.add(transcriptId)
+      return next
+    })
+    scriptIdempotencyKey.current = null
+  }
+
+  async function createAlignment(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault()
+    if (
+      !selectedBatch ||
+      scriptTitle.trim().length < 2 ||
+      scriptRawText.trim().length < 3 ||
+      scriptSourceIds.size === 0
+    ) {
+      setNotice(
+        'Informe o roteiro e selecione pelo menos uma transcrição do lote.',
+      )
+      return
+    }
+    setBusy(true)
+    setNotice(null)
+    scriptIdempotencyKey.current ??= globalThis.crypto.randomUUID()
+    try {
+      const sources = batchTranscripts
+        .filter((transcript) => scriptSourceIds.has(transcript.id))
+        .map((transcript) => ({
+          transcriptId: transcript.id,
+          expectedTranscriptHash: transcript.transcriptHash,
+          ...(scriptRoleHints[transcript.id]
+            ? { roleHint: scriptRoleHints[transcript.id] }
+            : {}),
+        }))
+      const response = await fetch(
+        `/v1/batches/${encodeURIComponent(selectedBatch.id)}/script-alignments`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key': scriptIdempotencyKey.current,
+          },
+          body: JSON.stringify({
+            title: scriptTitle.trim(),
+            locale: scriptLocale.trim(),
+            rawText: scriptRawText,
+            sources,
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as
+        ApiEnvelope<{ alignment: ScriptAlignmentRun; replayed: boolean }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível alinhar o roteiro.',
+        ))
+      }
+      const alignment = payload.data.alignment
+      setAlignments((current) => [
+        alignment,
+        ...current.filter((candidate) =>
+          candidate.id !== alignment.id),
+      ])
+      setActiveAlignmentId(alignment.id)
+      setScriptComposerOpen(false)
+      setDetailView('script')
+      scriptIdempotencyKey.current = null
+      setNotice(
+        alignment.summary.reviewRequiredCount > 0
+          ? `Roteiro alinhado. ${alignment.summary.reviewRequiredCount} decisão${alignment.summary.reviewRequiredCount === 1 ? '' : 'ões'} precisa${alignment.summary.reviewRequiredCount === 1 ? '' : 'm'} de revisão.`
+          : 'Roteiro alinhado sem pendências.',
+      )
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível alinhar o roteiro.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function reviewAlignment(decision: ScriptReviewDecision) {
+    if (!selectedBatch || !activeAlignment) return
+    setBusy(true)
+    setNotice(null)
+    try {
+      const response = await fetch(
+        `/v1/batches/${encodeURIComponent(selectedBatch.id)}/script-alignments/${encodeURIComponent(activeAlignment.id)}/reviews`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key': globalThis.crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            expectedRevision: activeAlignment.revision,
+            decisions: [decision],
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as
+        ApiEnvelope<{ alignment: ScriptAlignmentRun }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível registrar a revisão.',
+        ))
+      }
+      const alignment = payload.data.alignment
+      setAlignments((current) => current.map((candidate) =>
+        candidate.id === alignment.id ? alignment : candidate))
+      setNotice(
+        alignment.summary.reviewRequiredCount > 0
+          ? `Decisão registrada. Restam ${alignment.summary.reviewRequiredCount}.`
+          : 'Revisão do roteiro concluída.',
+      )
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível registrar a revisão.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#070707] text-[#f4f1ea] selection:bg-[#eab83e]/25 selection:text-[#fff8df]">
       <div className="mx-auto flex min-h-screen max-w-[1800px]">
@@ -852,6 +1271,30 @@ export default function BatchesPage() {
                       </div>
                     </div>
 
+                    <div className="flex border-b border-white/[0.07] bg-[#090909] px-3 pt-2 sm:px-4">
+                      <button
+                        className={`relative px-3 py-3 text-[10px] font-semibold transition ${detailView === 'script' ? 'text-[#e7bd59]' : 'text-[#77736c] hover:text-[#bbb5ab]'}`}
+                        onClick={() => setDetailView('script')}
+                        type="button"
+                      >
+                        Roteiro & takes
+                        {activeAlignment?.summary.reviewRequiredCount ? (
+                          <span className="ml-2 rounded-full bg-[#d8a936]/15 px-1.5 py-0.5 font-mono text-[8px] text-[#dfba60]">{activeAlignment.summary.reviewRequiredCount}</span>
+                        ) : null}
+                        {detailView === 'script' ? <span className="absolute inset-x-2 bottom-0 h-px bg-[#d8a936]" /> : null}
+                      </button>
+                      <button
+                        className={`relative px-3 py-3 text-[10px] font-semibold transition ${detailView === 'outputs' ? 'text-[#e7bd59]' : 'text-[#77736c] hover:text-[#bbb5ab]'}`}
+                        onClick={() => setDetailView('outputs')}
+                        type="button"
+                      >
+                        Saídas do lote
+                        <span className="ml-2 font-mono text-[8px] text-[#6c6861]">{selectedBatch.items.length}</span>
+                        {detailView === 'outputs' ? <span className="absolute inset-x-2 bottom-0 h-px bg-[#d8a936]" /> : null}
+                      </button>
+                    </div>
+
+                    {detailView === 'outputs' ? (
                     <div className="max-h-[620px] space-y-2 overflow-y-auto p-3 sm:p-4">
                       {selectedBatch.items.map((item, index) => {
                         const recipe = selectedBatch.recipes.find((candidate) => candidate.id === item.recipeId)
@@ -891,6 +1334,156 @@ export default function BatchesPage() {
                         )
                       })}
                     </div>
+                    ) : (
+                      <div className="max-h-[720px] overflow-y-auto p-3 sm:p-4" data-testid="script-alignment-panel">
+                        {alignmentLoading ? (
+                          <div className="space-y-3">
+                            <div className="h-24 animate-pulse rounded-xl bg-white/[0.025]" />
+                            <div className="h-40 animate-pulse rounded-xl bg-white/[0.025]" />
+                          </div>
+                        ) : batchTranscripts.length === 0 ? (
+                          <div className="grid min-h-56 place-items-center rounded-xl border border-dashed border-[#bd6666]/25 bg-[#bd6666]/[0.035] p-7 text-center">
+                            <div>
+                              <p className="text-sm font-semibold text-[#d9b0b0]">Nenhuma fala transcrita neste lote</p>
+                              <p className="mx-auto mt-2 max-w-md text-xs leading-5 text-[#846f6f]">Conclua a ingestão e a transcrição dos materiais selecionados. O alinhamento usa as palavras e os tempos canônicos da API.</p>
+                            </div>
+                          </div>
+                        ) : !activeAlignment ? (
+                          <div className="relative overflow-hidden rounded-xl border border-[#d5a638]/20 bg-[#d5a638]/[0.035] p-5">
+                            <div aria-hidden="true" className="absolute inset-y-0 left-0 w-1 bg-[#d7a937]" />
+                            <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#a98536]">Script slate · aguardando</p>
+                            <h3 className="mt-3 text-lg font-semibold tracking-[-0.02em] text-[#e9e3d9]">Compare o planejado com o que foi gravado.</h3>
+                            <p className="mt-2 max-w-xl text-xs leading-5 text-[#817c73]">O Apollo separa hooks, corpos, provas e CTAs, encontra os ranges exatos e sinaliza somente o que exige decisão humana.</p>
+                            <div className="mt-5 flex flex-wrap items-center gap-3">
+                              <button className="rounded-lg bg-[#dcae3a] px-4 py-2.5 text-xs font-bold text-[#171207] transition hover:bg-[#efc34f] disabled:opacity-40" disabled={busy} onClick={openScriptComposer} type="button">Importar roteiro</button>
+                              <span className="font-mono text-[9px] text-[#777169]">{batchTranscripts.length} transcrição{batchTranscripts.length === 1 ? '' : 'ões'} disponível{batchTranscripts.length === 1 ? '' : 'is'}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="flex flex-col gap-3 rounded-xl border border-white/[0.07] bg-[#0e0e0e] p-4 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#9a762c]"><span className="h-px w-5 bg-[#9a762c]" /> Script slate</div>
+                                <h3 className="mt-2 truncate text-base font-semibold text-[#eee8de]">{activeAlignment.document.title}</h3>
+                                <p className="mt-1 text-[10px] text-[#6e6961]">{activeAlignment.document.locale} · revisão {activeAlignment.revision} · {elapsed(activeAlignment.updatedAt)}</p>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-2">
+                                {alignments.length > 1 ? (
+                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-none" onChange={(event) => setActiveAlignmentId(event.target.value)} value={activeAlignment.id}>
+                                    {alignments.map((alignment) => <option key={alignment.id} value={alignment.id}>{alignment.document.title} · r{alignment.revision}</option>)}
+                                  </select>
+                                ) : null}
+                                <button className="h-9 rounded-lg border border-[#d5a638]/20 px-3 text-[10px] font-semibold text-[#d7b559] transition hover:bg-[#d5a638]/10" onClick={openScriptComposer} type="button">Novo alinhamento</button>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                              {[
+                                ['Confiança média', `${Math.round(activeAlignment.summary.averageConfidence)}%`],
+                                ['Blocos', activeAlignment.summary.blockCount],
+                                ['Ambíguos', activeAlignment.summary.ambiguousCount],
+                                ['Pendências', activeAlignment.summary.reviewRequiredCount],
+                              ].map(([label, value]) => (
+                                <div className="rounded-lg border border-white/[0.06] bg-[#0d0d0d] px-3 py-2.5" key={String(label)}>
+                                  <p className="font-mono text-sm font-semibold text-[#d8d1c6]">{value}</p>
+                                  <p className="mt-1 text-[8px] uppercase tracking-[0.1em] text-[#625e57]">{label}</p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div aria-label="Ordem planejada do roteiro" className="mt-4 flex overflow-hidden rounded-lg border border-white/[0.07] bg-[#090909] p-2">
+                              {activeAlignment.alignments.map((alignment) => (
+                                <div className="flex min-w-0 flex-1 items-center" key={alignment.blockId}>
+                                  <div className={`grid h-6 w-6 shrink-0 place-items-center rounded-md border font-mono text-[8px] ${alignment.reviewStatus === 'review-required' ? 'border-[#d8a936]/40 bg-[#d8a936]/10 text-[#e4bd60]' : alignment.kind === 'missing' ? 'border-[#c96262]/30 bg-[#c96262]/10 text-[#d77b7b]' : 'border-[#5dae7a]/25 bg-[#5dae7a]/10 text-[#76bf90]'}`}>{alignment.documentOrder + 1}</div>
+                                  {alignment.documentOrder < activeAlignment.alignments.length - 1 ? <span className="h-px min-w-2 flex-1 bg-white/[0.08]" /> : null}
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="mt-4 space-y-3">
+                              {activeAlignment.alignments.map((alignment) => {
+                                const block = activeAlignment.document.blocks.find((candidate) => candidate.id === alignment.blockId)
+                                const range = alignment.selectedCandidate?.sourceRangeMs
+                                return (
+                                  <article className={`relative overflow-hidden rounded-xl border bg-[#0d0d0d] ${alignment.reviewStatus === 'review-required' ? 'border-[#d6a638]/25' : 'border-white/[0.07]'}`} data-testid={`alignment-block-${alignment.blockId}`} key={alignment.blockId}>
+                                    <div aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] ${alignment.reviewStatus === 'review-required' ? 'bg-[#d8a936]' : 'bg-[#4d8c67]'}`} />
+                                    <div className="p-4 pl-5">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-mono text-[9px] text-[#777169]">{String(alignment.documentOrder + 1).padStart(2, '0')}</span>
+                                          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#b28c38]">{SCRIPT_ROLE_LABELS[alignment.role]}</span>
+                                          <span className="rounded-md bg-white/[0.04] px-1.5 py-0.5 text-[8px] text-[#777169]">{SCRIPT_KIND_LABELS[alignment.kind]}</span>
+                                        </div>
+                                        <div className="text-right">
+                                          <p className={`font-mono text-sm font-semibold ${alignment.confidence >= 80 ? 'text-[#73bb8d]' : alignment.confidence >= 60 ? 'text-[#dfb85b]' : 'text-[#d57979]'}`}>{Math.round(alignment.confidence)}%</p>
+                                          {range ? <p className="mt-0.5 font-mono text-[8px] text-[#625e57]">{timecode(range[0])} → {timecode(range[1])}</p> : null}
+                                        </div>
+                                      </div>
+                                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                        <div className="rounded-lg border border-white/[0.055] bg-[#090909] p-3">
+                                          <p className="text-[8px] font-semibold uppercase tracking-[0.14em] text-[#5f5b54]">Planejado</p>
+                                          <p className="mt-2 text-xs leading-5 text-[#c9c2b8]">{block?.plannedText ?? 'Bloco não encontrado'}</p>
+                                        </div>
+                                        <div className="rounded-lg border border-white/[0.055] bg-[#090909] p-3">
+                                          <p className="text-[8px] font-semibold uppercase tracking-[0.14em] text-[#5f5b54]">Falado</p>
+                                          <p className="mt-2 text-xs leading-5 text-[#e1dbd1]">{alignment.selectedCandidate?.spokenText ?? 'Nenhum trecho atribuído'}</p>
+                                        </div>
+                                      </div>
+                                      {alignment.selectedCandidate?.deviations.length ? (
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                          {alignment.selectedCandidate.deviations.map((deviation) => <span className="rounded-md border border-[#c98a4d]/15 bg-[#c98a4d]/[0.06] px-2 py-1 text-[8px] text-[#bd9269]" key={`${deviation.kind}-${deviation.reasonCode}`}>{deviation.kind}</span>)}
+                                        </div>
+                                      ) : null}
+                                      {alignment.reviewStatus === 'review-required' ? (
+                                        <div className="mt-3 flex flex-wrap gap-2 border-t border-white/[0.055] pt-3">
+                                          {alignment.selectedCandidate ? <button className="rounded-lg bg-[#d7a936] px-3 py-2 text-[9px] font-bold text-[#171207] disabled:opacity-40" disabled={busy} onClick={() => void reviewAlignment({ targetKind: 'block', blockId: alignment.blockId, resolution: 'accept' })} type="button">Confirmar trecho</button> : null}
+                                          <button className="rounded-lg border border-white/[0.09] px-3 py-2 text-[9px] font-semibold text-[#9b958c] disabled:opacity-40" disabled={busy} onClick={() => void reviewAlignment({ targetKind: 'block', blockId: alignment.blockId, resolution: 'mark-missing' })} type="button">Marcar ausente</button>
+                                          {alignment.alternatives.map((alternative, index) => (
+                                            <button className="rounded-lg border border-[#7b79bd]/20 px-3 py-2 text-[9px] font-semibold text-[#9c9ad4] disabled:opacity-40" disabled={busy} key={alternative.id} onClick={() => void reviewAlignment({ targetKind: 'block', blockId: alignment.blockId, resolution: 'select-alternative', candidateId: alternative.id })} title={alternative.spokenText} type="button">Usar take {index + 2} · {Math.round(alternative.metrics.total)}%</button>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p className="mt-3 text-[9px] text-[#63856f]">✓ Decisão registrada</p>
+                                      )}
+                                    </div>
+                                  </article>
+                                )
+                              })}
+                            </div>
+
+                            {activeAlignment.extraTakes.length > 0 ? (
+                              <section className="mt-5">
+                                <div className="flex items-end justify-between">
+                                  <div>
+                                    <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#756f66]">Fora do roteiro</p>
+                                    <h4 className="mt-1 text-sm font-semibold text-[#cfc8be]">Takes extras</h4>
+                                  </div>
+                                  <span className="font-mono text-[9px] text-[#6d6860]">{activeAlignment.extraTakes.length}</span>
+                                </div>
+                                <div className="mt-2 space-y-2">
+                                  {activeAlignment.extraTakes.map((extra) => (
+                                    <article className="rounded-lg border border-white/[0.06] bg-[#0d0d0d] p-3" key={extra.id}>
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <p className="text-[10px] leading-4 text-[#aaa49a]">{extra.spokenText}</p>
+                                          <p className="mt-1 font-mono text-[8px] text-[#5f5b54]">{timecode(extra.sourceRangeMs[0])} → {timecode(extra.sourceRangeMs[1])}</p>
+                                        </div>
+                                        {extra.reviewStatus === 'review-required' ? (
+                                          <div className="flex shrink-0 gap-1.5">
+                                            <button className="rounded-md border border-[#5da879]/20 px-2 py-1.5 text-[8px] font-semibold text-[#75b98d] disabled:opacity-40" disabled={busy} onClick={() => void reviewAlignment({ targetKind: 'extra-take', extraTakeId: extra.id, resolution: 'accept-extra' })} type="button">Aproveitar</button>
+                                            <button className="rounded-md border border-white/[0.08] px-2 py-1.5 text-[8px] font-semibold text-[#858078] disabled:opacity-40" disabled={busy} onClick={() => void reviewAlignment({ targetKind: 'extra-take', extraTakeId: extra.id, resolution: 'reject-extra' })} type="button">Ignorar</button>
+                                          </div>
+                                        ) : <span className={`shrink-0 text-[8px] ${extra.reviewStatus === 'accepted' ? 'text-[#70b588]' : 'text-[#6e6961]'}`}>{extra.reviewStatus === 'accepted' ? 'aproveitado' : 'ignorado'}</span>}
+                                      </div>
+                                    </article>
+                                  ))}
+                                </div>
+                              </section>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </aside>
@@ -898,6 +1491,95 @@ export default function BatchesPage() {
           </div>
         </section>
       </div>
+
+      {scriptComposerOpen ? (
+        <div aria-labelledby="script-composer-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 backdrop-blur-sm sm:p-5" role="dialog">
+          <button aria-label="Fechar importação do roteiro" className="absolute inset-0 cursor-default" disabled={busy} onClick={() => setScriptComposerOpen(false)} type="button" />
+          <form className="relative max-h-[95vh] w-full max-w-[1060px] overflow-x-hidden overflow-y-auto rounded-[24px] border border-white/[0.1] bg-[#0d0d0d] shadow-[0_30px_110px_rgba(0,0,0,.78)]" data-testid="script-alignment-composer" onSubmit={createAlignment}>
+            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-white/[0.07] bg-[#0d0d0d]/95 px-5 py-5 backdrop-blur-xl sm:px-7">
+              <div>
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b89034]"><span className="h-px w-6 bg-[#b89034]" /> Script slate</div>
+                <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[#f4f0e8]" id="script-composer-title">Importar roteiro gravado</h2>
+                <p className="mt-1 max-w-2xl text-xs leading-5 text-[#77736c]">Identifique cada bloco pelo papel. O texto original fica preservado; a normalização e o alinhamento são derivados separadamente.</p>
+              </div>
+              <button aria-label="Fechar" className="grid h-9 w-9 place-items-center rounded-lg border border-white/[0.07] text-lg text-[#77736c] transition hover:bg-white/[0.04] hover:text-white" disabled={busy} onClick={() => setScriptComposerOpen(false)} type="button">×</button>
+            </div>
+
+            <div className="grid min-w-0 lg:grid-cols-[minmax(0,1.15fr)_minmax(330px,.85fr)]">
+              <div className="min-w-0 space-y-4 px-5 py-6 sm:px-7">
+                <div className="grid gap-4 sm:grid-cols-[1fr_130px]">
+                  <label>
+                    <span className="text-xs font-semibold text-[#c8c2b8]">Nome do roteiro</span>
+                    <input autoFocus className="mt-2 h-11 min-w-0 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={200} onChange={(event) => { setScriptTitle(event.target.value); scriptIdempotencyKey.current = null }} required value={scriptTitle} />
+                  </label>
+                  <label>
+                    <span className="text-xs font-semibold text-[#c8c2b8]">Idioma</span>
+                    <input className="mt-2 h-11 min-w-0 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-none focus:border-[#d5a535]/55" maxLength={35} onChange={(event) => { setScriptLocale(event.target.value); scriptIdempotencyKey.current = null }} required value={scriptLocale} />
+                  </label>
+                </div>
+                <label className="block">
+                  <span className="text-xs font-semibold text-[#c8c2b8]">Texto planejado</span>
+                  <span className="ml-2 text-[10px] text-[#77736c]">um marcador por bloco</span>
+                  <textarea className="mt-2 min-h-[390px] min-w-0 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 font-mono text-[12px] leading-6 text-[#eee8de] outline-none placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={500000} onChange={(event) => { setScriptRawText(event.target.value); scriptIdempotencyKey.current = null }} placeholder={'HOOK 1: Uma abertura completa.\nCORPO 1: O argumento principal.\nPROVA 1: A evidência.\nCTA 1: A chamada para ação.'} required spellCheck value={scriptRawText} />
+                </label>
+                <p className="text-[9px] leading-4 text-[#656159]">Marcadores aceitos: HOOK/GANCHO, BODY/CORPO, PROOF/PROVA, OBJECTION/OBJEÇÃO, BRIDGE/PONTE, OFFER/OFERTA e CTA.</p>
+              </div>
+
+              <aside className="min-w-0 border-t border-white/[0.07] bg-[#0a0a0a] px-5 py-6 sm:px-7 lg:border-l lg:border-t-0">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9a762c]">Fontes canônicas</p>
+                <h3 className="mt-1 text-lg font-semibold text-[#e8e3da]">Gravações do lote</h3>
+                <p className="mt-2 text-[10px] leading-4 text-[#6f6b64]">O papel é uma pista opcional. O servidor sempre usa o hash e as palavras persistidas, nunca um texto enviado pelo navegador.</p>
+
+                <div className="mt-4 max-h-[430px] space-y-2 overflow-y-auto">
+                  {batchTranscripts.map((transcript) => {
+                    const checked = scriptSourceIds.has(transcript.id)
+                    return (
+                      <div className={`rounded-xl border p-3 transition ${checked ? 'border-[#d5a535]/35 bg-[#d5a535]/[0.055]' : 'border-white/[0.07] bg-[#090909]'}`} key={transcript.id}>
+                        <label className="flex cursor-pointer items-start gap-3">
+                          <input checked={checked} className="mt-0.5 h-4 w-4 accent-[#dcae3a]" onChange={() => toggleScriptSource(transcript.id)} type="checkbox" />
+                          <span className="min-w-0">
+                            <span className="block truncate text-xs font-medium text-[#d8d1c7]">{transcript.text.slice(0, 100) || transcript.id}</span>
+                            <span className="mt-1 block font-mono text-[8px] text-[#625e57]">{transcript.language} · {transcript.wordCount} palavras</span>
+                          </span>
+                        </label>
+                        {checked ? (
+                          <label className="mt-3 block border-t border-white/[0.055] pt-2">
+                            <span className="text-[8px] uppercase tracking-[0.12em] text-[#625e57]">Pista de papel</span>
+                            <select className="mt-1 h-8 w-full rounded-lg border border-white/[0.07] bg-[#080808] px-2 text-[10px] text-[#9d978e] outline-none" onChange={(event) => { setScriptRoleHints((current) => ({ ...current, [transcript.id]: event.target.value as ScriptRole | '' })); scriptIdempotencyKey.current = null }} value={scriptRoleHints[transcript.id] ?? ''}>
+                              <option value="">Detectar automaticamente</option>
+                              {(Object.keys(SCRIPT_ROLE_LABELS) as ScriptRole[]).map((role) => <option key={role} value={role}>{SCRIPT_ROLE_LABELS[role]}</option>)}
+                            </select>
+                          </label>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="mt-5 rounded-xl border border-white/[0.07] bg-[#0d0d0d] p-4">
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-[#77736c]">Transcrições escolhidas</span>
+                    <span className="font-mono text-[#d7b65d]">{scriptSourceIds.size}</span>
+                  </div>
+                  <div className="mt-2 flex justify-between text-[10px]">
+                    <span className="text-[#77736c]">Decisão automática</span>
+                    <span className="font-mono text-[#a49e94]">≥ 80%</span>
+                  </div>
+                  <div className="mt-2 flex justify-between text-[10px]">
+                    <span className="text-[#77736c]">Revisão humana</span>
+                    <span className="font-mono text-[#a49e94]">ambíguo · desvio · &lt; 80%</span>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button className="h-11 rounded-xl border border-white/[0.08] px-4 text-xs font-medium text-[#8e8980] transition hover:text-white disabled:opacity-40" disabled={busy} onClick={() => setScriptComposerOpen(false)} type="button">Cancelar</button>
+                  <button className="h-11 rounded-xl bg-[#dfae38] px-5 text-xs font-bold text-[#171207] transition hover:bg-[#efc34f] disabled:cursor-not-allowed disabled:opacity-45" disabled={busy || scriptSourceIds.size === 0} type="submit">{busy ? 'Alinhando pela API…' : 'Alinhar roteiro'}</button>
+                </div>
+              </aside>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {composerOpen ? (
         <div aria-labelledby="batch-composer-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 backdrop-blur-sm sm:p-5" role="dialog">

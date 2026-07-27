@@ -1705,6 +1705,147 @@ const productionBatchExample = {
     remainingMinorUnits: 5000,
   },
 }
+const scriptAlignmentCreateRequestExample = {
+  title: 'Roteiro de descoberta',
+  locale: 'pt-BR',
+  rawText: [
+    'HOOK 1: Pare de perder dinheiro com anuncios.',
+    'CORPO 1: Alinhe oferta, publico e mensagem.',
+    'PROVA 1: Mais de cem clientes aplicaram este metodo.',
+    'CTA 1: Clique no link e agende uma conversa.',
+  ].join('\n'),
+  sources: [
+    {
+      transcriptId: 'transcript-hooks-example-1',
+      expectedTranscriptHash: '8'.repeat(64),
+      roleHint: 'hook',
+    },
+    {
+      transcriptId: 'transcript-body-cta-example-1',
+      expectedTranscriptHash: '9'.repeat(64),
+      roleHint: 'body',
+    },
+  ],
+}
+const scriptAlignmentCandidateExample = {
+  id: 'script-candidate-example-1',
+  transcriptId: 'transcript-hooks-example-1',
+  sourceArtifactId: 'artifact-hooks-example-1',
+  kind: 'near',
+  sourceRangeMs: [1240, 3380],
+  evidenceWordIndices: [4, 5, 6, 7, 8, 9],
+  spokenText: 'Pare de perder dinheiro com seus anuncios',
+  normalizedSpokenText: 'pare de perder dinheiro com seus anuncios',
+  metrics: {
+    semanticSimilarity: 0.91,
+    lexicalCoverage: 1,
+    expectedOrder: 1,
+    boundaryCompleteness: 0.8,
+    durationPlausibility: 1,
+    labelSignal: 1,
+    total: 91.85,
+  },
+  deviations: [
+    {
+      kind: 'insertion',
+      plannedTokens: [],
+      spokenTokens: ['seus'],
+      reasonCode: 'OFF_SCRIPT_WORDS_INSERTED',
+    },
+  ],
+  candidateHash: 'a'.repeat(64),
+}
+const scriptAlignmentRunExample = {
+  id: 'script-alignment-example-1',
+  workspaceId,
+  projectId,
+  batchId: productionBatchExample.id,
+  schemaVersion: 'script-alignment-run/v1',
+  algorithmVersion: 'monotonic-lexical-sequence/v1',
+  status: 'review-required',
+  revision: 1,
+  document: {
+    schemaVersion: 'script-document/v1',
+    title: 'Roteiro de descoberta',
+    locale: 'pt-BR',
+    rawText: 'HOOK 1: Pare de perder dinheiro com anuncios.',
+    normalizedText: 'hook 1 pare de perder dinheiro com anuncios',
+    blocks: [
+      {
+        id: 'script-block-1',
+        role: 'hook',
+        originalLabel: 'HOOK 1',
+        plannedText: 'Pare de perder dinheiro com anuncios.',
+        normalizedText: 'pare de perder dinheiro com anuncios',
+        documentOrder: 0,
+        blockHash: 'b'.repeat(64),
+      },
+    ],
+    documentHash: 'c'.repeat(64),
+  },
+  sourceRefs: [
+    {
+      transcriptId: 'transcript-hooks-example-1',
+      sourceArtifactId: 'artifact-hooks-example-1',
+      transcriptHash: '8'.repeat(64),
+      language: 'pt-BR',
+      roleHint: 'hook',
+    },
+  ],
+  alignments: [
+    {
+      blockId: 'script-block-1',
+      role: 'hook',
+      documentOrder: 0,
+      kind: 'near',
+      confidence: 91.85,
+      reviewStatus: 'review-required',
+      ambiguous: true,
+      reasonCodes: ['ALIGNMENT_AMBIGUOUS'],
+      selectedCandidate: scriptAlignmentCandidateExample,
+      alternatives: [
+        {
+          ...scriptAlignmentCandidateExample,
+          id: 'script-candidate-example-2',
+          sourceRangeMs: [5520, 7660],
+          evidenceWordIndices: [16, 17, 18, 19, 20, 21],
+          candidateHash: 'd'.repeat(64),
+        },
+      ],
+      alignmentHash: 'e'.repeat(64),
+    },
+  ],
+  extraTakes: [
+    {
+      id: 'script-extra-example-1',
+      transcriptId: 'transcript-hooks-example-1',
+      sourceArtifactId: 'artifact-hooks-example-1',
+      sourceRangeMs: [0, 900],
+      evidenceWordIndices: [0, 1, 2],
+      spokenText: 'Preparando para gravar',
+      normalizedSpokenText: 'preparando para gravar',
+      reviewStatus: 'review-required',
+      extraHash: 'f'.repeat(64),
+    },
+  ],
+  reviews: [],
+  summary: {
+    blockCount: 1,
+    exactCount: 0,
+    nearCount: 1,
+    partialCount: 0,
+    missingCount: 0,
+    extraTakeCount: 1,
+    ambiguousCount: 1,
+    reviewRequiredCount: 2,
+    resolvedReviewCount: 0,
+    averageConfidence: 91.85,
+  },
+  createdByClientId: clientId,
+  createdAt,
+  updatedAt: createdAt,
+  runHash: '1'.repeat(64),
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -3815,6 +3956,53 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         costMinorUnits: 5,
         cacheHit: false,
         artifactIds: ['artifact-final-example-1'],
+      },
+    ],
+    'apollo://schemas/create-script-alignment-request/v1': [
+      scriptAlignmentCreateRequestExample,
+    ],
+    'apollo://schemas/script-alignment-review-request/v1': [
+      {
+        expectedRevision: 1,
+        decisions: [
+          {
+            targetKind: 'block',
+            blockId: 'script-block-1',
+            resolution: 'select-alternative',
+            candidateId: 'script-candidate-example-2',
+            note: 'Segundo take tem uma entrega mais direta.',
+          },
+          {
+            targetKind: 'extra-take',
+            extraTakeId: 'script-extra-example-1',
+            resolution: 'reject-extra',
+            note: 'Preparacao fora da composicao.',
+          },
+        ],
+      },
+    ],
+    'apollo://schemas/script-alignment-mutated/v1': [
+      {
+        data: {
+          alignment: scriptAlignmentRunExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/script-alignment-read/v1': [
+      {
+        data: { alignment: scriptAlignmentRunExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/script-alignment-page/v1': [
+      {
+        data: {
+          alignments: [scriptAlignmentRunExample],
+          nextCursor: scriptAlignmentRunExample.id,
+        },
+        meta: { apiVersion: 'v1' },
       },
     ],
     'apollo://schemas/apply-project-edit-command-request/v1': [

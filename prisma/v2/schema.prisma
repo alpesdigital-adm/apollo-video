@@ -78,6 +78,8 @@ model V2Workspace {
   productionBatchSteps            V2ProductionBatchStep[]
   productionBatchArtifacts        V2ProductionBatchItemArtifact[]
   productionBatchActions          V2ProductionBatchAction[]
+  scriptAlignmentRuns             V2ScriptAlignmentRun[]
+  scriptAlignmentReviews          V2ScriptAlignmentReview[]
 
   @@map("workspaces")
 }
@@ -114,6 +116,8 @@ model V2ApiClient {
   hierarchicalProcessingRuns  V2HierarchicalProcessingRun[]
   productionBatches           V2ProductionBatch[]           @relation("ProductionBatchCreator")
   productionBatchActions      V2ProductionBatchAction[]     @relation("ProductionBatchActionActor")
+  scriptAlignmentRuns         V2ScriptAlignmentRun[]        @relation("ScriptAlignmentRunCreator")
+  scriptAlignmentReviews      V2ScriptAlignmentReview[]     @relation("ScriptAlignmentReviewActor")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -251,6 +255,7 @@ model V2Project {
   hierarchicalProcessingChunks V2HierarchicalProcessingChunk[]
   hierarchicalTierExecutions   V2HierarchicalTierExecution[]
   productionBatches            V2ProductionBatch[]
+  scriptAlignmentRuns          V2ScriptAlignmentRun[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -1956,11 +1961,12 @@ model V2ProductionBatch {
   createdAt              DateTime @db.Timestamptz(3)
   updatedAt              DateTime @db.Timestamptz(3)
 
-  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project   V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  createdBy V2ApiClient               @relation("ProductionBatchCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  items     V2ProductionBatchItem[]
-  actions   V2ProductionBatchAction[]
+  workspace           V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project             V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy           V2ApiClient               @relation("ProductionBatchCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  items               V2ProductionBatchItem[]
+  actions             V2ProductionBatchAction[]
+  scriptAlignmentRuns V2ScriptAlignmentRun[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
@@ -1968,6 +1974,68 @@ model V2ProductionBatch {
   @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, objective, createdAt(sort: Desc)])
   @@map("production_batches")
+}
+
+model V2ScriptAlignmentRun {
+  id                  String   @id @db.VarChar(128)
+  workspaceId         String   @db.VarChar(128)
+  projectId           String   @db.VarChar(128)
+  batchId             String   @db.VarChar(128)
+  schemaVersion       String   @db.VarChar(64)
+  algorithmVersion    String   @db.VarChar(64)
+  status              String   @db.VarChar(32)
+  revision            Int      @default(1)
+  documentHash        String   @db.Char(64)
+  documentJson        String   @db.Text
+  sourceRefsJson      String   @db.Text
+  resultJson          String   @db.Text
+  blockCount          Int
+  reviewRequiredCount Int
+  extraTakeCount      Int
+  runHash             String   @db.Char(64)
+  requestFingerprint  String   @db.Char(64)
+  idempotencyKey      String   @db.VarChar(128)
+  createdByClientId   String   @db.VarChar(80)
+  createdAt           DateTime @db.Timestamptz(3)
+  updatedAt           DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch     V2ProductionBatch         @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy V2ApiClient               @relation("ScriptAlignmentRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  reviews   V2ScriptAlignmentReview[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, batchId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, projectId, status, updatedAt(sort: Desc)])
+  @@index([workspaceId, status, reviewRequiredCount, updatedAt(sort: Desc)])
+  @@map("script_alignment_runs")
+}
+
+model V2ScriptAlignmentReview {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  runId              String   @db.VarChar(128)
+  expectedRevision   Int
+  resultRevision     Int
+  decisionsJson      String   @db.Text
+  reviewHash         String   @db.Char(64)
+  resultRunJson      String   @db.Text
+  resultRunHash      String   @db.Char(64)
+  requestFingerprint String   @db.Char(64)
+  idempotencyKey     String   @db.VarChar(128)
+  actorClientId      String   @db.VarChar(80)
+  createdAt          DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  run       V2ScriptAlignmentRun @relation(fields: [runId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  actor     V2ApiClient          @relation("ScriptAlignmentReviewActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([workspaceId, actorClientId, idempotencyKey])
+  @@unique([runId, resultRevision])
+  @@index([workspaceId, runId, createdAt(sort: Desc)])
+  @@map("script_alignment_reviews")
 }
 
 model V2ProductionBatchItem {

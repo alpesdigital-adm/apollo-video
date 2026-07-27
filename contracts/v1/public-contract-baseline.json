@@ -498,6 +498,127 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.batches.script-alignments.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-script-alignment-request/v1",
+      "outputSchemaRef": "apollo://schemas/script-alignment-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/batches/{batchId}/script-alignments"
+      },
+      "toolName": "apollo.batches.script-alignments.create",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.batches.script-alignments.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/script-alignment-page/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/batches/{batchId}/script-alignments"
+      },
+      "toolName": "apollo.batches.script-alignments.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum alignment runs to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        {
+          "name": "cursor",
+          "description": "Opaque cursor returned by the previous page.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.batches.script-alignments.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/script-alignment-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/batches/{batchId}/script-alignments/{alignmentId}"
+      },
+      "toolName": "apollo.batches.script-alignments.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.batches.script-alignments.reviews.apply": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/script-alignment-review-request/v1",
+      "outputSchemaRef": "apollo://schemas/script-alignment-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/batches/{batchId}/script-alignments/{alignmentId}/reviews"
+      },
+      "toolName": "apollo.batches.script-alignments.reviews.apply",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.capabilities.list": {
       "version": "3.0.0",
       "exposure": "public",
@@ -10045,6 +10166,68 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 128
+        }
+      }
+    },
+    "apollo://schemas/create-script-alignment-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "locale",
+        "rawText",
+        "sources"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 200
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 35
+        },
+        "rawText": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 500000
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "transcriptId",
+              "expectedTranscriptHash"
+            ],
+            "properties": {
+              "transcriptId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "expectedTranscriptHash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "roleHint": {
+                "enum": [
+                  "hook",
+                  "body",
+                  "proof",
+                  "objection",
+                  "bridge",
+                  "offer",
+                  "cta"
+                ]
+              }
+            }
+          }
         }
       }
     },
@@ -41571,6 +41754,3085 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        }
+      }
+    },
+    "apollo://schemas/script-alignment-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "alignment",
+            "replayed"
+          ],
+          "properties": {
+            "alignment": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "projectId",
+                "batchId",
+                "schemaVersion",
+                "algorithmVersion",
+                "status",
+                "revision",
+                "document",
+                "sourceRefs",
+                "alignments",
+                "extraTakes",
+                "reviews",
+                "summary",
+                "createdByClientId",
+                "createdAt",
+                "updatedAt",
+                "runHash"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "batchId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "schemaVersion": {
+                  "const": "script-alignment-run/v1"
+                },
+                "algorithmVersion": {
+                  "const": "monotonic-lexical-sequence/v1"
+                },
+                "status": {
+                  "enum": [
+                    "completed",
+                    "review-required",
+                    "reviewed"
+                  ]
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                },
+                "document": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "title",
+                    "locale",
+                    "rawText",
+                    "normalizedText",
+                    "blocks",
+                    "documentHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "script-document/v1"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 200
+                    },
+                    "locale": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 35
+                    },
+                    "rawText": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 500000
+                    },
+                    "normalizedText": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 500,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "role",
+                          "originalLabel",
+                          "plannedText",
+                          "normalizedText",
+                          "documentOrder",
+                          "blockHash"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "role": {
+                            "enum": [
+                              "hook",
+                              "body",
+                              "proof",
+                              "objection",
+                              "bridge",
+                              "offer",
+                              "cta"
+                            ]
+                          },
+                          "originalLabel": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120
+                          },
+                          "plannedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 20000
+                          },
+                          "normalizedText": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "documentOrder": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 499
+                          },
+                          "blockHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      }
+                    },
+                    "documentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "sourceRefs": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "transcriptId",
+                      "sourceArtifactId",
+                      "transcriptHash",
+                      "language"
+                    ],
+                    "properties": {
+                      "transcriptId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "transcriptHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "language": {
+                        "type": "string",
+                        "minLength": 2,
+                        "maxLength": 35
+                      },
+                      "roleHint": {
+                        "enum": [
+                          "hook",
+                          "body",
+                          "proof",
+                          "objection",
+                          "bridge",
+                          "offer",
+                          "cta"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "alignments": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 500,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "blockId",
+                      "role",
+                      "documentOrder",
+                      "kind",
+                      "confidence",
+                      "reviewStatus",
+                      "ambiguous",
+                      "reasonCodes",
+                      "selectedCandidate",
+                      "alternatives",
+                      "alignmentHash"
+                    ],
+                    "properties": {
+                      "blockId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "role": {
+                        "enum": [
+                          "hook",
+                          "body",
+                          "proof",
+                          "objection",
+                          "bridge",
+                          "offer",
+                          "cta"
+                        ]
+                      },
+                      "documentOrder": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 499
+                      },
+                      "kind": {
+                        "enum": [
+                          "exact",
+                          "near",
+                          "partial",
+                          "missing"
+                        ]
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "reviewStatus": {
+                        "enum": [
+                          "auto-linked",
+                          "review-required",
+                          "accepted",
+                          "marked-missing"
+                        ]
+                      },
+                      "ambiguous": {
+                        "type": "boolean"
+                      },
+                      "reasonCodes": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "selectedCandidate": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "transcriptId",
+                              "sourceArtifactId",
+                              "kind",
+                              "sourceRangeMs",
+                              "evidenceWordIndices",
+                              "spokenText",
+                              "normalizedSpokenText",
+                              "metrics",
+                              "deviations",
+                              "candidateHash"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "transcriptId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "sourceArtifactId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "kind": {
+                                "enum": [
+                                  "exact",
+                                  "near",
+                                  "partial"
+                                ]
+                              },
+                              "sourceRangeMs": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "prefixItems": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                ]
+                              },
+                              "evidenceWordIndices": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 500000,
+                                "items": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "spokenText": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "normalizedSpokenText": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "metrics": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "semanticSimilarity",
+                                  "lexicalCoverage",
+                                  "expectedOrder",
+                                  "boundaryCompleteness",
+                                  "durationPlausibility",
+                                  "labelSignal",
+                                  "total"
+                                ],
+                                "properties": {
+                                  "semanticSimilarity": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "lexicalCoverage": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "expectedOrder": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "boundaryCompleteness": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "durationPlausibility": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "labelSignal": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "total": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 100
+                                  }
+                                }
+                              },
+                              "deviations": {
+                                "type": "array",
+                                "maxItems": 8,
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "kind",
+                                    "plannedTokens",
+                                    "spokenTokens",
+                                    "reasonCode"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "enum": [
+                                        "omission",
+                                        "insertion",
+                                        "paraphrase",
+                                        "number-claim-change",
+                                        "qualifier-change",
+                                        "incomplete-ending",
+                                        "restart",
+                                        "off-script"
+                                      ]
+                                    },
+                                    "plannedTokens": {
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "spokenTokens": {
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "reasonCode": {
+                                      "type": "string",
+                                      "pattern": "^[A-Z][A-Z0-9_]{2,127}$"
+                                    }
+                                  }
+                                }
+                              },
+                              "candidateHash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "alternatives": {
+                        "type": "array",
+                        "maxItems": 3,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "transcriptId",
+                            "sourceArtifactId",
+                            "kind",
+                            "sourceRangeMs",
+                            "evidenceWordIndices",
+                            "spokenText",
+                            "normalizedSpokenText",
+                            "metrics",
+                            "deviations",
+                            "candidateHash"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "transcriptId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "sourceArtifactId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "kind": {
+                              "enum": [
+                                "exact",
+                                "near",
+                                "partial"
+                              ]
+                            },
+                            "sourceRangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              ]
+                            },
+                            "evidenceWordIndices": {
+                              "type": "array",
+                              "minItems": 1,
+                              "maxItems": 500000,
+                              "items": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "spokenText": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "normalizedSpokenText": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "metrics": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "semanticSimilarity",
+                                "lexicalCoverage",
+                                "expectedOrder",
+                                "boundaryCompleteness",
+                                "durationPlausibility",
+                                "labelSignal",
+                                "total"
+                              ],
+                              "properties": {
+                                "semanticSimilarity": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "lexicalCoverage": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "expectedOrder": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "boundaryCompleteness": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "durationPlausibility": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "labelSignal": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "total": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 100
+                                }
+                              }
+                            },
+                            "deviations": {
+                              "type": "array",
+                              "maxItems": 8,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "kind",
+                                  "plannedTokens",
+                                  "spokenTokens",
+                                  "reasonCode"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "enum": [
+                                      "omission",
+                                      "insertion",
+                                      "paraphrase",
+                                      "number-claim-change",
+                                      "qualifier-change",
+                                      "incomplete-ending",
+                                      "restart",
+                                      "off-script"
+                                    ]
+                                  },
+                                  "plannedTokens": {
+                                    "type": "array",
+                                    "maxItems": 50,
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "spokenTokens": {
+                                    "type": "array",
+                                    "maxItems": 50,
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "reasonCode": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z][A-Z0-9_]{2,127}$"
+                                  }
+                                }
+                              }
+                            },
+                            "candidateHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      },
+                      "reviewedCandidateId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "reviewNote": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "reviewedByClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "reviewedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "alignmentHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "extraTakes": {
+                  "type": "array",
+                  "maxItems": 2000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "transcriptId",
+                      "sourceArtifactId",
+                      "sourceRangeMs",
+                      "evidenceWordIndices",
+                      "spokenText",
+                      "normalizedSpokenText",
+                      "reviewStatus",
+                      "extraHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "transcriptId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceRangeMs": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "prefixItems": [
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        ]
+                      },
+                      "evidenceWordIndices": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 500000,
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "spokenText": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "normalizedSpokenText": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "reviewStatus": {
+                        "enum": [
+                          "review-required",
+                          "accepted",
+                          "rejected"
+                        ]
+                      },
+                      "reviewNote": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "reviewedByClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "reviewedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "extraHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "reviews": {
+                  "type": "array",
+                  "maxItems": 1000000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "revision",
+                      "decisions",
+                      "actorClientId",
+                      "createdAt",
+                      "reviewHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "minimum": 2,
+                        "maximum": 1000000
+                      },
+                      "decisions": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 500,
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "targetKind",
+                                "blockId",
+                                "resolution"
+                              ],
+                              "properties": {
+                                "targetKind": {
+                                  "const": "block"
+                                },
+                                "blockId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "resolution": {
+                                  "enum": [
+                                    "accept",
+                                    "mark-missing",
+                                    "select-alternative"
+                                  ]
+                                },
+                                "candidateId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "note": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1000
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "targetKind",
+                                "extraTakeId",
+                                "resolution"
+                              ],
+                              "properties": {
+                                "targetKind": {
+                                  "const": "extra-take"
+                                },
+                                "extraTakeId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "resolution": {
+                                  "enum": [
+                                    "accept-extra",
+                                    "reject-extra"
+                                  ]
+                                },
+                                "note": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1000
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "actorClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "reviewHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "summary": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "blockCount",
+                    "exactCount",
+                    "nearCount",
+                    "partialCount",
+                    "missingCount",
+                    "extraTakeCount",
+                    "ambiguousCount",
+                    "reviewRequiredCount",
+                    "resolvedReviewCount",
+                    "averageConfidence"
+                  ],
+                  "properties": {
+                    "blockCount": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 500
+                    },
+                    "exactCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    },
+                    "nearCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    },
+                    "partialCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    },
+                    "missingCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    },
+                    "extraTakeCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2000
+                    },
+                    "ambiguousCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    },
+                    "reviewRequiredCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2500
+                    },
+                    "resolvedReviewCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2500
+                    },
+                    "averageConfidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    }
+                  }
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "runHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/script-alignment-page/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "alignments"
+          ],
+          "properties": {
+            "alignments": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "workspaceId",
+                  "projectId",
+                  "batchId",
+                  "schemaVersion",
+                  "algorithmVersion",
+                  "status",
+                  "revision",
+                  "document",
+                  "sourceRefs",
+                  "alignments",
+                  "extraTakes",
+                  "reviews",
+                  "summary",
+                  "createdByClientId",
+                  "createdAt",
+                  "updatedAt",
+                  "runHash"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "batchId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "schemaVersion": {
+                    "const": "script-alignment-run/v1"
+                  },
+                  "algorithmVersion": {
+                    "const": "monotonic-lexical-sequence/v1"
+                  },
+                  "status": {
+                    "enum": [
+                      "completed",
+                      "review-required",
+                      "reviewed"
+                    ]
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000000
+                  },
+                  "document": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "title",
+                      "locale",
+                      "rawText",
+                      "normalizedText",
+                      "blocks",
+                      "documentHash"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "script-document/v1"
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 2,
+                        "maxLength": 200
+                      },
+                      "locale": {
+                        "type": "string",
+                        "minLength": 2,
+                        "maxLength": 35
+                      },
+                      "rawText": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 500000
+                      },
+                      "normalizedText": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "blocks": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 500,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "role",
+                            "originalLabel",
+                            "plannedText",
+                            "normalizedText",
+                            "documentOrder",
+                            "blockHash"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "role": {
+                              "enum": [
+                                "hook",
+                                "body",
+                                "proof",
+                                "objection",
+                                "bridge",
+                                "offer",
+                                "cta"
+                              ]
+                            },
+                            "originalLabel": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "plannedText": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 20000
+                            },
+                            "normalizedText": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "documentOrder": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 499
+                            },
+                            "blockHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      },
+                      "documentHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  },
+                  "sourceRefs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "transcriptId",
+                        "sourceArtifactId",
+                        "transcriptHash",
+                        "language"
+                      ],
+                      "properties": {
+                        "transcriptId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "sourceArtifactId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "transcriptHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "language": {
+                          "type": "string",
+                          "minLength": 2,
+                          "maxLength": 35
+                        },
+                        "roleHint": {
+                          "enum": [
+                            "hook",
+                            "body",
+                            "proof",
+                            "objection",
+                            "bridge",
+                            "offer",
+                            "cta"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "alignments": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 500,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "blockId",
+                        "role",
+                        "documentOrder",
+                        "kind",
+                        "confidence",
+                        "reviewStatus",
+                        "ambiguous",
+                        "reasonCodes",
+                        "selectedCandidate",
+                        "alternatives",
+                        "alignmentHash"
+                      ],
+                      "properties": {
+                        "blockId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "role": {
+                          "enum": [
+                            "hook",
+                            "body",
+                            "proof",
+                            "objection",
+                            "bridge",
+                            "offer",
+                            "cta"
+                          ]
+                        },
+                        "documentOrder": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 499
+                        },
+                        "kind": {
+                          "enum": [
+                            "exact",
+                            "near",
+                            "partial",
+                            "missing"
+                          ]
+                        },
+                        "confidence": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 100
+                        },
+                        "reviewStatus": {
+                          "enum": [
+                            "auto-linked",
+                            "review-required",
+                            "accepted",
+                            "marked-missing"
+                          ]
+                        },
+                        "ambiguous": {
+                          "type": "boolean"
+                        },
+                        "reasonCodes": {
+                          "type": "array",
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "selectedCandidate": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "transcriptId",
+                                "sourceArtifactId",
+                                "kind",
+                                "sourceRangeMs",
+                                "evidenceWordIndices",
+                                "spokenText",
+                                "normalizedSpokenText",
+                                "metrics",
+                                "deviations",
+                                "candidateHash"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "transcriptId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "sourceArtifactId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "kind": {
+                                  "enum": [
+                                    "exact",
+                                    "near",
+                                    "partial"
+                                  ]
+                                },
+                                "sourceRangeMs": {
+                                  "type": "array",
+                                  "minItems": 2,
+                                  "maxItems": 2,
+                                  "prefixItems": [
+                                    {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    },
+                                    {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    }
+                                  ]
+                                },
+                                "evidenceWordIndices": {
+                                  "type": "array",
+                                  "minItems": 1,
+                                  "maxItems": 500000,
+                                  "items": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "spokenText": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "normalizedSpokenText": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "metrics": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "semanticSimilarity",
+                                    "lexicalCoverage",
+                                    "expectedOrder",
+                                    "boundaryCompleteness",
+                                    "durationPlausibility",
+                                    "labelSignal",
+                                    "total"
+                                  ],
+                                  "properties": {
+                                    "semanticSimilarity": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "lexicalCoverage": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "expectedOrder": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "boundaryCompleteness": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "durationPlausibility": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "labelSignal": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "total": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 100
+                                    }
+                                  }
+                                },
+                                "deviations": {
+                                  "type": "array",
+                                  "maxItems": 8,
+                                  "items": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "kind",
+                                      "plannedTokens",
+                                      "spokenTokens",
+                                      "reasonCode"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "enum": [
+                                          "omission",
+                                          "insertion",
+                                          "paraphrase",
+                                          "number-claim-change",
+                                          "qualifier-change",
+                                          "incomplete-ending",
+                                          "restart",
+                                          "off-script"
+                                        ]
+                                      },
+                                      "plannedTokens": {
+                                        "type": "array",
+                                        "maxItems": 50,
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "spokenTokens": {
+                                        "type": "array",
+                                        "maxItems": 50,
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "reasonCode": {
+                                        "type": "string",
+                                        "pattern": "^[A-Z][A-Z0-9_]{2,127}$"
+                                      }
+                                    }
+                                  }
+                                },
+                                "candidateHash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "alternatives": {
+                          "type": "array",
+                          "maxItems": 3,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "transcriptId",
+                              "sourceArtifactId",
+                              "kind",
+                              "sourceRangeMs",
+                              "evidenceWordIndices",
+                              "spokenText",
+                              "normalizedSpokenText",
+                              "metrics",
+                              "deviations",
+                              "candidateHash"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "transcriptId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "sourceArtifactId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "kind": {
+                                "enum": [
+                                  "exact",
+                                  "near",
+                                  "partial"
+                                ]
+                              },
+                              "sourceRangeMs": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "prefixItems": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                ]
+                              },
+                              "evidenceWordIndices": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 500000,
+                                "items": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "spokenText": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "normalizedSpokenText": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "metrics": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "semanticSimilarity",
+                                  "lexicalCoverage",
+                                  "expectedOrder",
+                                  "boundaryCompleteness",
+                                  "durationPlausibility",
+                                  "labelSignal",
+                                  "total"
+                                ],
+                                "properties": {
+                                  "semanticSimilarity": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "lexicalCoverage": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "expectedOrder": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "boundaryCompleteness": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "durationPlausibility": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "labelSignal": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "total": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 100
+                                  }
+                                }
+                              },
+                              "deviations": {
+                                "type": "array",
+                                "maxItems": 8,
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "kind",
+                                    "plannedTokens",
+                                    "spokenTokens",
+                                    "reasonCode"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "enum": [
+                                        "omission",
+                                        "insertion",
+                                        "paraphrase",
+                                        "number-claim-change",
+                                        "qualifier-change",
+                                        "incomplete-ending",
+                                        "restart",
+                                        "off-script"
+                                      ]
+                                    },
+                                    "plannedTokens": {
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "spokenTokens": {
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "reasonCode": {
+                                      "type": "string",
+                                      "pattern": "^[A-Z][A-Z0-9_]{2,127}$"
+                                    }
+                                  }
+                                }
+                              },
+                              "candidateHash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            }
+                          }
+                        },
+                        "reviewedCandidateId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "reviewNote": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "reviewedByClientId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "reviewedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "alignmentHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  },
+                  "extraTakes": {
+                    "type": "array",
+                    "maxItems": 2000,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "transcriptId",
+                        "sourceArtifactId",
+                        "sourceRangeMs",
+                        "evidenceWordIndices",
+                        "spokenText",
+                        "normalizedSpokenText",
+                        "reviewStatus",
+                        "extraHash"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "transcriptId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "sourceArtifactId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "sourceRangeMs": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "prefixItems": [
+                            {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          ]
+                        },
+                        "evidenceWordIndices": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 500000,
+                          "items": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "spokenText": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "normalizedSpokenText": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "reviewStatus": {
+                          "enum": [
+                            "review-required",
+                            "accepted",
+                            "rejected"
+                          ]
+                        },
+                        "reviewNote": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "reviewedByClientId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "reviewedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "extraHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  },
+                  "reviews": {
+                    "type": "array",
+                    "maxItems": 1000000,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "revision",
+                        "decisions",
+                        "actorClientId",
+                        "createdAt",
+                        "reviewHash"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 2,
+                          "maximum": 1000000
+                        },
+                        "decisions": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 500,
+                          "items": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "targetKind",
+                                  "blockId",
+                                  "resolution"
+                                ],
+                                "properties": {
+                                  "targetKind": {
+                                    "const": "block"
+                                  },
+                                  "blockId": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 128
+                                  },
+                                  "resolution": {
+                                    "enum": [
+                                      "accept",
+                                      "mark-missing",
+                                      "select-alternative"
+                                    ]
+                                  },
+                                  "candidateId": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 128
+                                  },
+                                  "note": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 1000
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "targetKind",
+                                  "extraTakeId",
+                                  "resolution"
+                                ],
+                                "properties": {
+                                  "targetKind": {
+                                    "const": "extra-take"
+                                  },
+                                  "extraTakeId": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 128
+                                  },
+                                  "resolution": {
+                                    "enum": [
+                                      "accept-extra",
+                                      "reject-extra"
+                                    ]
+                                  },
+                                  "note": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 1000
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "actorClientId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "reviewHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  },
+                  "summary": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "blockCount",
+                      "exactCount",
+                      "nearCount",
+                      "partialCount",
+                      "missingCount",
+                      "extraTakeCount",
+                      "ambiguousCount",
+                      "reviewRequiredCount",
+                      "resolvedReviewCount",
+                      "averageConfidence"
+                    ],
+                    "properties": {
+                      "blockCount": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500
+                      },
+                      "exactCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 500
+                      },
+                      "nearCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 500
+                      },
+                      "partialCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 500
+                      },
+                      "missingCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 500
+                      },
+                      "extraTakeCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2000
+                      },
+                      "ambiguousCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 500
+                      },
+                      "reviewRequiredCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2500
+                      },
+                      "resolvedReviewCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2500
+                      },
+                      "averageConfidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      }
+                    }
+                  },
+                  "createdByClientId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "runHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/script-alignment-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "alignment"
+          ],
+          "properties": {
+            "alignment": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "projectId",
+                "batchId",
+                "schemaVersion",
+                "algorithmVersion",
+                "status",
+                "revision",
+                "document",
+                "sourceRefs",
+                "alignments",
+                "extraTakes",
+                "reviews",
+                "summary",
+                "createdByClientId",
+                "createdAt",
+                "updatedAt",
+                "runHash"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "batchId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "schemaVersion": {
+                  "const": "script-alignment-run/v1"
+                },
+                "algorithmVersion": {
+                  "const": "monotonic-lexical-sequence/v1"
+                },
+                "status": {
+                  "enum": [
+                    "completed",
+                    "review-required",
+                    "reviewed"
+                  ]
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                },
+                "document": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "title",
+                    "locale",
+                    "rawText",
+                    "normalizedText",
+                    "blocks",
+                    "documentHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "script-document/v1"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 200
+                    },
+                    "locale": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 35
+                    },
+                    "rawText": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 500000
+                    },
+                    "normalizedText": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 500,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "role",
+                          "originalLabel",
+                          "plannedText",
+                          "normalizedText",
+                          "documentOrder",
+                          "blockHash"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "role": {
+                            "enum": [
+                              "hook",
+                              "body",
+                              "proof",
+                              "objection",
+                              "bridge",
+                              "offer",
+                              "cta"
+                            ]
+                          },
+                          "originalLabel": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120
+                          },
+                          "plannedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 20000
+                          },
+                          "normalizedText": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "documentOrder": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 499
+                          },
+                          "blockHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      }
+                    },
+                    "documentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "sourceRefs": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "transcriptId",
+                      "sourceArtifactId",
+                      "transcriptHash",
+                      "language"
+                    ],
+                    "properties": {
+                      "transcriptId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "transcriptHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "language": {
+                        "type": "string",
+                        "minLength": 2,
+                        "maxLength": 35
+                      },
+                      "roleHint": {
+                        "enum": [
+                          "hook",
+                          "body",
+                          "proof",
+                          "objection",
+                          "bridge",
+                          "offer",
+                          "cta"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "alignments": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 500,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "blockId",
+                      "role",
+                      "documentOrder",
+                      "kind",
+                      "confidence",
+                      "reviewStatus",
+                      "ambiguous",
+                      "reasonCodes",
+                      "selectedCandidate",
+                      "alternatives",
+                      "alignmentHash"
+                    ],
+                    "properties": {
+                      "blockId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "role": {
+                        "enum": [
+                          "hook",
+                          "body",
+                          "proof",
+                          "objection",
+                          "bridge",
+                          "offer",
+                          "cta"
+                        ]
+                      },
+                      "documentOrder": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 499
+                      },
+                      "kind": {
+                        "enum": [
+                          "exact",
+                          "near",
+                          "partial",
+                          "missing"
+                        ]
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "reviewStatus": {
+                        "enum": [
+                          "auto-linked",
+                          "review-required",
+                          "accepted",
+                          "marked-missing"
+                        ]
+                      },
+                      "ambiguous": {
+                        "type": "boolean"
+                      },
+                      "reasonCodes": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "selectedCandidate": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "transcriptId",
+                              "sourceArtifactId",
+                              "kind",
+                              "sourceRangeMs",
+                              "evidenceWordIndices",
+                              "spokenText",
+                              "normalizedSpokenText",
+                              "metrics",
+                              "deviations",
+                              "candidateHash"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "transcriptId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "sourceArtifactId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "kind": {
+                                "enum": [
+                                  "exact",
+                                  "near",
+                                  "partial"
+                                ]
+                              },
+                              "sourceRangeMs": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "prefixItems": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                ]
+                              },
+                              "evidenceWordIndices": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 500000,
+                                "items": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "spokenText": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "normalizedSpokenText": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "metrics": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "semanticSimilarity",
+                                  "lexicalCoverage",
+                                  "expectedOrder",
+                                  "boundaryCompleteness",
+                                  "durationPlausibility",
+                                  "labelSignal",
+                                  "total"
+                                ],
+                                "properties": {
+                                  "semanticSimilarity": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "lexicalCoverage": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "expectedOrder": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "boundaryCompleteness": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "durationPlausibility": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "labelSignal": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "total": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 100
+                                  }
+                                }
+                              },
+                              "deviations": {
+                                "type": "array",
+                                "maxItems": 8,
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "kind",
+                                    "plannedTokens",
+                                    "spokenTokens",
+                                    "reasonCode"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "enum": [
+                                        "omission",
+                                        "insertion",
+                                        "paraphrase",
+                                        "number-claim-change",
+                                        "qualifier-change",
+                                        "incomplete-ending",
+                                        "restart",
+                                        "off-script"
+                                      ]
+                                    },
+                                    "plannedTokens": {
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "spokenTokens": {
+                                      "type": "array",
+                                      "maxItems": 50,
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "reasonCode": {
+                                      "type": "string",
+                                      "pattern": "^[A-Z][A-Z0-9_]{2,127}$"
+                                    }
+                                  }
+                                }
+                              },
+                              "candidateHash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "alternatives": {
+                        "type": "array",
+                        "maxItems": 3,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "transcriptId",
+                            "sourceArtifactId",
+                            "kind",
+                            "sourceRangeMs",
+                            "evidenceWordIndices",
+                            "spokenText",
+                            "normalizedSpokenText",
+                            "metrics",
+                            "deviations",
+                            "candidateHash"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "transcriptId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "sourceArtifactId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "kind": {
+                              "enum": [
+                                "exact",
+                                "near",
+                                "partial"
+                              ]
+                            },
+                            "sourceRangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              ]
+                            },
+                            "evidenceWordIndices": {
+                              "type": "array",
+                              "minItems": 1,
+                              "maxItems": 500000,
+                              "items": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "spokenText": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "normalizedSpokenText": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "metrics": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "semanticSimilarity",
+                                "lexicalCoverage",
+                                "expectedOrder",
+                                "boundaryCompleteness",
+                                "durationPlausibility",
+                                "labelSignal",
+                                "total"
+                              ],
+                              "properties": {
+                                "semanticSimilarity": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "lexicalCoverage": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "expectedOrder": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "boundaryCompleteness": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "durationPlausibility": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "labelSignal": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "total": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 100
+                                }
+                              }
+                            },
+                            "deviations": {
+                              "type": "array",
+                              "maxItems": 8,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "kind",
+                                  "plannedTokens",
+                                  "spokenTokens",
+                                  "reasonCode"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "enum": [
+                                      "omission",
+                                      "insertion",
+                                      "paraphrase",
+                                      "number-claim-change",
+                                      "qualifier-change",
+                                      "incomplete-ending",
+                                      "restart",
+                                      "off-script"
+                                    ]
+                                  },
+                                  "plannedTokens": {
+                                    "type": "array",
+                                    "maxItems": 50,
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "spokenTokens": {
+                                    "type": "array",
+                                    "maxItems": 50,
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "reasonCode": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z][A-Z0-9_]{2,127}$"
+                                  }
+                                }
+                              }
+                            },
+                            "candidateHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      },
+                      "reviewedCandidateId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "reviewNote": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "reviewedByClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "reviewedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "alignmentHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "extraTakes": {
+                  "type": "array",
+                  "maxItems": 2000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "transcriptId",
+                      "sourceArtifactId",
+                      "sourceRangeMs",
+                      "evidenceWordIndices",
+                      "spokenText",
+                      "normalizedSpokenText",
+                      "reviewStatus",
+                      "extraHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "transcriptId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceRangeMs": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "prefixItems": [
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        ]
+                      },
+                      "evidenceWordIndices": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 500000,
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "spokenText": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "normalizedSpokenText": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "reviewStatus": {
+                        "enum": [
+                          "review-required",
+                          "accepted",
+                          "rejected"
+                        ]
+                      },
+                      "reviewNote": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "reviewedByClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "reviewedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "extraHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "reviews": {
+                  "type": "array",
+                  "maxItems": 1000000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "revision",
+                      "decisions",
+                      "actorClientId",
+                      "createdAt",
+                      "reviewHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "minimum": 2,
+                        "maximum": 1000000
+                      },
+                      "decisions": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 500,
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "targetKind",
+                                "blockId",
+                                "resolution"
+                              ],
+                              "properties": {
+                                "targetKind": {
+                                  "const": "block"
+                                },
+                                "blockId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "resolution": {
+                                  "enum": [
+                                    "accept",
+                                    "mark-missing",
+                                    "select-alternative"
+                                  ]
+                                },
+                                "candidateId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "note": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1000
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "targetKind",
+                                "extraTakeId",
+                                "resolution"
+                              ],
+                              "properties": {
+                                "targetKind": {
+                                  "const": "extra-take"
+                                },
+                                "extraTakeId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "resolution": {
+                                  "enum": [
+                                    "accept-extra",
+                                    "reject-extra"
+                                  ]
+                                },
+                                "note": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1000
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "actorClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "reviewHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "summary": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "blockCount",
+                    "exactCount",
+                    "nearCount",
+                    "partialCount",
+                    "missingCount",
+                    "extraTakeCount",
+                    "ambiguousCount",
+                    "reviewRequiredCount",
+                    "resolvedReviewCount",
+                    "averageConfidence"
+                  ],
+                  "properties": {
+                    "blockCount": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 500
+                    },
+                    "exactCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    },
+                    "nearCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    },
+                    "partialCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    },
+                    "missingCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    },
+                    "extraTakeCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2000
+                    },
+                    "ambiguousCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    },
+                    "reviewRequiredCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2500
+                    },
+                    "resolvedReviewCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2500
+                    },
+                    "averageConfidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    }
+                  }
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "runHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/script-alignment-review-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "decisions"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "decisions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "targetKind",
+                  "blockId",
+                  "resolution"
+                ],
+                "properties": {
+                  "targetKind": {
+                    "const": "block"
+                  },
+                  "blockId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "resolution": {
+                    "enum": [
+                      "accept",
+                      "mark-missing",
+                      "select-alternative"
+                    ]
+                  },
+                  "candidateId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "targetKind",
+                  "extraTakeId",
+                  "resolution"
+                ],
+                "properties": {
+                  "targetKind": {
+                    "const": "extra-take"
+                  },
+                  "extraTakeId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "resolution": {
+                    "enum": [
+                      "accept-extra",
+                      "reject-extra"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  }
+                }
+              }
+            ]
+          }
         }
       }
     },

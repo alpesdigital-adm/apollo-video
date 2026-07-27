@@ -33,6 +33,14 @@ const coverage = Object.freeze({
     itemRevision: true,
     evidence: 'F2-007 request requires expectedBatchRevision and expectedItemRevision; the serializable repository compares both before transitioning only the selected item and step',
   },
+  'apollo.batches.script-alignments.create': {
+    mode: 'idempotent-create',
+    evidence: 'F2-008 request fingerprint binds the exact script, ordered source transcript IDs and hashes, optional role hints and actor; serializable persistence rechecks batch membership, artifacts, rights, consent and canonical transcript hashes',
+  },
+  'apollo.batches.script-alignments.reviews.apply': {
+    mode: 'script-alignment-revision-action',
+    evidence: 'F2-008 request requires expectedRevision; serializable persistence compares and swaps the exact alignment revision before storing one immutable review and replay snapshot',
+  },
   'apollo.operations.cancel': {
     mode: 'state-machine-action', evidence: 'F0-070',
   },
@@ -213,6 +221,19 @@ function requiresProductionBatchRevision(capability, itemRevision) {
   }
 }
 
+function requiresScriptAlignmentRevision(capability) {
+  assert.ok(capability.inputSchemaRef, `${capability.id} must publish an input schema`)
+  const schema = getPublicSchema(capability.inputSchemaRef).schema
+  assert.ok(
+    schema.required?.includes('expectedRevision'),
+    `${capability.id} must require expectedRevision`,
+  )
+  assert.ok(
+    schema.properties?.expectedRevision,
+    `${capability.id} must define expectedRevision`,
+  )
+}
+
 test('every external mutation has an explicit precondition strategy', () => {
   assert.deepEqual(
     Object.keys(coverage).sort(),
@@ -254,6 +275,10 @@ test('every external mutation has an explicit precondition strategy', () => {
       requiresProductionBatchRevision(capability, decision.itemRevision === true)
       assert.equal(capability.idempotency, 'required')
     }
+    if (decision.mode === 'script-alignment-revision-action') {
+      requiresScriptAlignmentRevision(capability)
+      assert.equal(capability.idempotency, 'required')
+    }
     if (decision.mode === 'idempotent-create') {
       assert.equal(capability.idempotency, 'required')
     }
@@ -274,11 +299,12 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 28,
+    'idempotent-create': 29,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,
     'base-version-bound-action': 3,
     'production-batch-revision-action': 2,
+    'script-alignment-revision-action': 1,
   })
 })

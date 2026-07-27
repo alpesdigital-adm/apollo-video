@@ -41,6 +41,7 @@
     "test:integration:hybrid-search": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-hybrid-search.integration.mjs",
     "test:integration:hierarchical-processing": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-hierarchical-processing.integration.mjs",
     "test:integration:production-batches": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-production-batch.integration.mjs",
+    "test:integration:script-alignments": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-script-alignment.integration.mjs",
     "test:e2e:mvp-core-full": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/mvp-core-full-journey.e2e.mjs",
     "api:v1:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-public-contracts.mjs",
     "api:v1:baseline:update": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/update-public-contract-baseline.mjs",

@@ -195,6 +195,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one explicit bounded item matrix from existing approved workspace artifacts without starting provider work.',
     },
+    'apollo.batches.script-alignments.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable virtual alignment from an exact labeled script and approved transcript hashes without materializing media.',
+    },
+    'apollo.batches.script-alignments.reviews.apply': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Records explicit reversible alignment review choices against one exact optimistic revision without modifying source media.',
+    },
     'apollo.batches.actions.apply': {
       impact: 'destructive', confirmation: 'human-approval',
       reason: 'Can cancel all unfinished work in one production batch or reopen previously cancelled and failed items.',

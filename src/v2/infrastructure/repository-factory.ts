@@ -35,6 +35,7 @@ import type { ValidatedSegmentRepository } from '../application/ports/validated-
 import type { SemanticSearchRepository } from '../application/ports/semantic-search-repository.ts'
 import type { HierarchicalProcessingRepository } from '../application/ports/hierarchical-processing-repository.ts'
 import type { ProductionBatchRepository } from '../application/ports/production-batch-repository.ts'
+import type { ScriptAlignmentRepository } from '../application/ports/script-alignment-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -108,6 +109,7 @@ import { PrismaValidatedSegmentRepository } from './prisma/validated-segment-rep
 import { PrismaSemanticSearchRepository } from './prisma/semantic-search-repository.ts'
 import { PrismaHierarchicalProcessingRepository } from './prisma/hierarchical-processing-repository.ts'
 import { PrismaProductionBatchRepository } from './prisma/production-batch-repository.ts'
+import { PrismaScriptAlignmentRepository } from './prisma/script-alignment-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -220,6 +222,11 @@ HierarchicalProcessingRepository {
 export function createProductionBatchRepository():
 ProductionBatchRepository {
   return new PrismaProductionBatchRepository(resolveV2Client())
+}
+
+export function createScriptAlignmentRepository():
+ScriptAlignmentRepository {
+  return new PrismaScriptAlignmentRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {
