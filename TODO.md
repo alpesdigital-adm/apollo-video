@@ -1037,10 +1037,10 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.003 — LongFormMoment [FR-045]
 
-- [ ] Modelar chapter, topic, moment, summary, speakers, ranges e salience. Evidência T-FR-045.
-- [ ] Indexar momentos hierarquicamente sem exigir um único resumo de duas horas. Evidência: `LongFormIndex` por chapters/moments.
-- [ ] Permitir abrir contexto anterior/posterior a partir do resultado. Evidência T-FR-045: preview expandido e limitado ao master.
-- [ ] Testar busca e preview em live/podcast com mudanças de assunto. Evidência T-FR-045: fixture de 2h com dois tópicos.
+- [x] Modelar chapter, topic, moment, summary, speakers, ranges e salience. Entregue em `f1459fb`: `long_form_index_runs`, `long_form_chapters` e `long_form_moments` preservam provenance, scores, hashes, rights snapshot, um ou mais ranges e `physicalMaterialized=false`; smoke `long-form-index-run-f2007cef-4901-443e-be66-2238c6247533`.
+- [x] Indexar momentos hierarquicamente sem exigir um único resumo de duas horas. Entregue em `f1459fb`: API pública `POST /v1/projects/{projectId}/long-form-moments`, policy `long-form-index/v1`, chapters/moments imutáveis e exatamente um índice ativo por artifact; resposta e persistência não contêm resumo monolítico.
+- [x] Permitir abrir contexto anterior/posterior a partir do resultado. Entregue em `f1459fb`: `GET /v1/projects/{projectId}/long-form-moments` expande cada range independentemente, limita ao master e escolhe o recomendado como preview primário; smoke retornou `47000–70000 ms` e dois ranges.
+- [x] Testar busca e preview em live/podcast com mudanças de assunto. Entregue em `f1459fb`: T-FR-045 4/4, regressão 493/493, E2E API/PostgreSQL 1/1 com fixture de 2h/dois tópicos e reindexação concorrente, build/typecheck/arquitetura aprovados; produção encontrou `moment-positioning` por texto, speaker, papel, tag e salience sem criar artifacts.
 
 ### F2.004 — ValidatedSegment [FR-046]
 

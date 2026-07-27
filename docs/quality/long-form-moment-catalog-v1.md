@@ -152,6 +152,43 @@ O E2E usa um manifest de duas horas, dois chapters e dois assuntos e comprova:
 
 ## 7. Evidência de produção
 
-Esta seção será preenchida somente após backup, migration, deploy do commit
-exato e smoke autenticado em produção. O gate permanece aberto no `TODO.md`
-até essa evidência existir.
+Implantação aprovada em 2026-07-27:
+
+- commit, release e imagem: `f1459fb` / `apollo-video:f1459fb`;
+- archive do commit verificado localmente e na VPS:
+  SHA-256 `554ef00cc040b32b4dceced547900bb72af8bed1f510836a01e2a44001d4f2ea`;
+- backup anterior à migration:
+  `/opt/backups/apollo-video/apollo_video_v2-20260727T143401Z.dump`;
+- SHA-256 do backup:
+  `84353c093843688179541e4935d2162b0c578f0ce7f8b9dadaa4218f3853387e`;
+- `pg_restore --list` aprovou o backup;
+- migration `20260727150000_long_form_moment_catalog` aplicada;
+- 57 migrations reconhecidas e nenhuma pendente;
+- aplicação, ingest worker, render worker e webhook worker executando
+  `apollo-video:f1459fb`, saudáveis e com zero reinícios;
+- build revision dentro do container: `f1459fb`;
+- health, OpenAPI e capability discovery responderam HTTP 200;
+- OpenAPI publicou `POST` e `GET`
+  `/v1/projects/{projectId}/long-form-moments`;
+- discovery autenticado publicou as capabilities de catálogo e busca.
+
+Smoke autenticado no projeto
+`project-fe932791-32f4-4453-8b85-6ce35a711860`:
+
+- master real:
+  `artifact-89a72429c007-3405acad6ec8718c6742f4db21bcdb818b4f41eb8140f0fc91f18dfe2e7f8ada`;
+- índice:
+  `long-form-index-run-f2007cef-4901-443e-be66-2238c6247533`;
+- hash:
+  `8ff7d94d94cdd23c7d32dd2d38bcb1e7944053282731b33e960eeeaaddbc30de`;
+- criação HTTP 201;
+- replay com a mesma idempotency key HTTP 200 e a mesma identidade;
+- busca HTTP 200 encontrou `moment-positioning` por texto, speaker, papel,
+  tag e salience;
+- preview primário expandido para `47000–70000 ms`, com dois ranges;
+- `eligibleForReuse=true`;
+- chamada sem credencial retornou HTTP 401;
+- índice sem resumo monolítico, com dois chapters e dois moments;
+- PostgreSQL confirmou todos os quatro registros virtuais, zero inválidos e
+  exatamente um índice ativo;
+- artifacts físicos permaneceram em 7 antes e depois do catálogo.
