@@ -1052,11 +1052,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.005 — Busca híbrida [FR-048]
 
-- [ ] Implementar filtros estruturados por rights, kind, pessoa, duração, locale e metadados. Evidência T-FR-048.
-- [ ] Implementar full-text para transcript/OCR e vector search por intenção/descrição. Evidência T-FR-048.
-- [ ] Unir candidates, remover duplicatas e reranquear com pesos versionados. Evidência: identidade única e `hybrid-rerank/v1`.
-- [ ] Exibir por que cada resultado correspondeu e por que foi bloqueado. Evidência: `matchedBy`/`blockedReasons`.
-- [ ] Criar retrieval eval com precision/recall/nDCG por tipo de consulta. Evidência T-FR-048.
+- [x] Implementar filtros estruturados por rights, kind, pessoa, duração, locale e metadados. Entregue em `17301ad`: filtros são reavaliados no domínio e no PostgreSQL; T-FR-048 9/9, E2E PostgreSQL 1/1 e smoke autenticado aprovados.
+- [x] Implementar full-text para transcript/OCR e vector search por intenção/descrição. Entregue em `17301ad`: `tsvector`/GIN/trigram, `pgvector`/HNSW e embedding real `text-embedding-3-small` de 256 dimensões; regressão 506/506.
+- [x] Unir candidates, remover duplicatas e reranquear com pesos versionados. Entregue em `17301ad`: identidade ativa única, histórico preservado, deduplicação e `hybrid-rerank/v1`; concorrência e reindexação comprovadas no E2E.
+- [x] Exibir por que cada resultado correspondeu e por que foi bloqueado. Entregue em `17301ad`: API publica `matchedBy`, `eligibleForReuse` e `blockedReasons`; smoke expôs matches full-text/vetor/filtros e `RIGHTS_USE_NOT_ALLOWED`.
+- [x] Criar retrieval eval com precision/recall/nDCG por tipo de consulta. Entregue em `17301ad`: `retrieval-eval/v1` imutável; avaliação de produção `retrieval-evaluation-747ccccf-b7ce-4dc2-b18a-16e7c16cd154` obteve precision@1, recall@1, nDCG@1 e reciprocal rank iguais a 1.
 
 ### F2.006 — Processamento hierárquico [FR-053]
 

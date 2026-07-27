@@ -209,5 +209,38 @@ O E2E comprova:
 
 ## 9. Evidência de produção
 
-Esta seção só será preenchida após backup, migration, deploy e smoke autenticado
-da mesma revisão. Até lá, o F2.005 permanece desmarcado no `TODO.md`.
+Produção validada em 2026-07-27 na revisão `17301ad`:
+
+- backup anterior à migration:
+  `/opt/backups/apollo-video/apollo_video_v2-20260727T173144Z.dump`,
+  SHA-256
+  `abd9168621610fc85b67201e81264439e2992ef9310daa4532a625a52a5589ff`;
+  `pg_restore --list` aprovado;
+- source archive da revisão exata com SHA-256
+  `5502ddbfe5d97af1acfc2329f62bd18a49ea55160a4822b9155e2d3695fe2e1f`;
+- imagem `apollo-video:17301ad`, ID
+  `sha256:17245ffb2390df93beb6357bfb08083c648d02271e2839d3557427190a1724dd`;
+- migration `20260727170000_hybrid_search` aplicada; 59/59 migrations
+  reconhecidas como atuais;
+- extensões PostgreSQL confirmadas: `pg_trgm=1.6` e `vector=0.6.0`;
+- web, ingest worker, render worker e webhook worker executando a mesma imagem,
+  com zero reinícios; web healthy;
+- health público HTTP 200, API `v1`;
+- acesso sem Bearer recusado com HTTP 401;
+- as três capabilities do slice presentes na descoberta autenticada;
+- catálogo HTTP 201 e replay idempotente HTTP 200;
+- documento
+  `semantic-document-e3c88bd5-d0cc-4120-b155-4c72f603d1f3`, hash
+  `323dcc390990312d597b8c9e70d489b3568294c5b4dad01b4241966e35164f63`;
+- embedding real `openai/text-embedding-3-small`, 256 dimensões,
+  `degraded=false`, vetor persistido;
+- busca HTTP 200 com full-text, intenção, vetor e filtros estruturados; a
+  restrição atual de direitos foi exposta como `RIGHTS_USE_NOT_ALLOWED`, sem
+  liberar o item para reutilização;
+- avaliação
+  `retrieval-evaluation-747ccccf-b7ce-4dc2-b18a-16e7c16cd154`, hash
+  `db0494045665d8493172c99ecc1e00915b33f2cf02792ed21a134e27a8f09d6b`;
+  precision@1, recall@1, nDCG@1 e reciprocal rank iguais a `1`;
+- exatamente um documento ativo para a identidade catalogada;
+- `physicalMaterialized=false` e contagem de media artifacts inalterada em
+  `7` antes/depois do smoke.
