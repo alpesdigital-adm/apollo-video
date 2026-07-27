@@ -1576,6 +1576,135 @@ const hierarchicalProcessingRunExample = {
   runHash: 'f'.repeat(64),
   active: true,
 }
+const productionBatchCreateRequestExample = {
+  projectId,
+  name: 'Campanha de descoberta — julho',
+  objective: 'content-distribution',
+  sourceGroups: [
+    {
+      id: 'source-group-hooks',
+      name: 'Hooks validados',
+      sourceArtifactIds: [
+        'artifact-hook-example-1',
+        'artifact-hook-example-2',
+      ],
+    },
+    {
+      id: 'source-group-body',
+      name: 'Corpo e CTA',
+      sourceArtifactIds: ['artifact-body-example-1'],
+    },
+  ],
+  recipes: [
+    {
+      id: 'recipe-hook',
+      name: 'Hook direto',
+      sourceGroupIds: ['source-group-hooks'],
+    },
+    {
+      id: 'recipe-body',
+      name: 'Argumento completo',
+      sourceGroupIds: ['source-group-body'],
+    },
+  ],
+  variants: [
+    {
+      id: 'variant-vertical',
+      name: 'Vertical 9:16',
+      outputSpecId: '9:16',
+      locale: 'pt-BR',
+    },
+    {
+      id: 'variant-square',
+      name: 'Quadrado 1:1',
+      outputSpecId: '1:1',
+      locale: 'pt-BR',
+    },
+  ],
+  budget: {
+    currency: 'USD',
+    maxCostMinorUnits: 5000,
+    reservedCostMinorUnits: 1800,
+  },
+  items: [
+    {
+      key: 'hook/vertical',
+      sourceGroupId: 'source-group-hooks',
+      recipeId: 'recipe-hook',
+      variantId: 'variant-vertical',
+    },
+    {
+      key: 'body/square',
+      sourceGroupId: 'source-group-body',
+      recipeId: 'recipe-body',
+      variantId: 'variant-square',
+    },
+  ],
+}
+const queuedProductionBatchStepsExample = [
+  'planning',
+  'materializing',
+  'rendering',
+  'reviewing',
+].map((step, sequence) => ({
+  step,
+  sequence,
+  state: 'queued',
+  attempt: 0,
+  costMinorUnits: 0,
+  cacheHit: false,
+  stepHash: String(sequence + 1).repeat(64),
+}))
+const productionBatchExample = {
+  schemaVersion: 'production-batch/v1',
+  id: 'production-batch-example-1',
+  workspaceId,
+  projectId,
+  name: productionBatchCreateRequestExample.name,
+  objective: productionBatchCreateRequestExample.objective,
+  policyVersion: 'production-batch/v1',
+  revision: 1,
+  sourceGroups: productionBatchCreateRequestExample.sourceGroups,
+  recipes: productionBatchCreateRequestExample.recipes,
+  variants: productionBatchCreateRequestExample.variants,
+  budget: productionBatchCreateRequestExample.budget,
+  items: productionBatchCreateRequestExample.items.map((item, index) => ({
+    id: `production-batch-item-example-${index + 1}`,
+    ...item,
+    state: 'queued',
+    revision: 1,
+    steps: queuedProductionBatchStepsExample.map((step) => ({
+      ...step,
+      stepHash: String(index + step.sequence + 1).repeat(64),
+    })),
+    artifactIds: [],
+    retryCount: 0,
+    createdAt,
+    updatedAt: createdAt,
+    itemHash: String(index + 5).repeat(64),
+  })),
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  updatedAt: createdAt,
+  definitionHash: '7'.repeat(64),
+  status: 'queued',
+  progress: {
+    completedSteps: 0,
+    failedSteps: 0,
+    cancelledSteps: 0,
+    runningSteps: 0,
+    totalSteps: 8,
+    percent: 0,
+    completedItems: 0,
+    failedItems: 0,
+    cancelledItems: 0,
+    activeItems: 0,
+    queuedItems: 2,
+    totalItems: 2,
+    spentMinorUnits: 0,
+    remainingMinorUnits: 5000,
+  },
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -3620,6 +3749,72 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       {
         data: { run: hierarchicalProcessingRunExample },
         meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-production-batch-request/v1': [
+      productionBatchCreateRequestExample,
+    ],
+    'apollo://schemas/production-batch-mutated/v1': [
+      {
+        data: {
+          batch: productionBatchExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/production-batch-read/v1': [
+      {
+        data: { batch: productionBatchExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/production-batch-page/v1': [
+      {
+        data: {
+          batches: [productionBatchExample],
+          nextCursor: productionBatchExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/production-batch-action-request/v1': [
+      {
+        action: 'cancel',
+        expectedBatchRevision: 1,
+      },
+      {
+        action: 'resume',
+        expectedBatchRevision: 2,
+      },
+    ],
+    'apollo://schemas/production-batch-item-action-request/v1': [
+      {
+        action: 'start-step',
+        step: 'planning',
+        expectedBatchRevision: 1,
+        expectedItemRevision: 1,
+      },
+      {
+        action: 'fail-step',
+        step: 'rendering',
+        expectedBatchRevision: 8,
+        expectedItemRevision: 8,
+        costMinorUnits: 25,
+        cacheHit: false,
+        error: {
+          code: 'RENDER_TIMEOUT',
+          message: 'Renderer exceeded the bounded attempt.',
+        },
+      },
+      {
+        action: 'complete-step',
+        step: 'reviewing',
+        expectedBatchRevision: 11,
+        expectedItemRevision: 11,
+        costMinorUnits: 5,
+        cacheHit: false,
+        artifactIds: ['artifact-final-example-1'],
       },
     ],
     'apollo://schemas/apply-project-edit-command-request/v1': [

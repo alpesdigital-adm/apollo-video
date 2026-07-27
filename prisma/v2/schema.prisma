@@ -73,6 +73,11 @@ model V2Workspace {
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks    V2HierarchicalProcessingChunk[]
   hierarchicalTierExecutions      V2HierarchicalTierExecution[]
+  productionBatches               V2ProductionBatch[]
+  productionBatchItems            V2ProductionBatchItem[]
+  productionBatchSteps            V2ProductionBatchStep[]
+  productionBatchArtifacts        V2ProductionBatchItemArtifact[]
+  productionBatchActions          V2ProductionBatchAction[]
 
   @@map("workspaces")
 }
@@ -107,6 +112,8 @@ model V2ApiClient {
   semanticSearchDocuments     V2SemanticSearchDocument[]
   retrievalEvaluations        V2RetrievalEvaluation[]
   hierarchicalProcessingRuns  V2HierarchicalProcessingRun[]
+  productionBatches           V2ProductionBatch[]           @relation("ProductionBatchCreator")
+  productionBatchActions      V2ProductionBatchAction[]     @relation("ProductionBatchActionActor")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -243,6 +250,7 @@ model V2Project {
   hierarchicalProcessingRuns   V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks V2HierarchicalProcessingChunk[]
   hierarchicalTierExecutions   V2HierarchicalTierExecution[]
+  productionBatches            V2ProductionBatch[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -640,6 +648,7 @@ model V2MediaArtifact {
   semanticSearchDocuments      V2SemanticSearchDocument[]
   hierarchicalProcessingRuns   V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks V2HierarchicalProcessingChunk[]
+  productionBatchArtifacts     V2ProductionBatchItemArtifact[]
   reviewAnnotations            V2ReviewAnnotation[]
   renderElementMaps            V2RenderElementMap[]
   proxyReviews                 V2ProxyReview[]
@@ -1921,6 +1930,146 @@ model V2HierarchicalTierExecution {
   @@index([workspaceId, projectId, tier, status])
   @@index([workspaceId, reusedFromRunId])
   @@map("hierarchical_tier_executions")
+}
+
+model V2ProductionBatch {
+  id                     String   @id @db.VarChar(128)
+  workspaceId            String   @db.VarChar(128)
+  projectId              String   @db.VarChar(128)
+  schemaVersion          String   @db.VarChar(64)
+  policyVersion          String   @db.VarChar(64)
+  name                   String   @db.VarChar(200)
+  objective              String   @db.VarChar(128)
+  aggregateStatus        String   @db.VarChar(32)
+  revision               Int      @default(1)
+  sourceGroupsJson       String   @db.Text
+  recipesJson            String   @db.Text
+  variantsJson           String   @db.Text
+  budgetJson             String   @db.Text
+  maxCostMinorUnits      Int
+  reservedCostMinorUnits Int
+  itemCount              Int
+  definitionHash         String   @db.Char(64)
+  requestFingerprint     String   @db.Char(64)
+  idempotencyKey         String   @db.VarChar(128)
+  createdByClientId      String   @db.VarChar(80)
+  createdAt              DateTime @db.Timestamptz(3)
+  updatedAt              DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy V2ApiClient               @relation("ProductionBatchCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  items     V2ProductionBatchItem[]
+  actions   V2ProductionBatchAction[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, aggregateStatus, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, objective, createdAt(sort: Desc)])
+  @@map("production_batches")
+}
+
+model V2ProductionBatchItem {
+  id            String   @id @db.VarChar(128)
+  workspaceId   String   @db.VarChar(128)
+  batchId       String   @db.VarChar(128)
+  sequence      Int
+  key           String   @db.VarChar(128)
+  sourceGroupId String   @db.VarChar(128)
+  recipeId      String   @db.VarChar(128)
+  variantId     String   @db.VarChar(128)
+  state         String   @db.VarChar(32)
+  revision      Int      @default(1)
+  retryCount    Int      @default(0)
+  errorCode     String?  @db.VarChar(128)
+  errorMessage  String?  @db.VarChar(500)
+  createdAt     DateTime @db.Timestamptz(3)
+  updatedAt     DateTime @db.Timestamptz(3)
+  itemHash      String   @db.Char(64)
+
+  workspace V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch     V2ProductionBatch               @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  steps     V2ProductionBatchStep[]
+  artifacts V2ProductionBatchItemArtifact[]
+  actions   V2ProductionBatchAction[]
+
+  @@unique([id, workspaceId, batchId])
+  @@unique([batchId, sequence])
+  @@unique([batchId, key])
+  @@unique([batchId, sourceGroupId, recipeId, variantId])
+  @@index([workspaceId, batchId, state, updatedAt(sort: Desc)])
+  @@index([workspaceId, recipeId, variantId])
+  @@map("production_batch_items")
+}
+
+model V2ProductionBatchStep {
+  workspaceId    String   @db.VarChar(128)
+  batchId        String   @db.VarChar(128)
+  itemId         String   @db.VarChar(128)
+  step           String   @db.VarChar(32)
+  sequence       Int
+  state          String   @db.VarChar(16)
+  attempt        Int      @default(0)
+  costMinorUnits Int      @default(0)
+  cacheHit       Boolean  @default(false)
+  errorCode      String?  @db.VarChar(128)
+  errorMessage   String?  @db.VarChar(500)
+  stepHash       String   @db.Char(64)
+  updatedAt      DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  item      V2ProductionBatchItem @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+
+  @@id([itemId, step])
+  @@unique([workspaceId, batchId, itemId, sequence])
+  @@index([workspaceId, batchId, state, sequence])
+  @@map("production_batch_steps")
+}
+
+model V2ProductionBatchItemArtifact {
+  workspaceId String   @db.VarChar(128)
+  batchId     String   @db.VarChar(128)
+  itemId      String   @db.VarChar(128)
+  artifactId  String   @db.VarChar(128)
+  sequence    Int
+  attachedAt  DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  item      V2ProductionBatchItem @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+  artifact  V2MediaArtifact       @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@id([itemId, artifactId])
+  @@unique([itemId, sequence])
+  @@index([workspaceId, batchId, artifactId])
+  @@map("production_batch_item_artifacts")
+}
+
+model V2ProductionBatchAction {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  batchId               String   @db.VarChar(128)
+  itemId                String?  @db.VarChar(128)
+  scope                 String   @db.VarChar(16)
+  action                String   @db.VarChar(32)
+  step                  String?  @db.VarChar(32)
+  expectedBatchRevision Int
+  expectedItemRevision  Int?
+  requestFingerprint    String   @db.Char(64)
+  idempotencyKey        String   @db.VarChar(128)
+  responseJson          String   @db.Text
+  actorClientId         String   @db.VarChar(80)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch     V2ProductionBatch      @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  item      V2ProductionBatchItem? @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  actor     V2ApiClient            @relation("ProductionBatchActionActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([workspaceId, actorClientId, idempotencyKey])
+  @@index([workspaceId, batchId, createdAt(sort: Desc)])
+  @@index([workspaceId, itemId, createdAt(sort: Desc)])
+  @@map("production_batch_actions")
 }
 
 model V2ArtifactRenderOperation {

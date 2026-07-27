@@ -314,6 +314,190 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.batches.actions.apply": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/production-batch-action-request/v1",
+      "outputSchemaRef": "apollo://schemas/production-batch-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/batches/{batchId}/actions"
+      },
+      "toolName": "apollo.batches.actions.apply",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.batches.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-production-batch-request/v1",
+      "outputSchemaRef": "apollo://schemas/production-batch-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/batches"
+      },
+      "toolName": "apollo.batches.create",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.batches.items.actions.apply": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/production-batch-item-action-request/v1",
+      "outputSchemaRef": "apollo://schemas/production-batch-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/batches/{batchId}/items/{itemId}/actions"
+      },
+      "toolName": "apollo.batches.items.actions.apply",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.batches.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/production-batch-page/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/batches"
+      },
+      "toolName": "apollo.batches.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "projectId",
+          "description": "Optional project boundary for the batch page.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "status",
+          "description": "Optional truthful aggregate batch status.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "review",
+              "partially-completed",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          }
+        },
+        {
+          "name": "q",
+          "description": "Optional case-insensitive name or objective query.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        {
+          "name": "limit",
+          "description": "Maximum production batches to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        {
+          "name": "cursor",
+          "description": "Opaque cursor returned by the previous page.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.batches.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/production-batch-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/batches/{batchId}"
+      },
+      "toolName": "apollo.batches.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.capabilities.list": {
       "version": "3.0.0",
       "exposure": "public",
@@ -9064,6 +9248,205 @@
           "items": {
             "type": "string",
             "pattern": "^[a-z-]+:[a-z-]+$"
+          }
+        }
+      }
+    },
+    "apollo://schemas/create-production-batch-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "name",
+        "objective",
+        "sourceGroups",
+        "recipes",
+        "variants",
+        "budget",
+        "items"
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "objective": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+        },
+        "sourceGroups": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "sourceArtifactIds"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "sourceArtifactIds": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1000,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            }
+          }
+        },
+        "recipes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 250,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "sourceGroupIds"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "sourceGroupIds": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            }
+          }
+        },
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "outputSpecId",
+              "locale"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "outputSpecId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+              },
+              "locale": {
+                "type": "string",
+                "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$"
+              }
+            }
+          }
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "currency",
+            "maxCostMinorUnits",
+            "reservedCostMinorUnits"
+          ],
+          "properties": {
+            "currency": {
+              "const": "USD"
+            },
+            "maxCostMinorUnits": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000000
+            },
+            "reservedCostMinorUnits": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000000
+            }
+          }
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "sourceGroupId",
+              "recipeId",
+              "variantId"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+              },
+              "sourceGroupId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "recipeId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "variantId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              }
+            }
           }
         }
       }
@@ -20297,6 +20680,1731 @@
             "historical-association",
             "causality"
           ]
+        }
+      }
+    },
+    "apollo://schemas/production-batch-action-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "expectedBatchRevision"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "cancel",
+            "resume"
+          ]
+        },
+        "expectedBatchRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        }
+      }
+    },
+    "apollo://schemas/production-batch-item-action-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "expectedBatchRevision",
+        "expectedItemRevision"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "start-step",
+            "complete-step",
+            "fail-step",
+            "cancel",
+            "resume",
+            "retry-step"
+          ]
+        },
+        "step": {
+          "enum": [
+            "planning",
+            "materializing",
+            "rendering",
+            "reviewing"
+          ]
+        },
+        "expectedBatchRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "expectedItemRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "costMinorUnits": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000000
+        },
+        "cacheHit": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          }
+        },
+        "artifactIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      }
+    },
+    "apollo://schemas/production-batch-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "batch",
+            "replayed"
+          ],
+          "properties": {
+            "batch": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "name",
+                "objective",
+                "policyVersion",
+                "revision",
+                "sourceGroups",
+                "recipes",
+                "variants",
+                "budget",
+                "items",
+                "createdBy",
+                "createdAt",
+                "updatedAt",
+                "definitionHash",
+                "status",
+                "progress"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "production-batch/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "objective": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                },
+                "policyVersion": {
+                  "const": "production-batch/v1"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                },
+                "sourceGroups": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "sourceArtifactIds"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "sourceArtifactIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1000,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "recipes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 250,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "sourceGroupIds"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "sourceGroupIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 100,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "variants": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "outputSpecId",
+                      "locale"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "outputSpecId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                      },
+                      "locale": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$"
+                      }
+                    }
+                  }
+                },
+                "budget": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "currency",
+                    "maxCostMinorUnits",
+                    "reservedCostMinorUnits"
+                  ],
+                  "properties": {
+                    "currency": {
+                      "const": "USD"
+                    },
+                    "maxCostMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000000
+                    },
+                    "reservedCostMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000000
+                    }
+                  }
+                },
+                "items": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 1000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "key",
+                      "sourceGroupId",
+                      "recipeId",
+                      "variantId",
+                      "state",
+                      "revision",
+                      "steps",
+                      "artifactIds",
+                      "retryCount",
+                      "createdAt",
+                      "updatedAt",
+                      "itemHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                      },
+                      "sourceGroupId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "recipeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "variantId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "state": {
+                        "enum": [
+                          "queued",
+                          "planning",
+                          "materializing",
+                          "rendering",
+                          "reviewing",
+                          "completed",
+                          "failed",
+                          "cancelled",
+                          "superseded"
+                        ]
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000000
+                      },
+                      "steps": {
+                        "type": "array",
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "step",
+                            "sequence",
+                            "state",
+                            "attempt",
+                            "costMinorUnits",
+                            "cacheHit",
+                            "stepHash"
+                          ],
+                          "properties": {
+                            "step": {
+                              "enum": [
+                                "planning",
+                                "materializing",
+                                "rendering",
+                                "reviewing"
+                              ]
+                            },
+                            "sequence": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 3
+                            },
+                            "state": {
+                              "enum": [
+                                "queued",
+                                "running",
+                                "completed",
+                                "failed",
+                                "cancelled"
+                              ]
+                            },
+                            "attempt": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10000
+                            },
+                            "costMinorUnits": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 100000000
+                            },
+                            "cacheHit": {
+                              "type": "boolean"
+                            },
+                            "error": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "code",
+                                "message"
+                              ],
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                                },
+                                "message": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                }
+                              }
+                            },
+                            "stepHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      },
+                      "artifactIds": {
+                        "type": "array",
+                        "maxItems": 1000,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "retryCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10000
+                      },
+                      "error": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                          },
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "itemHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "api-client"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "definitionHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "review",
+                    "partially-completed",
+                    "completed",
+                    "failed",
+                    "cancelled"
+                  ]
+                },
+                "progress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "completedSteps",
+                    "failedSteps",
+                    "cancelledSteps",
+                    "runningSteps",
+                    "totalSteps",
+                    "percent",
+                    "completedItems",
+                    "failedItems",
+                    "cancelledItems",
+                    "activeItems",
+                    "queuedItems",
+                    "totalItems",
+                    "spentMinorUnits",
+                    "remainingMinorUnits"
+                  ],
+                  "properties": {
+                    "completedSteps": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "failedSteps": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "cancelledSteps": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "runningSteps": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "totalSteps": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "percent": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "completedItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "failedItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "cancelledItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "activeItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "queuedItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "totalItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "spentMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "remainingMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/production-batch-page/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "batches"
+          ],
+          "properties": {
+            "batches": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "workspaceId",
+                  "projectId",
+                  "name",
+                  "objective",
+                  "policyVersion",
+                  "revision",
+                  "sourceGroups",
+                  "recipes",
+                  "variants",
+                  "budget",
+                  "items",
+                  "createdBy",
+                  "createdAt",
+                  "updatedAt",
+                  "definitionHash",
+                  "status",
+                  "progress"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "production-batch/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "objective": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                  },
+                  "policyVersion": {
+                    "const": "production-batch/v1"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000000
+                  },
+                  "sourceGroups": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "name",
+                        "sourceArtifactIds"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "sourceArtifactIds": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 1000,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "recipes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 250,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "name",
+                        "sourceGroupIds"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "sourceGroupIds": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 100,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "variants": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "name",
+                        "outputSpecId",
+                        "locale"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "outputSpecId": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                        },
+                        "locale": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$"
+                        }
+                      }
+                    }
+                  },
+                  "budget": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "currency",
+                      "maxCostMinorUnits",
+                      "reservedCostMinorUnits"
+                    ],
+                    "properties": {
+                      "currency": {
+                        "const": "USD"
+                      },
+                      "maxCostMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100000000
+                      },
+                      "reservedCostMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100000000
+                      }
+                    }
+                  },
+                  "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1000,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "key",
+                        "sourceGroupId",
+                        "recipeId",
+                        "variantId",
+                        "state",
+                        "revision",
+                        "steps",
+                        "artifactIds",
+                        "retryCount",
+                        "createdAt",
+                        "updatedAt",
+                        "itemHash"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "key": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                        },
+                        "sourceGroupId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "recipeId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "state": {
+                          "enum": [
+                            "queued",
+                            "planning",
+                            "materializing",
+                            "rendering",
+                            "reviewing",
+                            "completed",
+                            "failed",
+                            "cancelled",
+                            "superseded"
+                          ]
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1000000
+                        },
+                        "steps": {
+                          "type": "array",
+                          "minItems": 4,
+                          "maxItems": 4,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "step",
+                              "sequence",
+                              "state",
+                              "attempt",
+                              "costMinorUnits",
+                              "cacheHit",
+                              "stepHash"
+                            ],
+                            "properties": {
+                              "step": {
+                                "enum": [
+                                  "planning",
+                                  "materializing",
+                                  "rendering",
+                                  "reviewing"
+                                ]
+                              },
+                              "sequence": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 3
+                              },
+                              "state": {
+                                "enum": [
+                                  "queued",
+                                  "running",
+                                  "completed",
+                                  "failed",
+                                  "cancelled"
+                                ]
+                              },
+                              "attempt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10000
+                              },
+                              "costMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000000
+                              },
+                              "cacheHit": {
+                                "type": "boolean"
+                              },
+                              "error": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "code",
+                                  "message"
+                                ],
+                                "properties": {
+                                  "code": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                                  },
+                                  "message": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500
+                                  }
+                                }
+                              },
+                              "stepHash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            }
+                          }
+                        },
+                        "artifactIds": {
+                          "type": "array",
+                          "maxItems": 1000,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "retryCount": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000
+                        },
+                        "error": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                            },
+                            "message": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            }
+                          }
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "itemHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  },
+                  "createdBy": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "id"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "api-client"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "definitionHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "status": {
+                    "enum": [
+                      "queued",
+                      "running",
+                      "review",
+                      "partially-completed",
+                      "completed",
+                      "failed",
+                      "cancelled"
+                    ]
+                  },
+                  "progress": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "completedSteps",
+                      "failedSteps",
+                      "cancelledSteps",
+                      "runningSteps",
+                      "totalSteps",
+                      "percent",
+                      "completedItems",
+                      "failedItems",
+                      "cancelledItems",
+                      "activeItems",
+                      "queuedItems",
+                      "totalItems",
+                      "spentMinorUnits",
+                      "remainingMinorUnits"
+                    ],
+                    "properties": {
+                      "completedSteps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "failedSteps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "cancelledSteps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "runningSteps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "totalSteps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "percent": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "completedItems": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "failedItems": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "cancelledItems": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "activeItems": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "queuedItems": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "totalItems": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "spentMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "remainingMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/production-batch-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "batch"
+          ],
+          "properties": {
+            "batch": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "name",
+                "objective",
+                "policyVersion",
+                "revision",
+                "sourceGroups",
+                "recipes",
+                "variants",
+                "budget",
+                "items",
+                "createdBy",
+                "createdAt",
+                "updatedAt",
+                "definitionHash",
+                "status",
+                "progress"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "production-batch/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "objective": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                },
+                "policyVersion": {
+                  "const": "production-batch/v1"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                },
+                "sourceGroups": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "sourceArtifactIds"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "sourceArtifactIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1000,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "recipes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 250,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "sourceGroupIds"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "sourceGroupIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 100,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "variants": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "outputSpecId",
+                      "locale"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "outputSpecId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                      },
+                      "locale": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$"
+                      }
+                    }
+                  }
+                },
+                "budget": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "currency",
+                    "maxCostMinorUnits",
+                    "reservedCostMinorUnits"
+                  ],
+                  "properties": {
+                    "currency": {
+                      "const": "USD"
+                    },
+                    "maxCostMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000000
+                    },
+                    "reservedCostMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000000
+                    }
+                  }
+                },
+                "items": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 1000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "key",
+                      "sourceGroupId",
+                      "recipeId",
+                      "variantId",
+                      "state",
+                      "revision",
+                      "steps",
+                      "artifactIds",
+                      "retryCount",
+                      "createdAt",
+                      "updatedAt",
+                      "itemHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                      },
+                      "sourceGroupId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "recipeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "variantId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "state": {
+                        "enum": [
+                          "queued",
+                          "planning",
+                          "materializing",
+                          "rendering",
+                          "reviewing",
+                          "completed",
+                          "failed",
+                          "cancelled",
+                          "superseded"
+                        ]
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000000
+                      },
+                      "steps": {
+                        "type": "array",
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "step",
+                            "sequence",
+                            "state",
+                            "attempt",
+                            "costMinorUnits",
+                            "cacheHit",
+                            "stepHash"
+                          ],
+                          "properties": {
+                            "step": {
+                              "enum": [
+                                "planning",
+                                "materializing",
+                                "rendering",
+                                "reviewing"
+                              ]
+                            },
+                            "sequence": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 3
+                            },
+                            "state": {
+                              "enum": [
+                                "queued",
+                                "running",
+                                "completed",
+                                "failed",
+                                "cancelled"
+                              ]
+                            },
+                            "attempt": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10000
+                            },
+                            "costMinorUnits": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 100000000
+                            },
+                            "cacheHit": {
+                              "type": "boolean"
+                            },
+                            "error": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "code",
+                                "message"
+                              ],
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                                },
+                                "message": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                }
+                              }
+                            },
+                            "stepHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      },
+                      "artifactIds": {
+                        "type": "array",
+                        "maxItems": 1000,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "retryCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10000
+                      },
+                      "error": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+                          },
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "itemHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "api-client"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "definitionHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "review",
+                    "partially-completed",
+                    "completed",
+                    "failed",
+                    "cancelled"
+                  ]
+                },
+                "progress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "completedSteps",
+                    "failedSteps",
+                    "cancelledSteps",
+                    "runningSteps",
+                    "totalSteps",
+                    "percent",
+                    "completedItems",
+                    "failedItems",
+                    "cancelledItems",
+                    "activeItems",
+                    "queuedItems",
+                    "totalItems",
+                    "spentMinorUnits",
+                    "remainingMinorUnits"
+                  ],
+                  "properties": {
+                    "completedSteps": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "failedSteps": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "cancelledSteps": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "runningSteps": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "totalSteps": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "percent": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "completedItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "failedItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "cancelledItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "activeItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "queuedItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "totalItems": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "spentMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "remainingMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },

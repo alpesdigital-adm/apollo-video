@@ -20,6 +20,19 @@ const coverage = Object.freeze({
   'apollo.artifacts.render.enqueue': {
     mode: 'idempotent-create', evidence: 'F0-066',
   },
+  'apollo.batches.create': {
+    mode: 'idempotent-create',
+    evidence: 'F2-007 request fingerprint binds the project, sources, recipes, variants, budget and complete explicit item set; serializable persistence rechecks project, artifacts, rights and actor',
+  },
+  'apollo.batches.actions.apply': {
+    mode: 'production-batch-revision-action',
+    evidence: 'F2-007 request requires expectedBatchRevision; the serializable repository compares and swaps the batch revision before cancel or resume and records one actor-bound idempotent result',
+  },
+  'apollo.batches.items.actions.apply': {
+    mode: 'production-batch-revision-action',
+    itemRevision: true,
+    evidence: 'F2-007 request requires expectedBatchRevision and expectedItemRevision; the serializable repository compares both before transitioning only the selected item and step',
+  },
   'apollo.operations.cancel': {
     mode: 'state-machine-action', evidence: 'F0-070',
   },
@@ -177,6 +190,29 @@ function requiresImmutableBase(capability) {
   assert.ok(schema.properties?.baseHash, `${capability.id} must define baseHash`)
 }
 
+function requiresProductionBatchRevision(capability, itemRevision) {
+  assert.ok(capability.inputSchemaRef, `${capability.id} must publish an input schema`)
+  const schema = getPublicSchema(capability.inputSchemaRef).schema
+  assert.ok(
+    schema.required?.includes('expectedBatchRevision'),
+    `${capability.id} must require expectedBatchRevision`,
+  )
+  assert.ok(
+    schema.properties?.expectedBatchRevision,
+    `${capability.id} must define expectedBatchRevision`,
+  )
+  if (itemRevision) {
+    assert.ok(
+      schema.required?.includes('expectedItemRevision'),
+      `${capability.id} must require expectedItemRevision`,
+    )
+    assert.ok(
+      schema.properties?.expectedItemRevision,
+      `${capability.id} must define expectedItemRevision`,
+    )
+  }
+}
+
 test('every external mutation has an explicit precondition strategy', () => {
   assert.deepEqual(
     Object.keys(coverage).sort(),
@@ -214,6 +250,10 @@ test('every external mutation has an explicit precondition strategy', () => {
       requiresImmutableBase(capability)
       assert.equal(capability.idempotency, 'required')
     }
+    if (decision.mode === 'production-batch-revision-action') {
+      requiresProductionBatchRevision(capability, decision.itemRevision === true)
+      assert.equal(capability.idempotency, 'required')
+    }
     if (decision.mode === 'idempotent-create') {
       assert.equal(capability.idempotency, 'required')
     }
@@ -234,10 +274,11 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 27,
+    'idempotent-create': 28,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,
     'base-version-bound-action': 3,
+    'production-batch-revision-action': 2,
   })
 })

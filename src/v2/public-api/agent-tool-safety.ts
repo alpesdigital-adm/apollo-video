@@ -191,6 +191,18 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Processes one exact existing artifact and transcript within explicit cost, memory and elapsed-time budgets; it persists only virtual chunks, evidence mappings and measurements.',
     },
+    'apollo.batches.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one explicit bounded item matrix from existing approved workspace artifacts without starting provider work.',
+    },
+    'apollo.batches.actions.apply': {
+      impact: 'destructive', confirmation: 'human-approval',
+      reason: 'Can cancel all unfinished work in one production batch or reopen previously cancelled and failed items.',
+    },
+    'apollo.batches.items.actions.apply': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Changes one exact item step and may record provider cost, failure, cancellation, retry or a newly produced artifact.',
+    },
     'apollo.projects.commands.apply': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',

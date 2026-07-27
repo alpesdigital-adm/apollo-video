@@ -1774,6 +1774,305 @@ const hierarchicalProcessingRunSchema = {
     active: { type: 'boolean' },
   },
 }
+const productionBatchStatusSchema = {
+  enum: [
+    'queued',
+    'running',
+    'review',
+    'partially-completed',
+    'completed',
+    'failed',
+    'cancelled',
+  ],
+}
+const productionBatchStepNameSchema = {
+  enum: ['planning', 'materializing', 'rendering', 'reviewing'],
+}
+const productionBatchErrorSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['code', 'message'],
+  properties: {
+    code: {
+      type: 'string',
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
+    },
+    message: { type: 'string', minLength: 1, maxLength: 500 },
+  },
+}
+const productionBatchSourceGroupSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'name', 'sourceArtifactIds'],
+  properties: {
+    id: idSchema,
+    name: { type: 'string', minLength: 1, maxLength: 160 },
+    sourceArtifactIds: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 1000,
+      uniqueItems: true,
+      items: idSchema,
+    },
+  },
+}
+const productionBatchRecipeSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'name', 'sourceGroupIds'],
+  properties: {
+    id: idSchema,
+    name: { type: 'string', minLength: 1, maxLength: 160 },
+    sourceGroupIds: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 100,
+      uniqueItems: true,
+      items: idSchema,
+    },
+  },
+}
+const productionBatchVariantSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'name', 'outputSpecId', 'locale'],
+  properties: {
+    id: idSchema,
+    name: { type: 'string', minLength: 1, maxLength: 160 },
+    outputSpecId: {
+      type: 'string',
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
+    },
+    locale: {
+      type: 'string',
+      pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$',
+    },
+  },
+}
+const productionBatchBudgetSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'currency',
+    'maxCostMinorUnits',
+    'reservedCostMinorUnits',
+  ],
+  properties: {
+    currency: { const: 'USD' },
+    maxCostMinorUnits: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 100000000,
+    },
+    reservedCostMinorUnits: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 100000000,
+    },
+  },
+}
+const productionBatchStepSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'step',
+    'sequence',
+    'state',
+    'attempt',
+    'costMinorUnits',
+    'cacheHit',
+    'stepHash',
+  ],
+  properties: {
+    step: productionBatchStepNameSchema,
+    sequence: { type: 'integer', minimum: 0, maximum: 3 },
+    state: {
+      enum: ['queued', 'running', 'completed', 'failed', 'cancelled'],
+    },
+    attempt: { type: 'integer', minimum: 0, maximum: 10000 },
+    costMinorUnits: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 100000000,
+    },
+    cacheHit: { type: 'boolean' },
+    error: productionBatchErrorSchema,
+    stepHash: sha256Schema,
+  },
+}
+const productionBatchItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id',
+    'key',
+    'sourceGroupId',
+    'recipeId',
+    'variantId',
+    'state',
+    'revision',
+    'steps',
+    'artifactIds',
+    'retryCount',
+    'createdAt',
+    'updatedAt',
+    'itemHash',
+  ],
+  properties: {
+    id: idSchema,
+    key: {
+      type: 'string',
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
+    },
+    sourceGroupId: idSchema,
+    recipeId: idSchema,
+    variantId: idSchema,
+    state: {
+      enum: [
+        'queued',
+        'planning',
+        'materializing',
+        'rendering',
+        'reviewing',
+        'completed',
+        'failed',
+        'cancelled',
+        'superseded',
+      ],
+    },
+    revision: { type: 'integer', minimum: 1, maximum: 1000000 },
+    steps: {
+      type: 'array',
+      minItems: 4,
+      maxItems: 4,
+      items: productionBatchStepSchema,
+    },
+    artifactIds: {
+      type: 'array',
+      maxItems: 1000,
+      uniqueItems: true,
+      items: idSchema,
+    },
+    retryCount: { type: 'integer', minimum: 0, maximum: 10000 },
+    error: productionBatchErrorSchema,
+    createdAt: dateTimeSchema,
+    updatedAt: dateTimeSchema,
+    itemHash: sha256Schema,
+  },
+}
+const productionBatchProgressSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'completedSteps',
+    'failedSteps',
+    'cancelledSteps',
+    'runningSteps',
+    'totalSteps',
+    'percent',
+    'completedItems',
+    'failedItems',
+    'cancelledItems',
+    'activeItems',
+    'queuedItems',
+    'totalItems',
+    'spentMinorUnits',
+    'remainingMinorUnits',
+  ],
+  properties: {
+    completedSteps: { type: 'integer', minimum: 0 },
+    failedSteps: { type: 'integer', minimum: 0 },
+    cancelledSteps: { type: 'integer', minimum: 0 },
+    runningSteps: { type: 'integer', minimum: 0 },
+    totalSteps: { type: 'integer', minimum: 0 },
+    percent: { type: 'integer', minimum: 0, maximum: 100 },
+    completedItems: { type: 'integer', minimum: 0 },
+    failedItems: { type: 'integer', minimum: 0 },
+    cancelledItems: { type: 'integer', minimum: 0 },
+    activeItems: { type: 'integer', minimum: 0 },
+    queuedItems: { type: 'integer', minimum: 0 },
+    totalItems: { type: 'integer', minimum: 0 },
+    spentMinorUnits: { type: 'integer', minimum: 0 },
+    remainingMinorUnits: { type: 'integer', minimum: 0 },
+  },
+}
+const productionBatchSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion',
+    'id',
+    'workspaceId',
+    'projectId',
+    'name',
+    'objective',
+    'policyVersion',
+    'revision',
+    'sourceGroups',
+    'recipes',
+    'variants',
+    'budget',
+    'items',
+    'createdBy',
+    'createdAt',
+    'updatedAt',
+    'definitionHash',
+    'status',
+    'progress',
+  ],
+  properties: {
+    schemaVersion: { const: 'production-batch/v1' },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    objective: {
+      type: 'string',
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
+    },
+    policyVersion: { const: 'production-batch/v1' },
+    revision: { type: 'integer', minimum: 1, maximum: 1000000 },
+    sourceGroups: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 100,
+      items: productionBatchSourceGroupSchema,
+    },
+    recipes: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 250,
+      items: productionBatchRecipeSchema,
+    },
+    variants: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 50,
+      items: productionBatchVariantSchema,
+    },
+    budget: productionBatchBudgetSchema,
+    items: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 1000,
+      items: productionBatchItemSchema,
+    },
+    createdBy: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id'],
+      properties: {
+        type: { const: 'api-client' },
+        id: idSchema,
+      },
+    },
+    createdAt: dateTimeSchema,
+    updatedAt: dateTimeSchema,
+    definitionHash: sha256Schema,
+    status: productionBatchStatusSchema,
+    progress: productionBatchProgressSchema,
+  },
+}
 const semanticSearchSourceSchema = {
   type: 'object',
   additionalProperties: false,
@@ -7369,6 +7668,166 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('create-production-batch-request', 1, 'Create one explicit bounded production batch', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'projectId',
+      'name',
+      'objective',
+      'sourceGroups',
+      'recipes',
+      'variants',
+      'budget',
+      'items',
+    ],
+    properties: {
+      projectId: idSchema,
+      name: { type: 'string', minLength: 1, maxLength: 200 },
+      objective: {
+        type: 'string',
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
+      },
+      sourceGroups: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 100,
+        items: productionBatchSourceGroupSchema,
+      },
+      recipes: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 250,
+        items: productionBatchRecipeSchema,
+      },
+      variants: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 50,
+        items: productionBatchVariantSchema,
+      },
+      budget: productionBatchBudgetSchema,
+      items: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 1000,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'key',
+            'sourceGroupId',
+            'recipeId',
+            'variantId',
+          ],
+          properties: {
+            key: {
+              type: 'string',
+              pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$',
+            },
+            sourceGroupId: idSchema,
+            recipeId: idSchema,
+            variantId: idSchema,
+          },
+        },
+      },
+    },
+  }),
+  defineSchema('production-batch-mutated', 1, 'Created or mutated production batch with idempotency evidence',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['batch', 'replayed'],
+      properties: {
+        batch: productionBatchSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('production-batch-read', 1, 'Read one production batch with truthful aggregate status and progress',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['batch'],
+      properties: {
+        batch: productionBatchSchema,
+      },
+    }),
+  ),
+  defineSchema('production-batch-page', 1, 'Filtered cursor page of production batches',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['batches'],
+      properties: {
+        batches: {
+          type: 'array',
+          maxItems: 100,
+          items: productionBatchSchema,
+        },
+        nextCursor: idSchema,
+      },
+    }),
+  ),
+  defineSchema('production-batch-action-request', 1, 'Cancel or resume unfinished production batch items', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['action', 'expectedBatchRevision'],
+    properties: {
+      action: { enum: ['cancel', 'resume'] },
+      expectedBatchRevision: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 1000000,
+      },
+    },
+  }),
+  defineSchema('production-batch-item-action-request', 1, 'Advance, fail, cancel, resume, or retry one production batch item step', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'action',
+      'expectedBatchRevision',
+      'expectedItemRevision',
+    ],
+    properties: {
+      action: {
+        enum: [
+          'start-step',
+          'complete-step',
+          'fail-step',
+          'cancel',
+          'resume',
+          'retry-step',
+        ],
+      },
+      step: productionBatchStepNameSchema,
+      expectedBatchRevision: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 1000000,
+      },
+      expectedItemRevision: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 1000000,
+      },
+      costMinorUnits: {
+        type: 'integer',
+        minimum: 0,
+        maximum: 100000000,
+      },
+      cacheHit: { type: 'boolean' },
+      error: productionBatchErrorSchema,
+      artifactIds: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 1000,
+        uniqueItems: true,
+        items: idSchema,
+      },
+    },
+  }),
   defineSchema('apply-project-edit-command-request', 1, 'Typed project edit command request', {
     type: 'object',
     additionalProperties: false,

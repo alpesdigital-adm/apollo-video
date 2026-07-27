@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url))
 const v2Root = join(repositoryRoot, 'src', 'v2')
 const publicRoutesRoot = join(repositoryRoot, 'src', 'app', 'v1')
+const applicationUiRoot = join(repositoryRoot, 'src', 'app')
 const legacyRuntimeRoot = join(repositoryRoot, 'src', 'lib')
 const compositionRoots = new Set(['public-api/authentication.ts'])
 const forbiddenLegacyPaths = [
@@ -12,7 +13,6 @@ const forbiddenLegacyPaths = [
   'src/app/api',
   'src/app/project',
   'src/app/assets',
-  'src/app/batches',
   'src/app/capture',
   'src/app/settings',
   'src/components/ApolloEditorWorkspace.tsx',
@@ -85,6 +85,20 @@ for (const file of await files(publicRoutesRoot)) {
   for (const specifier of staticImports(source)) {
     if (resolvesIntoLegacyRuntime(file, specifier)) {
       violations.push(`${rel}: public V2 route imports legacy runtime ${specifier}`)
+    }
+  }
+}
+
+for (const file of await files(applicationUiRoot)) {
+  if (!/\.tsx$/.test(file)) continue
+  const rel = normalized(relative(repositoryRoot, file))
+  const source = await readFile(file, 'utf8')
+  for (const specifier of staticImports(source)) {
+    if (resolvesIntoLegacyRuntime(file, specifier)) {
+      violations.push(`${rel}: V2 UI imports legacy runtime ${specifier}`)
+    }
+    if (specifier === '@prisma/client') {
+      violations.push(`${rel}: V2 UI bypasses the public API through the legacy Prisma client`)
     }
   }
 }

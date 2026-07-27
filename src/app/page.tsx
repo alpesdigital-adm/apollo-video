@@ -236,6 +236,11 @@ export default function Dashboard() {
               <ApiIcon path="M4 5.5A1.5 1.5 0 0 1 5.5 4h5A1.5 1.5 0 0 1 12 5.5v5a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 4 10.5v-5Zm8 8A1.5 1.5 0 0 1 13.5 12h5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-5Zm2-8.5h5m-2.5-2.5V7.5M4 16h5" />
               Projetos
             </a>
+            <a className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#8e8a82] transition hover:bg-white/[0.035] hover:text-white" href="/batches">
+              <ApiIcon path="M5 4h14v4H5V4Zm0 6h14v4H5v-4Zm0 6h14v4H5v-4Zm3-10h8m-8 6h5m-5 6h7" />
+              Lotes
+              <span className="ml-auto rounded-md bg-[#e0af37]/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wider text-[#c49b39]">V2</span>
+            </a>
             <div className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#696762]" title="A biblioteca V2 será conectada em uma etapa posterior">
               <ApiIcon path="M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-11ZM8 5V3m8 2V3M4 9h16" />
               Biblioteca
@@ -269,6 +274,9 @@ export default function Dashboard() {
                 <p className="mt-1 text-sm font-medium text-[#d7d2c8]">Alpes Digital</p>
               </div>
               <div className="flex items-center gap-2">
+                <a className="flex h-10 items-center rounded-xl border border-white/[0.08] px-3 text-xs font-medium text-[#aaa59c] transition hover:border-[#d7a936]/30 hover:text-[#e7be59] lg:hidden" href="/batches">
+                  Lotes
+                </a>
                 <div className="hidden items-center gap-2 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 py-2 text-[#77736b] sm:flex">
                   <ApiIcon className="h-4 w-4" path="m20 20-4.4-4.4m2.4-4.1a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
                   <input aria-label="Buscar projetos" className="w-40 bg-transparent text-sm text-[#e6e1d8] outline-none placeholder:text-[#5e5b55] xl:w-56" onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto" value={query} />
