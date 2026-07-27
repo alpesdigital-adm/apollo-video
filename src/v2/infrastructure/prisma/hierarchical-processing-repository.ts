@@ -298,11 +298,19 @@ function hydrateRun(
   })
 }
 
-function manifestContext(value: string, expectedHash: string) {
+function manifestContext(
+  value: string,
+  expectedHash: string,
+  expectedArtifactSha256: string,
+) {
   const parsed = parseJson(value, 'hierarchical source manifest')
   const manifest = parsed as MediaArtifactManifest
   assertMediaArtifactManifest(manifest)
-  if (manifest.manifestHash !== expectedHash || !manifest.probe) {
+  if (
+    manifest.manifestHash !== expectedHash ||
+    manifest.artifact.sha256 !== expectedArtifactSha256 ||
+    !manifest.probe
+  ) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
       'Hierarchical source manifest failed integrity validation',
@@ -508,7 +516,6 @@ implements HierarchicalProcessingRepository {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
           sourceArtifactId: input.sourceArtifactId,
-          sourceManifestId: input.sourceManifestId,
         },
       }),
       input.previousRunId
@@ -539,6 +546,7 @@ implements HierarchicalProcessingRepository {
     const media = manifestContext(
       manifest.manifestJson,
       manifest.manifestHash,
+      artifact.sha256,
     )
     return Object.freeze({
       sourceArtifactId: artifact.id,
@@ -658,7 +666,6 @@ implements HierarchicalProcessingRepository {
                 workspaceId: run.workspaceId,
                 projectId: run.projectId,
                 sourceArtifactId: run.sourceArtifactId,
-                sourceManifestId: run.sourceManifestId,
                 transcriptHash: run.sourceTranscriptHash,
               },
               select: { id: true },

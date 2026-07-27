@@ -93,7 +93,10 @@ test('T-FR-053 executes, persists and partially reuses hierarchical two-hour pro
 
   const { assetRightsRevision } =
     await import('../../src/v2/domain/asset-rights.ts')
-  const { createMediaArtifactManifestV2 } =
+  const {
+    createMediaArtifactManifest,
+    createMediaArtifactManifestV2,
+  } =
     await import('../../src/v2/domain/media-artifact.ts')
   const { createMediaTranscript } =
     await import('../../src/v2/domain/media-transcript.ts')
@@ -122,6 +125,8 @@ test('T-FR-053 executes, persists and partially reuses hierarchical two-hour pro
   const projectId = `hierarchical-e2e-project-${suffix}`
   const artifactId = `hierarchical-e2e-artifact-${suffix}`
   const manifestId = `hierarchical-e2e-manifest-${suffix}`
+  const transcriptManifestId =
+    `hierarchical-e2e-transcript-manifest-${suffix}`
   const transcriptId = `hierarchical-e2e-transcript-${suffix}`
   const createdAt = new Date('2026-07-27T18:30:00.000Z')
   let server
@@ -189,6 +194,19 @@ test('T-FR-053 executes, persists and partially reuses hierarchical two-hour pro
         fps: 30,
       },
     })
+    const transcriptManifest = createMediaArtifactManifest({
+      artifactKey,
+      artifactSha256,
+      byteSize: 20_000_000,
+      mediaType: 'video',
+      container: 'mp4',
+      recipe: {
+        id: 'hierarchical-e2e-upload',
+        version: '1.0.0',
+        parameters: { fixture: 'source-upload' },
+      },
+      sources: [],
+    })
     const segments = Array.from({ length: 24 }, (_, id) => ({
       id,
       start: id * 300 + 10,
@@ -239,6 +257,20 @@ test('T-FR-053 executes, persists and partially reuses hierarchical two-hour pro
         createdAt,
       },
     })
+    await client.v2MediaArtifactManifest.create({
+      data: {
+        id: transcriptManifestId,
+        workspaceId,
+        artifactId,
+        schemaVersion: transcriptManifest.schemaVersion,
+        manifestHash: transcriptManifest.manifestHash,
+        recipeId: transcriptManifest.recipe.id,
+        recipeVersion: transcriptManifest.recipe.version,
+        parametersHash: transcriptManifest.recipe.parametersHash,
+        manifestJson: stableSerialize(transcriptManifest),
+        createdAt,
+      },
+    })
     await client.v2ProjectMediaAsset.create({
       data: {
         id: randomUUID(),
@@ -256,7 +288,7 @@ test('T-FR-053 executes, persists and partially reuses hierarchical two-hour pro
         workspaceId,
         projectId,
         sourceArtifactId: artifactId,
-        sourceManifestId: manifestId,
+        sourceManifestId: transcriptManifestId,
         schemaVersion: transcript.schemaVersion,
         language: transcript.language,
         provider: transcript.provider,
