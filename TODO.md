@@ -8,7 +8,7 @@
 
 ---
 
-## Auditoria de execução — 2026-07-21
+## Auditoria de execução — 2026-07-27
 
 Após o E2E revelar que a interface nova ainda acionava o pipeline legado, todas as caixas foram reavaliadas. O status anterior de 1.247/1.255 não representava produto entregue: misturava documentação, funções isoladas, fixtures e testes com jornadas integradas inexistentes.
 
@@ -20,16 +20,24 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F1.044, com revisão em lote atômica, conflitos explicáveis, retry parcial explícito, transação serializável, API pública e mesa de revisão:
+Estado auditado após o gate F1.051, com a jornada integral do MVP Core,
+PostgreSQL V2, API pública, renders reais 9:16/16:9, retry durável,
+revisão visual e implantação em produção:
 
-- **127 de 1.259 microtarefas verificadas como efetivamente entregues (10,1%)**;
-- **1.132 microtarefas abertas ou aguardando nova comprovação**;
+- **175 de 1.259 microtarefas verificadas como efetivamente entregues (13,9%)**;
+- **1.084 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
-- todos os gates de release, jornadas E2E e capacidades F1–F5 foram reabertos;
+- o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
+  permanecem abertos;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
 
-Esta porcentagem mede o PRD completo. Workspace, ingestão, Command editorial, DirectorRun, critic, proxy legendado e o primeiro export final 9:16 já são executáveis pela API V2 sobre Postgres. O E2E corretivo foi concluído em produção; isso não conclui as demais capacidades F1–F5 nem autoriza marcar contratos isolados como produto entregue.
+Esta porcentagem mede o PRD completo. Workspace, ingestão, Command editorial,
+DirectorRun, critic, proxy legendado, revisão/correção, duplicação e exports
+finais 9:16/16:9 já são executáveis pela API V2 sobre Postgres. O gate
+automático 16/16 foi concluído e o mesmo código foi implantado em produção;
+isso não conclui as capacidades F2–F5 nem autoriza marcar contratos isolados
+como produto entregue.
 
 ---
 
@@ -981,25 +989,25 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 - [x] Encerrar por aprovação, convergência, budget, issue não corrigível ou revisão humana. Entregue em `ed0de22`: as cinco razões terminais possuem regras determinísticas e cobertura T-FR-219; o E2E público cobre aprovação, convergência e problema incorrigível em iterações persistidas.
 - [x] Versionar reports e medir regressão no dataset de referência. Entregue em `ed0de22`: `closed-quality-report/v1` vincula versão, iteração anterior, proxy, assets, rubrica, ranges, dataset server-side, score, delta, patches, budget e decisão em fingerprint canônico; `quality-iteration/v1` adiciona hash integral imutável e a leitura recompõe ambos, rejeitando adulteração. E2E PostgreSQL e 476/476 testes aprovados.
 
-### F1.051 — Gate do MVP Core [AC-001 a AC-015]
+### F1.051 — Gate do MVP Core [AC-001 a AC-016]
 
-- [ ] Executar AC-001: workspace, marca/guardrails opcionais e criação de projeto. Evidência T-AC-001.
-- [ ] Executar AC-002: objetivo obrigatório e briefing livre vazio. Evidência T-AC-002.
-- [ ] Executar AC-003: vídeo/áudio persistido como master e proxy derivado. Evidência T-AC-003.
-- [ ] Executar AC-004: transcript com timestamps e detecção de silêncios/retakes. Evidência T-AC-004.
-- [ ] Executar AC-005: TreatmentPlan, StoryPlan e EditPlan estruturados. Evidência T-AC-005.
-- [ ] Executar AC-006: talking head+B-roll e áudio+B-roll sem pessoas. Evidência T-AC-006.
-- [ ] Executar AC-007: asset gerado avaliado, rejeitado e substituído. Evidência T-AC-007.
-- [ ] Executar AC-008: proxy com hard validation e crítica localizada. Evidência T-AC-008.
-- [ ] Executar AC-009: annotation em região/cena aplicada em nova versão. Evidência T-AC-009.
-- [ ] Executar AC-010: trim, troca de B-roll, texto/legenda/layout e undo. Evidência T-AC-010.
-- [ ] Executar AC-011: duplicação sem copiar masters. Evidência T-AC-011.
-- [ ] Executar AC-012: export 9:16 e 16:9 validados separadamente. Evidência T-AC-012.
-- [ ] Executar AC-013: final reconstruído pelo manifest. Evidência T-AC-013.
-- [ ] Executar AC-014: restart e retry sem projeto preso. Evidência T-AC-014.
-- [ ] Executar AC-015: dashboard fiel aos estados do workflow. Evidência T-AC-015.
-- [ ] Executar AC-016: client/agente externo conclui jornada MVP com paridade de versões, policies, jobs e artifacts. Evidência T-AC-016 e endpoint quality-v2.
-- [ ] Registrar evidência automática/manual e aprovar gate da fase. Evidência: `docs/quality/mvp-core-gate-v1.md`, gate exige 16/16 automáticos.
+- [x] Executar AC-001: workspace, marca/guardrails opcionais e criação de projeto. Entregue em `529019a`: T-FR-222 criou workspace e projeto pela API, vinculou policy snapshot server-side e passou `workspace-active`, `project-created` e `policy-snapshot-bound`.
+- [x] Executar AC-002: objetivo obrigatório e briefing livre vazio. Entregue em `529019a`: a jornada pública criou objetivo explícito com briefing opcional vazio e o gate aprovou `objective-bound` e `briefing-optional-contract`.
+- [x] Executar AC-003: vídeo/áudio persistido como master e proxy derivado. Entregue em `529019a`: masters imutáveis, proxies FFmpeg reais e lineage de todos os sources foram persistidos no PostgreSQL; `immutable-master`, `derived-proxy` e `source-lineage` aprovados.
+- [x] Executar AC-004: transcript com timestamps e detecção de silêncios/retakes. Entregue em `529019a`: transcript alinhado e evidências persistidas de palavras, silêncios e retakes passaram `word-timestamps`, `silence-detection-recorded` e `retake-detection-recorded`.
+- [x] Executar AC-005: TreatmentPlan, StoryPlan e EditPlan estruturados. Entregue em `529019a`: DirectorRun persistiu os três snapshots imutáveis, referenciados pela versão final e aprovados pelo gate.
+- [x] Executar AC-006: talking head+B-roll e áudio+B-roll sem pessoas. Entregue em `529019a`: o final primário 9:16 preserva talking head e insert; o companion 16:9 usa apenas áudio+B-roll e passou os dois checks de modo de produção.
+- [x] Executar AC-007: asset gerado avaliado, rejeitado e substituído. Entregue em `529019a`: seleção rights-first auditou candidato gerado revogado, persistiu a rejeição e escolheu substituto da biblioteca; integração PostgreSQL e T-FR-222 aprovados.
+- [x] Executar AC-008: proxy com hard validation e crítica localizada. Entregue em `529019a`: proxies reais passaram hard validators, critic por range e review persistida antes do final; gate aprovou os três checks.
+- [x] Executar AC-009: annotation em região/cena aplicada em nova versão. Entregue em `529019a`: annotation vinculada ao hash exato do final gerou patch e nova ProjectVersion pela API pública.
+- [x] Executar AC-010: trim, troca de B-roll, texto/legenda/layout e undo. Entregue em `529019a`: T-FR-222 executou split/trim, replace com áudio original, inspector de texto/legenda/layout e undo versionado, todos pela API.
+- [x] Executar AC-011: duplicação sem copiar masters. Entregue em `529019a`: `POST /v1/projects/{projectId}/duplicates` implementa copy-on-write, compartilha referências imutáveis e copia zero bytes; integração PostgreSQL aprovada.
+- [x] Executar AC-012: export 9:16 e 16:9 validados separadamente. Entregue em `529019a`: finais H.264/AAC de 1080×1920 e 1920×1080 foram renderizados, probados, hasheados e inspecionados separadamente.
+- [x] Executar AC-013: final reconstruído pelo manifest. Entregue em `529019a`: export final persiste manifest V4, RenderInput protegido, lineage e checksum; integração T-FR-231 baixou e reconstruiu bytes idênticos.
+- [x] Executar AC-014: restart e retry sem projeto preso. Entregue em `529019a`: falha transitória real do executor gerou attempt falho, retry promovido e projeto concluído; heartbeat/fases usam fencing serializado, com regressão contra corrida de lease.
+- [x] Executar AC-015: dashboard fiel aos estados do workflow. Entregue em `529019a`: o gate leu estados persistidos de progresso, review, completion e failure; nenhuma porcentagem ou estado foi inferido pela fixture/UI.
+- [x] Executar AC-016: client/agente externo conclui jornada MVP com paridade de versões, policies, jobs e artifacts. Entregue em `529019a`: cliente Bearer com menor escopo concluiu toda a jornada por `/v1`, com precondições, jobs, artifacts e versões idênticos aos consumidos pela UI.
+- [x] Registrar evidência automática/manual e aprovar gate da fase. Entregue em `529019a`: T-FR-222 aprovou 16/16 com `serverEvidenceOnly=true`; 480/480 regressões, quatro integrações PostgreSQL, build e inspeção dos MP4 passaram. Produção `apollo-video:529019a` opera com 54/54 migrations, health público, 77 paths, capabilities autenticadas e três workers sem restart. Evidência completa em `docs/quality/mvp-core-gate-v1.md`.
 
 ---
 

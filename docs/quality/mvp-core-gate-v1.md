@@ -100,11 +100,28 @@ versionados do produto.
   aprovada;
 - integração FFmpeg multi-source, FPS fracionário e true peak: aprovada.
 
-## Condição para contabilização
+## Prova de produção
 
-Esta evidência local torna o F1.051 candidato a deploy, mas não altera o
-percentual oficial. As 17 caixas de F1.051 permanecem abertas até que o mesmo
-commit seja migrado, implantado e revalidado em produção. Depois da prova de
-produção, este documento deve registrar commit, versão implantada, health,
-contratos públicos, migration state e gate 16/16 antes de atualizar o
-`TODO.md`.
+O mesmo código foi implantado em 2026-07-27:
+
+- commit e revisão visível: `529019a`;
+- imagem ativa em app e workers: `apollo-video:529019a`;
+- backup pré-migration validado:
+  `/opt/backups/apollo-video/apollo_video_v2-20260727T105754Z.dump`;
+- migrations `20260727010000_mvp_core_gates` e
+  `20260727011000_selected_insert_media_role` aplicadas;
+- `prisma migrate status`: 54 migrations e schema atualizado;
+- `GET https://apollo.alpesd.com.br/v1/health`: `status=ok`;
+- OpenAPI de produção: 77 paths, incluindo duplicação e gate MVP;
+- catálogo autenticado publicou
+  `apollo.projects.duplicates.create`,
+  `apollo.projects.mvp-core-gates.run` e
+  `apollo.projects.mvp-core-gates.list`;
+- leitura autenticada do gate no projeto de teste respondeu 200/v1; sem
+  autenticação respondeu 401;
+- app healthy; ingest, render e webhook workers ativos com zero restart;
+- login renderizado contém discretamente a revisão `529019a`.
+
+Com a prova local 16/16 vinculada ao mesmo código e a validação operacional em
+produção, as 17 microtarefas de F1.051 podem ser contabilizadas. O progresso
+auditado passa de 158/1.259 para 175/1.259 (13,9%).
