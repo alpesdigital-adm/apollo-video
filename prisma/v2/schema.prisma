@@ -68,6 +68,8 @@ model V2Workspace {
   longFormChapters                V2LongFormChapter[]
   longFormMoments                 V2LongFormMoment[]
   validatedSegments               V2ValidatedSegment[]
+  semanticSearchDocuments         V2SemanticSearchDocument[]
+  retrievalEvaluations            V2RetrievalEvaluation[]
 
   @@map("workspaces")
 }
@@ -99,6 +101,8 @@ model V2ApiClient {
   evidenceSegments            V2EvidenceSegment[]
   longFormIndexRuns           V2LongFormIndexRun[]
   validatedSegments           V2ValidatedSegment[]
+  semanticSearchDocuments     V2SemanticSearchDocument[]
+  retrievalEvaluations        V2RetrievalEvaluation[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -230,6 +234,8 @@ model V2Project {
   longFormChapters        V2LongFormChapter[]
   longFormMoments         V2LongFormMoment[]
   validatedSegments       V2ValidatedSegment[]
+  semanticSearchDocuments V2SemanticSearchDocument[]
+  retrievalEvaluations    V2RetrievalEvaluation[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -624,6 +630,7 @@ model V2MediaArtifact {
   longFormChapters          V2LongFormChapter[]
   longFormMoments           V2LongFormMoment[]
   validatedSegments         V2ValidatedSegment[]
+  semanticSearchDocuments   V2SemanticSearchDocument[]
   reviewAnnotations         V2ReviewAnnotation[]
   renderElementMaps         V2RenderElementMap[]
   proxyReviews              V2ProxyReview[]
@@ -942,14 +949,15 @@ model V2AssetRightsSnapshot {
   createdById                    String    @db.VarChar(128)
   createdAt                      DateTime  @default(now()) @db.Timestamptz(3)
 
-  workspace           V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  artifact            V2MediaArtifact      @relation("AssetRightsSnapshots", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  currentForArtifacts V2MediaArtifact[]    @relation("CurrentAssetRights")
-  consentDocument     V2MediaArtifact?     @relation("ConsentDocument", fields: [consentDocumentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  decisions           V2AssetUseDecision[]
-  evidenceSegments    V2EvidenceSegment[]
-  longFormIndexRuns   V2LongFormIndexRun[]
-  validatedSegments   V2ValidatedSegment[]
+  workspace               V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact                V2MediaArtifact            @relation("AssetRightsSnapshots", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  currentForArtifacts     V2MediaArtifact[]          @relation("CurrentAssetRights")
+  consentDocument         V2MediaArtifact?           @relation("ConsentDocument", fields: [consentDocumentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  decisions               V2AssetUseDecision[]
+  evidenceSegments        V2EvidenceSegment[]
+  longFormIndexRuns       V2LongFormIndexRun[]
+  validatedSegments       V2ValidatedSegment[]
+  semanticSearchDocuments V2SemanticSearchDocument[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, sequence])
@@ -1677,6 +1685,101 @@ model V2ValidatedSegment {
   @@index([workspaceId, expiresAt])
   @@index([workspaceId, rightsSnapshotId])
   @@map("validated_segments")
+}
+
+model V2SemanticSearchDocument {
+  id                       String                      @id @db.VarChar(128)
+  workspaceId              String                      @db.VarChar(128)
+  projectId                String                      @db.VarChar(128)
+  sourceType               String                      @db.VarChar(32)
+  sourceId                 String                      @db.VarChar(128)
+  sourceHash               String                      @db.Char(64)
+  identityKey              String                      @db.VarChar(260)
+  sourceArtifactId         String                      @db.VarChar(128)
+  sourceArtifactSha256     String                      @db.Char(64)
+  kind                     String                      @db.VarChar(32)
+  durationMs               Int
+  locale                   String                      @db.VarChar(35)
+  personIdsJson            String                      @db.Text
+  personIdsNormalized      String                      @db.Text
+  transcriptText           String                      @db.Text
+  ocrText                  String                      @db.Text
+  intentionsJson           String                      @db.Text
+  intentionsNormalized     String                      @db.Text
+  description              String                      @db.Text
+  metadataJson             String                      @db.Text
+  metadataSearchNormalized String                      @db.Text
+  searchTextNormalized     String                      @db.Text
+  searchVector             Unsupported("tsvector")?
+  producerJson             String                      @db.Text
+  embeddingState           String                      @db.VarChar(32)
+  embeddingProvider        String                      @db.VarChar(64)
+  embeddingModel           String                      @db.VarChar(128)
+  embeddingVersion         String                      @db.VarChar(64)
+  embeddingDimensions      Int
+  embeddingDegraded        Boolean
+  embeddingInputHash       String                      @db.Char(64)
+  embeddingVectorHash      String?                     @db.Char(64)
+  embeddingJson            String                      @db.Text
+  embedding                Unsupported("vector(256)")?
+  rightsSnapshotId         String                      @db.VarChar(128)
+  rightsStatus             String                      @db.VarChar(32)
+  consentStatus            String                      @db.VarChar(32)
+  indexVersion             String                      @db.VarChar(64)
+  active                   Boolean                     @default(true)
+  physicalMaterialized     Boolean                     @default(false)
+  requestFingerprint       String                      @db.Char(64)
+  idempotencyKey           String                      @db.VarChar(128)
+  createdByType            String                      @db.VarChar(32)
+  createdById              String                      @db.VarChar(80)
+  createdAt                DateTime                    @default(now()) @db.Timestamptz(3)
+  documentHash             String                      @db.Char(64)
+
+  workspace      V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project             @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact V2MediaArtifact       @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  rightsSnapshot V2AssetRightsSnapshot @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy      V2ApiClient           @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@unique([workspaceId, documentHash])
+  @@index([workspaceId, projectId, active, createdAt(sort: Desc)])
+  @@index([workspaceId, projectId, kind, locale, durationMs])
+  @@index([workspaceId, sourceArtifactId, active])
+  @@index([workspaceId, sourceType, sourceId, active])
+  @@index([workspaceId, rightsSnapshotId])
+  @@index([workspaceId, embeddingProvider, embeddingModel, embeddingVersion, embeddingState])
+  @@map("semantic_search_documents")
+}
+
+model V2RetrievalEvaluation {
+  id                  String   @id @db.VarChar(128)
+  workspaceId         String   @db.VarChar(128)
+  projectId           String   @db.VarChar(128)
+  policyVersion       String   @db.VarChar(64)
+  rerankPolicyVersion String   @db.VarChar(64)
+  k                   Int
+  caseCount           Int
+  casesJson           String   @db.Text
+  aggregateJson       String   @db.Text
+  requestFingerprint  String   @db.Char(64)
+  idempotencyKey      String   @db.VarChar(128)
+  createdByType       String   @db.VarChar(32)
+  createdById         String   @db.VarChar(80)
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+  reportHash          String   @db.Char(64)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy V2ApiClient @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@unique([workspaceId, reportHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, policyVersion, rerankPolicyVersion])
+  @@map("retrieval_evaluations")
 }
 
 model V2ArtifactRenderOperation {

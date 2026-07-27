@@ -1205,6 +1205,343 @@ const validatedSegmentReuseDecisionSchema = {
     evaluatedAt: dateTimeSchema,
   },
 }
+const semanticSearchSourceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'id', 'hash', 'artifactId', 'artifactSha256'],
+  properties: {
+    type: {
+      enum: [
+        'artifact',
+        'speech-segment',
+        'evidence-segment',
+        'long-form-moment',
+        'validated-segment',
+      ],
+    },
+    id: idSchema,
+    hash: sha256Schema,
+    artifactId: idSchema,
+    artifactSha256: sha256Schema,
+  },
+}
+const semanticSearchProducerSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['provider', 'model', 'version', 'confidence'],
+  properties: {
+    provider: {
+      type: 'string',
+      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+    },
+    model: {
+      type: 'string',
+      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+    },
+    version: {
+      type: 'string',
+      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+    },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+  },
+}
+const semanticEmbeddingEvidenceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'state',
+    'provider',
+    'model',
+    'version',
+    'dimensions',
+    'degraded',
+    'inputHash',
+  ],
+  properties: {
+    state: { enum: ['ready', 'unavailable'] },
+    provider: {
+      type: 'string',
+      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+    },
+    model: {
+      type: 'string',
+      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+    },
+    version: {
+      type: 'string',
+      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+    },
+    dimensions: { type: 'integer', minimum: 8, maximum: 4096 },
+    degraded: { type: 'boolean' },
+    inputHash: sha256Schema,
+    vectorHash: sha256Schema,
+  },
+  oneOf: [
+    {
+      properties: {
+        state: { const: 'ready' },
+        vectorHash: sha256Schema,
+      },
+      required: ['state', 'vectorHash'],
+    },
+    {
+      properties: {
+        state: { const: 'unavailable' },
+        vectorHash: sha256Schema,
+      },
+      required: ['state'],
+      not: { required: ['vectorHash'] },
+    },
+  ],
+}
+const semanticSearchDocumentSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion',
+    'id',
+    'workspaceId',
+    'projectId',
+    'source',
+    'identityKey',
+    'kind',
+    'durationMs',
+    'locale',
+    'personIds',
+    'transcriptText',
+    'ocrText',
+    'intentions',
+    'description',
+    'metadata',
+    'producer',
+    'embedding',
+    'rightsSnapshotId',
+    'rightsStatus',
+    'consentStatus',
+    'indexVersion',
+    'active',
+    'physicalMaterialized',
+    'createdBy',
+    'createdAt',
+    'documentHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'semantic-search-document/v1' },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    source: semanticSearchSourceSchema,
+    identityKey: {
+      type: 'string',
+      minLength: 3,
+      maxLength: 260,
+    },
+    kind: {
+      enum: [
+        'image',
+        'video',
+        'audio',
+        'speech-segment',
+        'evidence-segment',
+        'long-form-moment',
+        'validated-segment',
+      ],
+    },
+    durationMs: { type: 'integer', minimum: 0 },
+    locale: {
+      type: 'string',
+      pattern: '^[a-z]{2,3}(?:-[A-Z]{2})?$',
+    },
+    personIds: {
+      type: 'array',
+      maxItems: 100,
+      uniqueItems: true,
+      items: idSchema,
+    },
+    transcriptText: {
+      type: 'string',
+      maxLength: 100000,
+    },
+    ocrText: { type: 'string', maxLength: 100000 },
+    intentions: {
+      type: 'array',
+      maxItems: 100,
+      uniqueItems: true,
+      items: {
+        type: 'string',
+        pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+      },
+    },
+    description: { type: 'string', maxLength: 40001 },
+    metadata: {
+      type: 'object',
+      maxProperties: 50,
+      additionalProperties: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 500,
+      },
+    },
+    producer: semanticSearchProducerSchema,
+    embedding: semanticEmbeddingEvidenceSchema,
+    rightsSnapshotId: idSchema,
+    rightsStatus: {
+      enum: ['approved', 'restricted', 'unknown', 'expired', 'revoked'],
+    },
+    consentStatus: {
+      enum: [
+        'approved',
+        'not-required',
+        'restricted',
+        'unknown',
+        'expired',
+        'revoked',
+      ],
+    },
+    indexVersion: { const: 'semantic-search-index/v1' },
+    active: { type: 'boolean' },
+    physicalMaterialized: { const: false },
+    createdBy: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id'],
+      properties: {
+        type: { const: 'api-client' },
+        id: idSchema,
+      },
+    },
+    createdAt: dateTimeSchema,
+    documentHash: sha256Schema,
+  },
+}
+const semanticSearchFilterSchema = {
+  type: 'object',
+  additionalProperties: false,
+  minProperties: 1,
+  properties: {
+    kinds: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 7,
+      uniqueItems: true,
+      items: {
+        enum: [
+          'image',
+          'video',
+          'audio',
+          'speech-segment',
+          'evidence-segment',
+          'long-form-moment',
+          'validated-segment',
+        ],
+      },
+    },
+    personIds: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 20,
+      uniqueItems: true,
+      items: idSchema,
+    },
+    minDurationMs: { type: 'integer', minimum: 0 },
+    maxDurationMs: { type: 'integer', minimum: 0 },
+    locale: {
+      type: 'string',
+      pattern: '^[a-z]{2,3}(?:-[A-Z]{2})?$',
+    },
+    metadata: {
+      type: 'object',
+      minProperties: 1,
+      maxProperties: 20,
+      additionalProperties: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 500,
+      },
+    },
+    rights: { enum: ['approved', 'blocked', 'any'] },
+  },
+}
+const hybridSearchQueryProperties = {
+  text: { type: 'string', minLength: 1, maxLength: 2000 },
+  intention: { type: 'string', minLength: 1, maxLength: 2000 },
+  rightsUse: {
+    type: 'string',
+    pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+  },
+  filters: semanticSearchFilterSchema,
+  includeBlocked: { type: 'boolean', default: false },
+}
+const hybridSearchQuerySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['rightsUse'],
+  anyOf: [
+    {
+      properties: { text: hybridSearchQueryProperties.text },
+      required: ['text'],
+    },
+    {
+      properties: {
+        intention: hybridSearchQueryProperties.intention,
+      },
+      required: ['intention'],
+    },
+    {
+      properties: { filters: hybridSearchQueryProperties.filters },
+      required: ['filters'],
+    },
+  ],
+  properties: {
+    ...hybridSearchQueryProperties,
+    limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+    explain: { type: 'boolean', default: true },
+  },
+}
+const hybridMatchReasonsSchema = {
+  type: 'array',
+  maxItems: 11,
+  uniqueItems: true,
+  items: {
+    enum: [
+      'full-text:transcript',
+      'full-text:ocr',
+      'full-text:description',
+      'full-text:intention',
+      'vector:intention-description',
+      'structured:kind',
+      'structured:person',
+      'structured:duration',
+      'structured:locale',
+      'structured:metadata',
+      'rights:allowed',
+    ],
+  },
+}
+const retrievalMetricsSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'precisionAtK',
+    'recallAtK',
+    'ndcgAtK',
+    'reciprocalRank',
+    'hitsAtK',
+    'relevantCount',
+    'returnedCount',
+    'k',
+  ],
+  properties: {
+    precisionAtK: { type: 'number', minimum: 0, maximum: 1 },
+    recallAtK: { type: 'number', minimum: 0, maximum: 1 },
+    ndcgAtK: { type: 'number', minimum: 0, maximum: 1 },
+    reciprocalRank: { type: 'number', minimum: 0, maximum: 1 },
+    hitsAtK: { type: 'integer', minimum: 0 },
+    relevantCount: { type: 'integer', minimum: 0 },
+    returnedCount: { type: 'integer', minimum: 0 },
+    k: { type: 'integer', minimum: 1, maximum: 100 },
+  },
+}
 const manualInspectorSchema = {
   type: 'object',
   additionalProperties: false,
@@ -6016,6 +6353,369 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['decision'],
       properties: {
         decision: validatedSegmentReuseDecisionSchema,
+      },
+    }),
+  ),
+  defineSchema('catalog-semantic-search-document-request', 1, 'Catalog one immutable source identity for full-text and semantic retrieval', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'source',
+      'expectedSourceHash',
+      'indexVersion',
+      'observations',
+    ],
+    properties: {
+      source: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['type', 'id'],
+        properties: {
+          type: {
+            enum: [
+              'artifact',
+              'speech-segment',
+              'evidence-segment',
+              'long-form-moment',
+              'validated-segment',
+            ],
+          },
+          id: idSchema,
+        },
+      },
+      expectedSourceHash: sha256Schema,
+      indexVersion: { const: 'semantic-search-index/v1' },
+      observations: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['producer'],
+        properties: {
+          ocrText: { type: 'string', maxLength: 100000 },
+          description: { type: 'string', maxLength: 20000 },
+          intentions: {
+            type: 'array',
+            maxItems: 100,
+            uniqueItems: true,
+            items: {
+              type: 'string',
+              pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+            },
+          },
+          personIds: {
+            type: 'array',
+            maxItems: 100,
+            uniqueItems: true,
+            items: idSchema,
+          },
+          metadata: {
+            type: 'object',
+            maxProperties: 50,
+            additionalProperties: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 500,
+            },
+          },
+          producer: semanticSearchProducerSchema,
+        },
+      },
+    },
+  }),
+  defineSchema('semantic-search-document-cataloged', 1, 'Persisted immutable hybrid-search document without vector materialization',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['document', 'replayed'],
+      properties: {
+        document: semanticSearchDocumentSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('hybrid-search-query-request', 1, 'Hybrid full-text, vector and structured retrieval request', hybridSearchQuerySchema),
+  defineSchema('hybrid-search-results', 1, 'Rights-aware deduplicated results reranked by hybrid-rerank/v1',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'schemaVersion',
+        'query',
+        'queryHash',
+        'semantic',
+        'rerankPolicyVersion',
+        'results',
+        'evaluatedAt',
+      ],
+      properties: {
+        schemaVersion: { const: 'hybrid-search-results/v1' },
+        query: hybridSearchQuerySchema,
+        queryHash: sha256Schema,
+        semantic: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'state',
+            'provider',
+            'model',
+            'version',
+            'dimensions',
+            'degraded',
+          ],
+          properties: {
+            state: { enum: ['ready', 'unavailable'] },
+            provider: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+            },
+            model: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+            },
+            version: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+            },
+            dimensions: {
+              type: 'integer',
+              minimum: 8,
+              maximum: 4096,
+            },
+            degraded: { type: 'boolean' },
+          },
+        },
+        rerankPolicyVersion: { const: 'hybrid-rerank/v1' },
+        results: {
+          type: 'array',
+          maxItems: 100,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: [
+              'document',
+              'score',
+              'scoreBreakdown',
+              'matchedBy',
+              'blockedReasons',
+              'eligibleForReuse',
+              'rerankPolicyVersion',
+            ],
+            properties: {
+              document: semanticSearchDocumentSchema,
+              score: { type: 'number', minimum: 0, maximum: 1 },
+              scoreBreakdown: {
+                type: 'object',
+                additionalProperties: false,
+                required: [
+                  'fullText',
+                  'vector',
+                  'intention',
+                  'structured',
+                  'rights',
+                ],
+                properties: {
+                  fullText: {
+                    type: 'number',
+                    minimum: 0,
+                    maximum: 1,
+                  },
+                  vector: {
+                    type: 'number',
+                    minimum: 0,
+                    maximum: 1,
+                  },
+                  intention: {
+                    type: 'number',
+                    minimum: 0,
+                    maximum: 1,
+                  },
+                  structured: {
+                    type: 'number',
+                    minimum: 0,
+                    maximum: 1,
+                  },
+                  rights: {
+                    type: 'number',
+                    minimum: 0,
+                    maximum: 1,
+                  },
+                },
+              },
+              matchedBy: hybridMatchReasonsSchema,
+              blockedReasons: {
+                type: 'array',
+                maxItems: 32,
+                uniqueItems: true,
+                items: {
+                  type: 'string',
+                  minLength: 1,
+                  maxLength: 128,
+                },
+              },
+              eligibleForReuse: { type: 'boolean' },
+              rerankPolicyVersion: {
+                const: 'hybrid-rerank/v1',
+              },
+            },
+          },
+        },
+        evaluatedAt: dateTimeSchema,
+      },
+    }),
+  ),
+  defineSchema('evaluate-hybrid-retrieval-request', 1, 'Run a persisted precision, recall and nDCG evaluation over fixed relevance judgments', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['k', 'cases'],
+    properties: {
+      k: { type: 'integer', minimum: 1, maximum: 100 },
+      cases: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 50,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'query', 'relevantIdentityKeys'],
+          properties: {
+            id: idSchema,
+            query: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['rightsUse'],
+              anyOf: [
+                {
+                  properties: {
+                    text: hybridSearchQueryProperties.text,
+                  },
+                  required: ['text'],
+                },
+                {
+                  properties: {
+                    intention:
+                      hybridSearchQueryProperties.intention,
+                  },
+                  required: ['intention'],
+                },
+                {
+                  properties: {
+                    filters: hybridSearchQueryProperties.filters,
+                  },
+                  required: ['filters'],
+                },
+              ],
+              properties: hybridSearchQueryProperties,
+            },
+            relevantIdentityKeys: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 500,
+              uniqueItems: true,
+              items: {
+                type: 'string',
+                minLength: 3,
+                maxLength: 260,
+              },
+            },
+          },
+        },
+      },
+    },
+  }),
+  defineSchema('hybrid-retrieval-evaluated', 1, 'Persisted retrieval evaluation with per-query and macro metrics',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['evaluation', 'replayed'],
+      properties: {
+        evaluation: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'schemaVersion',
+            'id',
+            'workspaceId',
+            'projectId',
+            'policyVersion',
+            'rerankPolicyVersion',
+            'k',
+            'cases',
+            'aggregate',
+            'createdBy',
+            'createdAt',
+            'reportHash',
+          ],
+          properties: {
+            schemaVersion: { const: 'retrieval-evaluation/v1' },
+            id: idSchema,
+            workspaceId: idSchema,
+            projectId: idSchema,
+            policyVersion: { const: 'retrieval-eval/v1' },
+            rerankPolicyVersion: { const: 'hybrid-rerank/v1' },
+            k: { type: 'integer', minimum: 1, maximum: 100 },
+            cases: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 50,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: [
+                  'id',
+                  'queryHash',
+                  'relevantIdentityKeys',
+                  'rankedIdentityKeys',
+                  'metrics',
+                  'semanticState',
+                ],
+                properties: {
+                  id: idSchema,
+                  queryHash: sha256Schema,
+                  relevantIdentityKeys: {
+                    type: 'array',
+                    minItems: 1,
+                    maxItems: 500,
+                    uniqueItems: true,
+                    items: {
+                      type: 'string',
+                      minLength: 3,
+                      maxLength: 260,
+                    },
+                  },
+                  rankedIdentityKeys: {
+                    type: 'array',
+                    maxItems: 100,
+                    uniqueItems: true,
+                    items: {
+                      type: 'string',
+                      minLength: 3,
+                      maxLength: 260,
+                    },
+                  },
+                  metrics: retrievalMetricsSchema,
+                  semanticState: {
+                    enum: ['ready', 'unavailable'],
+                  },
+                },
+              },
+            },
+            aggregate: retrievalMetricsSchema,
+            createdBy: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['type', 'id'],
+              properties: {
+                type: { const: 'api-client' },
+                id: idSchema,
+              },
+            },
+            createdAt: dateTimeSchema,
+            reportHash: sha256Schema,
+          },
+        },
+        replayed: { type: 'boolean' },
       },
     }),
   ),

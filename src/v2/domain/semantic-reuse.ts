@@ -65,26 +65,3 @@ export function validateSegmentUse(segment: ValidatedSegment, input: { requested
   const reasons = [...(expired ? ['validation-expired'] : []), ...(protectedChanges.length ? protectedChanges.map((item) => `protected:${item}`) : []), ...(input.claim === 'causality' ? ['causality-not-supported'] : [])]
   return Object.freeze({ compatible: reasons.length === 0, reasons: Object.freeze(reasons), scope: segment.scope, wholeVideoValidated: segment.scope === 'whole-video' })
 }
-
-export interface SearchableAsset { id: string; kind: string; personIds: readonly string[]; durationMs: number; locale: string; rights: 'approved' | 'blocked'; transcript: string; ocr: string; intentions: readonly string[]; description: string; metadata: Readonly<Record<string, string>>; vector: readonly number[] }
-export interface HybridSearchQuery { text?: string; intention?: string; vector?: readonly number[]; filters?: { kind?: string; personId?: string; minDurationMs?: number; maxDurationMs?: number; locale?: string; rights?: 'approved' | 'blocked'; metadata?: Readonly<Record<string, string>> } }
-export const HYBRID_RERANK_VERSION = Object.freeze({ id: 'hybrid-rerank/v1', weights: Object.freeze({ structured: .25, fullText: .3, vector: .3, rights: .15 }) })
-const cosine = (a: readonly number[], b: readonly number[]) => { if (!a.length || a.length !== b.length) return 0; const dot = a.reduce((sum, value, i) => sum + value * b[i], 0); const den = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0)) * Math.sqrt(b.reduce((sum, value) => sum + value * value, 0)); return den ? Math.max(0, dot / den) : 0 }
-export function hybridSearch(assets: readonly SearchableAsset[], query: HybridSearchQuery) {
-  const terms = normalizeText(`${query.text ?? ''} ${query.intention ?? ''}`).split(' ').filter(Boolean)
-  const results = assets.map((asset) => {
-    const f = query.filters ?? {}; const structuredMatches = [!f.kind || asset.kind === f.kind, !f.personId || asset.personIds.includes(f.personId), f.minDurationMs === undefined || asset.durationMs >= f.minDurationMs, f.maxDurationMs === undefined || asset.durationMs <= f.maxDurationMs, !f.locale || asset.locale === f.locale, !f.rights || asset.rights === f.rights, ...Object.entries(f.metadata ?? {}).map(([key, value]) => asset.metadata[key] === value)]
-    const structured = structuredMatches.filter(Boolean).length / structuredMatches.length
-    const corpus = normalizeText(`${asset.transcript} ${asset.ocr} ${asset.description} ${asset.intentions.join(' ')}`)
-    const fullText = terms.length ? terms.filter((term) => corpus.includes(term)).length / terms.length : 0
-    const vector = query.vector ? cosine(query.vector, asset.vector) : 0
-    const blockedReasons = [...(asset.rights !== 'approved' ? ['rights-blocked'] : []), ...(structured < 1 ? ['structured-filter-mismatch'] : [])]
-    const score = structured * .25 + fullText * .3 + vector * .3 + (asset.rights === 'approved' ? .15 : 0)
-    return Object.freeze({ asset, score: Number(score.toFixed(4)), matchedBy: Object.freeze([...(fullText ? ['full-text'] : []), ...(vector ? ['vector'] : []), ...(structured === 1 ? ['structured'] : [])]), blockedReasons: Object.freeze(blockedReasons), eligible: blockedReasons.length === 0, rerankVersion: HYBRID_RERANK_VERSION.id })
-  })
-  return Object.freeze(results.sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.score - a.score))
-}
-export function retrievalMetrics(input: { rankedIds: readonly string[]; relevantIds: readonly string[]; k: number }) {
-  const top = input.rankedIds.slice(0, input.k); const hits = top.filter((id) => input.relevantIds.includes(id)); const dcg = top.reduce((sum, id, index) => sum + (input.relevantIds.includes(id) ? 1 / Math.log2(index + 2) : 0), 0); const ideal = Array.from({ length: Math.min(input.k, input.relevantIds.length) }, (_, index) => 1 / Math.log2(index + 2)).reduce((a, b) => a + b, 0)
-  return Object.freeze({ precision: hits.length / Math.max(1, top.length), recall: hits.length / Math.max(1, input.relevantIds.length), ndcg: ideal ? dcg / ideal : 0 })
-}

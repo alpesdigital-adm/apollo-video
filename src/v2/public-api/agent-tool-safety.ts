@@ -179,6 +179,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable historical validation record bound to exact source hashes and current rights while preserving an explicit non-causal protected envelope.',
     },
+    'apollo.projects.semantic-search.documents.catalog': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable virtual search document bound to an exact source hash and current rights without materializing media.',
+    },
+    'apollo.projects.semantic-search.evaluations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Runs at most fifty bounded retrieval queries and persists one immutable metrics report without changing sources or project versions.',
+    },
     'apollo.projects.commands.apply': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',

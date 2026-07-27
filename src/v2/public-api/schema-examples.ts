@@ -1154,6 +1154,108 @@ const validatedSegmentReuseDecisionExample = {
   performanceInterpretation: 'historical-association',
   evaluatedAt: createdAt,
 }
+const semanticSearchDocumentExample = {
+  schemaVersion: 'semantic-search-document/v1',
+  id: 'semantic-document-example-1',
+  workspaceId,
+  projectId,
+  source: {
+    type: 'artifact',
+    id: 'artifact-search-example-1',
+    hash: '2'.repeat(64),
+    artifactId: 'artifact-search-example-1',
+    artifactSha256: '2'.repeat(64),
+  },
+  identityKey: 'artifact:artifact-search-example-1',
+  kind: 'image',
+  durationMs: 0,
+  locale: 'pt-BR',
+  personIds: ['person-specialist'],
+  transcriptText: '',
+  ocrText: 'Custo por lead caiu 31 por cento',
+  intentions: ['proof', 'lead-generation'],
+  description: 'Captura de tela com resultado comprovado da campanha.',
+  metadata: {
+    atmosphere: 'confiante',
+    campaign: 'captacao',
+  },
+  producer: {
+    provider: 'apollo',
+    model: 'media-observer',
+    version: '1.0.0',
+    confidence: 0.96,
+  },
+  embedding: {
+    state: 'ready',
+    provider: 'openai',
+    model: 'text-embedding-3-small',
+    version: '2024-01-25',
+    dimensions: 256,
+    degraded: false,
+    inputHash: '3'.repeat(64),
+    vectorHash: '4'.repeat(64),
+  },
+  rightsSnapshotId,
+  rightsStatus: 'approved',
+  consentStatus: 'not-required',
+  indexVersion: 'semantic-search-index/v1',
+  active: true,
+  physicalMaterialized: false,
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  documentHash: '5'.repeat(64),
+}
+const hybridSearchQueryExample = {
+  text: 'custo por lead',
+  intention: 'proof',
+  rightsUse: 'social-ad',
+  filters: {
+    kinds: ['image'],
+    personIds: ['person-specialist'],
+    maxDurationMs: 5000,
+    locale: 'pt-BR',
+    metadata: { campaign: 'captacao' },
+    rights: 'approved',
+  },
+  includeBlocked: false,
+  limit: 20,
+  explain: true,
+}
+const retrievalMetricsExample = {
+  precisionAtK: 1,
+  recallAtK: 1,
+  ndcgAtK: 1,
+  reciprocalRank: 1,
+  hitsAtK: 1,
+  relevantCount: 1,
+  returnedCount: 1,
+  k: 5,
+}
+const retrievalEvaluationExample = {
+  schemaVersion: 'retrieval-evaluation/v1',
+  id: 'retrieval-evaluation-example-1',
+  workspaceId,
+  projectId,
+  policyVersion: 'retrieval-eval/v1',
+  rerankPolicyVersion: 'hybrid-rerank/v1',
+  k: 5,
+  cases: [{
+    id: 'case-proof-image',
+    queryHash: '6'.repeat(64),
+    relevantIdentityKeys: [
+      semanticSearchDocumentExample.identityKey,
+    ],
+    rankedIdentityKeys: [
+      semanticSearchDocumentExample.identityKey,
+    ],
+    metrics: retrievalMetricsExample,
+    semanticState: 'ready',
+  }],
+  aggregate: retrievalMetricsExample,
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  reportHash: '7'.repeat(64),
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -3060,6 +3162,110 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       {
         data: {
           decision: validatedSegmentReuseDecisionExample,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/catalog-semantic-search-document-request/v1': [
+      {
+        source: {
+          type: semanticSearchDocumentExample.source.type,
+          id: semanticSearchDocumentExample.source.id,
+        },
+        expectedSourceHash:
+          semanticSearchDocumentExample.source.hash,
+        indexVersion: 'semantic-search-index/v1',
+        observations: {
+          ocrText: semanticSearchDocumentExample.ocrText,
+          description: semanticSearchDocumentExample.description,
+          intentions: semanticSearchDocumentExample.intentions,
+          personIds: semanticSearchDocumentExample.personIds,
+          metadata: semanticSearchDocumentExample.metadata,
+          producer: semanticSearchDocumentExample.producer,
+        },
+      },
+    ],
+    'apollo://schemas/semantic-search-document-cataloged/v1': [
+      {
+        data: {
+          document: semanticSearchDocumentExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/hybrid-search-query-request/v1': [
+      hybridSearchQueryExample,
+    ],
+    'apollo://schemas/hybrid-search-results/v1': [
+      {
+        data: {
+          schemaVersion: 'hybrid-search-results/v1',
+          query: hybridSearchQueryExample,
+          queryHash: '8'.repeat(64),
+          semantic: {
+            state: 'ready',
+            provider: 'openai',
+            model: 'text-embedding-3-small',
+            version: '2024-01-25',
+            dimensions: 256,
+            degraded: false,
+          },
+          rerankPolicyVersion: 'hybrid-rerank/v1',
+          results: [{
+            document: semanticSearchDocumentExample,
+            score: 0.97,
+            scoreBreakdown: {
+              fullText: 1,
+              vector: 0.95,
+              intention: 1,
+              structured: 1,
+              rights: 1,
+            },
+            matchedBy: [
+              'full-text:ocr',
+              'full-text:description',
+              'full-text:intention',
+              'vector:intention-description',
+              'structured:kind',
+              'structured:person',
+              'structured:duration',
+              'structured:locale',
+              'structured:metadata',
+              'rights:allowed',
+            ],
+            blockedReasons: [],
+            eligibleForReuse: true,
+            rerankPolicyVersion: 'hybrid-rerank/v1',
+          }],
+          evaluatedAt: createdAt,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/evaluate-hybrid-retrieval-request/v1': [
+      {
+        k: 5,
+        cases: [{
+          id: 'case-proof-image',
+          query: {
+            text: hybridSearchQueryExample.text,
+            intention: hybridSearchQueryExample.intention,
+            rightsUse: hybridSearchQueryExample.rightsUse,
+            filters: hybridSearchQueryExample.filters,
+            includeBlocked: false,
+          },
+          relevantIdentityKeys: [
+            semanticSearchDocumentExample.identityKey,
+          ],
+        }],
+      },
+    ],
+    'apollo://schemas/hybrid-retrieval-evaluated/v1': [
+      {
+        data: {
+          evaluation: retrievalEvaluationExample,
+          replayed: false,
         },
         meta: { apiVersion: 'v1' },
       },
