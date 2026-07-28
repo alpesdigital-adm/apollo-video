@@ -1,0 +1,104 @@
+{
+  "schemaVersion": "source-deconstruction-golden/v1",
+  "id": "reel-published-golden",
+  "file": "reel-published-golden.mp4",
+  "sha256": "7050441e6febd0ff5dab881747cef8564af0cea2c9f1b0a8d88a51aa7b2e60a4",
+  "byteSize": 111013,
+  "technical": {
+    "container": "mp4",
+    "videoCodec": "h264",
+    "audioCodec": "aac",
+    "width": 320,
+    "height": 568,
+    "fps": 30,
+    "durationMs": 6200,
+    "videoFrameCount": 186,
+    "audioSampleRate": 48000,
+    "audioChannels": 1
+  },
+  "visualEvidence": {
+    "publishedMarker": "REEL PUBLICADO",
+    "burnedCaptionMarker": "LEGENDA QUEIMADA",
+    "burnedCaptionRegion": {
+      "x": 20,
+      "y": 420,
+      "width": 280,
+      "height": 100
+    },
+    "speakerSilhouettePresent": true,
+    "phaseBackgroundsAreDistinct": true
+  },
+  "timeline": [
+    {
+      "sourceSegmentId": 0,
+      "role": "opening",
+      "rangeMs": [0, 900],
+      "exactText": "Antes de comecar, deixa eu me apresentar.",
+      "classification": "complete-thought",
+      "completeThoughtScore": 0.95,
+      "intention": "opening",
+      "expectedForHook": "remove"
+    },
+    {
+      "sourceSegmentId": 1,
+      "role": "hook",
+      "rangeMs": [900, 2300],
+      "exactText": "Se o anuncio nao prende atencao.",
+      "classification": "complete-thought",
+      "completeThoughtScore": 0.98,
+      "intention": "hook",
+      "expectedForHook": "include"
+    },
+    {
+      "sourceSegmentId": 2,
+      "role": "body",
+      "rangeMs": [2300, 4000],
+      "exactText": "Tres formas de estruturar a mensagem.",
+      "classification": "complete-thought",
+      "completeThoughtScore": 0.96,
+      "intention": "body",
+      "expectedForHook": "remove"
+    },
+    {
+      "sourceSegmentId": 3,
+      "role": "cta",
+      "rangeMs": [4000, 5100],
+      "exactText": "Clique no link e entre para a aula.",
+      "classification": "complete-thought",
+      "completeThoughtScore": 0.98,
+      "intention": "cta",
+      "expectedForHook": "remove"
+    },
+    {
+      "sourceSegmentId": 4,
+      "role": "tail",
+      "rangeMs": [5100, 6200],
+      "exactText": "Um abraco e ate a proxima.",
+      "classification": "complete-thought",
+      "completeThoughtScore": 0.95,
+      "intention": "tail",
+      "expectedForHook": "remove"
+    }
+  ],
+  "expectedHookDeconstruction": {
+    "desiredRole": "hook",
+    "sourceRangeMs": [0, 6200],
+    "speechRangeMs": [900, 2300],
+    "cleanRangeMs": [780, 2460],
+    "removedRangesMs": [[0, 780], [2460, 6200]],
+    "includedSourceSegmentIds": [1],
+    "contaminantKinds": [
+      "prior-opening",
+      "non-target-body",
+      "prior-cta",
+      "removable-tail"
+    ],
+    "contextPreserved": true,
+    "decision": "automatic"
+  },
+  "generator": {
+    "command": "npm run fixtures:source-deconstruction",
+    "script": "scripts/generate-source-deconstruction-golden.mjs",
+    "deterministic": true
+  }
+}

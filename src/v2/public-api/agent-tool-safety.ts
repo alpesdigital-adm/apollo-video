@@ -191,6 +191,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Processes one exact existing artifact and transcript within explicit cost, memory and elapsed-time budgets; it persists only virtual chunks, evidence mappings and measurements.',
     },
+    'apollo.projects.source-deconstructions.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable analysis from exact existing artifact and cataloged-speech hashes; it preserves source media and starts no provider or render work.',
+    },
     'apollo.batches.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one explicit bounded item matrix from existing approved workspace artifacts without starting provider work.',

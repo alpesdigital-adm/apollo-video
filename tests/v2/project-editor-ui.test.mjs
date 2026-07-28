@@ -142,6 +142,37 @@ test('T-FR-217 project editor compares immutable previews and exposes explicit p
   assert.match(projectEditorSource, /sem apagar o histórico/)
 })
 
+test('T-FR-120 project editor exposes API-backed source versus clean evidence', () => {
+  assert.match(
+    projectEditorSource,
+    /\/source-deconstructions\?limit=20/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="source-deconstruction-panel"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="source-deconstruction-source-track"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="source-deconstruction-clean-track"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="source-deconstruction-transcript"/,
+  )
+  assert.match(projectEditorSource, /O que fica\. O que sai\. Por quê\./)
+  assert.match(projectEditorSource, /comparison\.removedRangesMs/)
+  assert.match(projectEditorSource, /semanticContaminants\.map/)
+  assert.match(projectEditorSource, /SOURCE_CONTAMINANT_LABELS/)
+  assert.match(
+    projectEditorSource,
+    /contexto \{selectedSourceDeconstruction\.contextPreserved/,
+  )
+})
+
 test('T-FR-230 project editor exposes the persisted proxy verdict and blocks final export until release', () => {
   assert.match(projectEditorSource, /\/proxy-reviews/)
   assert.match(projectEditorSource, /data-testid="proxy-review-gate"/)

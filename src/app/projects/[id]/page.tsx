@@ -16,6 +16,53 @@ interface TranscriptSummary {
   id: string; sourceArtifactId: string; language: string; provider: string; model: string; transcriptHash: string;
   text: string; wordCount: number; segmentCount: number; createdAt: string
 }
+type SourceDeconstructionRole = 'opening' | 'hook' | 'context' | 'body' | 'cta' | 'tail'
+interface SourceDeconstructionReportData {
+  id: string
+  sourceArtifactId: string
+  desiredRole: 'hook' | 'body' | 'cta' | 'complete'
+  validationScope: 'copy' | 'take' | 'opening-edit' | 'full'
+  segments: {
+    id: string
+    exactText: string
+    rangeMs: [number, number]
+    role: SourceDeconstructionRole
+    included: boolean
+    includedForContext: boolean
+  }[]
+  cleanCandidateRanges: {
+    id: string
+    rangeMs: [number, number]
+    speechRangeMs: [number, number]
+    exactText: string
+    confidence: number
+    contextPreserved: boolean
+  }[]
+  semanticContaminants: {
+    id: string
+    kind: 'prior-opening' | 'non-target-body' | 'prior-cta' | 'removable-tail'
+    rangeMs: [number, number]
+    exactText: string
+    confidence: number
+    removableWithoutContextLoss: boolean
+  }[]
+  comparison: {
+    sourceRangeMs: [number, number]
+    cleanRangesMs: [number, number][]
+    removedRangesMs: [number, number][]
+    sourceDurationMs: number
+    cleanDurationMs: number
+    removedDurationMs: number
+    retainedRatio: number
+    sourceTranscript: string
+    cleanTranscript: string
+  }
+  confidence: number
+  editabilityScore: number
+  decision: 'automatic' | 'human-review' | 'reject'
+  contextPreserved: boolean
+  createdAt: string
+}
 interface PublicOperation {
   id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export'; status: string; phase: string;
   progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string
@@ -204,6 +251,22 @@ const PATCH_GATE_LABELS = Object.freeze({
   ambiguity: 'Intenção', 'protected-elements': 'Proteções', policy: 'Política', budget: 'Budget',
 } satisfies Record<ReviewPatchProposalData['gates'][number]['gate'], string>)
 
+const SOURCE_ROLE_LABELS = Object.freeze({
+  opening: 'Abertura',
+  hook: 'Hook',
+  context: 'Contexto',
+  body: 'Corpo',
+  cta: 'CTA',
+  tail: 'Cauda',
+} satisfies Record<SourceDeconstructionRole, string>)
+
+const SOURCE_CONTAMINANT_LABELS = Object.freeze({
+  'prior-opening': 'Abertura anterior',
+  'non-target-body': 'Corpo fora do alvo',
+  'prior-cta': 'CTA anterior',
+  'removable-tail': 'Cauda removível',
+} satisfies Record<SourceDeconstructionReportData['semanticContaminants'][number]['kind'], string>)
+
 function readableBytes(value: number | string): string {
   const bytes = typeof value === 'string' ? Number(value) : value
   if (!Number.isFinite(bytes)) return '—'
@@ -228,6 +291,25 @@ function localSignedUrl(value: string): string {
 }
 
 function clamp01(value: number): number { return Math.min(1, Math.max(0, value)) }
+
+function readableDuration(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return '—'
+  if (value < 1_000) return `${Math.round(value)} ms`
+  return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)} s`
+}
+
+function rangePosition(
+  rangeMs: readonly [number, number],
+  durationMs: number,
+) {
+  const duration = Math.max(1, durationMs)
+  const left = clamp01(rangeMs[0] / duration) * 100
+  const right = clamp01(rangeMs[1] / duration) * 100
+  return {
+    left: `${left}%`,
+    width: `${Math.max(0.35, right - left)}%`,
+  }
+}
 
 function frameTimecode(frame: number, fps: number): string {
   if (!Number.isFinite(frame) || !Number.isFinite(fps) || fps <= 0) return '00:00:00:00'
@@ -329,6 +411,9 @@ export default function ProjectWorkspacePage() {
   const [compareBusy, setCompareBusy] = useState(false)
   const [proxyReview, setProxyReview] = useState<ProxyReviewData | null>(null)
   const [proxyReviewBusy, setProxyReviewBusy] = useState(false)
+  const [sourceDeconstructions, setSourceDeconstructions] = useState<SourceDeconstructionReportData[]>([])
+  const [selectedSourceDeconstructionId, setSelectedSourceDeconstructionId] = useState<string | null>(null)
+  const [sourceDeconstructionLoading, setSourceDeconstructionLoading] = useState(true)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -392,6 +477,46 @@ export default function ProjectWorkspacePage() {
   }, [projectId, router])
 
   useEffect(() => { void loadWorkspace() }, [loadWorkspace])
+  const loadSourceDeconstructions = useCallback(async (quiet = false) => {
+    if (!quiet) setSourceDeconstructionLoading(true)
+    try {
+      const response = await fetch(
+        `/v1/projects/${encodeURIComponent(projectId)}/source-deconstructions?limit=20`,
+        { headers: { accept: 'application/json' }, cache: 'no-store' },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        reports: SourceDeconstructionReportData[]
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível carregar a leitura do material publicado.',
+        ))
+      }
+      setSourceDeconstructions(payload.data.reports)
+      setSelectedSourceDeconstructionId((current) =>
+        current && payload.data!.reports.some((report) =>
+          report.id === current)
+          ? current
+          : payload.data!.reports[0]?.id ?? null)
+    } catch (error) {
+      if (!quiet) {
+        setNotice(error instanceof Error
+          ? error.message
+          : 'Não foi possível carregar a leitura do material publicado.')
+      }
+    } finally {
+      if (!quiet) setSourceDeconstructionLoading(false)
+    }
+  }, [projectId, router])
+
+  useEffect(() => {
+    void loadSourceDeconstructions()
+  }, [loadSourceDeconstructions])
   useEffect(() => () => reviewElementLookup.current?.abort(), [])
   useEffect(() => {
     if (workspace?.editPlan?.state !== 'compiled' || !workspace.version) {
@@ -473,6 +598,13 @@ export default function ProjectWorkspacePage() {
       ?? [...media].reverse().find((item) => item.role === 'editing-proxy')
   }, [finalOutput, review?.session.proxyArtifactId, workspace])
   const sourceMasters = useMemo(() => (workspace?.media ?? []).filter((item) => item.role === 'source-master'), [workspace])
+  const selectedSourceDeconstruction = useMemo(
+    () => sourceDeconstructions.find((report) =>
+      report.id === selectedSourceDeconstructionId)
+      ?? sourceDeconstructions[0]
+      ?? null,
+    [selectedSourceDeconstructionId, sourceDeconstructions],
+  )
   const transcript = workspace?.transcripts[0]
   const latestDirectorRun = workspace?.directorRuns[0]
   const currentReviewScene = useMemo(
@@ -2291,6 +2423,157 @@ export default function ProjectWorkspacePage() {
           ) : null}
 
           {transcript ? <div className="mt-5 rounded-2xl border border-white/[0.07] bg-[#0a0a0a] p-5"><div className="flex items-center justify-between"><p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#79746c]">Transcrição do master</p><span className="text-[10px] text-[#5e9f74]">{transcript.wordCount} palavras · {transcript.language}</span></div><p className="mt-2 text-[10px] text-[#666159]">Fonte indexada; o preview acima já aplica os cortes da versão {workspace.version?.sequence ?? 1}.</p><p className="mt-3 line-clamp-4 text-sm leading-6 text-[#aaa59c]">{transcript.text}</p></div> : null}
+
+          <section
+            aria-label="Comparação entre a fonte publicada e os trechos limpos"
+            className="mt-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
+            data-testid="source-deconstruction-panel"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/[0.07] px-5 py-4">
+              <div>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#b58d31]">Raio-X da fonte</p>
+                <h2 className="mt-1.5 text-base font-semibold tracking-[-0.02em] text-[#e8e3da]">O que fica. O que sai. Por quê.</h2>
+                <p className="mt-1 text-[10px] text-[#6e6961]">Leitura imutável do diretor sobre material já publicado.</p>
+              </div>
+              {sourceDeconstructions.length > 1 ? (
+                <label className="grid gap-1 text-[8px] uppercase tracking-[0.14em] text-[#6f6a62]">
+                  Leitura
+                  <select
+                    className="min-w-48 border border-white/[0.09] bg-[#0d0d0d] px-3 py-2 text-[10px] normal-case tracking-normal text-[#bdb6ac] outline-none focus:border-[#d8aa3d]/55"
+                    data-testid="source-deconstruction-select"
+                    onChange={(event) =>
+                      setSelectedSourceDeconstructionId(event.target.value)}
+                    value={selectedSourceDeconstruction?.id ?? ''}
+                  >
+                    {sourceDeconstructions.map((report) => (
+                      <option key={report.id} value={report.id}>
+                        {report.desiredRole === 'complete' ? 'Composição completa' : SOURCE_ROLE_LABELS[report.desiredRole]} · {new Date(report.createdAt).toLocaleString('pt-BR')}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+
+            {sourceDeconstructionLoading ? (
+              <div className="px-5 py-10 text-center text-xs text-[#716c64]">
+                Lendo decisões sobre as fontes…
+              </div>
+            ) : !selectedSourceDeconstruction ? (
+              <div className="grid gap-2 px-5 py-9 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div>
+                  <p className="text-sm font-medium text-[#bdb7ae]">Nenhuma fonte publicada foi desconstruída ainda.</p>
+                  <p className="mt-1 text-[10px] leading-5 text-[#69655e]">Quando o diretor reaproveitar um Reel, depoimento ou anúncio validado, os trechos mantidos e removidos aparecerão aqui.</p>
+                </div>
+                <span className="mt-2 border border-dashed border-white/[0.1] px-3 py-2 font-mono text-[8px] uppercase tracking-[0.14em] text-[#5f5a53] sm:mt-0">aguardando análise</span>
+              </div>
+            ) : (
+              <div data-testid="source-deconstruction-result">
+                <div className="grid divide-y divide-white/[0.06] sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+                  <div className="px-5 py-4">
+                    <p className="text-[8px] uppercase tracking-[0.16em] text-[#69645c]">Alvo</p>
+                    <p className="mt-2 text-sm font-medium text-[#d6d0c7]">{selectedSourceDeconstruction.desiredRole === 'complete' ? 'Composição completa' : SOURCE_ROLE_LABELS[selectedSourceDeconstruction.desiredRole]}</p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-[8px] uppercase tracking-[0.16em] text-[#69645c]">Material limpo</p>
+                    <p className="mt-2 font-mono text-sm text-[#72bd8a]">{readableDuration(selectedSourceDeconstruction.comparison.cleanDurationMs)}</p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-[8px] uppercase tracking-[0.16em] text-[#69645c]">Removido</p>
+                    <p className="mt-2 font-mono text-sm text-[#ce746d]">{readableDuration(selectedSourceDeconstruction.comparison.removedDurationMs)}</p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-[8px] uppercase tracking-[0.16em] text-[#69645c]">Decisão</p>
+                    <p className={`mt-2 text-sm font-medium ${selectedSourceDeconstruction.decision === 'automatic' ? 'text-[#72bd8a]' : selectedSourceDeconstruction.decision === 'human-review' ? 'text-[#ddb452]' : 'text-[#cf756e]'}`}>
+                      {selectedSourceDeconstruction.decision === 'automatic' ? 'Editável automaticamente' : selectedSourceDeconstruction.decision === 'human-review' ? 'Revisão humana' : 'Rejeitar fonte'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="border-t border-white/[0.07] px-5 py-5">
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#777168]">Mapa temporal</p>
+                    <p className="font-mono text-[8px] text-[#625d56]">0:00 — {readableDuration(selectedSourceDeconstruction.comparison.sourceDurationMs)}</p>
+                  </div>
+                  <div className="mt-4 grid grid-cols-[48px_1fr] items-center gap-x-3 gap-y-3">
+                    <span className="text-[8px] font-semibold uppercase tracking-[0.12em] text-[#777168]">Fonte</span>
+                    <div className="relative h-8 overflow-hidden border border-white/[0.08] bg-[#111]" data-testid="source-deconstruction-source-track">
+                      {selectedSourceDeconstruction.segments.map((segment) => (
+                        <span
+                          className={`absolute inset-y-0 border-r border-black/50 ${segment.included ? 'bg-[#d7a93a]/70' : 'bg-[#853f42]/45'}`}
+                          key={segment.id}
+                          style={rangePosition(segment.rangeMs, selectedSourceDeconstruction.comparison.sourceDurationMs)}
+                          title={`${SOURCE_ROLE_LABELS[segment.role]} · ${readableDuration(segment.rangeMs[1] - segment.rangeMs[0])}`}
+                        />
+                      ))}
+                      <span className="pointer-events-none absolute inset-0 bg-[linear-gradient(110deg,transparent_0%,rgba(255,255,255,.035)_45%,transparent_46%)]" />
+                    </div>
+                    <span className="text-[8px] font-semibold uppercase tracking-[0.12em] text-[#72a980]">Clean</span>
+                    <div className="relative h-8 overflow-hidden border border-[#5ca575]/20 bg-[#0e1510]" data-testid="source-deconstruction-clean-track">
+                      {selectedSourceDeconstruction.comparison.cleanRangesMs.map((range, index) => (
+                        <span
+                          className="absolute inset-y-1 border border-[#70be88]/35 bg-[#4d9565]/75 shadow-[0_0_14px_rgba(86,159,111,.18)]"
+                          key={`${range[0]}-${range[1]}-${index}`}
+                          style={rangePosition(range, selectedSourceDeconstruction.comparison.sourceDurationMs)}
+                          title={`Trecho limpo · ${readableDuration(range[1] - range[0])}`}
+                        />
+                      ))}
+                      {selectedSourceDeconstruction.comparison.removedRangesMs.map((range, index) => (
+                        <span
+                          className="absolute inset-y-0 bg-[repeating-linear-gradient(135deg,rgba(165,75,72,.18)_0,rgba(165,75,72,.18)_3px,transparent_3px,transparent_7px)]"
+                          key={`removed-${range[0]}-${range[1]}-${index}`}
+                          style={rangePosition(range, selectedSourceDeconstruction.comparison.sourceDurationMs)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[8px] text-[#6f6a62]">
+                    <span className="flex items-center gap-1.5"><i className="h-2 w-2 bg-[#d7a93a]/70" /> fala-alvo</span>
+                    <span className="flex items-center gap-1.5"><i className="h-2 w-2 bg-[#853f42]/55" /> material anterior</span>
+                    <span className="flex items-center gap-1.5"><i className="h-2 w-2 bg-[#4d9565]/80" /> intervalo preservado</span>
+                    <span className="ml-auto font-mono text-[#827b71]">{Math.round(selectedSourceDeconstruction.comparison.retainedRatio * 100)}% retido · score {selectedSourceDeconstruction.editabilityScore}</span>
+                  </div>
+                </div>
+
+                <div className="grid border-t border-white/[0.07] lg:grid-cols-[minmax(0,1fr)_220px]">
+                  <div className="grid gap-4 px-5 py-5 sm:grid-cols-2" data-testid="source-deconstruction-transcript">
+                    <div>
+                      <p className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#7b756d]">Transcrição original</p>
+                      <p className="mt-3 text-xs leading-6 text-[#7d7870]">
+                        {selectedSourceDeconstruction.segments.map((segment) => (
+                          <span
+                            className={segment.included ? 'text-[#d9d2c8]' : 'text-[#795f5d] line-through decoration-[#a45a56]/60'}
+                            key={segment.id}
+                          >
+                            {segment.exactText}{' '}
+                          </span>
+                        ))}
+                      </p>
+                    </div>
+                    <div className="border-l border-white/[0.06] pl-4">
+                      <p className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#69a77c]">Fala limpa</p>
+                      <p className="mt-3 text-xs leading-6 text-[#c9d8cd]">{selectedSourceDeconstruction.comparison.cleanTranscript}</p>
+                      <p className="mt-3 font-mono text-[8px] text-[#66806e]">contexto {selectedSourceDeconstruction.contextPreserved ? 'preservado' : 'incompleto'} · confiança {Math.round(selectedSourceDeconstruction.confidence * 100)}%</p>
+                    </div>
+                  </div>
+                  <div className="border-t border-white/[0.07] bg-[#0b0a0a] px-4 py-5 lg:border-l lg:border-t-0">
+                    <p className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#8b6c68]">Descartes sem perda</p>
+                    <div className="mt-3 space-y-2">
+                      {selectedSourceDeconstruction.semanticContaminants.map((item) => (
+                        <div className="border-l border-[#a5524e]/40 pl-3" key={item.id}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[9px] font-medium text-[#b78a85]">{SOURCE_CONTAMINANT_LABELS[item.kind]}</span>
+                            <span className="font-mono text-[7px] text-[#705e5b]">{readableDuration(item.rangeMs[1] - item.rangeMs[0])}</span>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-[8px] leading-4 text-[#6e625f]">{item.exactText}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
         </section>
 
         <aside className="border-t border-white/[0.07] bg-[#0a0a0a] p-5 xl:border-l xl:border-t-0 xl:p-6">

@@ -96,6 +96,9 @@ model V2Workspace {
   batchEditCommandItems           V2BatchEditCommandItem[]
   batchEditInvalidations          V2BatchEditInvalidation[]
   productionBatchRetryJobs        V2ProductionBatchRetryJob[]
+  sourceDeconstructionReports     V2SourceDeconstructionReport[]
+  sourceDeconstructionSegments    V2SourceDeconstructionSegment[]
+  sourceDeconstructionRanges      V2SourceDeconstructionRange[]
 
   @@map("workspaces")
 }
@@ -144,6 +147,7 @@ model V2ApiClient {
   batchEditItemStates         V2BatchEditItemStateVersion[]     @relation("BatchEditItemStateCreator")
   batchEditPreflights         V2BatchEditPreflightRun[]         @relation("BatchEditPreflightCreator")
   batchEditCommands           V2BatchEditCommand[]              @relation("BatchEditCommandCreator")
+  sourceDeconstructionReports V2SourceDeconstructionReport[]     @relation("SourceDeconstructionCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -289,6 +293,9 @@ model V2Project {
   batchEditPreflights          V2BatchEditPreflightRun[]
   batchEditCommands            V2BatchEditCommand[]
   productionBatchRetryJobs     V2ProductionBatchRetryJob[]
+  sourceDeconstructionReports  V2SourceDeconstructionReport[]
+  sourceDeconstructionSegments V2SourceDeconstructionSegment[]
+  sourceDeconstructionRanges   V2SourceDeconstructionRange[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -691,6 +698,8 @@ model V2MediaArtifact {
   renderElementMaps            V2RenderElementMap[]
   proxyReviews                 V2ProxyReview[]
   selectedByAssetSelections    V2AssetSelection[]               @relation("AssetSelectionSelectedArtifact")
+  sourceDeconstructionReports  V2SourceDeconstructionReport[]
+  sourceDeconstructionSegments V2SourceDeconstructionSegment[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -1379,6 +1388,7 @@ model V2MediaTranscript {
   speechSegments             V2SpeechSegment[]
   evidenceSegments           V2EvidenceSegment[]
   hierarchicalProcessingRuns V2HierarchicalProcessingRun[]
+  sourceDeconstructionReports V2SourceDeconstructionReport[]
 
   @@unique([id, workspaceId])
   @@unique([sourceArtifactId, transcriptHash])
@@ -1462,6 +1472,7 @@ model V2SpeechSegment {
   sourceArtifact    V2MediaArtifact           @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   evidenceSegments  V2EvidenceSegment[]
   validatedSegments V2ValidatedSegment[]
+  sourceDeconstructionSegments V2SourceDeconstructionSegment[]
 
   @@unique([id, workspaceId])
   @@unique([catalogRunId, sourceSegmentId])
@@ -3126,4 +3137,121 @@ model V2WebhookWorkerShardLease {
   @@unique([poolId, leaseOwner])
   @@index([poolId, leaseExpiresAt, shardIndex])
   @@map("webhook_worker_shard_leases")
+}
+
+model V2SourceDeconstructionReport {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  sourceArtifactId         String   @db.VarChar(128)
+  sourceArtifactSha256     String   @db.Char(64)
+  sourceTranscriptId       String   @db.VarChar(128)
+  sourceTranscriptHash     String   @db.Char(64)
+  sourceDurationMs         Int
+  schemaVersion            String   @db.VarChar(64)
+  policyVersion            String   @db.VarChar(64)
+  analyzerVersion          String   @db.VarChar(64)
+  desiredRole              String   @db.VarChar(16)
+  validationScope          String   @db.VarChar(24)
+  targetCompositionJson    String   @db.Text
+  targetCompositionHash    String   @db.Char(64)
+  boundaryPolicyJson       String   @db.Text
+  boundaryPolicyHash       String   @db.Char(64)
+  reportJson               String   @db.Text
+  reportHash               String   @db.Char(64)
+  confidence               Float
+  editabilityScore         Int
+  decision                 String   @db.VarChar(24)
+  contextPreserved         Boolean
+  segmentCount             Int
+  cleanRangeCount          Int
+  semanticContaminantCount Int
+  cleanDurationMs          Int
+  removedDurationMs        Int
+  requestFingerprint       String   @db.Char(64)
+  idempotencyKey           String   @db.VarChar(128)
+  createdByClientId        String   @db.VarChar(80)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact   V2MediaArtifact    @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceTranscript V2MediaTranscript  @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy        V2ApiClient        @relation("SourceDeconstructionCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  segments         V2SourceDeconstructionSegment[]
+  cleanRanges      V2SourceDeconstructionRange[]
+
+  @@unique([id, workspaceId, projectId])
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, projectId, sourceArtifactId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceTranscriptId, createdAt(sort: Desc)])
+  @@index([workspaceId, decision, createdAt(sort: Desc)])
+  @@map("source_deconstruction_reports")
+}
+
+model V2SourceDeconstructionSegment {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  reportId              String   @db.VarChar(128)
+  sourceArtifactId      String   @db.VarChar(128)
+  sourceSpeechSegmentId String   @db.VarChar(128)
+  sourceSegmentId       Int
+  startMs               Int
+  endMs                 Int
+  semanticRole          String   @db.VarChar(16)
+  roleConfidence        Float
+  roleReasonCodesJson   String   @db.Text
+  essential             Boolean
+  included              Boolean
+  includedForContext    Boolean
+  completeThoughtScore  Float
+  classification        String   @db.VarChar(24)
+  exactText             String   @db.Text
+  normalizedText        String   @db.Text
+  sourceSegmentHash     String   @db.Char(64)
+  analysisHash          String   @db.Char(64)
+
+  workspace           V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project             V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  report              V2SourceDeconstructionReport  @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+  sourceArtifact      V2MediaArtifact               @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceSpeechSegment V2SpeechSegment               @relation(fields: [sourceSpeechSegmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([reportId, sourceSpeechSegmentId])
+  @@unique([reportId, sourceSegmentId])
+  @@index([workspaceId, projectId, reportId, startMs])
+  @@index([workspaceId, sourceArtifactId, startMs])
+  @@index([workspaceId, semanticRole, included])
+  @@map("source_deconstruction_segments")
+}
+
+model V2SourceDeconstructionRange {
+  id                         String   @id @db.VarChar(128)
+  workspaceId                String   @db.VarChar(128)
+  projectId                  String   @db.VarChar(128)
+  reportId                   String   @db.VarChar(128)
+  sequence                   Int
+  startMs                    Int
+  endMs                      Int
+  speechStartMs              Int
+  speechEndMs                Int
+  sourceSpeechSegmentIdsJson String   @db.Text
+  rolesJson                  String   @db.Text
+  exactText                  String   @db.Text
+  confidence                 Float
+  contextPreserved           Boolean
+  boundaryReasonCodesJson    String   @db.Text
+  rangeHash                  String   @db.Char(64)
+
+  workspace V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  report    V2SourceDeconstructionReport @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+
+  @@unique([reportId, sequence])
+  @@unique([reportId, id])
+  @@index([workspaceId, projectId, reportId, sequence])
+  @@index([workspaceId, contextPreserved, confidence(sort: Desc)])
+  @@map("source_deconstruction_ranges")
 }
