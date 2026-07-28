@@ -1,28 +1,24 @@
 import {
   Prisma,
   type PrismaClient,
-  type V2ScriptAlignmentRun,
+  type V2TakeLibraryRun,
 } from '../../../../generated/prisma-v2/index.js'
 
 import type {
-  ScriptAlignmentCreateRecord,
-  ScriptAlignmentPage,
-  ScriptAlignmentReplay,
-  ScriptAlignmentRepository,
-  ScriptAlignmentReviewRecord,
-} from '../../application/ports/script-alignment-repository.ts'
+  TakeLibraryCreateRecord,
+  TakeLibraryPage,
+  TakeLibraryReplay,
+  TakeLibraryRepository,
+  TakeLibrarySelectionRecord,
+} from '../../application/ports/take-library-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
-  hydrateScriptAlignmentRun,
-  type ScriptAlignmentRun,
-  type ScriptBlockRole,
-  type ScriptTranscriptSource,
-} from '../../domain/script-alignment.ts'
-import {
-  hydrateStoredMediaTranscript,
-} from './speech-segment-catalog-repository.ts'
+  hydrateTakeLibraryRun,
+  type TakeLibraryRun,
+} from '../../domain/take-library.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { hydrateRunRow as hydrateAlignmentRow } from './script-alignment-repository.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' &&
@@ -50,21 +46,13 @@ function canonicalJson<T>(value: string, field: string): Readonly<T> {
   return Object.freeze(parsed as T)
 }
 
-export function hydrateRunRow(
-  row: V2ScriptAlignmentRun,
-): Readonly<ScriptAlignmentRun> {
-  const document = canonicalJson<ScriptAlignmentRun['document']>(
-    row.documentJson,
-    'script alignment document',
-  )
-  const sourceRefs = canonicalJson<ScriptAlignmentRun['sourceRefs']>(
-    row.sourceRefsJson,
-    'script alignment source references',
-  )
-  const run = hydrateScriptAlignmentRun(
-    canonicalJson<ScriptAlignmentRun>(
+function hydrateRunRow(
+  row: V2TakeLibraryRun,
+): Readonly<TakeLibraryRun> {
+  const run = hydrateTakeLibraryRun(
+    canonicalJson<TakeLibraryRun>(
       row.resultJson,
-      'script alignment result',
+      'take library result',
     ),
   )
   if (
@@ -72,16 +60,23 @@ export function hydrateRunRow(
     run.workspaceId !== row.workspaceId ||
     run.projectId !== row.projectId ||
     run.batchId !== row.batchId ||
+    run.alignmentId !== row.alignmentId ||
+    run.alignmentRunHash !== row.alignmentRunHash ||
     run.schemaVersion !== row.schemaVersion ||
-    run.algorithmVersion !== row.algorithmVersion ||
+    run.groupingPolicyVersion !== row.groupingPolicyVersion ||
+    run.evaluationPolicyVersion !== row.evaluationPolicyVersion ||
     run.status !== row.status ||
     run.revision !== row.revision ||
-    run.document.documentHash !== row.documentHash ||
-    stableSerialize(run.document) !== stableSerialize(document) ||
-    stableSerialize(run.sourceRefs) !== stableSerialize(sourceRefs) ||
-    run.summary.blockCount !== row.blockCount ||
-    run.summary.reviewRequiredCount !== row.reviewRequiredCount ||
-    run.summary.extraTakeCount !== row.extraTakeCount ||
+    run.summary.groupCount !== row.groupCount ||
+    run.summary.takeCount !== row.takeCount ||
+    run.summary.primaryCount !== row.primaryCount ||
+    run.summary.alternateCount !== row.alternateCount ||
+    run.summary.rejectedCount !== row.rejectedCount ||
+    run.summary.needsReviewCount !== row.needsReviewCount ||
+    run.summary.protectedCount !== row.protectedCount ||
+    run.summary.measuredDimensionCount !== row.measuredDimensionCount ||
+    run.summary.unavailableDimensionCount !==
+      row.unavailableDimensionCount ||
     run.runHash !== row.runHash ||
     run.createdByClientId !== row.createdByClientId ||
     run.createdAt !== row.createdAt.toISOString() ||
@@ -89,30 +84,36 @@ export function hydrateRunRow(
   ) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
-      `Stored script alignment ${row.id} has inconsistent projections`,
+      `Stored take library ${row.id} has inconsistent projections`,
     )
   }
   return run
 }
 
-function runData(record: Readonly<ScriptAlignmentCreateRecord>) {
+function runData(record: Readonly<TakeLibraryCreateRecord>) {
   const { run } = record
   return {
     id: run.id,
     workspaceId: run.workspaceId,
     projectId: run.projectId,
     batchId: run.batchId,
+    alignmentId: run.alignmentId,
+    alignmentRunHash: run.alignmentRunHash,
     schemaVersion: run.schemaVersion,
-    algorithmVersion: run.algorithmVersion,
+    groupingPolicyVersion: run.groupingPolicyVersion,
+    evaluationPolicyVersion: run.evaluationPolicyVersion,
     status: run.status,
     revision: run.revision,
-    documentHash: run.document.documentHash,
-    documentJson: stableSerialize(run.document),
-    sourceRefsJson: stableSerialize(run.sourceRefs),
     resultJson: stableSerialize(run),
-    blockCount: run.summary.blockCount,
-    reviewRequiredCount: run.summary.reviewRequiredCount,
-    extraTakeCount: run.summary.extraTakeCount,
+    groupCount: run.summary.groupCount,
+    takeCount: run.summary.takeCount,
+    primaryCount: run.summary.primaryCount,
+    alternateCount: run.summary.alternateCount,
+    rejectedCount: run.summary.rejectedCount,
+    needsReviewCount: run.summary.needsReviewCount,
+    protectedCount: run.summary.protectedCount,
+    measuredDimensionCount: run.summary.measuredDimensionCount,
+    unavailableDimensionCount: run.summary.unavailableDimensionCount,
     runHash: run.runHash,
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
@@ -122,20 +123,25 @@ function runData(record: Readonly<ScriptAlignmentCreateRecord>) {
   }
 }
 
-async function assertRunCreationContext(
+async function assertCreationContext(
   transaction: Prisma.TransactionClient,
-  run: Readonly<ScriptAlignmentRun>,
+  run: Readonly<TakeLibraryRun>,
 ) {
-  const [batch, actor, transcripts] = await Promise.all([
+  const [batch, alignment, actor] = await Promise.all([
     transaction.v2ProductionBatch.findFirst({
       where: {
         id: run.batchId,
         workspaceId: run.workspaceId,
         projectId: run.projectId,
       },
-      select: {
-        id: true,
-        sourceGroupsJson: true,
+      select: { id: true },
+    }),
+    transaction.v2ScriptAlignmentRun.findFirst({
+      where: {
+        id: run.alignmentId,
+        workspaceId: run.workspaceId,
+        batchId: run.batchId,
+        projectId: run.projectId,
       },
     }),
     transaction.v2ApiClient.findFirst({
@@ -146,75 +152,35 @@ async function assertRunCreationContext(
       },
       select: { id: true },
     }),
-    transaction.v2MediaTranscript.findMany({
-      where: {
-        workspaceId: run.workspaceId,
-        projectId: run.projectId,
-        id: { in: run.sourceRefs.map((source) => source.transcriptId) },
-      },
-      include: {
-        sourceArtifact: {
-          include: { currentRightsSnapshot: true },
-        },
-      },
-    }),
   ])
   if (!batch) {
     throw new DomainError(
       'PRODUCTION_BATCH_NOT_FOUND',
-      'Script alignment production batch was not found',
+      'Take library production batch was not found',
+    )
+  }
+  if (!alignment) {
+    throw new DomainError(
+      'SCRIPT_ALIGNMENT_NOT_FOUND',
+      'Take library script alignment was not found',
+    )
+  }
+  if (alignment.runHash !== run.alignmentRunHash) {
+    throw new DomainError(
+      'VERSION_CONFLICT',
+      'Script alignment changed before take library persistence',
     )
   }
   if (!actor) {
     throw new DomainError(
       'API_CLIENT_NOT_FOUND',
-      'Script alignment actor was not found or is inactive',
+      'Take library actor was not found or is inactive',
     )
-  }
-  const sourceGroups = canonicalJson<
-    readonly Readonly<{ sourceArtifactIds: readonly string[] }>[]
-  >(batch.sourceGroupsJson, 'production batch source groups')
-  const allowedArtifactIds = new Set(
-    sourceGroups.flatMap((group) => group.sourceArtifactIds),
-  )
-  if (transcripts.length !== run.sourceRefs.length) {
-    throw new DomainError(
-      'MEDIA_TRANSCRIPT_NOT_FOUND',
-      'One or more script alignment transcripts were not found',
-    )
-  }
-  for (const reference of run.sourceRefs) {
-    const row = transcripts.find((item) => item.id === reference.transcriptId)
-    if (
-      !row ||
-      row.transcriptHash !== reference.transcriptHash ||
-      row.sourceArtifactId !== reference.sourceArtifactId ||
-      row.language !== reference.language
-    ) {
-      throw new DomainError(
-        'VERSION_CONFLICT',
-        `Transcript ${reference.transcriptId} changed before persistence`,
-      )
-    }
-    if (
-      !allowedArtifactIds.has(row.sourceArtifactId) ||
-      row.sourceArtifact.status !== 'available' ||
-      !row.sourceArtifact.currentRightsSnapshot ||
-      row.sourceArtifact.currentRightsSnapshot.status !== 'approved' ||
-      !['approved', 'not-required'].includes(
-        row.sourceArtifact.currentRightsSnapshot.consentStatus,
-      )
-    ) {
-      throw new DomainError(
-        'ASSET_RIGHTS_BLOCKED',
-        `Transcript ${reference.transcriptId} is not an approved batch source`,
-      )
-    }
   }
 }
 
-export class PrismaScriptAlignmentRepository
-implements ScriptAlignmentRepository {
+export class PrismaTakeLibraryRepository
+implements TakeLibraryRepository {
   constructor(
     private readonly prisma: PrismaClient = getV2PostgresClient(),
   ) {}
@@ -222,33 +188,18 @@ implements ScriptAlignmentRepository {
   async loadCreationContext(input: {
     workspaceId: string
     batchId: string
+    alignmentId: string
+    expectedAlignmentRunHash: string
     actorClientId: string
-    sources: readonly Readonly<{
-      transcriptId: string
-      expectedTranscriptHash: string
-      roleHint?: ScriptBlockRole
-    }>[]
-  }): Promise<Readonly<{
-    projectId: string
-    sources: readonly Readonly<ScriptTranscriptSource>[]
-  }>> {
-    const batch = await this.prisma.v2ProductionBatch.findFirst({
-      where: {
-        id: input.batchId,
-        workspaceId: input.workspaceId,
-      },
-      select: {
-        projectId: true,
-        sourceGroupsJson: true,
-      },
-    })
-    if (!batch) {
-      throw new DomainError(
-        'PRODUCTION_BATCH_NOT_FOUND',
-        'Script alignment production batch was not found',
-      )
-    }
-    const [actor, rows] = await Promise.all([
+  }) {
+    const [alignment, actor] = await Promise.all([
+      this.prisma.v2ScriptAlignmentRun.findFirst({
+        where: {
+          id: input.alignmentId,
+          workspaceId: input.workspaceId,
+          batchId: input.batchId,
+        },
+      }),
       this.prisma.v2ApiClient.findFirst({
         where: {
           id: input.actorClientId,
@@ -257,79 +208,28 @@ implements ScriptAlignmentRepository {
         },
         select: { id: true },
       }),
-      this.prisma.v2MediaTranscript.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          projectId: batch.projectId,
-          id: { in: input.sources.map((source) => source.transcriptId) },
-        },
-        include: {
-          sourceArtifact: {
-            include: { currentRightsSnapshot: true },
-          },
-        },
-      }),
     ])
+    if (!alignment) {
+      throw new DomainError(
+        'SCRIPT_ALIGNMENT_NOT_FOUND',
+        'Take library script alignment was not found',
+      )
+    }
     if (!actor) {
       throw new DomainError(
         'API_CLIENT_NOT_FOUND',
-        'Script alignment actor was not found or is inactive',
+        'Take library actor was not found or is inactive',
       )
     }
-    if (rows.length !== input.sources.length) {
+    if (alignment.runHash !== input.expectedAlignmentRunHash) {
       throw new DomainError(
-        'MEDIA_TRANSCRIPT_NOT_FOUND',
-        'One or more script alignment transcripts were not found',
+        'VERSION_CONFLICT',
+        'Script alignment hash is stale',
       )
     }
-    const sourceGroups = canonicalJson<
-      readonly Readonly<{ sourceArtifactIds: readonly string[] }>[]
-    >(batch.sourceGroupsJson, 'production batch source groups')
-    const allowedArtifactIds = new Set(
-      sourceGroups.flatMap((group) => group.sourceArtifactIds),
-    )
-    const sources = input.sources.map((requested) => {
-      const row = rows.find((candidate) =>
-        candidate.id === requested.transcriptId)
-      if (!row) {
-        throw new DomainError(
-          'MEDIA_TRANSCRIPT_NOT_FOUND',
-          `Transcript ${requested.transcriptId} was not found`,
-        )
-      }
-      if (row.transcriptHash !== requested.expectedTranscriptHash) {
-        throw new DomainError(
-          'VERSION_CONFLICT',
-          `Transcript ${requested.transcriptId} hash is stale`,
-        )
-      }
-      if (
-        !allowedArtifactIds.has(row.sourceArtifactId) ||
-        row.sourceArtifact.status !== 'available' ||
-        !row.sourceArtifact.currentRightsSnapshot ||
-        row.sourceArtifact.currentRightsSnapshot.status !== 'approved' ||
-        !['approved', 'not-required'].includes(
-          row.sourceArtifact.currentRightsSnapshot.consentStatus,
-        )
-      ) {
-        throw new DomainError(
-          'ASSET_RIGHTS_BLOCKED',
-          `Transcript ${requested.transcriptId} is not an approved batch source`,
-        )
-      }
-      const transcript = hydrateStoredMediaTranscript(row)
-      return Object.freeze({
-        transcriptId: row.id,
-        sourceArtifactId: row.sourceArtifactId,
-        transcriptHash: row.transcriptHash,
-        language: row.language,
-        ...(requested.roleHint ? { roleHint: requested.roleHint } : {}),
-        transcript,
-      })
-    })
     return Object.freeze({
-      projectId: batch.projectId,
-      sources: Object.freeze(sources),
+      projectId: alignment.projectId,
+      alignment: hydrateAlignmentRow(alignment),
     })
   }
 
@@ -337,8 +237,8 @@ implements ScriptAlignmentRepository {
     workspaceId: string
     actorClientId: string
     idempotencyKey: string
-  }): Promise<Readonly<ScriptAlignmentReplay> | null> {
-    const row = await this.prisma.v2ScriptAlignmentRun.findFirst({
+  }): Promise<Readonly<TakeLibraryReplay> | null> {
+    const row = await this.prisma.v2TakeLibraryRun.findFirst({
       where: {
         workspaceId: input.workspaceId,
         createdByClientId: input.actorClientId,
@@ -354,15 +254,15 @@ implements ScriptAlignmentRepository {
   }
 
   async create(
-    record: Readonly<ScriptAlignmentCreateRecord>,
+    record: Readonly<TakeLibraryCreateRecord>,
     attempt = 1,
   ): Promise<Readonly<{
-    run: Readonly<ScriptAlignmentRun>
+    run: Readonly<TakeLibraryRun>
     replayed: boolean
   }>> {
     try {
       return await this.prisma.$transaction(async (transaction) => {
-        const replay = await transaction.v2ScriptAlignmentRun.findFirst({
+        const replay = await transaction.v2TakeLibraryRun.findFirst({
           where: {
             workspaceId: record.run.workspaceId,
             createdByClientId: record.run.createdByClientId,
@@ -373,7 +273,7 @@ implements ScriptAlignmentRepository {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'Idempotency key was used with a different script alignment request',
+              'Idempotency key was used with a different take library request',
             )
           }
           return Object.freeze({
@@ -381,8 +281,8 @@ implements ScriptAlignmentRepository {
             replayed: true,
           })
         }
-        await assertRunCreationContext(transaction, record.run)
-        const row = await transaction.v2ScriptAlignmentRun.create({
+        await assertCreationContext(transaction, record.run)
+        const row = await transaction.v2TakeLibraryRun.create({
           data: runData(record),
         })
         return Object.freeze({
@@ -406,7 +306,7 @@ implements ScriptAlignmentRepository {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'Idempotency key was used with a different script alignment request',
+              'Idempotency key was used with a different take library request',
             )
           }
           return Object.freeze({ run: replay.run, replayed: true })
@@ -415,7 +315,7 @@ implements ScriptAlignmentRepository {
       if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) {
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
-          'Script alignment creation conflicted with another transaction',
+          'Take library creation conflicted with another transaction',
         )
       }
       throw error
@@ -426,8 +326,8 @@ implements ScriptAlignmentRepository {
     workspaceId: string
     batchId: string
     runId: string
-  }): Promise<Readonly<ScriptAlignmentRun> | null> {
-    const row = await this.prisma.v2ScriptAlignmentRun.findFirst({
+  }): Promise<Readonly<TakeLibraryRun> | null> {
+    const row = await this.prisma.v2TakeLibraryRun.findFirst({
       where: {
         id: input.runId,
         workspaceId: input.workspaceId,
@@ -442,9 +342,9 @@ implements ScriptAlignmentRepository {
     batchId: string
     limit: number
     cursor?: string
-  }): Promise<Readonly<ScriptAlignmentPage>> {
+  }): Promise<Readonly<TakeLibraryPage>> {
     const cursor = input.cursor
-      ? await this.prisma.v2ScriptAlignmentRun.findFirst({
+      ? await this.prisma.v2TakeLibraryRun.findFirst({
           where: {
             id: input.cursor,
             workspaceId: input.workspaceId,
@@ -456,10 +356,10 @@ implements ScriptAlignmentRepository {
     if (input.cursor && !cursor) {
       throw new DomainError(
         'INVALID_CURSOR',
-        'Script alignment cursor is invalid',
+        'Take library cursor is invalid',
       )
     }
-    const rows = await this.prisma.v2ScriptAlignmentRun.findMany({
+    const rows = await this.prisma.v2TakeLibraryRun.findMany({
       where: {
         workspaceId: input.workspaceId,
         batchId: input.batchId,
@@ -486,18 +386,18 @@ implements ScriptAlignmentRepository {
     const runs = Object.freeze(pageRows.map(hydrateRunRow))
     return Object.freeze({
       runs,
-      ...(hasNextPage && runs.length
+      ...(hasNextPage && runs.length > 0
         ? { nextCursor: runs.at(-1)!.id }
         : {}),
     })
   }
 
-  async findReviewReplay(input: {
+  async findSelectionReplay(input: {
     workspaceId: string
     actorClientId: string
     idempotencyKey: string
-  }): Promise<Readonly<ScriptAlignmentReplay> | null> {
-    const row = await this.prisma.v2ScriptAlignmentReview.findFirst({
+  }): Promise<Readonly<TakeLibraryReplay> | null> {
+    const row = await this.prisma.v2TakeLibrarySelection.findFirst({
       where: {
         workspaceId: input.workspaceId,
         actorClientId: input.actorClientId,
@@ -510,16 +410,16 @@ implements ScriptAlignmentRepository {
       },
     })
     if (!row) return null
-    const run = hydrateScriptAlignmentRun(
-      canonicalJson<ScriptAlignmentRun>(
+    const run = hydrateTakeLibraryRun(
+      canonicalJson<TakeLibraryRun>(
         row.resultRunJson,
-        'script alignment review result',
+        'take library selection result',
       ),
     )
     if (run.runHash !== row.resultRunHash) {
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
-        'Stored script alignment review result hash is inconsistent',
+        'Stored take library selection result hash is inconsistent',
       )
     }
     return Object.freeze({
@@ -528,19 +428,19 @@ implements ScriptAlignmentRepository {
     })
   }
 
-  async persistReview(
-    record: Readonly<ScriptAlignmentReviewRecord>,
+  async persistSelection(
+    record: Readonly<TakeLibrarySelectionRecord>,
     attempt = 1,
   ): Promise<Readonly<{
-    run: Readonly<ScriptAlignmentRun>
+    run: Readonly<TakeLibraryRun>
     replayed: boolean
   }>> {
     try {
       return await this.prisma.$transaction(async (transaction) => {
-        const replay = await transaction.v2ScriptAlignmentReview.findFirst({
+        const replay = await transaction.v2TakeLibrarySelection.findFirst({
           where: {
             workspaceId: record.resultingRun.workspaceId,
-            actorClientId: record.review.actorClientId,
+            actorClientId: record.selection.actorClientId,
             idempotencyKey: record.idempotencyKey,
           },
           select: {
@@ -553,25 +453,25 @@ implements ScriptAlignmentRepository {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'Idempotency key was used with a different script alignment review',
+              'Idempotency key was used with a different take selection',
             )
           }
-          const run = hydrateScriptAlignmentRun(
-            canonicalJson<ScriptAlignmentRun>(
+          const run = hydrateTakeLibraryRun(
+            canonicalJson<TakeLibraryRun>(
               replay.resultRunJson,
-              'script alignment review result',
+              'take library selection result',
             ),
           )
           if (run.runHash !== replay.resultRunHash) {
             throw new DomainError(
               'PERSISTENCE_CONFLICT',
-              'Stored script alignment review result hash is inconsistent',
+              'Stored take library selection result hash is inconsistent',
             )
           }
           return Object.freeze({ run, replayed: true })
         }
         const [currentRow, actor] = await Promise.all([
-          transaction.v2ScriptAlignmentRun.findFirst({
+          transaction.v2TakeLibraryRun.findFirst({
             where: {
               id: record.previousRun.id,
               workspaceId: record.previousRun.workspaceId,
@@ -580,7 +480,7 @@ implements ScriptAlignmentRepository {
           }),
           transaction.v2ApiClient.findFirst({
             where: {
-              id: record.review.actorClientId,
+              id: record.selection.actorClientId,
               workspaceId: record.resultingRun.workspaceId,
               status: 'active',
             },
@@ -589,18 +489,18 @@ implements ScriptAlignmentRepository {
         ])
         if (!currentRow) {
           throw new DomainError(
-            'SCRIPT_ALIGNMENT_NOT_FOUND',
-            'Script alignment was not found',
+            'TAKE_LIBRARY_NOT_FOUND',
+            'Take library was not found',
           )
         }
         if (!actor) {
           throw new DomainError(
             'API_CLIENT_NOT_FOUND',
-            'Script alignment review actor was not found or is inactive',
+            'Take selection actor was not found or is inactive',
           )
         }
         const current = hydrateRunRow(currentRow)
-        const next = hydrateScriptAlignmentRun(record.resultingRun)
+        const next = hydrateTakeLibraryRun(record.resultingRun)
         if (
           current.runHash !== record.previousRun.runHash ||
           current.revision !== record.previousRun.revision ||
@@ -609,17 +509,19 @@ implements ScriptAlignmentRepository {
           next.workspaceId !== current.workspaceId ||
           next.projectId !== current.projectId ||
           next.batchId !== current.batchId ||
-          next.document.documentHash !== current.document.documentHash ||
+          next.alignmentId !== current.alignmentId ||
+          next.alignmentRunHash !== current.alignmentRunHash ||
           next.createdAt !== current.createdAt ||
-          record.review.revision !== next.revision ||
-          next.reviews.at(-1)?.reviewHash !== record.review.reviewHash
+          record.selection.revision !== next.revision ||
+          next.selections.at(-1)?.selectionHash !==
+            record.selection.selectionHash
         ) {
           throw new DomainError(
             'VERSION_CONFLICT',
-            'Script alignment changed before review persistence',
+            'Take library changed before selection persistence',
           )
         }
-        const update = await transaction.v2ScriptAlignmentRun.updateMany({
+        const update = await transaction.v2TakeLibraryRun.updateMany({
           where: {
             id: current.id,
             workspaceId: current.workspaceId,
@@ -630,8 +532,14 @@ implements ScriptAlignmentRepository {
             status: next.status,
             revision: next.revision,
             resultJson: stableSerialize(next),
-            reviewRequiredCount: next.summary.reviewRequiredCount,
-            extraTakeCount: next.summary.extraTakeCount,
+            primaryCount: next.summary.primaryCount,
+            alternateCount: next.summary.alternateCount,
+            rejectedCount: next.summary.rejectedCount,
+            needsReviewCount: next.summary.needsReviewCount,
+            protectedCount: next.summary.protectedCount,
+            measuredDimensionCount: next.summary.measuredDimensionCount,
+            unavailableDimensionCount:
+              next.summary.unavailableDimensionCount,
             runHash: next.runHash,
             updatedAt: new Date(next.updatedAt),
           },
@@ -639,30 +547,37 @@ implements ScriptAlignmentRepository {
         if (update.count !== 1) {
           throw new DomainError(
             'VERSION_CONFLICT',
-            'Script alignment changed before review persistence',
+            'Take library changed before selection persistence',
           )
         }
-        await transaction.v2ScriptAlignmentReview.create({
+        await transaction.v2TakeLibrarySelection.create({
           data: {
-            id: record.review.id,
+            id: record.selection.id,
             workspaceId: next.workspaceId,
             runId: next.id,
             expectedRevision: current.revision,
             resultRevision: next.revision,
-            decisionsJson: stableSerialize(record.review.decisions),
-            reviewHash: record.review.reviewHash,
+            groupId: record.selection.groupId,
+            takeId: record.selection.takeId,
+            protect: record.selection.protect,
+            ...(record.selection.replacedProtectedTakeId
+              ? {
+                  replacedProtectedTakeId:
+                    record.selection.replacedProtectedTakeId,
+                }
+              : {}),
+            selectionJson: stableSerialize(record.selection),
+            selectionHash: record.selection.selectionHash,
             resultRunJson: stableSerialize(next),
             resultRunHash: next.runHash,
             requestFingerprint: record.requestFingerprint,
             idempotencyKey: record.idempotencyKey,
-            actorClientId: record.review.actorClientId,
-            createdAt: new Date(record.review.createdAt),
+            actorClientId: record.selection.actorClientId,
+            createdAt: new Date(record.selection.createdAt),
           },
         })
-        const persisted =
-          await transaction.v2ScriptAlignmentRun.findUniqueOrThrow({
-            where: { id: next.id },
-          })
+        const persisted = await transaction.v2TakeLibraryRun
+          .findUniqueOrThrow({ where: { id: next.id } })
         return Object.freeze({
           run: hydrateRunRow(persisted),
           replayed: false,
@@ -672,19 +587,19 @@ implements ScriptAlignmentRepository {
       })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
-        return this.persistReview(record, attempt + 1)
+        return this.persistSelection(record, attempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findReviewReplay({
+        const replay = await this.findSelectionReplay({
           workspaceId: record.resultingRun.workspaceId,
-          actorClientId: record.review.actorClientId,
+          actorClientId: record.selection.actorClientId,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'Idempotency key was used with a different script alignment review',
+              'Idempotency key was used with a different take selection',
             )
           }
           return Object.freeze({ run: replay.run, replayed: true })
@@ -693,7 +608,7 @@ implements ScriptAlignmentRepository {
       if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) {
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
-          'Script alignment review conflicted with another transaction',
+          'Take selection conflicted with another transaction',
         )
       }
       throw error

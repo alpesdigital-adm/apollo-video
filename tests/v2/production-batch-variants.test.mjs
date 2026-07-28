@@ -6,7 +6,6 @@ import {
   batchProgress,
   buildCompatibilityGraph,
   cancelProductionBatch,
-  classifyTakes,
   compileVariantRecipe,
   createProductionBatch,
   deriveBatchStatus,
@@ -14,7 +13,6 @@ import {
   previewBatchEdit,
   resumeProductionBatch,
   retryBatchStep,
-  selectTake,
   transitionBatchItem,
   variantSpacePreflight,
 } from '../../src/v2/domain/production-batch.ts'
@@ -413,47 +411,6 @@ test('T-FR-080 rejects incompatible dimensions, stale transitions, and integrity
     }),
     /state does not match/,
   )
-})
-
-test('T-FR-082 groups retakes, scores five dimensions, and protects a manual primary', () => {
-  const base = {
-    artifactId: 'artifact-source',
-    scriptBlockId: 'script-hook',
-    inferredIntention: 'hook',
-    rangeMs: [0, 1000],
-    scores: {
-      completeness: 0.9,
-      performance: 0.9,
-      audio: 0.9,
-      video: 0.9,
-      integrity: 0.9,
-    },
-  }
-  const takes = classifyTakes([
-    { ...base, id: 'take-one', retakeBoundaryId: 'boundary-one' },
-    {
-      ...base,
-      id: 'take-two',
-      retakeBoundaryId: 'boundary-two',
-      scores: { ...base.scores, performance: 0.7 },
-    },
-    {
-      ...base,
-      id: 'take-three',
-      retakeBoundaryId: 'boundary-three',
-      scores: { ...base.scores, integrity: 0.2 },
-    },
-  ])
-  assert.deepEqual(
-    takes.map((take) => take.status),
-    ['primary', 'alternate', 'rejected'],
-  )
-  const selected = selectTake(takes, 'take-two')
-  assert.equal(
-    selected.find((take) => take.id === 'take-two').protected,
-    true,
-  )
-  assert.equal(selected.length, 3)
 })
 
 test('T-FR-083 records compatibility hard blocks, scores, and evidence', () => {

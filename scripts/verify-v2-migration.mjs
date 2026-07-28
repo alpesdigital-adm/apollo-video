@@ -250,6 +250,14 @@ const requiredChecks = [
   'script_alignment_reviews_revision_check',
   'script_alignment_reviews_hash_check',
   'script_alignment_reviews_json_check',
+  'take_library_runs_versions_check',
+  'take_library_runs_status_check',
+  'take_library_runs_counts_check',
+  'take_library_runs_hashes_check',
+  'take_library_runs_json_check',
+  'take_library_selections_revision_check',
+  'take_library_selections_hashes_check',
+  'take_library_selections_json_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

@@ -39,6 +39,14 @@ const coverage = Object.freeze({
     mode: 'durable-covered',
     evidence: 'F2-008 exact alignment revision CAS, serializable review ledger, immutable result snapshot and stale-review public API E2E',
   },
+  'apollo.batches.take-libraries.create': {
+    mode: 'durable-covered',
+    evidence: 'F2-009 serializable exact-alignment creation, actor-bound idempotency ledger, immutable source evidence and public API E2E',
+  },
+  'apollo.batches.take-libraries.selections.apply': {
+    mode: 'durable-covered',
+    evidence: 'F2-009 exact take-library revision CAS, serializable selection ledger, protected-take precondition and public API E2E',
+  },
   'apollo.operations.cancel': {
     mode: 'durable-covered', evidence: 'F0-070',
   },
@@ -202,7 +210,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    58,
+    60,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

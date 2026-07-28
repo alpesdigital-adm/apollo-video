@@ -113,6 +113,7 @@ interface ScriptExtraTake {
 
 interface ScriptAlignmentRun {
   id: string
+  runHash: string
   status: 'completed' | 'review-required' | 'reviewed'
   revision: number
   document: {
@@ -141,6 +142,82 @@ interface ScriptAlignmentRun {
     averageConfidence: number
   }
   createdAt: string
+  updatedAt: string
+}
+
+type TakeDimension =
+  | 'completeness'
+  | 'performance'
+  | 'audio'
+  | 'video'
+  | 'integrity'
+type TakeStatus =
+  | 'primary'
+  | 'alternate'
+  | 'rejected'
+  | 'needs-review'
+
+interface TakeDimensionEvaluation {
+  dimension: TakeDimension
+  score: number | null
+  state: 'measured' | 'derived' | 'unavailable'
+  reasonCodes: string[]
+}
+
+interface TakeRecord {
+  id: string
+  groupId: string
+  retakeBoundaryId: string
+  sourceKind: 'alignment-candidate' | 'extra-take'
+  sourceId: string
+  sourceHash: string
+  sourceRangeMs: [number, number]
+  spokenText: string
+  assignment: {
+    kind: 'script-block' | 'inferred-intention'
+    role: ScriptRole | 'other'
+    label: string
+    confidence: number
+  }
+  evaluations: TakeDimensionEvaluation[]
+  weightedScore: number | null
+  status: TakeStatus
+  protected: boolean
+  selectionSource: 'automatic' | 'manual'
+  reasonCodes: string[]
+}
+
+interface TakeGroup {
+  id: string
+  assignmentKind: 'script-block' | 'inferred-intention'
+  role: ScriptRole | 'other'
+  label: string
+  scriptBlockId?: string
+  takeIds: string[]
+  primaryTakeId?: string
+  protectedTakeId?: string
+}
+
+interface TakeLibraryRun {
+  id: string
+  alignmentId: string
+  alignmentRunHash: string
+  status: 'completed' | 'review-required' | 'reviewed'
+  revision: number
+  groups: TakeGroup[]
+  takes: TakeRecord[]
+  summary: {
+    groupCount: number
+    takeCount: number
+    primaryCount: number
+    alternateCount: number
+    rejectedCount: number
+    needsReviewCount: number
+    protectedCount: number
+    measuredDimensionCount: number
+    unavailableDimensionCount: number
+    averageWeightedScore: number
+  }
   updatedAt: string
 }
 
@@ -269,6 +346,28 @@ const SCRIPT_KIND_LABELS: Record<ScriptBlockAlignment['kind'], string> = {
   missing: 'Ausente',
 }
 
+const TAKE_STATUS_LABELS: Record<TakeStatus, string> = {
+  primary: 'Principal',
+  alternate: 'Alternativo',
+  rejected: 'Rejeitado',
+  'needs-review': 'Revisar',
+}
+
+const TAKE_STATUS_STYLES: Record<TakeStatus, string> = {
+  primary: 'border-[#57aa77]/25 bg-[#57aa77]/10 text-[#7bc493]',
+  alternate: 'border-[#6b87b8]/25 bg-[#6b87b8]/10 text-[#8da8d4]',
+  rejected: 'border-[#c75e5e]/25 bg-[#c75e5e]/10 text-[#dc8080]',
+  'needs-review': 'border-[#bd8a3d]/25 bg-[#bd8a3d]/10 text-[#dcb568]',
+}
+
+const TAKE_DIMENSION_LABELS: Record<TakeDimension, string> = {
+  completeness: 'Completude',
+  performance: 'Performance',
+  audio: 'Áudio',
+  video: 'Vídeo',
+  integrity: 'Integridade',
+}
+
 const FORMATS = [
   { id: '9:16', name: 'Vertical', use: 'Reels · Shorts' },
   { id: '16:9', name: 'Horizontal', use: 'YouTube · sites' },
@@ -374,6 +473,10 @@ export default function BatchesPage() {
   const [alignments, setAlignments] = useState<ScriptAlignmentRun[]>([])
   const [activeAlignmentId, setActiveAlignmentId] =
     useState<string | null>(null)
+  const [takeLibraries, setTakeLibraries] =
+    useState<TakeLibraryRun[]>([])
+  const [activeTakeLibraryId, setActiveTakeLibraryId] =
+    useState<string | null>(null)
   const [alignmentLoading, setAlignmentLoading] = useState(false)
   const [scriptComposerOpen, setScriptComposerOpen] = useState(false)
   const [scriptTitle, setScriptTitle] = useState('')
@@ -384,6 +487,7 @@ export default function BatchesPage() {
   const [scriptRoleHints, setScriptRoleHints] =
     useState<Record<string, ScriptRole | ''>>({})
   const scriptIdempotencyKey = useRef<string | null>(null)
+  const takeLibraryIdempotencyKey = useRef<string | null>(null)
 
   const fetchBatches = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true)
@@ -502,13 +606,19 @@ export default function BatchesPage() {
       setBatchTranscripts([])
       setAlignments([])
       setActiveAlignmentId(null)
+      setTakeLibraries([])
+      setActiveTakeLibraryId(null)
       return
     }
     const controller = new AbortController()
     async function loadScriptWorkspace() {
       setAlignmentLoading(true)
       try {
-        const [workspaceResponse, alignmentsResponse] = await Promise.all([
+        const [
+          workspaceResponse,
+          alignmentsResponse,
+          takeLibrariesResponse,
+        ] = await Promise.all([
           fetch(
             `/v1/projects/${encodeURIComponent(selectedBatch!.projectId)}/workspace`,
             {
@@ -525,10 +635,19 @@ export default function BatchesPage() {
               cache: 'no-store',
             },
           ),
+          fetch(
+            `/v1/batches/${encodeURIComponent(selectedBatch!.id)}/take-libraries?limit=100`,
+            {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+              cache: 'no-store',
+            },
+          ),
         ])
         if (
           workspaceResponse.status === 401 ||
-          alignmentsResponse.status === 401
+          alignmentsResponse.status === 401 ||
+          takeLibrariesResponse.status === 401
         ) {
           router.replace('/login')
           return
@@ -537,6 +656,8 @@ export default function BatchesPage() {
           ApiEnvelope<{ transcripts: TranscriptSummary[] }>
         const alignmentsPayload = await alignmentsResponse.json() as
           ApiEnvelope<{ alignments: ScriptAlignmentRun[] }>
+        const takeLibrariesPayload = await takeLibrariesResponse.json() as
+          ApiEnvelope<{ libraries: TakeLibraryRun[] }>
         if (!workspaceResponse.ok || !workspacePayload.data) {
           throw new Error(apiError(
             workspacePayload,
@@ -547,6 +668,12 @@ export default function BatchesPage() {
           throw new Error(apiError(
             alignmentsPayload,
             'Não foi possível carregar os alinhamentos.',
+          ))
+        }
+        if (!takeLibrariesResponse.ok || !takeLibrariesPayload.data) {
+          throw new Error(apiError(
+            takeLibrariesPayload,
+            'Não foi possível carregar a biblioteca de takes.',
           ))
         }
         const allowedArtifacts = new Set(
@@ -572,6 +699,12 @@ export default function BatchesPage() {
           current && runs.some((run) => run.id === current)
             ? current
             : runs[0]?.id ?? null)
+        const libraries = takeLibrariesPayload.data.libraries
+        setTakeLibraries(libraries)
+        setActiveTakeLibraryId((current) =>
+          current && libraries.some((library) => library.id === current)
+            ? current
+            : libraries[0]?.id ?? null)
         const project = projects.find((candidate) =>
           candidate.id === selectedBatch!.projectId)
         setScriptLocale(project?.locale || 'pt-BR')
@@ -597,6 +730,28 @@ export default function BatchesPage() {
   const selectedProject = projects.find((project) => project.id === projectId)
   const activeAlignment = alignments.find((alignment) =>
     alignment.id === activeAlignmentId) ?? alignments[0] ?? null
+  const activeAlignmentLibraries = useMemo(
+    () => activeAlignment
+      ? takeLibraries.filter((library) =>
+          library.alignmentId === activeAlignment.id &&
+          library.alignmentRunHash === activeAlignment.runHash)
+      : [],
+    [activeAlignment, takeLibraries],
+  )
+  const activeTakeLibrary =
+    activeAlignmentLibraries.find((library) =>
+      library.id === activeTakeLibraryId) ??
+    activeAlignmentLibraries[0] ??
+    null
+  const activeTakesByGroup = useMemo(() => {
+    const result = new Map<string, TakeRecord[]>()
+    for (const take of activeTakeLibrary?.takes ?? []) {
+      const group = result.get(take.groupId)
+      if (group) group.push(take)
+      else result.set(take.groupId, [take])
+    }
+    return result
+  }, [activeTakeLibrary])
   const eligibleMedia = projectMedia.filter((media) => media.status === 'available' && media.rightsStatus === 'approved')
   const blockedMedia = projectMedia.filter((media) => media.status !== 'available' || media.rightsStatus !== 'approved')
   const recipes = useMemo(
@@ -952,9 +1107,11 @@ export default function BatchesPage() {
           candidate.id !== alignment.id),
       ])
       setActiveAlignmentId(alignment.id)
+      setActiveTakeLibraryId(null)
       setScriptComposerOpen(false)
       setDetailView('script')
       scriptIdempotencyKey.current = null
+      takeLibraryIdempotencyKey.current = null
       setNotice(
         alignment.summary.reviewRequiredCount > 0
           ? `Roteiro alinhado. ${alignment.summary.reviewRequiredCount} decisão${alignment.summary.reviewRequiredCount === 1 ? '' : 'ões'} precisa${alignment.summary.reviewRequiredCount === 1 ? '' : 'm'} de revisão.`
@@ -1006,6 +1163,8 @@ export default function BatchesPage() {
       const alignment = payload.data.alignment
       setAlignments((current) => current.map((candidate) =>
         candidate.id === alignment.id ? alignment : candidate))
+      setActiveTakeLibraryId(null)
+      takeLibraryIdempotencyKey.current = null
       setNotice(
         alignment.summary.reviewRequiredCount > 0
           ? `Decisão registrada. Restam ${alignment.summary.reviewRequiredCount}.`
@@ -1016,6 +1175,133 @@ export default function BatchesPage() {
         error instanceof Error
           ? error.message
           : 'Não foi possível registrar a revisão.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function createTakeLibrary() {
+    if (!selectedBatch || !activeAlignment) return
+    setBusy(true)
+    setNotice(null)
+    takeLibraryIdempotencyKey.current ??= globalThis.crypto.randomUUID()
+    try {
+      const response = await fetch(
+        `/v1/batches/${encodeURIComponent(selectedBatch.id)}/take-libraries`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key': takeLibraryIdempotencyKey.current,
+          },
+          body: JSON.stringify({
+            alignmentId: activeAlignment.id,
+            expectedAlignmentRunHash: activeAlignment.runHash,
+            evaluations: [],
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as
+        ApiEnvelope<{ library: TakeLibraryRun; replayed: boolean }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível criar a biblioteca de takes.',
+        ))
+      }
+      const library = payload.data.library
+      setTakeLibraries((current) => [
+        library,
+        ...current.filter((candidate) => candidate.id !== library.id),
+      ])
+      setActiveTakeLibraryId(library.id)
+      takeLibraryIdempotencyKey.current = null
+      setNotice(
+        library.summary.needsReviewCount > 0
+          ? `Biblioteca criada. ${library.summary.needsReviewCount} take${library.summary.needsReviewCount === 1 ? '' : 's'} precisa${library.summary.needsReviewCount === 1 ? '' : 'm'} de revisão.`
+          : 'Biblioteca criada com escolhas automáticas completas.',
+      )
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível criar a biblioteca de takes.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function selectAndProtectTake(
+    group: TakeGroup,
+    take: TakeRecord,
+  ) {
+    if (!selectedBatch || !activeTakeLibrary) return
+    const replacedProtectedTakeId =
+      group.protectedTakeId && group.protectedTakeId !== take.id
+        ? group.protectedTakeId
+        : undefined
+    if (
+      replacedProtectedTakeId &&
+      !globalThis.confirm(
+        'Este grupo já tem um take protegido. Confirma a troca da proteção?',
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    setNotice(null)
+    try {
+      const response = await fetch(
+        `/v1/batches/${encodeURIComponent(selectedBatch.id)}/take-libraries/${encodeURIComponent(activeTakeLibrary.id)}/selections`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key': globalThis.crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            expectedRevision: activeTakeLibrary.revision,
+            groupId: group.id,
+            takeId: take.id,
+            protect: true,
+            ...(replacedProtectedTakeId
+              ? { replacedProtectedTakeId }
+              : {}),
+            note: replacedProtectedTakeId
+              ? 'Proteção substituída manualmente no take room.'
+              : 'Take escolhido e protegido manualmente no take room.',
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as
+        ApiEnvelope<{ library: TakeLibraryRun; replayed: boolean }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível proteger o take.',
+        ))
+      }
+      const library = payload.data.library
+      setTakeLibraries((current) => current.map((candidate) =>
+        candidate.id === library.id ? library : candidate))
+      setNotice('Take escolhido e protegido. A fonte original foi preservada.')
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível proteger o take.',
       )
     } finally {
       setBusy(false)
@@ -1369,7 +1655,7 @@ export default function BatchesPage() {
                               </div>
                               <div className="flex shrink-0 items-center gap-2">
                                 {alignments.length > 1 ? (
-                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-none" onChange={(event) => setActiveAlignmentId(event.target.value)} value={activeAlignment.id}>
+                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-none" onChange={(event) => { setActiveAlignmentId(event.target.value); setActiveTakeLibraryId(null); takeLibraryIdempotencyKey.current = null }} value={activeAlignment.id}>
                                     {alignments.map((alignment) => <option key={alignment.id} value={alignment.id}>{alignment.document.title} · r{alignment.revision}</option>)}
                                   </select>
                                 ) : null}
@@ -1480,6 +1766,163 @@ export default function BatchesPage() {
                                 </div>
                               </section>
                             ) : null}
+
+                            <section
+                              className="mt-6 border-t border-dashed border-[#d8aa38]/20 pt-5"
+                              data-testid="take-library-panel"
+                            >
+                              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#a8802f]">
+                                    <span className="grid h-5 w-5 place-items-center rounded-full border border-[#c99a32]/30 font-mono text-[7px]">T</span>
+                                    Take room
+                                  </div>
+                                  <h4 className="mt-2 text-base font-semibold tracking-[-0.02em] text-[#ede7dd]">Biblioteca de performance</h4>
+                                  <p className="mt-1 max-w-xl text-[10px] leading-4 text-[#746f67]">Cada cartão é um take preservado na fonte. O Apollo separa retakes, mede cinco dimensões e só troca uma escolha protegida com confirmação explícita.</p>
+                                </div>
+                                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                                  {activeAlignmentLibraries.length > 1 && activeTakeLibrary ? (
+                                    <select
+                                      aria-label="Escolher avaliação de takes"
+                                      className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#d5a535]/45"
+                                      onChange={(event) => setActiveTakeLibraryId(event.target.value)}
+                                      value={activeTakeLibrary.id}
+                                    >
+                                      {activeAlignmentLibraries.map((library) => (
+                                        <option key={library.id} value={library.id}>
+                                          {library.summary.takeCount} takes · r{library.revision} · {elapsed(library.updatedAt)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : null}
+                                  <button
+                                    className="h-9 rounded-lg bg-[#dcae3a] px-3 text-[10px] font-bold text-[#171207] transition hover:bg-[#efc34f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#efc34f] disabled:cursor-not-allowed disabled:opacity-40"
+                                    data-testid="create-take-library"
+                                    disabled={busy}
+                                    onClick={() => void createTakeLibrary()}
+                                    type="button"
+                                  >
+                                    {activeTakeLibrary ? 'Nova avaliação' : 'Avaliar takes'}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {!activeTakeLibrary ? (
+                                <div className="mt-4 rounded-xl border border-[#d5a638]/18 bg-[#d5a638]/[0.035] p-4">
+                                  <p className="text-xs font-semibold text-[#d9c08a]">
+                                    {takeLibraries.some((library) =>
+                                      library.alignmentId === activeAlignment.id)
+                                      ? 'O roteiro mudou desde a última avaliação.'
+                                      : 'Os takes ainda não foram avaliados.'}
+                                  </p>
+                                  <p className="mt-1 text-[10px] leading-4 text-[#81755f]">Crie uma biblioteca vinculada ao hash exato deste alinhamento. Dimensões sem evidência ficam visivelmente pendentes, nunca recebem nota inventada.</p>
+                                </div>
+                              ) : (
+                                <div className="mt-4">
+                                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                    {[
+                                      ['Grupos', activeTakeLibrary.summary.groupCount],
+                                      ['Takes', activeTakeLibrary.summary.takeCount],
+                                      ['Protegidos', activeTakeLibrary.summary.protectedCount],
+                                      ['Revisar', activeTakeLibrary.summary.needsReviewCount],
+                                    ].map(([label, value]) => (
+                                      <div className="rounded-lg border border-white/[0.06] bg-[#0a0a0a] px-3 py-2.5" key={String(label)}>
+                                        <p className="font-mono text-sm font-semibold text-[#ddd6cb]">{value}</p>
+                                        <p className="mt-1 text-[8px] uppercase tracking-[0.1em] text-[#625e57]">{label}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  <div className="mt-4 space-y-4">
+                                    {activeTakeLibrary.groups.map((group, groupIndex) => {
+                                      const groupTakes = activeTakesByGroup.get(group.id) ?? []
+                                      return (
+                                        <article
+                                          className="overflow-hidden rounded-xl border border-white/[0.07] bg-[#0a0a0a]"
+                                          data-testid={`take-group-${group.id}`}
+                                          key={group.id}
+                                          style={{ contentVisibility: 'auto' }}
+                                        >
+                                          <div className="flex flex-col gap-2 border-b border-dashed border-white/[0.09] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="min-w-0">
+                                              <div className="flex flex-wrap items-center gap-2">
+                                                <span className="font-mono text-[8px] text-[#625e57]">{String(groupIndex + 1).padStart(2, '0')}</span>
+                                                <span className="text-[9px] font-semibold uppercase tracking-[0.13em] text-[#b58b35]">{group.role === 'other' ? 'Outro' : SCRIPT_ROLE_LABELS[group.role]}</span>
+                                                <span className="rounded-md bg-white/[0.04] px-1.5 py-0.5 text-[8px] text-[#716c64]">{group.assignmentKind === 'script-block' ? 'bloco do roteiro' : 'intenção inferida'}</span>
+                                              </div>
+                                              <h5 className="mt-1 truncate text-xs font-semibold text-[#d8d1c7]">{group.label}</h5>
+                                            </div>
+                                            <div className="flex items-center gap-2 font-mono text-[8px] text-[#6d6860]">
+                                              <span>{groupTakes.length} take{groupTakes.length === 1 ? '' : 's'}</span>
+                                              {group.protectedTakeId ? <span className="rounded-full border border-[#d9aa38]/25 bg-[#d9aa38]/10 px-2 py-1 text-[#dfba5e]">protegido</span> : null}
+                                            </div>
+                                          </div>
+
+                                          <div className="grid gap-2 p-2 sm:grid-cols-2">
+                                            {groupTakes.map((take, takeIndex) => (
+                                              <div
+                                                className={`relative min-w-0 overflow-hidden rounded-lg border p-3 ${take.protected ? 'border-[#d8aa38]/40 bg-[#d8aa38]/[0.045]' : take.status === 'primary' ? 'border-[#57aa77]/20 bg-[#57aa77]/[0.025]' : 'border-white/[0.065] bg-[#0d0d0d]'}`}
+                                                data-testid={`take-card-${take.id}`}
+                                                key={take.id}
+                                              >
+                                                <div aria-hidden="true" className="absolute inset-x-0 top-0 flex h-1 justify-around overflow-hidden opacity-50">
+                                                  {Array.from({ length: 14 }, (_, index) => <span className="h-1 w-1 rounded-full bg-[#756c59]" key={index} />)}
+                                                </div>
+                                                <div className="flex items-start justify-between gap-2 pt-1">
+                                                  <div className="min-w-0">
+                                                    <p className="font-mono text-[8px] text-[#716b62]">TAKE {String(takeIndex + 1).padStart(2, '0')} · {take.retakeBoundaryId.slice(-8)}</p>
+                                                    <p className="mt-1 font-mono text-[8px] text-[#59554f]">{timecode(take.sourceRangeMs[0])} → {timecode(take.sourceRangeMs[1])}</p>
+                                                  </div>
+                                                  <span className={`shrink-0 rounded-full border px-2 py-1 text-[8px] ${TAKE_STATUS_STYLES[take.status]}`}>{TAKE_STATUS_LABELS[take.status]}</span>
+                                                </div>
+
+                                                <p className="mt-3 line-clamp-3 min-h-12 text-[10px] leading-4 text-[#c6bfb5]">{take.spokenText}</p>
+
+                                                <div className="mt-3 space-y-1.5 border-t border-white/[0.055] pt-3">
+                                                  {take.evaluations.map((evaluation) => (
+                                                    <div className="grid grid-cols-[74px_1fr_34px] items-center gap-2" key={evaluation.dimension}>
+                                                      <span className="truncate text-[8px] text-[#736e66]">{TAKE_DIMENSION_LABELS[evaluation.dimension]}</span>
+                                                      <span className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                                                        <span
+                                                          className={`block h-full rounded-full ${evaluation.score === null ? 'bg-[#3f3c37]' : evaluation.score >= 0.8 ? 'bg-[#63ad7d]' : evaluation.score >= 0.65 ? 'bg-[#d0a344]' : 'bg-[#c45f5f]'}`}
+                                                          style={{ width: `${evaluation.score === null ? 0 : Math.round(evaluation.score * 100)}%` }}
+                                                        />
+                                                      </span>
+                                                      <span className={`text-right font-mono text-[8px] ${evaluation.score === null ? 'text-[#665f56]' : 'text-[#aaa298]'}`}>{evaluation.score === null ? '—' : `${Math.round(evaluation.score * 100)}%`}</span>
+                                                    </div>
+                                                  ))}
+                                                </div>
+
+                                                <div className="mt-3 flex items-end justify-between gap-3">
+                                                  <div className="min-w-0">
+                                                    <p className="truncate font-mono text-[7px] text-[#56514b]" title={take.sourceHash}>fonte {take.sourceHash.slice(0, 10)}… preservada</p>
+                                                    <p className="mt-1 text-[8px] text-[#686159]">{take.assignment.kind === 'script-block' ? 'roteiro' : 'inferido'} · {Math.round(take.assignment.confidence * 100)}%</p>
+                                                  </div>
+                                                  {take.status === 'rejected' ? (
+                                                    <span className="shrink-0 text-[8px] text-[#875e5e]">não elegível</span>
+                                                  ) : take.protected ? (
+                                                    <button className="shrink-0 cursor-default rounded-md border border-[#d8aa38]/25 bg-[#d8aa38]/10 px-2 py-1.5 text-[8px] font-semibold text-[#dfba5e]" disabled type="button">Protegido</button>
+                                                  ) : (
+                                                    <button
+                                                      className="shrink-0 rounded-md border border-[#d5a638]/25 px-2 py-1.5 text-[8px] font-semibold text-[#d9b65c] transition hover:bg-[#d5a638]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d5a638] disabled:opacity-40"
+                                                      disabled={busy}
+                                                      onClick={() => void selectAndProtectTake(group, take)}
+                                                      type="button"
+                                                    >
+                                                      {group.protectedTakeId ? 'Trocar proteção' : take.status === 'primary' ? 'Proteger' : 'Escolher e proteger'}
+                                                    </button>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </article>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </section>
                           </div>
                         )}
                       </div>

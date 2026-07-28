@@ -80,6 +80,8 @@ model V2Workspace {
   productionBatchActions          V2ProductionBatchAction[]
   scriptAlignmentRuns             V2ScriptAlignmentRun[]
   scriptAlignmentReviews          V2ScriptAlignmentReview[]
+  takeLibraryRuns                 V2TakeLibraryRun[]
+  takeLibrarySelections           V2TakeLibrarySelection[]
 
   @@map("workspaces")
 }
@@ -118,6 +120,8 @@ model V2ApiClient {
   productionBatchActions      V2ProductionBatchAction[]     @relation("ProductionBatchActionActor")
   scriptAlignmentRuns         V2ScriptAlignmentRun[]        @relation("ScriptAlignmentRunCreator")
   scriptAlignmentReviews      V2ScriptAlignmentReview[]     @relation("ScriptAlignmentReviewActor")
+  takeLibraryRuns             V2TakeLibraryRun[]            @relation("TakeLibraryRunCreator")
+  takeLibrarySelections       V2TakeLibrarySelection[]      @relation("TakeLibrarySelectionActor")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -256,6 +260,7 @@ model V2Project {
   hierarchicalTierExecutions   V2HierarchicalTierExecution[]
   productionBatches            V2ProductionBatch[]
   scriptAlignmentRuns          V2ScriptAlignmentRun[]
+  takeLibraryRuns              V2TakeLibraryRun[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -1967,6 +1972,7 @@ model V2ProductionBatch {
   items               V2ProductionBatchItem[]
   actions             V2ProductionBatchAction[]
   scriptAlignmentRuns V2ScriptAlignmentRun[]
+  takeLibraryRuns     V2TakeLibraryRun[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
@@ -1999,11 +2005,12 @@ model V2ScriptAlignmentRun {
   createdAt           DateTime @db.Timestamptz(3)
   updatedAt           DateTime @db.Timestamptz(3)
 
-  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project   V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  batch     V2ProductionBatch         @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  createdBy V2ApiClient               @relation("ScriptAlignmentRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  reviews   V2ScriptAlignmentReview[]
+  workspace     V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project       V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch         V2ProductionBatch         @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy     V2ApiClient               @relation("ScriptAlignmentRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  reviews       V2ScriptAlignmentReview[]
+  takeLibraries V2TakeLibraryRun[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
@@ -2036,6 +2043,81 @@ model V2ScriptAlignmentReview {
   @@unique([runId, resultRevision])
   @@index([workspaceId, runId, createdAt(sort: Desc)])
   @@map("script_alignment_reviews")
+}
+
+model V2TakeLibraryRun {
+  id                        String   @id @db.VarChar(128)
+  workspaceId               String   @db.VarChar(128)
+  projectId                 String   @db.VarChar(128)
+  batchId                   String   @db.VarChar(128)
+  alignmentId               String   @db.VarChar(128)
+  alignmentRunHash          String   @db.Char(64)
+  schemaVersion             String   @db.VarChar(64)
+  groupingPolicyVersion     String   @db.VarChar(64)
+  evaluationPolicyVersion   String   @db.VarChar(64)
+  status                    String   @db.VarChar(32)
+  revision                  Int      @default(1)
+  resultJson                String   @db.Text
+  groupCount                Int
+  takeCount                 Int
+  primaryCount              Int
+  alternateCount            Int
+  rejectedCount             Int
+  needsReviewCount          Int
+  protectedCount            Int
+  measuredDimensionCount    Int
+  unavailableDimensionCount Int
+  runHash                   String   @db.Char(64)
+  requestFingerprint        String   @db.Char(64)
+  idempotencyKey            String   @db.VarChar(128)
+  createdByClientId         String   @db.VarChar(80)
+  createdAt                 DateTime @db.Timestamptz(3)
+  updatedAt                 DateTime @db.Timestamptz(3)
+
+  workspace  V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project    V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch      V2ProductionBatch        @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  alignment  V2ScriptAlignmentRun     @relation(fields: [alignmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy  V2ApiClient              @relation("TakeLibraryRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  selections V2TakeLibrarySelection[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, batchId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, projectId, status, updatedAt(sort: Desc)])
+  @@index([workspaceId, alignmentId, createdAt(sort: Desc)])
+  @@index([workspaceId, status, needsReviewCount, updatedAt(sort: Desc)])
+  @@map("take_library_runs")
+}
+
+model V2TakeLibrarySelection {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  runId                   String   @db.VarChar(128)
+  expectedRevision        Int
+  resultRevision          Int
+  groupId                 String   @db.VarChar(128)
+  takeId                  String   @db.VarChar(128)
+  protect                 Boolean
+  replacedProtectedTakeId String?  @db.VarChar(128)
+  selectionJson           String   @db.Text
+  selectionHash           String   @db.Char(64)
+  resultRunJson           String   @db.Text
+  resultRunHash           String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  actorClientId           String   @db.VarChar(80)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  run       V2TakeLibraryRun @relation(fields: [runId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  actor     V2ApiClient      @relation("TakeLibrarySelectionActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([workspaceId, actorClientId, idempotencyKey])
+  @@unique([runId, resultRevision])
+  @@index([workspaceId, runId, createdAt(sort: Desc)])
+  @@index([workspaceId, groupId, takeId, createdAt(sort: Desc)])
+  @@map("take_library_selections")
 }
 
 model V2ProductionBatchItem {

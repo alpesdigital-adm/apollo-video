@@ -1846,6 +1846,230 @@ const scriptAlignmentRunExample = {
   updatedAt: createdAt,
   runHash: '1'.repeat(64),
 }
+const takeLibraryCreateRequestExample = {
+  alignmentId: scriptAlignmentRunExample.id,
+  expectedAlignmentRunHash: scriptAlignmentRunExample.runHash,
+  evaluations: [
+    {
+      sourceKind: 'alignment-candidate',
+      sourceId: scriptAlignmentCandidateExample.id,
+      expectedSourceHash: scriptAlignmentCandidateExample.candidateHash,
+      dimensions: [
+        {
+          dimension: 'completeness',
+          score: 0.95,
+          evaluatorVersion: 'take-quality-example/v1',
+          evidenceRefs: ['quality-report-example-1'],
+        },
+        {
+          dimension: 'performance',
+          score: 0.9,
+          evaluatorVersion: 'take-quality-example/v1',
+          evidenceRefs: ['quality-report-example-1'],
+        },
+        {
+          dimension: 'audio',
+          score: 0.92,
+          evaluatorVersion: 'take-quality-example/v1',
+          evidenceRefs: ['audio-report-example-1'],
+        },
+        {
+          dimension: 'video',
+          score: 0.88,
+          evaluatorVersion: 'take-quality-example/v1',
+          evidenceRefs: ['video-report-example-1'],
+        },
+        {
+          dimension: 'integrity',
+          score: 0.88,
+          evaluatorVersion: 'take-quality-example/v1',
+          evidenceRefs: ['quality-report-example-1'],
+        },
+      ],
+    },
+    {
+      sourceKind: 'extra-take',
+      sourceId: 'script-extra-example-1',
+      expectedSourceHash: 'f'.repeat(64),
+      dimensions: [],
+      inferredIntention: {
+        role: 'other',
+        label: 'Preparacao fora da composicao',
+        confidence: 0.98,
+        evidenceRefs: ['director-review-example-1'],
+      },
+    },
+  ],
+}
+const takeLibraryMeasuredEvaluationsExample = [
+  ['completeness', 0.95, 'quality-report-example-1'],
+  ['performance', 0.9, 'quality-report-example-1'],
+  ['audio', 0.92, 'audio-report-example-1'],
+  ['video', 0.88, 'video-report-example-1'],
+  ['integrity', 0.88, 'quality-report-example-1'],
+].map(([dimension, score, evidenceRef], index) => ({
+  dimension,
+  score,
+  state: 'measured',
+  evaluatorVersion: 'take-quality-example/v1',
+  evidenceRefs: [evidenceRef],
+  reasonCodes: [],
+  evaluationHash: String(index + 2).repeat(64),
+}))
+const takeLibraryUnavailableEvaluationsExample = [
+  'completeness',
+  'performance',
+  'audio',
+  'video',
+  'integrity',
+].map((dimension, index) => ({
+  dimension,
+  score: null,
+  state: 'unavailable',
+  evaluatorVersion: 'five-dimension-take-quality/v1',
+  evidenceRefs: ['f'.repeat(64)],
+  reasonCodes: [`${String(dimension).toUpperCase()}_EVIDENCE_UNAVAILABLE`],
+  evaluationHash: String(index + 3).repeat(64),
+}))
+const takeLibraryRunExample = {
+  id: 'take-library-example-1',
+  workspaceId,
+  projectId,
+  batchId: productionBatchExample.id,
+  alignmentId: scriptAlignmentRunExample.id,
+  alignmentRunHash: scriptAlignmentRunExample.runHash,
+  schemaVersion: 'take-library/v1',
+  groupingPolicyVersion: 'script-block-or-intention/v1',
+  evaluationPolicyVersion: 'five-dimension-take-quality/v1',
+  status: 'review-required',
+  revision: 2,
+  groups: [
+    {
+      id: 'take-group-script-block-1',
+      key: 'script-block:script-block-1',
+      assignmentKind: 'script-block',
+      role: 'hook',
+      label: 'HOOK 1',
+      scriptBlockId: 'script-block-1',
+      takeIds: ['take-example-primary-1'],
+      primaryTakeId: 'take-example-primary-1',
+      protectedTakeId: 'take-example-primary-1',
+      groupHash: '7'.repeat(64),
+    },
+    {
+      id: 'take-group-inferred-other-1',
+      key: 'inferred-intention:other:preparacao',
+      assignmentKind: 'inferred-intention',
+      role: 'other',
+      label: 'Preparacao fora da composicao',
+      takeIds: ['take-example-review-1'],
+      groupHash: '8'.repeat(64),
+    },
+  ],
+  takes: [
+    {
+      id: 'take-example-primary-1',
+      groupId: 'take-group-script-block-1',
+      retakeBoundaryId: 'retake-boundary-example-1',
+      sourceKind: 'alignment-candidate',
+      sourceId: scriptAlignmentCandidateExample.id,
+      sourceHash: scriptAlignmentCandidateExample.candidateHash,
+      transcriptId: scriptAlignmentCandidateExample.transcriptId,
+      sourceArtifactId: scriptAlignmentCandidateExample.sourceArtifactId,
+      sourceRangeMs: scriptAlignmentCandidateExample.sourceRangeMs,
+      evidenceWordIndices:
+        scriptAlignmentCandidateExample.evidenceWordIndices,
+      spokenText: scriptAlignmentCandidateExample.spokenText,
+      normalizedSpokenText:
+        scriptAlignmentCandidateExample.normalizedSpokenText,
+      assignment: {
+        kind: 'script-block',
+        role: 'hook',
+        label: 'HOOK 1',
+        confidence: 0.9185,
+        evidenceRefs: [
+          'e'.repeat(64),
+          scriptAlignmentCandidateExample.candidateHash,
+        ],
+        scriptBlockId: 'script-block-1',
+        assignmentHash: '9'.repeat(64),
+      },
+      evaluations: takeLibraryMeasuredEvaluationsExample,
+      weightedScore: 0.9112,
+      status: 'primary',
+      protected: true,
+      selectionSource: 'manual',
+      reasonCodes: [],
+      takeHash: '2'.repeat(64),
+    },
+    {
+      id: 'take-example-review-1',
+      groupId: 'take-group-inferred-other-1',
+      retakeBoundaryId: 'retake-boundary-example-2',
+      sourceKind: 'extra-take',
+      sourceId: 'script-extra-example-1',
+      sourceHash: 'f'.repeat(64),
+      transcriptId: 'transcript-hooks-example-1',
+      sourceArtifactId: 'artifact-hooks-example-1',
+      sourceRangeMs: [0, 900],
+      evidenceWordIndices: [0, 1, 2],
+      spokenText: 'Preparando para gravar',
+      normalizedSpokenText: 'preparando para gravar',
+      assignment: {
+        kind: 'inferred-intention',
+        role: 'other',
+        label: 'Preparacao fora da composicao',
+        confidence: 0.98,
+        evidenceRefs: [
+          'director-review-example-1',
+          'f'.repeat(64),
+        ],
+        assignmentHash: '3'.repeat(64),
+      },
+      evaluations: takeLibraryUnavailableEvaluationsExample,
+      weightedScore: null,
+      status: 'needs-review',
+      protected: false,
+      selectionSource: 'automatic',
+      reasonCodes: [
+        'AUDIO_EVIDENCE_UNAVAILABLE',
+        'COMPLETENESS_EVIDENCE_UNAVAILABLE',
+        'INTEGRITY_EVIDENCE_UNAVAILABLE',
+        'PERFORMANCE_EVIDENCE_UNAVAILABLE',
+        'VIDEO_EVIDENCE_UNAVAILABLE',
+      ],
+      takeHash: '4'.repeat(64),
+    },
+  ],
+  selections: [
+    {
+      id: 'take-selection-example-1',
+      revision: 2,
+      groupId: 'take-group-script-block-1',
+      takeId: 'take-example-primary-1',
+      protect: true,
+      actorClientId: clientId,
+      createdAt,
+      selectionHash: '5'.repeat(64),
+    },
+  ],
+  summary: {
+    groupCount: 2,
+    takeCount: 2,
+    primaryCount: 1,
+    alternateCount: 0,
+    rejectedCount: 0,
+    needsReviewCount: 1,
+    protectedCount: 1,
+    measuredDimensionCount: 5,
+    unavailableDimensionCount: 5,
+    averageWeightedScore: 0.9112,
+  },
+  createdByClientId: clientId,
+  createdAt,
+  updatedAt: createdAt,
+  runHash: '6'.repeat(64),
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -4001,6 +4225,42 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           alignments: [scriptAlignmentRunExample],
           nextCursor: scriptAlignmentRunExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-take-library-request/v1': [
+      takeLibraryCreateRequestExample,
+    ],
+    'apollo://schemas/take-library-selection-request/v1': [
+      {
+        expectedRevision: 1,
+        groupId: 'take-group-script-block-1',
+        takeId: 'take-example-primary-1',
+        protect: true,
+        note: 'Performance escolhida e protegida pelo diretor.',
+      },
+    ],
+    'apollo://schemas/take-library-mutated/v1': [
+      {
+        data: {
+          library: takeLibraryRunExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/take-library-read/v1': [
+      {
+        data: { library: takeLibraryRunExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/take-library-page/v1': [
+      {
+        data: {
+          libraries: [takeLibraryRunExample],
+          nextCursor: takeLibraryRunExample.id,
         },
         meta: { apiVersion: 'v1' },
       },
