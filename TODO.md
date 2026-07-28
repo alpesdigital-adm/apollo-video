@@ -1085,11 +1085,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.009 — Biblioteca de takes [FR-082]
 
-- [ ] Agrupar takes pelo ScriptBlock previsto ou intenção inferida. Evidência T-FR-082.
-- [ ] Separar takes consecutivos dentro do mesmo arquivo por retake boundaries. Evidência: `retakeBoundaryId` obrigatório.
-- [ ] Avaliar completude, performance, áudio, vídeo e integridade. Evidência T-FR-082.
-- [ ] Marcar primary, alternate, rejected e needs-review sem apagar source. Evidência T-FR-082.
-- [ ] Permitir seleção manual e proteção do take escolhido. Evidência T-FR-082.
+- [x] Agrupar takes pelo ScriptBlock previsto ou intenção inferida. Entregue em `3241ade`: aggregate resolve o alinhamento canônico, separa grupos planejados e inferidos e preserva evidence/confidence. Evidência T-FR-082 e produção em `docs/quality/take-library-v1.md`.
+- [x] Separar takes consecutivos dentro do mesmo arquivo por retake boundaries. Entregue em `3241ade`: todo take possui `retakeBoundaryId` determinístico, obrigatório e único; ranges e source permanecem independentes.
+- [x] Avaliar completude, performance, áudio, vídeo e integridade. Entregue em `3241ade`: cinco dimensões tipadas distinguem medição de indisponibilidade, com score, confidence, método, evidence e validação de hidratação.
+- [x] Marcar primary, alternate, rejected e needs-review sem apagar source. Entregue em `3241ade`: classificação derivada por policy versionada mantém artifact, transcript, range, texto, boundary e source hash; T-FR-082 cobre as quatro classes.
+- [x] Permitir seleção manual e proteção do take escolhido. Entregue em `3241ade`: API/UI exigem revision, idempotência e confirmação explícita para trocar proteção; smoke de produção concluiu seleção protegida na revision 2.
 
 ### F2.010 — Compatibility graph [FR-083]
 
