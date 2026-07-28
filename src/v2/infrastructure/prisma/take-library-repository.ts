@@ -90,6 +90,8 @@ function hydrateRunRow(
   return run
 }
 
+export { hydrateRunRow as hydrateTakeLibraryRow }
+
 function runData(record: Readonly<TakeLibraryCreateRecord>) {
   const { run } = record
   return {

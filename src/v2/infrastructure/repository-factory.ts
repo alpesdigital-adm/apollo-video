@@ -37,6 +37,7 @@ import type { HierarchicalProcessingRepository } from '../application/ports/hier
 import type { ProductionBatchRepository } from '../application/ports/production-batch-repository.ts'
 import type { ScriptAlignmentRepository } from '../application/ports/script-alignment-repository.ts'
 import type { TakeLibraryRepository } from '../application/ports/take-library-repository.ts'
+import type { CompatibilityGraphRepository } from '../application/ports/compatibility-graph-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -112,6 +113,7 @@ import { PrismaHierarchicalProcessingRepository } from './prisma/hierarchical-pr
 import { PrismaProductionBatchRepository } from './prisma/production-batch-repository.ts'
 import { PrismaScriptAlignmentRepository } from './prisma/script-alignment-repository.ts'
 import { PrismaTakeLibraryRepository } from './prisma/take-library-repository.ts'
+import { PrismaCompatibilityGraphRepository } from './prisma/compatibility-graph-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -234,6 +236,11 @@ ScriptAlignmentRepository {
 export function createTakeLibraryRepository():
 TakeLibraryRepository {
   return new PrismaTakeLibraryRepository(resolveV2Client())
+}
+
+export function createCompatibilityGraphRepository():
+CompatibilityGraphRepository {
+  return new PrismaCompatibilityGraphRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {

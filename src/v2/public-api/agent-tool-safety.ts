@@ -211,6 +211,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Records one reversible take selection and protection decision against an exact optimistic revision while preserving every source take.',
     },
+    'apollo.batches.compatibility-graphs.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable virtual compatibility graph from an exact take-library hash without materializing recipes, jobs or media.',
+    },
     'apollo.batches.actions.apply': {
       impact: 'destructive', confirmation: 'human-approval',
       reason: 'Can cancel all unfinished work in one production batch or reopen previously cancelled and failed items.',

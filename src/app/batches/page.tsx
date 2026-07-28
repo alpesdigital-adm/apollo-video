@@ -185,6 +185,7 @@ interface TakeRecord {
   protected: boolean
   selectionSource: 'automatic' | 'manual'
   reasonCodes: string[]
+  takeHash: string
 }
 
 interface TakeGroup {
@@ -219,6 +220,57 @@ interface TakeLibraryRun {
     averageWeightedScore: number
   }
   updatedAt: string
+  runHash: string
+}
+
+type CompatibilityDecision = 'accepted' | 'borderline' | 'blocked'
+
+interface CompatibilityGraphRun {
+  id: string
+  takeLibraryId: string
+  takeLibraryRunHash: string
+  acceptThreshold: number
+  reviewThreshold: number
+  nodes: Array<{
+    id: string
+    takeId: string
+    role: 'hook' | 'body' | 'proof' | 'cta'
+    sourceHash: string
+    durationMs: number
+  }>
+  edges: Array<{
+    id: string
+    fromNodeId: string
+    toNodeId: string
+    relation: 'hook-body' | 'body-proof' | 'body-cta' | 'proof-cta'
+    decision: CompatibilityDecision
+    eligible: boolean
+    softScore: number
+    reasonCodes: string[]
+    hardFailures: Array<{
+      code: string
+      message: string
+    }>
+    softScores: Array<{
+      dimension: 'narrative' | 'tone' | 'energy' | 'duration' | 'visual' | 'experiment'
+      score: number
+      weight: number
+    }>
+    evidence: {
+      evidenceHash: string
+    }
+  }>
+  summary: {
+    nodeCount: number
+    edgeCount: number
+    acceptedCount: number
+    borderlineCount: number
+    blockedCount: number
+    hardFailureCount: number
+    averageSoftScore: number
+  }
+  createdAt: string
+  runHash: string
 }
 
 type ScriptReviewDecision =
@@ -368,6 +420,46 @@ const TAKE_DIMENSION_LABELS: Record<TakeDimension, string> = {
   integrity: 'Integridade',
 }
 
+const COMPATIBILITY_DECISION_LABELS: Record<
+  CompatibilityDecision,
+  string
+> = {
+  accepted: 'Aceita',
+  borderline: 'Limítrofe',
+  blocked: 'Bloqueada',
+}
+
+const COMPATIBILITY_DECISION_STYLES: Record<
+  CompatibilityDecision,
+  string
+> = {
+  accepted: 'border-[#57aa77]/25 bg-[#57aa77]/10 text-[#7bc493]',
+  borderline: 'border-[#d3a23c]/25 bg-[#d3a23c]/10 text-[#e1bd68]',
+  blocked: 'border-[#c75e5e]/25 bg-[#c75e5e]/10 text-[#dc8080]',
+}
+
+const COMPATIBILITY_RELATION_LABELS: Record<
+  CompatibilityGraphRun['edges'][number]['relation'],
+  string
+> = {
+  'hook-body': 'Hook → corpo',
+  'body-proof': 'Corpo → prova',
+  'body-cta': 'Corpo → CTA',
+  'proof-cta': 'Prova → CTA',
+}
+
+const COMPATIBILITY_SOFT_LABELS: Record<
+  CompatibilityGraphRun['edges'][number]['softScores'][number]['dimension'],
+  string
+> = {
+  narrative: 'Narrativa',
+  tone: 'Tom',
+  energy: 'Energia',
+  duration: 'Duração',
+  visual: 'Visual',
+  experiment: 'Experimento',
+}
+
 const FORMATS = [
   { id: '9:16', name: 'Vertical', use: 'Reels · Shorts' },
   { id: '16:9', name: 'Horizontal', use: 'YouTube · sites' },
@@ -477,6 +569,10 @@ export default function BatchesPage() {
     useState<TakeLibraryRun[]>([])
   const [activeTakeLibraryId, setActiveTakeLibraryId] =
     useState<string | null>(null)
+  const [compatibilityGraphs, setCompatibilityGraphs] =
+    useState<CompatibilityGraphRun[]>([])
+  const [activeCompatibilityGraphId, setActiveCompatibilityGraphId] =
+    useState<string | null>(null)
   const [alignmentLoading, setAlignmentLoading] = useState(false)
   const [scriptComposerOpen, setScriptComposerOpen] = useState(false)
   const [scriptTitle, setScriptTitle] = useState('')
@@ -488,6 +584,7 @@ export default function BatchesPage() {
     useState<Record<string, ScriptRole | ''>>({})
   const scriptIdempotencyKey = useRef<string | null>(null)
   const takeLibraryIdempotencyKey = useRef<string | null>(null)
+  const compatibilityGraphIdempotencyKey = useRef<string | null>(null)
 
   const fetchBatches = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true)
@@ -608,6 +705,8 @@ export default function BatchesPage() {
       setActiveAlignmentId(null)
       setTakeLibraries([])
       setActiveTakeLibraryId(null)
+      setCompatibilityGraphs([])
+      setActiveCompatibilityGraphId(null)
       return
     }
     const controller = new AbortController()
@@ -618,6 +717,7 @@ export default function BatchesPage() {
           workspaceResponse,
           alignmentsResponse,
           takeLibrariesResponse,
+          compatibilityGraphsResponse,
         ] = await Promise.all([
           fetch(
             `/v1/projects/${encodeURIComponent(selectedBatch!.projectId)}/workspace`,
@@ -643,11 +743,20 @@ export default function BatchesPage() {
               cache: 'no-store',
             },
           ),
+          fetch(
+            `/v1/batches/${encodeURIComponent(selectedBatch!.id)}/compatibility-graphs?limit=100`,
+            {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+              cache: 'no-store',
+            },
+          ),
         ])
         if (
           workspaceResponse.status === 401 ||
           alignmentsResponse.status === 401 ||
-          takeLibrariesResponse.status === 401
+          takeLibrariesResponse.status === 401 ||
+          compatibilityGraphsResponse.status === 401
         ) {
           router.replace('/login')
           return
@@ -658,6 +767,9 @@ export default function BatchesPage() {
           ApiEnvelope<{ alignments: ScriptAlignmentRun[] }>
         const takeLibrariesPayload = await takeLibrariesResponse.json() as
           ApiEnvelope<{ libraries: TakeLibraryRun[] }>
+        const compatibilityGraphsPayload =
+          await compatibilityGraphsResponse.json() as
+            ApiEnvelope<{ graphs: CompatibilityGraphRun[] }>
         if (!workspaceResponse.ok || !workspacePayload.data) {
           throw new Error(apiError(
             workspacePayload,
@@ -674,6 +786,15 @@ export default function BatchesPage() {
           throw new Error(apiError(
             takeLibrariesPayload,
             'Não foi possível carregar a biblioteca de takes.',
+          ))
+        }
+        if (
+          !compatibilityGraphsResponse.ok ||
+          !compatibilityGraphsPayload.data
+        ) {
+          throw new Error(apiError(
+            compatibilityGraphsPayload,
+            'Não foi possível carregar o mapa de compatibilidade.',
           ))
         }
         const allowedArtifacts = new Set(
@@ -705,6 +826,12 @@ export default function BatchesPage() {
           current && libraries.some((library) => library.id === current)
             ? current
             : libraries[0]?.id ?? null)
+        const graphs = compatibilityGraphsPayload.data.graphs
+        setCompatibilityGraphs(graphs)
+        setActiveCompatibilityGraphId((current) =>
+          current && graphs.some((graph) => graph.id === current)
+            ? current
+            : graphs[0]?.id ?? null)
         const project = projects.find((candidate) =>
           candidate.id === selectedBatch!.projectId)
         setScriptLocale(project?.locale || 'pt-BR')
@@ -752,6 +879,45 @@ export default function BatchesPage() {
     }
     return result
   }, [activeTakeLibrary])
+  const activeCompatibilityGraphs = useMemo(
+    () => activeTakeLibrary
+      ? compatibilityGraphs.filter((graph) =>
+          graph.takeLibraryId === activeTakeLibrary.id &&
+          graph.takeLibraryRunHash === activeTakeLibrary.runHash)
+      : [],
+    [activeTakeLibrary, compatibilityGraphs],
+  )
+  const activeCompatibilityGraph =
+    activeCompatibilityGraphs.find((graph) =>
+      graph.id === activeCompatibilityGraphId) ??
+    activeCompatibilityGraphs[0] ??
+    null
+  const compatibilityEligibleTakes = useMemo(
+    () => (activeTakeLibrary?.takes ?? []).filter((take) =>
+      (take.status === 'primary' || take.status === 'alternate') &&
+      ['hook', 'body', 'proof', 'cta'].includes(take.assignment.role)),
+    [activeTakeLibrary],
+  )
+  const compatibilityEligibleRoles = new Set(
+    compatibilityEligibleTakes.map((take) => take.assignment.role),
+  )
+  const canBuildCompatibilityGraph =
+    (
+      compatibilityEligibleRoles.has('hook') &&
+      compatibilityEligibleRoles.has('body')
+    ) ||
+    (
+      compatibilityEligibleRoles.has('body') &&
+      compatibilityEligibleRoles.has('proof')
+    ) ||
+    (
+      compatibilityEligibleRoles.has('body') &&
+      compatibilityEligibleRoles.has('cta')
+    ) ||
+    (
+      compatibilityEligibleRoles.has('proof') &&
+      compatibilityEligibleRoles.has('cta')
+    )
   const eligibleMedia = projectMedia.filter((media) => media.status === 'available' && media.rightsStatus === 'approved')
   const blockedMedia = projectMedia.filter((media) => media.status !== 'available' || media.rightsStatus !== 'approved')
   const recipes = useMemo(
@@ -1108,10 +1274,12 @@ export default function BatchesPage() {
       ])
       setActiveAlignmentId(alignment.id)
       setActiveTakeLibraryId(null)
+      setActiveCompatibilityGraphId(null)
       setScriptComposerOpen(false)
       setDetailView('script')
       scriptIdempotencyKey.current = null
       takeLibraryIdempotencyKey.current = null
+      compatibilityGraphIdempotencyKey.current = null
       setNotice(
         alignment.summary.reviewRequiredCount > 0
           ? `Roteiro alinhado. ${alignment.summary.reviewRequiredCount} decisão${alignment.summary.reviewRequiredCount === 1 ? '' : 'ões'} precisa${alignment.summary.reviewRequiredCount === 1 ? '' : 'm'} de revisão.`
@@ -1164,7 +1332,9 @@ export default function BatchesPage() {
       setAlignments((current) => current.map((candidate) =>
         candidate.id === alignment.id ? alignment : candidate))
       setActiveTakeLibraryId(null)
+      setActiveCompatibilityGraphId(null)
       takeLibraryIdempotencyKey.current = null
+      compatibilityGraphIdempotencyKey.current = null
       setNotice(
         alignment.summary.reviewRequiredCount > 0
           ? `Decisão registrada. Restam ${alignment.summary.reviewRequiredCount}.`
@@ -1221,7 +1391,9 @@ export default function BatchesPage() {
         ...current.filter((candidate) => candidate.id !== library.id),
       ])
       setActiveTakeLibraryId(library.id)
+      setActiveCompatibilityGraphId(null)
       takeLibraryIdempotencyKey.current = null
+      compatibilityGraphIdempotencyKey.current = null
       setNotice(
         library.summary.needsReviewCount > 0
           ? `Biblioteca criada. ${library.summary.needsReviewCount} take${library.summary.needsReviewCount === 1 ? '' : 's'} precisa${library.summary.needsReviewCount === 1 ? '' : 'm'} de revisão.`
@@ -1296,12 +1468,101 @@ export default function BatchesPage() {
       const library = payload.data.library
       setTakeLibraries((current) => current.map((candidate) =>
         candidate.id === library.id ? library : candidate))
+      setActiveCompatibilityGraphId(null)
+      compatibilityGraphIdempotencyKey.current = null
       setNotice('Take escolhido e protegido. A fonte original foi preservada.')
     } catch (error) {
       setNotice(
         error instanceof Error
           ? error.message
           : 'Não foi possível proteger o take.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function createCompatibilityGraph() {
+    if (
+      !selectedBatch ||
+      !activeTakeLibrary ||
+      !canBuildCompatibilityGraph
+    ) {
+      return
+    }
+    setBusy(true)
+    setNotice(null)
+    compatibilityGraphIdempotencyKey.current ??=
+      globalThis.crypto.randomUUID()
+    try {
+      const contexts = compatibilityEligibleTakes.map((take) => ({
+        takeId: take.id,
+        expectedTakeHash: take.takeHash,
+        offerId: `offer-${selectedBatch.objective}`,
+        audienceTags: ['workspace-default'],
+        claims: [],
+        personaId: 'workspace-presenter',
+        locale: scriptLocale,
+        desiredAction: 'batch-default-action',
+        continuityProvides: [`role-${take.assignment.role}`],
+        continuityRequires: [],
+        narrativeTags: [
+          selectedBatch.objective,
+          'workspace-context',
+        ],
+        tone: 0.5,
+        energy: 0.5,
+        visual: 0.5,
+        experiment: 0.5,
+        evidenceRefs: [take.takeHash, take.sourceHash],
+      }))
+      const response = await fetch(
+        `/v1/batches/${encodeURIComponent(selectedBatch.id)}/compatibility-graphs`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key':
+              compatibilityGraphIdempotencyKey.current,
+          },
+          body: JSON.stringify({
+            takeLibraryId: activeTakeLibrary.id,
+            expectedTakeLibraryRunHash: activeTakeLibrary.runHash,
+            contexts,
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as
+        ApiEnvelope<{
+          graph: CompatibilityGraphRun
+          replayed: boolean
+        }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível calcular a compatibilidade.',
+        ))
+      }
+      const graph = payload.data.graph
+      setCompatibilityGraphs((current) => [
+        graph,
+        ...current.filter((candidate) => candidate.id !== graph.id),
+      ])
+      setActiveCompatibilityGraphId(graph.id)
+      compatibilityGraphIdempotencyKey.current = null
+      setNotice(
+        `Mapa criado: ${graph.summary.acceptedCount} aceita${graph.summary.acceptedCount === 1 ? '' : 's'}, ${graph.summary.borderlineCount} limítrofe${graph.summary.borderlineCount === 1 ? '' : 's'} e ${graph.summary.blockedCount} bloqueada${graph.summary.blockedCount === 1 ? '' : 's'}.`,
+      )
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível calcular a compatibilidade.',
       )
     } finally {
       setBusy(false)
@@ -1655,7 +1916,7 @@ export default function BatchesPage() {
                               </div>
                               <div className="flex shrink-0 items-center gap-2">
                                 {alignments.length > 1 ? (
-                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-none" onChange={(event) => { setActiveAlignmentId(event.target.value); setActiveTakeLibraryId(null); takeLibraryIdempotencyKey.current = null }} value={activeAlignment.id}>
+                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-none" onChange={(event) => { setActiveAlignmentId(event.target.value); setActiveTakeLibraryId(null); setActiveCompatibilityGraphId(null); takeLibraryIdempotencyKey.current = null; compatibilityGraphIdempotencyKey.current = null }} value={activeAlignment.id}>
                                     {alignments.map((alignment) => <option key={alignment.id} value={alignment.id}>{alignment.document.title} · r{alignment.revision}</option>)}
                                   </select>
                                 ) : null}
@@ -1785,7 +2046,11 @@ export default function BatchesPage() {
                                     <select
                                       aria-label="Escolher avaliação de takes"
                                       className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#d5a535]/45"
-                                      onChange={(event) => setActiveTakeLibraryId(event.target.value)}
+                                      onChange={(event) => {
+                                        setActiveTakeLibraryId(event.target.value)
+                                        setActiveCompatibilityGraphId(null)
+                                        compatibilityGraphIdempotencyKey.current = null
+                                      }}
                                       value={activeTakeLibrary.id}
                                     >
                                       {activeAlignmentLibraries.map((library) => (
@@ -1919,6 +2184,138 @@ export default function BatchesPage() {
                                         </article>
                                       )
                                     })}
+                                  </div>
+                                </div>
+                              )}
+                            </section>
+
+                            <section
+                              className="mt-6 border-t border-dashed border-[#6c86c7]/20 pt-5"
+                              data-testid="compatibility-graph-panel"
+                            >
+                              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#7792d2]">
+                                    <span className="grid h-5 w-5 place-items-center rounded-full border border-[#7895d4]/30 font-mono text-[7px]">G</span>
+                                    Compatibility map
+                                  </div>
+                                  <h4 className="mt-2 text-base font-semibold tracking-[-0.02em] text-[#ede7dd]">Mapa de combinações</h4>
+                                  <p className="mt-1 max-w-xl text-[10px] leading-4 text-[#746f67]">O Apollo só conecta hooks, corpos, provas e CTAs elegíveis. Bloqueios duros vencem qualquer nota; narrativa, tom, energia, duração, visual e experimento permanecem explicáveis por edge.</p>
+                                </div>
+                                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                                  {activeCompatibilityGraphs.length > 1 && activeCompatibilityGraph ? (
+                                    <select
+                                      aria-label="Escolher mapa de compatibilidade"
+                                      className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#7895d4]/45"
+                                      onChange={(event) => setActiveCompatibilityGraphId(event.target.value)}
+                                      value={activeCompatibilityGraph.id}
+                                    >
+                                      {activeCompatibilityGraphs.map((graph) => (
+                                        <option key={graph.id} value={graph.id}>
+                                          {graph.summary.edgeCount} edges · {elapsed(graph.createdAt)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : null}
+                                  <button
+                                    className="h-9 rounded-lg border border-[#7895d4]/30 bg-[#7895d4]/10 px-3 text-[10px] font-bold text-[#a9bceb] transition hover:bg-[#7895d4]/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7895d4] disabled:cursor-not-allowed disabled:opacity-40"
+                                    data-testid="create-compatibility-graph"
+                                    disabled={busy || !canBuildCompatibilityGraph}
+                                    onClick={() => void createCompatibilityGraph()}
+                                    title={canBuildCompatibilityGraph ? undefined : 'A biblioteca precisa de ao menos uma relação elegível entre hook, corpo, prova ou CTA.'}
+                                    type="button"
+                                  >
+                                    {activeCompatibilityGraph ? 'Recalcular mapa' : 'Calcular mapa'}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {!activeTakeLibrary ? (
+                                <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+                                  <p className="text-xs font-semibold text-[#aaa49a]">Crie primeiro a biblioteca de takes.</p>
+                                  <p className="mt-1 text-[10px] leading-4 text-[#716d66]">O grafo usa somente takes elegíveis e o hash exato da avaliação vigente.</p>
+                                </div>
+                              ) : !canBuildCompatibilityGraph ? (
+                                <div className="mt-4 rounded-xl border border-[#c27c52]/18 bg-[#c27c52]/[0.04] p-4">
+                                  <p className="text-xs font-semibold text-[#d5a17d]">Ainda não existe uma relação editorial possível.</p>
+                                  <p className="mt-1 text-[10px] leading-4 text-[#826b5c]">São necessários pelo menos hook + corpo, corpo + prova, corpo + CTA ou prova + CTA em estado principal/alternativo.</p>
+                                </div>
+                              ) : !activeCompatibilityGraph ? (
+                                <div className="mt-4 rounded-xl border border-[#7895d4]/18 bg-[#7895d4]/[0.035] p-4">
+                                  <p className="text-xs font-semibold text-[#aabbe7]">Os takes ainda não foram cruzados.</p>
+                                  <p className="mt-1 text-[10px] leading-4 text-[#737d99]">O cálculo é imutável, vinculado à biblioteca atual e não materializa receitas ou jobs.</p>
+                                </div>
+                              ) : (
+                                <div className="mt-4">
+                                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                                    {[
+                                      ['Nós', activeCompatibilityGraph.summary.nodeCount],
+                                      ['Aceitas', activeCompatibilityGraph.summary.acceptedCount],
+                                      ['Limítrofes', activeCompatibilityGraph.summary.borderlineCount],
+                                      ['Bloqueadas', activeCompatibilityGraph.summary.blockedCount],
+                                      ['Score médio', `${Math.round(activeCompatibilityGraph.summary.averageSoftScore)}%`],
+                                    ].map(([label, value]) => (
+                                      <div className="rounded-lg border border-white/[0.06] bg-[#0a0a0a] px-3 py-2.5" key={String(label)}>
+                                        <p className="font-mono text-sm font-semibold text-[#ddd6cb]">{value}</p>
+                                        <p className="mt-1 text-[8px] uppercase tracking-[0.1em] text-[#625e57]">{label}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                                    {activeCompatibilityGraph.edges.map((edge) => (
+                                      <article
+                                        className="min-w-0 overflow-hidden rounded-xl border border-white/[0.07] bg-[#0a0a0a] p-4"
+                                        data-testid={`compatibility-edge-${edge.id}`}
+                                        key={edge.id}
+                                        style={{ contentVisibility: 'auto' }}
+                                      >
+                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                          <div className="min-w-0">
+                                            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#839bd3]">{COMPATIBILITY_RELATION_LABELS[edge.relation]}</p>
+                                            <p className="mt-1 font-mono text-[8px] text-[#5f5a53]">evidence {edge.evidence.evidenceHash.slice(0, 12)}…</p>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-mono text-sm font-semibold text-[#d8d1c7]">{Math.round(edge.softScore)}%</span>
+                                            <span className={`rounded-full border px-2 py-1 text-[8px] ${COMPATIBILITY_DECISION_STYLES[edge.decision]}`}>{COMPATIBILITY_DECISION_LABELS[edge.decision]}</span>
+                                          </div>
+                                        </div>
+
+                                        <div className="mt-4 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+                                          {edge.softScores.map((score) => (
+                                            <div className="grid grid-cols-[66px_1fr_30px] items-center gap-2" key={score.dimension}>
+                                              <span className="truncate text-[8px] text-[#736e66]">{COMPATIBILITY_SOFT_LABELS[score.dimension]}</span>
+                                              <span className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                                                <span
+                                                  className={`block h-full rounded-full ${score.score >= 0.7 ? 'bg-[#6886ca]' : score.score >= 0.5 ? 'bg-[#c79b42]' : 'bg-[#bd6464]'}`}
+                                                  style={{ width: `${Math.round(score.score * 100)}%` }}
+                                                />
+                                              </span>
+                                              <span className="text-right font-mono text-[8px] text-[#aaa298]">{Math.round(score.score * 100)}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+
+                                        <div className="mt-4 border-t border-white/[0.055] pt-3">
+                                          {edge.hardFailures.length > 0 ? (
+                                            <div className="space-y-1.5">
+                                              {edge.hardFailures.map((failure) => (
+                                                <div className="flex min-w-0 items-start gap-2" key={`${edge.id}-${failure.code}`}>
+                                                  <span className="mt-0.5 shrink-0 rounded bg-[#b75555]/10 px-1.5 py-0.5 font-mono text-[7px] text-[#cf7777]">{failure.code}</span>
+                                                  <span className="min-w-0 text-[8px] leading-4 text-[#8d7772]">{failure.message}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <div className="flex flex-wrap gap-1.5">
+                                              {edge.reasonCodes.map((reason) => (
+                                                <span className="rounded bg-[#5b9870]/10 px-1.5 py-0.5 font-mono text-[7px] text-[#76b38a]" key={reason}>{reason}</span>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </article>
+                                    ))}
                                   </div>
                                 </div>
                               )}

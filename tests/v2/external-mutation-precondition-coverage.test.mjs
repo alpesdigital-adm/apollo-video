@@ -49,6 +49,10 @@ const coverage = Object.freeze({
     mode: 'take-library-revision-action',
     evidence: 'F2-009 request requires expectedRevision; serializable persistence compares and swaps the exact take-library revision before recording a source-preserving selection and protected-take decision',
   },
+  'apollo.batches.compatibility-graphs.create': {
+    mode: 'idempotent-create',
+    evidence: 'F2-010 request fingerprint binds the exact take-library ID/hash, every eligible take hash, compatibility context, thresholds and actor; serializable persistence rechecks library, batch and actor before writing one immutable graph',
+  },
   'apollo.operations.cancel': {
     mode: 'state-machine-action', evidence: 'F0-070',
   },
@@ -324,7 +328,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 30,
+    'idempotent-create': 31,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,

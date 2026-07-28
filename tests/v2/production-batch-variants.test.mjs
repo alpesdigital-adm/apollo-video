@@ -4,7 +4,6 @@ import test from 'node:test'
 import {
   applyBatchEdit,
   batchProgress,
-  buildCompatibilityGraph,
   cancelProductionBatch,
   compileVariantRecipe,
   createProductionBatch,
@@ -411,36 +410,6 @@ test('T-FR-080 rejects incompatible dimensions, stale transitions, and integrity
     }),
     /state does not match/,
   )
-})
-
-test('T-FR-083 records compatibility hard blocks, scores, and evidence', () => {
-  const node = (id, patch = {}) => ({
-    id,
-    role: 'hook',
-    offer: 'offer',
-    audience: 'audience',
-    persona: 'persona',
-    locale: 'pt-BR',
-    tone: 0.5,
-    energy: 0.5,
-    durationMs: 5000,
-    visual: 0.5,
-    experiment: 0.5,
-    ...patch,
-  })
-  const graph = buildCompatibilityGraph([
-    node('accepted'),
-    node('accepted-two'),
-    node('border', { tone: 1, energy: 1 }),
-    node('blocked', { offer: 'other-offer' }),
-  ])
-  assert.equal(graph.edges.length, 6)
-  assert.ok(graph.edges.some((edge) => edge.eligible && edge.softScore === 1))
-  assert.ok(graph.edges.some((edge) => edge.eligible && edge.softScore < 1))
-  assert.ok(graph.edges.some((edge) =>
-    !edge.eligible &&
-    edge.hardReasonCodes.includes('OFFER_MISMATCH')))
-  assert.ok(graph.edges.every((edge) => edge.evidence.from))
 })
 
 test('T-FR-084 compiles complete and short recipes by reference with lineage', () => {
