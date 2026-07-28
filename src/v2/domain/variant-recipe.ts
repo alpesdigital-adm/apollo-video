@@ -349,9 +349,9 @@ function assumption(
   })
 }
 
-function proofPolicy(
+export function resolveVariantRecipeProofPolicy(
   objectiveValue: string,
-  requireProof: boolean,
+  requireProof = false,
 ): Readonly<VariantRecipeProofPolicy> {
   const objective = identity(objectiveValue, 'objective')
   const baseRequirement = OPTIONAL_PROOF_OBJECTIVES.has(
@@ -563,7 +563,7 @@ function recipeScores(
   objective: string,
   nodes: readonly Readonly<CompatibilityNode>[],
   edges: readonly Readonly<CompatibilityEdge>[],
-  lineage: readonly Readonly<VariantRecipeLineageEntry>[],
+  lineage?: readonly Readonly<VariantRecipeLineageEntry>[],
 ): Readonly<VariantRecipeScores> {
   const minimumEdgeScore = boundedScore(
     Math.min(...edges.map((edge) => edge.softScore)),
@@ -577,11 +577,13 @@ function recipeScores(
   )
   const objectiveFit = objectiveScore(objective, nodes)
   const lineageCompletenessScore = nodes.every((node) =>
-    lineage.some((entry) =>
-      entry.usage === 'primary' &&
-      entry.nodeId === node.id &&
-      entry.takeId === node.takeId &&
-      entry.scriptBlockId === node.scriptBlockId))
+    lineage
+      ? lineage.some((entry) =>
+          entry.usage === 'primary' &&
+          entry.nodeId === node.id &&
+          entry.takeId === node.takeId &&
+          entry.scriptBlockId === node.scriptBlockId)
+      : Boolean(node.scriptBlockId))
     ? 100
     : 0
   const dimensions = Object.freeze([
@@ -610,7 +612,9 @@ function recipeScores(
       'lineage-completeness',
       lineageCompletenessScore,
       0.05,
-      lineage.map((entry) => entry.lineageHash),
+      lineage
+        ? lineage.map((entry) => entry.lineageHash)
+        : nodes.map((node) => node.nodeHash),
       'LINEAGE_COMPLETE',
     ),
   ])
@@ -630,6 +634,22 @@ function recipeScores(
     ...body,
     scoresHash: calculateCanonicalHash(body),
   })
+}
+
+export function scoreVariantRecipeCandidate(
+  objective: string,
+  nodes: readonly Readonly<CompatibilityNode>[],
+  edges: readonly Readonly<CompatibilityEdge>[],
+): Readonly<VariantRecipeScores> {
+  assertDomain(
+    nodes.length >= 3 &&
+      nodes.length <= 4 &&
+      edges.length === nodes.length - 1 &&
+      nodes.every((node) => Boolean(node.scriptBlockId)),
+    'PRECONDITION_REQUIRED',
+    'Variant candidate requires three or four lineaged nodes and a connected path',
+  )
+  return recipeScores(objective, nodes, edges)
 }
 
 function storyBody(value: CompiledVariantStoryPlan) {
@@ -994,7 +1014,7 @@ export function createVariantRecipe(
     'PRECONDITION_REQUIRED',
     'Recipe order must preserve hook, body, optional proof and CTA; use coldOpen for an opening reference',
   )
-  const policy = proofPolicy(
+  const policy = resolveVariantRecipeProofPolicy(
     objective,
     input.requireProof === true,
   )

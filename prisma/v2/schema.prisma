@@ -87,6 +87,8 @@ model V2Workspace {
   compatibilityGraphEdges         V2CompatibilityGraphEdge[]
   variantRecipeRuns               V2VariantRecipeRun[]
   variantRecipeLineage            V2VariantRecipeLineage[]
+  variantPortfolioPolicies        V2VariantPortfolioPolicy[]
+  variantPortfolioPreflights      V2VariantPortfolioPreflightRun[]
 
   @@map("workspaces")
 }
@@ -129,6 +131,8 @@ model V2ApiClient {
   takeLibrarySelections       V2TakeLibrarySelection[]      @relation("TakeLibrarySelectionActor")
   compatibilityGraphRuns      V2CompatibilityGraphRun[]     @relation("CompatibilityGraphRunCreator")
   variantRecipeRuns           V2VariantRecipeRun[]          @relation("VariantRecipeRunCreator")
+  updatedVariantPortfolioPolicies V2VariantPortfolioPolicy[] @relation("VariantPortfolioPolicyUpdater")
+  variantPortfolioPreflights  V2VariantPortfolioPreflightRun[] @relation("VariantPortfolioPreflightCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -270,6 +274,7 @@ model V2Project {
   takeLibraryRuns              V2TakeLibraryRun[]
   compatibilityGraphRuns       V2CompatibilityGraphRun[]
   variantRecipeRuns            V2VariantRecipeRun[]
+  variantPortfolioPreflights   V2VariantPortfolioPreflightRun[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -1984,6 +1989,7 @@ model V2ProductionBatch {
   takeLibraryRuns     V2TakeLibraryRun[]
   compatibilityGraphs V2CompatibilityGraphRun[]
   variantRecipes      V2VariantRecipeRun[]
+  variantPortfolioPreflights V2VariantPortfolioPreflightRun[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
@@ -2167,6 +2173,7 @@ model V2CompatibilityGraphRun {
   nodes          V2CompatibilityGraphNode[]
   edges          V2CompatibilityGraphEdge[]
   variantRecipes V2VariantRecipeRun[]
+  variantPortfolioPreflights V2VariantPortfolioPreflightRun[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId, batchId, takeLibraryId, runHash], map: "compat_graph_runs_recipe_scope_key")
@@ -2324,6 +2331,97 @@ model V2VariantRecipeLineage {
   @@index([workspaceId, takeId, scriptBlockId])
   @@index([workspaceId, sourceArtifactId, sourceRangeStartMs])
   @@map("variant_recipe_lineage")
+}
+
+model V2VariantPortfolioPolicy {
+  workspaceId                      String   @db.VarChar(128)
+  schemaVersion                    String   @db.VarChar(64)
+  revision                         Int      @default(1)
+  defaultRecipeLimit               Int
+  maxRecipeLimit                   Int
+  maxOutputCount                   Int
+  minCompatibilityEdgeScore       Decimal  @db.Decimal(6, 3)
+  minRecipeScore                   Decimal  @db.Decimal(6, 3)
+  minHookCoverage                  Int
+  minBodyCoverage                  Int
+  minCtaCoverage                   Int
+  maxRecipesPerSemanticCluster     Int
+  maxCandidateScanCount            Int
+  estimatedCostPerOutputMinorUnits Int
+  estimatedDurationSecondsPerOutput Int
+  estimatedStorageBytesPerOutput   BigInt
+  maxConcurrentJobs                Int
+  confirmationTtlSeconds           Int
+  policyJson                       String   @db.Text
+  policyHash                       String   @db.Char(64)
+  updatedByClientId                String   @db.VarChar(80)
+  createdAt                        DateTime @db.Timestamptz(3)
+  updatedAt                        DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  updatedBy V2ApiClient @relation("VariantPortfolioPolicyUpdater", fields: [updatedByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  preflights V2VariantPortfolioPreflightRun[]
+
+  @@id([workspaceId, revision])
+  @@unique([workspaceId, policyHash])
+  @@index([workspaceId, revision])
+  @@index([updatedByClientId, updatedAt(sort: Desc)])
+  @@map("variant_portfolio_policies")
+}
+
+model V2VariantPortfolioPreflightRun {
+  id                        String   @id @db.VarChar(128)
+  workspaceId               String   @db.VarChar(128)
+  projectId                 String   @db.VarChar(128)
+  batchId                   String   @db.VarChar(128)
+  compatibilityGraphId      String   @db.VarChar(128)
+  compatibilityGraphRunHash String   @db.Char(64)
+  takeLibraryId             String   @db.VarChar(128)
+  schemaVersion             String   @db.VarChar(64)
+  selectionVersion          String   @db.VarChar(64)
+  objective                 String   @db.VarChar(128)
+  status                    String   @db.VarChar(32)
+  resultJson                String   @db.Text
+  policyHash                String   @db.Char(64)
+  requestedRecipeCount      Int
+  effectiveRecipeLimit      Int
+  batchVariantCount         Int
+  budgetRemainingMinorUnits Int
+  theoreticalCandidateCount Decimal  @db.Decimal(38, 0)
+  eligibleCandidateCount    Decimal  @db.Decimal(38, 0)
+  scannedCandidateCount     Int
+  selectedRecipeCount       Int
+  outputVariantCount        Int
+  plannedJobCount           Int
+  jobsCreated               Int      @default(0)
+  estimatedCostMinorUnits   Int
+  estimatedDurationSeconds  Int
+  estimatedStorageBytes     BigInt
+  reusedRecipeCount         Int
+  productMaterialized       Boolean  @default(false)
+  confirmationRequired      Boolean
+  confirmationSatisfied     Boolean
+  confirmationExpiresAt     DateTime? @db.Timestamptz(3)
+  runHash                   String   @db.Char(64)
+  requestFingerprint        String   @db.Char(64)
+  idempotencyKey            String   @db.VarChar(128)
+  createdByClientId         String   @db.VarChar(80)
+  createdAt                 DateTime @db.Timestamptz(3)
+
+  workspace          V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project            V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch              V2ProductionBatch           @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  compatibilityGraph V2CompatibilityGraphRun     @relation(fields: [compatibilityGraphId, workspaceId, projectId, batchId, takeLibraryId, compatibilityGraphRunHash], references: [id, workspaceId, projectId, batchId, takeLibraryId, runHash], onDelete: Restrict, map: "variant_portfolio_preflight_graph_scope_fkey")
+  policy             V2VariantPortfolioPolicy    @relation(fields: [workspaceId, policyHash], references: [workspaceId, policyHash], onDelete: Restrict, map: "variant_portfolio_preflight_policy_scope_fkey")
+  createdBy          V2ApiClient                 @relation("VariantPortfolioPreflightCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, batchId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, compatibilityGraphId, createdAt(sort: Desc)])
+  @@index([workspaceId, status, confirmationRequired, createdAt(sort: Desc)])
+  @@index([workspaceId, policyHash])
+  @@map("variant_portfolio_preflight_runs")
 }
 
 model V2ProductionBatchItem {

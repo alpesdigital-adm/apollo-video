@@ -2539,6 +2539,106 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'not-applicable',
   },
   {
+    id: 'apollo.batches.variant-portfolio-preflights.list',
+    version: '1.0.0',
+    title: 'List variant portfolio preflights',
+    description: 'Returns persisted preflight evidence for bounded variant portfolios, including theoretical and eligible counts, quality filters, diversity, coverage, estimates, reuse and confirmation state without creating jobs.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef:
+      'apollo://schemas/variant-portfolio-preflight-page/v1',
+    endpoint: {
+      method: 'GET',
+      path:
+        '/v1/batches/{batchId}/variant-portfolio-preflights',
+    },
+    toolName:
+      'apollo.batches.variant-portfolio-preflights.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      {
+        name: 'compatibilityGraphId',
+        description: 'Optional exact compatibility graph filter.',
+        required: false,
+        schema: { type: 'string', minLength: 3, maxLength: 128 },
+      },
+      {
+        name: 'limit',
+        description: 'Maximum preflights to return.',
+        required: false,
+        schema: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 100,
+          default: 20,
+        },
+      },
+      {
+        name: 'cursor',
+        description: 'Opaque cursor returned by the previous page.',
+        required: false,
+        schema: { type: 'string', minLength: 3, maxLength: 128 },
+      },
+    ],
+  },
+  {
+    id: 'apollo.batches.variant-portfolio-preflights.create',
+    version: '1.0.0',
+    title: 'Preflight bounded variant portfolio',
+    description: 'Counts the theoretical and hard-filtered variant space without materializing its Cartesian product, selects a quality-bounded diverse top-N with minimum role coverage, calculates cost, time, storage and reuse, and returns a signed confirmation token above the workspace default.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef:
+      'apollo://schemas/create-variant-portfolio-preflight-request/v1',
+    outputSchemaRef:
+      'apollo://schemas/variant-portfolio-preflight-mutated/v1',
+    endpoint: {
+      method: 'POST',
+      path:
+        '/v1/batches/{batchId}/variant-portfolio-preflights',
+    },
+    toolName:
+      'apollo.batches.variant-portfolio-preflights.create',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'required',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.batches.variant-portfolio-preflights.read',
+    version: '1.0.0',
+    title: 'Read variant portfolio preflight',
+    description: 'Reads one immutable preflight and its graph, policy, counts, selected paths, exclusions, coverage, estimates, reuse, no-job and no-materialization evidence.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef:
+      'apollo://schemas/variant-portfolio-preflight-read/v1',
+    endpoint: {
+      method: 'GET',
+      path:
+        '/v1/batches/{batchId}/variant-portfolio-preflights/{preflightId}',
+    },
+    toolName:
+      'apollo.batches.variant-portfolio-preflights.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.batches.actions.apply',
     version: '1.0.0',
     title: 'Cancel or resume production batch',

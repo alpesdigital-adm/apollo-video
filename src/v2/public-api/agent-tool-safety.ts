@@ -219,6 +219,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable virtual recipe from an exact compatibility graph without duplicating masters, materializing media or starting render jobs.',
     },
+    'apollo.batches.variant-portfolio-preflights.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists only bounded planning evidence from an exact compatibility graph; it never materializes the Cartesian product, creates a job or incurs provider cost.',
+    },
     'apollo.batches.actions.apply': {
       impact: 'destructive', confirmation: 'human-approval',
       reason: 'Can cancel all unfinished work in one production batch or reopen previously cancelled and failed items.',

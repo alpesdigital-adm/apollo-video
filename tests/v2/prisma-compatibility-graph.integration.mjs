@@ -76,7 +76,7 @@ function dimensions(score) {
   }))
 }
 
-test('T-FR-083/T-FR-084 persists compatibility and source-referencing variant recipes through PostgreSQL and /v1', {
+test('T-FR-083/T-FR-084/T-FR-085 persists compatibility, source-referencing recipes and bounded portfolio preflights through PostgreSQL and /v1', {
   skip:
     process.env.APOLLO_COMPATIBILITY_GRAPH_E2E !== '1' &&
     'set APOLLO_COMPATIBILITY_GRAPH_E2E=1 and use an isolated V2 database',
@@ -436,6 +436,8 @@ test('T-FR-083/T-FR-084 persists compatibility and source-referencing variant re
             : 'production',
           __NEXT_PROCESSED_ENV: 'true',
           APOLLO_API_ENVIRONMENT: 'production',
+          APOLLO_PREFLIGHT_COMMIT_TOKEN_SECRET:
+            'compatibility-e2e-preflight-secret-at-least-32-bytes',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -867,6 +869,145 @@ test('T-FR-083/T-FR-084 persists compatibility and source-referencing variant re
       shortRecipe.id,
     )
 
+    const portfolioEndpoint =
+      `${baseUrl}/v1/batches/${batchId}/variant-portfolio-preflights`
+    assert.equal((await fetch(portfolioEndpoint)).status, 401)
+    const portfolioBody = {
+      compatibilityGraphId: recipeGraph.id,
+      expectedCompatibilityGraphRunHash: recipeGraph.runHash,
+      requestedRecipeCount: 20,
+      requireProof: false,
+    }
+    const portfolioKey = `variant-portfolio-${suffix}`
+    const portfolioResponse = await fetch(portfolioEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': portfolioKey,
+      },
+      body: JSON.stringify(portfolioBody),
+    })
+    const portfolioPayload = await portfolioResponse.json()
+    assert.equal(
+      portfolioResponse.status,
+      201,
+      JSON.stringify(portfolioPayload),
+    )
+    const portfolio = portfolioPayload.data.preflight
+    assert.equal(portfolioPayload.data.replayed, false)
+    assert.ok(portfolioPayload.data.confirmationToken)
+    assert.equal(portfolio.theoreticalCandidateCount, '2')
+    assert.equal(portfolio.eligibleCandidateCount, '2')
+    assert.equal(portfolio.selectedRecipeCount, 2)
+    assert.equal(portfolio.confirmation.required, true)
+    assert.equal(portfolio.confirmation.satisfied, false)
+    assert.equal(portfolio.productMaterialized, false)
+    assert.equal(portfolio.estimates.jobsCreated, 0)
+    assert.equal(portfolio.estimates.reusedRecipeCount, 2)
+    assert.equal(portfolio.estimates.plannedJobCount, 0)
+    assert.equal(portfolio.estimates.estimatedCostMinorUnits, 0)
+    assert.equal(portfolio.coverage.complete, true)
+
+    const portfolioReplayResponse = await fetch(portfolioEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': portfolioKey,
+      },
+      body: JSON.stringify(portfolioBody),
+    })
+    const portfolioReplayPayload =
+      await portfolioReplayResponse.json()
+    assert.equal(portfolioReplayResponse.status, 200)
+    assert.equal(portfolioReplayPayload.data.replayed, true)
+    assert.equal(
+      portfolioReplayPayload.data.confirmationToken,
+      portfolioPayload.data.confirmationToken,
+    )
+
+    const portfolioMismatchResponse = await fetch(
+      portfolioEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': portfolioKey,
+        },
+        body: JSON.stringify({
+          ...portfolioBody,
+          requestedRecipeCount: 19,
+        }),
+      },
+    )
+    assert.equal(portfolioMismatchResponse.status, 409)
+
+    const confirmedPortfolioResponse = await fetch(
+      portfolioEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': `variant-portfolio-confirm-${suffix}`,
+        },
+        body: JSON.stringify({
+          ...portfolioBody,
+          confirmationToken:
+            portfolioPayload.data.confirmationToken,
+        }),
+      },
+    )
+    const confirmedPortfolioPayload =
+      await confirmedPortfolioResponse.json()
+    assert.equal(
+      confirmedPortfolioResponse.status,
+      201,
+      JSON.stringify(confirmedPortfolioPayload),
+    )
+    const confirmedPortfolio =
+      confirmedPortfolioPayload.data.preflight
+    assert.equal(confirmedPortfolio.confirmation.required, false)
+    assert.equal(confirmedPortfolio.confirmation.satisfied, true)
+    assert.equal(confirmedPortfolio.effectiveRecipeLimit, 20)
+    assert.equal(confirmedPortfolio.productMaterialized, false)
+    assert.equal(confirmedPortfolio.estimates.jobsCreated, 0)
+
+    const stalePortfolioTokenResponse = await fetch(
+      portfolioEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': `variant-portfolio-stale-${suffix}`,
+        },
+        body: JSON.stringify({
+          ...portfolioBody,
+          requireProof: true,
+          confirmationToken:
+            portfolioPayload.data.confirmationToken,
+        }),
+      },
+    )
+    assert.equal(stalePortfolioTokenResponse.status, 409)
+
+    const portfolioReadResponse = await fetch(
+      `${portfolioEndpoint}/${confirmedPortfolio.id}`,
+      { headers },
+    )
+    assert.equal(portfolioReadResponse.status, 200)
+    assert.equal(
+      (await portfolioReadResponse.json()).data.preflight.runHash,
+      confirmedPortfolio.runHash,
+    )
+    const portfolioListResponse = await fetch(
+      `${portfolioEndpoint}?compatibilityGraphId=${recipeGraph.id}&limit=1`,
+      { headers },
+    )
+    assert.equal(portfolioListResponse.status, 200)
+    assert.equal(
+      (await portfolioListResponse.json()).data.preflights[0].id,
+      confirmedPortfolio.id,
+    )
+
     const mismatchResponse = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -926,6 +1067,16 @@ test('T-FR-083/T-FR-084 persists compatibility and source-referencing variant re
       'apollo.batches.variant-recipes.list',
       'apollo.batches.variant-recipes.read',
     ])
+    const portfolioCapabilityIds =
+      capabilitiesPayload.data.capabilities
+        .map((capability) => capability.id)
+        .filter((id) =>
+          id.includes('variant-portfolio-preflights'))
+    assert.deepEqual(portfolioCapabilityIds.sort(), [
+      'apollo.batches.variant-portfolio-preflights.create',
+      'apollo.batches.variant-portfolio-preflights.list',
+      'apollo.batches.variant-portfolio-preflights.read',
+    ])
 
     assert.equal(
       await client.v2CompatibilityGraphRun.count({
@@ -960,6 +1111,18 @@ test('T-FR-083/T-FR-084 persists compatibility and source-referencing variant re
         where: { workspaceId },
       }),
       8,
+    )
+    assert.equal(
+      await client.v2VariantPortfolioPolicy.count({
+        where: { workspaceId },
+      }),
+      1,
+    )
+    assert.equal(
+      await client.v2VariantPortfolioPreflightRun.count({
+        where: { workspaceId },
+      }),
+      2,
     )
     const storedFullRecipe = await client.v2VariantRecipeRun
       .findUniqueOrThrow({
@@ -1002,6 +1165,24 @@ test('T-FR-083/T-FR-084 persists compatibility and source-referencing variant re
           UPDATE "variant_recipe_runs"
           SET "selectedTakeCount" = 3
           WHERE "id" = ${fullRecipe.id}
+        `,
+      ),
+    )
+    await assert.rejects(
+      client.$executeRaw(
+        Prisma.sql`
+          UPDATE "variant_portfolio_preflight_runs"
+          SET "productMaterialized" = true
+          WHERE "workspaceId" = ${workspaceId}
+        `,
+      ),
+    )
+    await assert.rejects(
+      client.$executeRaw(
+        Prisma.sql`
+          UPDATE "variant_portfolio_preflight_runs"
+          SET "jobsCreated" = 1
+          WHERE "workspaceId" = ${workspaceId}
         `,
       ),
     )

@@ -102,3 +102,35 @@ test('T-FR-084 /batches compiles and renders VariantRecipe through the public V2
   assert.match(batchUiSource, /entry\.takeId/)
   assert.match(batchUiSource, /entry\.sourceRangeMs/)
 })
+
+test('T-FR-085 /batches preflights a bounded portfolio through the public V2 API before any job', () => {
+  assert.match(
+    batchUiSource,
+    /\/v1\/batches\/\$\{encodeURIComponent\(selectedBatch!\.id\)\}\/variant-portfolio-preflights\?limit=100/,
+  )
+  assert.match(
+    batchUiSource,
+    /\/v1\/batches\/\$\{encodeURIComponent\(selectedBatch\.id\)\}\/variant-portfolio-preflights/,
+  )
+  assert.match(
+    batchUiSource,
+    /data-testid="variant-portfolio-preflight-panel"/,
+  )
+  assert.match(
+    batchUiSource,
+    /data-testid="create-variant-portfolio-preflight"/,
+  )
+  assert.match(
+    batchUiSource,
+    /data-testid="confirm-variant-portfolio-expansion"/,
+  )
+  assert.match(batchUiSource, /theoreticalCandidateCount/)
+  assert.match(batchUiSource, /eligibleCandidateCount/)
+  assert.match(batchUiSource, /estimatedCostMinorUnits/)
+  assert.match(batchUiSource, /estimatedDurationSeconds/)
+  assert.match(batchUiSource, /estimatedStorageBytes/)
+  assert.match(batchUiSource, /expectedReuseRate/)
+  assert.match(batchUiSource, /confirmationToken/)
+  assert.match(batchUiSource, /produto cartesiano nunca materializado/)
+  assert.match(batchUiSource, /0 jobs criados/)
+})

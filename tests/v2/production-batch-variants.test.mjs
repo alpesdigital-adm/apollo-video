@@ -12,7 +12,6 @@ import {
   resumeProductionBatch,
   retryBatchStep,
   transitionBatchItem,
-  variantSpacePreflight,
 } from '../../src/v2/domain/production-batch.ts'
 
 const at = (second) =>
@@ -409,38 +408,6 @@ test('T-FR-080 rejects incompatible dimensions, stale transitions, and integrity
     }),
     /state does not match/,
   )
-})
-
-test('T-FR-085 preflights variants without materializing the uncontrolled product', () => {
-  const node = (id, role) => ({
-    id,
-    role,
-    offer: 'offer',
-    audience: 'audience',
-    persona: 'persona',
-    locale: 'pt-BR',
-    tone: 0.5,
-    energy: 0.5,
-    durationMs: 1000,
-    visual: 0.5,
-    experiment: 0.5,
-  })
-  const result = variantSpacePreflight({
-    hooks: [node('hook-one', 'hook'), node('hook-two', 'hook')],
-    bodies: [node('body-one', 'body'), node('body-two', 'body')],
-    proofs: [node('proof', 'proof')],
-    ctas: [node('cta-one', 'cta'), node('cta-two', 'cta')],
-    topN: 8,
-    threshold: 0.5,
-    budget: 3,
-    unitCost: 1,
-    defaultLimit: 2,
-  })
-  assert.equal(result.theoretical, 8)
-  assert.equal(result.selected.length, 2)
-  assert.equal(result.productMaterialized, false)
-  assert.equal(result.confirmationRequired, true)
-  assert.ok(result.expectedReuse > 0)
 })
 
 test('T-FR-086 previews protected impacts and applies explicit transaction policy', () => {

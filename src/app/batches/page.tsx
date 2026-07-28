@@ -383,6 +383,78 @@ interface VariantRecipeRun {
   runHash: string
 }
 
+interface VariantPortfolioPreflightRun {
+  id: string
+  compatibilityGraphId: string
+  compatibilityGraphRunHash: string
+  status: 'ready' | 'confirmation-required' | 'no-eligible-recipes'
+  requestedRecipeCount: number
+  effectiveRecipeLimit: number
+  batchVariantCount: number
+  theoreticalCandidateCount: string
+  eligibleCandidateCount: string
+  scannedCandidateCount: number
+  scanTruncated: boolean
+  selectedRecipeCount: number
+  productMaterialized: false
+  policy: {
+    defaultRecipeLimit: number
+    maxRecipeLimit: number
+    minRecipeScore: number
+    minHookCoverage: number
+    minBodyCoverage: number
+    minCtaCoverage: number
+    policyHash: string
+  }
+  confirmation: {
+    required: boolean
+    satisfied: boolean
+    threshold: number
+    expiresAt?: string
+  }
+  coverage: {
+    required: { hooks: number; bodies: number; ctas: number }
+    achieved: { hooks: number; bodies: number; ctas: number }
+    complete: boolean
+    reasonCodes: string[]
+  }
+  selected: Array<{
+    rank: number
+    selection: {
+      hookNodeId: string
+      bodyNodeId: string
+      proofNodeId?: string
+      ctaNodeId: string
+    }
+    totalScore: number
+    minimumEdgeScore: number
+    noveltyScore: number
+    reusableRecipeId?: string
+    candidateHash: string
+  }>
+  exclusions: {
+    hardFilterCount: string
+    belowQualityCount: number
+    semanticClusterCount: number
+    budgetCount: number
+    capacityCount: number
+    reasonCodes: string[]
+  }
+  estimates: {
+    outputVariantCount: number
+    reusedRecipeCount: number
+    plannedJobCount: number
+    jobsCreated: 0
+    estimatedCostMinorUnits: number
+    estimatedDurationSeconds: number
+    estimatedStorageBytes: number
+    expectedReuseRate: number
+  }
+  warningCodes: string[]
+  createdAt: string
+  runHash: string
+}
+
 type ScriptReviewDecision =
   | {
       targetKind: 'block'
@@ -687,6 +759,16 @@ export default function BatchesPage() {
     useState<VariantRecipeRun[]>([])
   const [activeVariantRecipeId, setActiveVariantRecipeId] =
     useState<string | null>(null)
+  const [variantPortfolioPreflights, setVariantPortfolioPreflights] =
+    useState<VariantPortfolioPreflightRun[]>([])
+  const [
+    activeVariantPortfolioPreflightId,
+    setActiveVariantPortfolioPreflightId,
+  ] = useState<string | null>(null)
+  const [portfolioRequestedCount, setPortfolioRequestedCount] =
+    useState('12')
+  const [portfolioConfirmationToken, setPortfolioConfirmationToken] =
+    useState<string | null>(null)
   const [alignmentLoading, setAlignmentLoading] = useState(false)
   const [scriptComposerOpen, setScriptComposerOpen] = useState(false)
   const [scriptTitle, setScriptTitle] = useState('')
@@ -700,6 +782,16 @@ export default function BatchesPage() {
   const takeLibraryIdempotencyKey = useRef<string | null>(null)
   const compatibilityGraphIdempotencyKey = useRef<string | null>(null)
   const variantRecipeIdempotencyKey = useRef<string | null>(null)
+  const variantPortfolioIdempotencyKey = useRef<string | null>(null)
+  const variantPortfolioConfirmationIdempotencyKey =
+    useRef<string | null>(null)
+
+  function resetVariantPortfolio() {
+    setActiveVariantPortfolioPreflightId(null)
+    setPortfolioConfirmationToken(null)
+    variantPortfolioIdempotencyKey.current = null
+    variantPortfolioConfirmationIdempotencyKey.current = null
+  }
 
   const fetchBatches = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true)
@@ -824,6 +916,9 @@ export default function BatchesPage() {
       setActiveCompatibilityGraphId(null)
       setVariantRecipes([])
       setActiveVariantRecipeId(null)
+      setVariantPortfolioPreflights([])
+      setActiveVariantPortfolioPreflightId(null)
+      setPortfolioConfirmationToken(null)
       return
     }
     const controller = new AbortController()
@@ -836,6 +931,7 @@ export default function BatchesPage() {
           takeLibrariesResponse,
           compatibilityGraphsResponse,
           variantRecipesResponse,
+          variantPortfolioPreflightsResponse,
         ] = await Promise.all([
           fetch(
             `/v1/projects/${encodeURIComponent(selectedBatch!.projectId)}/workspace`,
@@ -877,13 +973,22 @@ export default function BatchesPage() {
               cache: 'no-store',
             },
           ),
+          fetch(
+            `/v1/batches/${encodeURIComponent(selectedBatch!.id)}/variant-portfolio-preflights?limit=100`,
+            {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+              cache: 'no-store',
+            },
+          ),
         ])
         if (
           workspaceResponse.status === 401 ||
           alignmentsResponse.status === 401 ||
           takeLibrariesResponse.status === 401 ||
           compatibilityGraphsResponse.status === 401 ||
-          variantRecipesResponse.status === 401
+          variantRecipesResponse.status === 401 ||
+          variantPortfolioPreflightsResponse.status === 401
         ) {
           router.replace('/login')
           return
@@ -900,6 +1005,11 @@ export default function BatchesPage() {
         const variantRecipesPayload =
           await variantRecipesResponse.json() as
             ApiEnvelope<{ recipes: VariantRecipeRun[] }>
+        const variantPortfolioPreflightsPayload =
+          await variantPortfolioPreflightsResponse.json() as
+            ApiEnvelope<{
+              preflights: VariantPortfolioPreflightRun[]
+            }>
         if (!workspaceResponse.ok || !workspacePayload.data) {
           throw new Error(apiError(
             workspacePayload,
@@ -934,6 +1044,15 @@ export default function BatchesPage() {
           throw new Error(apiError(
             variantRecipesPayload,
             'Não foi possível carregar as receitas de variante.',
+          ))
+        }
+        if (
+          !variantPortfolioPreflightsResponse.ok ||
+          !variantPortfolioPreflightsPayload.data
+        ) {
+          throw new Error(apiError(
+            variantPortfolioPreflightsPayload,
+            'Não foi possível carregar os preflights de portfólio.',
           ))
         }
         const allowedArtifacts = new Set(
@@ -978,6 +1097,13 @@ export default function BatchesPage() {
             recipe.id === current)
             ? current
             : variantRuns[0]?.id ?? null)
+        const portfolioRuns =
+          variantPortfolioPreflightsPayload.data.preflights
+        setVariantPortfolioPreflights(portfolioRuns)
+        setActiveVariantPortfolioPreflightId((current) =>
+          current && portfolioRuns.some((run) => run.id === current)
+            ? current
+            : portfolioRuns[0]?.id ?? null)
         const project = projects.find((candidate) =>
           candidate.id === selectedBatch!.projectId)
         setScriptLocale(project?.locale || 'pt-BR')
@@ -1052,6 +1178,21 @@ export default function BatchesPage() {
     activeVariantRecipes.find((recipe) =>
       recipe.id === activeVariantRecipeId) ??
     activeVariantRecipes[0] ??
+    null
+  const activeVariantPortfolioPreflights = useMemo(
+    () => activeCompatibilityGraph
+      ? variantPortfolioPreflights.filter((preflight) =>
+          preflight.compatibilityGraphId ===
+            activeCompatibilityGraph.id &&
+          preflight.compatibilityGraphRunHash ===
+            activeCompatibilityGraph.runHash)
+      : [],
+    [activeCompatibilityGraph, variantPortfolioPreflights],
+  )
+  const activeVariantPortfolioPreflight =
+    activeVariantPortfolioPreflights.find((preflight) =>
+      preflight.id === activeVariantPortfolioPreflightId) ??
+    activeVariantPortfolioPreflights[0] ??
     null
   const variantRecipeCandidate = useMemo(() => {
     if (!activeCompatibilityGraph || !selectedBatch) return null
@@ -1521,6 +1662,7 @@ export default function BatchesPage() {
       setActiveTakeLibraryId(null)
       setActiveCompatibilityGraphId(null)
       setActiveVariantRecipeId(null)
+      resetVariantPortfolio()
       setScriptComposerOpen(false)
       setDetailView('script')
       scriptIdempotencyKey.current = null
@@ -1581,6 +1723,7 @@ export default function BatchesPage() {
       setActiveTakeLibraryId(null)
       setActiveCompatibilityGraphId(null)
       setActiveVariantRecipeId(null)
+      resetVariantPortfolio()
       takeLibraryIdempotencyKey.current = null
       compatibilityGraphIdempotencyKey.current = null
       variantRecipeIdempotencyKey.current = null
@@ -1642,6 +1785,7 @@ export default function BatchesPage() {
       setActiveTakeLibraryId(library.id)
       setActiveCompatibilityGraphId(null)
       setActiveVariantRecipeId(null)
+      resetVariantPortfolio()
       takeLibraryIdempotencyKey.current = null
       compatibilityGraphIdempotencyKey.current = null
       variantRecipeIdempotencyKey.current = null
@@ -1721,6 +1865,7 @@ export default function BatchesPage() {
         candidate.id === library.id ? library : candidate))
       setActiveCompatibilityGraphId(null)
       setActiveVariantRecipeId(null)
+      resetVariantPortfolio()
       compatibilityGraphIdempotencyKey.current = null
       variantRecipeIdempotencyKey.current = null
       setNotice('Take escolhido e protegido. A fonte original foi preservada.')
@@ -1808,6 +1953,7 @@ export default function BatchesPage() {
       ])
       setActiveCompatibilityGraphId(graph.id)
       setActiveVariantRecipeId(null)
+      resetVariantPortfolio()
       compatibilityGraphIdempotencyKey.current = null
       variantRecipeIdempotencyKey.current = null
       setNotice(
@@ -1897,6 +2043,98 @@ export default function BatchesPage() {
         error instanceof Error
           ? error.message
           : 'Não foi possível compilar a receita de variante.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function createVariantPortfolioPreflight(
+    confirmExpansion = false,
+  ) {
+    if (!selectedBatch || !activeCompatibilityGraph) return
+    const requestedRecipeCount = Number(portfolioRequestedCount)
+    if (
+      !Number.isSafeInteger(requestedRecipeCount) ||
+      requestedRecipeCount < 1 ||
+      requestedRecipeCount > 1_000
+    ) {
+      setNotice('Informe entre 1 e 1.000 receitas para o portfólio.')
+      return
+    }
+    if (confirmExpansion && !portfolioConfirmationToken) {
+      setNotice(
+        'Calcule novamente o preflight para gerar uma confirmação vinculada ao estado atual.',
+      )
+      return
+    }
+    setBusy(true)
+    setNotice(null)
+    const keyRef = confirmExpansion
+      ? variantPortfolioConfirmationIdempotencyKey
+      : variantPortfolioIdempotencyKey
+    keyRef.current ??= globalThis.crypto.randomUUID()
+    try {
+      const response = await fetch(
+        `/v1/batches/${encodeURIComponent(selectedBatch.id)}/variant-portfolio-preflights`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key': keyRef.current,
+          },
+          body: JSON.stringify({
+            compatibilityGraphId: activeCompatibilityGraph.id,
+            expectedCompatibilityGraphRunHash:
+              activeCompatibilityGraph.runHash,
+            requestedRecipeCount,
+            requireProof: false,
+            ...(confirmExpansion
+              ? { confirmationToken: portfolioConfirmationToken }
+              : {}),
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        preflight: VariantPortfolioPreflightRun
+        replayed: boolean
+        confirmationToken?: string
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível calcular o portfólio de variantes.',
+        ))
+      }
+      const preflight = payload.data.preflight
+      setVariantPortfolioPreflights((current) => [
+        preflight,
+        ...current.filter((candidate) =>
+          candidate.id !== preflight.id),
+      ])
+      setActiveVariantPortfolioPreflightId(preflight.id)
+      setPortfolioConfirmationToken(
+        payload.data.confirmationToken ?? null,
+      )
+      keyRef.current = null
+      if (confirmExpansion) {
+        variantPortfolioIdempotencyKey.current = null
+      }
+      setNotice(
+        preflight.confirmation.required
+          ? `Preflight pronto: ${preflight.selectedRecipeCount} receitas seguras agora. Confirme para expandir até ${preflight.requestedRecipeCount}.`
+          : `Portfólio pronto: ${preflight.selectedRecipeCount} receitas, ${preflight.estimates.outputVariantCount} saídas e nenhum job iniciado.`,
+      )
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível calcular o portfólio de variantes.',
       )
     } finally {
       setBusy(false)
@@ -2250,7 +2488,7 @@ export default function BatchesPage() {
                               </div>
                               <div className="flex shrink-0 items-center gap-2">
                                 {alignments.length > 1 ? (
-                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-none" onChange={(event) => { setActiveAlignmentId(event.target.value); setActiveTakeLibraryId(null); setActiveCompatibilityGraphId(null); setActiveVariantRecipeId(null); takeLibraryIdempotencyKey.current = null; compatibilityGraphIdempotencyKey.current = null; variantRecipeIdempotencyKey.current = null }} value={activeAlignment.id}>
+                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-none" onChange={(event) => { setActiveAlignmentId(event.target.value); setActiveTakeLibraryId(null); setActiveCompatibilityGraphId(null); setActiveVariantRecipeId(null); resetVariantPortfolio(); takeLibraryIdempotencyKey.current = null; compatibilityGraphIdempotencyKey.current = null; variantRecipeIdempotencyKey.current = null }} value={activeAlignment.id}>
                                     {alignments.map((alignment) => <option key={alignment.id} value={alignment.id}>{alignment.document.title} · r{alignment.revision}</option>)}
                                   </select>
                                 ) : null}
@@ -2384,6 +2622,7 @@ export default function BatchesPage() {
                                         setActiveTakeLibraryId(event.target.value)
                                         setActiveCompatibilityGraphId(null)
                                         setActiveVariantRecipeId(null)
+                                        resetVariantPortfolio()
                                         compatibilityGraphIdempotencyKey.current = null
                                         variantRecipeIdempotencyKey.current = null
                                       }}
@@ -2548,6 +2787,7 @@ export default function BatchesPage() {
                                           event.target.value,
                                         )
                                         setActiveVariantRecipeId(null)
+                                        resetVariantPortfolio()
                                         variantRecipeIdempotencyKey.current =
                                           null
                                       }}
@@ -2808,6 +3048,229 @@ export default function BatchesPage() {
                                         <span className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-[8px] text-[#817b72]" key={assumption.assumptionHash} title={assumption.statement}>{assumption.code}</span>
                                       ))}
                                     </div>
+                                  </div>
+                                </div>
+                              )}
+                            </section>
+
+                            <section
+                              className="mt-6 border-t border-dashed border-[#7792d2]/20 pt-5"
+                              data-testid="variant-portfolio-preflight-panel"
+                            >
+                              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#829bd2]">
+                                    <span className="grid h-5 w-5 place-items-center rounded-full border border-[#7792d2]/35 font-mono text-[7px]">P</span>
+                                    Portfolio slate
+                                  </div>
+                                  <h4 className="mt-2 text-base font-semibold tracking-[-0.02em] text-[#ede7dd]">
+                                    Quantas variantes vale a pena produzir?
+                                  </h4>
+                                  <p className="mt-1 max-w-2xl text-[10px] leading-4 text-[#746f67]">
+                                    O preflight conta todas as possibilidades, elimina incompatibilidades e monta um top-N diverso dentro da qualidade, cobertura e orçamento. Nenhum render começa aqui.
+                                  </p>
+                                </div>
+                                <div className="flex shrink-0 flex-wrap items-end gap-2">
+                                  {activeVariantPortfolioPreflights.length > 1 && activeVariantPortfolioPreflight ? (
+                                    <label>
+                                      <span className="mb-1 block text-[8px] uppercase tracking-[0.12em] text-[#625e57]">Preflight salvo</span>
+                                      <select
+                                        aria-label="Escolher preflight de portfólio"
+                                        className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#7792d2]/45"
+                                        onChange={(event) => {
+                                          setActiveVariantPortfolioPreflightId(event.target.value)
+                                          setPortfolioConfirmationToken(null)
+                                        }}
+                                        value={activeVariantPortfolioPreflight.id}
+                                      >
+                                        {activeVariantPortfolioPreflights.map((preflight) => (
+                                          <option key={preflight.id} value={preflight.id}>
+                                            {preflight.selectedRecipeCount}/{preflight.requestedRecipeCount} receitas · {elapsed(preflight.createdAt)}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                  ) : null}
+                                  <label>
+                                    <span className="mb-1 block text-[8px] uppercase tracking-[0.12em] text-[#625e57]">Receitas desejadas</span>
+                                    <input
+                                      aria-label="Quantidade de receitas desejadas"
+                                      className="h-9 w-24 rounded-lg border border-white/[0.08] bg-[#090909] px-3 font-mono text-[11px] text-[#d8d1c6] outline-none focus:border-[#7792d2]/45"
+                                      inputMode="numeric"
+                                      max={activeVariantPortfolioPreflight?.policy.maxRecipeLimit ?? 1000}
+                                      min={1}
+                                      onChange={(event) => {
+                                        setPortfolioRequestedCount(event.target.value)
+                                        setPortfolioConfirmationToken(null)
+                                        variantPortfolioIdempotencyKey.current = null
+                                        variantPortfolioConfirmationIdempotencyKey.current = null
+                                      }}
+                                      type="number"
+                                      value={portfolioRequestedCount}
+                                    />
+                                  </label>
+                                  <button
+                                    className="h-9 rounded-lg border border-[#7792d2]/30 bg-[#7792d2]/10 px-3 text-[10px] font-bold text-[#a9bce8] transition hover:bg-[#7792d2]/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7792d2] disabled:cursor-not-allowed disabled:opacity-40"
+                                    data-testid="create-variant-portfolio-preflight"
+                                    disabled={busy || !activeCompatibilityGraph}
+                                    onClick={() => void createVariantPortfolioPreflight(false)}
+                                    type="button"
+                                  >
+                                    {activeVariantPortfolioPreflight ? 'Recalcular' : 'Calcular portfólio'}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {!activeCompatibilityGraph ? (
+                                <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+                                  <p className="text-xs font-semibold text-[#aaa49a]">Calcule primeiro o mapa de compatibilidade.</p>
+                                  <p className="mt-1 text-[10px] leading-4 text-[#716d66]">O portfólio só considera caminhos aceitos no grafo imutável atual.</p>
+                                </div>
+                              ) : !activeVariantPortfolioPreflight ? (
+                                <div className="mt-4 overflow-hidden rounded-xl border border-[#7792d2]/18 bg-[#7792d2]/[0.035]">
+                                  <div className="grid grid-cols-4 border-b border-[#7792d2]/10">
+                                    {['Possíveis', 'Elegíveis', 'Escolhidas', 'Saídas'].map((label, index) => (
+                                      <div className="relative px-3 py-3 text-center" key={label}>
+                                        {index > 0 ? <span className="absolute left-0 top-1/2 h-px w-3 -translate-x-1/2 bg-[#7792d2]/25" /> : null}
+                                        <span className="font-mono text-sm text-[#66728d]">—</span>
+                                        <p className="mt-1 text-[7px] uppercase tracking-[0.12em] text-[#5f6676]">{label}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <p className="px-4 py-3 text-[10px] text-[#7f899f]">
+                                    Defina o tamanho desejado. O Apollo fará a conta sem criar o produto cartesiano.
+                                  </p>
+                                </div>
+                              ) : (
+                                <div
+                                  className="mt-4 space-y-3"
+                                  data-testid={`variant-portfolio-preflight-${activeVariantPortfolioPreflight.id}`}
+                                >
+                                  <div className="overflow-hidden rounded-xl border border-[#7792d2]/18 bg-[#090b0f]">
+                                    <div className="grid grid-cols-4">
+                                      {[
+                                        ['Possíveis', activeVariantPortfolioPreflight.theoreticalCandidateCount, 'contagem teórica'],
+                                        ['Elegíveis', activeVariantPortfolioPreflight.eligibleCandidateCount, 'após filtros'],
+                                        ['Escolhidas', activeVariantPortfolioPreflight.selectedRecipeCount, `top ${activeVariantPortfolioPreflight.effectiveRecipeLimit}`],
+                                        ['Saídas', activeVariantPortfolioPreflight.estimates.outputVariantCount, `${activeVariantPortfolioPreflight.batchVariantCount} formato${activeVariantPortfolioPreflight.batchVariantCount === 1 ? '' : 's'}`],
+                                      ].map(([label, value, hint], index) => (
+                                        <div className="relative min-w-0 border-r border-[#7792d2]/10 px-2 py-3 text-center last:border-r-0 sm:px-4" key={String(label)}>
+                                          {index > 0 ? <span className="absolute left-0 top-1/2 hidden h-px w-4 -translate-x-1/2 bg-[#7792d2]/35 sm:block" /> : null}
+                                          <p className="truncate font-mono text-lg font-semibold text-[#dce5f8] sm:text-xl">{value}</p>
+                                          <p className="mt-1 text-[7px] font-semibold uppercase tracking-[0.12em] text-[#8ea2cf]">{label}</p>
+                                          <p className="mt-0.5 hidden text-[7px] text-[#596277] sm:block">{hint}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#7792d2]/10 px-4 py-2">
+                                      <p className="text-[8px] text-[#69758d]">
+                                        {activeVariantPortfolioPreflight.scannedCandidateCount} caminhos inspecionados · produto cartesiano nunca materializado
+                                      </p>
+                                      <span className="rounded-full border border-[#629975]/25 bg-[#629975]/10 px-2 py-1 text-[8px] font-semibold text-[#84b795]">
+                                        0 jobs criados
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {activeVariantPortfolioPreflight.confirmation.required ? (
+                                    <div className="flex flex-col gap-3 rounded-xl border border-[#c09a5a]/25 bg-[#c09a5a]/[0.055] p-4 sm:flex-row sm:items-center sm:justify-between">
+                                      <div>
+                                        <p className="text-xs font-semibold text-[#dfbd83]">A expansão ultrapassa o padrão de {activeVariantPortfolioPreflight.confirmation.threshold} receitas.</p>
+                                        <p className="mt-1 text-[9px] leading-4 text-[#89775b]">A seleção segura já foi calculada. A confirmação é assinada e vinculada a este grafo, política, orçamento e matriz de saídas.</p>
+                                      </div>
+                                      <button
+                                        className="h-9 shrink-0 rounded-lg bg-[#c09a5a] px-3 text-[10px] font-bold text-[#171207] transition hover:bg-[#d7b16d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c09a5a] disabled:opacity-40"
+                                        data-testid="confirm-variant-portfolio-expansion"
+                                        disabled={busy}
+                                        onClick={() => void createVariantPortfolioPreflight(Boolean(portfolioConfirmationToken))}
+                                        type="button"
+                                      >
+                                        {portfolioConfirmationToken ? 'Confirmar expansão' : 'Gerar confirmação atual'}
+                                      </button>
+                                    </div>
+                                  ) : activeVariantPortfolioPreflight.confirmation.satisfied ? (
+                                    <div className="rounded-xl border border-[#629975]/22 bg-[#629975]/[0.05] px-4 py-3 text-[9px] text-[#84b795]">
+                                      Expansão confirmada com evidência vinculada ao preflight.
+                                    </div>
+                                  ) : null}
+
+                                  <div className="grid gap-3 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,.75fr)]">
+                                    <article className="min-w-0 rounded-xl border border-white/[0.07] bg-[#0a0a0a] p-4">
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div>
+                                          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#8ea2cf]">Seleção diversa</p>
+                                          <p className="mt-1 text-[9px] text-[#706d67]">Qualidade mínima {Math.round(activeVariantPortfolioPreflight.policy.minRecipeScore)}% · limite semântico ativo</p>
+                                        </div>
+                                        <div className="flex gap-1.5">
+                                          {[
+                                            ['H', activeVariantPortfolioPreflight.coverage.achieved.hooks, activeVariantPortfolioPreflight.coverage.required.hooks],
+                                            ['B', activeVariantPortfolioPreflight.coverage.achieved.bodies, activeVariantPortfolioPreflight.coverage.required.bodies],
+                                            ['C', activeVariantPortfolioPreflight.coverage.achieved.ctas, activeVariantPortfolioPreflight.coverage.required.ctas],
+                                          ].map(([role, achieved, required]) => (
+                                            <span className={`rounded-md border px-2 py-1 font-mono text-[8px] ${Number(achieved) >= Number(required) ? 'border-[#629975]/25 bg-[#629975]/10 text-[#84b795]' : 'border-[#b75555]/25 bg-[#b75555]/10 text-[#cf7777]'}`} key={String(role)}>
+                                              {role} {achieved}/{required}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+
+                                      {activeVariantPortfolioPreflight.selected.length > 0 ? (
+                                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                          {activeVariantPortfolioPreflight.selected.slice(0, 8).map((candidate) => (
+                                            <div className="rounded-lg border border-white/[0.06] bg-white/[0.018] p-3" key={candidate.candidateHash}>
+                                              <div className="flex items-center justify-between gap-2">
+                                                <span className="font-mono text-[8px] text-[#657797]">#{String(candidate.rank).padStart(2, '0')}</span>
+                                                <span className="font-mono text-[10px] font-semibold text-[#cbd7ee]">{Math.round(candidate.totalScore)}%</span>
+                                              </div>
+                                              <div className="mt-2 flex flex-wrap items-center gap-1">
+                                                {[
+                                                  ['H', candidate.selection.hookNodeId],
+                                                  ['B', candidate.selection.bodyNodeId],
+                                                  ...(candidate.selection.proofNodeId ? [['P', candidate.selection.proofNodeId]] : []),
+                                                  ['C', candidate.selection.ctaNodeId],
+                                                ].map(([role, nodeId]) => (
+                                                  <span className="rounded border border-[#7792d2]/18 bg-[#7792d2]/[0.06] px-1.5 py-1 font-mono text-[7px] text-[#8ea2cf]" key={`${candidate.candidateHash}-${nodeId}`} title={nodeId}>
+                                                    {role}
+                                                  </span>
+                                                ))}
+                                                {candidate.reusableRecipeId ? (
+                                                  <span className="ml-auto rounded border border-[#629975]/20 bg-[#629975]/[0.07] px-1.5 py-1 text-[7px] text-[#84b795]">reuso</span>
+                                                ) : null}
+                                              </div>
+                                              <p className="mt-2 text-[7px] text-[#5e5b56]">elo {Math.round(candidate.minimumEdgeScore)}% · novidade {Math.round(candidate.noveltyScore * 100)}%</p>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p className="mt-3 rounded-lg border border-[#b75555]/18 bg-[#b75555]/[0.04] p-3 text-[9px] text-[#aa7777]">Nenhuma receita passou por todos os filtros e limites atuais.</p>
+                                      )}
+                                    </article>
+
+                                    <article className="min-w-0 rounded-xl border border-white/[0.07] bg-[#0a0a0a] p-4">
+                                      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#84b795]">Antes de produzir</p>
+                                      <div className="mt-3 space-y-2">
+                                        {[
+                                          ['Custo estimado', `US$ ${(activeVariantPortfolioPreflight.estimates.estimatedCostMinorUnits / 100).toFixed(2)}`],
+                                          ['Tempo estimado', `${Math.ceil(activeVariantPortfolioPreflight.estimates.estimatedDurationSeconds / 60)} min`],
+                                          ['Armazenamento', `${(activeVariantPortfolioPreflight.estimates.estimatedStorageBytes / 1_000_000).toFixed(0)} MB`],
+                                          ['Reuso esperado', `${Math.round(activeVariantPortfolioPreflight.estimates.expectedReuseRate * 100)}%`],
+                                          ['Jobs planejados', activeVariantPortfolioPreflight.estimates.plannedJobCount],
+                                        ].map(([label, value]) => (
+                                          <div className="flex items-center justify-between gap-3 border-b border-white/[0.045] pb-2 text-[9px]" key={String(label)}>
+                                            <span className="text-[#746f67]">{label}</span>
+                                            <span className="font-mono text-[#aaa49a]">{value}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                      <div className="mt-3 rounded-lg border border-[#7792d2]/16 bg-[#7792d2]/[0.04] p-3">
+                                        <p className="text-[8px] font-semibold text-[#8ea2cf]">{activeVariantPortfolioPreflight.exclusions.hardFilterCount} possibilidades eliminadas antes do ranking</p>
+                                        <p className="mt-1 text-[7px] leading-3 text-[#626b7d]">
+                                          {activeVariantPortfolioPreflight.exclusions.reasonCodes.length > 0
+                                            ? activeVariantPortfolioPreflight.exclusions.reasonCodes.join(' · ')
+                                            : 'Nenhuma exclusão adicional.'}
+                                        </p>
+                                      </div>
+                                    </article>
                                   </div>
                                 </div>
                               )}

@@ -39,6 +39,7 @@ import type { ScriptAlignmentRepository } from '../application/ports/script-alig
 import type { TakeLibraryRepository } from '../application/ports/take-library-repository.ts'
 import type { CompatibilityGraphRepository } from '../application/ports/compatibility-graph-repository.ts'
 import type { VariantRecipeRepository } from '../application/ports/variant-recipe-repository.ts'
+import type { VariantPortfolioPreflightRepository } from '../application/ports/variant-portfolio-preflight-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -116,6 +117,7 @@ import { PrismaScriptAlignmentRepository } from './prisma/script-alignment-repos
 import { PrismaTakeLibraryRepository } from './prisma/take-library-repository.ts'
 import { PrismaCompatibilityGraphRepository } from './prisma/compatibility-graph-repository.ts'
 import { PrismaVariantRecipeRepository } from './prisma/variant-recipe-repository.ts'
+import { PrismaVariantPortfolioPreflightRepository } from './prisma/variant-portfolio-preflight-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -248,6 +250,11 @@ CompatibilityGraphRepository {
 export function createVariantRecipeRepository():
 VariantRecipeRepository {
   return new PrismaVariantRecipeRepository(resolveV2Client())
+}
+
+export function createVariantPortfolioPreflightRepository():
+VariantPortfolioPreflightRepository {
+  return new PrismaVariantPortfolioPreflightRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {
