@@ -17,6 +17,28 @@ for directory in tmp artifacts render-outputs; do
   install -d -o 1000 -g 1000 "${APP_ROOT}/${directory}"
 done
 
+docker run --rm \
+  --env-file "${ENV_FILE}" \
+  "${IMAGE}" \
+  node -e '
+    const secret = process.env.APOLLO_MEDIA_UPLOAD_SIGNING_SECRET ?? "";
+    if (secret.length < 32) {
+      console.error("APOLLO_MEDIA_UPLOAD_SIGNING_SECRET must contain at least 32 characters");
+      process.exit(1);
+    }
+    let baseUrl;
+    try {
+      baseUrl = new URL(process.env.APOLLO_MEDIA_UPLOAD_BASE_URL ?? "");
+    } catch {
+      console.error("APOLLO_MEDIA_UPLOAD_BASE_URL must be a valid absolute URL");
+      process.exit(1);
+    }
+    if (baseUrl.protocol !== "https:" || baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash) {
+      console.error("APOLLO_MEDIA_UPLOAD_BASE_URL must be a clean HTTPS origin");
+      process.exit(1);
+    }
+  '
+
 COMMON_RUNTIME=(
   --restart unless-stopped
   --init
