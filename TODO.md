@@ -20,15 +20,15 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.010, com a jornada integral do MVP Core e os
-dez primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
+Estado auditado após o gate F2.011, com a jornada integral do MVP Core e os
+onze primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **224 de 1.259 microtarefas verificadas como efetivamente entregues (17,8%)**;
-- **1.035 microtarefas abertas ou aguardando nova comprovação**;
+- **229 de 1.259 microtarefas verificadas como efetivamente entregues (18,2%)**;
+- **1.030 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 a F2.010 foram entregues, mas não encerram o
+  permanecem abertos; F2.001 a F2.011 foram entregues, mas não encerram o
   gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
@@ -41,7 +41,12 @@ automático 16/16 foi concluído. O catálogo virtual de SpeechSegments também
 artifacts físicos. Evidências editoriais agora podem ser catalogadas e
 pesquisadas pela API pública com claim, qualifier, contexto, atribuição,
 consentimento, direitos e preflight fail-closed preservados, também sem criar
-artifacts físicos. Isso não conclui as demais capacidades F2–F5 nem autoriza
+artifacts físicos. O `VariantRecipe` também é executável pela API pública e
+pela UI `/batches`: seleciona somente caminhos aceitos H+B+proof+CTA ou
+H+B+CTA permitidos pela policy, penaliza o elo mais fraco, compila
+`StoryPlan`/`EditPlan` por referência e preserva lineage até `ScriptBlock`,
+take, artifact e source range sem materializar fontes nem duplicar masters.
+Isso não conclui as demais capacidades F2–F5 nem autoriza
 marcar contratos isolados como produto entregue.
 
 ---
@@ -1101,11 +1106,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.011 — VariantRecipe [FR-084]
 
-- [ ] Modelar seleção H+B+proof+CTA, ordem, source segments, assumptions e scores. Evidência T-FR-084.
-- [ ] Compilar recipe em StoryPlan/EditPlan sem duplicar masters. Evidência T-FR-084.
-- [ ] Registrar lineage até cada ScriptBlock e take. Evidência T-FR-084.
-- [ ] Permitir recipe sem proof somente quando objetivo/policy permitirem. Evidência T-FR-084.
-- [ ] Testar recipe completa, curta, sem prova e com cold open. Evidência T-FR-084.
+- [x] Modelar seleção H+B+proof+CTA, ordem, source segments, assumptions e scores. Evidência T-FR-084 e `docs/quality/variant-recipe-v1.md`.
+- [x] Compilar recipe em StoryPlan/EditPlan sem duplicar masters. Evidência T-FR-084 e `docs/quality/variant-recipe-v1.md`.
+- [x] Registrar lineage até cada ScriptBlock e take. Evidência T-FR-084 e `docs/quality/variant-recipe-v1.md`.
+- [x] Permitir recipe sem proof somente quando objetivo/policy permitirem. Evidência T-FR-084 e `docs/quality/variant-recipe-v1.md`.
+- [x] Testar recipe completa, curta, sem prova e com cold open. Evidência T-FR-084 e `docs/quality/variant-recipe-v1.md`.
 
 ### F2.012 — Anti-explosão combinatória [FR-085]
 
