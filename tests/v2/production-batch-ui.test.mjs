@@ -134,3 +134,53 @@ test('T-FR-085 /batches preflights a bounded portfolio through the public V2 API
   assert.match(batchUiSource, /produto cartesiano nunca materializado/)
   assert.match(batchUiSource, /0 jobs criados/)
 })
+
+test('T-FR-086 /batches edits only an explicit recipe, format and target scope through the public V2 API', () => {
+  for (const endpoint of [
+    '/edit-preflights?limit=100',
+    '/edit-commands?limit=100',
+    '/edit-preflights`',
+    '/edit-preflights/${encodeURIComponent(activeBatchEditPreflight.id)}/commit',
+  ]) {
+    assert.ok(batchUiSource.includes(endpoint), `missing API path: ${endpoint}`)
+  }
+  assert.match(batchUiSource, /data-testid="batch-edit-panel"/)
+  assert.match(batchUiSource, /data-testid="batch-edit-explicit-scope"/)
+  assert.match(batchUiSource, /data-testid="create-batch-edit-preflight"/)
+  assert.match(batchUiSource, /data-testid="commit-batch-edit"/)
+  assert.match(batchUiSource, /batchEditDraftRecipeIds/)
+  assert.match(batchUiSource, /batchEditDraftOutputSpecIds/)
+  assert.match(batchUiSource, /batchEditDraftItems\.map\(\(item\) => item\.id\)/)
+  assert.match(batchUiSource, /expectedBatchRevision: selectedBatch\.revision/)
+  assert.match(
+    batchUiSource,
+    /expectedBatchDefinitionHash: selectedBatch\.definitionHash/,
+  )
+  assert.match(batchUiSource, /expectedPreflightHash:/)
+  assert.match(batchUiSource, /expectedScopeHash:/)
+  assert.match(batchUiSource, /commitToken: batchEditCommitToken/)
+  assert.match(batchUiSource, /idempotency-key/)
+})
+
+test('T-FR-086 /batches previews diff, conflicts, invalidations, cost and per-item outcomes before and after commit', () => {
+  assert.match(batchUiSource, /activeBatchEditPreflight\.sampleDiff/)
+  assert.match(batchUiSource, /activeBatchEditPreflight\.protectedConflictCount/)
+  assert.match(batchUiSource, /activeBatchEditPreflight\.invalidationCount/)
+  assert.match(batchUiSource, /activeBatchEditPreflight\.estimatedCostMinorUnits/)
+  assert.match(batchUiSource, /activeBatchEditPreflight\.budgetRemainingMinorUnits/)
+  assert.match(batchUiSource, /activeBatchEditPreflight\.warningCodes/)
+  assert.match(batchUiSource, /activeBatchEditCommand\.resultItems/)
+  assert.match(batchUiSource, /result\.invalidatedSteps/)
+  assert.match(batchUiSource, /batchEditMode/)
+  assert.match(batchUiSource, /all-or-nothing/)
+  assert.match(batchUiSource, /skip-failures/)
+  assert.match(batchUiSource, /O primeiro clique apenas calcula/)
+  assert.match(
+    batchUiSource,
+    /detailView === 'outputs'[\s\S]*selectedBatch\.items\.map[\s\S]*\{batchEditPanel\}[\s\S]*data-testid="script-alignment-panel"/,
+  )
+  assert.doesNotMatch(
+    batchUiSource,
+    /fetch\(['"`]\/api\/.*(?:batch|edit)/,
+  )
+})

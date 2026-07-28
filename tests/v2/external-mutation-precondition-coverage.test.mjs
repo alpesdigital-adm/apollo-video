@@ -61,6 +61,14 @@ const coverage = Object.freeze({
     mode: 'idempotent-create',
     evidence: 'F2-012 request fingerprint binds the exact graph ID/hash, requested top-N, proof policy and actor; signed expansion confirmation also binds the graph snapshot, workspace policy, batch output matrix and remaining budget before serializable no-job persistence',
   },
+  'apollo.batches.edit-preflights.create': {
+    mode: 'idempotent-create',
+    evidence: 'F2-013 request fingerprint binds expected batch revision/hash, exact recipe/format/item IDs, typed operation, mode and actor before serializable immutable preview persistence',
+  },
+  'apollo.batches.edit-preflights.commit': {
+    mode: 'batch-edit-signed-action',
+    evidence: 'F2-013 requires exact preflight and scope hashes plus a short-lived actor/workspace/request/scope/cost-bound token; serializable commit rechecks batch, latest item states, policy and remaining budget',
+  },
   'apollo.operations.cancel': {
     mode: 'state-machine-action', evidence: 'F0-070',
   },
@@ -267,6 +275,27 @@ function requiresTakeLibraryRevision(capability) {
   )
 }
 
+function requiresSignedBatchEdit(capability) {
+  assert.ok(capability.inputSchemaRef, `${capability.id} must publish an input schema`)
+  const schema = getPublicSchema(capability.inputSchemaRef).schema
+  for (const field of [
+    'expectedPreflightHash',
+    'expectedScopeHash',
+    'commitToken',
+  ]) {
+    assert.ok(
+      schema.required?.includes(field),
+      `${capability.id} must require ${field}`,
+    )
+    assert.ok(
+      schema.properties?.[field],
+      `${capability.id} must define ${field}`,
+    )
+  }
+  assert.equal(capability.confirmation, 'preflight-token')
+  assert.equal(capability.idempotency, 'required')
+}
+
 test('every external mutation has an explicit precondition strategy', () => {
   assert.deepEqual(
     Object.keys(coverage).sort(),
@@ -316,6 +345,9 @@ test('every external mutation has an explicit precondition strategy', () => {
       requiresTakeLibraryRevision(capability)
       assert.equal(capability.idempotency, 'required')
     }
+    if (decision.mode === 'batch-edit-signed-action') {
+      requiresSignedBatchEdit(capability)
+    }
     if (decision.mode === 'idempotent-create') {
       assert.equal(capability.idempotency, 'required')
     }
@@ -336,7 +368,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 33,
+    'idempotent-create': 34,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,
@@ -344,5 +376,6 @@ test('the current public surface has no unguarded state replacement', () => {
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,
+    'batch-edit-signed-action': 1,
   })
 })

@@ -2073,6 +2073,336 @@ const productionBatchSchema = {
     progress: productionBatchProgressSchema,
   },
 }
+const batchEditOperationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'valueRef'],
+  properties: {
+    type: { enum: ['replace-cta', 'subtitle-style', 'brand-kit'] },
+    valueRef: idSchema,
+  },
+}
+const batchEditScopeSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['recipeIds', 'outputSpecIds', 'itemIds', 'scopeHash'],
+  properties: {
+    recipeIds: {
+      type: 'array', minItems: 1, maxItems: 1000,
+      uniqueItems: true, items: idSchema,
+    },
+    outputSpecIds: {
+      type: 'array', minItems: 1, maxItems: 1000,
+      uniqueItems: true, items: idSchema,
+    },
+    itemIds: {
+      type: 'array', minItems: 1, maxItems: 1000,
+      uniqueItems: true, items: idSchema,
+    },
+    scopeHash: sha256Schema,
+  },
+}
+const batchEditPolicySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'workspaceId', 'revision', 'defaultMode',
+    'maxItemCount', 'diffSampleSize', 'replaceCtaCostMinorUnits',
+    'subtitleStyleCostMinorUnits', 'brandKitCostMinorUnits',
+    'confirmationTtlSeconds', 'updatedByClientId', 'updatedAt',
+    'policyHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'batch-edit-policy/v1' },
+    workspaceId: idSchema,
+    revision: { type: 'integer', minimum: 1, maximum: 1000000 },
+    defaultMode: { enum: ['all-or-nothing', 'skip-failures'] },
+    maxItemCount: { type: 'integer', minimum: 1, maximum: 1000 },
+    diffSampleSize: { type: 'integer', minimum: 1, maximum: 25 },
+    replaceCtaCostMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 1000000,
+    },
+    subtitleStyleCostMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 1000000,
+    },
+    brandKitCostMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 1000000,
+    },
+    confirmationTtlSeconds: {
+      type: 'integer', minimum: 60, maximum: 86400,
+    },
+    updatedByClientId: idSchema,
+    updatedAt: dateTimeSchema,
+    policyHash: sha256Schema,
+  },
+}
+const batchEditItemStateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'workspaceId', 'batchId', 'itemId', 'revision',
+    'directives', 'protectedOperations', 'createdByClientId',
+    'createdAt', 'stateHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'batch-edit-item-state/v1' },
+    workspaceId: idSchema,
+    batchId: idSchema,
+    itemId: idSchema,
+    revision: { type: 'integer', minimum: 1, maximum: 1000000 },
+    directives: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        ctaRef: idSchema,
+        subtitleStyleId: idSchema,
+        brandKitSnapshotId: idSchema,
+      },
+    },
+    protectedOperations: {
+      type: 'array',
+      maxItems: 3,
+      uniqueItems: true,
+      items: {
+        enum: ['replace-cta', 'subtitle-style', 'brand-kit'],
+      },
+    },
+    previousStateHash: sha256Schema,
+    sourceCommandId: idSchema,
+    createdByClientId: idSchema,
+    createdAt: dateTimeSchema,
+    stateHash: sha256Schema,
+  },
+}
+const batchEditImpactSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'itemId', 'recipeId', 'variantId', 'outputSpecId', 'locale',
+    'targetRef', 'disposition', 'afterValueRef', 'beforeStateRevision',
+    'beforeStateHash', 'protectedConflict', 'conflictCodes',
+    'invalidatedSteps', 'invalidatedTargetRefs',
+    'estimatedCostMinorUnits', 'impactHash',
+  ],
+  properties: {
+    itemId: idSchema,
+    recipeId: idSchema,
+    variantId: idSchema,
+    outputSpecId: idSchema,
+    locale: { type: 'string', pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$' },
+    targetRef: { type: 'string', minLength: 3, maxLength: 260 },
+    disposition: { enum: ['applicable', 'protected', 'unchanged'] },
+    beforeValueRef: idSchema,
+    afterValueRef: idSchema,
+    beforeStateRevision: {
+      type: 'integer', minimum: 1, maximum: 1000000,
+    },
+    beforeStateHash: sha256Schema,
+    protectedConflict: { type: 'boolean' },
+    conflictCodes: {
+      type: 'array', maxItems: 8, uniqueItems: true,
+      items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,127}$' },
+    },
+    invalidatedSteps: {
+      type: 'array', maxItems: 4, uniqueItems: true,
+      items: {
+        enum: ['planning', 'materializing', 'rendering', 'reviewing'],
+      },
+    },
+    invalidatedTargetRefs: {
+      type: 'array', maxItems: 4, uniqueItems: true,
+      items: { type: 'string', minLength: 3, maxLength: 300 },
+    },
+    estimatedCostMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 1000000,
+    },
+    impactHash: sha256Schema,
+  },
+}
+const batchEditDiffValueSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['mode'],
+  properties: {
+    mode: { enum: ['inherit', 'override'] },
+    valueRef: idSchema,
+  },
+}
+const batchEditSampleDiffSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'itemId', 'recipeId', 'outputSpecId', 'targetRef', 'before',
+    'after', 'disposition', 'conflictCodes', 'diffHash',
+  ],
+  properties: {
+    itemId: idSchema,
+    recipeId: idSchema,
+    outputSpecId: idSchema,
+    targetRef: { type: 'string', minLength: 3, maxLength: 260 },
+    before: batchEditDiffValueSchema,
+    after: batchEditDiffValueSchema,
+    disposition: { enum: ['applicable', 'protected', 'unchanged'] },
+    conflictCodes: {
+      type: 'array', maxItems: 8, uniqueItems: true,
+      items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,127}$' },
+    },
+    diffHash: sha256Schema,
+  },
+}
+const batchEditPreflightSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'impactVersion', 'id', 'workspaceId', 'projectId',
+    'batchId', 'batchRevision', 'batchDefinitionHash', 'policy',
+    'mode', 'operation', 'scope', 'status',
+    'budgetRemainingMinorUnits', 'affectedItemCount',
+    'applicableItemCount', 'protectedConflictCount',
+    'unchangedItemCount', 'invalidationCount',
+    'estimatedCostMinorUnits', 'budgetExceeded', 'impacts',
+    'sampleDiff', 'warningCodes', 'costFingerprint',
+    'createdByClientId', 'createdAt', 'preflightHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'batch-edit-preflight/v1' },
+    impactVersion: { const: 'batch-edit-impact/v1' },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    batchId: idSchema,
+    batchRevision: { type: 'integer', minimum: 1, maximum: 1000000 },
+    batchDefinitionHash: sha256Schema,
+    policy: batchEditPolicySchema,
+    mode: { enum: ['all-or-nothing', 'skip-failures'] },
+    operation: batchEditOperationSchema,
+    scope: batchEditScopeSchema,
+    status: { enum: ['ready', 'partial-ready', 'blocked', 'no-change'] },
+    budgetRemainingMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 100000000,
+    },
+    affectedItemCount: { type: 'integer', minimum: 1, maximum: 1000 },
+    applicableItemCount: { type: 'integer', minimum: 0, maximum: 1000 },
+    protectedConflictCount: {
+      type: 'integer', minimum: 0, maximum: 1000,
+    },
+    unchangedItemCount: { type: 'integer', minimum: 0, maximum: 1000 },
+    invalidationCount: { type: 'integer', minimum: 0, maximum: 4000 },
+    estimatedCostMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 100000000,
+    },
+    budgetExceeded: { type: 'boolean' },
+    impacts: {
+      type: 'array', minItems: 1, maxItems: 1000,
+      items: batchEditImpactSchema,
+    },
+    sampleDiff: {
+      type: 'array', minItems: 1, maxItems: 25,
+      items: batchEditSampleDiffSchema,
+    },
+    warningCodes: {
+      type: 'array', maxItems: 16, uniqueItems: true,
+      items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,127}$' },
+    },
+    confirmationExpiresAt: dateTimeSchema,
+    costFingerprint: sha256Schema,
+    createdByClientId: idSchema,
+    createdAt: dateTimeSchema,
+    preflightHash: sha256Schema,
+  },
+}
+const batchEditItemResultSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'itemId', 'recipeId', 'variantId', 'outputSpecId', 'targetRef',
+    'status', 'beforeStateRevision', 'beforeStateHash',
+    'conflictCodes', 'invalidatedSteps', 'invalidatedTargetRefs',
+    'costMinorUnits', 'resultHash',
+  ],
+  properties: {
+    itemId: idSchema,
+    recipeId: idSchema,
+    variantId: idSchema,
+    outputSpecId: idSchema,
+    targetRef: { type: 'string', minLength: 3, maxLength: 260 },
+    status: { enum: ['applied', 'skipped', 'unchanged'] },
+    beforeStateRevision: {
+      type: 'integer', minimum: 1, maximum: 1000000,
+    },
+    beforeStateHash: sha256Schema,
+    afterStateRevision: {
+      type: 'integer', minimum: 2, maximum: 1000000,
+    },
+    afterStateHash: sha256Schema,
+    conflictCodes: {
+      type: 'array', maxItems: 8, uniqueItems: true,
+      items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,127}$' },
+    },
+    invalidatedSteps: {
+      type: 'array', maxItems: 4, uniqueItems: true,
+      items: {
+        enum: ['planning', 'materializing', 'rendering', 'reviewing'],
+      },
+    },
+    invalidatedTargetRefs: {
+      type: 'array', maxItems: 4, uniqueItems: true,
+      items: { type: 'string', minLength: 3, maxLength: 300 },
+    },
+    costMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 1000000,
+    },
+    resultHash: sha256Schema,
+  },
+}
+const batchEditCommandSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'batchId',
+    'preflightId', 'preflightHash', 'batchRevision',
+    'batchDefinitionHash', 'policyHash', 'mode', 'operation', 'scope',
+    'status', 'resultItems', 'newStates', 'affectedItemCount',
+    'appliedItemCount', 'skippedItemCount', 'unchangedItemCount',
+    'invalidationCount', 'costMinorUnits', 'createdByClientId',
+    'createdAt', 'commandHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'batch-edit-command/v1' },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    batchId: idSchema,
+    preflightId: idSchema,
+    preflightHash: sha256Schema,
+    batchRevision: { type: 'integer', minimum: 1, maximum: 1000000 },
+    batchDefinitionHash: sha256Schema,
+    policyHash: sha256Schema,
+    mode: { enum: ['all-or-nothing', 'skip-failures'] },
+    operation: batchEditOperationSchema,
+    scope: batchEditScopeSchema,
+    status: { enum: ['committed', 'partial'] },
+    resultItems: {
+      type: 'array', minItems: 1, maxItems: 1000,
+      items: batchEditItemResultSchema,
+    },
+    newStates: {
+      type: 'array', minItems: 1, maxItems: 1000,
+      items: batchEditItemStateSchema,
+    },
+    affectedItemCount: { type: 'integer', minimum: 1, maximum: 1000 },
+    appliedItemCount: { type: 'integer', minimum: 1, maximum: 1000 },
+    skippedItemCount: { type: 'integer', minimum: 0, maximum: 1000 },
+    unchangedItemCount: { type: 'integer', minimum: 0, maximum: 1000 },
+    invalidationCount: { type: 'integer', minimum: 1, maximum: 4000 },
+    costMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 100000000,
+    },
+    createdByClientId: idSchema,
+    createdAt: dateTimeSchema,
+    commandHash: sha256Schema,
+  },
+}
 const scriptBlockRoleSchema = {
   enum: [
     'hook',
@@ -10471,6 +10801,131 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           type: 'array',
           maxItems: 100,
           items: variantPortfolioPreflightRunSchema,
+        },
+        nextCursor: idSchema,
+      },
+    }),
+  ),
+  defineSchema('create-batch-edit-preflight-request', 1, 'Explicit recipe, format and item scope for a bounded batch edit impact preview', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'expectedBatchRevision',
+      'expectedBatchDefinitionHash',
+      'recipeIds',
+      'outputSpecIds',
+      'itemIds',
+      'operation',
+    ],
+    properties: {
+      expectedBatchRevision: {
+        type: 'integer', minimum: 1, maximum: 1000000,
+      },
+      expectedBatchDefinitionHash: sha256Schema,
+      recipeIds: {
+        type: 'array', minItems: 1, maxItems: 1000,
+        uniqueItems: true, items: idSchema,
+      },
+      outputSpecIds: {
+        type: 'array', minItems: 1, maxItems: 1000,
+        uniqueItems: true, items: idSchema,
+      },
+      itemIds: {
+        type: 'array', minItems: 1, maxItems: 1000,
+        uniqueItems: true, items: idSchema,
+      },
+      operation: batchEditOperationSchema,
+      mode: { enum: ['all-or-nothing', 'skip-failures'] },
+    },
+  }),
+  defineSchema('batch-edit-preflight-mutated', 1, 'Persisted impact preview, sampled diff, protected conflicts, invalidations, cost and signed commit token',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['preflight', 'replayed'],
+      properties: {
+        preflight: batchEditPreflightSchema,
+        replayed: { type: 'boolean' },
+        commitToken: {
+          type: 'string',
+          minLength: 32,
+          maxLength: 4096,
+          pattern: '^[!-~]+$',
+        },
+      },
+    }),
+  ),
+  defineSchema('batch-edit-preflight-read', 1, 'Read one immutable batch edit impact preview',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['preflight'],
+      properties: { preflight: batchEditPreflightSchema },
+    }),
+  ),
+  defineSchema('batch-edit-preflight-page', 1, 'Cursor page of immutable batch edit impact previews',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['preflights'],
+      properties: {
+        preflights: {
+          type: 'array',
+          maxItems: 100,
+          items: batchEditPreflightSchema,
+        },
+        nextCursor: idSchema,
+      },
+    }),
+  ),
+  defineSchema('commit-batch-edit-request', 1, 'Commit one exact signed batch edit preflight without hidden targets', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'expectedPreflightHash',
+      'expectedScopeHash',
+      'commitToken',
+    ],
+    properties: {
+      expectedPreflightHash: sha256Schema,
+      expectedScopeHash: sha256Schema,
+      commitToken: {
+        type: 'string',
+        minLength: 32,
+        maxLength: 4096,
+        pattern: '^[!-~]+$',
+      },
+    },
+  }),
+  defineSchema('batch-edit-command-mutated', 1, 'Atomic or skip-failures batch edit command with one durable result per explicit item',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['command', 'replayed'],
+      properties: {
+        command: batchEditCommandSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('batch-edit-command-read', 1, 'Read one immutable batch edit command and its item results',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['command'],
+      properties: { command: batchEditCommandSchema },
+    }),
+  ),
+  defineSchema('batch-edit-command-page', 1, 'Cursor page of immutable batch edit commands',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['commands'],
+      properties: {
+        commands: {
+          type: 'array',
+          maxItems: 100,
+          items: batchEditCommandSchema,
         },
         nextCursor: idSchema,
       },

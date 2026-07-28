@@ -2,13 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  applyBatchEdit,
   batchProgress,
   cancelProductionBatch,
   createProductionBatch,
   deriveBatchStatus,
   hydrateProductionBatch,
-  previewBatchEdit,
   resumeProductionBatch,
   retryBatchStep,
   transitionBatchItem,
@@ -408,38 +406,4 @@ test('T-FR-080 rejects incompatible dimensions, stale transitions, and integrity
     }),
     /state does not match/,
   )
-})
-
-test('T-FR-086 previews protected impacts and applies explicit transaction policy', () => {
-  for (const operation of [
-    'replace-cta',
-    'subtitle-style',
-    'brand-kit',
-  ]) {
-    const command = {
-      id: operation,
-      recipeIds: ['recipe-one', 'recipe-two'],
-      formatIds: ['9:16'],
-      targetIds: ['safe', 'protected'],
-      operation,
-      value: 'new-value',
-      policy: 'skip-failures',
-    }
-    const preview = previewBatchEdit(command, {
-      protectedTargetIds: ['protected'],
-      itemCosts: { 'recipe-one:9:16:safe': 1 },
-    })
-    assert.equal(preview.conflicts.length, 2)
-    assert.ok(preview.sampleDiff.length)
-    const result = applyBatchEdit(command, preview)
-    assert.equal(result.status, 'partial')
-    assert.ok(result.results.some((entry) => entry.status === 'applied'))
-    assert.equal(
-      applyBatchEdit(
-        { ...command, policy: 'all-or-nothing' },
-        preview,
-      ).status,
-      'rolled-back',
-    )
-  }
 })

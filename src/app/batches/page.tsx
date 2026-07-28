@@ -455,6 +455,100 @@ interface VariantPortfolioPreflightRun {
   runHash: string
 }
 
+type BatchEditOperationType =
+  | 'replace-cta'
+  | 'subtitle-style'
+  | 'brand-kit'
+type BatchEditMode = 'all-or-nothing' | 'skip-failures'
+
+interface BatchEditPreflightRun {
+  id: string
+  batchRevision: number
+  batchDefinitionHash: string
+  mode: BatchEditMode
+  operation: {
+    type: BatchEditOperationType
+    valueRef: string
+  }
+  scope: {
+    recipeIds: string[]
+    outputSpecIds: string[]
+    itemIds: string[]
+    scopeHash: string
+  }
+  status: 'ready' | 'partial-ready' | 'blocked' | 'no-change'
+  budgetRemainingMinorUnits: number
+  affectedItemCount: number
+  applicableItemCount: number
+  protectedConflictCount: number
+  unchangedItemCount: number
+  invalidationCount: number
+  estimatedCostMinorUnits: number
+  budgetExceeded: boolean
+  impacts: Array<{
+    itemId: string
+    recipeId: string
+    variantId: string
+    outputSpecId: string
+    targetRef: string
+    disposition: 'applicable' | 'protected' | 'unchanged'
+    beforeValueRef?: string
+    afterValueRef: string
+    protectedConflict: boolean
+    conflictCodes: string[]
+    invalidatedSteps: StepName[]
+    estimatedCostMinorUnits: number
+  }>
+  sampleDiff: Array<{
+    itemId: string
+    recipeId: string
+    outputSpecId: string
+    targetRef: string
+    before: { mode: 'inherit' | 'override'; valueRef?: string }
+    after: { mode: 'override'; valueRef: string }
+    disposition: 'applicable' | 'protected' | 'unchanged'
+    conflictCodes: string[]
+    diffHash: string
+  }>
+  warningCodes: string[]
+  confirmationExpiresAt?: string
+  costFingerprint: string
+  createdAt: string
+  preflightHash: string
+}
+
+interface BatchEditCommand {
+  id: string
+  preflightId: string
+  mode: BatchEditMode
+  operation: {
+    type: BatchEditOperationType
+    valueRef: string
+  }
+  scope: BatchEditPreflightRun['scope']
+  status: 'committed' | 'partial'
+  resultItems: Array<{
+    itemId: string
+    recipeId: string
+    variantId: string
+    outputSpecId: string
+    targetRef: string
+    status: 'applied' | 'skipped' | 'unchanged'
+    conflictCodes: string[]
+    invalidatedSteps: StepName[]
+    costMinorUnits: number
+    resultHash: string
+  }>
+  affectedItemCount: number
+  appliedItemCount: number
+  skippedItemCount: number
+  unchangedItemCount: number
+  invalidationCount: number
+  costMinorUnits: number
+  createdAt: string
+  commandHash: string
+}
+
 type ScriptReviewDecision =
   | {
       targetKind: 'block'
@@ -523,6 +617,7 @@ interface ProductionBatch {
   }
   createdAt: string
   updatedAt: string
+  definitionHash: string
 }
 
 const STATUSES: { value: 'all' | BatchStatus; label: string }[] = [
@@ -769,6 +864,28 @@ export default function BatchesPage() {
     useState('12')
   const [portfolioConfirmationToken, setPortfolioConfirmationToken] =
     useState<string | null>(null)
+  const [batchEditPreflights, setBatchEditPreflights] =
+    useState<BatchEditPreflightRun[]>([])
+  const [activeBatchEditPreflightId, setActiveBatchEditPreflightId] =
+    useState<string | null>(null)
+  const [batchEditCommands, setBatchEditCommands] =
+    useState<BatchEditCommand[]>([])
+  const [activeBatchEditCommandId, setActiveBatchEditCommandId] =
+    useState<string | null>(null)
+  const [batchEditRecipeIds, setBatchEditRecipeIds] =
+    useState<Set<string>>(new Set())
+  const [batchEditOutputSpecIds, setBatchEditOutputSpecIds] =
+    useState<Set<string>>(new Set())
+  const [batchEditItemIds, setBatchEditItemIds] =
+    useState<Set<string>>(new Set())
+  const [batchEditOperationType, setBatchEditOperationType] =
+    useState<BatchEditOperationType>('subtitle-style')
+  const [batchEditValueRef, setBatchEditValueRef] =
+    useState('subtitle-style-dynamic')
+  const [batchEditMode, setBatchEditMode] =
+    useState<BatchEditMode>('all-or-nothing')
+  const [batchEditCommitToken, setBatchEditCommitToken] =
+    useState<string | null>(null)
   const [alignmentLoading, setAlignmentLoading] = useState(false)
   const [scriptComposerOpen, setScriptComposerOpen] = useState(false)
   const [scriptTitle, setScriptTitle] = useState('')
@@ -785,12 +902,36 @@ export default function BatchesPage() {
   const variantPortfolioIdempotencyKey = useRef<string | null>(null)
   const variantPortfolioConfirmationIdempotencyKey =
     useRef<string | null>(null)
+  const batchEditPreflightIdempotencyKey =
+    useRef<string | null>(null)
+  const batchEditCommitIdempotencyKey =
+    useRef<string | null>(null)
 
   function resetVariantPortfolio() {
     setActiveVariantPortfolioPreflightId(null)
     setPortfolioConfirmationToken(null)
     variantPortfolioIdempotencyKey.current = null
     variantPortfolioConfirmationIdempotencyKey.current = null
+  }
+
+  function invalidateBatchEditDraft() {
+    setActiveBatchEditPreflightId(null)
+    setBatchEditCommitToken(null)
+    batchEditPreflightIdempotencyKey.current = null
+    batchEditCommitIdempotencyKey.current = null
+  }
+
+  function resetBatchEdit() {
+    setBatchEditPreflights([])
+    setActiveBatchEditPreflightId(null)
+    setBatchEditCommands([])
+    setActiveBatchEditCommandId(null)
+    setBatchEditRecipeIds(new Set())
+    setBatchEditOutputSpecIds(new Set())
+    setBatchEditItemIds(new Set())
+    setBatchEditCommitToken(null)
+    batchEditPreflightIdempotencyKey.current = null
+    batchEditCommitIdempotencyKey.current = null
   }
 
   const fetchBatches = useCallback(async (quiet = false) => {
@@ -919,6 +1060,7 @@ export default function BatchesPage() {
       setVariantPortfolioPreflights([])
       setActiveVariantPortfolioPreflightId(null)
       setPortfolioConfirmationToken(null)
+      resetBatchEdit()
       return
     }
     const controller = new AbortController()
@@ -932,6 +1074,8 @@ export default function BatchesPage() {
           compatibilityGraphsResponse,
           variantRecipesResponse,
           variantPortfolioPreflightsResponse,
+          batchEditPreflightsResponse,
+          batchEditCommandsResponse,
         ] = await Promise.all([
           fetch(
             `/v1/projects/${encodeURIComponent(selectedBatch!.projectId)}/workspace`,
@@ -981,6 +1125,22 @@ export default function BatchesPage() {
               cache: 'no-store',
             },
           ),
+          fetch(
+            `/v1/batches/${encodeURIComponent(selectedBatch!.id)}/edit-preflights?limit=100`,
+            {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+              cache: 'no-store',
+            },
+          ),
+          fetch(
+            `/v1/batches/${encodeURIComponent(selectedBatch!.id)}/edit-commands?limit=100`,
+            {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+              cache: 'no-store',
+            },
+          ),
         ])
         if (
           workspaceResponse.status === 401 ||
@@ -988,7 +1148,9 @@ export default function BatchesPage() {
           takeLibrariesResponse.status === 401 ||
           compatibilityGraphsResponse.status === 401 ||
           variantRecipesResponse.status === 401 ||
-          variantPortfolioPreflightsResponse.status === 401
+          variantPortfolioPreflightsResponse.status === 401 ||
+          batchEditPreflightsResponse.status === 401 ||
+          batchEditCommandsResponse.status === 401
         ) {
           router.replace('/login')
           return
@@ -1010,6 +1172,12 @@ export default function BatchesPage() {
             ApiEnvelope<{
               preflights: VariantPortfolioPreflightRun[]
             }>
+        const batchEditPreflightsPayload =
+          await batchEditPreflightsResponse.json() as
+            ApiEnvelope<{ preflights: BatchEditPreflightRun[] }>
+        const batchEditCommandsPayload =
+          await batchEditCommandsResponse.json() as
+            ApiEnvelope<{ commands: BatchEditCommand[] }>
         if (!workspaceResponse.ok || !workspacePayload.data) {
           throw new Error(apiError(
             workspacePayload,
@@ -1053,6 +1221,24 @@ export default function BatchesPage() {
           throw new Error(apiError(
             variantPortfolioPreflightsPayload,
             'Não foi possível carregar os preflights de portfólio.',
+          ))
+        }
+        if (
+          !batchEditPreflightsResponse.ok ||
+          !batchEditPreflightsPayload.data
+        ) {
+          throw new Error(apiError(
+            batchEditPreflightsPayload,
+            'Não foi possível carregar os previews de edição em lote.',
+          ))
+        }
+        if (
+          !batchEditCommandsResponse.ok ||
+          !batchEditCommandsPayload.data
+        ) {
+          throw new Error(apiError(
+            batchEditCommandsPayload,
+            'Não foi possível carregar os resultados de edição em lote.',
           ))
         }
         const allowedArtifacts = new Set(
@@ -1104,6 +1290,33 @@ export default function BatchesPage() {
           current && portfolioRuns.some((run) => run.id === current)
             ? current
             : portfolioRuns[0]?.id ?? null)
+        const editPreflights =
+          batchEditPreflightsPayload.data.preflights
+        setBatchEditPreflights(editPreflights)
+        setActiveBatchEditPreflightId((current) =>
+          current && editPreflights.some((run) => run.id === current)
+            ? current
+            : editPreflights[0]?.id ?? null)
+        const editCommands = batchEditCommandsPayload.data.commands
+        setBatchEditCommands(editCommands)
+        setActiveBatchEditCommandId((current) =>
+          current && editCommands.some((command) =>
+            command.id === current)
+            ? current
+            : editCommands[0]?.id ?? null)
+        setBatchEditRecipeIds(new Set(
+          selectedBatch!.recipes.map((recipe) => recipe.id),
+        ))
+        setBatchEditOutputSpecIds(new Set(
+          selectedBatch!.variants.map((variant) =>
+            variant.outputSpecId),
+        ))
+        setBatchEditItemIds(new Set(
+          selectedBatch!.items.map((item) => item.id),
+        ))
+        setBatchEditCommitToken(null)
+        batchEditPreflightIdempotencyKey.current = null
+        batchEditCommitIdempotencyKey.current = null
         const project = projects.find((candidate) =>
           candidate.id === selectedBatch!.projectId)
         setScriptLocale(project?.locale || 'pt-BR')
@@ -1194,6 +1407,53 @@ export default function BatchesPage() {
       preflight.id === activeVariantPortfolioPreflightId) ??
     activeVariantPortfolioPreflights[0] ??
     null
+  const activeBatchEditPreflight =
+    batchEditPreflights.find((preflight) =>
+      preflight.id === activeBatchEditPreflightId) ?? null
+  const activeBatchEditCommand =
+    batchEditCommands.find((command) =>
+      command.id === activeBatchEditCommandId) ??
+    batchEditCommands[0] ??
+    null
+  const batchVariantsById = useMemo(
+    () => new Map(
+      (selectedBatch?.variants ?? []).map((variant) => [
+        variant.id,
+        variant,
+      ]),
+    ),
+    [selectedBatch],
+  )
+  const batchEditEligibleItems = useMemo(
+    () => (selectedBatch?.items ?? []).filter((item) => {
+      const outputSpecId =
+        batchVariantsById.get(item.variantId)?.outputSpecId
+      return batchEditRecipeIds.has(item.recipeId) &&
+        Boolean(outputSpecId) &&
+        batchEditOutputSpecIds.has(outputSpecId!)
+    }),
+    [
+      batchEditOutputSpecIds,
+      batchEditRecipeIds,
+      batchVariantsById,
+      selectedBatch,
+    ],
+  )
+  const batchEditDraftItems = useMemo(
+    () => batchEditEligibleItems.filter((item) =>
+      batchEditItemIds.has(item.id)),
+    [batchEditEligibleItems, batchEditItemIds],
+  )
+  const batchEditDraftRecipeIds = useMemo(
+    () => [...new Set(batchEditDraftItems.map((item) =>
+      item.recipeId))].toSorted(),
+    [batchEditDraftItems],
+  )
+  const batchEditDraftOutputSpecIds = useMemo(
+    () => [...new Set(batchEditDraftItems.map((item) =>
+      batchVariantsById.get(item.variantId)!.outputSpecId))].toSorted(),
+    [batchEditDraftItems, batchVariantsById],
+  )
   const variantRecipeCandidate = useMemo(() => {
     if (!activeCompatibilityGraph || !selectedBatch) return null
     const nodesByRole = {
@@ -2141,6 +2401,659 @@ export default function BatchesPage() {
     }
   }
 
+  function toggleBatchEditRecipe(recipeId: string) {
+    if (!selectedBatch) return
+    const next = new Set(batchEditRecipeIds)
+    if (next.has(recipeId)) next.delete(recipeId)
+    else next.add(recipeId)
+    setBatchEditRecipeIds(next)
+    setBatchEditItemIds(new Set(
+      selectedBatch.items
+        .filter((item) => {
+          const outputSpecId =
+            batchVariantsById.get(item.variantId)?.outputSpecId
+          return next.has(item.recipeId) &&
+            Boolean(outputSpecId) &&
+            batchEditOutputSpecIds.has(outputSpecId!)
+        })
+        .map((item) => item.id),
+    ))
+    invalidateBatchEditDraft()
+  }
+
+  function toggleBatchEditOutputSpec(outputSpecId: string) {
+    if (!selectedBatch) return
+    const next = new Set(batchEditOutputSpecIds)
+    if (next.has(outputSpecId)) next.delete(outputSpecId)
+    else next.add(outputSpecId)
+    setBatchEditOutputSpecIds(next)
+    setBatchEditItemIds(new Set(
+      selectedBatch.items
+        .filter((item) => {
+          const itemOutputSpecId =
+            batchVariantsById.get(item.variantId)?.outputSpecId
+          return batchEditRecipeIds.has(item.recipeId) &&
+            Boolean(itemOutputSpecId) &&
+            next.has(itemOutputSpecId!)
+        })
+        .map((item) => item.id),
+    ))
+    invalidateBatchEditDraft()
+  }
+
+  function toggleBatchEditItem(itemId: string) {
+    const next = new Set(batchEditItemIds)
+    if (next.has(itemId)) next.delete(itemId)
+    else next.add(itemId)
+    setBatchEditItemIds(next)
+    invalidateBatchEditDraft()
+  }
+
+  async function createBatchEditPreflight() {
+    if (!selectedBatch) return
+    const valueRef = batchEditValueRef.trim()
+    if (
+      batchEditDraftItems.length === 0 ||
+      batchEditDraftRecipeIds.length === 0 ||
+      batchEditDraftOutputSpecIds.length === 0
+    ) {
+      setNotice(
+        'Selecione ao menos uma receita, um formato e um item para editar.',
+      )
+      return
+    }
+    if (
+      valueRef.length < 3 ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/.test(valueRef)
+    ) {
+      setNotice(
+        'Informe uma referência válida para CTA, legenda ou Brand Kit.',
+      )
+      return
+    }
+    setBusy(true)
+    setNotice(null)
+    batchEditPreflightIdempotencyKey.current ??=
+      globalThis.crypto.randomUUID()
+    try {
+      const response = await fetch(
+        `/v1/batches/${encodeURIComponent(selectedBatch.id)}/edit-preflights`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key':
+              batchEditPreflightIdempotencyKey.current,
+          },
+          body: JSON.stringify({
+            expectedBatchRevision: selectedBatch.revision,
+            expectedBatchDefinitionHash: selectedBatch.definitionHash,
+            recipeIds: batchEditDraftRecipeIds,
+            outputSpecIds: batchEditDraftOutputSpecIds,
+            itemIds: batchEditDraftItems.map((item) => item.id),
+            operation: {
+              type: batchEditOperationType,
+              valueRef,
+            },
+            mode: batchEditMode,
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        preflight: BatchEditPreflightRun
+        replayed: boolean
+        commitToken?: string
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível calcular o impacto da edição em lote.',
+        ))
+      }
+      const preflight = payload.data.preflight
+      setBatchEditPreflights((current) => [
+        preflight,
+        ...current.filter((candidate) =>
+          candidate.id !== preflight.id),
+      ])
+      setActiveBatchEditPreflightId(preflight.id)
+      setBatchEditCommitToken(payload.data.commitToken ?? null)
+      batchEditPreflightIdempotencyKey.current = null
+      batchEditCommitIdempotencyKey.current = null
+      setNotice(
+        preflight.status === 'blocked'
+          ? `Preview bloqueado: ${preflight.protectedConflictCount} conflito(s) protegido(s) e custo de US$ ${(preflight.estimatedCostMinorUnits / 100).toFixed(2)}.`
+          : preflight.status === 'no-change'
+            ? 'Preview concluído: todos os itens já têm o valor solicitado.'
+            : `Preview pronto: ${preflight.applicableItemCount} item(ns), ${preflight.invalidationCount} invalidação(ões) e custo de US$ ${(preflight.estimatedCostMinorUnits / 100).toFixed(2)}.`,
+      )
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível calcular o impacto da edição em lote.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function commitBatchEdit() {
+    if (
+      !selectedBatch ||
+      !activeBatchEditPreflight ||
+      !batchEditCommitToken
+    ) {
+      setNotice(
+        'Gere um preview atual antes de aplicar a edição em lote.',
+      )
+      return
+    }
+    if (
+      activeBatchEditPreflight.status !== 'ready' &&
+      activeBatchEditPreflight.status !== 'partial-ready'
+    ) {
+      setNotice('Este preview não pode ser aplicado.')
+      return
+    }
+    setBusy(true)
+    setNotice(null)
+    batchEditCommitIdempotencyKey.current ??=
+      globalThis.crypto.randomUUID()
+    try {
+      const response = await fetch(
+        `/v1/batches/${encodeURIComponent(selectedBatch.id)}/edit-preflights/${encodeURIComponent(activeBatchEditPreflight.id)}/commit`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key':
+              batchEditCommitIdempotencyKey.current,
+          },
+          body: JSON.stringify({
+            expectedPreflightHash:
+              activeBatchEditPreflight.preflightHash,
+            expectedScopeHash:
+              activeBatchEditPreflight.scope.scopeHash,
+            commitToken: batchEditCommitToken,
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        command: BatchEditCommand
+        replayed: boolean
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível aplicar a edição em lote.',
+        ))
+      }
+      const command = payload.data.command
+      setBatchEditCommands((current) => [
+        command,
+        ...current.filter((candidate) =>
+          candidate.id !== command.id),
+      ])
+      setActiveBatchEditCommandId(command.id)
+      setBatchEditCommitToken(null)
+      batchEditCommitIdempotencyKey.current = null
+      setNotice(
+        `Edição aplicada: ${command.appliedItemCount} item(ns), ${command.skippedItemCount} ignorado(s) e ${command.invalidationCount} etapa(s) invalidadas.`,
+      )
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível aplicar a edição em lote.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const batchEditPanel = selectedBatch ? (
+                            <section
+                              className="mt-7 border-t border-dashed border-[#55b8b1]/20 pt-6"
+                              data-testid="batch-edit-panel"
+                            >
+                              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#6dc8c1]">
+                                    <span className="grid h-5 w-5 place-items-center rounded border border-[#55b8b1]/35 font-mono text-[7px]">Δ</span>
+                                    Cut sheet
+                                  </div>
+                                  <h4 className="mt-2 text-base font-semibold tracking-[-0.02em] text-[#ede7dd]">
+                                    Edição em lote. Nada fica implícito.
+                                  </h4>
+                                  <p className="mt-1 max-w-2xl text-[10px] leading-4 text-[#746f67]">
+                                    Escolha receitas, formatos e itens. O Apollo mostra o diff, conflitos protegidos, etapas invalidadas e custo antes de alterar qualquer saída.
+                                  </p>
+                                </div>
+                                <div className="flex shrink-0 flex-wrap gap-2">
+                                  {batchEditPreflights.length > 0 ? (
+                                    <label>
+                                      <span className="mb-1 block text-[8px] uppercase tracking-[0.12em] text-[#625e57]">
+                                        Preview salvo
+                                      </span>
+                                      <select
+                                        aria-label="Escolher preview de edição em lote"
+                                        className="h-9 max-w-[200px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#55b8b1]/45"
+                                        onChange={(event) => {
+                                          setActiveBatchEditPreflightId(
+                                            event.target.value || null,
+                                          )
+                                          setBatchEditCommitToken(null)
+                                          batchEditCommitIdempotencyKey.current = null
+                                        }}
+                                        value={activeBatchEditPreflightId ?? ''}
+                                      >
+                                        <option value="">Rascunho atual</option>
+                                        {batchEditPreflights.map((preflight) => (
+                                          <option key={preflight.id} value={preflight.id}>
+                                            {preflight.operation.type} · {preflight.affectedItemCount} itens · {elapsed(preflight.createdAt)}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                  ) : null}
+                                  {batchEditCommands.length > 0 ? (
+                                    <label>
+                                      <span className="mb-1 block text-[8px] uppercase tracking-[0.12em] text-[#625e57]">
+                                        Resultado
+                                      </span>
+                                      <select
+                                        aria-label="Escolher resultado de edição em lote"
+                                        className="h-9 max-w-[200px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#55b8b1]/45"
+                                        onChange={(event) =>
+                                          setActiveBatchEditCommandId(
+                                            event.target.value,
+                                          )}
+                                        value={activeBatchEditCommand?.id ?? ''}
+                                      >
+                                        {batchEditCommands.map((command) => (
+                                          <option key={command.id} value={command.id}>
+                                            {command.operation.type} · {command.appliedItemCount} aplicados · {elapsed(command.createdAt)}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              <div className="mt-5 grid gap-3 lg:grid-cols-3">
+                                <article className="rounded-xl border border-[#55b8b1]/16 bg-[#55b8b1]/[0.025] p-4">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#78cfc8]">
+                                      01 · Receitas
+                                    </p>
+                                    <span className="font-mono text-[8px] text-[#648985]">
+                                      {batchEditRecipeIds.size}/{selectedBatch.recipes.length}
+                                    </span>
+                                  </div>
+                                  <div className="mt-3 max-h-32 space-y-1.5 overflow-y-auto pr-1">
+                                    {selectedBatch.recipes.map((recipe) => (
+                                      <label
+                                        className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 transition ${
+                                          batchEditRecipeIds.has(recipe.id)
+                                            ? 'border-[#55b8b1]/28 bg-[#55b8b1]/[0.07] text-[#c7e8e5]'
+                                            : 'border-white/[0.055] bg-black/10 text-[#77736c]'
+                                        }`}
+                                        key={recipe.id}
+                                      >
+                                        <input
+                                          checked={batchEditRecipeIds.has(recipe.id)}
+                                          className="h-3.5 w-3.5 accent-[#55b8b1]"
+                                          onChange={() =>
+                                            toggleBatchEditRecipe(recipe.id)}
+                                          type="checkbox"
+                                        />
+                                        <span className="min-w-0 truncate text-[9px]">
+                                          {recipe.name}
+                                        </span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </article>
+
+                                <article className="rounded-xl border border-[#55b8b1]/16 bg-[#55b8b1]/[0.025] p-4">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#78cfc8]">
+                                      02 · Formatos
+                                    </p>
+                                    <span className="font-mono text-[8px] text-[#648985]">
+                                      {batchEditOutputSpecIds.size}
+                                    </span>
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    {[...new Set(selectedBatch.variants.map((variant) =>
+                                      variant.outputSpecId))].map((outputSpecId) => (
+                                      <label
+                                        className={`cursor-pointer rounded-lg border px-3 py-2 font-mono text-[9px] transition ${
+                                          batchEditOutputSpecIds.has(outputSpecId)
+                                            ? 'border-[#55b8b1]/35 bg-[#55b8b1]/10 text-[#c7e8e5]'
+                                            : 'border-white/[0.06] bg-black/10 text-[#716d66]'
+                                        }`}
+                                        key={outputSpecId}
+                                      >
+                                        <input
+                                          checked={batchEditOutputSpecIds.has(outputSpecId)}
+                                          className="sr-only"
+                                          onChange={() =>
+                                            toggleBatchEditOutputSpec(outputSpecId)}
+                                          type="checkbox"
+                                        />
+                                        {outputSpecId}
+                                      </label>
+                                    ))}
+                                  </div>
+                                  <p className="mt-3 text-[8px] leading-3 text-[#5f7774]">
+                                    A seleção de formato filtra imediatamente os targets elegíveis.
+                                  </p>
+                                </article>
+
+                                <article className="rounded-xl border border-[#55b8b1]/16 bg-[#55b8b1]/[0.025] p-4">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#78cfc8]">
+                                      03 · Targets
+                                    </p>
+                                    <span className="font-mono text-[8px] text-[#648985]">
+                                      {batchEditDraftItems.length}/{batchEditEligibleItems.length}
+                                    </span>
+                                  </div>
+                                  <div className="mt-3 max-h-32 space-y-1.5 overflow-y-auto pr-1">
+                                    {batchEditEligibleItems.length > 0 ? (
+                                      batchEditEligibleItems.map((item) => {
+                                        const variant =
+                                          batchVariantsById.get(item.variantId)
+                                        return (
+                                          <label
+                                            className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 transition ${
+                                              batchEditItemIds.has(item.id)
+                                                ? 'border-[#55b8b1]/28 bg-[#55b8b1]/[0.07]'
+                                                : 'border-white/[0.055] bg-black/10'
+                                            }`}
+                                            key={item.id}
+                                          >
+                                            <input
+                                              checked={batchEditItemIds.has(item.id)}
+                                              className="h-3.5 w-3.5 accent-[#55b8b1]"
+                                              onChange={() =>
+                                                toggleBatchEditItem(item.id)}
+                                              type="checkbox"
+                                            />
+                                            <span className="min-w-0">
+                                              <span className="block truncate font-mono text-[8px] text-[#bbb5aa]">
+                                                {item.key}
+                                              </span>
+                                              <span className="mt-0.5 block text-[7px] text-[#625e57]">
+                                                {variant?.outputSpecId} · {variant?.locale}
+                                              </span>
+                                            </span>
+                                          </label>
+                                        )
+                                      })
+                                    ) : (
+                                      <p className="rounded-lg border border-[#b75555]/18 bg-[#b75555]/[0.04] p-3 text-[9px] text-[#aa7777]">
+                                        A combinação atual não contém itens.
+                                      </p>
+                                    )}
+                                  </div>
+                                </article>
+                              </div>
+
+                              <div className="mt-3 grid gap-3 rounded-xl border border-white/[0.07] bg-[#090909] p-4 lg:grid-cols-[170px_minmax(220px,1fr)_180px_auto] lg:items-end">
+                                <label>
+                                  <span className="mb-1.5 block text-[8px] font-semibold uppercase tracking-[0.12em] text-[#77736c]">
+                                    Alteração
+                                  </span>
+                                  <select
+                                    aria-label="Tipo de edição em lote"
+                                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#070707] px-3 text-[10px] text-[#d8d1c6] outline-none focus:border-[#55b8b1]/45"
+                                    onChange={(event) => {
+                                      const type = event.target.value as BatchEditOperationType
+                                      setBatchEditOperationType(type)
+                                      setBatchEditValueRef(
+                                        type === 'replace-cta'
+                                          ? 'cta-primary'
+                                          : type === 'subtitle-style'
+                                            ? 'subtitle-style-dynamic'
+                                            : 'brand-kit-current',
+                                      )
+                                      invalidateBatchEditDraft()
+                                    }}
+                                    value={batchEditOperationType}
+                                  >
+                                    <option value="replace-cta">Trocar CTA</option>
+                                    <option value="subtitle-style">Estilo de legenda</option>
+                                    <option value="brand-kit">Brand Kit</option>
+                                  </select>
+                                </label>
+                                <label className="min-w-0">
+                                  <span className="mb-1.5 block text-[8px] font-semibold uppercase tracking-[0.12em] text-[#77736c]">
+                                    Referência de destino
+                                  </span>
+                                  <input
+                                    aria-label="Referência da edição em lote"
+                                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#070707] px-3 font-mono text-[10px] text-[#d8d1c6] outline-none placeholder:text-[#55514b] focus:border-[#55b8b1]/45"
+                                    maxLength={128}
+                                    onChange={(event) => {
+                                      setBatchEditValueRef(event.target.value)
+                                      invalidateBatchEditDraft()
+                                    }}
+                                    placeholder="ID do CTA, estilo ou snapshot"
+                                    value={batchEditValueRef}
+                                  />
+                                </label>
+                                <label>
+                                  <span className="mb-1.5 block text-[8px] font-semibold uppercase tracking-[0.12em] text-[#77736c]">
+                                    Falhas protegidas
+                                  </span>
+                                  <select
+                                    aria-label="Política de falha da edição em lote"
+                                    className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#070707] px-3 text-[9px] text-[#d8d1c6] outline-none focus:border-[#55b8b1]/45"
+                                    onChange={(event) => {
+                                      setBatchEditMode(event.target.value as BatchEditMode)
+                                      invalidateBatchEditDraft()
+                                    }}
+                                    value={batchEditMode}
+                                  >
+                                    <option value="all-or-nothing">Tudo ou nada</option>
+                                    <option value="skip-failures">Ignorar protegidos</option>
+                                  </select>
+                                </label>
+                                <button
+                                  className="h-10 rounded-lg border border-[#55b8b1]/35 bg-[#55b8b1]/10 px-4 text-[10px] font-bold text-[#9ce0da] transition hover:bg-[#55b8b1]/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#55b8b1] disabled:cursor-not-allowed disabled:opacity-35"
+                                  data-testid="create-batch-edit-preflight"
+                                  disabled={busy || batchEditDraftItems.length === 0}
+                                  onClick={() => void createBatchEditPreflight()}
+                                  type="button"
+                                >
+                                  Calcular impacto
+                                </button>
+                              </div>
+
+                              <div className="mt-3 flex flex-wrap gap-1.5" data-testid="batch-edit-explicit-scope">
+                                <span className="rounded-full border border-[#55b8b1]/20 bg-[#55b8b1]/[0.05] px-2 py-1 text-[8px] text-[#80bdb8]">
+                                  {batchEditDraftRecipeIds.length} receita(s)
+                                </span>
+                                <span className="rounded-full border border-[#55b8b1]/20 bg-[#55b8b1]/[0.05] px-2 py-1 text-[8px] text-[#80bdb8]">
+                                  {batchEditDraftOutputSpecIds.join(', ') || '0 formatos'}
+                                </span>
+                                <span className="rounded-full border border-[#55b8b1]/20 bg-[#55b8b1]/[0.05] px-2 py-1 text-[8px] text-[#80bdb8]">
+                                  {batchEditDraftItems.length} target(s) explícitos
+                                </span>
+                              </div>
+
+                              {activeBatchEditPreflight ? (
+                                <div
+                                  className="mt-4 overflow-hidden rounded-xl border border-[#55b8b1]/18 bg-[#080b0b]"
+                                  data-testid={`batch-edit-preflight-${activeBatchEditPreflight.id}`}
+                                >
+                                  <div className="grid grid-cols-2 border-b border-[#55b8b1]/10 sm:grid-cols-4">
+                                    {[
+                                      ['Afetados', activeBatchEditPreflight.affectedItemCount],
+                                      ['Aplicáveis', activeBatchEditPreflight.applicableItemCount],
+                                      ['Protegidos', activeBatchEditPreflight.protectedConflictCount],
+                                      ['Invalidações', activeBatchEditPreflight.invalidationCount],
+                                    ].map(([label, value]) => (
+                                      <div className="border-b border-r border-[#55b8b1]/10 px-3 py-3 text-center last:border-r-0 sm:border-b-0" key={String(label)}>
+                                        <p className="font-mono text-lg font-semibold text-[#d4ebe9]">{value}</p>
+                                        <p className="mt-1 text-[7px] uppercase tracking-[0.12em] text-[#6c9b97]">{label}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="grid gap-3 p-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(260px,.7fr)]">
+                                    <article className="min-w-0">
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div>
+                                          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#78cfc8]">
+                                            Diff amostrado
+                                          </p>
+                                          <p className="mt-1 text-[8px] text-[#61706e]">
+                                            {activeBatchEditPreflight.sampleDiff.length} de {activeBatchEditPreflight.affectedItemCount} targets · scope {activeBatchEditPreflight.scope.scopeHash.slice(0, 10)}
+                                          </p>
+                                        </div>
+                                        <span className={`rounded-full border px-2 py-1 text-[8px] font-semibold ${
+                                          activeBatchEditPreflight.status === 'ready'
+                                            ? 'border-[#629975]/25 bg-[#629975]/10 text-[#84b795]'
+                                            : activeBatchEditPreflight.status === 'partial-ready'
+                                              ? 'border-[#c09a5a]/25 bg-[#c09a5a]/10 text-[#dfbd83]'
+                                              : 'border-[#b75555]/25 bg-[#b75555]/10 text-[#cf7777]'
+                                        }`}>
+                                          {activeBatchEditPreflight.status}
+                                        </span>
+                                      </div>
+                                      <div className="mt-3 space-y-2">
+                                        {activeBatchEditPreflight.sampleDiff.map((diff) => (
+                                          <div className="grid gap-2 rounded-lg border border-white/[0.06] bg-white/[0.018] p-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center" key={diff.diffHash}>
+                                            <div className="min-w-0">
+                                              <p className="truncate font-mono text-[8px] text-[#77736c]">{diff.itemId}</p>
+                                              <p className="mt-1 truncate text-[9px] text-[#9a958c]">
+                                                {diff.before.mode === 'inherit'
+                                                  ? 'Herdar padrão'
+                                                  : diff.before.valueRef}
+                                              </p>
+                                            </div>
+                                            <span className="text-center text-[#55b8b1]">→</span>
+                                            <div className="min-w-0 sm:text-right">
+                                              <p className="truncate font-mono text-[8px] text-[#6d9e9a]">{diff.outputSpecId}</p>
+                                              <p className="mt-1 truncate text-[9px] font-semibold text-[#c8e6e3]">{diff.after.valueRef}</p>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </article>
+
+                                    <article className="rounded-lg border border-white/[0.06] bg-[#070909] p-4">
+                                      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#78cfc8]">
+                                        Antes de aplicar
+                                      </p>
+                                      <div className="mt-3 space-y-2">
+                                        {[
+                                          ['Custo', `US$ ${(activeBatchEditPreflight.estimatedCostMinorUnits / 100).toFixed(2)}`],
+                                          ['Orçamento livre', `US$ ${(activeBatchEditPreflight.budgetRemainingMinorUnits / 100).toFixed(2)}`],
+                                          ['Modo', activeBatchEditPreflight.mode === 'all-or-nothing' ? 'Tudo ou nada' : 'Ignorar protegidos'],
+                                          ['Sem mudança', activeBatchEditPreflight.unchangedItemCount],
+                                        ].map(([label, value]) => (
+                                          <div className="flex items-center justify-between gap-3 border-b border-white/[0.045] pb-2 text-[9px]" key={String(label)}>
+                                            <span className="text-[#746f67]">{label}</span>
+                                            <span className="font-mono text-[#aaa49a]">{value}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                      {activeBatchEditPreflight.warningCodes.length > 0 ? (
+                                        <p className="mt-3 break-words text-[7px] leading-3 text-[#8d7554]">
+                                          {activeBatchEditPreflight.warningCodes.join(' · ')}
+                                        </p>
+                                      ) : null}
+                                      <button
+                                        className="mt-4 h-10 w-full rounded-lg bg-[#55b8b1] px-4 text-[10px] font-black text-[#07100f] transition hover:bg-[#70d0c9] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#55b8b1] disabled:cursor-not-allowed disabled:bg-[#263d3b] disabled:text-[#63827f]"
+                                        data-testid="commit-batch-edit"
+                                        disabled={
+                                          busy ||
+                                          !batchEditCommitToken ||
+                                          (
+                                            activeBatchEditPreflight.status !== 'ready' &&
+                                            activeBatchEditPreflight.status !== 'partial-ready'
+                                          )
+                                        }
+                                        onClick={() => void commitBatchEdit()}
+                                        type="button"
+                                      >
+                                        {batchEditCommitToken
+                                          ? `Aplicar em ${activeBatchEditPreflight.applicableItemCount} item(ns)`
+                                          : 'Recalcule para aplicar'}
+                                      </button>
+                                    </article>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="mt-4 rounded-xl border border-[#55b8b1]/14 bg-[#55b8b1]/[0.025] px-4 py-4">
+                                  <p className="text-[10px] font-semibold text-[#8fbfbb]">
+                                    O primeiro clique apenas calcula.
+                                  </p>
+                                  <p className="mt-1 text-[9px] leading-4 text-[#61706e]">
+                                    A aplicação exige o token assinado retornado pelo preview e falha se lote, scope, custo ou estado dos itens mudarem.
+                                  </p>
+                                </div>
+                              )}
+
+                              {activeBatchEditCommand ? (
+                                <article
+                                  className="mt-4 rounded-xl border border-[#629975]/18 bg-[#629975]/[0.035] p-4"
+                                  data-testid={`batch-edit-command-${activeBatchEditCommand.id}`}
+                                >
+                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#84b795]">
+                                        Resultado por item
+                                      </p>
+                                      <p className="mt-1 text-[10px] text-[#9b9a8e]">
+                                        {activeBatchEditCommand.appliedItemCount} aplicado(s) · {activeBatchEditCommand.skippedItemCount} ignorado(s) · {activeBatchEditCommand.unchangedItemCount} sem mudança
+                                      </p>
+                                    </div>
+                                    <span className="font-mono text-[8px] text-[#65866e]">
+                                      {activeBatchEditCommand.commandHash.slice(0, 12)}
+                                    </span>
+                                  </div>
+                                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                    {activeBatchEditCommand.resultItems.map((result) => (
+                                      <div className="rounded-lg border border-white/[0.06] bg-black/10 p-3" key={result.resultHash}>
+                                        <div className="flex items-center justify-between gap-2">
+                                          <p className="truncate font-mono text-[8px] text-[#77736c]">{result.itemId}</p>
+                                          <span className={`rounded px-1.5 py-0.5 text-[7px] font-semibold ${
+                                            result.status === 'applied'
+                                              ? 'bg-[#629975]/12 text-[#84b795]'
+                                              : result.status === 'skipped'
+                                                ? 'bg-[#c09a5a]/12 text-[#dfbd83]'
+                                                : 'bg-white/[0.05] text-[#8a867e]'
+                                          }`}>
+                                            {result.status}
+                                          </span>
+                                        </div>
+                                        <p className="mt-2 text-[8px] text-[#706d67]">
+                                          {result.outputSpecId} · {result.invalidatedSteps.join(' → ') || 'sem invalidação'}
+                                        </p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </article>
+                              ) : null}
+                            </section>
+  ) : null
+
   return (
     <main className="min-h-screen bg-[#070707] text-[#f4f1ea] selection:bg-[#eab83e]/25 selection:text-[#fff8df]">
       <div className="mx-auto flex min-h-screen max-w-[1800px]">
@@ -2452,6 +3365,7 @@ export default function BatchesPage() {
                           </article>
                         )
                       })}
+                      {batchEditPanel}
                     </div>
                     ) : (
                       <div className="max-h-[720px] overflow-y-auto p-3 sm:p-4" data-testid="script-alignment-panel">
@@ -3275,6 +4189,8 @@ export default function BatchesPage() {
                                 </div>
                               )}
                             </section>
+
+
                           </div>
                         )}
                       </div>

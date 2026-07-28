@@ -89,6 +89,12 @@ model V2Workspace {
   variantRecipeLineage            V2VariantRecipeLineage[]
   variantPortfolioPolicies        V2VariantPortfolioPolicy[]
   variantPortfolioPreflights      V2VariantPortfolioPreflightRun[]
+  batchEditPolicies               V2BatchEditPolicy[]
+  batchEditItemStates             V2BatchEditItemStateVersion[]
+  batchEditPreflights             V2BatchEditPreflightRun[]
+  batchEditCommands               V2BatchEditCommand[]
+  batchEditCommandItems           V2BatchEditCommandItem[]
+  batchEditInvalidations          V2BatchEditInvalidation[]
 
   @@map("workspaces")
 }
@@ -133,6 +139,10 @@ model V2ApiClient {
   variantRecipeRuns           V2VariantRecipeRun[]          @relation("VariantRecipeRunCreator")
   updatedVariantPortfolioPolicies V2VariantPortfolioPolicy[] @relation("VariantPortfolioPolicyUpdater")
   variantPortfolioPreflights  V2VariantPortfolioPreflightRun[] @relation("VariantPortfolioPreflightCreator")
+  updatedBatchEditPolicies    V2BatchEditPolicy[]               @relation("BatchEditPolicyUpdater")
+  batchEditItemStates         V2BatchEditItemStateVersion[]     @relation("BatchEditItemStateCreator")
+  batchEditPreflights         V2BatchEditPreflightRun[]         @relation("BatchEditPreflightCreator")
+  batchEditCommands           V2BatchEditCommand[]              @relation("BatchEditCommandCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -275,6 +285,8 @@ model V2Project {
   compatibilityGraphRuns       V2CompatibilityGraphRun[]
   variantRecipeRuns            V2VariantRecipeRun[]
   variantPortfolioPreflights   V2VariantPortfolioPreflightRun[]
+  batchEditPreflights          V2BatchEditPreflightRun[]
+  batchEditCommands            V2BatchEditCommand[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -1990,6 +2002,11 @@ model V2ProductionBatch {
   compatibilityGraphs V2CompatibilityGraphRun[]
   variantRecipes      V2VariantRecipeRun[]
   variantPortfolioPreflights V2VariantPortfolioPreflightRun[]
+  batchEditItemStates         V2BatchEditItemStateVersion[]
+  batchEditPreflights         V2BatchEditPreflightRun[]
+  batchEditCommands           V2BatchEditCommand[]
+  batchEditCommandItems       V2BatchEditCommandItem[]
+  batchEditInvalidations      V2BatchEditInvalidation[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
@@ -2424,6 +2441,214 @@ model V2VariantPortfolioPreflightRun {
   @@map("variant_portfolio_preflight_runs")
 }
 
+model V2BatchEditPolicy {
+  workspaceId                   String   @db.VarChar(128)
+  schemaVersion                 String   @db.VarChar(64)
+  revision                      Int      @default(1)
+  defaultMode                   String   @db.VarChar(32)
+  maxItemCount                  Int
+  diffSampleSize                Int
+  replaceCtaCostMinorUnits      Int
+  subtitleStyleCostMinorUnits   Int
+  brandKitCostMinorUnits        Int
+  confirmationTtlSeconds        Int
+  policyJson                    String   @db.Text
+  policyHash                    String   @db.Char(64)
+  updatedByClientId             String   @db.VarChar(80)
+  createdAt                     DateTime @db.Timestamptz(3)
+  updatedAt                     DateTime @db.Timestamptz(3)
+
+  workspace  V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  updatedBy  V2ApiClient                @relation("BatchEditPolicyUpdater", fields: [updatedByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  preflights V2BatchEditPreflightRun[]
+
+  @@id([workspaceId, revision])
+  @@unique([workspaceId, policyHash])
+  @@index([workspaceId, revision])
+  @@index([updatedByClientId, updatedAt(sort: Desc)])
+  @@map("batch_edit_policies")
+}
+
+model V2BatchEditItemStateVersion {
+  workspaceId             String   @db.VarChar(128)
+  batchId                 String   @db.VarChar(128)
+  itemId                  String   @db.VarChar(128)
+  revision                Int
+  schemaVersion           String   @db.VarChar(64)
+  directivesJson          String   @db.Text
+  protectedOperationsJson String   @db.Text
+  stateJson               String   @db.Text
+  stateHash               String   @db.Char(64)
+  previousStateHash       String?  @db.Char(64)
+  sourceCommandId         String?  @db.VarChar(128)
+  createdByClientId       String   @db.VarChar(80)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace     V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch         V2ProductionBatch            @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  item          V2ProductionBatchItem        @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+  createdBy     V2ApiClient                  @relation("BatchEditItemStateCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  previousState V2BatchEditItemStateVersion? @relation("BatchEditStateLineage", fields: [itemId, previousStateHash], references: [itemId, stateHash], onDelete: Restrict)
+  nextStates    V2BatchEditItemStateVersion[] @relation("BatchEditStateLineage")
+  sourceCommand V2BatchEditCommand?          @relation("BatchEditCommandStates", fields: [sourceCommandId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Restrict)
+  beforeResults V2BatchEditCommandItem[]      @relation("BatchEditBeforeState")
+  afterResults  V2BatchEditCommandItem[]      @relation("BatchEditAfterState")
+
+  @@id([itemId, revision])
+  @@unique([itemId, stateHash])
+  @@index([workspaceId, batchId, itemId, revision(sort: Desc)])
+  @@index([workspaceId, sourceCommandId])
+  @@index([createdByClientId, createdAt(sort: Desc)])
+  @@map("batch_edit_item_state_versions")
+}
+
+model V2BatchEditPreflightRun {
+  id                        String    @id @db.VarChar(128)
+  workspaceId               String    @db.VarChar(128)
+  projectId                 String    @db.VarChar(128)
+  batchId                   String    @db.VarChar(128)
+  schemaVersion             String    @db.VarChar(64)
+  impactVersion             String    @db.VarChar(64)
+  status                    String    @db.VarChar(32)
+  mode                      String    @db.VarChar(32)
+  operationType             String    @db.VarChar(32)
+  operationValueRef         String    @db.VarChar(128)
+  resultJson                String    @db.Text
+  policyHash                String    @db.Char(64)
+  batchRevision             Int
+  batchDefinitionHash       String    @db.Char(64)
+  scopeHash                 String    @db.Char(64)
+  budgetRemainingMinorUnits Int
+  affectedItemCount         Int
+  applicableItemCount       Int
+  protectedConflictCount    Int
+  unchangedItemCount        Int
+  invalidationCount         Int
+  estimatedCostMinorUnits   Int
+  budgetExceeded            Boolean
+  confirmationExpiresAt     DateTime? @db.Timestamptz(3)
+  costFingerprint           String    @db.Char(64)
+  preflightHash             String    @db.Char(64)
+  requestFingerprint        String    @db.Char(64)
+  idempotencyKey            String    @db.VarChar(128)
+  createdByClientId         String    @db.VarChar(80)
+  createdAt                 DateTime  @db.Timestamptz(3)
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch     V2ProductionBatch @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  policy    V2BatchEditPolicy @relation(fields: [workspaceId, policyHash], references: [workspaceId, policyHash], onDelete: Restrict)
+  createdBy V2ApiClient       @relation("BatchEditPreflightCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  command   V2BatchEditCommand?
+
+  @@unique([id, workspaceId, batchId, preflightHash])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, batchId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, batchId, status, createdAt(sort: Desc)])
+  @@index([workspaceId, policyHash])
+  @@map("batch_edit_preflight_runs")
+}
+
+model V2BatchEditCommand {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  batchId                 String   @db.VarChar(128)
+  preflightId             String   @unique @db.VarChar(128)
+  preflightHash           String   @db.Char(64)
+  schemaVersion           String   @db.VarChar(64)
+  status                  String   @db.VarChar(32)
+  mode                    String   @db.VarChar(32)
+  operationType           String   @db.VarChar(32)
+  operationValueRef       String   @db.VarChar(128)
+  resultJson              String   @db.Text
+  batchRevision           Int
+  batchDefinitionHash     String   @db.Char(64)
+  policyHash              String   @db.Char(64)
+  scopeHash               String   @db.Char(64)
+  affectedItemCount       Int
+  appliedItemCount        Int
+  skippedItemCount        Int
+  unchangedItemCount      Int
+  invalidationCount       Int
+  costMinorUnits          Int
+  commandHash             String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  createdByClientId       String   @db.VarChar(80)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace     V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project       V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch         V2ProductionBatch              @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  preflight     V2BatchEditPreflightRun        @relation(fields: [preflightId, workspaceId, batchId, preflightHash], references: [id, workspaceId, batchId, preflightHash], onDelete: Restrict)
+  createdBy     V2ApiClient                    @relation("BatchEditCommandCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  stateVersions V2BatchEditItemStateVersion[]  @relation("BatchEditCommandStates")
+  items         V2BatchEditCommandItem[]
+
+  @@unique([id, workspaceId, batchId])
+  @@unique([preflightId, workspaceId, batchId, preflightHash])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, batchId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, batchId, status, createdAt(sort: Desc)])
+  @@index([workspaceId, policyHash])
+  @@map("batch_edit_commands")
+}
+
+model V2BatchEditCommandItem {
+  workspaceId       String   @db.VarChar(128)
+  batchId           String   @db.VarChar(128)
+  commandId         String   @db.VarChar(128)
+  itemId            String   @db.VarChar(128)
+  status            String   @db.VarChar(32)
+  targetRef         String   @db.VarChar(260)
+  beforeStateRevision Int
+  beforeStateHash   String   @db.Char(64)
+  afterStateRevision Int?
+  afterStateHash    String?  @db.Char(64)
+  costMinorUnits    Int
+  resultJson        String   @db.Text
+  resultHash        String   @db.Char(64)
+
+  workspace   V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch       V2ProductionBatch            @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  command     V2BatchEditCommand           @relation(fields: [commandId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+  item        V2ProductionBatchItem        @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+  beforeState V2BatchEditItemStateVersion  @relation("BatchEditBeforeState", fields: [itemId, beforeStateHash], references: [itemId, stateHash], onDelete: Restrict)
+  afterState  V2BatchEditItemStateVersion? @relation("BatchEditAfterState", fields: [itemId, afterStateHash], references: [itemId, stateHash], onDelete: Restrict)
+  invalidations V2BatchEditInvalidation[]
+
+  @@id([commandId, itemId])
+  @@index([workspaceId, batchId, itemId])
+  @@index([workspaceId, commandId, status])
+  @@index([itemId, beforeStateRevision])
+  @@index([itemId, afterStateRevision])
+  @@map("batch_edit_command_items")
+}
+
+model V2BatchEditInvalidation {
+  workspaceId     String   @db.VarChar(128)
+  batchId         String   @db.VarChar(128)
+  commandId       String   @db.VarChar(128)
+  itemId          String   @db.VarChar(128)
+  step            String   @db.VarChar(32)
+  sequence        Int
+  targetRef       String   @db.VarChar(260)
+  invalidationHash String  @db.Char(64)
+  createdAt       DateTime @db.Timestamptz(3)
+
+  workspace   V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch       V2ProductionBatch       @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  item        V2ProductionBatchItem   @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+  commandItem V2BatchEditCommandItem  @relation(fields: [commandId, itemId], references: [commandId, itemId], onDelete: Cascade)
+
+  @@id([commandId, itemId, step])
+  @@unique([commandId, itemId, sequence])
+  @@index([workspaceId, batchId, itemId, sequence])
+  @@index([workspaceId, step, createdAt(sort: Desc)])
+  @@map("batch_edit_invalidations")
+}
+
 model V2ProductionBatchItem {
   id            String   @id @db.VarChar(128)
   workspaceId   String   @db.VarChar(128)
@@ -2447,6 +2672,9 @@ model V2ProductionBatchItem {
   steps     V2ProductionBatchStep[]
   artifacts V2ProductionBatchItemArtifact[]
   actions   V2ProductionBatchAction[]
+  batchEditStates       V2BatchEditItemStateVersion[]
+  batchEditCommandItems V2BatchEditCommandItem[]
+  batchEditInvalidations V2BatchEditInvalidation[]
 
   @@unique([id, workspaceId, batchId])
   @@unique([batchId, sequence])

@@ -2647,6 +2647,168 @@ const variantPortfolioPreflightRunExample = {
   createdAt,
   runHash: '8'.repeat(64),
 }
+const batchEditPolicyExample = {
+  schemaVersion: 'batch-edit-policy/v1',
+  workspaceId,
+  revision: 1,
+  defaultMode: 'all-or-nothing',
+  maxItemCount: 100,
+  diffSampleSize: 5,
+  replaceCtaCostMinorUnits: 125,
+  subtitleStyleCostMinorUnits: 25,
+  brandKitCostMinorUnits: 75,
+  confirmationTtlSeconds: 900,
+  updatedByClientId: clientId,
+  updatedAt: createdAt,
+  policyHash: '9'.repeat(64),
+}
+const batchEditBeforeStateExample = {
+  schemaVersion: 'batch-edit-item-state/v1',
+  workspaceId,
+  batchId: productionBatchExample.id,
+  itemId: productionBatchExample.items[0].id,
+  revision: 1,
+  directives: {},
+  protectedOperations: [],
+  createdByClientId: clientId,
+  createdAt,
+  stateHash: 'a'.repeat(64),
+}
+const batchEditTargetRef =
+  `${productionBatchExample.items[0].id}:subtitle-style`
+const batchEditScopeExample = {
+  recipeIds: ['recipe-hook'],
+  outputSpecIds: ['9:16'],
+  itemIds: [productionBatchExample.items[0].id],
+  scopeHash: 'b'.repeat(64),
+}
+const batchEditPreflightExample = {
+  schemaVersion: 'batch-edit-preflight/v1',
+  impactVersion: 'batch-edit-impact/v1',
+  id: 'batch-edit-preflight-example-1',
+  workspaceId,
+  projectId,
+  batchId: productionBatchExample.id,
+  batchRevision: 1,
+  batchDefinitionHash: productionBatchExample.definitionHash,
+  policy: batchEditPolicyExample,
+  mode: 'all-or-nothing',
+  operation: {
+    type: 'subtitle-style',
+    valueRef: 'subtitle-style-bold-purple',
+  },
+  scope: batchEditScopeExample,
+  status: 'ready',
+  budgetRemainingMinorUnits: 3200,
+  affectedItemCount: 1,
+  applicableItemCount: 1,
+  protectedConflictCount: 0,
+  unchangedItemCount: 0,
+  invalidationCount: 2,
+  estimatedCostMinorUnits: 25,
+  budgetExceeded: false,
+  impacts: [
+    {
+      itemId: productionBatchExample.items[0].id,
+      recipeId: 'recipe-hook',
+      variantId: 'variant-vertical',
+      outputSpecId: '9:16',
+      locale: 'pt-BR',
+      targetRef: batchEditTargetRef,
+      disposition: 'applicable',
+      afterValueRef: 'subtitle-style-bold-purple',
+      beforeStateRevision: 1,
+      beforeStateHash: batchEditBeforeStateExample.stateHash,
+      protectedConflict: false,
+      conflictCodes: [],
+      invalidatedSteps: ['rendering', 'reviewing'],
+      invalidatedTargetRefs: [
+        `${batchEditTargetRef}:rendering`,
+        `${batchEditTargetRef}:reviewing`,
+      ],
+      estimatedCostMinorUnits: 25,
+      impactHash: 'c'.repeat(64),
+    },
+  ],
+  sampleDiff: [
+    {
+      itemId: productionBatchExample.items[0].id,
+      recipeId: 'recipe-hook',
+      outputSpecId: '9:16',
+      targetRef: batchEditTargetRef,
+      before: { mode: 'inherit' },
+      after: {
+        mode: 'override',
+        valueRef: 'subtitle-style-bold-purple',
+      },
+      disposition: 'applicable',
+      conflictCodes: [],
+      diffHash: 'd'.repeat(64),
+    },
+  ],
+  warningCodes: ['PARTIAL_FORMAT_SCOPE', 'PARTIAL_RECIPE_SCOPE'],
+  confirmationExpiresAt: '2026-07-12T20:15:00.000Z',
+  costFingerprint: 'e'.repeat(64),
+  createdByClientId: clientId,
+  createdAt,
+  preflightHash: 'f'.repeat(64),
+}
+const batchEditAfterStateExample = {
+  ...batchEditBeforeStateExample,
+  revision: 2,
+  directives: { subtitleStyleId: 'subtitle-style-bold-purple' },
+  previousStateHash: batchEditBeforeStateExample.stateHash,
+  sourceCommandId: 'batch-edit-command-example-1',
+  stateHash: '1'.repeat(64),
+}
+const batchEditCommandExample = {
+  schemaVersion: 'batch-edit-command/v1',
+  id: 'batch-edit-command-example-1',
+  workspaceId,
+  projectId,
+  batchId: productionBatchExample.id,
+  preflightId: batchEditPreflightExample.id,
+  preflightHash: batchEditPreflightExample.preflightHash,
+  batchRevision: 1,
+  batchDefinitionHash: productionBatchExample.definitionHash,
+  policyHash: batchEditPolicyExample.policyHash,
+  mode: 'all-or-nothing',
+  operation: batchEditPreflightExample.operation,
+  scope: batchEditScopeExample,
+  status: 'committed',
+  resultItems: [
+    {
+      itemId: productionBatchExample.items[0].id,
+      recipeId: 'recipe-hook',
+      variantId: 'variant-vertical',
+      outputSpecId: '9:16',
+      targetRef: batchEditTargetRef,
+      status: 'applied',
+      beforeStateRevision: 1,
+      beforeStateHash: batchEditBeforeStateExample.stateHash,
+      afterStateRevision: 2,
+      afterStateHash: batchEditAfterStateExample.stateHash,
+      conflictCodes: [],
+      invalidatedSteps: ['rendering', 'reviewing'],
+      invalidatedTargetRefs: [
+        `${batchEditTargetRef}:rendering`,
+        `${batchEditTargetRef}:reviewing`,
+      ],
+      costMinorUnits: 25,
+      resultHash: '2'.repeat(64),
+    },
+  ],
+  newStates: [batchEditAfterStateExample],
+  affectedItemCount: 1,
+  appliedItemCount: 1,
+  skippedItemCount: 0,
+  unchangedItemCount: 0,
+  invalidationCount: 2,
+  costMinorUnits: 25,
+  createdByClientId: clientId,
+  createdAt,
+  commandHash: '3'.repeat(64),
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -4947,6 +5109,79 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           preflights: [variantPortfolioPreflightRunExample],
           nextCursor: variantPortfolioPreflightRunExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-batch-edit-preflight-request/v1': [
+      {
+        expectedBatchRevision: 1,
+        expectedBatchDefinitionHash:
+          productionBatchExample.definitionHash,
+        recipeIds: ['recipe-hook'],
+        outputSpecIds: ['9:16'],
+        itemIds: [productionBatchExample.items[0].id],
+        operation: {
+          type: 'subtitle-style',
+          valueRef: 'subtitle-style-bold-purple',
+        },
+        mode: 'all-or-nothing',
+      },
+    ],
+    'apollo://schemas/batch-edit-preflight-mutated/v1': [
+      {
+        data: {
+          preflight: batchEditPreflightExample,
+          replayed: false,
+          commitToken: `${'c'.repeat(48)}.${'d'.repeat(43)}`,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/batch-edit-preflight-read/v1': [
+      {
+        data: { preflight: batchEditPreflightExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/batch-edit-preflight-page/v1': [
+      {
+        data: {
+          preflights: [batchEditPreflightExample],
+          nextCursor: batchEditPreflightExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/commit-batch-edit-request/v1': [
+      {
+        expectedPreflightHash:
+          batchEditPreflightExample.preflightHash,
+        expectedScopeHash:
+          batchEditPreflightExample.scope.scopeHash,
+        commitToken: `${'c'.repeat(48)}.${'d'.repeat(43)}`,
+      },
+    ],
+    'apollo://schemas/batch-edit-command-mutated/v1': [
+      {
+        data: {
+          command: batchEditCommandExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/batch-edit-command-read/v1': [
+      {
+        data: { command: batchEditCommandExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/batch-edit-command-page/v1': [
+      {
+        data: {
+          commands: [batchEditCommandExample],
+          nextCursor: batchEditCommandExample.id,
         },
         meta: { apiVersion: 'v1' },
       },

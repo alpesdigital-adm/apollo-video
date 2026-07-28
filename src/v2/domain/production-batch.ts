@@ -1013,10 +1013,6 @@ export function resumeProductionBatch(input: {
 }
 
 
-export interface BatchEditCommand { id: string; recipeIds: readonly string[]; formatIds: readonly string[]; targetIds: readonly string[]; operation: 'replace-cta' | 'subtitle-style' | 'brand-kit'; value: string; policy: 'all-or-nothing' | 'skip-failures' }
-export function previewBatchEdit(command: BatchEditCommand, input: { protectedTargetIds: readonly string[]; itemCosts: Readonly<Record<string, number>> }) { const affected = command.recipeIds.flatMap((recipeId) => command.formatIds.flatMap((formatId) => command.targetIds.map((targetId) => ({ id: `${recipeId}:${formatId}:${targetId}`, recipeId, formatId, targetId })))); const conflicts = affected.filter((item) => input.protectedTargetIds.includes(item.targetId)); return Object.freeze({ affected: Object.freeze(affected), conflicts: Object.freeze(conflicts), invalidatedRanges: Object.freeze(affected.map((item) => item.id)), estimatedCost: affected.reduce((sum, item) => sum + (input.itemCosts[item.id] ?? 0), 0), sampleDiff: Object.freeze(affected.slice(0, 3).map((item) => ({ id: item.id, before: 'current', after: command.value }))) }) }
-export function applyBatchEdit(command: BatchEditCommand, preview: ReturnType<typeof previewBatchEdit>) { if (command.policy === 'all-or-nothing' && preview.conflicts.length) return Object.freeze({ status: 'rolled-back', results: Object.freeze(preview.affected.map((item) => ({ id: item.id, status: 'not-applied' }))) }); const failed = new Set(preview.conflicts.map((item) => item.id)); return Object.freeze({ status: failed.size ? 'partial' : 'committed', transactionId: `batch_edit_${stableOperationId(command)}`, results: Object.freeze(preview.affected.map((item) => ({ id: item.id, status: failed.has(item.id) ? 'skipped' : 'applied' }))) }) }
-
 export function retryBatchStep(
   batchInput: Readonly<ProductionBatch>,
   input: {

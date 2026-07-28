@@ -59,6 +59,14 @@ const coverage = Object.freeze({
     mode: 'durable-covered',
     evidence: 'F2-012 serializable exact graph/policy/batch binding, actor-bound idempotency, immutable count and estimate projections, signed expansion confirmation and PostgreSQL/API E2E',
   },
+  'apollo.batches.edit-preflights.create': {
+    mode: 'durable-covered',
+    evidence: 'F2-013 immutable exact recipe/format/item scope, actor-bound idempotency, state-hash binding, sampled diff, protected conflicts, budget and signed commit-token PostgreSQL/API E2E',
+  },
+  'apollo.batches.edit-preflights.commit': {
+    mode: 'durable-covered',
+    evidence: 'F2-013 signed preflight and scope hashes, serializable current-state and budget revalidation, immutable state lineage, all-or-nothing or skip-failures item results and PostgreSQL/API E2E',
+  },
   'apollo.operations.cancel': {
     mode: 'durable-covered', evidence: 'F0-070',
   },
@@ -222,7 +230,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    63,
+    65,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

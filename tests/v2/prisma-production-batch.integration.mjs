@@ -48,11 +48,11 @@ async function stopServer(server) {
   if (server.exitCode === null) server.kill('SIGKILL')
 }
 
-test('T-FR-080 persists and operates a partial, cancelled, resumed production batch through the public API', {
+test('T-FR-080 / T-FR-086 persists production batches and signed batch edits through the public API', {
   skip:
     process.env.APOLLO_PRODUCTION_BATCH_E2E !== '1' &&
     'set APOLLO_PRODUCTION_BATCH_E2E=1 and use an isolated V2 database',
-  timeout: 120_000,
+  timeout: 240_000,
 }, async () => {
   assert.ok(
     process.env.V2_DATABASE_URL,
@@ -230,6 +230,8 @@ test('T-FR-080 persists and operates a partial, cancelled, resumed production ba
           NODE_ENV: 'production',
           __NEXT_PROCESSED_ENV: 'true',
           APOLLO_API_ENVIRONMENT: 'production',
+          APOLLO_PREFLIGHT_COMMIT_TOKEN_SECRET:
+            'batch-edit-e2e-signed-commit-secret-32-bytes',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -628,6 +630,262 @@ test('T-FR-080 persists and operates a partial, cancelled, resumed production ba
       [finalOneId],
     )
 
+    const { createBatchEditItemState } =
+      await import('../../src/v2/domain/batch-edit.ts')
+    const { stableSerialize } =
+      await import('../../src/v2/domain/canonical-hash.ts')
+    const protectedCtaState = createBatchEditItemState({
+      workspaceId,
+      batchId: batch.id,
+      itemId: secondItemId,
+      protectedOperations: ['replace-cta'],
+      createdByClientId: issued.client.id,
+      createdAt: '2026-07-28T20:31:00.000Z',
+    })
+    await client.v2BatchEditItemStateVersion.create({
+      data: {
+        workspaceId,
+        batchId: batch.id,
+        itemId: secondItemId,
+        revision: protectedCtaState.revision,
+        schemaVersion: protectedCtaState.schemaVersion,
+        directivesJson: stableSerialize(protectedCtaState.directives),
+        protectedOperationsJson: stableSerialize(
+          protectedCtaState.protectedOperations,
+        ),
+        stateJson: stableSerialize(protectedCtaState),
+        stateHash: protectedCtaState.stateHash,
+        previousStateHash: null,
+        sourceCommandId: null,
+        createdByClientId: issued.client.id,
+        createdAt: new Date(protectedCtaState.createdAt),
+      },
+    })
+
+    const editScope = {
+      expectedBatchRevision: batch.revision,
+      expectedBatchDefinitionHash: batch.definitionHash,
+      recipeIds: ['recipe-hook', 'recipe-body'],
+      outputSpecIds: ['9:16', '1:1'],
+      itemIds: batch.items.map((item) => item.id),
+    }
+    const editPreflightEndpoint =
+      `${endpoint}/${batch.id}/edit-preflights`
+    const createEditPreflight = async ({
+      key,
+      operation,
+      mode,
+      expectedStatus,
+    }) => {
+      const response = await fetch(editPreflightEndpoint, {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': key,
+        },
+        body: JSON.stringify({
+          ...editScope,
+          operation,
+          mode,
+        }),
+      })
+      const payload = await response.json()
+      assert.equal(response.status, 201, JSON.stringify(payload))
+      assert.equal(payload.data.preflight.status, expectedStatus)
+      return payload.data
+    }
+    const commitEditPreflight = async ({
+      key,
+      preflight,
+      commitToken,
+      expectedStatus,
+      expectedApplied,
+      expectedSkipped,
+    }) => {
+      const response = await fetch(
+        `${editPreflightEndpoint}/${preflight.id}/commit`,
+        {
+          method: 'POST',
+          headers: {
+            ...headers,
+            'idempotency-key': key,
+          },
+          body: JSON.stringify({
+            expectedPreflightHash: preflight.preflightHash,
+            expectedScopeHash: preflight.scope.scopeHash,
+            commitToken,
+          }),
+        },
+      )
+      const payload = await response.json()
+      assert.equal(response.status, 201, JSON.stringify(payload))
+      assert.equal(payload.data.command.status, expectedStatus)
+      assert.equal(
+        payload.data.command.appliedItemCount,
+        expectedApplied,
+      )
+      assert.equal(
+        payload.data.command.skippedItemCount,
+        expectedSkipped,
+      )
+      return payload.data
+    }
+
+    const atomicCta = await createEditPreflight({
+      key: `batch-edit-cta-atomic-${suffix}`,
+      operation: {
+        type: 'replace-cta',
+        valueRef: 'cta-validated-v2',
+      },
+      mode: 'all-or-nothing',
+      expectedStatus: 'blocked',
+    })
+    assert.equal(atomicCta.preflight.protectedConflictCount, 1)
+    assert.equal(atomicCta.commitToken, undefined)
+    assert.equal(atomicCta.preflight.confirmationExpiresAt, undefined)
+
+    const partialCta = await createEditPreflight({
+      key: `batch-edit-cta-partial-${suffix}`,
+      operation: {
+        type: 'replace-cta',
+        valueRef: 'cta-validated-v2',
+      },
+      mode: 'skip-failures',
+      expectedStatus: 'partial-ready',
+    })
+    assert.ok(partialCta.commitToken)
+    assert.equal(partialCta.preflight.applicableItemCount, 2)
+    assert.equal(partialCta.preflight.invalidationCount, 8)
+    const ctaCommit = await commitEditPreflight({
+      key: `batch-edit-cta-commit-${suffix}`,
+      preflight: partialCta.preflight,
+      commitToken: partialCta.commitToken,
+      expectedStatus: 'partial',
+      expectedApplied: 2,
+      expectedSkipped: 1,
+    })
+    assert.equal(ctaCommit.command.costMinorUnits, 250)
+    assert.equal(ctaCommit.command.resultItems.length, 3)
+
+    const ctaCommitReplayResponse = await fetch(
+      `${editPreflightEndpoint}/${partialCta.preflight.id}/commit`,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': `batch-edit-cta-commit-${suffix}`,
+        },
+        body: JSON.stringify({
+          expectedPreflightHash: partialCta.preflight.preflightHash,
+          expectedScopeHash: partialCta.preflight.scope.scopeHash,
+          commitToken: partialCta.commitToken,
+        }),
+      },
+    )
+    const ctaCommitReplayPayload =
+      await ctaCommitReplayResponse.json()
+    assert.equal(ctaCommitReplayResponse.status, 200)
+    assert.equal(ctaCommitReplayPayload.data.replayed, true)
+    assert.equal(
+      ctaCommitReplayPayload.data.command.commandHash,
+      ctaCommit.command.commandHash,
+    )
+
+    const subtitlePreview = await createEditPreflight({
+      key: `batch-edit-subtitle-${suffix}`,
+      operation: {
+        type: 'subtitle-style',
+        valueRef: 'subtitle-editorial-v3',
+      },
+      mode: 'all-or-nothing',
+      expectedStatus: 'ready',
+    })
+    assert.equal(subtitlePreview.preflight.invalidationCount, 6)
+    assert.equal(subtitlePreview.preflight.sampleDiff.length, 3)
+    const subtitleCommit = await commitEditPreflight({
+      key: `batch-edit-subtitle-commit-${suffix}`,
+      preflight: subtitlePreview.preflight,
+      commitToken: subtitlePreview.commitToken,
+      expectedStatus: 'committed',
+      expectedApplied: 3,
+      expectedSkipped: 0,
+    })
+    assert.equal(subtitleCommit.command.costMinorUnits, 75)
+
+    const brandPreview = await createEditPreflight({
+      key: `batch-edit-brand-${suffix}`,
+      operation: {
+        type: 'brand-kit',
+        valueRef: 'brand-kit-snapshot-v7',
+      },
+      mode: 'all-or-nothing',
+      expectedStatus: 'ready',
+    })
+    assert.equal(brandPreview.preflight.invalidationCount, 9)
+    const brandCommit = await commitEditPreflight({
+      key: `batch-edit-brand-commit-${suffix}`,
+      preflight: brandPreview.preflight,
+      commitToken: brandPreview.commitToken,
+      expectedStatus: 'committed',
+      expectedApplied: 3,
+      expectedSkipped: 0,
+    })
+    assert.equal(brandCommit.command.costMinorUnits, 225)
+
+    const preflightListResponse = await fetch(
+      `${editPreflightEndpoint}?limit=100`,
+      { headers: { authorization } },
+    )
+    const preflightListPayload = await preflightListResponse.json()
+    assert.equal(preflightListResponse.status, 200)
+    assert.equal(preflightListPayload.data.preflights.length, 4)
+    const commandListResponse = await fetch(
+      `${endpoint}/${batch.id}/edit-commands?limit=100`,
+      { headers: { authorization } },
+    )
+    const commandListPayload = await commandListResponse.json()
+    assert.equal(commandListResponse.status, 200)
+    assert.equal(commandListPayload.data.commands.length, 3)
+
+    const readEditPreflightResponse = await fetch(
+      `${editPreflightEndpoint}/${brandPreview.preflight.id}`,
+      { headers: { authorization } },
+    )
+    assert.equal(readEditPreflightResponse.status, 200)
+    assert.equal(
+      (await readEditPreflightResponse.json()).data.preflight
+        .preflightHash,
+      brandPreview.preflight.preflightHash,
+    )
+    const readEditCommandResponse = await fetch(
+      `${endpoint}/${batch.id}/edit-commands/${brandCommit.command.id}`,
+      { headers: { authorization } },
+    )
+    assert.equal(readEditCommandResponse.status, 200)
+    assert.equal(
+      (await readEditCommandResponse.json()).data.command.commandHash,
+      brandCommit.command.commandHash,
+    )
+
+    const unauthenticatedEdit = await fetch(editPreflightEndpoint)
+    assert.equal(unauthenticatedEdit.status, 401)
+    const staleScopeCommit = await fetch(
+      `${editPreflightEndpoint}/${brandPreview.preflight.id}/commit`,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': `batch-edit-stale-scope-${suffix}`,
+        },
+        body: JSON.stringify({
+          expectedPreflightHash: brandPreview.preflight.preflightHash,
+          expectedScopeHash: 'f'.repeat(64),
+          commitToken: brandPreview.commitToken,
+        }),
+      },
+    )
+    assert.equal(staleScopeCommit.status, 409)
+
     assert.equal(
       await client.v2ProductionBatch.count({
         where: { workspaceId },
@@ -657,6 +915,36 @@ test('T-FR-080 persists and operates a partial, cancelled, resumed production ba
         where: { workspaceId },
       }) >= 16,
     )
+    assert.equal(
+      await client.v2BatchEditPreflightRun.count({
+        where: { workspaceId },
+      }),
+      4,
+    )
+    assert.equal(
+      await client.v2BatchEditCommand.count({
+        where: { workspaceId },
+      }),
+      3,
+    )
+    assert.equal(
+      await client.v2BatchEditCommandItem.count({
+        where: { workspaceId },
+      }),
+      9,
+    )
+    assert.equal(
+      await client.v2BatchEditInvalidation.count({
+        where: { workspaceId },
+      }),
+      23,
+    )
+    assert.equal(
+      await client.v2BatchEditItemStateVersion.count({
+        where: { workspaceId },
+      }),
+      11,
+    )
 
     await assert.rejects(
       client.$executeRaw(
@@ -671,12 +959,69 @@ test('T-FR-080 persists and operates a partial, cancelled, resumed production ba
         `,
       ),
     )
+
+    const invalidationToTamper =
+      await client.v2BatchEditInvalidation.findFirstOrThrow({
+        where: { commandId: brandCommit.command.id },
+        orderBy: [{ itemId: 'asc' }, { sequence: 'asc' }],
+      })
+    await client.v2BatchEditInvalidation.updateMany({
+      where: {
+        commandId: invalidationToTamper.commandId,
+        itemId: invalidationToTamper.itemId,
+        step: invalidationToTamper.step,
+      },
+      data: {
+        targetRef: `${invalidationToTamper.targetRef}:tampered`,
+        invalidationHash: 'f'.repeat(64),
+      },
+    })
+    const tamperedCommandRead = await fetch(
+      `${endpoint}/${batch.id}/edit-commands/${brandCommit.command.id}`,
+      { headers: { authorization } },
+    )
+    const tamperedCommandPayload = await tamperedCommandRead.json()
+    assert.equal(tamperedCommandRead.status, 409)
+    assert.equal(
+      tamperedCommandPayload.error.code,
+      'PERSISTENCE_CONFLICT',
+    )
+    await client.v2BatchEditInvalidation.updateMany({
+      where: {
+        commandId: invalidationToTamper.commandId,
+        itemId: invalidationToTamper.itemId,
+        step: invalidationToTamper.step,
+      },
+      data: {
+        targetRef: invalidationToTamper.targetRef,
+        invalidationHash: invalidationToTamper.invalidationHash,
+      },
+    })
     await assert.rejects(
       client.$executeRaw(
         Prisma.sql`
           UPDATE "production_batches"
           SET "aggregateStatus" = 'fabricated'
           WHERE "workspaceId" = ${workspaceId}
+        `,
+      ),
+    )
+    await assert.rejects(
+      client.$executeRaw(
+        Prisma.sql`
+          UPDATE "batch_edit_commands"
+          SET "appliedItemCount" = 999
+          WHERE "id" = ${brandCommit.command.id}
+        `,
+      ),
+    )
+    await assert.rejects(
+      client.$executeRaw(
+        Prisma.sql`
+          UPDATE "batch_edit_command_items"
+          SET "afterStateHash" = NULL
+          WHERE "commandId" = ${brandCommit.command.id}
+            AND "status" = 'applied'
         `,
       ),
     )

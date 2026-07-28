@@ -223,6 +223,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Persists only bounded planning evidence from an exact compatibility graph; it never materializes the Cartesian product, creates a job or incurs provider cost.',
     },
+    'apollo.batches.edit-preflights.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists only an immutable impact preview for explicitly selected recipes, formats and items without changing any item directive.',
+    },
+    'apollo.batches.edit-preflights.commit': {
+      impact: 'bounded', confirmation: 'preflight-token',
+      reason: 'Changes only the exact fingerprint-bound targets shown in the signed preview and records every applied, skipped or unchanged result.',
+    },
     'apollo.batches.actions.apply': {
       impact: 'destructive', confirmation: 'human-approval',
       reason: 'Can cancel all unfinished work in one production batch or reopen previously cancelled and failed items.',
