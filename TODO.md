@@ -1138,11 +1138,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.015 — Source Deconstruction [FR-120]
 
-- [ ] Detectar conteúdo essencial, hook envelope, corpo/CTA e elementos contaminantes. Evidência T-FR-120.
-- [ ] Produzir `DeconstructionReport` com clean candidate ranges e confidence. Evidência T-FR-120.
-- [ ] Preservar fala/contexto necessário ao recortar material publicado. Evidência T-FR-120.
-- [ ] Permitir comparação source versus range limpo. Evidência T-FR-120.
-- [ ] Criar golden fixtures de Reel com abertura, legenda queimada, CTA e cauda removível. Evidência T-FR-120/T-FR-121.
+- [x] Detectar conteúdo essencial, hook envelope, corpo/CTA e elementos contaminantes. Evidência T-FR-120 e produção `d2bb805`.
+- [x] Produzir `DeconstructionReport` com clean candidate ranges e confidence. Evidência T-FR-120 e produção `d2bb805`.
+- [x] Preservar fala/contexto necessário ao recortar material publicado. Evidência T-FR-120 e produção `d2bb805`.
+- [x] Permitir comparação source versus range limpo. Evidência T-FR-120 e produção `d2bb805`.
+- [x] Criar golden fixtures de Reel com abertura, legenda queimada, CTA e cauda removível. Evidência T-FR-120/T-FR-121 e produção `d2bb805`.
 
 ### F2.016 — Detecção de contaminação [FR-121]
 

@@ -138,7 +138,7 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-085 | Anti-explosão combinatória | S4 | D2,D4 | preflight/top-N/budget | e2e |
 | FR-086 | Edição em lote | S4,S7 | D3,D6 | scope/impacto explícitos | e2e |
 | FR-087 | Partial retry | S4 | D4 | item falho retenta isolado | resilience |
-| FR-120 | Source Deconstruction | S3 | D1,D2 | clean range e report | golden |
+| FR-120 | Source Deconstruction | S3 | D1,D2 | clean range, report, contexto preservado e comparação source/clean | T-FR-120 domínio/Golden Reel + API/PostgreSQL E2E + UI desktop/mobile + produção `d2bb805` |
 | FR-121 | Contaminação | S3 | D1,D2 | burned/music/watermark detectados | fixture |
 | FR-122 | Limpeza MVP | S3 | D1,D5 | trim/reframe/cover/reject | visual golden |
 | FR-124 | Validation envelope | S3 | D1,D7 | copy/take/opening protegidos | policy |
