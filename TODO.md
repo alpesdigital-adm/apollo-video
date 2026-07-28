@@ -20,15 +20,15 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.007, com a jornada integral do MVP Core e os
-sete primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
+Estado auditado após o gate F2.010, com a jornada integral do MVP Core e os
+dez primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **208 de 1.259 microtarefas verificadas como efetivamente entregues (16,5%)**;
-- **1.051 microtarefas abertas ou aguardando nova comprovação**;
+- **224 de 1.259 microtarefas verificadas como efetivamente entregues (17,8%)**;
+- **1.035 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 a F2.007 foram entregues, mas não encerram o
+  permanecem abertos; F2.001 a F2.010 foram entregues, mas não encerram o
   gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
@@ -1093,11 +1093,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.010 — Compatibility graph [FR-083]
 
-- [ ] Criar nós para hooks, corpos, provas e CTAs elegíveis. Evidência T-FR-083.
-- [ ] Implementar hard incompatibilities de oferta, audiência, claim, persona, locale, CTA e continuidade obrigatória. Evidência T-FR-083.
-- [ ] Calcular soft score de narrativa, tom, energia, duração, visual e experimento. Evidência T-FR-083.
-- [ ] Persistir reason codes e evidence por edge. Evidência T-FR-083.
-- [ ] Criar golden graph com combinações aceitas, bloqueadas e limítrofes. Evidência T-FR-083.
+- [x] Criar nós para hooks, corpos, provas e CTAs elegíveis. Entregue em `958063a`: nós imutáveis preservam papel, grupo, ScriptBlock, source, take/context hashes e identidade scoped por graph; rejeitados e `needs-review` não entram automaticamente. Evidência T-FR-083 e produção em `docs/quality/compatibility-graph-v1.md`.
+- [x] Implementar hard incompatibilities de oferta, audiência, claim, persona, locale, CTA e continuidade obrigatória. Entregue em `958063a`: sete regras determinísticas bloqueiam o edge antes do score; smoke público comprovou todos os códigos e constraints PostgreSQL.
+- [x] Calcular soft score de narrativa, tom, energia, duração, visual e experimento. Entregue em `958063a`: seis dimensões versionadas, ponderadas e explicáveis classificam relações elegíveis como aceitas ou limítrofes sem vencer hard failures.
+- [x] Persistir reason codes e evidence por edge. Entregue em `958063a`: runs, nodes e edges relacionais preservam reason codes, hard failures, scores, evidence/hash e FKs compostas que rejeitam referência cross-graph.
+- [x] Criar golden graph com combinações aceitas, bloqueadas e limítrofes. Entregue em `958063a`: golden T-FR-083 com 4 nós, 4 edges, 1 aceita, 1 limítrofe e 2 bloqueadas passou em 532/532 regressões, PostgreSQL/API, smoke e E2E visual desktop/mobile de produção.
 
 ### F2.011 — VariantRecipe [FR-084]
 
