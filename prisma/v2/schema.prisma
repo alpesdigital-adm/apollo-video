@@ -99,6 +99,11 @@ model V2Workspace {
   sourceDeconstructionReports     V2SourceDeconstructionReport[]
   sourceDeconstructionSegments    V2SourceDeconstructionSegment[]
   sourceDeconstructionRanges      V2SourceDeconstructionRange[]
+  contaminationReports            V2ContaminationReport[]
+  contaminationObservations       V2ContaminationObservation[]
+  contaminationProtectedRegions   V2ContaminationProtectedRegion[]
+  contaminationFindings           V2ContaminationFinding[]
+  contaminationOverlaps           V2ContaminationOverlap[]
 
   @@map("workspaces")
 }
@@ -148,6 +153,7 @@ model V2ApiClient {
   batchEditPreflights         V2BatchEditPreflightRun[]         @relation("BatchEditPreflightCreator")
   batchEditCommands           V2BatchEditCommand[]              @relation("BatchEditCommandCreator")
   sourceDeconstructionReports V2SourceDeconstructionReport[]     @relation("SourceDeconstructionCreator")
+  contaminationReports        V2ContaminationReport[]            @relation("ContaminationReportCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -296,6 +302,11 @@ model V2Project {
   sourceDeconstructionReports  V2SourceDeconstructionReport[]
   sourceDeconstructionSegments V2SourceDeconstructionSegment[]
   sourceDeconstructionRanges   V2SourceDeconstructionRange[]
+  contaminationReports         V2ContaminationReport[]
+  contaminationObservations    V2ContaminationObservation[]
+  contaminationProtectedRegions V2ContaminationProtectedRegion[]
+  contaminationFindings        V2ContaminationFinding[]
+  contaminationOverlaps        V2ContaminationOverlap[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -700,6 +711,7 @@ model V2MediaArtifact {
   selectedByAssetSelections    V2AssetSelection[]               @relation("AssetSelectionSelectedArtifact")
   sourceDeconstructionReports  V2SourceDeconstructionReport[]
   sourceDeconstructionSegments V2SourceDeconstructionSegment[]
+  contaminationReports         V2ContaminationReport[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -3180,6 +3192,7 @@ model V2SourceDeconstructionReport {
   createdBy        V2ApiClient        @relation("SourceDeconstructionCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   segments         V2SourceDeconstructionSegment[]
   cleanRanges      V2SourceDeconstructionRange[]
+  contaminationReports V2ContaminationReport[]
 
   @@unique([id, workspaceId, projectId])
   @@unique([workspaceId, projectId, createdByClientId, idempotencyKey])
@@ -3254,4 +3267,187 @@ model V2SourceDeconstructionRange {
   @@index([workspaceId, projectId, reportId, sequence])
   @@index([workspaceId, contextPreserved, confidence(sort: Desc)])
   @@map("source_deconstruction_ranges")
+}
+
+model V2ContaminationReport {
+  id                                String   @id @db.VarChar(128)
+  workspaceId                       String   @db.VarChar(128)
+  projectId                         String   @db.VarChar(128)
+  sourceDeconstructionReportId      String   @db.VarChar(128)
+  sourceDeconstructionReportHash    String   @db.Char(64)
+  sourceArtifactId                  String   @db.VarChar(128)
+  sourceArtifactSha256              String   @db.Char(64)
+  sourceDurationMs                  Int
+  schemaVersion                     String   @db.VarChar(64)
+  policyVersion                     String   @db.VarChar(64)
+  analyzerProvider                  String   @db.VarChar(128)
+  analyzerModel                     String   @db.VarChar(128)
+  analyzerVersion                   String   @db.VarChar(128)
+  observationBatchHash              String   @db.Char(64)
+  analyzerJson                      String   @db.Text
+  analyzerHash                      String   @db.Char(64)
+  policyJson                        String   @db.Text
+  policyHash                        String   @db.Char(64)
+  reportJson                        String   @db.Text
+  reportHash                        String   @db.Char(64)
+  decision                          String   @db.VarChar(40)
+  humanReviewRequired               Boolean
+  confidence                        Float
+  findingCount                      Int
+  observationCount                  Int
+  protectedRegionCount              Int
+  overlapCount                      Int
+  safeCount                         Int
+  reviewCount                       Int
+  destructiveCount                  Int
+  requestFingerprint                String   @db.Char(64)
+  idempotencyKey                    String   @db.VarChar(128)
+  createdByClientId                 String   @db.VarChar(80)
+  createdAt                         DateTime @db.Timestamptz(3)
+
+  workspace              V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_reports_project_workspace_fkey")
+  sourceDeconstruction   V2SourceDeconstructionReport   @relation(fields: [sourceDeconstructionReportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "contamination_reports_source_deconstruction_fkey")
+  sourceArtifact         V2MediaArtifact                @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "contamination_reports_source_artifact_fkey")
+  createdBy              V2ApiClient                    @relation("ContaminationReportCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "contamination_reports_creator_fkey")
+  observations           V2ContaminationObservation[]
+  protectedRegions       V2ContaminationProtectedRegion[]
+  findings               V2ContaminationFinding[]
+  overlaps               V2ContaminationOverlap[]
+
+  @@unique([id, workspaceId, projectId])
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey], map: "contamination_reports_workspace_project_actor_idem_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)], map: "contamination_reports_workspace_project_created_idx")
+  @@index([workspaceId, projectId, sourceDeconstructionReportId, createdAt(sort: Desc)], map: "contamination_reports_workspace_project_source_idx")
+  @@index([workspaceId, sourceArtifactId, createdAt(sort: Desc)], map: "contamination_reports_workspace_artifact_created_idx")
+  @@index([workspaceId, decision, humanReviewRequired, createdAt(sort: Desc)], map: "contamination_reports_workspace_decision_review_idx")
+  @@map("contamination_reports")
+}
+
+model V2ContaminationObservation {
+  id               String   @id @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  projectId        String   @db.VarChar(128)
+  reportId         String   @db.VarChar(128)
+  kind             String   @db.VarChar(32)
+  startMs          Int
+  endMs            Int
+  regionX          Float?
+  regionY          Float?
+  regionWidth      Float?
+  regionHeight     Float?
+  confidence       Float
+  detectorProvider String   @db.VarChar(128)
+  detectorModel    String   @db.VarChar(128)
+  detectorVersion  String   @db.VarChar(128)
+  detectorHash     String   @db.Char(64)
+  signalsJson      String   @db.Text
+  signalsHash      String   @db.Char(64)
+  observationHash  String   @db.Char(64)
+
+  workspace V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_observations_workspace_fkey")
+  project   V2Project              @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_observations_project_fkey")
+  report    V2ContaminationReport  @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "contamination_observations_report_fkey")
+  finding   V2ContaminationFinding?
+
+  @@unique([id, reportId])
+  @@index([workspaceId, projectId, reportId, startMs], map: "contamination_observations_workspace_project_report_idx")
+  @@index([workspaceId, kind, confidence(sort: Desc)], map: "contamination_observations_workspace_kind_confidence_idx")
+  @@map("contamination_observations")
+}
+
+model V2ContaminationProtectedRegion {
+  id          String   @id @db.VarChar(128)
+  workspaceId String   @db.VarChar(128)
+  projectId   String   @db.VarChar(128)
+  reportId    String   @db.VarChar(128)
+  kind        String   @db.VarChar(32)
+  startMs     Int
+  endMs       Int
+  regionX     Float
+  regionY     Float
+  regionWidth Float
+  regionHeight Float
+  confidence  Float
+  source      String   @db.VarChar(128)
+  regionHash  String   @db.Char(64)
+
+  workspace V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_protected_regions_workspace_fkey")
+  project   V2Project             @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_protected_regions_project_fkey")
+  report    V2ContaminationReport @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "contamination_protected_regions_report_fkey")
+
+  @@unique([id, reportId])
+  @@index([workspaceId, projectId, reportId, startMs], map: "contamination_protected_regions_workspace_project_report_idx")
+  @@index([workspaceId, kind, confidence(sort: Desc)], map: "contamination_protected_regions_workspace_kind_conf_idx")
+  @@map("contamination_protected_regions")
+}
+
+model V2ContaminationFinding {
+  id                               String   @id @db.VarChar(128)
+  workspaceId                      String   @db.VarChar(128)
+  projectId                        String   @db.VarChar(128)
+  reportId                         String   @db.VarChar(128)
+  observationId                    String   @db.VarChar(128)
+  kind                             String   @db.VarChar(32)
+  startMs                          Int
+  endMs                            Int
+  regionX                          Float?
+  regionY                          Float?
+  regionWidth                      Float?
+  regionHeight                     Float?
+  confidence                       Float
+  overlapsEssentialTime            Boolean
+  essentialOverlapRatio            Float
+  protectedRegionIdsJson           String   @db.Text
+  protectedRegionIntersectionRatio Float
+  removalImpact                    String   @db.VarChar(32)
+  removalWouldDestroyEssential     Boolean
+  requiresHumanReview              Boolean
+  reasonCodesJson                  String   @db.Text
+  observationHash                  String   @db.Char(64)
+  findingHash                      String   @db.Char(64)
+
+  workspace     V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_findings_workspace_fkey")
+  project       V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_findings_project_fkey")
+  report        V2ContaminationReport     @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "contamination_findings_report_fkey")
+  observation   V2ContaminationObservation @relation(fields: [observationId, reportId], references: [id, reportId], onDelete: Cascade, map: "contamination_findings_observation_fkey")
+  leftOverlaps  V2ContaminationOverlap[]  @relation("ContaminationOverlapLeft")
+  rightOverlaps V2ContaminationOverlap[]  @relation("ContaminationOverlapRight")
+
+  @@unique([id, reportId])
+  @@unique([observationId, reportId])
+  @@index([workspaceId, projectId, reportId, startMs], map: "contamination_findings_workspace_project_report_idx")
+  @@index([workspaceId, kind, removalImpact, confidence(sort: Desc)], map: "contamination_findings_workspace_kind_impact_idx")
+  @@index([workspaceId, requiresHumanReview, confidence(sort: Desc)], map: "contamination_findings_workspace_review_confidence_idx")
+  @@map("contamination_findings")
+}
+
+model V2ContaminationOverlap {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  reportId             String   @db.VarChar(128)
+  leftFindingId        String   @db.VarChar(128)
+  rightFindingId       String   @db.VarChar(128)
+  startMs              Int
+  endMs                Int
+  spatiallyOverlapping Boolean
+  intersectionX        Float?
+  intersectionY        Float?
+  intersectionWidth    Float?
+  intersectionHeight   Float?
+  confidence           Float
+  overlapHash          String   @db.Char(64)
+
+  workspace    V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_overlaps_workspace_fkey")
+  project      V2Project             @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_overlaps_project_fkey")
+  report       V2ContaminationReport @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "contamination_overlaps_report_fkey")
+  leftFinding  V2ContaminationFinding @relation("ContaminationOverlapLeft", fields: [leftFindingId, reportId], references: [id, reportId], onDelete: Cascade, map: "contamination_overlaps_left_finding_fkey")
+  rightFinding V2ContaminationFinding @relation("ContaminationOverlapRight", fields: [rightFindingId, reportId], references: [id, reportId], onDelete: Cascade, map: "contamination_overlaps_right_finding_fkey")
+
+  @@unique([id, reportId])
+  @@unique([reportId, leftFindingId, rightFindingId], map: "contamination_overlaps_report_pair_key")
+  @@index([workspaceId, projectId, reportId, startMs], map: "contamination_overlaps_workspace_project_report_idx")
+  @@index([workspaceId, confidence(sort: Desc)], map: "contamination_overlaps_workspace_confidence_idx")
+  @@map("contamination_overlaps")
 }

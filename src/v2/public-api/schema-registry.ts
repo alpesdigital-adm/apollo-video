@@ -7066,6 +7066,630 @@ const sourceDeconstructionReportSchema = {
   },
 }
 
+const contaminationRangeMsSchema = {
+  type: 'array',
+  minItems: 2,
+  maxItems: 2,
+  prefixItems: [
+    { type: 'integer', minimum: 0, maximum: 86_399_999 },
+    { type: 'integer', minimum: 1, maximum: 86_400_000 },
+  ],
+  items: false,
+}
+const contaminationTokenSchema = {
+  type: 'string',
+  minLength: 1,
+  maxLength: 128,
+  pattern: '^[a-z0-9][a-z0-9._:/-]{0,127}$',
+}
+const contaminationRegionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['x', 'y', 'width', 'height'],
+  properties: {
+    x: { type: 'number', minimum: 0, maximum: 1 },
+    y: { type: 'number', minimum: 0, maximum: 1 },
+    width: {
+      type: 'number',
+      exclusiveMinimum: 0,
+      maximum: 1,
+    },
+    height: {
+      type: 'number',
+      exclusiveMinimum: 0,
+      maximum: 1,
+    },
+  },
+}
+const contaminationDetectorSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['provider', 'model', 'version'],
+  properties: {
+    provider: contaminationTokenSchema,
+    model: contaminationTokenSchema,
+    version: contaminationTokenSchema,
+  },
+}
+const contaminationAnalyzerSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'provider',
+    'model',
+    'version',
+    'observationBatchHash',
+  ],
+  properties: {
+    ...contaminationDetectorSchema.properties,
+    observationBatchHash: sha256Schema,
+  },
+}
+const contaminationPolicyInputSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'minObservationConfidence',
+    'minAutomaticConfidence',
+    'protectedIntersectionReviewRatio',
+    'protectedIntersectionDestructiveRatio',
+    'lowConfidenceRequiresReview',
+  ],
+  properties: {
+    minObservationConfidence: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+    minAutomaticConfidence: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+    protectedIntersectionReviewRatio: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+    protectedIntersectionDestructiveRatio: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+    lowConfidenceRequiresReview: { type: 'boolean' },
+  },
+}
+const contaminationPolicySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    ...contaminationPolicyInputSchema.required,
+    'version',
+  ],
+  properties: {
+    ...contaminationPolicyInputSchema.properties,
+    version: { const: 'source-contamination/v1' },
+  },
+}
+const burnedCaptionSignalsSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'text',
+    'textTrackMatch',
+    'frameCoverage',
+    'foregroundContrast',
+  ],
+  properties: {
+    text: { type: 'string', minLength: 1, maxLength: 4_000 },
+    textTrackMatch: { type: 'number', minimum: 0, maximum: 1 },
+    frameCoverage: { type: 'number', minimum: 0, maximum: 1 },
+    foregroundContrast: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+  },
+}
+const logoWatermarkSignalsSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['label', 'logoMatch', 'frameCoverage', 'opacity'],
+  properties: {
+    label: { type: 'string', minLength: 1, maxLength: 256 },
+    logoMatch: { type: 'number', minimum: 0, maximum: 1 },
+    frameCoverage: { type: 'number', minimum: 0, maximum: 1 },
+    opacity: { type: 'number', minimum: 0, maximum: 1 },
+  },
+}
+const musicSignalsSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'musicLikelihood',
+    'speechLikelihood',
+    'separableStem',
+    'spectralPersistence',
+  ],
+  properties: {
+    musicLikelihood: { type: 'number', minimum: 0, maximum: 1 },
+    speechLikelihood: { type: 'number', minimum: 0, maximum: 1 },
+    separableStem: { type: 'boolean' },
+    spectralPersistence: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+  },
+}
+const borderSignalsSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'edges',
+    'uniformity',
+    'thicknessRatio',
+    'frameCoverage',
+  ],
+  properties: {
+    edges: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 4,
+      uniqueItems: true,
+      items: {
+        type: 'string',
+        enum: ['top', 'right', 'bottom', 'left'],
+      },
+    },
+    uniformity: { type: 'number', minimum: 0, maximum: 1 },
+    thicknessRatio: { type: 'number', minimum: 0, maximum: 1 },
+    frameCoverage: { type: 'number', minimum: 0, maximum: 1 },
+  },
+}
+const overlaySignalsSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'overlayClass',
+    'frameCoverage',
+    'opacity',
+    'occludesSubject',
+  ],
+  properties: {
+    overlayClass: contaminationTokenSchema,
+    frameCoverage: { type: 'number', minimum: 0, maximum: 1 },
+    opacity: { type: 'number', minimum: 0, maximum: 1 },
+    occludesSubject: { type: 'boolean' },
+  },
+}
+const contaminationSignalsSchema = {
+  oneOf: [
+    burnedCaptionSignalsSchema,
+    logoWatermarkSignalsSchema,
+    musicSignalsSchema,
+    borderSignalsSchema,
+    overlaySignalsSchema,
+  ],
+}
+const contaminationObservationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id',
+    'kind',
+    'rangeMs',
+    'region',
+    'confidence',
+    'detector',
+    'signals',
+  ],
+  properties: {
+    id: idSchema,
+    kind: {
+      type: 'string',
+      enum: [
+        'burned-caption',
+        'logo-watermark',
+        'music',
+        'border',
+        'overlay',
+      ],
+    },
+    rangeMs: contaminationRangeMsSchema,
+    region: {
+      anyOf: [
+        { type: 'null' },
+        contaminationRegionSchema,
+      ],
+    },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    detector: contaminationDetectorSchema,
+    signals: contaminationSignalsSchema,
+  },
+}
+const contaminationProtectedRegionInputSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id',
+    'kind',
+    'rangeMs',
+    'region',
+    'confidence',
+    'source',
+  ],
+  properties: {
+    id: idSchema,
+    kind: {
+      type: 'string',
+      enum: [
+        'face',
+        'speaker',
+        'essential-text',
+        'product',
+        'screen-content',
+      ],
+    },
+    rangeMs: contaminationRangeMsSchema,
+    region: contaminationRegionSchema,
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    source: contaminationTokenSchema,
+  },
+}
+const contaminationProtectedRegionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    ...contaminationProtectedRegionInputSchema.required,
+    'regionHash',
+  ],
+  properties: {
+    ...contaminationProtectedRegionInputSchema.properties,
+    regionHash: sha256Schema,
+  },
+}
+const contaminationFindingSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id',
+    'observationId',
+    'kind',
+    'rangeMs',
+    'region',
+    'confidence',
+    'detector',
+    'signals',
+    'overlapsEssentialTime',
+    'essentialOverlapRatio',
+    'protectedRegionIds',
+    'protectedRegionIntersectionRatio',
+    'removalImpact',
+    'removalWouldDestroyEssential',
+    'requiresHumanReview',
+    'reasonCodes',
+    'observationHash',
+    'findingHash',
+  ],
+  properties: {
+    id: idSchema,
+    observationId: idSchema,
+    kind: contaminationObservationSchema.properties.kind,
+    rangeMs: contaminationRangeMsSchema,
+    region: contaminationObservationSchema.properties.region,
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    detector: contaminationDetectorSchema,
+    signals: contaminationSignalsSchema,
+    overlapsEssentialTime: { type: 'boolean' },
+    essentialOverlapRatio: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+    protectedRegionIds: {
+      type: 'array',
+      maxItems: 5_000,
+      uniqueItems: true,
+      items: idSchema,
+    },
+    protectedRegionIntersectionRatio: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+    removalImpact: {
+      type: 'string',
+      enum: ['safe', 'review-required', 'destructive'],
+    },
+    removalWouldDestroyEssential: { type: 'boolean' },
+    requiresHumanReview: { type: 'boolean' },
+    reasonCodes: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 32,
+      uniqueItems: true,
+      items: { type: 'string', minLength: 1, maxLength: 128 },
+    },
+    observationHash: sha256Schema,
+    findingHash: sha256Schema,
+  },
+}
+const contaminationOverlapSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id',
+    'leftFindingId',
+    'rightFindingId',
+    'rangeMs',
+    'spatiallyOverlapping',
+    'intersectionRegion',
+    'confidence',
+    'overlapHash',
+  ],
+  properties: {
+    id: idSchema,
+    leftFindingId: idSchema,
+    rightFindingId: idSchema,
+    rangeMs: contaminationRangeMsSchema,
+    spatiallyOverlapping: { const: true },
+    intersectionRegion: {
+      anyOf: [
+        { type: 'null' },
+        contaminationRegionSchema,
+      ],
+    },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    overlapHash: sha256Schema,
+  },
+}
+const directorContaminationDiagnosticSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'findingId',
+    'code',
+    'severity',
+    'rangeMs',
+    'region',
+    'confidence',
+    'removalDecision',
+    'reasonCodes',
+    'message',
+  ],
+  properties: {
+    findingId: idSchema,
+    code: contaminationObservationSchema.properties.kind,
+    severity: {
+      type: 'string',
+      enum: ['information', 'warning', 'blocking'],
+    },
+    rangeMs: contaminationRangeMsSchema,
+    region: contaminationObservationSchema.properties.region,
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    removalDecision: {
+      type: 'string',
+      enum: ['eligible', 'review', 'blocked'],
+    },
+    reasonCodes:
+      contaminationFindingSchema.properties.reasonCodes,
+    message: { type: 'string', minLength: 1, maxLength: 1_000 },
+  },
+}
+const humanContaminationDiagnosticSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'findingId',
+    'reviewRequired',
+    'rangeMs',
+    'region',
+    'compareSource',
+    'question',
+    'reasonCodes',
+  ],
+  properties: {
+    findingId: idSchema,
+    reviewRequired: { type: 'boolean' },
+    rangeMs: contaminationRangeMsSchema,
+    region: contaminationObservationSchema.properties.region,
+    compareSource: { const: true },
+    question: { type: 'string', minLength: 1, maxLength: 1_000 },
+    reasonCodes:
+      contaminationFindingSchema.properties.reasonCodes,
+  },
+}
+const contaminationDiagnosticsSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'reportId',
+    'sourceArtifactId',
+    'decision',
+    'humanReviewRequired',
+    'confidence',
+  ],
+  properties: {
+    reportId: idSchema,
+    sourceArtifactId: idSchema,
+    decision: {
+      type: 'string',
+      enum: [
+        'cleanup-eligible',
+        'human-review',
+        'manual-preservation-required',
+      ],
+    },
+    humanReviewRequired: { type: 'boolean' },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    director: {
+      type: 'array',
+      maxItems: 10_000,
+      items: directorContaminationDiagnosticSchema,
+    },
+    humanReview: {
+      type: 'array',
+      maxItems: 10_000,
+      items: humanContaminationDiagnosticSchema,
+    },
+  },
+}
+const contaminationReportSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion',
+    'id',
+    'workspaceId',
+    'projectId',
+    'sourceDeconstructionReportId',
+    'sourceDeconstructionReportHash',
+    'sourceArtifactId',
+    'sourceArtifactSha256',
+    'sourceDurationMs',
+    'analyzer',
+    'policy',
+    'observations',
+    'protectedRegions',
+    'findings',
+    'overlaps',
+    'summary',
+    'diagnostics',
+    'decision',
+    'humanReviewRequired',
+    'confidence',
+    'createdByClientId',
+    'createdAt',
+    'reportHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'contamination-report/v1' },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    sourceDeconstructionReportId: idSchema,
+    sourceDeconstructionReportHash: sha256Schema,
+    sourceArtifactId: idSchema,
+    sourceArtifactSha256: sha256Schema,
+    sourceDurationMs: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 86_400_000,
+    },
+    analyzer: contaminationAnalyzerSchema,
+    policy: contaminationPolicySchema,
+    observations: {
+      type: 'array',
+      maxItems: 10_000,
+      items: contaminationObservationSchema,
+    },
+    protectedRegions: {
+      type: 'array',
+      maxItems: 5_000,
+      items: contaminationProtectedRegionSchema,
+    },
+    findings: {
+      type: 'array',
+      maxItems: 10_000,
+      items: contaminationFindingSchema,
+    },
+    overlaps: {
+      type: 'array',
+      maxItems: 50_000_000,
+      items: contaminationOverlapSchema,
+    },
+    summary: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'findingCount',
+        'observationCount',
+        'protectedRegionCount',
+        'overlapCount',
+        'countsByKind',
+        'safeCount',
+        'reviewCount',
+        'destructiveCount',
+      ],
+      properties: {
+        findingCount: { type: 'integer', minimum: 0, maximum: 10_000 },
+        observationCount: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 10_000,
+        },
+        protectedRegionCount: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 5_000,
+        },
+        overlapCount: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 50_000_000,
+        },
+        countsByKind: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'burned-caption',
+            'logo-watermark',
+            'music',
+            'border',
+            'overlay',
+          ],
+          properties: {
+            'burned-caption': {
+              type: 'integer',
+              minimum: 0,
+              maximum: 10_000,
+            },
+            'logo-watermark': {
+              type: 'integer',
+              minimum: 0,
+              maximum: 10_000,
+            },
+            music: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 10_000,
+            },
+            border: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 10_000,
+            },
+            overlay: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 10_000,
+            },
+          },
+        },
+        safeCount: { type: 'integer', minimum: 0, maximum: 10_000 },
+        reviewCount: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 10_000,
+        },
+        destructiveCount: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 10_000,
+        },
+      },
+    },
+    diagnostics: contaminationDiagnosticsSchema,
+    decision: contaminationDiagnosticsSchema.properties.decision,
+    humanReviewRequired: { type: 'boolean' },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    createdByClientId: idSchema,
+    createdAt: dateTimeSchema,
+    reportHash: sha256Schema,
+  },
+}
+
 function defineSchema(
   id: string,
   version: number,
@@ -10784,6 +11408,79 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           type: 'array',
           maxItems: 100,
           items: sourceDeconstructionReportSchema,
+        },
+        nextCursor: idSchema,
+      },
+    }),
+  ),
+  defineSchema('create-contamination-report-request', 1, 'Diagnose multimodal contamination against one exact source deconstruction', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'sourceDeconstructionReportId',
+      'expectedSourceDeconstructionReportHash',
+      'analyzer',
+      'observations',
+      'protectedRegions',
+    ],
+    properties: {
+      sourceDeconstructionReportId: idSchema,
+      expectedSourceDeconstructionReportHash: sha256Schema,
+      analyzer: contaminationDetectorSchema,
+      policy: contaminationPolicyInputSchema,
+      observations: {
+        type: 'array',
+        maxItems: 10_000,
+        items: contaminationObservationSchema,
+      },
+      protectedRegions: {
+        type: 'array',
+        maxItems: 5_000,
+        items: contaminationProtectedRegionInputSchema,
+      },
+    },
+  }),
+  defineSchema('contamination-report-mutated', 1, 'Created or replayed immutable source-contamination report',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['report', 'replayed'],
+      properties: {
+        report: contaminationReportSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('contamination-report-read', 1, 'Read one immutable source-contamination report',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['report'],
+      properties: {
+        report: contaminationReportSchema,
+      },
+    }),
+  ),
+  defineSchema('contamination-diagnostics-read', 1, 'Read Director, human-review or dual contamination diagnostics',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['diagnostics'],
+      properties: {
+        diagnostics: contaminationDiagnosticsSchema,
+      },
+    }),
+  ),
+  defineSchema('contamination-report-page', 1, 'Cursor page of immutable source-contamination reports',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['reports'],
+      properties: {
+        reports: {
+          type: 'array',
+          maxItems: 100,
+          items: contaminationReportSchema,
         },
         nextCursor: idSchema,
       },

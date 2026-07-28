@@ -1830,6 +1830,216 @@ const sourceDeconstructionReportExample = {
   createdAt,
   reportHash: '3'.repeat(64),
 }
+const contaminationDetectorExample = {
+  provider: 'apollo',
+  model: 'contamination-diagnostics',
+  version: '1.0.0',
+}
+const contaminationPolicyExample = {
+  minObservationConfidence: 0.5,
+  minAutomaticConfidence: 0.85,
+  protectedIntersectionReviewRatio: 0.1,
+  protectedIntersectionDestructiveRatio: 0.35,
+  lowConfidenceRequiresReview: true,
+}
+const contaminationObservationsExample = [
+  {
+    id: 'contamination-observation-caption-example',
+    kind: 'burned-caption',
+    rangeMs: [900, 2300],
+    region: { x: 0.1, y: 0.8, width: 0.8, height: 0.12 },
+    confidence: 0.98,
+    detector: contaminationDetectorExample,
+    signals: {
+      text: 'Se o seu anúncio não prende atenção',
+      textTrackMatch: 0.99,
+      frameCoverage: 0.96,
+      foregroundContrast: 0.92,
+    },
+  },
+  {
+    id: 'contamination-observation-music-example',
+    kind: 'music',
+    rangeMs: [900, 4000],
+    region: null,
+    confidence: 0.96,
+    detector: contaminationDetectorExample,
+    signals: {
+      musicLikelihood: 0.98,
+      speechLikelihood: 0.91,
+      separableStem: false,
+      spectralPersistence: 0.94,
+    },
+  },
+]
+const contaminationProtectedRegionsExample = [
+  {
+    id: 'contamination-protected-face-example',
+    kind: 'face',
+    rangeMs: [0, 6200],
+    region: { x: 0.26, y: 0.13, width: 0.48, height: 0.53 },
+    confidence: 0.99,
+    source: 'face-detector/v1',
+  },
+]
+const contaminationRequestExample = {
+  sourceDeconstructionReportId:
+    sourceDeconstructionReportExample.id,
+  expectedSourceDeconstructionReportHash:
+    sourceDeconstructionReportExample.reportHash,
+  analyzer: contaminationDetectorExample,
+  policy: contaminationPolicyExample,
+  observations: contaminationObservationsExample,
+  protectedRegions: contaminationProtectedRegionsExample,
+}
+const contaminationFindingsExample = [
+  {
+    id: 'contamination-finding-caption-example',
+    observationId: contaminationObservationsExample[0].id,
+    kind: 'burned-caption',
+    rangeMs: [900, 2300],
+    region: contaminationObservationsExample[0].region,
+    confidence: 0.98,
+    detector: contaminationDetectorExample,
+    signals: contaminationObservationsExample[0].signals,
+    overlapsEssentialTime: true,
+    essentialOverlapRatio: 1,
+    protectedRegionIds: [
+      contaminationProtectedRegionsExample[0].id,
+    ],
+    protectedRegionIntersectionRatio: 0.4,
+    removalImpact: 'destructive',
+    removalWouldDestroyEssential: true,
+    requiresHumanReview: true,
+    reasonCodes: [
+      'overlaps-clean-candidate',
+      'protected-region-destructive-overlap',
+    ],
+    observationHash: '4'.repeat(64),
+    findingHash: '5'.repeat(64),
+  },
+  {
+    id: 'contamination-finding-music-example',
+    observationId: contaminationObservationsExample[1].id,
+    kind: 'music',
+    rangeMs: [900, 4000],
+    region: null,
+    confidence: 0.96,
+    detector: contaminationDetectorExample,
+    signals: contaminationObservationsExample[1].signals,
+    overlapsEssentialTime: true,
+    essentialOverlapRatio: 0.4516,
+    protectedRegionIds: [],
+    protectedRegionIntersectionRatio: 0,
+    removalImpact: 'destructive',
+    removalWouldDestroyEssential: true,
+    requiresHumanReview: true,
+    reasonCodes: [
+      'overlaps-clean-candidate',
+      'mixed-with-essential-speech',
+      'no-separable-stem',
+    ],
+    observationHash: '6'.repeat(64),
+    findingHash: '7'.repeat(64),
+  },
+]
+const contaminationDirectorDiagnosticsExample =
+  contaminationFindingsExample.map((finding) => ({
+    findingId: finding.id,
+    code: finding.kind,
+    severity: 'blocking',
+    rangeMs: finding.rangeMs,
+    region: finding.region,
+    confidence: finding.confidence,
+    removalDecision: 'blocked',
+    reasonCodes: finding.reasonCodes,
+    message:
+      `${finding.kind} não pode ser removido sem afetar conteúdo essencial.`,
+  }))
+const contaminationHumanDiagnosticsExample =
+  contaminationFindingsExample.map((finding) => ({
+    findingId: finding.id,
+    reviewRequired: true,
+    rangeMs: finding.rangeMs,
+    region: finding.region,
+    compareSource: true,
+    question:
+      `A remoção de ${finding.kind} destruiria conteúdo essencial?`,
+    reasonCodes: finding.reasonCodes,
+  }))
+const contaminationDiagnosticsExample = {
+  reportId: 'contamination-report-example-1',
+  sourceArtifactId: sourceDeconstructionReportExample.sourceArtifactId,
+  decision: 'manual-preservation-required',
+  humanReviewRequired: true,
+  confidence: 0.97,
+  director: contaminationDirectorDiagnosticsExample,
+  humanReview: contaminationHumanDiagnosticsExample,
+}
+const contaminationReportExample = {
+  schemaVersion: 'contamination-report/v1',
+  id: contaminationDiagnosticsExample.reportId,
+  workspaceId,
+  projectId,
+  sourceDeconstructionReportId:
+    sourceDeconstructionReportExample.id,
+  sourceDeconstructionReportHash:
+    sourceDeconstructionReportExample.reportHash,
+  sourceArtifactId: sourceDeconstructionReportExample.sourceArtifactId,
+  sourceArtifactSha256:
+    sourceDeconstructionReportExample.sourceArtifactSha256,
+  sourceDurationMs: sourceDeconstructionReportExample.sourceDurationMs,
+  analyzer: {
+    ...contaminationDetectorExample,
+    observationBatchHash: '8'.repeat(64),
+  },
+  policy: {
+    ...contaminationPolicyExample,
+    version: 'source-contamination/v1',
+  },
+  observations: contaminationObservationsExample,
+  protectedRegions: contaminationProtectedRegionsExample.map(
+    (region) => ({
+      ...region,
+      regionHash: '9'.repeat(64),
+    }),
+  ),
+  findings: contaminationFindingsExample,
+  overlaps: [{
+    id: 'contamination-overlap-example-1',
+    leftFindingId: contaminationFindingsExample[0].id,
+    rightFindingId: contaminationFindingsExample[1].id,
+    rangeMs: [900, 2300],
+    spatiallyOverlapping: true,
+    intersectionRegion:
+      contaminationObservationsExample[0].region,
+    confidence: 0.96,
+    overlapHash: 'a'.repeat(64),
+  }],
+  summary: {
+    findingCount: 2,
+    observationCount: 2,
+    protectedRegionCount: 1,
+    overlapCount: 1,
+    countsByKind: {
+      'burned-caption': 1,
+      'logo-watermark': 0,
+      music: 1,
+      border: 0,
+      overlay: 0,
+    },
+    safeCount: 0,
+    reviewCount: 0,
+    destructiveCount: 2,
+  },
+  diagnostics: contaminationDiagnosticsExample,
+  decision: 'manual-preservation-required',
+  humanReviewRequired: true,
+  confidence: 0.97,
+  createdByClientId: clientId,
+  createdAt,
+  reportHash: 'b'.repeat(64),
+}
 const productionBatchCreateRequestExample = {
   projectId,
   name: 'Campanha de descoberta — julho',
@@ -5222,6 +5432,39 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           reports: [sourceDeconstructionReportExample],
           nextCursor: sourceDeconstructionReportExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-contamination-report-request/v1': [
+      contaminationRequestExample,
+    ],
+    'apollo://schemas/contamination-report-mutated/v1': [
+      {
+        data: {
+          report: contaminationReportExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/contamination-report-read/v1': [
+      {
+        data: { report: contaminationReportExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/contamination-diagnostics-read/v1': [
+      {
+        data: { diagnostics: contaminationDiagnosticsExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/contamination-report-page/v1': [
+      {
+        data: {
+          reports: [contaminationReportExample],
+          nextCursor: contaminationReportExample.id,
         },
         meta: { apiVersion: 'v1' },
       },

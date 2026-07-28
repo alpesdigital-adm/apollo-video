@@ -195,6 +195,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable analysis from exact existing artifact and cataloged-speech hashes; it preserves source media and starts no provider or render work.',
     },
+    'apollo.projects.contamination-reports.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable multimodal diagnosis from an exact source-deconstruction hash; it preserves source media, blocks destructive cleanup and starts no provider or render work.',
+    },
     'apollo.batches.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one explicit bounded item matrix from existing approved workspace artifacts without starting provider work.',

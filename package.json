@@ -41,6 +41,7 @@
     "test:integration:hybrid-search": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-hybrid-search.integration.mjs",
     "test:integration:hierarchical-processing": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-hierarchical-processing.integration.mjs",
     "test:integration:source-deconstruction": "node node_modules/tsx/dist/cli.mjs --test tests/v2/prisma-source-deconstruction.integration.mjs",
+    "test:integration:contamination-reports": "node --env-file=.env node_modules/tsx/dist/cli.mjs --test tests/v2/prisma-contamination-report.integration.mjs",
     "test:integration:production-batches": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-production-batch.integration.mjs",
     "test:integration:script-alignments": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-script-alignment.integration.mjs",
     "test:integration:take-libraries": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-take-library.integration.mjs",
@@ -55,6 +56,7 @@
     "db:v2:studio": "npx prisma studio --schema prisma/v2/schema.prisma",
     "db:v2:validate": "node scripts/verify-v2-migration.mjs",
     "fixtures:source-deconstruction": "node scripts/generate-source-deconstruction-golden.mjs",
+    "fixtures:contamination": "node scripts/generate-contamination-goldens.mjs",
     "db:v2:migrate:deploy": "npx prisma migrate deploy --schema prisma/v2/schema.prisma",
     "db:v2:bootstrap": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env scripts/bootstrap-v2-workspace.mjs",
     "postinstall": "node scripts/generate-prisma-clients.mjs"

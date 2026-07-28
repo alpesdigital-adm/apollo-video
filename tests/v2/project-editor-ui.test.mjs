@@ -173,6 +173,54 @@ test('T-FR-120 project editor exposes API-backed source versus clean evidence', 
   )
 })
 
+test('T-FR-121 project editor exposes localized dual contamination diagnostics from the public API', () => {
+  assert.match(
+    projectEditorSource,
+    /\/contamination-reports\?limit=20/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="contamination-report-panel"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="contamination-region-map"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="contamination-region"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="contamination-finding"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="contamination-director-diagnostics"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="contamination-human-diagnostics"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="contamination-human-review-flag"/,
+  )
+  assert.match(projectEditorSource, /CONTAMINATION_LABELS/)
+  assert.match(projectEditorSource, /removalImpact === 'destructive'/)
+  assert.match(projectEditorSource, /finding\.region\.x\.toFixed\(2\)/)
+  assert.match(projectEditorSource, /diagnostics\.director\.map/)
+  assert.match(
+    projectEditorSource,
+    /diagnostics\.humanReview\.filter/,
+  )
+  assert.match(
+    projectEditorSource,
+    /=== 1 \? 'sobreposição' : 'sobreposições'/,
+  )
+  assert.doesNotMatch(projectEditorSource, /sobreposição\{[^}]+\? '' : 'ões'\}/)
+})
+
 test('T-FR-230 project editor exposes the persisted proxy verdict and blocks final export until release', () => {
   assert.match(projectEditorSource, /\/proxy-reviews/)
   assert.match(projectEditorSource, /data-testid="proxy-review-gate"/)

@@ -42,6 +42,7 @@ import type { VariantRecipeRepository } from '../application/ports/variant-recip
 import type { VariantPortfolioPreflightRepository } from '../application/ports/variant-portfolio-preflight-repository.ts'
 import type { BatchEditRepository } from '../application/ports/batch-edit-repository.ts'
 import type { SourceDeconstructionRepository } from '../application/ports/source-deconstruction-repository.ts'
+import type { ContaminationReportRepository } from '../application/ports/contamination-report-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -122,6 +123,7 @@ import { PrismaVariantRecipeRepository } from './prisma/variant-recipe-repositor
 import { PrismaVariantPortfolioPreflightRepository } from './prisma/variant-portfolio-preflight-repository.ts'
 import { PrismaBatchEditRepository } from './prisma/batch-edit-repository.ts'
 import { PrismaSourceDeconstructionRepository } from './prisma/source-deconstruction-repository.ts'
+import { PrismaContaminationReportRepository } from './prisma/contamination-report-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -268,6 +270,11 @@ export function createBatchEditRepository(): BatchEditRepository {
 export function createSourceDeconstructionRepository():
 SourceDeconstructionRepository {
   return new PrismaSourceDeconstructionRepository(resolveV2Client())
+}
+
+export function createContaminationReportRepository():
+ContaminationReportRepository {
+  return new PrismaContaminationReportRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {

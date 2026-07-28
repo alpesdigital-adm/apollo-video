@@ -63,6 +63,84 @@ interface SourceDeconstructionReportData {
   contextPreserved: boolean
   createdAt: string
 }
+type ContaminationKind =
+  | 'burned-caption'
+  | 'logo-watermark'
+  | 'music'
+  | 'border'
+  | 'overlay'
+type ContaminationRemovalImpact =
+  | 'safe'
+  | 'review-required'
+  | 'destructive'
+interface ContaminationReportData {
+  id: string
+  sourceDeconstructionReportId: string
+  sourceArtifactId: string
+  sourceDurationMs: number
+  protectedRegions: {
+    id: string
+    kind: 'face' | 'speaker' | 'essential-text' | 'product' | 'screen-content'
+    region: {
+      x: number
+      y: number
+      width: number
+      height: number
+    }
+  }[]
+  findings: {
+    id: string
+    kind: ContaminationKind
+    rangeMs: [number, number]
+    region: {
+      x: number
+      y: number
+      width: number
+      height: number
+    } | null
+    confidence: number
+    removalImpact: ContaminationRemovalImpact
+    removalWouldDestroyEssential: boolean
+    requiresHumanReview: boolean
+    protectedRegionIds: string[]
+    reasonCodes: string[]
+  }[]
+  overlaps: {
+    id: string
+    rangeMs: [number, number]
+    leftFindingId: string
+    rightFindingId: string
+  }[]
+  summary: {
+    findingCount: number
+    overlapCount: number
+    safeCount: number
+    reviewCount: number
+    destructiveCount: number
+    countsByKind: Record<ContaminationKind, number>
+  }
+  diagnostics: {
+    director: {
+      findingId: string
+      severity: 'information' | 'warning' | 'blocking'
+      removalDecision: 'eligible' | 'review' | 'blocked'
+      message: string
+    }[]
+    humanReview: {
+      findingId: string
+      reviewRequired: boolean
+      compareSource: true
+      question: string
+    }[]
+  }
+  decision:
+    | 'cleanup-eligible'
+    | 'human-review'
+    | 'manual-preservation-required'
+  humanReviewRequired: boolean
+  confidence: number
+  createdAt: string
+}
 interface PublicOperation {
   id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export'; status: string; phase: string;
   progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string
@@ -267,6 +345,20 @@ const SOURCE_CONTAMINANT_LABELS = Object.freeze({
   'removable-tail': 'Cauda removível',
 } satisfies Record<SourceDeconstructionReportData['semanticContaminants'][number]['kind'], string>)
 
+const CONTAMINATION_LABELS = Object.freeze({
+  'burned-caption': 'Legenda incorporada',
+  'logo-watermark': 'Logo ou marca d’água',
+  music: 'Música mixada',
+  border: 'Borda incorporada',
+  overlay: 'Overlay incorporado',
+} satisfies Record<ContaminationKind, string>)
+
+const CONTAMINATION_IMPACT_LABELS = Object.freeze({
+  safe: 'Limpeza segura',
+  'review-required': 'Revisar antes de limpar',
+  destructive: 'Preservar conteúdo',
+} satisfies Record<ContaminationRemovalImpact, string>)
+
 function readableBytes(value: number | string): string {
   const bytes = typeof value === 'string' ? Number(value) : value
   if (!Number.isFinite(bytes)) return '—'
@@ -296,6 +388,15 @@ function readableDuration(value: number): string {
   if (!Number.isFinite(value) || value < 0) return '—'
   if (value < 1_000) return `${Math.round(value)} ms`
   return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)} s`
+}
+
+function readableTimestamp(value: number): string {
+  const milliseconds = Math.max(0, Math.round(value))
+  const totalSeconds = Math.floor(milliseconds / 1_000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  const remainder = milliseconds % 1_000
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(remainder).padStart(3, '0')}`
 }
 
 function rangePosition(
@@ -414,6 +515,9 @@ export default function ProjectWorkspacePage() {
   const [sourceDeconstructions, setSourceDeconstructions] = useState<SourceDeconstructionReportData[]>([])
   const [selectedSourceDeconstructionId, setSelectedSourceDeconstructionId] = useState<string | null>(null)
   const [sourceDeconstructionLoading, setSourceDeconstructionLoading] = useState(true)
+  const [contaminationReports, setContaminationReports] = useState<ContaminationReportData[]>([])
+  const [selectedContaminationReportId, setSelectedContaminationReportId] = useState<string | null>(null)
+  const [contaminationReportsLoading, setContaminationReportsLoading] = useState(true)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -517,6 +621,46 @@ export default function ProjectWorkspacePage() {
   useEffect(() => {
     void loadSourceDeconstructions()
   }, [loadSourceDeconstructions])
+  const loadContaminationReports = useCallback(async (quiet = false) => {
+    if (!quiet) setContaminationReportsLoading(true)
+    try {
+      const response = await fetch(
+        `/v1/projects/${encodeURIComponent(projectId)}/contamination-reports?limit=20`,
+        { headers: { accept: 'application/json' }, cache: 'no-store' },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        reports: ContaminationReportData[]
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível carregar o diagnóstico visual e sonoro.',
+        ))
+      }
+      setContaminationReports(payload.data.reports)
+      setSelectedContaminationReportId((current) =>
+        current && payload.data!.reports.some((report) =>
+          report.id === current)
+          ? current
+          : payload.data!.reports[0]?.id ?? null)
+    } catch (error) {
+      if (!quiet) {
+        setNotice(error instanceof Error
+          ? error.message
+          : 'Não foi possível carregar o diagnóstico visual e sonoro.')
+      }
+    } finally {
+      if (!quiet) setContaminationReportsLoading(false)
+    }
+  }, [projectId, router])
+
+  useEffect(() => {
+    void loadContaminationReports()
+  }, [loadContaminationReports])
   useEffect(() => () => reviewElementLookup.current?.abort(), [])
   useEffect(() => {
     if (workspace?.editPlan?.state !== 'compiled' || !workspace.version) {
@@ -604,6 +748,24 @@ export default function ProjectWorkspacePage() {
       ?? sourceDeconstructions[0]
       ?? null,
     [selectedSourceDeconstructionId, sourceDeconstructions],
+  )
+  const contaminationReportsForSource = useMemo(
+    () => selectedSourceDeconstruction
+      ? contaminationReports.filter((report) =>
+          report.sourceDeconstructionReportId ===
+            selectedSourceDeconstruction.id)
+      : contaminationReports,
+    [contaminationReports, selectedSourceDeconstruction],
+  )
+  const selectedContaminationReport = useMemo(
+    () => contaminationReportsForSource.find((report) =>
+      report.id === selectedContaminationReportId)
+      ?? contaminationReportsForSource[0]
+      ?? null,
+    [
+      contaminationReportsForSource,
+      selectedContaminationReportId,
+    ],
   )
   const transcript = workspace?.transcripts[0]
   const latestDirectorRun = workspace?.directorRuns[0]
@@ -2426,7 +2588,7 @@ export default function ProjectWorkspacePage() {
 
           <section
             aria-label="Comparação entre a fonte publicada e os trechos limpos"
-            className="mt-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
+            className="mt-5 scroll-mt-20 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
             data-testid="source-deconstruction-panel"
           >
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/[0.07] px-5 py-4">
@@ -2568,6 +2730,205 @@ export default function ProjectWorkspacePage() {
                           <p className="mt-1 line-clamp-2 text-[8px] leading-4 text-[#6e625f]">{item.exactText}</p>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section
+            aria-label="Diagnóstico de elementos incorporados à fonte"
+            className="mt-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
+            data-testid="contamination-report-panel"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/[0.07] px-5 py-4">
+              <div>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#ad8950]">Integridade da fonte</p>
+                <h2 className="mt-1.5 text-base font-semibold tracking-[-0.02em] text-[#e8e3da]">O que pode ser limpo sem apagar o essencial.</h2>
+                <p className="mt-1 text-[10px] text-[#6e6961]">O diretor cruza imagem, áudio, fala preservada e áreas sensíveis antes de planejar qualquer remoção.</p>
+              </div>
+              {contaminationReportsForSource.length > 1 ? (
+                <label className="grid gap-1 text-[8px] uppercase tracking-[0.14em] text-[#6f6a62]">
+                  Diagnóstico
+                  <select
+                    className="min-w-48 border border-white/[0.09] bg-[#0d0d0d] px-3 py-2 text-[10px] normal-case tracking-normal text-[#bdb6ac] outline-none focus:border-[#d8aa3d]/55"
+                    data-testid="contamination-report-select"
+                    onChange={(event) =>
+                      setSelectedContaminationReportId(event.target.value)}
+                    value={selectedContaminationReport?.id ?? ''}
+                  >
+                    {contaminationReportsForSource.map((report) => (
+                      <option key={report.id} value={report.id}>
+                        {new Date(report.createdAt).toLocaleString('pt-BR')} · {report.summary.findingCount} achado{report.summary.findingCount === 1 ? '' : 's'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+
+            {contaminationReportsLoading ? (
+              <div className="px-5 py-10 text-center text-xs text-[#716c64]">
+                Cruzando pixels, áudio e regiões protegidas…
+              </div>
+            ) : !selectedContaminationReport ? (
+              <div className="grid gap-2 px-5 py-9 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div>
+                  <p className="text-sm font-medium text-[#bdb7ae]">Nenhum diagnóstico multimodal disponível.</p>
+                  <p className="mt-1 text-[10px] leading-5 text-[#69655e]">Quando uma fonte for analisada, legendas incorporadas, marcas, música, bordas e overlays aparecerão aqui com posição e impacto de remoção.</p>
+                </div>
+                <span className="mt-2 border border-dashed border-white/[0.1] px-3 py-2 font-mono text-[8px] uppercase tracking-[0.14em] text-[#5f5a53] sm:mt-0">aguardando diagnóstico</span>
+              </div>
+            ) : (
+              <div data-testid="contamination-report-result">
+                <div className="grid divide-y divide-white/[0.06] sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+                  <div className="px-5 py-4">
+                    <p className="text-[8px] uppercase tracking-[0.16em] text-[#69645c]">Achados</p>
+                    <p className="mt-2 font-mono text-sm text-[#d8d0c4]">{selectedContaminationReport.summary.findingCount}</p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-[8px] uppercase tracking-[0.16em] text-[#69645c]">Limpeza segura</p>
+                    <p className="mt-2 font-mono text-sm text-[#72bd8a]">{selectedContaminationReport.summary.safeCount}</p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-[8px] uppercase tracking-[0.16em] text-[#69645c]">Preservar</p>
+                    <p className="mt-2 font-mono text-sm text-[#d97970]">{selectedContaminationReport.summary.destructiveCount}</p>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-[8px] uppercase tracking-[0.16em] text-[#69645c]">Decisão</p>
+                    <p className={`mt-2 text-sm font-medium ${selectedContaminationReport.decision === 'cleanup-eligible' ? 'text-[#72bd8a]' : selectedContaminationReport.decision === 'human-review' ? 'text-[#ddb452]' : 'text-[#d97970]'}`}>
+                      {selectedContaminationReport.decision === 'cleanup-eligible' ? 'Pode planejar limpeza' : selectedContaminationReport.decision === 'human-review' ? 'Confirmar com editor' : 'Remoção bloqueada'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid border-t border-white/[0.07] lg:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="border-b border-white/[0.07] bg-[#0b0b0b] px-5 py-5 lg:border-b-0 lg:border-r">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#777168]">Mapa de risco</p>
+                      <span className="font-mono text-[9px] text-[#625d56]">{workspace.project.format ?? '9:16'}</span>
+                    </div>
+                    <div
+                      className="relative mx-auto mt-4 max-h-72 w-full max-w-40 overflow-hidden border border-white/[0.12] bg-[radial-gradient(circle_at_50%_35%,#292824_0,#171715_34%,#0e0e0d_72%)] shadow-[0_20px_55px_rgba(0,0,0,.35)]"
+                      data-testid="contamination-region-map"
+                      style={{ aspectRatio: (workspace.project.format ?? '9:16').replace(':', ' / ') }}
+                    >
+                      <span className="absolute inset-x-0 top-1/2 h-px bg-white/[0.035]" />
+                      <span className="absolute inset-y-0 left-1/2 w-px bg-white/[0.035]" />
+                      {selectedContaminationReport.protectedRegions.map((region) => (
+                        <span
+                          className="absolute border border-dashed border-[#6da982]/55 bg-[#4f8c65]/[0.06]"
+                          key={region.id}
+                          style={{
+                            left: `${region.region.x * 100}%`,
+                            top: `${region.region.y * 100}%`,
+                            width: `${region.region.width * 100}%`,
+                            height: `${region.region.height * 100}%`,
+                          }}
+                          title={`Área protegida · ${region.kind}`}
+                        />
+                      ))}
+                      {selectedContaminationReport.findings.filter((finding) =>
+                        finding.region !== null).map((finding) => (
+                        <span
+                          className={`absolute border ${finding.removalImpact === 'destructive' ? 'border-[#e06e65] bg-[#b54f49]/15 shadow-[0_0_16px_rgba(190,75,68,.25)]' : finding.removalImpact === 'review-required' ? 'border-[#d7aa45] bg-[#b8892f]/12' : 'border-[#68ad7e] bg-[#4d8e62]/10'}`}
+                          data-testid="contamination-region"
+                          key={finding.id}
+                          style={{
+                            left: `${finding.region!.x * 100}%`,
+                            top: `${finding.region!.y * 100}%`,
+                            width: `${finding.region!.width * 100}%`,
+                            height: `${finding.region!.height * 100}%`,
+                          }}
+                          title={`${CONTAMINATION_LABELS[finding.kind]} · ${CONTAMINATION_IMPACT_LABELS[finding.removalImpact]}`}
+                        >
+                          <i className={`absolute -left-px -top-4 px-1 py-0.5 text-[6px] font-bold uppercase tracking-[0.08em] ${finding.removalImpact === 'destructive' ? 'bg-[#c85d55] text-[#190706]' : finding.removalImpact === 'review-required' ? 'bg-[#b98b32] text-[#160f03]' : 'bg-[#548f67] text-[#061009]'}`}>
+                            {finding.kind === 'burned-caption' ? 'TXT' : finding.kind === 'logo-watermark' ? 'LOGO' : finding.kind === 'border' ? 'BORDA' : 'OVR'}
+                          </i>
+                        </span>
+                      ))}
+                      {selectedContaminationReport.findings.some((finding) =>
+                        finding.kind === 'music') ? (
+                        <span className="absolute inset-x-2 bottom-2 flex h-5 items-center justify-center gap-px border border-[#ae8741]/45 bg-[#17130b]/90 px-1" title="Música detectada no áudio">
+                          {[4, 9, 6, 13, 7, 11, 5, 14, 8, 10, 6, 12, 5, 9, 4].map((height, index) => (
+                            <i className="w-px bg-[#d0a348]/70" key={`${height}-${index}`} style={{ height: `${height}px` }} />
+                          ))}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-2 text-[8px] uppercase tracking-[0.1em] text-[#68635c]">
+                      <span className="flex items-center gap-1.5"><i className="h-2 w-2 border border-dashed border-[#6da982]/60" /> protegido</span>
+                      <span className="flex items-center gap-1.5"><i className="h-2 w-2 border border-[#df6e65]" /> bloqueado</span>
+                    </div>
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="flex items-center justify-between gap-4 border-b border-white/[0.06] px-5 py-3">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#777168]">Achados localizados</p>
+                      <span className="font-mono text-[9px] text-[#706a61]">{selectedContaminationReport.summary.overlapCount} {selectedContaminationReport.summary.overlapCount === 1 ? 'sobreposição' : 'sobreposições'} · {Math.round(selectedContaminationReport.confidence * 100)}% confiança</span>
+                    </div>
+                    <div className="divide-y divide-white/[0.055]">
+                      {[...selectedContaminationReport.findings].sort((left, right) => {
+                        const priority = { destructive: 0, 'review-required': 1, safe: 2 }
+                        return priority[left.removalImpact] - priority[right.removalImpact] || left.rangeMs[0] - right.rangeMs[0]
+                      }).map((finding) => (
+                        <article
+                          className="grid gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                          data-testid="contamination-finding"
+                          key={finding.id}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`h-1.5 w-1.5 rounded-full ${finding.removalImpact === 'destructive' ? 'bg-[#dc7067]' : finding.removalImpact === 'review-required' ? 'bg-[#d6a945]' : 'bg-[#6cb482]'}`} />
+                              <p className="text-[11px] font-medium text-[#c9c3ba]">{CONTAMINATION_LABELS[finding.kind]}</p>
+                              <span className={`border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.1em] ${finding.removalImpact === 'destructive' ? 'border-[#a94f49]/35 text-[#c87871]' : finding.removalImpact === 'review-required' ? 'border-[#9f792d]/35 text-[#c9a44d]' : 'border-[#4d8860]/35 text-[#72a982]'}`}>{CONTAMINATION_IMPACT_LABELS[finding.removalImpact]}</span>
+                            </div>
+                            <p className="mt-1.5 truncate font-mono text-[9px] text-[#6e6961]">{readableTimestamp(finding.rangeMs[0])} → {readableTimestamp(finding.rangeMs[1])} · {finding.region ? `x ${finding.region.x.toFixed(2)} · y ${finding.region.y.toFixed(2)} · ${finding.region.width.toFixed(2)}×${finding.region.height.toFixed(2)}` : 'faixa de áudio'}</p>
+                          </div>
+                          <div className="text-left sm:text-right">
+                            <p className="font-mono text-[10px] text-[#9d968c]">{Math.round(finding.confidence * 100)}%</p>
+                            <p className="mt-1 text-[8px] uppercase tracking-[0.1em] text-[#5f5a53]">{finding.protectedRegionIds.length ? `${finding.protectedRegionIds.length} área protegida` : 'sem colisão visual'}</p>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid border-t border-white/[0.07] lg:grid-cols-2">
+                  <div className="px-5 py-5" data-testid="contamination-director-diagnostics">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#b18a43]">Decisão do diretor</p>
+                      <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#6d665b]">ação automática</span>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {selectedContaminationReport.diagnostics.director.map((diagnostic) => (
+                        <div className="grid grid-cols-[8px_1fr] gap-2" key={diagnostic.findingId}>
+                          <i className={`mt-1 h-1.5 w-1.5 rounded-full ${diagnostic.severity === 'blocking' ? 'bg-[#d66a62]' : diagnostic.severity === 'warning' ? 'bg-[#d1a246]' : 'bg-[#69a97c]'}`} />
+                          <p className="text-[10px] leading-5 text-[#8d877e]">{diagnostic.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="border-t border-white/[0.07] bg-[#0b0a09] px-5 py-5 lg:border-l lg:border-t-0" data-testid="contamination-human-diagnostics">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#a87972]">Revisão humana</p>
+                      <span
+                        className={`border px-2 py-1 text-[8px] font-bold uppercase tracking-[0.11em] ${selectedContaminationReport.humanReviewRequired ? 'border-[#ad554e]/35 bg-[#a84e48]/[0.08] text-[#cd756d]' : 'border-[#4f8d62]/35 bg-[#4f8d62]/[0.07] text-[#71aa82]'}`}
+                        data-testid="contamination-human-review-flag"
+                      >
+                        {selectedContaminationReport.humanReviewRequired ? 'confirmação necessária' : 'sem pendência'}
+                      </span>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {selectedContaminationReport.diagnostics.humanReview.filter((diagnostic) =>
+                        diagnostic.reviewRequired).map((diagnostic) => (
+                        <p className="border-l border-[#9f514b]/35 pl-3 text-[10px] leading-5 text-[#8e7a76]" key={diagnostic.findingId}>{diagnostic.question}</p>
+                      ))}
+                      {!selectedContaminationReport.humanReviewRequired ? (
+                        <p className="text-[10px] leading-5 text-[#738477]">O diagnóstico preserva fala e áreas importantes; a comparação com a fonte permanece disponível para auditoria.</p>
+                      ) : null}
                     </div>
                   </div>
                 </div>

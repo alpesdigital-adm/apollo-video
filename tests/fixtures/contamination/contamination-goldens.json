@@ -1,0 +1,494 @@
+{
+  "schemaVersion": "contamination-golden-fixtures/v1",
+  "generator": "scripts/generate-contamination-goldens.mjs",
+  "fixtures": [
+    {
+      "id": "contamination-burned-caption",
+      "file": "burned-caption.mp4",
+      "kinds": [
+        "burned-caption"
+      ],
+      "sha256": "895424541d8924fd3bf7ac80b6f1571fe7479175ebb99e53f07e16a51ed4cbd6",
+      "byteSize": 8456,
+      "technical": {
+        "width": 320,
+        "height": 568,
+        "fps": 30,
+        "durationMs": 2000,
+        "videoCodec": "h264",
+        "audioCodec": "aac",
+        "audioSampleRate": 48000
+      },
+      "observations": [
+        {
+          "id": "observation-burned-caption",
+          "kind": "burned-caption",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.1,
+            "y": 0.78,
+            "width": 0.8,
+            "height": 0.12
+          },
+          "confidence": 0.98,
+          "detector": {
+            "provider": "apollo",
+            "model": "contamination-golden",
+            "version": "1.0.0"
+          },
+          "signals": {
+            "text": "OFERTA VALIDADA",
+            "textTrackMatch": 0.99,
+            "frameCoverage": 1,
+            "foregroundContrast": 0.94
+          }
+        }
+      ],
+      "protectedRegions": [
+        {
+          "id": "protected-speaker-face",
+          "kind": "face",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.3,
+            "y": 0.18,
+            "width": 0.4,
+            "height": 0.5
+          },
+          "confidence": 0.99,
+          "source": "fixture-face-detector/v1"
+        }
+      ]
+    },
+    {
+      "id": "contamination-logo-watermark",
+      "file": "logo-watermark.mp4",
+      "kinds": [
+        "logo-watermark"
+      ],
+      "sha256": "dfefeece888b706f3cff0ebe7a4d420e28ef84ae721b30771db590d52c0fc04f",
+      "byteSize": 7563,
+      "technical": {
+        "width": 320,
+        "height": 568,
+        "fps": 30,
+        "durationMs": 2000,
+        "videoCodec": "h264",
+        "audioCodec": "aac",
+        "audioSampleRate": 48000
+      },
+      "observations": [
+        {
+          "id": "observation-logo-watermark",
+          "kind": "logo-watermark",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.77,
+            "y": 0.03,
+            "width": 0.2,
+            "height": 0.08
+          },
+          "confidence": 0.96,
+          "detector": {
+            "provider": "apollo",
+            "model": "contamination-golden",
+            "version": "1.0.0"
+          },
+          "signals": {
+            "label": "APOLLO",
+            "logoMatch": 0.99,
+            "frameCoverage": 1,
+            "opacity": 0.72
+          }
+        }
+      ],
+      "protectedRegions": [
+        {
+          "id": "protected-speaker-face",
+          "kind": "face",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.3,
+            "y": 0.18,
+            "width": 0.4,
+            "height": 0.5
+          },
+          "confidence": 0.99,
+          "source": "fixture-face-detector/v1"
+        }
+      ]
+    },
+    {
+      "id": "contamination-music",
+      "file": "music.mp4",
+      "kinds": [
+        "music"
+      ],
+      "sha256": "9435b5acf5e9efc32e8eee1312b6317dbc4948d573e11e806987f70558859be9",
+      "byteSize": 31897,
+      "technical": {
+        "width": 320,
+        "height": 568,
+        "fps": 30,
+        "durationMs": 2000,
+        "videoCodec": "h264",
+        "audioCodec": "aac",
+        "audioSampleRate": 48000
+      },
+      "observations": [
+        {
+          "id": "observation-music",
+          "kind": "music",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": null,
+          "confidence": 0.97,
+          "detector": {
+            "provider": "apollo",
+            "model": "contamination-golden",
+            "version": "1.0.0"
+          },
+          "signals": {
+            "musicLikelihood": 0.99,
+            "speechLikelihood": 0.88,
+            "separableStem": false,
+            "spectralPersistence": 0.96
+          }
+        }
+      ],
+      "protectedRegions": [
+        {
+          "id": "protected-speaker-face",
+          "kind": "face",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.3,
+            "y": 0.18,
+            "width": 0.4,
+            "height": 0.5
+          },
+          "confidence": 0.99,
+          "source": "fixture-face-detector/v1"
+        }
+      ]
+    },
+    {
+      "id": "contamination-border",
+      "file": "border.mp4",
+      "kinds": [
+        "border"
+      ],
+      "sha256": "04ed0df2756e8b1288723aad30a18b775834ed68c610af2e9e097980da8f0d2c",
+      "byteSize": 6922,
+      "technical": {
+        "width": 320,
+        "height": 568,
+        "fps": 30,
+        "durationMs": 2000,
+        "videoCodec": "h264",
+        "audioCodec": "aac",
+        "audioSampleRate": 48000
+      },
+      "observations": [
+        {
+          "id": "observation-border",
+          "kind": "border",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 0.071
+          },
+          "confidence": 0.98,
+          "detector": {
+            "provider": "apollo",
+            "model": "contamination-golden",
+            "version": "1.0.0"
+          },
+          "signals": {
+            "edges": [
+              "top",
+              "bottom"
+            ],
+            "uniformity": 0.99,
+            "thicknessRatio": 0.071,
+            "frameCoverage": 1
+          }
+        }
+      ],
+      "protectedRegions": [
+        {
+          "id": "protected-speaker-face",
+          "kind": "face",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.3,
+            "y": 0.18,
+            "width": 0.4,
+            "height": 0.5
+          },
+          "confidence": 0.99,
+          "source": "fixture-face-detector/v1"
+        }
+      ]
+    },
+    {
+      "id": "contamination-overlay",
+      "file": "overlay.mp4",
+      "kinds": [
+        "overlay"
+      ],
+      "sha256": "7a276b18acfd58426c674a4fa30d7d020f4a044ecc2f3d147f43df9d8d3e1819",
+      "byteSize": 7975,
+      "technical": {
+        "width": 320,
+        "height": 568,
+        "fps": 30,
+        "durationMs": 2000,
+        "videoCodec": "h264",
+        "audioCodec": "aac",
+        "audioSampleRate": 48000
+      },
+      "observations": [
+        {
+          "id": "observation-overlay",
+          "kind": "overlay",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.275,
+            "y": 0.317,
+            "width": 0.45,
+            "height": 0.475
+          },
+          "confidence": 0.95,
+          "detector": {
+            "provider": "apollo",
+            "model": "contamination-golden",
+            "version": "1.0.0"
+          },
+          "signals": {
+            "overlayClass": "promo-card",
+            "frameCoverage": 1,
+            "opacity": 0.72,
+            "occludesSubject": true
+          }
+        }
+      ],
+      "protectedRegions": [
+        {
+          "id": "protected-speaker-face",
+          "kind": "face",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.3,
+            "y": 0.18,
+            "width": 0.4,
+            "height": 0.5
+          },
+          "confidence": 0.99,
+          "source": "fixture-face-detector/v1"
+        }
+      ]
+    },
+    {
+      "id": "contamination-overlapping-combination",
+      "file": "overlapping-combination.mp4",
+      "kinds": [
+        "burned-caption",
+        "logo-watermark",
+        "music",
+        "border",
+        "overlay"
+      ],
+      "sha256": "ac3744202c11cea6a5ca5a050a8008ca2c00043a229788ad9ec23abd61ba7f8c",
+      "byteSize": 35021,
+      "technical": {
+        "width": 320,
+        "height": 568,
+        "fps": 30,
+        "durationMs": 2000,
+        "videoCodec": "h264",
+        "audioCodec": "aac",
+        "audioSampleRate": 48000
+      },
+      "observations": [
+        {
+          "id": "overlap-observation-burned-caption",
+          "kind": "burned-caption",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.1,
+            "y": 0.78,
+            "width": 0.8,
+            "height": 0.12
+          },
+          "confidence": 0.98,
+          "detector": {
+            "provider": "apollo",
+            "model": "contamination-golden",
+            "version": "1.0.0"
+          },
+          "signals": {
+            "text": "OFERTA VALIDADA",
+            "textTrackMatch": 0.99,
+            "frameCoverage": 1,
+            "foregroundContrast": 0.94
+          }
+        },
+        {
+          "id": "overlap-observation-logo-watermark",
+          "kind": "logo-watermark",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.77,
+            "y": 0.03,
+            "width": 0.2,
+            "height": 0.08
+          },
+          "confidence": 0.96,
+          "detector": {
+            "provider": "apollo",
+            "model": "contamination-golden",
+            "version": "1.0.0"
+          },
+          "signals": {
+            "label": "APOLLO",
+            "logoMatch": 0.99,
+            "frameCoverage": 1,
+            "opacity": 0.72
+          }
+        },
+        {
+          "id": "overlap-observation-music",
+          "kind": "music",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": null,
+          "confidence": 0.97,
+          "detector": {
+            "provider": "apollo",
+            "model": "contamination-golden",
+            "version": "1.0.0"
+          },
+          "signals": {
+            "musicLikelihood": 0.99,
+            "speechLikelihood": 0.88,
+            "separableStem": false,
+            "spectralPersistence": 0.96
+          }
+        },
+        {
+          "id": "overlap-observation-border",
+          "kind": "border",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 0.071
+          },
+          "confidence": 0.98,
+          "detector": {
+            "provider": "apollo",
+            "model": "contamination-golden",
+            "version": "1.0.0"
+          },
+          "signals": {
+            "edges": [
+              "top",
+              "bottom"
+            ],
+            "uniformity": 0.99,
+            "thicknessRatio": 0.071,
+            "frameCoverage": 1
+          }
+        },
+        {
+          "id": "overlap-observation-overlay",
+          "kind": "overlay",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.275,
+            "y": 0.317,
+            "width": 0.45,
+            "height": 0.475
+          },
+          "confidence": 0.95,
+          "detector": {
+            "provider": "apollo",
+            "model": "contamination-golden",
+            "version": "1.0.0"
+          },
+          "signals": {
+            "overlayClass": "promo-card",
+            "frameCoverage": 1,
+            "opacity": 0.72,
+            "occludesSubject": true
+          }
+        }
+      ],
+      "protectedRegions": [
+        {
+          "id": "protected-speaker-face",
+          "kind": "face",
+          "rangeMs": [
+            0,
+            2000
+          ],
+          "region": {
+            "x": 0.3,
+            "y": 0.18,
+            "width": 0.4,
+            "height": 0.5
+          },
+          "confidence": 0.99,
+          "source": "fixture-face-detector/v1"
+        }
+      ]
+    }
+  ]
+}

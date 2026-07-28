@@ -1177,16 +1177,8 @@ export function hydrateSourceDeconstructionReport(
   return rebuilt
 }
 
-export type ContaminationKind =
-  | 'burned-caption'
-  | 'logo-watermark'
-  | 'music'
-  | 'border'
-  | 'overlay'
-
-export interface Contamination {
+export interface CleanupContaminationInput {
   id: string
-  kind: ContaminationKind
   rangeMs: readonly [number, number]
   region: {
     x: number
@@ -1198,104 +1190,6 @@ export interface Contamination {
   overlapsEssential: boolean
 }
 
-export interface DeconstructionInput {
-  artifactId: string
-  durationMs: number
-  semanticRanges: readonly {
-    role: 'hook' | 'body' | 'cta' | 'tail'
-    rangeMs: readonly [number, number]
-    essential: boolean
-  }[]
-  contaminations: readonly Contamination[]
-}
-
-export function deconstructSource(input: DeconstructionInput) {
-  const durationMs = integer(
-    input.durationMs,
-    'durationMs',
-    1,
-    24 * 60 * 60 * 1_000,
-  )
-  const semanticRanges = input.semanticRanges.map((item, index) =>
-    Object.freeze({
-      role: item.role,
-      rangeMs: range(
-        item.rangeMs,
-        durationMs,
-        `semanticRanges[${index}].rangeMs`,
-      ),
-      essential: Boolean(item.essential),
-    }))
-  const essential = semanticRanges.filter((item) =>
-    item.essential && item.role !== 'tail')
-  const cleanCandidateRanges = Object.freeze(
-    essential.map((item) => item.rangeMs),
-  )
-  const confidence = essential.length > 0
-    ? essential.reduce((sum, item) =>
-        sum + (item.rangeMs[1] > item.rangeMs[0] ? 1 : 0), 0) /
-      essential.length
-    : 0
-  const contaminants = Object.freeze(
-    input.contaminations.map((item) =>
-      Object.freeze({
-        ...item,
-        removableWithoutDamage: !item.overlapsEssential,
-      })),
-  )
-  return Object.freeze({
-    schemaVersion: 'deconstruction-report/v1' as const,
-    artifactId: identity(input.artifactId, 'artifactId'),
-    hookEnvelope:
-      essential.find((item) => item.role === 'hook')?.rangeMs ?? null,
-    bodyRanges: Object.freeze(
-      essential.filter((item) => item.role === 'body')
-        .map((item) => item.rangeMs),
-    ),
-    ctaRanges: Object.freeze(
-      essential.filter((item) => item.role === 'cta')
-        .map((item) => item.rangeMs),
-    ),
-    cleanCandidateRanges,
-    contaminants,
-    confidence,
-    comparison: Object.freeze({
-      sourceRangeMs: Object.freeze([
-        0,
-        durationMs,
-      ]) as readonly [number, number],
-      cleanRangesMs: cleanCandidateRanges,
-    }),
-    contextPreserved: cleanCandidateRanges.every(([start, end]) =>
-      start >= 0 && end <= durationMs),
-  })
-}
-
-export function diagnoseContamination(
-  items: readonly Contamination[],
-) {
-  return Object.freeze({
-    director: Object.freeze(items.map((item) =>
-      Object.freeze({
-        code: item.kind,
-        rangeMs: item.rangeMs,
-        region: item.region,
-        confidence: item.confidence,
-        blocked: item.overlapsEssential,
-      }))),
-    humanReviewRequired: items.some((item) =>
-      item.overlapsEssential || item.confidence < 0.75),
-    overlaps: Object.freeze(items.flatMap((left, index) =>
-      items.slice(index + 1).filter((right) =>
-        left.rangeMs[0] < right.rangeMs[1] &&
-        right.rangeMs[0] < left.rangeMs[1])
-        .map((right) => Object.freeze([
-          left.id,
-          right.id,
-        ]) as readonly [string, string]))),
-  })
-}
-
 export type CleanupStrategy =
   | 'trim'
   | 'crop-reframe'
@@ -1304,7 +1198,7 @@ export type CleanupStrategy =
 
 export function planCleanup(input: {
   sourceArtifactId: string
-  contamination: Contamination
+  contamination: CleanupContaminationInput
   residualQuality: number
   integrity: number
   costs: Readonly<
@@ -1406,31 +1300,3 @@ export function applyValidationEnvelope(
     }),
   })
 }
-
-export const DECONSTRUCTION_GOLDENS = Object.freeze(
-  ([
-    'burned-caption',
-    'logo-watermark',
-    'music',
-    'border',
-    'overlay',
-  ] as const).map((kind, index) => Object.freeze({
-    id: `golden-${kind}`,
-    contamination: Object.freeze({
-      id: `c${index}`,
-      kind,
-      rangeMs: Object.freeze([
-        index * 1_000,
-        index * 1_000 + 800,
-      ]) as readonly [number, number],
-      region: Object.freeze({
-        x: index % 2 ? 0 : 0.1,
-        y: 0.8,
-        width: 0.2,
-        height: 0.1,
-      }),
-      confidence: 0.95,
-      overlapsEssential: index === 4,
-    }),
-  })),
-)
