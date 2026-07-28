@@ -245,10 +245,77 @@ Resultados locais antes do deploy:
 
 ## 11. Evidência de produção
 
-O gate permanece aberto no `TODO.md` até que a migration, API e interface deste
-commit sejam implantadas e comprovadas no PostgreSQL de produção. Esta seção
-será preenchida com commit, imagem, backup, smoke de API, invariantes do banco e
-prova visual do artefato efetivamente implantado.
+Produção foi validada em 28 de julho de 2026:
+
+- commit técnico e build revision: `bcd4b1c`;
+- imagem: `apollo-video:bcd4b1c`;
+- digest final da imagem:
+  `sha256:dad68905f4ede03343f578088e6a9b6418bfa6421b8561554e0056a4aa0bff0c`;
+- `APOLLO_BUILD_REVISION=bcd4b1c` comprovado dentro do container;
+- archive exato:
+  SHA-256 `1c1ee3241b87f6a1f8552bd04878c3108719cfa926dfd9759d98f13a994673b5`;
+- backup pré-migration:
+  `/opt/backups/apollo-video/apollo_video_v2-20260728T120445Z.dump`;
+- SHA-256 do backup:
+  `4693d28e439ac182116cb707698423d8b46849aad41f9484ea71e85d957c9e46`;
+- `pg_restore --list` aprovado;
+- migration `20260728050000_variant_portfolio_preflights` aplicada;
+- 67/67 migrations concluídas;
+- app healthy e três workers running;
+- quatro restart counts iguais a zero;
+- health interno e público HTTP 200.
+
+Smoke no digest final pela API pública:
+
+- batch: `compat-prod-batch-6b9f7931`;
+- graph:
+  `compatibility-graph-34163934-c5d9-469a-987c-51c413e84f53`;
+- preflight inicial:
+  `variant-portfolio-preflight-2f56e339-e26c-4f2c-8322-751ddf148e3d`;
+- preflight confirmado:
+  `variant-portfolio-preflight-85607706-a145-4a54-913f-bd5a0e046d89`;
+- acesso sem autenticação: HTTP 401;
+- criação acima do default: HTTP 201;
+- replay exato: HTTP 200;
+- mesma chave com payload diferente: HTTP 409;
+- confirmação assinada: HTTP 201;
+- token usado com fingerprint diferente: HTTP 409;
+- leitura: HTTP 200;
+- listagem filtrada pelo graph: HTTP 200;
+- três capabilities encontradas em discovery;
+- duas recipes e duas saídas selecionadas;
+- `jobsCreated=0`;
+- `productMaterialized=false`.
+
+Prova PostgreSQL no resultado do smoke:
+
+- policy versionada persistida;
+- dois preflights do smoke persistidos e íntegros;
+- dois preflights criados pela UI persistidos e íntegros;
+- tentativa de atualizar `jobsCreated` para um falhou pela constraint;
+- tentativa de atualizar `productMaterialized` para `true` falhou pela
+  constraint;
+- o registro continuou com zero jobs e sem materialização após ambas as provas.
+
+Evidência visual em `https://apollo.alpesd.com.br/batches`:
+
+- versão `APOLLO · V1.0.0 · BCD4B1C` visível;
+- funil `Possíveis → Elegíveis → Escolhidas → Saídas` visível;
+- custo, tempo, armazenamento, cobertura, ranking e reuso visíveis;
+- mensagens de produto cartesiano não materializado e zero jobs visíveis;
+- ação `Recalcular` criou o preflight
+  `variant-portfolio-preflight-d464f927-4be5-4a4b-93be-26aca44c94bf`;
+- ação `Confirmar expansão` criou o preflight confirmado
+  `variant-portfolio-preflight-5b2cf82c-fa1c-472f-a48e-8c42b7e140d3`;
+- desktop 1440 × 1000 sem overflow;
+- mobile 390 × 844 sem overflow;
+- zero caracteres Unicode de substituição;
+- zero mensagens corrompidas;
+- zero percentuais malformados;
+- zero erros ou warnings de console;
+- screenshots locais:
+  `output/playwright/f2012-production-portfolio-desktop.png` e
+  `output/playwright/f2012-production-portfolio-mobile.png`.
 
 ## 12. Limite honesto deste gate
 

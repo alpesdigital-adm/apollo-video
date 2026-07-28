@@ -1114,12 +1114,12 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.012 — Anti-explosão combinatória [FR-085]
 
-- [ ] Calcular espaço teórico e elegível antes de criar jobs. Evidência T-FR-085.
-- [ ] Aplicar hard filters, threshold, dedupe e top-N com diversidade. Evidência T-FR-085.
-- [ ] Definir cobertura mínima de hooks/corpos/CTAs dentro do budget. Evidência T-FR-085.
-- [ ] Exibir preflight de quantidade, custo, tempo e reutilização esperada. Evidência T-FR-085.
-- [ ] Exigir confirmação para expansão acima do default do workspace. Evidência T-FR-085.
-- [ ] Testar que produto cartesiano não é materializado sem controle. Evidência: `productMaterialized=false`.
+- [x] Calcular espaço teórico e elegível antes de criar jobs. Evidência T-FR-085.
+- [x] Aplicar hard filters, threshold, dedupe e top-N com diversidade. Evidência T-FR-085.
+- [x] Definir cobertura mínima de hooks/corpos/CTAs dentro do budget. Evidência T-FR-085.
+- [x] Exibir preflight de quantidade, custo, tempo e reutilização esperada. Evidência T-FR-085.
+- [x] Exigir confirmação para expansão acima do default do workspace. Evidência T-FR-085.
+- [x] Testar que produto cartesiano não é materializado sem controle. Evidência: `productMaterialized=false`.
 
 ### F2.013 — Edição em lote [FR-086]
 
