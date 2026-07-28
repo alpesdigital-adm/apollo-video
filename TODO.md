@@ -20,15 +20,15 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.011, com a jornada integral do MVP Core e os
-onze primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
+Estado auditado após o gate F2.013, com a jornada integral do MVP Core e os
+treze primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **229 de 1.259 microtarefas verificadas como efetivamente entregues (18,2%)**;
-- **1.030 microtarefas abertas ou aguardando nova comprovação**;
+- **240 de 1.259 microtarefas verificadas como efetivamente entregues (19,1%)**;
+- **1.019 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 a F2.011 foram entregues, mas não encerram o
+  permanecem abertos; F2.001 a F2.013 foram entregues, mas não encerram o
   gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
@@ -1123,11 +1123,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.013 — Edição em lote [FR-086]
 
-- [ ] Implementar seleção explícita de recipes, formatos e targets. Evidência T-FR-086 e UI `/batches`.
-- [ ] Gerar impact preview com protected conflicts, invalidations e custo. Evidência T-FR-086.
-- [ ] Aplicar command transaction por política all-or-nothing/skip failures. Evidência T-FR-086.
-- [ ] Exibir diff amostrado antes do commit e resultado por item depois. Evidência T-FR-086.
-- [ ] Criar E2E de troca de CTA, legenda e Brand Kit em lote. Evidência T-FR-086.
+- [x] Implementar seleção explícita de recipes, formatos e targets. Evidência T-FR-086 e UI `/batches`.
+- [x] Gerar impact preview com protected conflicts, invalidations e custo. Evidência T-FR-086.
+- [x] Aplicar command transaction por política all-or-nothing/skip failures. Evidência T-FR-086.
+- [x] Exibir diff amostrado antes do commit e resultado por item depois. Evidência T-FR-086.
+- [x] Criar E2E de troca de CTA, legenda e Brand Kit em lote. Evidência T-FR-086.
 
 ### F2.014 — Partial retry [FR-087]
 
