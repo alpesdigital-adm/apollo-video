@@ -69,6 +69,10 @@ const coverage = Object.freeze({
     mode: 'batch-edit-signed-action',
     evidence: 'F2-013 requires exact preflight and scope hashes plus a short-lived actor/workspace/request/scope/cost-bound token; serializable commit rechecks batch, latest item states, policy and remaining budget',
   },
+  'apollo.batches.partial-retries.create': {
+    mode: 'batch-partial-retry-action',
+    evidence: 'F2-014 request requires exact batch revision and one item revision plus failed-step hash per target; serializable persistence recompiles and compares the complete retry aggregate before one atomic CAS',
+  },
   'apollo.operations.cancel': {
     mode: 'state-machine-action', evidence: 'F0-070',
   },
@@ -296,6 +300,36 @@ function requiresSignedBatchEdit(capability) {
   assert.equal(capability.idempotency, 'required')
 }
 
+function requiresBatchPartialRetry(capability) {
+  assert.ok(capability.inputSchemaRef, `${capability.id} must publish an input schema`)
+  const schema = getPublicSchema(capability.inputSchemaRef).schema
+  assert.ok(
+    schema.required?.includes('expectedBatchRevision'),
+    `${capability.id} must require expectedBatchRevision`,
+  )
+  assert.ok(
+    schema.required?.includes('targets'),
+    `${capability.id} must require targets`,
+  )
+  const target = schema.properties?.targets?.items
+  for (const field of [
+    'itemId',
+    'step',
+    'expectedItemRevision',
+    'expectedStepHash',
+  ]) {
+    assert.ok(
+      target?.required?.includes(field),
+      `${capability.id} targets must require ${field}`,
+    )
+    assert.ok(
+      target?.properties?.[field],
+      `${capability.id} targets must define ${field}`,
+    )
+  }
+  assert.equal(capability.idempotency, 'required')
+}
+
 test('every external mutation has an explicit precondition strategy', () => {
   assert.deepEqual(
     Object.keys(coverage).sort(),
@@ -348,6 +382,9 @@ test('every external mutation has an explicit precondition strategy', () => {
     if (decision.mode === 'batch-edit-signed-action') {
       requiresSignedBatchEdit(capability)
     }
+    if (decision.mode === 'batch-partial-retry-action') {
+      requiresBatchPartialRetry(capability)
+    }
     if (decision.mode === 'idempotent-create') {
       assert.equal(capability.idempotency, 'required')
     }
@@ -377,5 +414,6 @@ test('the current public surface has no unguarded state replacement', () => {
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,
     'batch-edit-signed-action': 1,
+    'batch-partial-retry-action': 1,
   })
 })

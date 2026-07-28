@@ -184,3 +184,29 @@ test('T-FR-086 /batches previews diff, conflicts, invalidations, cost and per-it
     /fetch\(['"`]\/api\/.*(?:batch|edit)/,
   )
 })
+
+test('T-FR-087 /batches retries all failed steps through the public partial-retry API', () => {
+  assert.ok(
+    batchUiSource.includes('/partial-retries?limit=100'),
+    'partial retry history must load through the public API',
+  )
+  assert.ok(
+    batchUiSource.includes('/partial-retries`'),
+    'mixed retry must post through the public API',
+  )
+  assert.match(
+    batchUiSource,
+    /data-testid="batch-partial-retry-panel"/,
+  )
+  assert.match(
+    batchUiSource,
+    /data-testid="retry-all-failed-batch-steps"/,
+  )
+  assert.match(batchUiSource, /expectedStepHash: failedStep\.stepHash/)
+  assert.match(batchUiSource, /expectedItemRevision: item\.revision/)
+  assert.match(batchUiSource, /expectedBatchRevision: batch\.revision/)
+  assert.match(batchUiSource, /preservedCompletedItemIds/)
+  assert.match(batchUiSource, /preservedArtifactIds/)
+  assert.match(batchUiSource, /spentMinorUnitsAfter/)
+  assert.match(batchUiSource, /chargedMinorUnitsAtEnqueue/)
+})

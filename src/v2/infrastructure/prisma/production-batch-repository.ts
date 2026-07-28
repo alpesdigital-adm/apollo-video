@@ -4,6 +4,8 @@ import {
   type V2ProductionBatch,
   type V2ProductionBatchItem,
   type V2ProductionBatchItemArtifact,
+  type V2ProductionBatchAction,
+  type V2ProductionBatchRetryJob,
   type V2ProductionBatchStep,
 } from '../../../../generated/prisma-v2/index.js'
 
@@ -11,14 +13,23 @@ import type {
   ProductionBatchActionRecord,
   ProductionBatchCreateRecord,
   ProductionBatchPage,
+  ProductionBatchPartialRetryPage,
+  ProductionBatchPartialRetryReplay,
   ProductionBatchReplay,
   ProductionBatchRepository,
 } from '../../application/ports/production-batch-repository.ts'
+import {
+  createBatchPartialRetry,
+  hydrateBatchPartialRetry,
+  type BatchPartialRetryJob,
+  type BatchPartialRetryRun,
+} from '../../domain/batch-partial-retry.ts'
 import {
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
+  batchProgress,
   deriveBatchStatus,
   hydrateProductionBatch,
   type BatchItem,
@@ -40,6 +51,10 @@ type BatchRow = V2ProductionBatch & {
   items: ItemRow[]
 }
 
+type PartialRetryActionRow = V2ProductionBatchAction & {
+  retryJobs: V2ProductionBatchRetryJob[]
+}
+
 const batchInclude = {
   items: {
     include: {
@@ -48,6 +63,10 @@ const batchInclude = {
     },
   },
 } satisfies Prisma.V2ProductionBatchInclude
+
+const partialRetryActionInclude = {
+  retryJobs: true,
+} satisfies Prisma.V2ProductionBatchActionInclude
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' &&
@@ -201,6 +220,158 @@ function hydrateResponseJson(value: string): Readonly<ProductionBatch> {
     )
   }
   return hydrateProductionBatch(response.batch)
+}
+
+function retryJobFromRow(
+  row: V2ProductionBatchRetryJob,
+): Readonly<BatchPartialRetryJob> {
+  return Object.freeze({
+    schemaVersion: row.schemaVersion as BatchPartialRetryJob['schemaVersion'],
+    id: row.id,
+    workspaceId: row.workspaceId,
+    projectId: row.projectId,
+    batchId: row.batchId,
+    retryId: row.actionId,
+    itemId: row.itemId,
+    step: row.step as BatchPartialRetryJob['step'],
+    executorClass:
+      row.executorClass as BatchPartialRetryJob['executorClass'],
+    status: row.status as BatchPartialRetryJob['status'],
+    lineageKey: row.lineageKey,
+    failedAttempt: row.failedAttempt,
+    retryAttempt: row.retryAttempt,
+    previousStepHash: row.previousStepHash,
+    queuedStepHash: row.queuedStepHash,
+    failureCode: row.failureCode,
+    failureMessage: row.failureMessage,
+    preservedArtifactIds: canonicalJson<readonly string[]>(
+      row.preservedArtifactIdsJson,
+      'production batch retry job preserved artifacts',
+    ),
+    preservedArtifactCount: row.preservedArtifactCount,
+    chargedMinorUnitsAtEnqueue:
+      row.chargedMinorUnitsAtEnqueue as 0,
+    createdAt: row.createdAt.toISOString(),
+    jobHash: row.jobHash,
+  })
+}
+
+function hydratePartialRetryAction(
+  row: PartialRetryActionRow,
+): Readonly<BatchPartialRetryRun> {
+  if (
+    row.action !== 'partial-retry' ||
+    row.scope !== 'batch' ||
+    row.itemId !== null ||
+    row.step !== null ||
+    row.expectedItemRevision !== null ||
+    !row.retryManifestJson ||
+    !row.retryManifestHash
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `Stored production batch action ${row.id} is not a partial retry`,
+    )
+  }
+  const partialRetry = hydrateBatchPartialRetry(
+    canonicalJson<BatchPartialRetryRun>(
+      row.retryManifestJson,
+      'production batch partial retry manifest',
+    ),
+  )
+  const relationalJobs = Object.freeze(
+    [...row.retryJobs]
+      .sort((left, right) =>
+        left.id.localeCompare(right.id))
+      .map(retryJobFromRow),
+  )
+  const manifestJobs = Object.freeze(
+    [...partialRetry.jobs]
+      .sort((left, right) =>
+        left.id.localeCompare(right.id)),
+  )
+  if (
+    row.retryManifestHash !== partialRetry.retryHash ||
+    row.id !== partialRetry.id ||
+    row.workspaceId !== partialRetry.workspaceId ||
+    row.batchId !== partialRetry.batchId ||
+    row.actorClientId !== partialRetry.createdByClientId ||
+    row.expectedBatchRevision !==
+      partialRetry.batchRevisionBefore ||
+    row.createdAt.toISOString() !== partialRetry.createdAt ||
+    stableSerialize(partialRetry) !== row.retryManifestJson ||
+    stableSerialize(relationalJobs) !== stableSerialize(manifestJobs)
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `Stored production batch partial retry ${row.id} is inconsistent`,
+    )
+  }
+  return partialRetry
+}
+
+function assertPartialRetryTransition(input: {
+  record: Readonly<ProductionBatchActionRecord>
+  current: Readonly<ProductionBatch>
+  next: Readonly<ProductionBatch>
+  partialRetry: Readonly<BatchPartialRetryRun>
+}): void {
+  const { record, current, next, partialRetry } = input
+  if (
+    record.id !== partialRetry.id ||
+    record.workspaceId !== partialRetry.workspaceId ||
+    record.batchId !== partialRetry.batchId ||
+    record.actorClientId !== partialRetry.createdByClientId ||
+    record.createdAt !== partialRetry.createdAt ||
+    current.projectId !== partialRetry.projectId ||
+    current.definitionHash !== partialRetry.batchDefinitionHash ||
+    current.revision !== partialRetry.batchRevisionBefore ||
+    next.revision !== partialRetry.batchRevisionAfter ||
+    stableSerialize(batchProgress(current)) !==
+      stableSerialize(partialRetry.progressBefore) ||
+    stableSerialize(batchProgress(next)) !==
+      stableSerialize(partialRetry.progressAfter)
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Production batch partial retry does not match its action',
+    )
+  }
+  const compiled = createBatchPartialRetry({
+    id: partialRetry.id,
+    batch: current,
+    expectedBatchRevision: partialRetry.batchRevisionBefore,
+    targets: partialRetry.jobs.map((job) => {
+      const item = current.items.find((candidate) =>
+        candidate.id === job.itemId)
+      if (!item) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          `Partial retry item ${job.itemId} is missing`,
+        )
+      }
+      return Object.freeze({
+        itemId: job.itemId,
+        step: job.step,
+        expectedItemRevision: item.revision,
+        expectedStepHash: job.previousStepHash,
+      })
+    }),
+    actorClientId: partialRetry.createdByClientId,
+    createdAt: partialRetry.createdAt,
+    createJobId: (_target, index) =>
+      partialRetry.jobs[index]!.id,
+  })
+  if (
+    stableSerialize(compiled.retry) !==
+      stableSerialize(partialRetry) ||
+    stableSerialize(compiled.batch) !== stableSerialize(next)
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Production batch partial retry transition was not deterministic',
+    )
+  }
 }
 
 function batchData(record: Readonly<ProductionBatchCreateRecord>) {
@@ -585,13 +756,135 @@ implements ProductionBatchRepository {
       : null
   }
 
+  async findPartialRetryReplay(input: {
+    workspaceId: string
+    actorClientId: string
+    idempotencyKey: string
+  }): Promise<Readonly<ProductionBatchPartialRetryReplay> | null> {
+    const row = await this.prisma.v2ProductionBatchAction.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        actorClientId: input.actorClientId,
+        idempotencyKey: input.idempotencyKey,
+      },
+      include: partialRetryActionInclude,
+    })
+    if (!row) return null
+    if (row.action !== 'partial-retry') {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Idempotency key was used with a different production batch action',
+      )
+    }
+    return Object.freeze({
+      batch: hydrateResponseJson(row.responseJson),
+      partialRetry: hydratePartialRetryAction(row),
+      requestFingerprint: row.requestFingerprint,
+    })
+  }
+
+  async readPartialRetry(input: {
+    workspaceId: string
+    batchId: string
+    retryId: string
+  }): Promise<Readonly<BatchPartialRetryRun> | null> {
+    const row = await this.prisma.v2ProductionBatchAction.findFirst({
+      where: {
+        id: input.retryId,
+        workspaceId: input.workspaceId,
+        batchId: input.batchId,
+        action: 'partial-retry',
+      },
+      include: partialRetryActionInclude,
+    })
+    return row ? hydratePartialRetryAction(row) : null
+  }
+
+  async listPartialRetries(input: {
+    workspaceId: string
+    batchId: string
+    limit: number
+    cursor?: string
+  }): Promise<Readonly<ProductionBatchPartialRetryPage>> {
+    const cursor = input.cursor
+      ? await this.prisma.v2ProductionBatchAction.findFirst({
+          where: {
+            id: input.cursor,
+            workspaceId: input.workspaceId,
+            batchId: input.batchId,
+            action: 'partial-retry',
+          },
+          select: { id: true, createdAt: true },
+        })
+      : null
+    if (input.cursor && !cursor) {
+      throw new DomainError(
+        'INVALID_CURSOR',
+        'Production batch partial retry cursor is invalid',
+      )
+    }
+    const rows = await this.prisma.v2ProductionBatchAction.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        batchId: input.batchId,
+        action: 'partial-retry',
+        ...(cursor
+          ? {
+              OR: [
+                { createdAt: { lt: cursor.createdAt } },
+                {
+                  createdAt: cursor.createdAt,
+                  id: { lt: cursor.id },
+                },
+              ],
+            }
+          : {}),
+      },
+      include: partialRetryActionInclude,
+      orderBy: [
+        { createdAt: 'desc' },
+        { id: 'desc' },
+      ],
+      take: input.limit + 1,
+    })
+    const hasNextPage = rows.length > input.limit
+    const pageRows = hasNextPage ? rows.slice(0, input.limit) : rows
+    const retries = Object.freeze(
+      pageRows.map(hydratePartialRetryAction),
+    )
+    return Object.freeze({
+      retries,
+      ...(hasNextPage && retries.length > 0
+        ? { nextCursor: retries.at(-1)!.id }
+        : {}),
+    })
+  }
+
   async persistAction(
     record: Readonly<ProductionBatchActionRecord>,
     attempt = 1,
   ): Promise<Readonly<{
     batch: Readonly<ProductionBatch>
     replayed: boolean
+    partialRetry?: Readonly<BatchPartialRetryRun>
   }>> {
+    const partialRetry = record.partialRetry
+      ? hydrateBatchPartialRetry(record.partialRetry)
+      : undefined
+    if (
+      (record.action === 'partial-retry') !== Boolean(partialRetry) ||
+      (partialRetry && (
+        record.scope !== 'batch' ||
+        record.itemId !== undefined ||
+        record.step !== undefined ||
+        record.expectedItemRevision !== undefined
+      ))
+    ) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Production batch partial retry action is malformed',
+      )
+    }
     try {
       return await this.prisma.$transaction(async (transaction) => {
         const replay = await transaction.v2ProductionBatchAction.findFirst({
@@ -600,10 +893,7 @@ implements ProductionBatchRepository {
             actorClientId: record.actorClientId,
             idempotencyKey: record.idempotencyKey,
           },
-          select: {
-            requestFingerprint: true,
-            responseJson: true,
-          },
+          include: partialRetryActionInclude,
         })
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
@@ -612,9 +902,23 @@ implements ProductionBatchRepository {
               'Idempotency key was used with a different production batch action',
             )
           }
+          if (
+            (record.action === 'partial-retry') !==
+              (replay.action === 'partial-retry')
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Idempotency key was used with a different production batch action',
+            )
+          }
           return Object.freeze({
             batch: hydrateResponseJson(replay.responseJson),
             replayed: true,
+            ...(replay.action === 'partial-retry'
+              ? {
+                  partialRetry: hydratePartialRetryAction(replay),
+                }
+              : {}),
           })
         }
         const currentRow =
@@ -665,6 +969,14 @@ implements ProductionBatchRepository {
               'Production batch item changed before the action was committed',
             )
           }
+        }
+        if (partialRetry) {
+          assertPartialRetryTransition({
+            record,
+            current,
+            next,
+            partialRetry,
+          })
         }
         const [actor, artifacts] = await Promise.all([
           transaction.v2ApiClient.findFirst({
@@ -791,10 +1103,45 @@ implements ProductionBatchRepository {
             requestFingerprint: record.requestFingerprint,
             idempotencyKey: record.idempotencyKey,
             responseJson,
+            retryManifestJson: partialRetry
+              ? stableSerialize(partialRetry)
+              : null,
+            retryManifestHash: partialRetry?.retryHash ?? null,
             actorClientId: record.actorClientId,
             createdAt: new Date(record.createdAt),
           },
         })
+        if (partialRetry) {
+          await transaction.v2ProductionBatchRetryJob.createMany({
+            data: partialRetry.jobs.map((job) => ({
+              id: job.id,
+              workspaceId: job.workspaceId,
+              projectId: job.projectId,
+              batchId: job.batchId,
+              itemId: job.itemId,
+              actionId: job.retryId,
+              schemaVersion: job.schemaVersion,
+              step: job.step,
+              executorClass: job.executorClass,
+              status: job.status,
+              lineageKey: job.lineageKey,
+              failedAttempt: job.failedAttempt,
+              retryAttempt: job.retryAttempt,
+              previousStepHash: job.previousStepHash,
+              queuedStepHash: job.queuedStepHash,
+              failureCode: job.failureCode,
+              failureMessage: job.failureMessage,
+              preservedArtifactIdsJson: stableSerialize(
+                job.preservedArtifactIds,
+              ),
+              preservedArtifactCount: job.preservedArtifactCount,
+              chargedMinorUnitsAtEnqueue:
+                job.chargedMinorUnitsAtEnqueue,
+              createdAt: new Date(job.createdAt),
+              jobHash: job.jobHash,
+            })),
+          })
+        }
         const persisted =
           await transaction.v2ProductionBatch.findUniqueOrThrow({
             where: { id: next.id },
@@ -803,6 +1150,7 @@ implements ProductionBatchRepository {
         return Object.freeze({
           batch: hydrateBatch(persisted),
           replayed: false,
+          ...(partialRetry ? { partialRetry } : {}),
         })
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -812,17 +1160,32 @@ implements ProductionBatchRepository {
         return this.persistAction(record, attempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
-        const replay = await this.findActionReplay({
-          workspaceId: record.workspaceId,
-          actorClientId: record.actorClientId,
-          idempotencyKey: record.idempotencyKey,
-        })
+        const replay = record.action === 'partial-retry'
+          ? await this.findPartialRetryReplay({
+              workspaceId: record.workspaceId,
+              actorClientId: record.actorClientId,
+              idempotencyKey: record.idempotencyKey,
+            })
+          : await this.findActionReplay({
+              workspaceId: record.workspaceId,
+              actorClientId: record.actorClientId,
+              idempotencyKey: record.idempotencyKey,
+            })
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different production batch action',
             )
+          }
+          if (record.action === 'partial-retry') {
+            return Object.freeze({
+              batch: replay.batch,
+              replayed: true,
+              partialRetry: (
+                replay as Readonly<ProductionBatchPartialRetryReplay>
+              ).partialRetry,
+            })
           }
           return Object.freeze({
             batch: replay.batch,

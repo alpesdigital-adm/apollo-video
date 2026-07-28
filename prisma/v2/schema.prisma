@@ -95,6 +95,7 @@ model V2Workspace {
   batchEditCommands               V2BatchEditCommand[]
   batchEditCommandItems           V2BatchEditCommandItem[]
   batchEditInvalidations          V2BatchEditInvalidation[]
+  productionBatchRetryJobs        V2ProductionBatchRetryJob[]
 
   @@map("workspaces")
 }
@@ -287,6 +288,7 @@ model V2Project {
   variantPortfolioPreflights   V2VariantPortfolioPreflightRun[]
   batchEditPreflights          V2BatchEditPreflightRun[]
   batchEditCommands            V2BatchEditCommand[]
+  productionBatchRetryJobs     V2ProductionBatchRetryJob[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -2007,6 +2009,7 @@ model V2ProductionBatch {
   batchEditCommands           V2BatchEditCommand[]
   batchEditCommandItems       V2BatchEditCommandItem[]
   batchEditInvalidations      V2BatchEditInvalidation[]
+  partialRetryJobs            V2ProductionBatchRetryJob[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
@@ -2675,6 +2678,7 @@ model V2ProductionBatchItem {
   batchEditStates       V2BatchEditItemStateVersion[]
   batchEditCommandItems V2BatchEditCommandItem[]
   batchEditInvalidations V2BatchEditInvalidation[]
+  partialRetryJobs      V2ProductionBatchRetryJob[]
 
   @@unique([id, workspaceId, batchId])
   @@unique([batchId, sequence])
@@ -2740,6 +2744,8 @@ model V2ProductionBatchAction {
   requestFingerprint    String   @db.Char(64)
   idempotencyKey        String   @db.VarChar(128)
   responseJson          String   @db.Text
+  retryManifestJson     String?  @db.Text
+  retryManifestHash     String?  @db.Char(64)
   actorClientId         String   @db.VarChar(80)
   createdAt             DateTime @db.Timestamptz(3)
 
@@ -2747,11 +2753,51 @@ model V2ProductionBatchAction {
   batch     V2ProductionBatch      @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   item      V2ProductionBatchItem? @relation(fields: [itemId], references: [id], onDelete: Restrict)
   actor     V2ApiClient            @relation("ProductionBatchActionActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  retryJobs V2ProductionBatchRetryJob[]
 
   @@unique([workspaceId, actorClientId, idempotencyKey])
+  @@unique([id, workspaceId, batchId])
   @@index([workspaceId, batchId, createdAt(sort: Desc)])
   @@index([workspaceId, itemId, createdAt(sort: Desc)])
   @@map("production_batch_actions")
+}
+
+model V2ProductionBatchRetryJob {
+  id                         String   @id @db.VarChar(128)
+  workspaceId                String   @db.VarChar(128)
+  projectId                  String   @db.VarChar(128)
+  batchId                    String   @db.VarChar(128)
+  itemId                     String   @db.VarChar(128)
+  actionId                   String   @db.VarChar(128)
+  schemaVersion              String   @db.VarChar(64)
+  step                       String   @db.VarChar(32)
+  executorClass              String   @db.VarChar(32)
+  status                     String   @db.VarChar(16)
+  lineageKey                 String   @db.Char(64)
+  failedAttempt              Int
+  retryAttempt               Int
+  previousStepHash           String   @db.Char(64)
+  queuedStepHash             String   @db.Char(64)
+  failureCode                String   @db.VarChar(128)
+  failureMessage             String   @db.VarChar(500)
+  preservedArtifactIdsJson   String   @db.Text
+  preservedArtifactCount     Int
+  chargedMinorUnitsAtEnqueue Int      @default(0)
+  createdAt                  DateTime @db.Timestamptz(3)
+  jobHash                    String   @db.Char(64)
+
+  workspace V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch     V2ProductionBatch       @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  item      V2ProductionBatchItem   @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+  action    V2ProductionBatchAction @relation(fields: [actionId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+
+  @@unique([actionId, itemId, step])
+  @@unique([workspaceId, lineageKey, retryAttempt])
+  @@index([workspaceId, batchId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, status, executorClass, createdAt, id])
+  @@index([workspaceId, itemId, step, retryAttempt(sort: Desc)])
+  @@map("production_batch_retry_jobs")
 }
 
 model V2ArtifactRenderOperation {

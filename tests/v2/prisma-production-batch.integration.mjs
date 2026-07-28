@@ -48,11 +48,11 @@ async function stopServer(server) {
   if (server.exitCode === null) server.kill('SIGKILL')
 }
 
-test('T-FR-080 / T-FR-086 persists production batches and signed batch edits through the public API', {
+test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits and mixed partial retries through the public API', {
   skip:
     process.env.APOLLO_PRODUCTION_BATCH_E2E !== '1' &&
     'set APOLLO_PRODUCTION_BATCH_E2E=1 and use an isolated V2 database',
-  timeout: 240_000,
+  timeout: 360_000,
 }, async () => {
   assert.ok(
     process.env.V2_DATABASE_URL,
@@ -1025,6 +1025,522 @@ test('T-FR-080 / T-FR-086 persists production batches and signed batch edits thr
         `,
       ),
     )
+
+    const retryCreateBody = {
+      ...body,
+      name: 'Mixed partial retry E2E',
+      items: [
+        {
+          key: 'retry/completed',
+          sourceGroupId: 'source-group-hooks',
+          recipeId: 'recipe-hook',
+          variantId: 'variant-vertical',
+        },
+        {
+          key: 'retry/provider',
+          sourceGroupId: 'source-group-hooks',
+          recipeId: 'recipe-hook',
+          variantId: 'variant-square',
+        },
+        {
+          key: 'retry/renderer',
+          sourceGroupId: 'source-group-body',
+          recipeId: 'recipe-body',
+          variantId: 'variant-vertical',
+        },
+        {
+          key: 'retry/validator',
+          sourceGroupId: 'source-group-body',
+          recipeId: 'recipe-body',
+          variantId: 'variant-square',
+        },
+      ],
+    }
+    const retryCreateResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `batch-partial-retry-create-${suffix}`,
+      },
+      body: JSON.stringify(retryCreateBody),
+    })
+    const retryCreatePayload = await retryCreateResponse.json()
+    assert.equal(
+      retryCreateResponse.status,
+      201,
+      JSON.stringify(retryCreatePayload),
+    )
+    let retryBatch = retryCreatePayload.data.batch
+    const retryItems = Object.fromEntries(
+      retryBatch.items.map((item) => [item.key, item.id]),
+    )
+    const retryAction = async (
+      itemId,
+      actionBody,
+      idempotencyKey,
+    ) => {
+      const invoke = async () => {
+        const response = await fetch(
+          `${endpoint}/${retryBatch.id}/items/${itemId}/actions`,
+          {
+            method: 'POST',
+            headers: {
+              ...headers,
+              'idempotency-key': idempotencyKey,
+            },
+            body: JSON.stringify(actionBody),
+          },
+        )
+        return {
+          response,
+          payload: await response.json(),
+        }
+      }
+      let { response, payload } = await invoke()
+      if (
+        response.status >= 500 &&
+        payload.error?.retryable === true
+      ) {
+        ({ response, payload } = await invoke())
+      }
+      assert.ok(
+        [200, 201].includes(response.status),
+        JSON.stringify(payload),
+      )
+      retryBatch = payload.data.batch
+      return payload.data
+    }
+    const retryCompleteStep = async (
+      itemId,
+      step,
+      sequence,
+      options = {},
+    ) => {
+      let item = retryBatch.items.find((candidate) =>
+        candidate.id === itemId)
+      await retryAction(itemId, {
+        action: 'start-step',
+        step,
+        expectedBatchRevision: retryBatch.revision,
+        expectedItemRevision: item.revision,
+      }, `partial-${sequence}-start-${suffix}`)
+      item = retryBatch.items.find((candidate) =>
+        candidate.id === itemId)
+      await retryAction(itemId, {
+        action: 'complete-step',
+        step,
+        expectedBatchRevision: retryBatch.revision,
+        expectedItemRevision: item.revision,
+        costMinorUnits: options.costMinorUnits ?? 1,
+        cacheHit: options.cacheHit ?? false,
+        ...(options.artifactIds
+          ? { artifactIds: options.artifactIds }
+          : {}),
+      }, `partial-${sequence}-complete-${suffix}`)
+    }
+    const retryFailStep = async (
+      itemId,
+      step,
+      sequence,
+      errorCode,
+      costMinorUnits = 3,
+    ) => {
+      let item = retryBatch.items.find((candidate) =>
+        candidate.id === itemId)
+      await retryAction(itemId, {
+        action: 'start-step',
+        step,
+        expectedBatchRevision: retryBatch.revision,
+        expectedItemRevision: item.revision,
+      }, `partial-${sequence}-start-${suffix}`)
+      item = retryBatch.items.find((candidate) =>
+        candidate.id === itemId)
+      await retryAction(itemId, {
+        action: 'fail-step',
+        step,
+        expectedBatchRevision: retryBatch.revision,
+        expectedItemRevision: item.revision,
+        costMinorUnits,
+        cacheHit: false,
+        error: {
+          code: errorCode,
+          message: `${errorCode} in the mixed retry E2E`,
+        },
+      }, `partial-${sequence}-fail-${suffix}`)
+    }
+
+    for (const [index, step] of [
+      'planning',
+      'materializing',
+      'rendering',
+      'reviewing',
+    ].entries()) {
+      await retryCompleteStep(
+        retryItems['retry/completed'],
+        step,
+        `completed-${index}`,
+        index === 3 ? { artifactIds: [finalOneId] } : {},
+      )
+    }
+    await retryCompleteStep(
+      retryItems['retry/provider'],
+      'planning',
+      'provider-planning',
+      { artifactIds: [planTwoId] },
+    )
+    await retryFailStep(
+      retryItems['retry/provider'],
+      'materializing',
+      'provider-materializing',
+      'PROVIDER_TIMEOUT',
+    )
+    await retryCompleteStep(
+      retryItems['retry/renderer'],
+      'planning',
+      'renderer-planning',
+    )
+    await retryCompleteStep(
+      retryItems['retry/renderer'],
+      'materializing',
+      'renderer-materializing',
+    )
+    await retryFailStep(
+      retryItems['retry/renderer'],
+      'rendering',
+      'renderer-rendering',
+      'RENDER_PROCESS_EXITED',
+    )
+    await retryCompleteStep(
+      retryItems['retry/validator'],
+      'planning',
+      'validator-planning',
+    )
+    await retryCompleteStep(
+      retryItems['retry/validator'],
+      'materializing',
+      'validator-materializing',
+    )
+    await retryCompleteStep(
+      retryItems['retry/validator'],
+      'rendering',
+      'validator-rendering',
+    )
+    await retryFailStep(
+      retryItems['retry/validator'],
+      'reviewing',
+      'validator-reviewing',
+      'VALIDATOR_REJECTED',
+    )
+
+    const failedTarget = (itemKey, step) => {
+      const item = retryBatch.items.find((candidate) =>
+        candidate.id === retryItems[itemKey])
+      const failed = item.steps.find((candidate) =>
+        candidate.step === step)
+      assert.equal(item.state, 'failed')
+      assert.equal(failed.state, 'failed')
+      return {
+        itemId: item.id,
+        step,
+        expectedItemRevision: item.revision,
+        expectedStepHash: failed.stepHash,
+      }
+    }
+    const mixedTargets = [
+      failedTarget('retry/provider', 'materializing'),
+      failedTarget('retry/renderer', 'rendering'),
+      failedTarget('retry/validator', 'reviewing'),
+    ]
+    const partialRetryEndpoint =
+      `${endpoint}/${retryBatch.id}/partial-retries`
+    const spentBeforeMixedRetry =
+      retryBatch.progress.spentMinorUnits
+    const completedBeforeMixedRetry =
+      retryBatch.items.find((item) =>
+        item.id === retryItems['retry/completed'])
+    const mixedRetryBody = {
+      expectedBatchRevision: retryBatch.revision,
+      targets: mixedTargets,
+    }
+    const unauthenticatedPartialRetry = await fetch(
+      partialRetryEndpoint,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(mixedRetryBody),
+      },
+    )
+    assert.equal(unauthenticatedPartialRetry.status, 401)
+    const mixedRetryKey = `batch-partial-retry-mixed-${suffix}`
+    const mixedRetryResponse = await fetch(partialRetryEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': mixedRetryKey,
+      },
+      body: JSON.stringify(mixedRetryBody),
+    })
+    const mixedRetryPayload = await mixedRetryResponse.json()
+    assert.equal(
+      mixedRetryResponse.status,
+      201,
+      JSON.stringify(mixedRetryPayload),
+    )
+    retryBatch = mixedRetryPayload.data.batch
+    const mixedRetry = mixedRetryPayload.data.partialRetry
+    assert.equal(mixedRetryPayload.data.replayed, false)
+    assert.deepEqual(
+      mixedRetry.jobs.map((job) => job.executorClass),
+      ['provider', 'renderer', 'validator'],
+    )
+    assert.ok(mixedRetry.jobs.every((job) =>
+      job.status === 'queued' &&
+      job.chargedMinorUnitsAtEnqueue === 0 &&
+      job.retryAttempt === job.failedAttempt + 1))
+    assert.equal(
+      retryBatch.progress.spentMinorUnits,
+      spentBeforeMixedRetry,
+    )
+    assert.equal(
+      mixedRetry.spentMinorUnitsAfter,
+      spentBeforeMixedRetry,
+    )
+    assert.deepEqual(
+      retryBatch.items.find((item) =>
+        item.id === retryItems['retry/completed']),
+      completedBeforeMixedRetry,
+    )
+    assert.deepEqual(
+      retryBatch.items.find((item) =>
+        item.id === retryItems['retry/provider']).artifactIds,
+      [planTwoId],
+    )
+    assert.deepEqual(
+      mixedRetry.preservedCompletedItemIds,
+      [retryItems['retry/completed']],
+    )
+    assert.deepEqual(
+      [...mixedRetry.preservedArtifactIds].sort(),
+      [finalOneId, planTwoId].sort(),
+    )
+
+    const mixedRetryReplayResponse = await fetch(
+      partialRetryEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': mixedRetryKey,
+        },
+        body: JSON.stringify(mixedRetryBody),
+      },
+    )
+    const mixedRetryReplayPayload =
+      await mixedRetryReplayResponse.json()
+    assert.equal(mixedRetryReplayResponse.status, 200)
+    assert.equal(mixedRetryReplayPayload.data.replayed, true)
+    assert.equal(
+      mixedRetryReplayPayload.data.partialRetry.retryHash,
+      mixedRetry.retryHash,
+    )
+    const mixedRetryMismatchResponse = await fetch(
+      partialRetryEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': mixedRetryKey,
+        },
+        body: JSON.stringify({
+          ...mixedRetryBody,
+          targets: mixedTargets.slice(0, 1),
+        }),
+      },
+    )
+    assert.equal(mixedRetryMismatchResponse.status, 409)
+    const staleMixedRetryResponse = await fetch(
+      partialRetryEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key':
+            `batch-partial-retry-stale-${suffix}`,
+        },
+        body: JSON.stringify(mixedRetryBody),
+      },
+    )
+    assert.equal(staleMixedRetryResponse.status, 409)
+
+    const readMixedRetryResponse = await fetch(
+      `${partialRetryEndpoint}/${mixedRetry.id}`,
+      { headers: { authorization } },
+    )
+    const readMixedRetryPayload =
+      await readMixedRetryResponse.json()
+    assert.equal(readMixedRetryResponse.status, 200)
+    assert.equal(
+      readMixedRetryPayload.data.partialRetry.retryHash,
+      mixedRetry.retryHash,
+    )
+    const listMixedRetriesResponse = await fetch(
+      `${partialRetryEndpoint}?limit=1`,
+      { headers: { authorization } },
+    )
+    const listMixedRetriesPayload =
+      await listMixedRetriesResponse.json()
+    assert.equal(listMixedRetriesResponse.status, 200)
+    assert.equal(
+      listMixedRetriesPayload.data.partialRetries[0].id,
+      mixedRetry.id,
+    )
+
+    const providerSpentBeforeCache =
+      retryBatch.progress.spentMinorUnits
+    await retryCompleteStep(
+      retryItems['retry/provider'],
+      'materializing',
+      'provider-cache-retry',
+      {
+        costMinorUnits: 999_999,
+        cacheHit: true,
+        artifactIds: [sourceHookId],
+      },
+    )
+    assert.equal(
+      retryBatch.progress.spentMinorUnits,
+      providerSpentBeforeCache,
+    )
+    assert.equal(
+      retryBatch.items.find((item) =>
+        item.id === retryItems['retry/provider'])
+        .steps.find((step) =>
+          step.step === 'materializing').attempt,
+      2,
+    )
+
+    await retryFailStep(
+      retryItems['retry/renderer'],
+      'rendering',
+      'renderer-second-failure',
+      'RENDER_PROCESS_EXITED_AGAIN',
+      4,
+    )
+    const secondRendererTarget =
+      failedTarget('retry/renderer', 'rendering')
+    const spentBeforeSecondRetry =
+      retryBatch.progress.spentMinorUnits
+    const secondRendererRetryResponse = await fetch(
+      partialRetryEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key':
+            `batch-partial-retry-renderer-2-${suffix}`,
+        },
+        body: JSON.stringify({
+          expectedBatchRevision: retryBatch.revision,
+          targets: [secondRendererTarget],
+        }),
+      },
+    )
+    const secondRendererRetryPayload =
+      await secondRendererRetryResponse.json()
+    assert.equal(
+      secondRendererRetryResponse.status,
+      201,
+      JSON.stringify(secondRendererRetryPayload),
+    )
+    retryBatch = secondRendererRetryPayload.data.batch
+    const secondRendererRetry =
+      secondRendererRetryPayload.data.partialRetry
+    const firstRendererJob = mixedRetry.jobs.find((job) =>
+      job.itemId === retryItems['retry/renderer'])
+    assert.equal(
+      secondRendererRetry.jobs[0].lineageKey,
+      firstRendererJob.lineageKey,
+    )
+    assert.equal(
+      secondRendererRetry.jobs[0].retryAttempt,
+      firstRendererJob.retryAttempt + 1,
+    )
+    assert.equal(
+      retryBatch.progress.spentMinorUnits,
+      spentBeforeSecondRetry,
+    )
+
+    const persistedRetryActions =
+      await client.v2ProductionBatchAction.findMany({
+        where: {
+          workspaceId,
+          batchId: retryBatch.id,
+          action: 'partial-retry',
+        },
+        include: { retryJobs: true },
+        orderBy: { createdAt: 'asc' },
+      })
+    assert.equal(persistedRetryActions.length, 2)
+    assert.equal(
+      persistedRetryActions[0].retryManifestHash,
+      mixedRetry.retryHash,
+    )
+    assert.equal(persistedRetryActions[0].retryJobs.length, 3)
+    assert.equal(persistedRetryActions[1].retryJobs.length, 1)
+    assert.deepEqual(
+      persistedRetryActions[0].retryJobs
+        .map((job) => job.executorClass)
+        .sort(),
+      ['provider', 'renderer', 'validator'],
+    )
+    const rendererLineageRows =
+      await client.v2ProductionBatchRetryJob.findMany({
+        where: {
+          workspaceId,
+          batchId: retryBatch.id,
+          itemId: retryItems['retry/renderer'],
+          step: 'rendering',
+        },
+        orderBy: { retryAttempt: 'asc' },
+      })
+    assert.equal(rendererLineageRows.length, 2)
+    assert.equal(
+      rendererLineageRows[0].lineageKey,
+      rendererLineageRows[1].lineageKey,
+    )
+    assert.deepEqual(
+      rendererLineageRows.map((job) => job.retryAttempt),
+      [2, 3],
+    )
+    await assert.rejects(
+      client.$executeRaw(
+        Prisma.sql`
+          UPDATE "production_batch_retry_jobs"
+          SET "chargedMinorUnitsAtEnqueue" = 1
+          WHERE "id" = ${persistedRetryActions[0].retryJobs[0].id}
+        `,
+      ),
+    )
+    const retryJobToTamper =
+      persistedRetryActions[0].retryJobs[0]
+    await client.v2ProductionBatchRetryJob.update({
+      where: { id: retryJobToTamper.id },
+      data: { failureMessage: 'tampered retry evidence' },
+    })
+    const tamperedRetryRead = await fetch(
+      `${partialRetryEndpoint}/${mixedRetry.id}`,
+      { headers: { authorization } },
+    )
+    const tamperedRetryPayload = await tamperedRetryRead.json()
+    assert.equal(tamperedRetryRead.status, 409)
+    assert.equal(
+      tamperedRetryPayload.error.code,
+      'PERSISTENCE_CONFLICT',
+    )
+    await client.v2ProductionBatchRetryJob.update({
+      where: { id: retryJobToTamper.id },
+      data: { failureMessage: retryJobToTamper.failureMessage },
+    })
   } catch (error) {
     if (serverLogs) {
       error.message += `\nNext logs:\n${serverLogs.slice(-8_000)}`

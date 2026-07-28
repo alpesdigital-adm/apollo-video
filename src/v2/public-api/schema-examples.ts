@@ -1705,6 +1705,88 @@ const productionBatchExample = {
     remainingMinorUnits: 5000,
   },
 }
+const batchPartialRetryRequestExample = {
+  expectedBatchRevision: 9,
+  targets: [
+    {
+      itemId: 'production-batch-item-example-1',
+      step: 'materializing',
+      expectedItemRevision: 5,
+      expectedStepHash: 'a'.repeat(64),
+    },
+  ],
+}
+const batchPartialRetryProgressBeforeExample = {
+  completedSteps: 1,
+  failedSteps: 1,
+  cancelledSteps: 0,
+  runningSteps: 0,
+  totalSteps: 8,
+  percent: 12,
+  completedItems: 0,
+  failedItems: 1,
+  cancelledItems: 0,
+  activeItems: 0,
+  queuedItems: 1,
+  totalItems: 2,
+  spentMinorUnits: 120,
+  remainingMinorUnits: 4880,
+}
+const batchPartialRetryProgressAfterExample = {
+  ...batchPartialRetryProgressBeforeExample,
+  failedSteps: 0,
+  queuedItems: 2,
+  failedItems: 0,
+}
+const batchPartialRetryExample = {
+  schemaVersion: 'batch-partial-retry/v1',
+  id: 'production-batch-partial-retry-example-1',
+  workspaceId,
+  projectId,
+  batchId: productionBatchExample.id,
+  batchDefinitionHash: productionBatchExample.definitionHash,
+  batchRevisionBefore: 9,
+  batchRevisionAfter: 10,
+  status: 'queued',
+  jobs: [
+    {
+      schemaVersion: 'batch-partial-retry-job/v1',
+      id: 'production-batch-retry-job-example-1',
+      workspaceId,
+      projectId,
+      batchId: productionBatchExample.id,
+      retryId: 'production-batch-partial-retry-example-1',
+      itemId: 'production-batch-item-example-1',
+      step: 'materializing',
+      executorClass: 'provider',
+      status: 'queued',
+      lineageKey: 'b'.repeat(64),
+      failedAttempt: 1,
+      retryAttempt: 2,
+      previousStepHash: 'a'.repeat(64),
+      queuedStepHash: 'c'.repeat(64),
+      failureCode: 'PROVIDER_TIMEOUT',
+      failureMessage: 'Provider exceeded the bounded attempt.',
+      preservedArtifactIds: [artifactId],
+      preservedArtifactCount: 1,
+      chargedMinorUnitsAtEnqueue: 0,
+      createdAt,
+      jobHash: 'd'.repeat(64),
+    },
+  ],
+  targetCount: 1,
+  preservedCompletedItemIds: [],
+  preservedArtifactIds: [artifactId],
+  progressBefore: batchPartialRetryProgressBeforeExample,
+  progressAfter: batchPartialRetryProgressAfterExample,
+  spentMinorUnitsBefore: 120,
+  spentMinorUnitsAfter: 120,
+  remainingMinorUnitsBefore: 4880,
+  remainingMinorUnitsAfter: 4880,
+  createdByClientId: clientId,
+  createdAt,
+  retryHash: 'e'.repeat(64),
+}
 const scriptAlignmentCreateRequestExample = {
   title: 'Roteiro de descoberta',
   locale: 'pt-BR',
@@ -4919,6 +5001,37 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         costMinorUnits: 5,
         cacheHit: false,
         artifactIds: ['artifact-final-example-1'],
+      },
+    ],
+    'apollo://schemas/create-batch-partial-retry-request/v1': [
+      batchPartialRetryRequestExample,
+    ],
+    'apollo://schemas/batch-partial-retry-mutated/v1': [
+      {
+        data: {
+          batch: {
+            ...productionBatchExample,
+            revision: 10,
+          },
+          partialRetry: batchPartialRetryExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/batch-partial-retry-read/v1': [
+      {
+        data: { partialRetry: batchPartialRetryExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/batch-partial-retry-page/v1': [
+      {
+        data: {
+          partialRetries: [batchPartialRetryExample],
+          nextCursor: batchPartialRetryExample.id,
+        },
+        meta: { apiVersion: 'v1' },
       },
     ],
     'apollo://schemas/create-script-alignment-request/v1': [

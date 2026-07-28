@@ -231,6 +231,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'preflight-token',
       reason: 'Changes only the exact fingerprint-bound targets shown in the signed preview and records every applied, skipped or unchanged result.',
     },
+    'apollo.batches.partial-retries.create': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Requeues only explicitly selected failed steps, but their durable jobs may repeat bounded provider, render or validation work.',
+    },
     'apollo.batches.actions.apply': {
       impact: 'destructive', confirmation: 'human-approval',
       reason: 'Can cancel all unfinished work in one production batch or reopen previously cancelled and failed items.',

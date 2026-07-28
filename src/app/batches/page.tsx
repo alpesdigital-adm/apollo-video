@@ -549,6 +549,30 @@ interface BatchEditCommand {
   commandHash: string
 }
 
+interface BatchPartialRetryRun {
+  id: string
+  batchRevisionBefore: number
+  batchRevisionAfter: number
+  status: 'queued'
+  targetCount: number
+  jobs: Array<{
+    id: string
+    itemId: string
+    step: StepName
+    executorClass: 'director' | 'provider' | 'renderer' | 'validator'
+    status: 'queued'
+    retryAttempt: number
+    lineageKey: string
+    chargedMinorUnitsAtEnqueue: 0
+  }>
+  preservedCompletedItemIds: string[]
+  preservedArtifactIds: string[]
+  spentMinorUnitsBefore: number
+  spentMinorUnitsAfter: number
+  createdAt: string
+  retryHash: string
+}
+
 type ScriptReviewDecision =
   | {
       targetKind: 'block'
@@ -570,6 +594,7 @@ interface BatchStep {
   costMinorUnits: number
   cacheHit: boolean
   error?: { code: string; message: string }
+  stepHash?: string
 }
 
 interface BatchItem {
@@ -872,6 +897,8 @@ export default function BatchesPage() {
     useState<BatchEditCommand[]>([])
   const [activeBatchEditCommandId, setActiveBatchEditCommandId] =
     useState<string | null>(null)
+  const [batchPartialRetries, setBatchPartialRetries] =
+    useState<BatchPartialRetryRun[]>([])
   const [batchEditRecipeIds, setBatchEditRecipeIds] =
     useState<Set<string>>(new Set())
   const [batchEditOutputSpecIds, setBatchEditOutputSpecIds] =
@@ -906,6 +933,8 @@ export default function BatchesPage() {
     useRef<string | null>(null)
   const batchEditCommitIdempotencyKey =
     useRef<string | null>(null)
+  const batchPartialRetryIdempotencyKey =
+    useRef<string | null>(null)
 
   function resetVariantPortfolio() {
     setActiveVariantPortfolioPreflightId(null)
@@ -932,6 +961,11 @@ export default function BatchesPage() {
     setBatchEditCommitToken(null)
     batchEditPreflightIdempotencyKey.current = null
     batchEditCommitIdempotencyKey.current = null
+  }
+
+  function resetBatchPartialRetries() {
+    setBatchPartialRetries([])
+    batchPartialRetryIdempotencyKey.current = null
   }
 
   const fetchBatches = useCallback(async (quiet = false) => {
@@ -1061,6 +1095,7 @@ export default function BatchesPage() {
       setActiveVariantPortfolioPreflightId(null)
       setPortfolioConfirmationToken(null)
       resetBatchEdit()
+      resetBatchPartialRetries()
       return
     }
     const controller = new AbortController()
@@ -1076,6 +1111,7 @@ export default function BatchesPage() {
           variantPortfolioPreflightsResponse,
           batchEditPreflightsResponse,
           batchEditCommandsResponse,
+          batchPartialRetriesResponse,
         ] = await Promise.all([
           fetch(
             `/v1/projects/${encodeURIComponent(selectedBatch!.projectId)}/workspace`,
@@ -1141,6 +1177,14 @@ export default function BatchesPage() {
               cache: 'no-store',
             },
           ),
+          fetch(
+            `/v1/batches/${encodeURIComponent(selectedBatch!.id)}/partial-retries?limit=100`,
+            {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+              cache: 'no-store',
+            },
+          ),
         ])
         if (
           workspaceResponse.status === 401 ||
@@ -1150,7 +1194,8 @@ export default function BatchesPage() {
           variantRecipesResponse.status === 401 ||
           variantPortfolioPreflightsResponse.status === 401 ||
           batchEditPreflightsResponse.status === 401 ||
-          batchEditCommandsResponse.status === 401
+          batchEditCommandsResponse.status === 401 ||
+          batchPartialRetriesResponse.status === 401
         ) {
           router.replace('/login')
           return
@@ -1178,6 +1223,9 @@ export default function BatchesPage() {
         const batchEditCommandsPayload =
           await batchEditCommandsResponse.json() as
             ApiEnvelope<{ commands: BatchEditCommand[] }>
+        const batchPartialRetriesPayload =
+          await batchPartialRetriesResponse.json() as
+            ApiEnvelope<{ partialRetries: BatchPartialRetryRun[] }>
         if (!workspaceResponse.ok || !workspacePayload.data) {
           throw new Error(apiError(
             workspacePayload,
@@ -1239,6 +1287,15 @@ export default function BatchesPage() {
           throw new Error(apiError(
             batchEditCommandsPayload,
             'Não foi possível carregar os resultados de edição em lote.',
+          ))
+        }
+        if (
+          !batchPartialRetriesResponse.ok ||
+          !batchPartialRetriesPayload.data
+        ) {
+          throw new Error(apiError(
+            batchPartialRetriesPayload,
+            'Não foi possível carregar as recuperações seletivas.',
           ))
         }
         const allowedArtifacts = new Set(
@@ -1304,6 +1361,9 @@ export default function BatchesPage() {
             command.id === current)
             ? current
             : editCommands[0]?.id ?? null)
+        setBatchPartialRetries(
+          batchPartialRetriesPayload.data.partialRetries,
+        )
         setBatchEditRecipeIds(new Set(
           selectedBatch!.recipes.map((recipe) => recipe.id),
         ))
@@ -1797,6 +1857,84 @@ export default function BatchesPage() {
       setBatches((current) => current.map((candidate) => candidate.id === batch.id ? payload.data!.batch : candidate))
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível retentar o item.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function retryAllFailedSteps(batch: ProductionBatch) {
+    const targets = batch.items.flatMap((item) => {
+      const failedStep = item.steps.find((step) =>
+        step.state === 'failed')
+      return failedStep?.stepHash
+        ? [{
+            itemId: item.id,
+            step: failedStep.step,
+            expectedItemRevision: item.revision,
+            expectedStepHash: failedStep.stepHash,
+          }]
+        : []
+    })
+    if (targets.length === 0) {
+      setNotice('Este lote não tem etapas falhas para recuperar.')
+      return
+    }
+    setBusy(true)
+    setNotice(null)
+    if (!batchPartialRetryIdempotencyKey.current) {
+      batchPartialRetryIdempotencyKey.current =
+        globalThis.crypto.randomUUID()
+    }
+    try {
+      const response = await fetch(
+        `/v1/batches/${encodeURIComponent(batch.id)}/partial-retries`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key':
+              batchPartialRetryIdempotencyKey.current,
+          },
+          body: JSON.stringify({
+            expectedBatchRevision: batch.revision,
+            targets,
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        batch: ProductionBatch
+        partialRetry: BatchPartialRetryRun
+        replayed: boolean
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível recuperar as etapas falhas.',
+        ))
+      }
+      const result = payload.data
+      setBatches((current) => current.map((candidate) =>
+        candidate.id === batch.id ? result.batch : candidate))
+      setBatchPartialRetries((current) => [
+        result.partialRetry,
+        ...current.filter((retry) =>
+          retry.id !== result.partialRetry.id),
+      ])
+      batchPartialRetryIdempotencyKey.current = null
+      setNotice(
+        `${result.partialRetry.targetCount} etapa(s) reenfileirada(s), sem nova cobrança. Itens concluídos e artifacts foram preservados.`,
+      )
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível recuperar as etapas falhas.',
+      )
     } finally {
       setBusy(false)
     }
@@ -2622,6 +2760,103 @@ export default function BatchesPage() {
     }
   }
 
+  const failedBatchItems = selectedBatch?.items.filter((item) =>
+    item.state === 'failed' &&
+    item.steps.some((step) => step.state === 'failed')) ?? []
+  const latestPartialRetry = batchPartialRetries[0] ?? null
+  const partialRetryPanel = selectedBatch &&
+    (failedBatchItems.length > 0 || latestPartialRetry) ? (
+      <section
+        className="relative overflow-hidden rounded-xl border border-[#d8a936]/20 bg-[#0d0c09] p-4"
+        data-testid="batch-partial-retry-panel"
+      >
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 w-1 bg-[#d8a936]"
+        />
+        <div className="flex flex-col gap-4 pl-1 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#b9953e]">
+              <span className="font-mono">R//</span>
+              Recovery rail
+            </div>
+            <h4 className="mt-2 text-sm font-semibold text-[#e8e1d5]">
+              {failedBatchItems.length > 0
+                ? 'Recupere apenas o que falhou.'
+                : 'Última recuperação seletiva.'}
+            </h4>
+            <p className="mt-1 max-w-xl text-[10px] leading-4 text-[#777168]">
+              O Apollo mantém saídas concluídas, artifacts válidos e custo já pago. Cada falha volta para o executor correto com a mesma lineage.
+            </p>
+          </div>
+          {failedBatchItems.length > 0 ? (
+            <button
+              className="h-9 shrink-0 rounded-lg bg-[#d8a936] px-3 text-[10px] font-bold text-[#171207] transition hover:bg-[#e9bb4a] disabled:cursor-wait disabled:opacity-40"
+              data-testid="retry-all-failed-batch-steps"
+              disabled={busy}
+              onClick={() => void retryAllFailedSteps(selectedBatch)}
+              type="button"
+            >
+              Retentar {failedBatchItems.length} falha{failedBatchItems.length === 1 ? '' : 's'}
+            </button>
+          ) : null}
+        </div>
+
+        {failedBatchItems.length > 0 ? (
+          <div className="mt-4 flex flex-wrap gap-1.5 pl-1">
+            {failedBatchItems.map((item) => {
+              const failedStep = item.steps.find((step) =>
+                step.state === 'failed')!
+              return (
+                <span
+                  className="rounded-md border border-[#c76666]/20 bg-[#c76666]/[0.06] px-2 py-1 font-mono text-[8px] text-[#d78686]"
+                  key={item.id}
+                >
+                  {STEP_LABELS[failedStep.step]} · tentativa {failedStep.attempt}
+                </span>
+              )
+            })}
+          </div>
+        ) : null}
+
+        {latestPartialRetry ? (
+          <div
+            className="mt-4 border-l border-[#d8a936]/25 pl-4"
+            data-testid={`batch-partial-retry-${latestPartialRetry.id}`}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              {latestPartialRetry.jobs.map((job) => (
+                <span
+                  className="rounded-md border border-white/[0.07] bg-white/[0.025] px-2 py-1 font-mono text-[8px] text-[#a7a198]"
+                  key={job.id}
+                >
+                  {job.executorClass} → {STEP_LABELS[job.step]} · a{job.retryAttempt}
+                </span>
+              ))}
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {[
+                ['Concluídos intactos', latestPartialRetry.preservedCompletedItemIds.length],
+                ['Artifacts preservados', latestPartialRetry.preservedArtifactIds.length],
+                ['Cobrança ao reenfileirar', money(
+                  latestPartialRetry.spentMinorUnitsAfter -
+                  latestPartialRetry.spentMinorUnitsBefore,
+                )],
+              ].map(([label, value]) => (
+                <div
+                  className="rounded-lg border border-white/[0.055] bg-[#090909] px-2.5 py-2"
+                  key={String(label)}
+                >
+                  <p className="font-mono text-xs text-[#ded7cc]">{value}</p>
+                  <p className="mt-1 text-[7px] uppercase tracking-[0.08em] text-[#625e57]">{label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </section>
+    ) : null
+
   const batchEditPanel = selectedBatch ? (
                             <section
                               className="mt-7 border-t border-dashed border-[#55b8b1]/20 pt-6"
@@ -3328,6 +3563,7 @@ export default function BatchesPage() {
 
                     {detailView === 'outputs' ? (
                     <div className="max-h-[620px] space-y-2 overflow-y-auto p-3 sm:p-4">
+                      {partialRetryPanel}
                       {selectedBatch.items.map((item, index) => {
                         const recipe = selectedBatch.recipes.find((candidate) => candidate.id === item.recipeId)
                         const variant = selectedBatch.variants.find((candidate) => candidate.id === item.variantId)
