@@ -77,3 +77,28 @@ test('dashboard exposes the V2 production-batch control room as a first-class de
   assert.match(dashboardSource, />\s*Lotes\s*</)
   assert.doesNotMatch(architectureLintSource, /['"]src\/app\/batches['"]/)
 })
+
+test('T-FR-084 /batches compiles and renders VariantRecipe through the public V2 API', () => {
+  assert.match(
+    batchUiSource,
+    /\/v1\/batches\/\$\{encodeURIComponent\(selectedBatch!\.id\)\}\/variant-recipes\?limit=100/,
+  )
+  assert.match(
+    batchUiSource,
+    /\/v1\/batches\/\$\{encodeURIComponent\(selectedBatch\.id\)\}\/variant-recipes/,
+  )
+  assert.match(batchUiSource, /data-testid="variant-recipe-panel"/)
+  assert.match(batchUiSource, /data-testid="create-variant-recipe"/)
+  assert.match(
+    batchUiSource,
+    /expectedCompatibilityGraphRunHash:\s*activeCompatibilityGraph\.runHash/,
+  )
+  assert.match(batchUiSource, /edge\.decision === 'accepted'/)
+  assert.match(batchUiSource, /proofOptionalObjectives/)
+  assert.match(batchUiSource, /scores\.minimumEdgeScore/)
+  assert.match(batchUiSource, /storyPlan\.blocks/)
+  assert.match(batchUiSource, /editPlan\.duplicatesMasters/)
+  assert.match(batchUiSource, /entry\.scriptBlockId/)
+  assert.match(batchUiSource, /entry\.takeId/)
+  assert.match(batchUiSource, /entry\.sourceRangeMs/)
+})

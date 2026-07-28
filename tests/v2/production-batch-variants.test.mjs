@@ -5,7 +5,6 @@ import {
   applyBatchEdit,
   batchProgress,
   cancelProductionBatch,
-  compileVariantRecipe,
   createProductionBatch,
   deriveBatchStatus,
   hydrateProductionBatch,
@@ -409,50 +408,6 @@ test('T-FR-080 rejects incompatible dimensions, stale transitions, and integrity
       items: [invalidItem, ...batch.items.slice(1)],
     }),
     /state does not match/,
-  )
-})
-
-test('T-FR-084 compiles complete and short recipes by reference with lineage', () => {
-  const recipe = {
-    id: 'recipe-one',
-    selection: {
-      hookId: 'hook',
-      bodyId: 'body',
-      proofId: 'proof',
-      ctaId: 'cta',
-    },
-    order: ['hook', 'body', 'proof', 'cta'],
-    sourceSegmentIds: ['segment-hook', 'segment-body', 'segment-proof', 'segment-cta'],
-    assumptions: [],
-    scores: { narrative: 0.9 },
-    coldOpen: {
-      sourceSegmentId: 'segment-proof',
-      returnAtMs: 2000,
-    },
-  }
-  const result = compileVariantRecipe(recipe, { proofRequired: true })
-  assert.equal(result.editPlan.duplicatesMasters, false)
-  assert.equal(result.lineage.length, 4)
-  assert.equal(result.storyPlan.coldOpen.sourceSegmentId, 'segment-proof')
-  const short = compileVariantRecipe({
-    ...recipe,
-    selection: {
-      hookId: 'hook',
-      bodyId: 'body',
-      ctaId: 'cta',
-    },
-    order: ['hook', 'body', 'cta'],
-  }, { proofRequired: false })
-  assert.equal(short.lineage.length, 3)
-  assert.throws(
-    () => compileVariantRecipe({
-      ...recipe,
-      selection: {
-        hookId: 'hook',
-        bodyId: 'body',
-        ctaId: 'cta',
-      },
-    }, { proofRequired: true }),
   )
 })
 

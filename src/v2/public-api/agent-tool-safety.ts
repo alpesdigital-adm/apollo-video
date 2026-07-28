@@ -215,6 +215,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable virtual compatibility graph from an exact take-library hash without materializing recipes, jobs or media.',
     },
+    'apollo.batches.variant-recipes.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable virtual recipe from an exact compatibility graph without duplicating masters, materializing media or starting render jobs.',
+    },
     'apollo.batches.actions.apply': {
       impact: 'destructive', confirmation: 'human-approval',
       reason: 'Can cancel all unfinished work in one production batch or reopen previously cancelled and failed items.',

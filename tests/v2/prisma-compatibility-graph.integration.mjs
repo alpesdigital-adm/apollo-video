@@ -25,7 +25,7 @@ async function freePort() {
 }
 
 async function waitForServer(baseUrl, server) {
-  const deadline = Date.now() + 30_000
+  const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
     if (server.exitCode !== null) {
       throw new Error(`Next server exited with ${server.exitCode}`)
@@ -76,11 +76,11 @@ function dimensions(score) {
   }))
 }
 
-test('T-FR-083 persists and exposes accepted, blocked and borderline compatibility through PostgreSQL and /v1', {
+test('T-FR-083/T-FR-084 persists compatibility and source-referencing variant recipes through PostgreSQL and /v1', {
   skip:
     process.env.APOLLO_COMPATIBILITY_GRAPH_E2E !== '1' &&
     'set APOLLO_COMPATIBILITY_GRAPH_E2E=1 and use an isolated V2 database',
-  timeout: 120_000,
+  timeout: 240_000,
 }, async () => {
   assert.ok(
     process.env.V2_DATABASE_URL,
@@ -414,14 +414,26 @@ test('T-FR-083 persists and exposes accepted, blocked and borderline compatibili
 
     const port = await freePort()
     const baseUrl = `http://127.0.0.1:${port}`
+    const serverMode =
+      process.env.APOLLO_E2E_SERVER_MODE === 'dev'
+        ? 'dev'
+        : 'start'
     server = spawn(
       process.execPath,
-      ['node_modules/next/dist/bin/next', 'start', '-p', String(port)],
+      [
+        'node_modules/next/dist/bin/next',
+        serverMode,
+        ...(serverMode === 'dev' ? ['--webpack'] : []),
+        '-p',
+        String(port),
+      ],
       {
         cwd: process.cwd(),
         env: {
           ...process.env,
-          NODE_ENV: 'production',
+          NODE_ENV: serverMode === 'dev'
+            ? 'development'
+            : 'production',
           __NEXT_PROCESSED_ENV: 'true',
           APOLLO_API_ENVIRONMENT: 'production',
         },
@@ -616,6 +628,245 @@ test('T-FR-083 persists and exposes accepted, blocked and borderline compatibili
           candidate.id === edge.id)),
       false,
     )
+
+    const recipeContexts = contexts.map((context) => ({
+      ...context,
+      offerId: 'offer-apollo',
+      audienceTags: ['especialistas'],
+      claims: [{ key: 'resultado', value: 'clareza' }],
+      personaId: 'persona-especialista',
+      locale: 'pt-BR',
+      desiredAction: 'whatsapp',
+      continuityProvides: [`role-${
+        eligible.find((take) => take.id === context.takeId)
+          .assignment.role
+      }`],
+      continuityRequires: [],
+      narrativeTags: ['clareza', 'vendas'],
+      tone: .55,
+      energy: .62,
+      visual: .5,
+      experiment: .4,
+    }))
+    const recipeGraphResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `compatibility-recipe-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...createBody,
+        contexts: recipeContexts,
+        acceptThreshold: 70,
+        reviewThreshold: 60,
+      }),
+    })
+    const recipeGraphPayload = await recipeGraphResponse.json()
+    assert.equal(
+      recipeGraphResponse.status,
+      201,
+      JSON.stringify(recipeGraphPayload),
+    )
+    const recipeGraph = recipeGraphPayload.data.graph
+    assert.equal(recipeGraph.summary.blockedCount, 0)
+    assert.equal(
+      recipeGraph.summary.acceptedCount,
+      recipeGraph.summary.edgeCount,
+    )
+    const hookNode = recipeGraph.nodes.find((node) =>
+      node.role === 'hook')
+    const bodyNode = recipeGraph.nodes.find((node) =>
+      node.role === 'body')
+    const proofNode = recipeGraph.nodes.find((node) =>
+      node.role === 'proof')
+    const ctaNode = recipeGraph.nodes.find((node) =>
+      node.role === 'cta')
+    assert.ok(hookNode && bodyNode && proofNode && ctaNode)
+    assert.ok(recipeGraph.edges.some((edge) =>
+      edge.fromNodeId === hookNode.id &&
+      edge.toNodeId === bodyNode.id &&
+      edge.relation === 'hook-body' &&
+      edge.decision === 'accepted'))
+    assert.ok(recipeGraph.edges.some((edge) =>
+      edge.fromNodeId === bodyNode.id &&
+      edge.toNodeId === proofNode.id &&
+      edge.relation === 'body-proof' &&
+      edge.decision === 'accepted'))
+    assert.ok(recipeGraph.edges.some((edge) =>
+      edge.fromNodeId === proofNode.id &&
+      edge.toNodeId === ctaNode.id &&
+      edge.relation === 'proof-cta' &&
+      edge.decision === 'accepted'))
+
+    const recipeEndpoint =
+      `${baseUrl}/v1/batches/${batchId}/variant-recipes`
+    assert.equal((await fetch(recipeEndpoint)).status, 401)
+    const fullRecipeBody = {
+      compatibilityGraphId: recipeGraph.id,
+      expectedCompatibilityGraphRunHash: recipeGraph.runHash,
+      selection: {
+        hookNodeId: hookNode.id,
+        bodyNodeId: bodyNode.id,
+        proofNodeId: proofNode.id,
+        ctaNodeId: ctaNode.id,
+      },
+      orderedNodeIds: [
+        hookNode.id,
+        bodyNode.id,
+        proofNode.id,
+        ctaNode.id,
+      ],
+      assumptions: [{
+        code: 'FULL_RECIPE_E2E',
+        statement: 'Full accepted path selected by the E2E.',
+        evidenceRefs: [recipeGraph.runHash],
+      }],
+      requireProof: true,
+      coldOpen: {
+        nodeId: proofNode.id,
+        sourceRangeMs: [
+          proofNode.sourceRangeMs[0],
+          Math.min(
+            proofNode.sourceRangeMs[1],
+            proofNode.sourceRangeMs[0] + 500,
+          ),
+        ],
+        returnAtRole: 'hook',
+      },
+    }
+    const fullRecipeKey = `variant-recipe-full-${suffix}`
+    const fullRecipeResponse = await fetch(recipeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': fullRecipeKey,
+      },
+      body: JSON.stringify(fullRecipeBody),
+    })
+    const fullRecipePayload = await fullRecipeResponse.json()
+    assert.equal(
+      fullRecipeResponse.status,
+      201,
+      JSON.stringify(fullRecipePayload),
+    )
+    assert.equal(fullRecipePayload.data.replayed, false)
+    const fullRecipe = fullRecipePayload.data.recipe
+    assert.deepEqual(fullRecipe.orderedNodeIds, [
+      hookNode.id,
+      bodyNode.id,
+      proofNode.id,
+      ctaNode.id,
+    ])
+    assert.equal(fullRecipe.summary.includesProof, true)
+    assert.equal(fullRecipe.summary.hasColdOpen, true)
+    assert.equal(fullRecipe.lineage.length, 5)
+    assert.equal(fullRecipe.lineage[0].usage, 'cold-open')
+    assert.equal(fullRecipe.editPlan.duplicatesMasters, false)
+    assert.equal(fullRecipe.editPlan.materializesSources, false)
+    assert.ok(fullRecipe.lineage.every((entry) =>
+      entry.takeId &&
+      entry.scriptBlockId &&
+      entry.sourceSegmentId &&
+      entry.lineageHash))
+    assert.ok(
+      fullRecipe.scores.weightedEdgeScore <=
+        fullRecipe.scores.averageEdgeScore,
+      'weakest-link edge score must not exceed the optimistic average',
+    )
+    assert.notEqual(
+      fullRecipe.scores.totalScore,
+      fullRecipe.scores.averageEdgeScore,
+    )
+
+    const fullReplayResponse = await fetch(recipeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': fullRecipeKey,
+      },
+      body: JSON.stringify(fullRecipeBody),
+    })
+    assert.equal(fullReplayResponse.status, 200)
+    assert.equal((await fullReplayResponse.json()).data.replayed, true)
+    const fullMismatchResponse = await fetch(recipeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': fullRecipeKey,
+      },
+      body: JSON.stringify({
+        ...fullRecipeBody,
+        requireProof: false,
+      }),
+    })
+    assert.equal(fullMismatchResponse.status, 409)
+    const staleRecipeResponse = await fetch(recipeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `variant-recipe-stale-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...fullRecipeBody,
+        expectedCompatibilityGraphRunHash: '0'.repeat(64),
+      }),
+    })
+    assert.equal(staleRecipeResponse.status, 409)
+
+    const shortRecipeResponse = await fetch(recipeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `variant-recipe-short-${suffix}`,
+      },
+      body: JSON.stringify({
+        compatibilityGraphId: recipeGraph.id,
+        expectedCompatibilityGraphRunHash: recipeGraph.runHash,
+        selection: {
+          hookNodeId: hookNode.id,
+          bodyNodeId: bodyNode.id,
+          ctaNodeId: ctaNode.id,
+        },
+        orderedNodeIds: [
+          hookNode.id,
+          bodyNode.id,
+          ctaNode.id,
+        ],
+        requireProof: false,
+      }),
+    })
+    const shortRecipePayload = await shortRecipeResponse.json()
+    assert.equal(
+      shortRecipeResponse.status,
+      201,
+      JSON.stringify(shortRecipePayload),
+    )
+    const shortRecipe = shortRecipePayload.data.recipe
+    assert.equal(shortRecipe.summary.includesProof, false)
+    assert.equal(shortRecipe.summary.hasColdOpen, false)
+    assert.equal(shortRecipe.lineage.length, 3)
+    assert.ok(shortRecipe.assumptions.some((assumption) =>
+      assumption.code === 'PROOF_OMITTED_BY_POLICY'))
+
+    const recipeReadResponse = await fetch(
+      `${recipeEndpoint}/${fullRecipe.id}`,
+      { headers },
+    )
+    assert.equal(recipeReadResponse.status, 200)
+    assert.equal(
+      (await recipeReadResponse.json()).data.recipe.runHash,
+      fullRecipe.runHash,
+    )
+    const recipeListResponse = await fetch(
+      `${recipeEndpoint}?compatibilityGraphId=${recipeGraph.id}&limit=1`,
+      { headers },
+    )
+    assert.equal(recipeListResponse.status, 200)
+    assert.equal(
+      (await recipeListResponse.json()).data.recipes[0].id,
+      shortRecipe.id,
+    )
+
     const mismatchResponse = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -650,7 +901,7 @@ test('T-FR-083 persists and exposes accepted, blocked and borderline compatibili
     assert.equal(listResponse.status, 200)
     assert.equal(
       (await listResponse.json()).data.graphs[0].id,
-      recalculatedGraph.id,
+      recipeGraph.id,
     )
 
     const capabilitiesResponse = await fetch(
@@ -666,24 +917,66 @@ test('T-FR-083 persists and exposes accepted, blocked and borderline compatibili
       'apollo.batches.compatibility-graphs.list',
       'apollo.batches.compatibility-graphs.read',
     ])
+    const recipeCapabilityIds =
+      capabilitiesPayload.data.capabilities
+        .map((capability) => capability.id)
+        .filter((id) => id.includes('variant-recipes'))
+    assert.deepEqual(recipeCapabilityIds.sort(), [
+      'apollo.batches.variant-recipes.create',
+      'apollo.batches.variant-recipes.list',
+      'apollo.batches.variant-recipes.read',
+    ])
 
     assert.equal(
       await client.v2CompatibilityGraphRun.count({
         where: { workspaceId },
       }),
-      2,
+      3,
     )
     assert.equal(
       await client.v2CompatibilityGraphNode.count({
         where: { workspaceId },
       }),
-      graph.summary.nodeCount + recalculatedGraph.summary.nodeCount,
+      graph.summary.nodeCount +
+        recalculatedGraph.summary.nodeCount +
+        recipeGraph.summary.nodeCount,
     )
     assert.equal(
       await client.v2CompatibilityGraphEdge.count({
         where: { workspaceId },
       }),
-      graph.summary.edgeCount + recalculatedGraph.summary.edgeCount,
+      graph.summary.edgeCount +
+        recalculatedGraph.summary.edgeCount +
+        recipeGraph.summary.edgeCount,
+    )
+    assert.equal(
+      await client.v2VariantRecipeRun.count({
+        where: { workspaceId },
+      }),
+      2,
+    )
+    assert.equal(
+      await client.v2VariantRecipeLineage.count({
+        where: { workspaceId },
+      }),
+      8,
+    )
+    const storedFullRecipe = await client.v2VariantRecipeRun
+      .findUniqueOrThrow({
+        where: { id: fullRecipe.id },
+        include: {
+          lineage: { orderBy: { sequence: 'asc' } },
+        },
+      })
+    assert.equal(storedFullRecipe.lineage.length, 5)
+    assert.deepEqual(
+      storedFullRecipe.lineage.map((entry) => entry.scriptBlockId),
+      fullRecipe.lineage.map((entry) => entry.scriptBlockId),
+    )
+    assert.equal(
+      JSON.parse(storedFullRecipe.resultJson)
+        .editPlan.duplicatesMasters,
+      false,
     )
     const storedEdges = await client.v2CompatibilityGraphEdge.findMany({
       where: { workspaceId },
@@ -696,6 +989,21 @@ test('T-FR-083 persists and exposes accepted, blocked and borderline compatibili
         where: { id: graph.edges[0].id },
         data: { fromNodeId: recalculatedGraph.nodes[0].id },
       }),
+    )
+    await assert.rejects(
+      client.v2VariantRecipeLineage.update({
+        where: { id: storedFullRecipe.lineage[0].id },
+        data: { nodeId: graph.nodes[0].id },
+      }),
+    )
+    await assert.rejects(
+      client.$executeRaw(
+        Prisma.sql`
+          UPDATE "variant_recipe_runs"
+          SET "selectedTakeCount" = 3
+          WHERE "id" = ${fullRecipe.id}
+        `,
+      ),
     )
     await assert.rejects(
       client.$executeRaw(

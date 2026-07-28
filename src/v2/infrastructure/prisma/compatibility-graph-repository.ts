@@ -22,7 +22,8 @@ import {
   hydrateTakeLibraryRow,
 } from './take-library-repository.ts'
 
-type GraphRow = Prisma.V2CompatibilityGraphRunGetPayload<{
+export type CompatibilityGraphPrismaRow =
+Prisma.V2CompatibilityGraphRunGetPayload<{
   include: { nodes: true; edges: true }
 }>
 
@@ -52,7 +53,9 @@ function canonicalJson<T>(value: string, field: string): Readonly<T> {
   return Object.freeze(parsed as T)
 }
 
-function hydrateRunRow(row: GraphRow): Readonly<CompatibilityGraphRun> {
+export function hydrateCompatibilityGraphRow(
+  row: CompatibilityGraphPrismaRow,
+): Readonly<CompatibilityGraphRun> {
   const run = hydrateCompatibilityGraph(
     canonicalJson<CompatibilityGraphRun>(
       row.resultJson,
@@ -353,7 +356,7 @@ implements CompatibilityGraphRepository {
     })
     return row
       ? Object.freeze({
-          run: hydrateRunRow(row),
+          run: hydrateCompatibilityGraphRow(row),
           requestFingerprint: row.requestFingerprint,
         })
       : null
@@ -385,7 +388,7 @@ implements CompatibilityGraphRepository {
             )
           }
           return Object.freeze({
-            run: hydrateRunRow(replay),
+            run: hydrateCompatibilityGraphRow(replay),
             replayed: true,
           })
         }
@@ -407,7 +410,7 @@ implements CompatibilityGraphRepository {
             include: { nodes: true, edges: true },
           })
         return Object.freeze({
-          run: hydrateRunRow(persisted),
+          run: hydrateCompatibilityGraphRow(persisted),
           replayed: false,
         })
       }, {
@@ -456,7 +459,7 @@ implements CompatibilityGraphRepository {
       },
       include: { nodes: true, edges: true },
     })
-    return row ? hydrateRunRow(row) : null
+    return row ? hydrateCompatibilityGraphRow(row) : null
   }
 
   async list(input: {
@@ -506,7 +509,9 @@ implements CompatibilityGraphRepository {
     })
     const hasNextPage = rows.length > input.limit
     const pageRows = hasNextPage ? rows.slice(0, input.limit) : rows
-    const runs = Object.freeze(pageRows.map(hydrateRunRow))
+    const runs = Object.freeze(
+      pageRows.map(hydrateCompatibilityGraphRow),
+    )
     return Object.freeze({
       runs,
       ...(hasNextPage && runs.length > 0

@@ -38,6 +38,7 @@ import type { ProductionBatchRepository } from '../application/ports/production-
 import type { ScriptAlignmentRepository } from '../application/ports/script-alignment-repository.ts'
 import type { TakeLibraryRepository } from '../application/ports/take-library-repository.ts'
 import type { CompatibilityGraphRepository } from '../application/ports/compatibility-graph-repository.ts'
+import type { VariantRecipeRepository } from '../application/ports/variant-recipe-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -114,6 +115,7 @@ import { PrismaProductionBatchRepository } from './prisma/production-batch-repos
 import { PrismaScriptAlignmentRepository } from './prisma/script-alignment-repository.ts'
 import { PrismaTakeLibraryRepository } from './prisma/take-library-repository.ts'
 import { PrismaCompatibilityGraphRepository } from './prisma/compatibility-graph-repository.ts'
+import { PrismaVariantRecipeRepository } from './prisma/variant-recipe-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -241,6 +243,11 @@ TakeLibraryRepository {
 export function createCompatibilityGraphRepository():
 CompatibilityGraphRepository {
   return new PrismaCompatibilityGraphRepository(resolveV2Client())
+}
+
+export function createVariantRecipeRepository():
+VariantRecipeRepository {
+  return new PrismaVariantRecipeRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {

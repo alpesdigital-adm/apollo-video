@@ -85,6 +85,8 @@ model V2Workspace {
   compatibilityGraphRuns          V2CompatibilityGraphRun[]
   compatibilityGraphNodes         V2CompatibilityGraphNode[]
   compatibilityGraphEdges         V2CompatibilityGraphEdge[]
+  variantRecipeRuns               V2VariantRecipeRun[]
+  variantRecipeLineage            V2VariantRecipeLineage[]
 
   @@map("workspaces")
 }
@@ -126,6 +128,7 @@ model V2ApiClient {
   takeLibraryRuns             V2TakeLibraryRun[]            @relation("TakeLibraryRunCreator")
   takeLibrarySelections       V2TakeLibrarySelection[]      @relation("TakeLibrarySelectionActor")
   compatibilityGraphRuns      V2CompatibilityGraphRun[]     @relation("CompatibilityGraphRunCreator")
+  variantRecipeRuns           V2VariantRecipeRun[]          @relation("VariantRecipeRunCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -266,6 +269,7 @@ model V2Project {
   scriptAlignmentRuns          V2ScriptAlignmentRun[]
   takeLibraryRuns              V2TakeLibraryRun[]
   compatibilityGraphRuns       V2CompatibilityGraphRun[]
+  variantRecipeRuns            V2VariantRecipeRun[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -1979,6 +1983,7 @@ model V2ProductionBatch {
   scriptAlignmentRuns V2ScriptAlignmentRun[]
   takeLibraryRuns     V2TakeLibraryRun[]
   compatibilityGraphs V2CompatibilityGraphRun[]
+  variantRecipes      V2VariantRecipeRun[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
@@ -2080,13 +2085,14 @@ model V2TakeLibraryRun {
   createdAt                 DateTime @db.Timestamptz(3)
   updatedAt                 DateTime @db.Timestamptz(3)
 
-  workspace  V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project    V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  batch      V2ProductionBatch        @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  alignment  V2ScriptAlignmentRun     @relation(fields: [alignmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  createdBy  V2ApiClient              @relation("TakeLibraryRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  selections V2TakeLibrarySelection[]
+  workspace           V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project             V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch               V2ProductionBatch         @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  alignment           V2ScriptAlignmentRun      @relation(fields: [alignmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy           V2ApiClient               @relation("TakeLibraryRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  selections          V2TakeLibrarySelection[]
   compatibilityGraphs V2CompatibilityGraphRun[]
+  variantRecipes      V2VariantRecipeRun[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
@@ -2128,40 +2134,42 @@ model V2TakeLibrarySelection {
 }
 
 model V2CompatibilityGraphRun {
-  id                     String   @id @db.VarChar(128)
-  workspaceId            String   @db.VarChar(128)
-  projectId              String   @db.VarChar(128)
-  batchId                String   @db.VarChar(128)
-  takeLibraryId          String   @db.VarChar(128)
-  takeLibraryRunHash     String   @db.Char(64)
-  schemaVersion          String   @db.VarChar(64)
-  ruleVersion            String   @db.VarChar(64)
-  softScoreVersion       String   @db.VarChar(64)
-  acceptThreshold        Decimal  @db.Decimal(6, 3)
-  reviewThreshold        Decimal  @db.Decimal(6, 3)
-  resultJson             String   @db.Text
-  nodeCount              Int
-  edgeCount              Int
-  acceptedCount          Int
-  borderlineCount        Int
-  blockedCount           Int
-  hardFailureCount       Int
-  averageSoftScore       Decimal  @db.Decimal(6, 3)
-  runHash                String   @db.Char(64)
-  requestFingerprint     String   @db.Char(64)
-  idempotencyKey         String   @db.VarChar(128)
-  createdByClientId      String   @db.VarChar(80)
-  createdAt              DateTime @db.Timestamptz(3)
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  batchId            String   @db.VarChar(128)
+  takeLibraryId      String   @db.VarChar(128)
+  takeLibraryRunHash String   @db.Char(64)
+  schemaVersion      String   @db.VarChar(64)
+  ruleVersion        String   @db.VarChar(64)
+  softScoreVersion   String   @db.VarChar(64)
+  acceptThreshold    Decimal  @db.Decimal(6, 3)
+  reviewThreshold    Decimal  @db.Decimal(6, 3)
+  resultJson         String   @db.Text
+  nodeCount          Int
+  edgeCount          Int
+  acceptedCount      Int
+  borderlineCount    Int
+  blockedCount       Int
+  hardFailureCount   Int
+  averageSoftScore   Decimal  @db.Decimal(6, 3)
+  runHash            String   @db.Char(64)
+  requestFingerprint String   @db.Char(64)
+  idempotencyKey     String   @db.VarChar(128)
+  createdByClientId  String   @db.VarChar(80)
+  createdAt          DateTime @db.Timestamptz(3)
 
-  workspace   V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project     V2Project             @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  batch       V2ProductionBatch     @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  takeLibrary V2TakeLibraryRun      @relation(fields: [takeLibraryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  createdBy   V2ApiClient           @relation("CompatibilityGraphRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  nodes       V2CompatibilityGraphNode[]
-  edges       V2CompatibilityGraphEdge[]
+  workspace      V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project                  @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch          V2ProductionBatch          @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  takeLibrary    V2TakeLibraryRun           @relation(fields: [takeLibraryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy      V2ApiClient                @relation("CompatibilityGraphRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  nodes          V2CompatibilityGraphNode[]
+  edges          V2CompatibilityGraphEdge[]
+  variantRecipes V2VariantRecipeRun[]
 
   @@unique([id, workspaceId])
+  @@unique([id, workspaceId, projectId, batchId, takeLibraryId, runHash], map: "compat_graph_runs_recipe_scope_key")
   @@unique([workspaceId, createdByClientId, idempotencyKey])
   @@index([workspaceId, batchId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
@@ -2171,23 +2179,24 @@ model V2CompatibilityGraphRun {
 }
 
 model V2CompatibilityGraphNode {
-  id               String @id @db.VarChar(128)
-  workspaceId      String @db.VarChar(128)
-  graphId          String @db.VarChar(128)
-  takeId           String @db.VarChar(128)
-  groupId          String @db.VarChar(128)
+  id               String  @id @db.VarChar(128)
+  workspaceId      String  @db.VarChar(128)
+  graphId          String  @db.VarChar(128)
+  takeId           String  @db.VarChar(128)
+  groupId          String  @db.VarChar(128)
   scriptBlockId    String? @db.VarChar(128)
-  role             String @db.VarChar(16)
-  sourceArtifactId String @db.VarChar(128)
-  sourceHash       String @db.Char(64)
-  contextHash      String @db.Char(64)
-  nodeJson         String @db.Text
-  nodeHash         String @db.Char(64)
+  role             String  @db.VarChar(16)
+  sourceArtifactId String  @db.VarChar(128)
+  sourceHash       String  @db.Char(64)
+  contextHash      String  @db.Char(64)
+  nodeJson         String  @db.Text
+  nodeHash         String  @db.Char(64)
 
-  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  graph     V2CompatibilityGraphRun    @relation(fields: [graphId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  fromEdges V2CompatibilityGraphEdge[] @relation("CompatibilityEdgeFrom")
-  toEdges   V2CompatibilityGraphEdge[] @relation("CompatibilityEdgeTo")
+  workspace     V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  graph         V2CompatibilityGraphRun    @relation(fields: [graphId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  fromEdges     V2CompatibilityGraphEdge[] @relation("CompatibilityEdgeFrom")
+  toEdges       V2CompatibilityGraphEdge[] @relation("CompatibilityEdgeTo")
+  recipeLineage V2VariantRecipeLineage[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, graphId], map: "compat_graph_nodes_scope_key")
@@ -2213,16 +2222,108 @@ model V2CompatibilityGraphEdge {
   edgeJson        String  @db.Text
   edgeHash        String  @db.Char(64)
 
-  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  graph     V2CompatibilityGraphRun    @relation(fields: [graphId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  fromNode  V2CompatibilityGraphNode   @relation("CompatibilityEdgeFrom", fields: [fromNodeId, workspaceId, graphId], references: [id, workspaceId, graphId], onDelete: Cascade, map: "compat_graph_edges_from_node_scope_fkey")
-  toNode    V2CompatibilityGraphNode   @relation("CompatibilityEdgeTo", fields: [toNodeId, workspaceId, graphId], references: [id, workspaceId, graphId], onDelete: Cascade, map: "compat_graph_edges_to_node_scope_fkey")
+  workspace V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  graph     V2CompatibilityGraphRun  @relation(fields: [graphId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  fromNode  V2CompatibilityGraphNode @relation("CompatibilityEdgeFrom", fields: [fromNodeId, workspaceId, graphId], references: [id, workspaceId, graphId], onDelete: Cascade, map: "compat_graph_edges_from_node_scope_fkey")
+  toNode    V2CompatibilityGraphNode @relation("CompatibilityEdgeTo", fields: [toNodeId, workspaceId, graphId], references: [id, workspaceId, graphId], onDelete: Cascade, map: "compat_graph_edges_to_node_scope_fkey")
 
   @@unique([graphId, fromNodeId, toNodeId, relation])
   @@index([workspaceId, graphId, decision, softScore(sort: Desc)])
   @@index([workspaceId, fromNodeId, relation, decision])
   @@index([workspaceId, toNodeId, relation, decision])
   @@map("compatibility_graph_edges")
+}
+
+model V2VariantRecipeRun {
+  id                        String   @id @db.VarChar(128)
+  workspaceId               String   @db.VarChar(128)
+  projectId                 String   @db.VarChar(128)
+  batchId                   String   @db.VarChar(128)
+  compatibilityGraphId      String   @db.VarChar(128)
+  compatibilityGraphRunHash String   @db.Char(64)
+  takeLibraryId             String   @db.VarChar(128)
+  schemaVersion             String   @db.VarChar(64)
+  policyVersion             String   @db.VarChar(64)
+  scoreVersion              String   @db.VarChar(64)
+  compilerVersion           String   @db.VarChar(64)
+  objective                 String   @db.VarChar(128)
+  status                    String   @db.VarChar(32)
+  resultJson                String   @db.Text
+  selectedTakeCount         Int
+  sourceSegmentCount        Int
+  lineageCount              Int
+  compatibilityEdgeCount    Int
+  assumptionCount           Int
+  estimatedDurationMs       Int
+  estimatedDurationFrames   Int
+  includesProof             Boolean
+  hasColdOpen               Boolean
+  masterReferenceCount      Int
+  minimumEdgeScore          Decimal  @db.Decimal(6, 3)
+  averageEdgeScore          Decimal  @db.Decimal(6, 3)
+  objectiveScore            Decimal  @db.Decimal(6, 3)
+  totalScore                Decimal  @db.Decimal(6, 3)
+  proofPolicyHash           String   @db.Char(64)
+  scoresHash                String   @db.Char(64)
+  storyPlanHash             String   @db.Char(64)
+  editPlanHash              String   @db.Char(64)
+  runHash                   String   @db.Char(64)
+  requestFingerprint        String   @db.Char(64)
+  idempotencyKey            String   @db.VarChar(128)
+  createdByClientId         String   @db.VarChar(80)
+  createdAt                 DateTime @db.Timestamptz(3)
+
+  workspace          V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project            V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch              V2ProductionBatch        @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  compatibilityGraph V2CompatibilityGraphRun  @relation(fields: [compatibilityGraphId, workspaceId, projectId, batchId, takeLibraryId, compatibilityGraphRunHash], references: [id, workspaceId, projectId, batchId, takeLibraryId, runHash], onDelete: Restrict, map: "variant_recipe_runs_graph_scope_fkey")
+  takeLibrary        V2TakeLibraryRun         @relation(fields: [takeLibraryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy          V2ApiClient              @relation("VariantRecipeRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  lineage            V2VariantRecipeLineage[]
+
+  @@unique([id, workspaceId])
+  @@unique([id, workspaceId, compatibilityGraphId], map: "variant_recipe_runs_lineage_scope_key")
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, batchId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, projectId, status, totalScore(sort: Desc)])
+  @@index([workspaceId, compatibilityGraphId, createdAt(sort: Desc)])
+  @@index([workspaceId, takeLibraryId, createdAt(sort: Desc)])
+  @@index([workspaceId, includesProof, hasColdOpen, totalScore(sort: Desc)])
+  @@map("variant_recipe_runs")
+}
+
+model V2VariantRecipeLineage {
+  id                   String  @id @db.VarChar(128)
+  workspaceId          String  @db.VarChar(128)
+  recipeId             String  @db.VarChar(128)
+  compatibilityGraphId String  @db.VarChar(128)
+  sequence             Int
+  usage                String  @db.VarChar(16)
+  role                 String  @db.VarChar(16)
+  nodeId               String  @db.VarChar(128)
+  takeId               String  @db.VarChar(128)
+  takeHash             String  @db.Char(64)
+  scriptBlockId        String  @db.VarChar(128)
+  groupId              String  @db.VarChar(128)
+  sourceSegmentId      String  @db.VarChar(128)
+  sourceArtifactId     String  @db.VarChar(128)
+  sourceHash           String  @db.Char(64)
+  sourceRangeStartMs   Decimal @db.Decimal(14, 3)
+  sourceRangeEndMs     Decimal @db.Decimal(14, 3)
+  lineageJson          String  @db.Text
+  lineageHash          String  @db.Char(64)
+
+  workspace V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  recipe    V2VariantRecipeRun       @relation(fields: [recipeId, workspaceId, compatibilityGraphId], references: [id, workspaceId, compatibilityGraphId], onDelete: Cascade, map: "variant_recipe_lineage_recipe_scope_fkey")
+  node      V2CompatibilityGraphNode @relation(fields: [nodeId, workspaceId, compatibilityGraphId], references: [id, workspaceId, graphId], onDelete: Restrict)
+
+  @@unique([recipeId, sequence])
+  @@unique([recipeId, sourceSegmentId])
+  @@index([workspaceId, recipeId, role, sequence])
+  @@index([workspaceId, compatibilityGraphId, nodeId])
+  @@index([workspaceId, takeId, scriptBlockId])
+  @@index([workspaceId, sourceArtifactId, sourceRangeStartMs])
+  @@map("variant_recipe_lineage")
 }
 
 model V2ProductionBatchItem {

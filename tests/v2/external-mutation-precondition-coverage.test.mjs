@@ -53,6 +53,10 @@ const coverage = Object.freeze({
     mode: 'idempotent-create',
     evidence: 'F2-010 request fingerprint binds the exact take-library ID/hash, every eligible take hash, compatibility context, thresholds and actor; serializable persistence rechecks library, batch and actor before writing one immutable graph',
   },
+  'apollo.batches.variant-recipes.create': {
+    mode: 'idempotent-create',
+    evidence: 'F2-011 request fingerprint binds the exact compatibility graph ID/hash, ordered node selection, proof policy, assumptions, optional cold open and actor; serializable persistence rechecks batch objective, graph hash/context and actor before writing recipe plus lineage',
+  },
   'apollo.operations.cancel': {
     mode: 'state-machine-action', evidence: 'F0-070',
   },
@@ -328,7 +332,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 31,
+    'idempotent-create': 32,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,

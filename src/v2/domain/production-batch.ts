@@ -1,5 +1,5 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
-import { assertDomain, DomainError } from './errors.ts'
+import { assertDomain } from './errors.ts'
 import type { ScriptBlockRole } from './script-alignment.ts'
 
 const stableOperationId = (value: unknown) => { const text = JSON.stringify(value); let hash = 2166136261; for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 16777619); return (hash >>> 0).toString(16).padStart(8, '0') }
@@ -1011,9 +1011,6 @@ export function resumeProductionBatch(input: {
     updatedAt: normalizedInstant(input.now, 'resume.now'),
   })
 }
-
-export interface VariantRecipe { id: string; selection: { hookId: string; bodyId: string; proofId?: string; ctaId: string }; order: readonly string[]; sourceSegmentIds: readonly string[]; assumptions: readonly string[]; scores: Readonly<Record<string, number>>; coldOpen?: { sourceSegmentId: string; returnAtMs: number } }
-export function compileVariantRecipe(recipe: VariantRecipe, policy: { proofRequired: boolean }) { if (policy.proofRequired && !recipe.selection.proofId) throw new DomainError('PRECONDITION_REQUIRED', 'Recipe requires proof'); const lineage = Object.freeze(Object.entries(recipe.selection).filter(([, id]) => id).map(([role, id]) => Object.freeze({ role, scriptBlockId: id, takeId: id, sourceSegmentId: recipe.sourceSegmentIds.find((segment) => segment.includes(String(id))) ?? recipe.sourceSegmentIds[0] }))); return Object.freeze({ storyPlan: Object.freeze({ id: `story_${recipe.id}`, blockIds: Object.freeze([...recipe.order]), coldOpen: recipe.coldOpen ?? null }), editPlan: Object.freeze({ id: `edit_${recipe.id}`, sourceReferences: Object.freeze([...recipe.sourceSegmentIds]), duplicatesMasters: false }), lineage }) }
 
 interface VariantSpaceNode { id: string; offer: string; audience: string; persona: string; locale: string; tone: number; energy: number; durationMs: number; visual: number; experiment: number }
 function variantSpaceEdge(from: VariantSpaceNode, to: VariantSpaceNode) { const eligible = from.offer === to.offer && from.audience === to.audience && from.persona === to.persona && from.locale === to.locale; const similarity = (a: number, b: number) => 1 - Math.min(1, Math.abs(a - b)); const softScore = (similarity(from.tone, to.tone) + similarity(from.energy, to.energy) + similarity(from.durationMs / 60_000, to.durationMs / 60_000) + similarity(from.visual, to.visual) + similarity(from.experiment, to.experiment)) / 5; return { eligible, softScore } }

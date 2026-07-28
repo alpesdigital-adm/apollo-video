@@ -2107,10 +2107,28 @@ const compatibilityContextsExample = [
     experiment: 0.4,
     evidenceRefs: ['2'.repeat(64)],
   },
+  {
+    takeId: 'take-example-cta-1',
+    expectedTakeHash: '3'.repeat(64),
+    offerId: 'offer-apollo-example',
+    audienceTags: ['especialistas'],
+    claims: [{ key: 'resultado', value: 'clareza' }],
+    personaId: 'persona-especialista',
+    locale: 'pt-BR',
+    desiredAction: 'whatsapp',
+    continuityProvides: [],
+    continuityRequires: ['mecanismo-explicado'],
+    narrativeTags: ['clareza', 'vendas'],
+    tone: 0.6,
+    energy: 0.66,
+    visual: 0.54,
+    experiment: 0.4,
+    evidenceRefs: ['3'.repeat(64)],
+  },
 ]
 const compatibilityNodeExample = (
   index: number,
-  role: 'hook' | 'body',
+  role: 'hook' | 'body' | 'cta',
   sourceRangeMs: readonly [number, number],
   context: (typeof compatibilityContextsExample)[number],
 ) => ({
@@ -2153,6 +2171,12 @@ const compatibilityNodesExample = [
     'body',
     [3200, 9700],
     compatibilityContextsExample[1],
+  ),
+  compatibilityNodeExample(
+    2,
+    'cta',
+    [9700, 12000],
+    compatibilityContextsExample[2],
   ),
 ]
 const compatibilitySoftScoresExample = [
@@ -2213,15 +2237,295 @@ const compatibilityGraphRunExample = {
       },
       edgeHash: 'b'.repeat(64),
     },
+    {
+      id: 'compat-edge-example-body-cta',
+      fromNodeId: compatibilityNodesExample[1].id,
+      toNodeId: compatibilityNodesExample[2].id,
+      relation: 'body-cta',
+      decision: 'accepted',
+      eligible: true,
+      hardFailures: [],
+      softScores: compatibilitySoftScoresExample.map(
+        (score, index) => ({
+          ...score,
+          evidenceRefs: [
+            compatibilityNodesExample[1].contextHash,
+            compatibilityNodesExample[2].contextHash,
+            compatibilityNodesExample[1].takeHash,
+            compatibilityNodesExample[2].takeHash,
+          ],
+          scoreHash: String(index + 2).repeat(64),
+        }),
+      ),
+      softScore: 89.5,
+      reasonCodes: ['COMPATIBLE'],
+      evidence: {
+        fromTakeHash: compatibilityNodesExample[1].takeHash,
+        toTakeHash: compatibilityNodesExample[2].takeHash,
+        fromSourceHash: compatibilityNodesExample[1].sourceHash,
+        toSourceHash: compatibilityNodesExample[2].sourceHash,
+        fromContextHash: compatibilityNodesExample[1].contextHash,
+        toContextHash: compatibilityNodesExample[2].contextHash,
+        ruleVersion: 'compatibility-rules/v1',
+        softScoreVersion: 'compatibility-soft-score/v1',
+        evidenceHash: 'd'.repeat(64),
+      },
+      edgeHash: 'e'.repeat(64),
+    },
   ],
   summary: {
-    nodeCount: 2,
-    edgeCount: 1,
-    acceptedCount: 1,
+    nodeCount: 3,
+    edgeCount: 2,
+    acceptedCount: 2,
     borderlineCount: 0,
     blockedCount: 0,
     hardFailureCount: 0,
-    averageSoftScore: 91.785,
+    averageSoftScore: 90.6425,
+  },
+  createdByClientId: clientId,
+  createdAt,
+  runHash: 'c'.repeat(64),
+}
+const variantRecipeSourceSegmentsExample =
+  compatibilityNodesExample.map((node, index) => ({
+    id: `variant-source-segment-${index + 1}`,
+    usage: 'primary',
+    role: node.role,
+    nodeId: node.id,
+    takeId: node.takeId,
+    takeHash: node.takeHash,
+    scriptBlockId: node.scriptBlockId,
+    sourceArtifactId: node.sourceArtifactId,
+    sourceHash: node.sourceHash,
+    sourceRangeMs: node.sourceRangeMs,
+    durationMs: node.durationMs,
+    segmentHash: String(index + 5).repeat(64),
+  }))
+const variantRecipeLineageExample =
+  variantRecipeSourceSegmentsExample.map((segment, index) => ({
+    id: `variant-lineage-${index + 1}`,
+    sequence: index,
+    usage: 'primary',
+    role: segment.role,
+    nodeId: segment.nodeId,
+    takeId: segment.takeId,
+    takeHash: segment.takeHash,
+    scriptBlockId: compatibilityNodesExample[index].scriptBlockId,
+    groupId: compatibilityNodesExample[index].groupId,
+    sourceSegmentId: segment.id,
+    sourceArtifactId: segment.sourceArtifactId,
+    sourceHash: segment.sourceHash,
+    sourceRangeMs: segment.sourceRangeMs,
+    lineageHash: ['8', '9', 'a'][index].repeat(64),
+  }))
+const variantStoryBlocksExample =
+  variantRecipeSourceSegmentsExample.map((segment, index) => {
+    const node = compatibilityNodesExample[index]
+    return {
+      id: `variant-story-block-${segment.role}`,
+      actId: segment.role === 'hook'
+        ? 'opening'
+        : segment.role === 'cta'
+          ? 'resolution'
+          : 'development',
+      role: segment.role === 'body' ? 'argument' : segment.role,
+      intent: `use-${segment.role}-take`,
+      dependencies: index === 0
+        ? []
+        : [`variant-story-block-${
+            variantRecipeSourceSegmentsExample[index - 1].role
+          }`],
+      sourceCandidateIds: [segment.takeId],
+      durationTargetMs: {
+        min: segment.durationMs,
+        ideal: segment.durationMs,
+        max: segment.durationMs,
+      },
+      content: {
+        claimIds: node.claims.map((claim) => claim.key),
+        qualifierIds: [],
+        proofIds: [],
+        ...(segment.role === 'cta'
+          ? { ctaId: segment.takeId }
+          : {}),
+      },
+      presentation: 'source-video',
+      sourceRangeId: segment.id,
+    }
+  })
+const variantStoryPlanExample = {
+  id: 'variant-story-plan-example-1',
+  schemaVersion: 1,
+  compilerVersion: 'variant-recipe-compiler/v1',
+  objective: productionBatchExample.objective,
+  targetDurationMs: { min: 12000, max: 12000 },
+  acts: [
+    {
+      id: 'opening',
+      role: 'opening',
+      blockIds: ['variant-story-block-hook'],
+    },
+    {
+      id: 'development',
+      role: 'development',
+      blockIds: ['variant-story-block-body'],
+    },
+    {
+      id: 'resolution',
+      role: 'resolution',
+      blockIds: ['variant-story-block-cta'],
+    },
+  ],
+  blocks: variantStoryBlocksExample,
+  storyHash: 'e'.repeat(64),
+}
+const variantEditPlanExample = {
+  id: 'variant-edit-plan-example-1',
+  schemaVersion: 'variant-edit-plan/v1',
+  compilerVersion: 'variant-recipe-compiler/v1',
+  storyPlanId: variantStoryPlanExample.id,
+  fps: 30,
+  durationFrames: 360,
+  outputBinding: 'deferred-to-output-matrix',
+  trackIds: ['variant-video-track-example-1'],
+  videoTracks: [
+    {
+      id: 'variant-video-track-example-1',
+      kind: 'base-video',
+      clips: variantRecipeLineageExample.map((lineage, index) => ({
+        id: `variant-clip-example-${index + 1}`,
+        storyBlockId: variantStoryBlocksExample[index].id,
+        lineageId: lineage.id,
+        sourceSegmentId: lineage.sourceSegmentId,
+        sourceArtifactId: lineage.sourceArtifactId,
+        sourceHash: lineage.sourceHash,
+        sourceRangeMs: lineage.sourceRangeMs,
+        timelineRangeFrames: [
+          [0, 96],
+          [96, 291],
+          [291, 360],
+        ][index],
+        referenceMode: 'immutable-source',
+        clipHash: ['b', 'c', 'd'][index].repeat(64),
+      })),
+    },
+  ],
+  masterReferences: [
+    {
+      sourceArtifactId: 'artifact-compatibility-example',
+      sourceHashes: compatibilityNodesExample.map((node) =>
+        node.sourceHash),
+      referenceMode: 'immutable-source',
+    },
+  ],
+  materializesSources: false,
+  duplicatesMasters: false,
+  editPlanHash: 'f'.repeat(64),
+}
+const variantRecipeRunExample = {
+  id: 'variant-recipe-example-1',
+  workspaceId,
+  projectId,
+  batchId: productionBatchExample.id,
+  compatibilityGraphId: compatibilityGraphRunExample.id,
+  compatibilityGraphRunHash: compatibilityGraphRunExample.runHash,
+  takeLibraryId: takeLibraryRunExample.id,
+  schemaVersion: 'variant-recipe/v1',
+  policyVersion: 'variant-recipe-policy/v1',
+  scoreVersion: 'variant-recipe-score/v1',
+  compilerVersion: 'variant-recipe-compiler/v1',
+  objective: productionBatchExample.objective,
+  status: 'candidate',
+  selection: {
+    hookNodeId: compatibilityNodesExample[0].id,
+    bodyNodeId: compatibilityNodesExample[1].id,
+    ctaNodeId: compatibilityNodesExample[2].id,
+  },
+  orderedNodeIds: compatibilityNodesExample.map((node) => node.id),
+  compatibilityEdgeIds:
+    compatibilityGraphRunExample.edges.map((edge) => edge.id),
+  sourceSegments: variantRecipeSourceSegmentsExample,
+  assumptions: [
+    {
+      code: 'PROOF_OMITTED_BY_POLICY',
+      statement: 'Content distribution permits a short recipe without proof under the active policy.',
+      evidenceRefs: [
+        'a'.repeat(64),
+        compatibilityGraphRunExample.runHash,
+      ],
+      assumptionHash: 'd'.repeat(64),
+    },
+  ],
+  proofPolicy: {
+    version: 'variant-recipe-policy/v1',
+    objective: productionBatchExample.objective,
+    baseRequirement: 'optional',
+    effectiveRequirement: 'optional',
+    stricterRequestApplied: false,
+    reasonCode: 'PROOF_OPTIONAL_FOR_OBJECTIVE',
+    policyHash: 'a'.repeat(64),
+  },
+  scores: {
+    version: 'variant-recipe-score/v1',
+    minimumEdgeScore: 89.5,
+    averageEdgeScore: 90.6425,
+    weightedEdgeScore: 89.84275,
+    objectiveScore: 100,
+    lineageCompletenessScore: 100,
+    totalScore: 92.19355,
+    dimensions: [
+      {
+        dimension: 'minimum-edge',
+        score: 89.5,
+        weight: 0.55,
+        evidenceRefs: compatibilityGraphRunExample.edges.map((edge) =>
+          edge.edgeHash),
+        reasonCode: 'WEAKEST_EDGE_PENALTY',
+        scoreHash: '1'.repeat(64),
+      },
+      {
+        dimension: 'weighted-edge',
+        score: 89.84275,
+        weight: 0.2,
+        evidenceRefs: compatibilityGraphRunExample.edges.map((edge) =>
+          edge.edgeHash),
+        reasonCode: 'WEAKEST_EDGE_WEIGHTED',
+        scoreHash: '2'.repeat(64),
+      },
+      {
+        dimension: 'objective-fit',
+        score: 100,
+        weight: 0.2,
+        evidenceRefs: compatibilityNodesExample.map((node) =>
+          node.contextHash),
+        reasonCode: 'OBJECTIVE_FIT',
+        scoreHash: '3'.repeat(64),
+      },
+      {
+        dimension: 'lineage-completeness',
+        score: 100,
+        weight: 0.05,
+        evidenceRefs: variantRecipeLineageExample.map((entry) =>
+          entry.lineageHash),
+        reasonCode: 'LINEAGE_COMPLETE',
+        scoreHash: '4'.repeat(64),
+      },
+    ],
+    scoresHash: 'b'.repeat(64),
+  },
+  storyPlan: variantStoryPlanExample,
+  editPlan: variantEditPlanExample,
+  lineage: variantRecipeLineageExample,
+  summary: {
+    selectedTakeCount: 3,
+    sourceSegmentCount: 3,
+    lineageCount: 3,
+    compatibilityEdgeCount: 2,
+    estimatedDurationMs: 12000,
+    estimatedDurationFrames: 360,
+    includesProof: false,
+    hasColdOpen: false,
+    masterReferenceCount: 1,
   },
   createdByClientId: clientId,
   createdAt,
@@ -4451,6 +4755,47 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           graphs: [compatibilityGraphRunExample],
           nextCursor: compatibilityGraphRunExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-variant-recipe-request/v1': [
+      {
+        compatibilityGraphId: compatibilityGraphRunExample.id,
+        expectedCompatibilityGraphRunHash:
+          compatibilityGraphRunExample.runHash,
+        selection: variantRecipeRunExample.selection,
+        orderedNodeIds: variantRecipeRunExample.orderedNodeIds,
+        assumptions: [
+          {
+            code: 'VALIDATED_HOOK_REUSED',
+            statement: 'The selected hook was previously validated.',
+            evidenceRefs: ['validated-hook-example-1'],
+          },
+        ],
+        requireProof: false,
+      },
+    ],
+    'apollo://schemas/variant-recipe-mutated/v1': [
+      {
+        data: {
+          recipe: variantRecipeRunExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/variant-recipe-read/v1': [
+      {
+        data: { recipe: variantRecipeRunExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/variant-recipe-page/v1': [
+      {
+        data: {
+          recipes: [variantRecipeRunExample],
+          nextCursor: variantRecipeRunExample.id,
         },
         meta: { apiVersion: 'v1' },
       },

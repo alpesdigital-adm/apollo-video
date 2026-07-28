@@ -273,6 +273,116 @@ interface CompatibilityGraphRun {
   runHash: string
 }
 
+interface VariantRecipeRun {
+  id: string
+  compatibilityGraphId: string
+  compatibilityGraphRunHash: string
+  takeLibraryId: string
+  objective: string
+  status: 'candidate' | 'selected' | 'excluded'
+  selection: {
+    hookNodeId: string
+    bodyNodeId: string
+    proofNodeId?: string
+    ctaNodeId: string
+  }
+  orderedNodeIds: string[]
+  compatibilityEdgeIds: string[]
+  coldOpen?: {
+    nodeId: string
+    sourceSegmentId: string
+    sourceRangeMs: [number, number]
+    returnAtRole: 'hook'
+    coldOpenHash: string
+  }
+  sourceSegments: Array<{
+    id: string
+    usage: 'primary' | 'cold-open'
+    role: 'hook' | 'body' | 'proof' | 'cta'
+    nodeId: string
+    takeId: string
+    scriptBlockId: string
+    sourceArtifactId: string
+    sourceRangeMs: [number, number]
+    durationMs: number
+    segmentHash: string
+  }>
+  assumptions: Array<{
+    code: string
+    statement: string
+    evidenceRefs: string[]
+    assumptionHash: string
+  }>
+  proofPolicy: {
+    version: string
+    baseRequirement: 'required' | 'optional'
+    effectiveRequirement: 'required' | 'optional'
+    stricterRequestApplied: boolean
+    reasonCode: string
+    policyHash: string
+  }
+  scores: {
+    minimumEdgeScore: number
+    averageEdgeScore: number
+    weightedEdgeScore: number
+    objectiveScore: number
+    lineageCompletenessScore: number
+    totalScore: number
+    scoresHash: string
+  }
+  storyPlan: {
+    id: string
+    blocks: Array<{
+      id: string
+      role: 'hook' | 'argument' | 'proof' | 'cta'
+      intent: string
+      sourceCandidateIds: string[]
+      sourceRangeId: string
+      presentation: 'source-video' | 'cold-open-reference'
+    }>
+    storyHash: string
+  }
+  editPlan: {
+    id: string
+    durationFrames: number
+    fps: number
+    masterReferences: Array<{
+      sourceArtifactId: string
+      sourceHashes: string[]
+      referenceMode: 'immutable-source'
+    }>
+    materializesSources: false
+    duplicatesMasters: false
+    editPlanHash: string
+  }
+  lineage: Array<{
+    id: string
+    sequence: number
+    usage: 'primary' | 'cold-open'
+    role: 'hook' | 'body' | 'proof' | 'cta'
+    nodeId: string
+    takeId: string
+    scriptBlockId: string
+    sourceSegmentId: string
+    sourceArtifactId: string
+    sourceRangeMs: [number, number]
+    lineageHash: string
+  }>
+  summary: {
+    selectedTakeCount: number
+    sourceSegmentCount: number
+    lineageCount: number
+    compatibilityEdgeCount: number
+    estimatedDurationMs: number
+    estimatedDurationFrames: number
+    includesProof: boolean
+    hasColdOpen: boolean
+    masterReferenceCount: number
+  }
+  createdAt: string
+  runHash: string
+}
+
 type ScriptReviewDecision =
   | {
       targetKind: 'block'
@@ -573,6 +683,10 @@ export default function BatchesPage() {
     useState<CompatibilityGraphRun[]>([])
   const [activeCompatibilityGraphId, setActiveCompatibilityGraphId] =
     useState<string | null>(null)
+  const [variantRecipes, setVariantRecipes] =
+    useState<VariantRecipeRun[]>([])
+  const [activeVariantRecipeId, setActiveVariantRecipeId] =
+    useState<string | null>(null)
   const [alignmentLoading, setAlignmentLoading] = useState(false)
   const [scriptComposerOpen, setScriptComposerOpen] = useState(false)
   const [scriptTitle, setScriptTitle] = useState('')
@@ -585,6 +699,7 @@ export default function BatchesPage() {
   const scriptIdempotencyKey = useRef<string | null>(null)
   const takeLibraryIdempotencyKey = useRef<string | null>(null)
   const compatibilityGraphIdempotencyKey = useRef<string | null>(null)
+  const variantRecipeIdempotencyKey = useRef<string | null>(null)
 
   const fetchBatches = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true)
@@ -707,6 +822,8 @@ export default function BatchesPage() {
       setActiveTakeLibraryId(null)
       setCompatibilityGraphs([])
       setActiveCompatibilityGraphId(null)
+      setVariantRecipes([])
+      setActiveVariantRecipeId(null)
       return
     }
     const controller = new AbortController()
@@ -718,6 +835,7 @@ export default function BatchesPage() {
           alignmentsResponse,
           takeLibrariesResponse,
           compatibilityGraphsResponse,
+          variantRecipesResponse,
         ] = await Promise.all([
           fetch(
             `/v1/projects/${encodeURIComponent(selectedBatch!.projectId)}/workspace`,
@@ -751,12 +869,21 @@ export default function BatchesPage() {
               cache: 'no-store',
             },
           ),
+          fetch(
+            `/v1/batches/${encodeURIComponent(selectedBatch!.id)}/variant-recipes?limit=100`,
+            {
+              signal: controller.signal,
+              headers: { accept: 'application/json' },
+              cache: 'no-store',
+            },
+          ),
         ])
         if (
           workspaceResponse.status === 401 ||
           alignmentsResponse.status === 401 ||
           takeLibrariesResponse.status === 401 ||
-          compatibilityGraphsResponse.status === 401
+          compatibilityGraphsResponse.status === 401 ||
+          variantRecipesResponse.status === 401
         ) {
           router.replace('/login')
           return
@@ -770,6 +897,9 @@ export default function BatchesPage() {
         const compatibilityGraphsPayload =
           await compatibilityGraphsResponse.json() as
             ApiEnvelope<{ graphs: CompatibilityGraphRun[] }>
+        const variantRecipesPayload =
+          await variantRecipesResponse.json() as
+            ApiEnvelope<{ recipes: VariantRecipeRun[] }>
         if (!workspaceResponse.ok || !workspacePayload.data) {
           throw new Error(apiError(
             workspacePayload,
@@ -795,6 +925,15 @@ export default function BatchesPage() {
           throw new Error(apiError(
             compatibilityGraphsPayload,
             'Não foi possível carregar o mapa de compatibilidade.',
+          ))
+        }
+        if (
+          !variantRecipesResponse.ok ||
+          !variantRecipesPayload.data
+        ) {
+          throw new Error(apiError(
+            variantRecipesPayload,
+            'Não foi possível carregar as receitas de variante.',
           ))
         }
         const allowedArtifacts = new Set(
@@ -832,6 +971,13 @@ export default function BatchesPage() {
           current && graphs.some((graph) => graph.id === current)
             ? current
             : graphs[0]?.id ?? null)
+        const variantRuns = variantRecipesPayload.data.recipes
+        setVariantRecipes(variantRuns)
+        setActiveVariantRecipeId((current) =>
+          current && variantRuns.some((recipe) =>
+            recipe.id === current)
+            ? current
+            : variantRuns[0]?.id ?? null)
         const project = projects.find((candidate) =>
           candidate.id === selectedBatch!.projectId)
         setScriptLocale(project?.locale || 'pt-BR')
@@ -892,6 +1038,105 @@ export default function BatchesPage() {
       graph.id === activeCompatibilityGraphId) ??
     activeCompatibilityGraphs[0] ??
     null
+  const activeVariantRecipes = useMemo(
+    () => activeCompatibilityGraph
+      ? variantRecipes.filter((recipe) =>
+          recipe.compatibilityGraphId ===
+            activeCompatibilityGraph.id &&
+          recipe.compatibilityGraphRunHash ===
+            activeCompatibilityGraph.runHash)
+      : [],
+    [activeCompatibilityGraph, variantRecipes],
+  )
+  const activeVariantRecipe =
+    activeVariantRecipes.find((recipe) =>
+      recipe.id === activeVariantRecipeId) ??
+    activeVariantRecipes[0] ??
+    null
+  const variantRecipeCandidate = useMemo(() => {
+    if (!activeCompatibilityGraph || !selectedBatch) return null
+    const nodesByRole = {
+      hook: activeCompatibilityGraph.nodes.filter((node) =>
+        node.role === 'hook'),
+      body: activeCompatibilityGraph.nodes.filter((node) =>
+        node.role === 'body'),
+      proof: activeCompatibilityGraph.nodes.filter((node) =>
+        node.role === 'proof'),
+      cta: activeCompatibilityGraph.nodes.filter((node) =>
+        node.role === 'cta'),
+    }
+    const accepted = (
+      fromNodeId: string,
+      toNodeId: string,
+      relation: CompatibilityGraphRun['edges'][number]['relation'],
+    ) => activeCompatibilityGraph.edges.some((edge) =>
+      edge.fromNodeId === fromNodeId &&
+      edge.toNodeId === toNodeId &&
+      edge.relation === relation &&
+      edge.decision === 'accepted' &&
+      edge.eligible)
+    for (const hook of nodesByRole.hook) {
+      for (const body of nodesByRole.body) {
+        if (!accepted(hook.id, body.id, 'hook-body')) continue
+        for (const proof of nodesByRole.proof) {
+          if (!accepted(body.id, proof.id, 'body-proof')) continue
+          for (const cta of nodesByRole.cta) {
+            if (accepted(proof.id, cta.id, 'proof-cta')) {
+              return {
+                selection: {
+                  hookNodeId: hook.id,
+                  bodyNodeId: body.id,
+                  proofNodeId: proof.id,
+                  ctaNodeId: cta.id,
+                },
+                orderedNodeIds: [
+                  hook.id,
+                  body.id,
+                  proof.id,
+                  cta.id,
+                ],
+                includesProof: true,
+              }
+            }
+          }
+        }
+      }
+    }
+    const proofOptionalObjectives = new Set([
+      'awareness',
+      'content-discovery',
+      'content-distribution',
+      'download',
+      'education',
+      'lead-capture',
+      'lead-generation',
+      'schedule',
+      'warming',
+      'whatsapp',
+    ])
+    if (!proofOptionalObjectives.has(selectedBatch.objective)) {
+      return null
+    }
+    for (const hook of nodesByRole.hook) {
+      for (const body of nodesByRole.body) {
+        if (!accepted(hook.id, body.id, 'hook-body')) continue
+        for (const cta of nodesByRole.cta) {
+          if (accepted(body.id, cta.id, 'body-cta')) {
+            return {
+              selection: {
+                hookNodeId: hook.id,
+                bodyNodeId: body.id,
+                ctaNodeId: cta.id,
+              },
+              orderedNodeIds: [hook.id, body.id, cta.id],
+              includesProof: false,
+            }
+          }
+        }
+      }
+    }
+    return null
+  }, [activeCompatibilityGraph, selectedBatch])
   const compatibilityEligibleTakes = useMemo(
     () => (activeTakeLibrary?.takes ?? []).filter((take) =>
       (take.status === 'primary' || take.status === 'alternate') &&
@@ -1275,11 +1520,13 @@ export default function BatchesPage() {
       setActiveAlignmentId(alignment.id)
       setActiveTakeLibraryId(null)
       setActiveCompatibilityGraphId(null)
+      setActiveVariantRecipeId(null)
       setScriptComposerOpen(false)
       setDetailView('script')
       scriptIdempotencyKey.current = null
       takeLibraryIdempotencyKey.current = null
       compatibilityGraphIdempotencyKey.current = null
+      variantRecipeIdempotencyKey.current = null
       setNotice(
         alignment.summary.reviewRequiredCount > 0
           ? `Roteiro alinhado. ${alignment.summary.reviewRequiredCount} decisão${alignment.summary.reviewRequiredCount === 1 ? '' : 'ões'} precisa${alignment.summary.reviewRequiredCount === 1 ? '' : 'm'} de revisão.`
@@ -1333,8 +1580,10 @@ export default function BatchesPage() {
         candidate.id === alignment.id ? alignment : candidate))
       setActiveTakeLibraryId(null)
       setActiveCompatibilityGraphId(null)
+      setActiveVariantRecipeId(null)
       takeLibraryIdempotencyKey.current = null
       compatibilityGraphIdempotencyKey.current = null
+      variantRecipeIdempotencyKey.current = null
       setNotice(
         alignment.summary.reviewRequiredCount > 0
           ? `Decisão registrada. Restam ${alignment.summary.reviewRequiredCount}.`
@@ -1392,8 +1641,10 @@ export default function BatchesPage() {
       ])
       setActiveTakeLibraryId(library.id)
       setActiveCompatibilityGraphId(null)
+      setActiveVariantRecipeId(null)
       takeLibraryIdempotencyKey.current = null
       compatibilityGraphIdempotencyKey.current = null
+      variantRecipeIdempotencyKey.current = null
       setNotice(
         library.summary.needsReviewCount > 0
           ? `Biblioteca criada. ${library.summary.needsReviewCount} take${library.summary.needsReviewCount === 1 ? '' : 's'} precisa${library.summary.needsReviewCount === 1 ? '' : 'm'} de revisão.`
@@ -1469,7 +1720,9 @@ export default function BatchesPage() {
       setTakeLibraries((current) => current.map((candidate) =>
         candidate.id === library.id ? library : candidate))
       setActiveCompatibilityGraphId(null)
+      setActiveVariantRecipeId(null)
       compatibilityGraphIdempotencyKey.current = null
+      variantRecipeIdempotencyKey.current = null
       setNotice('Take escolhido e protegido. A fonte original foi preservada.')
     } catch (error) {
       setNotice(
@@ -1554,7 +1807,9 @@ export default function BatchesPage() {
         ...current.filter((candidate) => candidate.id !== graph.id),
       ])
       setActiveCompatibilityGraphId(graph.id)
+      setActiveVariantRecipeId(null)
       compatibilityGraphIdempotencyKey.current = null
+      variantRecipeIdempotencyKey.current = null
       setNotice(
         `Mapa criado: ${graph.summary.acceptedCount} aceita${graph.summary.acceptedCount === 1 ? '' : 's'}, ${graph.summary.borderlineCount} limítrofe${graph.summary.borderlineCount === 1 ? '' : 's'} e ${graph.summary.blockedCount} bloqueada${graph.summary.blockedCount === 1 ? '' : 's'}.`,
       )
@@ -1563,6 +1818,85 @@ export default function BatchesPage() {
         error instanceof Error
           ? error.message
           : 'Não foi possível calcular a compatibilidade.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function createVariantRecipe() {
+    if (
+      !selectedBatch ||
+      !activeCompatibilityGraph ||
+      !variantRecipeCandidate
+    ) {
+      return
+    }
+    setBusy(true)
+    setNotice(null)
+    variantRecipeIdempotencyKey.current ??=
+      globalThis.crypto.randomUUID()
+    try {
+      const response = await fetch(
+        `/v1/batches/${encodeURIComponent(selectedBatch.id)}/variant-recipes`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key':
+              variantRecipeIdempotencyKey.current,
+          },
+          body: JSON.stringify({
+            compatibilityGraphId: activeCompatibilityGraph.id,
+            expectedCompatibilityGraphRunHash:
+              activeCompatibilityGraph.runHash,
+            selection: variantRecipeCandidate.selection,
+            orderedNodeIds: variantRecipeCandidate.orderedNodeIds,
+            assumptions: [
+              {
+                code: 'UI_BEST_ACCEPTED_PATH',
+                statement:
+                  'The workspace selected the first fully accepted path in deterministic role order.',
+                evidenceRefs: [
+                  activeCompatibilityGraph.runHash,
+                ],
+              },
+            ],
+            requireProof: false,
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        recipe: VariantRecipeRun
+        replayed: boolean
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível compilar a receita de variante.',
+        ))
+      }
+      const recipe = payload.data.recipe
+      setVariantRecipes((current) => [
+        recipe,
+        ...current.filter((candidate) =>
+          candidate.id !== recipe.id),
+      ])
+      setActiveVariantRecipeId(recipe.id)
+      variantRecipeIdempotencyKey.current = null
+      setNotice(
+        `Receita compilada com ${recipe.summary.selectedTakeCount} takes, score ${Math.round(recipe.scores.totalScore)}% e ${recipe.summary.masterReferenceCount} master${recipe.summary.masterReferenceCount === 1 ? '' : 's'} referenciado${recipe.summary.masterReferenceCount === 1 ? '' : 's'}.`,
+      )
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível compilar a receita de variante.',
       )
     } finally {
       setBusy(false)
@@ -1916,7 +2250,7 @@ export default function BatchesPage() {
                               </div>
                               <div className="flex shrink-0 items-center gap-2">
                                 {alignments.length > 1 ? (
-                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-none" onChange={(event) => { setActiveAlignmentId(event.target.value); setActiveTakeLibraryId(null); setActiveCompatibilityGraphId(null); takeLibraryIdempotencyKey.current = null; compatibilityGraphIdempotencyKey.current = null }} value={activeAlignment.id}>
+                                  <select aria-label="Escolher alinhamento" className="h-9 max-w-[180px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[10px] text-[#aaa49a] outline-none" onChange={(event) => { setActiveAlignmentId(event.target.value); setActiveTakeLibraryId(null); setActiveCompatibilityGraphId(null); setActiveVariantRecipeId(null); takeLibraryIdempotencyKey.current = null; compatibilityGraphIdempotencyKey.current = null; variantRecipeIdempotencyKey.current = null }} value={activeAlignment.id}>
                                     {alignments.map((alignment) => <option key={alignment.id} value={alignment.id}>{alignment.document.title} · r{alignment.revision}</option>)}
                                   </select>
                                 ) : null}
@@ -2049,7 +2383,9 @@ export default function BatchesPage() {
                                       onChange={(event) => {
                                         setActiveTakeLibraryId(event.target.value)
                                         setActiveCompatibilityGraphId(null)
+                                        setActiveVariantRecipeId(null)
                                         compatibilityGraphIdempotencyKey.current = null
+                                        variantRecipeIdempotencyKey.current = null
                                       }}
                                       value={activeTakeLibrary.id}
                                     >
@@ -2207,7 +2543,14 @@ export default function BatchesPage() {
                                     <select
                                       aria-label="Escolher mapa de compatibilidade"
                                       className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#7895d4]/45"
-                                      onChange={(event) => setActiveCompatibilityGraphId(event.target.value)}
+                                      onChange={(event) => {
+                                        setActiveCompatibilityGraphId(
+                                          event.target.value,
+                                        )
+                                        setActiveVariantRecipeId(null)
+                                        variantRecipeIdempotencyKey.current =
+                                          null
+                                      }}
                                       value={activeCompatibilityGraph.id}
                                     >
                                       {activeCompatibilityGraphs.map((graph) => (
@@ -2316,6 +2659,155 @@ export default function BatchesPage() {
                                         </div>
                                       </article>
                                     ))}
+                                  </div>
+                                </div>
+                              )}
+                            </section>
+
+                            <section
+                              className="mt-6 border-t border-dashed border-[#b58a45]/20 pt-5"
+                              data-testid="variant-recipe-panel"
+                            >
+                              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#c09a5a]">
+                                    <span className="grid h-5 w-5 place-items-center rounded-full border border-[#c09a5a]/30 font-mono text-[7px]">R</span>
+                                    Recipe slate
+                                  </div>
+                                  <h4 className="mt-2 text-base font-semibold tracking-[-0.02em] text-[#ede7dd]">Receita editorial compilada</h4>
+                                  <p className="mt-1 max-w-xl text-[10px] leading-4 text-[#746f67]">O Apollo escolhe um caminho aceito de hook, corpo, prova opcional e CTA, penaliza o elo mais fraco e compila StoryPlan/EditPlan por referência. Nenhum master é copiado.</p>
+                                </div>
+                                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                                  {activeVariantRecipes.length > 1 && activeVariantRecipe ? (
+                                    <select
+                                      aria-label="Escolher receita de variante"
+                                      className="h-9 max-w-[190px] rounded-lg border border-white/[0.08] bg-[#090909] px-2 text-[9px] text-[#aaa49a] outline-none focus:border-[#c09a5a]/45"
+                                      onChange={(event) =>
+                                        setActiveVariantRecipeId(
+                                          event.target.value,
+                                        )}
+                                      value={activeVariantRecipe.id}
+                                    >
+                                      {activeVariantRecipes.map((recipe) => (
+                                        <option key={recipe.id} value={recipe.id}>
+                                          {Math.round(recipe.scores.totalScore)}% · {recipe.summary.includesProof ? 'com prova' : 'curta'} · {elapsed(recipe.createdAt)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : null}
+                                  <button
+                                    className="h-9 rounded-lg border border-[#c09a5a]/30 bg-[#c09a5a]/10 px-3 text-[10px] font-bold text-[#dfbd83] transition hover:bg-[#c09a5a]/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c09a5a] disabled:cursor-not-allowed disabled:opacity-40"
+                                    data-testid="create-variant-recipe"
+                                    disabled={busy || !variantRecipeCandidate}
+                                    onClick={() => void createVariantRecipe()}
+                                    title={variantRecipeCandidate ? undefined : 'É necessário um caminho inteiramente aceito e compatível com a política de prova do objetivo.'}
+                                    type="button"
+                                  >
+                                    {activeVariantRecipe ? 'Compilar outra' : 'Compilar receita'}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {!activeCompatibilityGraph ? (
+                                <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+                                  <p className="text-xs font-semibold text-[#aaa49a]">Calcule primeiro o mapa de compatibilidade.</p>
+                                  <p className="mt-1 text-[10px] leading-4 text-[#716d66]">A receita só pode referenciar nós e edges aceitos de um grafo imutável.</p>
+                                </div>
+                              ) : !variantRecipeCandidate && !activeVariantRecipe ? (
+                                <div className="mt-4 rounded-xl border border-[#c27c52]/18 bg-[#c27c52]/[0.04] p-4">
+                                  <p className="text-xs font-semibold text-[#d5a17d]">Nenhum caminho editorial completo foi aceito.</p>
+                                  <p className="mt-1 text-[10px] leading-4 text-[#826b5c]">É preciso hook → corpo → CTA, com prova quando o objetivo exigir. Edges limítrofes ou bloqueados nunca entram automaticamente.</p>
+                                </div>
+                              ) : !activeVariantRecipe ? (
+                                <div className="mt-4 rounded-xl border border-[#c09a5a]/18 bg-[#c09a5a]/[0.035] p-4">
+                                  <p className="text-xs font-semibold text-[#d8bd91]">Existe um caminho aceito pronto para compilação.</p>
+                                  <p className="mt-1 text-[10px] leading-4 text-[#87775f]">{variantRecipeCandidate?.includesProof ? 'A sequência inclui prova.' : 'A política do objetivo permite uma receita curta sem prova.'} A ação cria somente planos e referências virtuais.</p>
+                                </div>
+                              ) : (
+                                <div className="mt-4 space-y-4" data-testid={`variant-recipe-${activeVariantRecipe.id}`}>
+                                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                                    {[
+                                      ['Score total', `${Math.round(activeVariantRecipe.scores.totalScore)}%`],
+                                      ['Elo mais fraco', `${Math.round(activeVariantRecipe.scores.minimumEdgeScore)}%`],
+                                      ['Fit do objetivo', `${Math.round(activeVariantRecipe.scores.objectiveScore)}%`],
+                                      ['Duração', `${(activeVariantRecipe.summary.estimatedDurationMs / 1000).toFixed(1)}s`],
+                                      ['Masters', activeVariantRecipe.summary.masterReferenceCount],
+                                    ].map(([label, value]) => (
+                                      <div className="rounded-lg border border-white/[0.06] bg-[#0a0a0a] px-3 py-2.5" key={String(label)}>
+                                        <p className="font-mono text-sm font-semibold text-[#ddd6cb]">{value}</p>
+                                        <p className="mt-1 text-[8px] uppercase tracking-[0.1em] text-[#625e57]">{label}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(280px,.85fr)]">
+                                    <article className="min-w-0 rounded-xl border border-white/[0.07] bg-[#0a0a0a] p-4">
+                                      <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#c09a5a]">Ordem narrativa</p>
+                                          <p className="mt-1 text-[10px] text-[#746f67]">Source segments e StoryBlocks permanecem alinhados.</p>
+                                        </div>
+                                        <span className={`rounded-full border px-2 py-1 text-[8px] ${activeVariantRecipe.summary.includesProof ? 'border-[#629975]/25 bg-[#629975]/10 text-[#7fbd93]' : 'border-[#b58a45]/25 bg-[#b58a45]/10 text-[#d0ac70]'}`}>
+                                          {activeVariantRecipe.summary.includesProof ? 'Prova incluída' : 'Sem prova por policy'}
+                                        </span>
+                                      </div>
+
+                                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                                        {activeVariantRecipe.lineage.map((entry, index) => (
+                                          <div className="contents" key={entry.id}>
+                                            {index > 0 ? <span className="text-[10px] text-[#514d47]">→</span> : null}
+                                            <span className={`rounded-lg border px-2.5 py-2 text-[9px] font-semibold ${entry.usage === 'cold-open' ? 'border-[#8d70b5]/30 bg-[#8d70b5]/10 text-[#bda2df]' : 'border-[#c09a5a]/22 bg-[#c09a5a]/[0.055] text-[#d8bd91]'}`}>
+                                              {entry.usage === 'cold-open' ? 'Cold open' : entry.role === 'hook' ? 'Hook' : entry.role === 'body' ? 'Corpo' : entry.role === 'proof' ? 'Prova' : 'CTA'}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+
+                                      <div className="mt-4 space-y-2 border-t border-white/[0.055] pt-3">
+                                        {activeVariantRecipe.lineage.map((entry) => (
+                                          <div className="grid min-w-0 gap-1 rounded-lg bg-white/[0.018] px-3 py-2 sm:grid-cols-[70px_minmax(0,1fr)_120px]" key={`lineage-${entry.id}`}>
+                                            <span className="text-[8px] font-semibold uppercase tracking-[0.1em] text-[#9c8154]">{entry.role}</span>
+                                            <span className="truncate font-mono text-[8px] text-[#817b72]">{entry.scriptBlockId} · {entry.takeId}</span>
+                                            <span className="font-mono text-[8px] text-[#625e57]">{(entry.sourceRangeMs[0] / 1000).toFixed(2)}–{(entry.sourceRangeMs[1] / 1000).toFixed(2)}s</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </article>
+
+                                    <article className="min-w-0 rounded-xl border border-white/[0.07] bg-[#0a0a0a] p-4">
+                                      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#7792d2]">Compiler integrity</p>
+                                      <div className="mt-3 space-y-2">
+                                        {[
+                                          ['StoryBlocks', activeVariantRecipe.storyPlan.blocks.length],
+                                          ['Edit frames', activeVariantRecipe.editPlan.durationFrames],
+                                          ['Lineage entries', activeVariantRecipe.lineage.length],
+                                          ['Fontes materializadas', activeVariantRecipe.editPlan.materializesSources ? 'sim' : 'não'],
+                                          ['Masters duplicados', activeVariantRecipe.editPlan.duplicatesMasters ? 'sim' : 'não'],
+                                        ].map(([label, value]) => (
+                                          <div className="flex items-center justify-between gap-3 border-b border-white/[0.045] pb-2 text-[9px]" key={String(label)}>
+                                            <span className="text-[#746f67]">{label}</span>
+                                            <span className="font-mono text-[#aaa49a]">{value}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                      <div className="mt-3 rounded-lg border border-[#629975]/18 bg-[#629975]/[0.045] p-3">
+                                        <p className="text-[9px] font-semibold text-[#84b795]">Somente referências imutáveis</p>
+                                        <p className="mt-1 font-mono text-[7px] leading-3 text-[#65786b]">story {activeVariantRecipe.storyPlan.storyHash.slice(0, 12)}… · edit {activeVariantRecipe.editPlan.editPlanHash.slice(0, 12)}…</p>
+                                      </div>
+                                    </article>
+                                  </div>
+
+                                  <div className="rounded-xl border border-white/[0.07] bg-[#0a0a0a] p-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#8f897f]">Assumptions & proof policy</p>
+                                      <span className="font-mono text-[7px] text-[#5d5952]">{activeVariantRecipe.proofPolicy.version}</span>
+                                    </div>
+                                    <p className="mt-2 text-[9px] text-[#8b847a]">{activeVariantRecipe.proofPolicy.effectiveRequirement === 'required' ? 'Prova obrigatória' : 'Prova opcional'} · {activeVariantRecipe.proofPolicy.reasonCode}</p>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                      {activeVariantRecipe.assumptions.map((assumption) => (
+                                        <span className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-[8px] text-[#817b72]" key={assumption.assumptionHash} title={assumption.statement}>{assumption.code}</span>
+                                      ))}
+                                    </div>
                                   </div>
                                 </div>
                               )}
