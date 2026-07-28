@@ -139,7 +139,7 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-086 | Edição em lote | S4,S7 | D3,D6 | scope/impacto explícitos | e2e |
 | FR-087 | Partial retry | S4 | D4 | item falho retenta isolado | resilience |
 | FR-120 | Source Deconstruction | S3 | D1,D2 | clean range, report, contexto preservado e comparação source/clean | T-FR-120 domínio/Golden Reel + API/PostgreSQL E2E + UI desktop/mobile + produção `d2bb805` |
-| FR-121 | Contaminação | S3 | D1,D2 | burned/music/watermark detectados | fixture |
+| FR-121 | Contaminação | S3 | D1,D2 | cinco tipos localizados por range/região/confidence, impacto de remoção e diagnóstico Director/humano | T-FR-121 + seis fixtures audiovisuais + API/PostgreSQL E2E + UI + produção `e00727f` |
 | FR-122 | Limpeza MVP | S3 | D1,D5 | trim/reframe/cover/reject | visual golden |
 | FR-124 | Validation envelope | S3 | D1,D7 | copy/take/opening protegidos | policy |
 | FR-130 | Proof need | S1,S3 | D2 | story solicita evidência adequada | golden |

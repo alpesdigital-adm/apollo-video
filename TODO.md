@@ -8,7 +8,7 @@
 
 ---
 
-## Auditoria de execução — 2026-07-27
+## Auditoria de execução — 2026-07-28
 
 Após o E2E revelar que a interface nova ainda acionava o pipeline legado, todas as caixas foram reavaliadas. O status anterior de 1.247/1.255 não representava produto entregue: misturava documentação, funções isoladas, fixtures e testes com jornadas integradas inexistentes.
 
@@ -20,15 +20,15 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.014, com a jornada integral do MVP Core e os
-quatorze primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
+Estado auditado após o gate F2.016, com a jornada integral do MVP Core e os
+dezesseis primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **244 de 1.259 microtarefas verificadas como efetivamente entregues (19,4%)**;
-- **1.015 microtarefas abertas ou aguardando nova comprovação**;
+- **254 de 1.259 microtarefas verificadas como efetivamente entregues (20,2%)**;
+- **1.005 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 a F2.014 foram entregues, mas não encerram o
+  permanecem abertos; F2.001 a F2.016 foram entregues, mas não encerram o
   gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
@@ -48,6 +48,13 @@ H+B+CTA permitidos pela policy, penaliza o elo mais fraco, compila
 take, artifact e source range sem materializar fontes nem duplicar masters.
 Isso não conclui as demais capacidades F2–F5 nem autoriza
 marcar contratos isolados como produto entregue.
+
+O diagnóstico de contaminação F2.016 também está implantado: detector
+identificado, regiões/ranges/confidence, cruzamento com fala e pixels
+essenciais, diagnóstico separado para Director/revisão e seis fixtures
+audiovisuais reais são operáveis por quatro capabilities `/v1` sobre
+PostgreSQL. A evidência detalhada está em
+`docs/quality/source-contamination-v1.md`; limpeza permanece aberta em F2.017.
 
 ---
 
@@ -1146,11 +1153,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.016 — Detecção de contaminação [FR-121]
 
-- [ ] Detectar burned captions, logos/watermarks, music, borders e overlays. Evidência T-FR-121.
-- [ ] Localizar contaminação por região e range com confidence. Evidência T-FR-121.
-- [ ] Identificar quando remoção destruiria conteúdo essencial. Evidência T-FR-121.
-- [ ] Expor diagnóstico ao Director e à revisão humana. Evidência: diagnóstico duplo e flag de revisão.
-- [ ] Criar fixtures de cada contaminação e combinações sobrepostas. Evidência T-FR-121.
+- [x] Detectar burned captions, logos/watermarks, music, borders e overlays. Evidência: T-FR-121, API/PostgreSQL e produção `e00727f`, relatório `contamination-report-9784067e-3d23-485c-b90b-de68a34e75b0`.
+- [x] Localizar contaminação por região e range com confidence. Evidência: T-FR-121, projeções relacionais e smoke `e00727f` com cinco findings/overlaps.
+- [x] Identificar quando remoção destruiria conteúdo essencial. Evidência: T-FR-121 e smoke `e00727f` com `destructiveCount=2` e decisão `manual-preservation-required`.
+- [x] Expor diagnóstico ao Director e à revisão humana. Evidência: quatro capabilities `/v1`, audiences separados, UI do editor e smoke `200`.
+- [x] Criar fixtures de cada contaminação e combinações sobrepostas. Evidência: seis MP4 reais, manifest SHA-256 e testes FFmpeg/FFprobe em `tests/fixtures/contamination`.
 
 ### F2.017 — Limpeza MVP [FR-122]
 
