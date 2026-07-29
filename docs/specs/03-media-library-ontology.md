@@ -434,18 +434,44 @@ Texto/embedding/range podem detectar segmentos equivalentes. Preservar source li
 ## 20. Long-form indexing
 
 ```text
-audio proxy
-→ ASR word-level + diarization
-→ topic boundaries
-→ chapters
-→ candidate moments 15–180s
-→ standalone/context scores
-→ visual samples top candidates
-→ tier-2 analysis
-→ embeddings/index
+master + manifest imutáveis
+→ probe (reuso ou processo)
+→ transcript word-level (reuso ou processo)
+→ diarization
+→ chunks + evidence spans
+→ chapters/moments + scores
+→ índice pesquisável
 ```
 
-Não enviar vídeo integral em alta resolução ao modelo. Reindex parcial quando somente analyzer version muda.
+O workflow canônico é `long-form-index-workflow/v1`. Suas etapas são `probe`,
+`transcript`, `diarization`, `chunks` e `moments`, com DAG e checkpoints
+explícitos. Um checkpoint contém:
+
+- provider/model/version;
+- input/output hash;
+- idempotency key estável por run, etapa e input;
+- status, tentativa, início e conclusão;
+- custo, elapsed, concorrência e contagem de resultados;
+- indicação `searchable` somente depois de persistência bem-sucedida.
+
+Probe e transcript existentes podem ser reutilizados se seus hashes e vínculos
+com artifact/manifest forem atuais. Diarização nunca assume speaker único nem
+atribui uma pessoa sem evidência. Chunks e moments são virtuais e não duplicam
+bytes do master.
+
+O worker persiste a conclusão de uma etapa antes de liberar a próxima. Após
+restart, ele hidrata e valida todos os hashes, ignora efeitos já confirmados e
+retoma no primeiro estágio `ready` ou `failed` retryable. Transcript, chunks e
+moments concluídos ficam pesquisáveis durante o restante do run.
+
+Budget global e por etapa limita USD minor units, elapsed e concorrência.
+Fontes de duas horas são particionadas para chunks/moments, mas probe,
+transcript e diarization permanecem serializados por fonte. `budget-blocked`
+é estado observável e não dispara trabalho.
+
+Não enviar vídeo integral em alta resolução ao modelo. Usar proxy/amostras
+limitadas e reindexar somente a etapa cuja versão/input mudou e seus
+dependentes.
 
 ## 21. Source Deconstruction
 
@@ -694,4 +720,3 @@ Somente blob sem referências ativas, sem legal hold e fora do grace period. Nun
 - Face identity metadata e nível de consentimento.
 - Estratégia de legal hold e purge.
 - Materialização/caching de segmentos.
-

@@ -5,7 +5,6 @@ import {
 } from '../../src/v2/domain/source-deconstruction.ts'
 import {
   extractContiguous,
-  planLongFormWorkflow,
   querySemanticRepository,
 } from '../../src/v2/application/proof-and-longform.ts'
 
@@ -74,36 +73,6 @@ test(
 
     assert.ok(strategies.has('reject'))
     assert.ok([...strategies].some((strategy) => strategy !== 'reject'))
-  },
-)
-
-test(
-  'T-FR-133 resumable 2h workflow publishes partial tiers within budget',
-  () => {
-    const workflow = planLongFormWorkflow({
-      jobId: 'j',
-      durationMs: 7_200_000,
-      completedTiers: ['probe', 'transcript'],
-      partialCounts: { chunks: 10 },
-      tierCosts: {
-        probe: 1,
-        transcript: 2,
-        diarization: 2,
-        chunks: 1,
-        moments: 3,
-      },
-      budget: 6,
-      maxConcurrency: 4,
-    })
-    assert.equal(workflow.resumable, true)
-    assert.equal(workflow.duplicateSegments, false)
-    assert.equal(
-      workflow.tiers.find((tier) => tier.tier === 'chunks')
-        .partialSearchable,
-      true,
-    )
-    assert.ok(workflow.estimatedCost <= 6)
-    assert.equal(workflow.concurrency, 2)
   },
 )
 

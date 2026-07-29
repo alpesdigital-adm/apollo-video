@@ -1165,7 +1165,48 @@ Critérios de aceite:
 
 ### FR-133 — Long-form indexing
 
-Indexação one-time de lives e vídeos longos.
+Lives e vídeos longos devem ser indexados por um workflow durável, retomável e
+observável. O workflow possui exatamente cinco etapas ordenadas:
+
+1. `probe`, para identidade técnica, duração e timebase;
+2. `transcript`, para texto e alinhamento temporal;
+3. `diarization`, para intervalos de speakers sem inventar identidades;
+4. `chunks`, para partições virtuais sobrepostas e evidence spans;
+5. `moments`, para capítulos, momentos, scores e índice pesquisável.
+
+Cada etapa possui provider/model/version, dependências, input/output hash,
+idempotency key estável, tentativa, orçamento, concorrência, custo, tempo,
+contagem de resultados e checkpoint antes de liberar a etapa seguinte. Probe e
+transcript já materializados pelo ingest podem ser reutilizados após conferência
+dos hashes; reuso não cobra custo nem finge nova execução.
+
+O workflow deve:
+
+- executar em background por operação pública cancelável e retomável;
+- persistir cada checkpoint antes de publicar o resultado;
+- retomar do primeiro estágio incompleto depois de restart, sem duplicar
+  segments, chunks ou moments;
+- publicar transcript, chunks e moments incrementalmente com `status` e
+  `searchable` explícitos;
+- limitar custo, elapsed e concorrência tanto no run quanto em cada etapa;
+- manter master imutável e materializar somente entidades virtuais/indexes;
+- preservar source artifact, manifest, transcript, rights, consent, producer,
+  hashes e time ranges em todo resultado;
+- invalidar apenas a etapa cuja versão/input mudou e seus dependentes;
+- expor create/list/read/retry/cancel e resultados parciais pela API `/v1`,
+  usando os mesmos application services da UI;
+- falhar fechado quando faltar diarização necessária, rights, consent,
+  alinhamento, budget ou provider configurado.
+
+Critérios de aceite:
+
+- fixture de duas horas conclui dentro dos budgets publicados;
+- uma interrupção após `chunks` retoma em `moments` com as mesmas identidades;
+- polling durante o processamento encontra resultados parciais pesquisáveis;
+- payload idempotente converge e payload divergente falha;
+- PostgreSQL prova constraints, concorrência, restart e ausência de duplicatas;
+- API, worker e UI observam o mesmo run;
+- nenhum MP4 ou cópia do master é criado pela indexação.
 
 ### FR-134 — Contiguous extraction
 
