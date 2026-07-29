@@ -292,6 +292,11 @@ export function runNextLongFormIndexOperationService(
         const result = await dependencies.processor.process({
           workflow,
           checkpoint,
+          lease: Object.freeze({
+            operationId,
+            owner: leaseOwner,
+            attempt: operationAttempt,
+          }),
           signal: abortController.signal,
           heartbeat,
         })

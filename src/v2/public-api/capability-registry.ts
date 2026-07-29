@@ -1932,6 +1932,30 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'not-applicable',
   },
   {
+    id: 'apollo.projects.speaker-diarizations.read',
+    version: '1.0.0',
+    title: 'Read speaker diarization',
+    description: 'Reads immutable time ranges assigned to anonymous speaker clusters without claiming a real person identity.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef:
+      'apollo://schemas/speaker-diarization-read/v1',
+    endpoint: {
+      method: 'GET',
+      path:
+        '/v1/projects/{projectId}/speaker-diarizations/{runId}',
+    },
+    toolName:
+      'apollo.projects.speaker-diarizations.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.projects.long-form-moments.search',
     version: '1.0.0',
     title: 'Search long-form moments and open context',

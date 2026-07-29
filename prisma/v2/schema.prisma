@@ -66,6 +66,8 @@ model V2Workspace {
   evidenceSegments                V2EvidenceSegment[]
   longFormIndexRuns               V2LongFormIndexRun[]
   longFormIndexWorkflows          V2LongFormIndexWorkflow[]
+  speakerDiarizationRuns          V2SpeakerDiarizationRun[]
+  speakerDiarizationSegments      V2SpeakerDiarizationSegment[]
   longFormChapters                V2LongFormChapter[]
   longFormMoments                 V2LongFormMoment[]
   validatedSegments               V2ValidatedSegment[]
@@ -146,6 +148,7 @@ model V2ApiClient {
   evidenceSegments                V2EvidenceSegment[]
   longFormIndexRuns               V2LongFormIndexRun[]
   longFormIndexWorkflows          V2LongFormIndexWorkflow[]
+  speakerDiarizationRuns          V2SpeakerDiarizationRun[]
   validatedSegments               V2ValidatedSegment[]
   semanticSearchDocuments         V2SemanticSearchDocument[]
   retrievalEvaluations            V2RetrievalEvaluation[]
@@ -301,6 +304,8 @@ model V2Project {
   evidenceSegments              V2EvidenceSegment[]
   longFormIndexRuns             V2LongFormIndexRun[]
   longFormIndexWorkflows        V2LongFormIndexWorkflow[]
+  speakerDiarizationRuns        V2SpeakerDiarizationRun[]
+  speakerDiarizationSegments    V2SpeakerDiarizationSegment[]
   longFormChapters              V2LongFormChapter[]
   longFormMoments               V2LongFormMoment[]
   validatedSegments             V2ValidatedSegment[]
@@ -728,6 +733,7 @@ model V2MediaArtifact {
   evidenceSegments             V2EvidenceSegment[]
   longFormIndexRuns            V2LongFormIndexRun[]
   longFormIndexWorkflows       V2LongFormIndexWorkflow[]
+  speakerDiarizationRuns       V2SpeakerDiarizationRun[]
   longFormChapters             V2LongFormChapter[]
   longFormMoments              V2LongFormMoment[]
   validatedSegments            V2ValidatedSegment[]
@@ -803,6 +809,7 @@ model V2MediaArtifactManifest {
   proxyReviews               V2ProxyReview[]
   longFormIndexRuns          V2LongFormIndexRun[]
   longFormIndexWorkflows     V2LongFormIndexWorkflow[]
+  speakerDiarizationRuns     V2SpeakerDiarizationRun[]
   validatedSegments          V2ValidatedSegment[]
   hierarchicalProcessingRuns V2HierarchicalProcessingRun[]
   sourceCleanupResults       V2SourceCleanupResult[]
@@ -1442,6 +1449,7 @@ model V2MediaTranscript {
   evidenceSegments            V2EvidenceSegment[]
   hierarchicalProcessingRuns  V2HierarchicalProcessingRun[]
   longFormIndexWorkflows      V2LongFormIndexWorkflow[]
+  speakerDiarizationRuns      V2SpeakerDiarizationRun[]
   sourceDeconstructionReports V2SourceDeconstructionReport[]
 
   @@unique([id, workspaceId])
@@ -1665,6 +1673,7 @@ model V2LongFormIndexWorkflow {
   sourceTranscript V2MediaTranscript?               @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy        V2ApiClient                      @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   stages           V2LongFormIndexStageCheckpoint[]
+  diarizationRuns  V2SpeakerDiarizationRun[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId])
@@ -1715,6 +1724,83 @@ model V2LongFormIndexStageCheckpoint {
   @@index([workspaceId, projectId, workflowId, sequence])
   @@index([workspaceId, status, stage])
   @@map("long_form_index_stage_checkpoints")
+}
+
+model V2SpeakerDiarizationRun {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  workflowId            String   @db.VarChar(128)
+  sourceArtifactId      String   @db.VarChar(128)
+  sourceArtifactSha256  String   @db.Char(64)
+  sourceManifestId      String   @db.VarChar(128)
+  sourceManifestHash    String   @db.Char(64)
+  sourceTranscriptId    String   @db.VarChar(128)
+  sourceTranscriptHash  String   @db.Char(64)
+  durationMs            Int
+  providerInputJson     String   @db.Text
+  providerInputHash     String   @db.Char(64)
+  schemaVersion         String   @db.VarChar(64)
+  policyVersion         String   @db.VarChar(64)
+  providerId            String   @db.VarChar(128)
+  providerModel         String   @db.VarChar(128)
+  providerVersion       String   @db.VarChar(128)
+  speakerCount          Int
+  segmentCount          Int
+  usageSeconds          Int
+  costMinorUnits        Int
+  elapsedMs             Int
+  identityResolved      Boolean
+  physicalMaterialized  Boolean
+  requestFingerprint    String   @db.Char(64)
+  idempotencyKey        String   @db.VarChar(128)
+  createdByClientId     String   @db.VarChar(80)
+  createdAt             DateTime @db.Timestamptz(3)
+  runJson               String   @db.Text
+  runHash               String   @db.Char(64)
+
+  workspace        V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  workflow         V2LongFormIndexWorkflow @relation(fields: [workflowId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+  sourceArtifact   V2MediaArtifact         @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceManifest   V2MediaArtifactManifest @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceTranscript V2MediaTranscript       @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy        V2ApiClient             @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  segments         V2SpeakerDiarizationSegment[]
+
+  @@unique([id, workspaceId])
+  @@unique([id, workspaceId, projectId])
+  @@unique([workspaceId, workflowId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId, createdAt(sort: Desc)])
+  @@map("speaker_diarization_runs")
+}
+
+model V2SpeakerDiarizationSegment {
+  id                String @id @db.VarChar(128)
+  workspaceId       String @db.VarChar(128)
+  projectId         String @db.VarChar(128)
+  runId             String @db.VarChar(128)
+  ordinal           Int
+  providerSegmentId String @db.VarChar(128)
+  providerLabel     String @db.VarChar(128)
+  speakerKey        String @db.VarChar(128)
+  startMs           Int
+  endMs             Int
+  text              String @db.Text
+  textHash          String @db.Char(64)
+  segmentJson       String @db.Text
+  segmentHash       String @db.Char(64)
+
+  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  run       V2SpeakerDiarizationRun   @relation(fields: [runId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+
+  @@unique([runId, ordinal])
+  @@unique([runId, providerSegmentId])
+  @@index([workspaceId, projectId, runId, ordinal])
+  @@index([workspaceId, speakerKey, startMs])
+  @@map("speaker_diarization_segments")
 }
 
 model V2LongFormIndexRun {

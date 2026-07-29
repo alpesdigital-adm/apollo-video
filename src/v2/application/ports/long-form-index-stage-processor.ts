@@ -15,6 +15,11 @@ export interface LongFormIndexStageProcessor {
   process(input: {
     workflow: Readonly<LongFormIndexWorkflow>
     checkpoint: Readonly<LongFormIndexStageCheckpoint>
+    lease: Readonly<{
+      operationId: string
+      owner: string
+      attempt: number
+    }>
     signal: AbortSignal
     heartbeat: () => Promise<boolean>
   }): Promise<Readonly<LongFormIndexStageResult>>

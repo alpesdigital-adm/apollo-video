@@ -22,6 +22,9 @@ import { runNextMediaIngestOperationService } from '../application/run-media-ing
 import { runNextProjectProxyRenderOperationService } from '../application/run-project-proxy-render-worker.ts'
 import { runNextProjectFinalExportOperationService } from '../application/run-project-final-export-worker.ts'
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
+import {
+  createSpeakerDiarizationStageProcessor,
+} from '../application/speaker-diarization-stage-processor.ts'
 import { calculateVersionHash } from '../application/version-hash.ts'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
@@ -33,6 +36,7 @@ import type { SpeechSegmentCatalogRepository } from '../application/ports/speech
 import type { EvidenceSegmentRepository } from '../application/ports/evidence-segment-repository.ts'
 import type { LongFormIndexRepository } from '../application/ports/long-form-index-repository.ts'
 import type { LongFormIndexWorkflowRepository } from '../application/ports/long-form-index-workflow-repository.ts'
+import type { SpeakerDiarizationRepository } from '../application/ports/speaker-diarization-repository.ts'
 import type { ValidatedSegmentRepository } from '../application/ports/validated-segment-repository.ts'
 import type { SemanticSearchRepository } from '../application/ports/semantic-search-repository.ts'
 import type { HierarchicalProcessingRepository } from '../application/ports/hierarchical-processing-repository.ts'
@@ -120,6 +124,7 @@ import { PrismaSpeechSegmentCatalogRepository } from './prisma/speech-segment-ca
 import { PrismaEvidenceSegmentRepository } from './prisma/evidence-segment-repository.ts'
 import { PrismaLongFormIndexRepository } from './prisma/long-form-index-repository.ts'
 import { PrismaLongFormIndexWorkflowRepository } from './prisma/long-form-index-workflow-repository.ts'
+import { PrismaSpeakerDiarizationRepository } from './prisma/speaker-diarization-repository.ts'
 import { PrismaValidatedSegmentRepository } from './prisma/validated-segment-repository.ts'
 import { PrismaSemanticSearchRepository } from './prisma/semantic-search-repository.ts'
 import { PrismaHierarchicalProcessingRepository } from './prisma/hierarchical-processing-repository.ts'
@@ -186,7 +191,13 @@ import { createLocalArtifactContentStorageFromEnvironment } from './media/local-
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { createFfmpegSourceCleanupProcessorFromEnvironment } from './media/ffmpeg-source-cleanup-processor.ts'
+import {
+  createFfmpegSpeakerDiarizationAudioPreparerFromEnvironment,
+} from './media/ffmpeg-speaker-diarization-audio-preparer.ts'
 import { createMediaTranscriberFromEnvironment } from './media/groq-media-transcriber.ts'
+import {
+  createOpenAiSpeakerDiarizationProviderFromEnvironment,
+} from './media/openai-speaker-diarization-provider.ts'
 import { createConfiguredRenderTargetRegistry } from './render-target-registry.ts'
 import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
 import { createWebhookSigningSecretProtector } from './security/webhook-signing-secret-protector.ts'
@@ -317,6 +328,43 @@ export function createProofModeRepository(): ProofModeRepository {
 export function createLongFormIndexWorkflowRepository():
 LongFormIndexWorkflowRepository {
   return new PrismaLongFormIndexWorkflowRepository(resolveV2Client())
+}
+
+export function createSpeakerDiarizationRepository():
+SpeakerDiarizationRepository {
+  return new PrismaSpeakerDiarizationRepository(resolveV2Client())
+}
+
+export function createSpeakerDiarizationStageProcessorFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const pricingMinorUnitsPerHour = Number(
+    environment.OPENAI_DIARIZATION_COST_MINOR_UNITS_PER_HOUR,
+  )
+  if (
+    !Number.isSafeInteger(pricingMinorUnitsPerHour) ||
+    pricingMinorUnitsPerHour < 1
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_NOT_CONFIGURED',
+      'OpenAI diarization pricing is not configured',
+    )
+  }
+  return createSpeakerDiarizationStageProcessor({
+    repository: createSpeakerDiarizationRepository(),
+    provider:
+      createOpenAiSpeakerDiarizationProviderFromEnvironment(
+        environment,
+      ),
+    audio:
+      createFfmpegSpeakerDiarizationAudioPreparerFromEnvironment(
+        environment,
+      ),
+    createRunId: () => `diarization-run-${randomUUID()}`,
+    clock,
+    pricingMinorUnitsPerHour,
+  })
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {

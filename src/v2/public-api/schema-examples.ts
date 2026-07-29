@@ -351,6 +351,79 @@ const longFormIndexWorkflowExampleV1 = {
     return legacyStage
   }),
 }
+const speakerDiarizationRunExample = {
+  schemaVersion: 'speaker-diarization-run/v1',
+  policyVersion: 'anonymous-speaker-clusters/v1',
+  id: 'diarization-run-example-1',
+  workspaceId,
+  projectId,
+  workflowId: longFormIndexWorkflowExample.id,
+  sourceArtifactId: longFormIndexWorkflowExample.sourceArtifactId,
+  sourceArtifactSha256:
+    longFormIndexWorkflowExample.sourceArtifactSha256,
+  sourceManifestId: longFormIndexWorkflowExample.sourceManifestId,
+  sourceManifestHash:
+    longFormIndexWorkflowExample.sourceManifestHash,
+  sourceTranscriptId:
+    longFormIndexWorkflowExample.sourceTranscriptId,
+  sourceTranscriptHash:
+    longFormIndexWorkflowExample.sourceTranscriptHash,
+  durationMs: longFormIndexWorkflowExample.durationMs,
+  providerInput: {
+    sha256: '7'.repeat(64),
+    byteSize: 14400000,
+    durationMs: longFormIndexWorkflowExample.durationMs,
+    preparation: {
+      toolId: 'ffmpeg',
+      toolVersion: 'static',
+      configurationHash: '8'.repeat(64),
+    },
+  },
+  provider: {
+    id: 'openai',
+    model: 'gpt-4o-transcribe-diarize',
+    version: 'v1',
+  },
+  segments: [
+    {
+      id: 'diarization-segment-example-1',
+      ordinal: 0,
+      providerSegmentId: 'provider-segment-example-1',
+      providerLabel: 'A',
+      speakerKey: `speaker-cluster-${'1'.repeat(40)}`,
+      startMs: 0,
+      endMs: 5200,
+      text: 'Abertura do especialista.',
+      textHash: '1'.repeat(64),
+      segmentHash: '2'.repeat(64),
+    },
+    {
+      id: 'diarization-segment-example-2',
+      ordinal: 1,
+      providerSegmentId: 'provider-segment-example-2',
+      providerLabel: 'B',
+      speakerKey: `speaker-cluster-${'3'.repeat(40)}`,
+      startMs: 5200,
+      endMs: 12800,
+      text: 'Resposta do convidado.',
+      textHash: '3'.repeat(64),
+      segmentHash: '4'.repeat(64),
+    },
+  ],
+  speakerCount: 2,
+  segmentCount: 2,
+  usageSeconds: 7200,
+  costMinorUnits: 120,
+  elapsedMs: 180000,
+  identityResolved: false,
+  physicalMaterialized: false,
+  requestFingerprint: '5'.repeat(64),
+  idempotencyKey:
+    'long-form-workflow-example-1:diarization:55555555555555555555555555555555',
+  createdByClientId: clientId,
+  createdAt,
+  runHash: '6'.repeat(64),
+}
 const createLongFormIndexWorkflowRequestExample = {
   sourceArtifactId: longFormIndexWorkflowExample.sourceArtifactId,
   expectedArtifactSha256:
@@ -7437,6 +7510,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             operation: queuedLongFormIndexOperationExample,
           }],
         },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/speaker-diarization-read/v1': [
+      {
+        data: speakerDiarizationRunExample,
         meta: { apiVersion: 'v1' },
       },
     ],
