@@ -151,3 +151,25 @@ testa `proof-unavailable`, `no-proof-needed`, replay, mismatch, leitura, filtro
 e capability discovery. Confirma zero artifact adicional e prova que o
 PostgreSQL rejeita card fabricado, resolução incoerente e contagem genérica
 maior que zero.
+
+## Evidência de produção
+
+O release funcional `253fcc0` foi implantado em
+`https://apollo.alpesd.com.br` e auditado após a substituição dos serviços:
+
+- imagem `apollo-video:253fcc0`, ID
+  `sha256:3f2c12cd95ed1b6834c569ecb873fd475315ab2f6dab1218cf5837cc0f548d93`;
+- arquivo de release com SHA-256
+  `6cd2b8312ee12a81ac8af0452b6a9e65ec401deae4590e240d7d2a75694d94f0`;
+- backup anterior ao deploy
+  `/opt/backups/apollo-video/apollo_video_v2-20260729T113252Z.dump`, SHA-256
+  `dcaf32b394019602daa2606c0f912d8d59d38b3e984e5d4ba662df0d99718485`,
+  validado por `pg_restore --list`;
+- 74 migrations aplicadas e zero migration incompleta;
+- aplicação, ingest worker, render worker e webhook worker executando a imagem
+  exata, com zero reinício; aplicação reportando estado saudável;
+- `/v1/health`, `/v1/openapi.json` e listagem autenticada de Proof Need
+  retornando HTTP 200;
+- OpenAPI público expondo exatamente os dois paths e as três capabilities de
+  Proof Need;
+- logs dos quatro serviços sem erro crítico após o deploy.
