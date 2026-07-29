@@ -20,15 +20,15 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.018, com a jornada integral do MVP Core e os
-dezoito primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
+Estado auditado após o gate F2.019, com a jornada integral do MVP Core e os
+dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **264 de 1.259 microtarefas verificadas como efetivamente entregues (21,0%)**;
-- **995 microtarefas abertas ou aguardando nova comprovação**;
+- **268 de 1.259 microtarefas verificadas como efetivamente entregues (21,3%)**;
+- **991 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 a F2.018 foram entregues, mas não encerram o
+  permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
   gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
@@ -67,6 +67,13 @@ exige decisão humana separada para registrar preservação ou perda da validaç
 Plano, composição e decisions log são imutáveis, idempotentes e operáveis por
 quatro capabilities `/v1`. Evidências:
 `docs/quality/validation-envelope-v1.md`.
+
+O ProofNeed F2.019 também está implantado: cada StoryPlan declara tipo, função
+e momento da prova, consulta EvidenceSegments compatíveis antes de qualquer
+alternativa e registra explicitamente `proof-unavailable` ou
+`no-proof-needed` sem fabricar card genérico. Run, itens, seleção e hashes são
+imutáveis, idempotentes e operáveis por três capabilities `/v1`. Evidências:
+`docs/quality/proof-need-v1.md`.
 
 ---
 
