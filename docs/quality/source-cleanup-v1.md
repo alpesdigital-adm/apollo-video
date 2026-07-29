@@ -127,6 +127,16 @@ render, revisão pós-limpeza e persistência do derivative.
 - migration verifier: 96 tabelas, 471 índices e 364 FKs;
 - lint de arquitetura, linguagem canônica, TypeScript e build Next aprovados.
 
+### Produção
+
+- commit e imagem implantados: `443d9ac`;
+- health, OpenAPI e listagem autenticada de limpezas responderam `200`;
+- o OpenAPI publicado contém `/v1/projects/{projectId}/source-cleanups`;
+- 72 migrations aplicadas e nenhuma migration falha;
+- app, ingest worker, render worker e webhook worker executando a mesma imagem;
+- zero reinícios nos quatro containers e zero ocorrências críticas nos logs
+  após o deploy.
+
 ## Limites deliberados
 
 - O MVP não faz separação de stems, inpainting generativo ou restauração
