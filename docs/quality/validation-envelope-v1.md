@@ -138,3 +138,25 @@ perda de `opening`, lê e lista o log, descobre as quatro capabilities e prova
 que nenhum artifact físico foi criado. Tentativas SQL de incluir excesso,
 combinar outcome/validação inválidos ou criar sequência de decisão inválida
 são rejeitadas.
+
+## Evidência de produção
+
+Implantação aprovada em 2026-07-29:
+
+- commit, release e imagem: `e27234a` / `apollo-video:e27234a`;
+- image ID:
+  `sha256:3a3d9e50bcf4657944c2d44953156405cb3638162ac8c90acc9e3f4b559bbc00`;
+- archive do commit verificado localmente e na VPS:
+  SHA-256 `715158b52f31f47b3b4e975d9d9aad185766f2482267c8ab3dc9c702e0a13b58`;
+- backup anterior à migration:
+  `/opt/backups/apollo-video/apollo_video_v2-20260729T020731Z.dump`;
+- SHA-256 do backup:
+  `931e7437cc4a30247711037a0bcc8336466a6d1f14b842cdab3594420582e5d6`;
+- `pg_restore --list`: aprovado;
+- migration `20260728233000_validation_envelope_reuse`: aplicada;
+- 73 migrations aplicadas e zero falhas;
+- app, ingest, render e webhook executando a mesma imagem, saudáveis, com
+  zero reinícios;
+- health, OpenAPI e listagem autenticada do validation envelope: HTTP 200;
+- OpenAPI publicou as três rotas e quatro operações do slice;
+- logs da aplicação sem correspondência crítica após o deploy.
