@@ -172,6 +172,16 @@ const queuedProjectFinalExportOperationExample = {
   type: 'project-final-export',
   target: { type: 'media-artifact', id: 'artifact-final-example-1', manifestId: 'manifest-final-example-1' },
 }
+const queuedSourceCleanupOperationExample = {
+  ...queuedRenderOperationExample,
+  id: 'operation-source-cleanup-example-1',
+  type: 'source-cleanup',
+  target: {
+    type: 'media-artifact',
+    id: 'artifact-cleaned-example-1',
+    manifestId: 'manifest-cleaned-example-1',
+  },
+}
 const versionComparisonExample = {
   before: {
     id: 'project-version-example-4',
@@ -2040,6 +2050,107 @@ const contaminationReportExample = {
   createdAt,
   reportHash: 'b'.repeat(64),
 }
+const sourceCleanupPolicyExample = {
+  minResidualQuality: 0.7,
+  minIntegrity: 0.9,
+  maxCost: 1,
+  edgeTolerance: 0.04,
+  maxCropFraction: 0.25,
+  maxCoverArea: 0.12,
+  coverColor: '#111111',
+  costs: {
+    trim: 0.1,
+    'crop-reframe': 0.2,
+    cover: 0.3,
+  },
+}
+const sourceCleanupRequestExample = {
+  contaminationReportId: contaminationReportExample.id,
+  expectedReportHash: contaminationReportExample.reportHash,
+  findingId: 'contamination-finding-safe-example-1',
+  policy: sourceCleanupPolicyExample,
+}
+const sourceCleanupPlanExample = {
+  schemaVersion: 'source-cleanup-plan/v1',
+  policyVersion: 'source-cleanup-mvp/v1',
+  id: 'source-cleanup-example-1',
+  workspaceId,
+  projectId,
+  contaminationReportId: contaminationReportExample.id,
+  contaminationReportHash: contaminationReportExample.reportHash,
+  findingId: sourceCleanupRequestExample.findingId,
+  findingHash: 'c'.repeat(64),
+  sourceArtifactId: contaminationReportExample.sourceArtifactId,
+  sourceArtifactSha256:
+    contaminationReportExample.sourceArtifactSha256,
+  sourceManifestId: 'manifest-source-cleanup-example-1',
+  sourceDurationMs: contaminationReportExample.sourceDurationMs,
+  sourceImmutable: true,
+  policy: sourceCleanupPolicyExample,
+  candidates: [
+    {
+      strategy: 'trim',
+      eligible: false,
+      predictedResidualQuality: 0.95,
+      predictedIntegrity: 1,
+      cost: 0.1,
+      score: 0.88,
+      reasonCodes: ['TEMPORAL_RANGE_NOT_AT_EDGE'],
+    },
+    {
+      strategy: 'crop-reframe',
+      eligible: false,
+      predictedResidualQuality: 0,
+      predictedIntegrity: 1,
+      cost: 0.2,
+      score: 0.52,
+      reasonCodes: ['NO_SAFE_EDGE_CROP'],
+    },
+    {
+      strategy: 'cover',
+      eligible: true,
+      predictedResidualQuality: 0.97,
+      predictedIntegrity: 1,
+      cost: 0.3,
+      score: 0.92,
+      reasonCodes: [],
+      action: {
+        strategy: 'cover',
+        rangeMs: [900, 2300],
+        region: { x: 0.02, y: 0.85, width: 0.2, height: 0.08 },
+        color: '#111111',
+      },
+    },
+  ],
+  selectedStrategy: 'cover',
+  selectedAction: {
+    strategy: 'cover',
+    rangeMs: [900, 2300],
+    region: { x: 0.02, y: 0.85, width: 0.2, height: 0.08 },
+    color: '#111111',
+  },
+  decision: 'execute',
+  predictedResidualQuality: 0.97,
+  predictedIntegrity: 1,
+  predictedCost: 0.3,
+  rightsSnapshotId: 'rights-source-cleanup-example-1',
+  rightsSnapshotHash: 'd'.repeat(64),
+  rightsDecision: 'allow',
+  rightsReasonCodes: [],
+  operationId: queuedSourceCleanupOperationExample.id,
+  outputArtifactId:
+    queuedSourceCleanupOperationExample.target.id,
+  outputManifestId:
+    queuedSourceCleanupOperationExample.target.manifestId,
+  postCleanupReviewRequired: true,
+  createdByClientId: clientId,
+  createdAt,
+  planHash: 'e'.repeat(64),
+}
+const sourceCleanupRecordExample = {
+  plan: sourceCleanupPlanExample,
+  operation: queuedSourceCleanupOperationExample,
+}
 const productionBatchCreateRequestExample = {
   projectId,
   name: 'Campanha de descoberta — julho',
@@ -3845,6 +3956,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v4': [
       { data: { operation: queuedProjectFinalExportOperationExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v5': [
+      { data: { operation: queuedSourceCleanupOperationExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -3871,6 +3985,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v4': [
       { data: { operations: [queuedProjectFinalExportOperationExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v5': [
+      { data: { operations: [queuedSourceCleanupOperationExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/webhook-delivery-list/v1': [
       {
@@ -5465,6 +5582,33 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           reports: [contaminationReportExample],
           nextCursor: contaminationReportExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-source-cleanup-request/v1': [
+      sourceCleanupRequestExample,
+    ],
+    'apollo://schemas/source-cleanup-mutated/v1': [
+      {
+        data: {
+          cleanup: sourceCleanupRecordExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/source-cleanup-read/v1': [
+      {
+        data: { cleanup: sourceCleanupRecordExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/source-cleanup-page/v1': [
+      {
+        data: {
+          cleanups: [sourceCleanupRecordExample],
+          nextCursor: sourceCleanupPlanExample.id,
         },
         meta: { apiVersion: 'v1' },
       },

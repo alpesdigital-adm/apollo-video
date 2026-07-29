@@ -17,6 +17,7 @@ export const PUBLIC_OPERATION_TYPES = [
   'media-ingest',
   'project-proxy-render',
   'project-final-export',
+  'source-cleanup',
 ] as const
 export type PublicOperationType = (typeof PUBLIC_OPERATION_TYPES)[number]
 
@@ -25,7 +26,10 @@ export function requiresArtifactRenderCheckpoint(type: PublicOperationType): boo
 }
 
 function isRenderOperation(type: PublicOperationType): boolean {
-  return type === 'artifact-render' || type === 'project-proxy-render' || type === 'project-final-export'
+  return type === 'artifact-render' ||
+    type === 'project-proxy-render' ||
+    type === 'project-final-export' ||
+    type === 'source-cleanup'
 }
 
 export const PUBLIC_OPERATION_PHASES = [

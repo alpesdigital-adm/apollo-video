@@ -75,6 +75,7 @@ type ContaminationRemovalImpact =
   | 'destructive'
 interface ContaminationReportData {
   id: string
+  reportHash: string
   sourceDeconstructionReportId: string
   sourceArtifactId: string
   sourceDurationMs: number
@@ -141,8 +142,44 @@ interface ContaminationReportData {
   confidence: number
   createdAt: string
 }
+type SourceCleanupStrategy =
+  | 'trim'
+  | 'crop-reframe'
+  | 'cover'
+  | 'reject'
+interface SourceCleanupData {
+  plan: {
+    id: string
+    contaminationReportId: string
+    findingId: string
+    sourceArtifactId: string
+    sourceImmutable: true
+    selectedStrategy: SourceCleanupStrategy
+    decision: 'execute' | 'reject'
+    predictedResidualQuality: number
+    predictedIntegrity: number
+    predictedCost: number
+    postCleanupReviewRequired: boolean
+    outputArtifactId?: string
+    createdAt: string
+  }
+  operation?: PublicOperation
+  postCleanupReview?: {
+    passed: boolean
+    visual: {
+      passed: boolean
+      residualQuality: number
+      reasonCodes: string[]
+    }
+    rights: {
+      passed: boolean
+      reasonCodes: string[]
+    }
+    reviewedAt: string
+  }
+}
 interface PublicOperation {
-  id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export'; status: string; phase: string;
+  id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export' | 'source-cleanup'; status: string; phase: string;
   progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string
 }
 interface DirectorRunSummary {
@@ -359,6 +396,13 @@ const CONTAMINATION_IMPACT_LABELS = Object.freeze({
   destructive: 'Preservar conteúdo',
 } satisfies Record<ContaminationRemovalImpact, string>)
 
+const SOURCE_CLEANUP_STRATEGY_LABELS = Object.freeze({
+  trim: 'Corte temporal',
+  'crop-reframe': 'Recorte e reenquadramento',
+  cover: 'Cobertura localizada',
+  reject: 'Fonte preservada',
+} satisfies Record<SourceCleanupStrategy, string>)
+
 function readableBytes(value: number | string): string {
   const bytes = typeof value === 'string' ? Number(value) : value
   if (!Number.isFinite(bytes)) return '—'
@@ -457,6 +501,7 @@ export default function ProjectWorkspacePage() {
   const previewSeekSamples = useRef<number[]>([])
   const preservedPreviewTimeMs = useRef<number | null>(null)
   const selectedReviewVersionId = useRef<string | null>(null)
+  const sourceCleanupIdempotencyKeys = useRef(new Map<string, string>())
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
@@ -518,6 +563,9 @@ export default function ProjectWorkspacePage() {
   const [contaminationReports, setContaminationReports] = useState<ContaminationReportData[]>([])
   const [selectedContaminationReportId, setSelectedContaminationReportId] = useState<string | null>(null)
   const [contaminationReportsLoading, setContaminationReportsLoading] = useState(true)
+  const [sourceCleanups, setSourceCleanups] = useState<SourceCleanupData[]>([])
+  const [sourceCleanupsLoading, setSourceCleanupsLoading] = useState(true)
+  const [sourceCleanupBusyFindingId, setSourceCleanupBusyFindingId] = useState<string | null>(null)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -661,6 +709,41 @@ export default function ProjectWorkspacePage() {
   useEffect(() => {
     void loadContaminationReports()
   }, [loadContaminationReports])
+  const loadSourceCleanups = useCallback(async (quiet = false) => {
+    if (!quiet) setSourceCleanupsLoading(true)
+    try {
+      const response = await fetch(
+        `/v1/projects/${encodeURIComponent(projectId)}/source-cleanups?limit=100`,
+        { headers: { accept: 'application/json' }, cache: 'no-store' },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        cleanups: SourceCleanupData[]
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível carregar as decisões de limpeza da fonte.',
+        ))
+      }
+      setSourceCleanups(payload.data.cleanups)
+    } catch (error) {
+      if (!quiet) {
+        setNotice(error instanceof Error
+          ? error.message
+          : 'Não foi possível carregar as decisões de limpeza da fonte.')
+      }
+    } finally {
+      if (!quiet) setSourceCleanupsLoading(false)
+    }
+  }, [projectId, router])
+
+  useEffect(() => {
+    void loadSourceCleanups()
+  }, [loadSourceCleanups])
   useEffect(() => () => reviewElementLookup.current?.abort(), [])
   useEffect(() => {
     if (workspace?.editPlan?.state !== 'compiled' || !workspace.version) {
@@ -729,9 +812,10 @@ export default function ProjectWorkspacePage() {
       void loadWorkspace(true)
       void loadReview(true, selectedReviewVersionId.current ?? undefined)
       void loadProxyReview(true, workspace?.version?.id)
+      void loadSourceCleanups(true)
     }, 2500)
     return () => window.clearInterval(timer)
-  }, [activeOperation, loadProxyReview, loadReview, loadWorkspace, workspace?.version?.id])
+  }, [activeOperation, loadProxyReview, loadReview, loadSourceCleanups, loadWorkspace, workspace?.version?.id])
 
   const finalOutput = useMemo(() => [...(workspace?.media ?? [])].reverse().find((item) => item.role === 'final-output'), [workspace])
   const editingProxy = useMemo(() => {
@@ -766,6 +850,21 @@ export default function ProjectWorkspacePage() {
       contaminationReportsForSource,
       selectedContaminationReportId,
     ],
+  )
+  const selectedReportCleanups = useMemo(
+    () => selectedContaminationReport
+      ? sourceCleanups.filter((cleanup) =>
+          cleanup.plan.contaminationReportId ===
+            selectedContaminationReport.id)
+      : [],
+    [selectedContaminationReport, sourceCleanups],
+  )
+  const cleanupByFindingId = useMemo(
+    () => new Map(selectedReportCleanups.map((cleanup) => [
+      cleanup.plan.findingId,
+      cleanup,
+    ])),
+    [selectedReportCleanups],
   )
   const transcript = workspace?.transcripts[0]
   const latestDirectorRun = workspace?.directorRuns[0]
@@ -1731,9 +1830,85 @@ export default function ProjectWorkspacePage() {
     }
   }
 
+  async function planSourceCleanup(
+    finding: ContaminationReportData['findings'][number],
+  ) {
+    if (!selectedContaminationReport) return
+    setSourceCleanupBusyFindingId(finding.id)
+    const requestIdentity =
+      `${selectedContaminationReport.id}:${finding.id}`
+    const existingKey =
+      sourceCleanupIdempotencyKeys.current.get(requestIdentity)
+    const idempotencyKey =
+      existingKey ?? `ui-source-cleanup-${crypto.randomUUID()}`
+    sourceCleanupIdempotencyKeys.current.set(
+      requestIdentity,
+      idempotencyKey,
+    )
+    try {
+      const response = await fetch(
+        `/v1/projects/${encodeURIComponent(projectId)}/source-cleanups`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': idempotencyKey,
+          },
+          body: JSON.stringify({
+            contaminationReportId: selectedContaminationReport.id,
+            expectedReportHash:
+              selectedContaminationReport.reportHash,
+            findingId: finding.id,
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        cleanup: SourceCleanupData
+        replayed: boolean
+      }>
+      if (!response.ok || !payload.data?.cleanup) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível decidir a limpeza desta ocorrência.',
+        ))
+      }
+      const cleanup = payload.data.cleanup
+      setSourceCleanups((current) => [
+        cleanup,
+        ...current.filter((item) =>
+          item.plan.id !== cleanup.plan.id),
+      ])
+      sourceCleanupIdempotencyKeys.current.delete(requestIdentity)
+      setNotice(cleanup.plan.decision === 'reject'
+        ? 'O diretor preservou a fonte: nenhuma estratégia segura manteria o conteúdo essencial.'
+        : `${SOURCE_CLEANUP_STRATEGY_LABELS[cleanup.plan.selectedStrategy]} escolhida. O derivado está na fila e o original permanecerá imutável.`)
+      await Promise.all([
+        loadSourceCleanups(true),
+        loadWorkspace(true),
+      ])
+    } catch (error) {
+      setNotice(error instanceof Error
+        ? error.message
+        : 'Não foi possível decidir a limpeza desta ocorrência.')
+    } finally {
+      setSourceCleanupBusyFindingId(null)
+    }
+  }
+
   const finalExportOperation = activeOperation?.type === 'project-final-export'
+  const cleanupOperation = activeOperation?.type === 'source-cleanup'
   const directorOperation = activeOperation?.type === 'project-proxy-render' || finalExportOperation
-  const pipelineSteps: readonly (readonly [string, string, string])[] = finalExportOperation
+  const pipelineSteps: readonly (readonly [string, string, string])[] = cleanupOperation
+    ? [
+        ['rendering', 'Limpeza não destrutiva', 'Trim, reenquadramento ou cobertura localizada'],
+        ['verifying', 'Revisão pós-limpeza', 'Imagem, duração, enquadramento e direitos'],
+        ['persisting', 'Derivado reutilizável', 'Manifest, checksum e lineage sem alterar o master'],
+      ]
+    : finalExportOperation
     ? [
         ['rendering', 'Render final 1080p', 'H.264/AAC, legendas e composição aprovada'],
         ['verifying', 'Validação de entrega', 'Canvas, FPS, duração e direitos'],
@@ -2872,26 +3047,72 @@ export default function ProjectWorkspacePage() {
                       {[...selectedContaminationReport.findings].sort((left, right) => {
                         const priority = { destructive: 0, 'review-required': 1, safe: 2 }
                         return priority[left.removalImpact] - priority[right.removalImpact] || left.rangeMs[0] - right.rangeMs[0]
-                      }).map((finding) => (
-                        <article
-                          className="grid gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
-                          data-testid="contamination-finding"
-                          key={finding.id}
-                        >
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className={`h-1.5 w-1.5 rounded-full ${finding.removalImpact === 'destructive' ? 'bg-[#dc7067]' : finding.removalImpact === 'review-required' ? 'bg-[#d6a945]' : 'bg-[#6cb482]'}`} />
-                              <p className="text-[11px] font-medium text-[#c9c3ba]">{CONTAMINATION_LABELS[finding.kind]}</p>
-                              <span className={`border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.1em] ${finding.removalImpact === 'destructive' ? 'border-[#a94f49]/35 text-[#c87871]' : finding.removalImpact === 'review-required' ? 'border-[#9f792d]/35 text-[#c9a44d]' : 'border-[#4d8860]/35 text-[#72a982]'}`}>{CONTAMINATION_IMPACT_LABELS[finding.removalImpact]}</span>
+                      }).map((finding) => {
+                        const cleanup =
+                          cleanupByFindingId.get(finding.id)
+                        const cleanupRunning = Boolean(
+                          cleanup?.operation &&
+                          ['queued', 'running', 'waiting', 'retrying']
+                            .includes(cleanup.operation.status),
+                        )
+                        return (
+                          <article
+                            className="grid gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(170px,auto)] sm:items-center"
+                            data-testid="contamination-finding"
+                            key={finding.id}
+                          >
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className={`h-1.5 w-1.5 rounded-full ${finding.removalImpact === 'destructive' ? 'bg-[#dc7067]' : finding.removalImpact === 'review-required' ? 'bg-[#d6a945]' : 'bg-[#6cb482]'}`} />
+                                <p className="text-[11px] font-medium text-[#c9c3ba]">{CONTAMINATION_LABELS[finding.kind]}</p>
+                                <span className={`border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.1em] ${finding.removalImpact === 'destructive' ? 'border-[#a94f49]/35 text-[#c87871]' : finding.removalImpact === 'review-required' ? 'border-[#9f792d]/35 text-[#c9a44d]' : 'border-[#4d8860]/35 text-[#72a982]'}`}>{CONTAMINATION_IMPACT_LABELS[finding.removalImpact]}</span>
+                              </div>
+                              <p className="mt-1.5 truncate font-mono text-[9px] text-[#6e6961]">{readableTimestamp(finding.rangeMs[0])} → {readableTimestamp(finding.rangeMs[1])} · {finding.region ? `x ${finding.region.x.toFixed(2)} · y ${finding.region.y.toFixed(2)} · ${finding.region.width.toFixed(2)}×${finding.region.height.toFixed(2)}` : 'faixa de áudio'}</p>
+                              <p className="mt-1 font-mono text-[8px] uppercase tracking-[0.1em] text-[#5f5a53]">{Math.round(finding.confidence * 100)}% confiança · {finding.protectedRegionIds.length ? `${finding.protectedRegionIds.length} área protegida` : 'sem colisão visual'}</p>
                             </div>
-                            <p className="mt-1.5 truncate font-mono text-[9px] text-[#6e6961]">{readableTimestamp(finding.rangeMs[0])} → {readableTimestamp(finding.rangeMs[1])} · {finding.region ? `x ${finding.region.x.toFixed(2)} · y ${finding.region.y.toFixed(2)} · ${finding.region.width.toFixed(2)}×${finding.region.height.toFixed(2)}` : 'faixa de áudio'}</p>
-                          </div>
-                          <div className="text-left sm:text-right">
-                            <p className="font-mono text-[10px] text-[#9d968c]">{Math.round(finding.confidence * 100)}%</p>
-                            <p className="mt-1 text-[8px] uppercase tracking-[0.1em] text-[#5f5a53]">{finding.protectedRegionIds.length ? `${finding.protectedRegionIds.length} área protegida` : 'sem colisão visual'}</p>
-                          </div>
-                        </article>
-                      ))}
+                            {cleanup ? (
+                              <div
+                                className={`border-l-2 pl-3 text-left ${cleanup.postCleanupReview?.passed ? 'border-[#65aa7a]' : cleanup.plan.decision === 'reject' || cleanup.operation?.status === 'failed' ? 'border-[#bd625b]' : 'border-[#c89a38]'}`}
+                                data-testid="source-cleanup-decision"
+                              >
+                                <p className={`text-[10px] font-semibold ${cleanup.postCleanupReview?.passed ? 'text-[#77bb8b]' : cleanup.plan.decision === 'reject' || cleanup.operation?.status === 'failed' ? 'text-[#cd766f]' : 'text-[#d2aa4e]'}`}>
+                                  {SOURCE_CLEANUP_STRATEGY_LABELS[cleanup.plan.selectedStrategy]}
+                                </p>
+                                <p className="mt-1 font-mono text-[8px] uppercase tracking-[0.09em] text-[#69635b]">
+                                  qualidade {Math.round(cleanup.plan.predictedResidualQuality * 100)} · integridade {Math.round(cleanup.plan.predictedIntegrity * 100)}
+                                </p>
+                                <p className="mt-1 text-[9px] text-[#817a70]">
+                                  {cleanup.postCleanupReview
+                                    ? cleanup.postCleanupReview.passed
+                                      ? 'Visual e direitos aprovados'
+                                      : 'Revisão pós-limpeza reprovada'
+                                    : cleanup.plan.decision === 'reject'
+                                      ? 'Original preservado; nenhum derivado criado'
+                                      : cleanup.operation?.status === 'failed'
+                                        ? 'A geração do derivado falhou'
+                                        : cleanupRunning
+                                          ? 'Gerando derivado e mantendo o master intacto'
+                                          : 'Aguardando revisão pós-limpeza'}
+                                </p>
+                              </div>
+                            ) : (
+                              <button
+                                className="border border-[#9f7b31]/35 bg-[#a47d29]/[0.07] px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-[#cda94f] transition hover:border-[#c89c3a]/60 hover:bg-[#a47d29]/[0.12] disabled:cursor-not-allowed disabled:opacity-45"
+                                data-testid="source-cleanup-action"
+                                disabled={sourceCleanupsLoading || sourceCleanupBusyFindingId !== null}
+                                onClick={() => void planSourceCleanup(finding)}
+                                type="button"
+                              >
+                                {sourceCleanupBusyFindingId === finding.id
+                                  ? 'Diretor avaliando…'
+                                  : finding.removalImpact === 'destructive'
+                                    ? 'Confirmar preservação'
+                                    : 'Planejar limpeza'}
+                              </button>
+                            )}
+                          </article>
+                        )
+                      })}
                     </div>
                   </div>
                 </div>
@@ -2938,7 +3159,7 @@ export default function ProjectWorkspacePage() {
         </section>
 
         <aside className="border-t border-white/[0.07] bg-[#0a0a0a] p-5 xl:border-l xl:border-t-0 xl:p-6">
-          <div className="flex items-center justify-between"><div><p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#b58d31]">Pipeline V2</p><h2 className="mt-2 text-lg font-semibold">{finalExportOperation ? 'Exportação final' : directorOperation ? 'Direção materializada' : 'Ingestão verificável'}</h2></div><span className="font-mono text-[9px] text-[#5f5c55]">{activeOperation?.id.slice(-8) ?? 'AGUARDANDO'}</span></div>
+          <div className="flex items-center justify-between"><div><p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#b58d31]">Pipeline V2</p><h2 className="mt-2 text-lg font-semibold">{cleanupOperation ? 'Limpeza da fonte' : finalExportOperation ? 'Exportação final' : directorOperation ? 'Direção materializada' : 'Ingestão verificável'}</h2></div><span className="font-mono text-[9px] text-[#5f5c55]">{activeOperation?.id.slice(-8) ?? 'AGUARDANDO'}</span></div>
           <div className="mt-7 space-y-1">
             {pipelineSteps.map(([phase, title, description], index) => {
               const failed = activeOperation?.status === 'failed' && currentStep === index
@@ -2947,7 +3168,7 @@ export default function ProjectWorkspacePage() {
             })}
           </div>
           <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
-            <div className="flex items-center justify-between"><span className="text-[9px] uppercase tracking-[0.15em] text-[#68645e]">Estado</span><span className="text-[10px] text-[#b9b3aa]">{activeOperation ? finalExportOperation && activeOperation.phase === 'completed' ? 'MP4 final disponível' : directorOperation && activeOperation.phase === 'completed' ? 'Render editorial concluído' : PHASE_LABELS[activeOperation.phase] ?? activeOperation.status : 'Aguardando mídia'}</span></div>
+            <div className="flex items-center justify-between"><span className="text-[9px] uppercase tracking-[0.15em] text-[#68645e]">Estado</span><span className="text-[10px] text-[#b9b3aa]">{activeOperation ? cleanupOperation && activeOperation.phase === 'completed' ? 'Derivado limpo e revisado' : finalExportOperation && activeOperation.phase === 'completed' ? 'MP4 final disponível' : directorOperation && activeOperation.phase === 'completed' ? 'Render editorial concluído' : PHASE_LABELS[activeOperation.phase] ?? activeOperation.status : 'Aguardando mídia'}</span></div>
             {activeOperation?.error?.message ? <p className="mt-3 text-[10px] leading-4 text-[#c87b7b]">{activeOperation.error.message}</p> : null}
           </div>
         </aside>

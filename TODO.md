@@ -20,15 +20,15 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.016, com a jornada integral do MVP Core e os
-dezesseis primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
+Estado auditado após o gate F2.017, com a jornada integral do MVP Core e os
+dezessete primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **254 de 1.259 microtarefas verificadas como efetivamente entregues (20,2%)**;
-- **1.005 microtarefas abertas ou aguardando nova comprovação**;
+- **259 de 1.259 microtarefas verificadas como efetivamente entregues (20,6%)**;
+- **1.000 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 a F2.016 foram entregues, mas não encerram o
+  permanecem abertos; F2.001 a F2.017 foram entregues, mas não encerram o
   gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
@@ -53,8 +53,12 @@ O diagnóstico de contaminação F2.016 também está implantado: detector
 identificado, regiões/ranges/confidence, cruzamento com fala e pixels
 essenciais, diagnóstico separado para Director/revisão e seis fixtures
 audiovisuais reais são operáveis por quatro capabilities `/v1` sobre
-PostgreSQL. A evidência detalhada está em
-`docs/quality/source-contamination-v1.md`; limpeza permanece aberta em F2.017.
+PostgreSQL. A limpeza MVP F2.017 agora escolhe explicitamente entre trim,
+crop/reframe, cover e reject, gera apenas derivative, preserva o master,
+reavalia visual e direitos e publica o resultado somente após
+`postCleanupReview`. As evidências detalhadas estão em
+`docs/quality/source-contamination-v1.md` e
+`docs/quality/source-cleanup-v1.md`.
 
 ---
 
@@ -1161,11 +1165,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.017 — Limpeza MVP [FR-122]
 
-- [ ] Implementar trim, crop/reframe, cover e reject como estratégias explícitas. Evidência T-FR-122.
-- [ ] Escolher estratégia por qualidade residual, integridade e custo. Evidência T-FR-122.
-- [ ] Gerar derivative e manter source publicado imutável. Evidência T-FR-122.
-- [ ] Reavaliar visual/rights após limpeza. Evidência: `postCleanupReview` obrigatório.
-- [ ] Criar visual goldens de cada estratégia e rejeição correta. Evidência T-FR-122.
+- [x] Implementar trim, crop/reframe, cover e reject como estratégias explícitas. Evidência: T-FR-122 em domínio, FFmpeg real, worker e API pública.
+- [x] Escolher estratégia por qualidade residual, integridade e custo. Evidência: plano canônico `source-cleanup-plan/v1`, policy versionada e T-FR-122.
+- [x] Gerar derivative e manter source publicado imutável. Evidência: E2E API → PostgreSQL → worker → FFmpeg, um novo artifact/manifest/lineage e SHA-256 do source inalterado.
+- [x] Reavaliar visual/rights após limpeza. Evidência: `postCleanupReview` obrigatório, rights herdados/reavaliados e operação só conclui quando ambos passam.
+- [x] Criar visual goldens de cada estratégia e rejeição correta. Evidência: MP4s reais para trim, crop/reframe e cover, medição de pixels e reject fail-closed em T-FR-122.
 
 ### F2.018 — Validation envelope [FR-124]
 

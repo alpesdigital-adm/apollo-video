@@ -6354,6 +6354,22 @@ const publicOperationSchemaV4 = {
   },
 }
 
+const publicOperationSchemaV5 = {
+  ...publicOperationSchemaV4,
+  properties: {
+    ...publicOperationSchemaV4.properties,
+    type: {
+      enum: [
+        'artifact-render',
+        'media-ingest',
+        'project-proxy-render',
+        'project-final-export',
+        'source-cleanup',
+      ],
+    },
+  },
+}
+
 const semanticDiffItemSchema = {
   type: 'object',
   additionalProperties: false,
@@ -7690,6 +7706,331 @@ const contaminationReportSchema = {
   },
 }
 
+const sourceCleanupPolicySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'minResidualQuality',
+    'minIntegrity',
+    'maxCost',
+    'edgeTolerance',
+    'maxCropFraction',
+    'maxCoverArea',
+    'coverColor',
+    'costs',
+  ],
+  properties: {
+    minResidualQuality: { type: 'number', minimum: 0, maximum: 1 },
+    minIntegrity: { type: 'number', minimum: 0, maximum: 1 },
+    maxCost: { type: 'number', minimum: 0, maximum: 1_000_000 },
+    edgeTolerance: {
+      type: 'number',
+      exclusiveMinimum: 0,
+      maximum: 0.2,
+    },
+    maxCropFraction: {
+      type: 'number',
+      exclusiveMinimum: 0,
+      maximum: 0.4,
+    },
+    maxCoverArea: {
+      type: 'number',
+      exclusiveMinimum: 0,
+      maximum: 0.4,
+    },
+    coverColor: {
+      type: 'string',
+      pattern: '^#[A-F0-9]{6}$',
+    },
+    costs: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['trim', 'crop-reframe', 'cover'],
+      properties: {
+        trim: { type: 'number', minimum: 0, maximum: 1_000_000 },
+        'crop-reframe': {
+          type: 'number',
+          minimum: 0,
+          maximum: 1_000_000,
+        },
+        cover: { type: 'number', minimum: 0, maximum: 1_000_000 },
+      },
+    },
+  },
+}
+const sourceCleanupReasonCodesSchema = {
+  type: 'array',
+  maxItems: 128,
+  uniqueItems: true,
+  items: {
+    type: 'string',
+    minLength: 1,
+    maxLength: 128,
+    pattern: '^[A-Z0-9_]+$',
+  },
+}
+const sourceCleanupActionSchema = {
+  oneOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['strategy', 'keepRangeMs', 'removedRangeMs'],
+      properties: {
+        strategy: { const: 'trim' },
+        keepRangeMs: contaminationRangeMsSchema,
+        removedRangeMs: contaminationRangeMsSchema,
+      },
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['strategy', 'crop', 'removedRegion'],
+      properties: {
+        strategy: { const: 'crop-reframe' },
+        crop: contaminationRegionSchema,
+        removedRegion: contaminationRegionSchema,
+      },
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['strategy', 'rangeMs', 'region', 'color'],
+      properties: {
+        strategy: { const: 'cover' },
+        rangeMs: contaminationRangeMsSchema,
+        region: contaminationRegionSchema,
+        color: { type: 'string', pattern: '^#[A-F0-9]{6}$' },
+      },
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['strategy', 'reasonCodes'],
+      properties: {
+        strategy: { const: 'reject' },
+        reasonCodes: sourceCleanupReasonCodesSchema,
+      },
+    },
+  ],
+}
+const sourceCleanupCandidateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'strategy',
+    'eligible',
+    'predictedResidualQuality',
+    'predictedIntegrity',
+    'cost',
+    'score',
+    'reasonCodes',
+  ],
+  properties: {
+    strategy: {
+      enum: ['trim', 'crop-reframe', 'cover', 'reject'],
+    },
+    eligible: { type: 'boolean' },
+    predictedResidualQuality: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+    predictedIntegrity: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+    cost: { type: 'number', minimum: 0, maximum: 1_000_000 },
+    score: { type: 'number', minimum: 0, maximum: 1 },
+    reasonCodes: sourceCleanupReasonCodesSchema,
+    action: sourceCleanupActionSchema,
+  },
+}
+const sourceCleanupPlanSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion',
+    'policyVersion',
+    'id',
+    'workspaceId',
+    'projectId',
+    'contaminationReportId',
+    'contaminationReportHash',
+    'findingId',
+    'findingHash',
+    'sourceArtifactId',
+    'sourceArtifactSha256',
+    'sourceManifestId',
+    'sourceDurationMs',
+    'sourceImmutable',
+    'policy',
+    'candidates',
+    'selectedStrategy',
+    'selectedAction',
+    'decision',
+    'predictedResidualQuality',
+    'predictedIntegrity',
+    'predictedCost',
+    'rightsDecision',
+    'rightsReasonCodes',
+    'postCleanupReviewRequired',
+    'createdByClientId',
+    'createdAt',
+    'planHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'source-cleanup-plan/v1' },
+    policyVersion: { const: 'source-cleanup-mvp/v1' },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    contaminationReportId: idSchema,
+    contaminationReportHash: sha256Schema,
+    findingId: idSchema,
+    findingHash: sha256Schema,
+    sourceArtifactId: idSchema,
+    sourceArtifactSha256: sha256Schema,
+    sourceManifestId: idSchema,
+    sourceDurationMs: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 86_400_000,
+    },
+    sourceImmutable: { const: true },
+    policy: sourceCleanupPolicySchema,
+    candidates: {
+      type: 'array',
+      minItems: 3,
+      maxItems: 3,
+      items: sourceCleanupCandidateSchema,
+    },
+    selectedStrategy: {
+      enum: ['trim', 'crop-reframe', 'cover', 'reject'],
+    },
+    selectedAction: sourceCleanupActionSchema,
+    decision: { enum: ['execute', 'reject'] },
+    predictedResidualQuality: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+    predictedIntegrity: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1,
+    },
+    predictedCost: {
+      type: 'number',
+      minimum: 0,
+      maximum: 1_000_000,
+    },
+    rightsSnapshotId: idSchema,
+    rightsSnapshotHash: sha256Schema,
+    rightsDecision: { enum: ['allow', 'deny'] },
+    rightsReasonCodes: sourceCleanupReasonCodesSchema,
+    operationId: idSchema,
+    outputArtifactId: idSchema,
+    outputManifestId: idSchema,
+    postCleanupReviewRequired: { type: 'boolean' },
+    createdByClientId: idSchema,
+    createdAt: dateTimeSchema,
+    planHash: sha256Schema,
+  },
+}
+const postCleanupReviewSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion',
+    'cleanupPlanId',
+    'cleanupPlanHash',
+    'sourceArtifactId',
+    'sourceArtifactSha256',
+    'outputArtifactId',
+    'outputArtifactSha256',
+    'outputManifestId',
+    'strategy',
+    'visual',
+    'rights',
+    'passed',
+    'reviewedAt',
+    'reviewHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'post-cleanup-review/v1' },
+    cleanupPlanId: idSchema,
+    cleanupPlanHash: sha256Schema,
+    sourceArtifactId: idSchema,
+    sourceArtifactSha256: sha256Schema,
+    outputArtifactId: idSchema,
+    outputArtifactSha256: sha256Schema,
+    outputManifestId: idSchema,
+    strategy: { enum: ['trim', 'crop-reframe', 'cover'] },
+    visual: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'passed',
+        'contaminationRemoved',
+        'outputPlayable',
+        'durationAligned',
+        'framingPreserved',
+        'residualQuality',
+        'reasonCodes',
+      ],
+      properties: {
+        passed: { type: 'boolean' },
+        contaminationRemoved: { type: 'boolean' },
+        outputPlayable: { type: 'boolean' },
+        durationAligned: { type: 'boolean' },
+        framingPreserved: { type: 'boolean' },
+        residualQuality: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+        },
+        reasonCodes: sourceCleanupReasonCodesSchema,
+      },
+    },
+    rights: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'passed',
+        'sourceRightsSnapshotId',
+        'sourceRightsSnapshotHash',
+        'outputRightsSnapshotId',
+        'outputRightsSnapshotHash',
+        'use',
+        'reasonCodes',
+      ],
+      properties: {
+        passed: { type: 'boolean' },
+        sourceRightsSnapshotId: idSchema,
+        sourceRightsSnapshotHash: sha256Schema,
+        outputRightsSnapshotId: idSchema,
+        outputRightsSnapshotHash: sha256Schema,
+        use: { const: 'editing' },
+        reasonCodes: sourceCleanupReasonCodesSchema,
+      },
+    },
+    passed: { type: 'boolean' },
+    reviewedAt: dateTimeSchema,
+    reviewHash: sha256Schema,
+  },
+}
+const sourceCleanupRecordSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['plan'],
+  properties: {
+    plan: sourceCleanupPlanSchema,
+    operation: publicOperationSchemaV5,
+    postCleanupReview: postCleanupReviewSchema,
+  },
+}
+
 function defineSchema(
   id: string,
   version: number,
@@ -8665,6 +9006,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV4 },
     }),
   ),
+  defineSchema('public-operation-detail', 5, 'Public operation detail including source cleanup derivatives',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation'],
+      properties: { operation: publicOperationSchemaV5 },
+    }),
+  ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
     successSchema({
       type: 'object',
@@ -9049,6 +9398,26 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: {
         operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV4 },
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      },
+    }),
+  ),
+  defineSchema('public-operation-list', 5, 'Public operation list including source cleanup derivatives',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operations'],
+      properties: {
+        operations: {
+          type: 'array',
+          maxItems: 100,
+          items: publicOperationSchemaV5,
+        },
+        nextCursor: {
+          type: 'string',
+          minLength: 8,
+          maxLength: 1024,
+          pattern: '^[A-Za-z0-9_-]+$',
+        },
       },
     }),
   ),
@@ -11481,6 +11850,57 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           type: 'array',
           maxItems: 100,
           items: contaminationReportSchema,
+        },
+        nextCursor: idSchema,
+      },
+    }),
+  ),
+  defineSchema('create-source-cleanup-request', 1, 'Choose and enqueue one bounded source-cleanup strategy', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'contaminationReportId',
+      'expectedReportHash',
+      'findingId',
+    ],
+    properties: {
+      contaminationReportId: idSchema,
+      expectedReportHash: sha256Schema,
+      findingId: idSchema,
+      policy: sourceCleanupPolicySchema,
+    },
+  }),
+  defineSchema('source-cleanup-mutated', 1, 'Created, rejected or replayed source-cleanup plan and operation',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['cleanup', 'replayed'],
+      properties: {
+        cleanup: sourceCleanupRecordSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('source-cleanup-read', 1, 'Read one source-cleanup plan, operation and mandatory review',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['cleanup'],
+      properties: {
+        cleanup: sourceCleanupRecordSchema,
+      },
+    }),
+  ),
+  defineSchema('source-cleanup-page', 1, 'Cursor page of source-cleanup plans and derivative status',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['cleanups'],
+      properties: {
+        cleanups: {
+          type: 'array',
+          maxItems: 100,
+          items: sourceCleanupRecordSchema,
         },
         nextCursor: idSchema,
       },

@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  rm,
+} from 'node:fs/promises'
 import net from 'node:net'
-import { resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -73,7 +80,7 @@ function transcriptWords(timeline) {
   })
 }
 
-test('T-FR-121 diagnoses five localized contaminations through public API and PostgreSQL', {
+test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through public API and PostgreSQL', {
   skip:
     process.env.APOLLO_CONTAMINATION_E2E !== '1' &&
     'set APOLLO_CONTAMINATION_E2E=1 and use an isolated V2 database',
@@ -83,13 +90,14 @@ test('T-FR-121 diagnoses five localized contaminations through public API and Po
     process.env.V2_DATABASE_URL,
     'V2_DATABASE_URL must point to an isolated PostgreSQL database',
   )
-  const databaseName = new URL(
-    process.env.V2_DATABASE_URL,
-  ).pathname.slice(1)
+  const databaseUrl = new URL(process.env.V2_DATABASE_URL)
+  const databaseName = databaseUrl.pathname.slice(1)
+  const databaseSchema =
+    databaseUrl.searchParams.get('schema') ?? ''
   assert.match(
-    databaseName,
+    `${databaseName}_${databaseSchema}`,
     /(?:^|_)e2e(?:_|$)/,
-    'destructive E2E setup requires an explicitly isolated database',
+    'destructive E2E setup requires an explicitly isolated database or schema',
   )
 
   const {
@@ -101,6 +109,10 @@ test('T-FR-121 diagnoses five localized contaminations through public API and Po
   const {
     stableSerialize,
   } = await import('../../src/v2/domain/canonical-hash.ts')
+  const {
+    assetRightsRevision,
+    createAssetRightsSnapshot,
+  } = await import('../../src/v2/domain/asset-rights.ts')
   const {
     SPEECH_SEGMENT_EXTRACTION_POLICY_VERSION,
   } = await import(
@@ -135,6 +147,11 @@ test('T-FR-121 diagnoses five localized contaminations through public API and Po
     PrismaSourceDeconstructionRepository,
   } = await import(
     '../../src/v2/infrastructure/prisma/source-deconstruction-repository.ts'
+  )
+  const {
+    PrismaAssetRightsRepository,
+  } = await import(
+    '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
   )
   const {
     nodeApiCredentialCrypto,
@@ -180,6 +197,9 @@ test('T-FR-121 diagnoses five localized contaminations through public API and Po
   const catalogRunId = `contamination-e2e-catalog-${suffix}`
   const sourceReportId = `contamination-e2e-source-${suffix}`
   const createdAt = new Date('2026-07-28T20:00:00.000Z')
+  const artifactRoot = await mkdtemp(
+    join(tmpdir(), 'apollo-source-cleanup-e2e-'),
+  )
   let server
   let serverLogs = ''
 
@@ -225,6 +245,15 @@ test('T-FR-121 diagnoses five localized contaminations through public API and Po
     })
     const artifactKey =
       `workspaces/${workspaceId}/masters/${artifactId}.mp4`
+    const artifactPath = resolve(
+      artifactRoot,
+      ...artifactKey.split('/'),
+    )
+    await mkdir(dirname(artifactPath), { recursive: true })
+    await copyFile(
+      resolve('tests/fixtures/contamination', fixture.file),
+      artifactPath,
+    )
     const mediaManifest = createMediaArtifactManifestV2({
       artifactKey,
       artifactSha256: fixture.sha256,
@@ -289,6 +318,31 @@ test('T-FR-121 diagnoses five localized contaminations through public API and Po
         createdAt,
       },
     })
+    const sourceRights = createAssetRightsSnapshot({
+      id: `contamination-e2e-rights-${suffix}`,
+      workspaceId,
+      artifactId,
+      sequence: 1,
+      draft: {
+        status: 'approved',
+        allowedUses: ['editing'],
+        prohibitedUses: [],
+        allowedLocales: ['pt-BR'],
+        consent: {
+          status: 'not-required',
+          allowedUses: [],
+        },
+      },
+      createdBy: {
+        type: 'api-client',
+        id: issued.client.id,
+      },
+      createdAt: createdAt.toISOString(),
+    })
+    await new PrismaAssetRightsRepository(client).setCurrent(
+      sourceRights,
+      assetRightsRevision(artifactId, 0),
+    )
     await client.v2ProjectMediaAsset.create({
       data: {
         id: randomUUID(),
@@ -566,6 +620,203 @@ test('T-FR-121 diagnoses five localized contaminations through public API and Po
       'cleanup-eligible',
     )
 
+    const safeCleanupReportResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `contamination-cleanup-source-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...requestBody,
+        observations: [{
+          id: `observation-cleanup-edge-${suffix}`,
+          kind: 'logo-watermark',
+          rangeMs: [0, 2_000],
+          region: {
+            x: 0.9,
+            y: 0.1,
+            width: 0.1,
+            height: 0.1,
+          },
+          confidence: 0.99,
+          detector: {
+            provider: 'apollo',
+            model: 'source-cleanup-e2e',
+            version: '1.0.0',
+          },
+          signals: {
+            label: 'EDGE',
+            logoMatch: 0.99,
+            frameCoverage: 1,
+            opacity: 1,
+          },
+        }],
+        protectedRegions: [],
+      }),
+    })
+    const safeCleanupReportPayload =
+      await safeCleanupReportResponse.json()
+    assert.equal(
+      safeCleanupReportResponse.status,
+      201,
+      JSON.stringify(safeCleanupReportPayload),
+    )
+    const safeCleanupReport =
+      safeCleanupReportPayload.data.report
+    const cleanupEndpoint =
+      `${baseUrl}/v1/projects/${projectId}/source-cleanups`
+    const cleanupBody = {
+      contaminationReportId: safeCleanupReport.id,
+      expectedReportHash: safeCleanupReport.reportHash,
+      findingId: safeCleanupReport.findings[0].id,
+    }
+    const cleanupResponse = await fetch(cleanupEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `source-cleanup-${suffix}`,
+      },
+      body: JSON.stringify(cleanupBody),
+    })
+    const cleanupPayload = await cleanupResponse.json()
+    assert.equal(
+      cleanupResponse.status,
+      202,
+      JSON.stringify(cleanupPayload),
+    )
+    assert.equal(
+      cleanupPayload.data.cleanup.plan.selectedStrategy,
+      'crop-reframe',
+    )
+    assert.equal(
+      cleanupPayload.data.cleanup.plan.sourceImmutable,
+      true,
+    )
+    assert.equal(
+      cleanupPayload.data.cleanup.plan.postCleanupReviewRequired,
+      true,
+    )
+    assert.equal(
+      cleanupPayload.data.cleanup.operation.type,
+      'source-cleanup',
+    )
+    assert.equal(
+      cleanupPayload.data.cleanup.operation.status,
+      'queued',
+    )
+    const cleanupReplay = await fetch(cleanupEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `source-cleanup-${suffix}`,
+      },
+      body: JSON.stringify(cleanupBody),
+    })
+    assert.equal(cleanupReplay.status, 200)
+    assert.equal((await cleanupReplay.json()).data.replayed, true)
+    const cleanupRead = await fetch(
+      `${cleanupEndpoint}/` +
+      cleanupPayload.data.cleanup.plan.id,
+      { headers: { authorization } },
+    )
+    assert.equal(cleanupRead.status, 200)
+    const cleanupList = await fetch(
+      `${cleanupEndpoint}?findingId=` +
+      encodeURIComponent(cleanupBody.findingId),
+      { headers: { authorization } },
+    )
+    const cleanupListPayload = await cleanupList.json()
+    assert.equal(cleanupList.status, 200)
+    assert.equal(cleanupListPayload.data.cleanups.length, 1)
+    assert.equal(
+      await client.v2SourceCleanupPlan.count({
+        where: { workspaceId, projectId },
+      }),
+      1,
+    )
+    assert.equal(
+      await client.v2PublicOperation.count({
+        where: {
+          workspaceId,
+          type: 'source-cleanup',
+        },
+      }),
+      1,
+    )
+    assert.equal(
+      await client.v2MediaArtifact.count({
+        where: { workspaceId },
+      }),
+      artifactCountBefore,
+      'planning source cleanup must not materialize media',
+    )
+    const sourceShaBeforeCleanup = createHash('sha256')
+      .update(readFileSync(artifactPath))
+      .digest('hex')
+    const {
+      createSourceCleanupWorker,
+    } = await import(
+      '../../src/v2/infrastructure/repository-factory.ts'
+    )
+    const runCleanupWorker = createSourceCleanupWorker({
+      ...process.env,
+      APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
+      APOLLO_V2_SOURCE_CLEANUP_WORK_ROOT:
+        join(artifactRoot, 'cleanup-work'),
+      APOLLO_V2_RENDER_LEASE_MS: '30000',
+      APOLLO_V2_RENDER_HEARTBEAT_MS: '10000',
+      APOLLO_V2_WORKER_RETRY_BASE_MS: '1',
+      APOLLO_V2_WORKER_RETRY_MAX_MS: '2',
+      APOLLO_PROTECTED_PAYLOAD_KEY_ID:
+        'source-cleanup-e2e-key',
+      APOLLO_PROTECTED_PAYLOAD_KEY:
+        Buffer.alloc(32, 17).toString('base64url'),
+    })
+    assert.deepEqual(
+      await runCleanupWorker(
+        `source-cleanup-e2e-worker-${suffix}`,
+      ),
+      {
+        operationId:
+          cleanupPayload.data.cleanup.operation.id,
+        status: 'succeeded',
+      },
+    )
+    assert.equal(
+      createHash('sha256')
+        .update(readFileSync(artifactPath))
+        .digest('hex'),
+      sourceShaBeforeCleanup,
+      'source cleanup worker must keep source bytes immutable',
+    )
+    const completedCleanupResponse = await fetch(
+      `${cleanupEndpoint}/` +
+      cleanupPayload.data.cleanup.plan.id,
+      { headers: { authorization } },
+    )
+    const completedCleanupPayload =
+      await completedCleanupResponse.json()
+    assert.equal(completedCleanupResponse.status, 200)
+    assert.equal(
+      completedCleanupPayload.data.cleanup.operation.status,
+      'succeeded',
+    )
+    assert.equal(
+      completedCleanupPayload.data.cleanup
+        .postCleanupReview.passed,
+      true,
+    )
+    assert.equal(
+      completedCleanupPayload.data.cleanup
+        .postCleanupReview.visual.passed,
+      true,
+    )
+    assert.equal(
+      completedCleanupPayload.data.cleanup
+        .postCleanupReview.rights.passed,
+      true,
+    )
+
     const readResponse = await fetch(
       `${endpoint}/${report.id}`,
       { headers: { authorization } },
@@ -634,19 +885,19 @@ test('T-FR-121 diagnoses five localized contaminations through public API and Po
       await client.v2ContaminationReport.count({
         where: { workspaceId },
       }),
-      2,
+      3,
     )
     assert.equal(
       await client.v2ContaminationObservation.count({
         where: { workspaceId },
       }),
-      5,
+      6,
     )
     assert.equal(
       await client.v2ContaminationFinding.count({
         where: { workspaceId },
       }),
-      5,
+      6,
     )
     assert.equal(
       await client.v2ContaminationProtectedRegion.count({
@@ -658,8 +909,8 @@ test('T-FR-121 diagnoses five localized contaminations through public API and Po
       await client.v2MediaArtifact.count({
         where: { workspaceId },
       }),
-      artifactCountBefore,
-      'contamination diagnosis must not materialize media',
+      artifactCountBefore + 1,
+      'cleanup must add exactly one derived artifact',
     )
 
     const finding =
@@ -719,5 +970,6 @@ test('T-FR-121 diagnoses five localized contaminations through public API and Po
   } finally {
     await stopServer(server)
     await client.$disconnect()
+    await rm(artifactRoot, { recursive: true, force: true })
   }
 })

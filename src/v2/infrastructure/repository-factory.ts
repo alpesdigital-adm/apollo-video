@@ -21,6 +21,7 @@ import { runNextPublicOperationService } from '../application/run-public-operati
 import { runNextMediaIngestOperationService } from '../application/run-media-ingest-worker.ts'
 import { runNextProjectProxyRenderOperationService } from '../application/run-project-proxy-render-worker.ts'
 import { runNextProjectFinalExportOperationService } from '../application/run-project-final-export-worker.ts'
+import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
 import { calculateVersionHash } from '../application/version-hash.ts'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
@@ -43,6 +44,7 @@ import type { VariantPortfolioPreflightRepository } from '../application/ports/v
 import type { BatchEditRepository } from '../application/ports/batch-edit-repository.ts'
 import type { SourceDeconstructionRepository } from '../application/ports/source-deconstruction-repository.ts'
 import type { ContaminationReportRepository } from '../application/ports/contamination-report-repository.ts'
+import type { SourceCleanupRepository } from '../application/ports/source-cleanup-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -124,6 +126,7 @@ import { PrismaVariantPortfolioPreflightRepository } from './prisma/variant-port
 import { PrismaBatchEditRepository } from './prisma/batch-edit-repository.ts'
 import { PrismaSourceDeconstructionRepository } from './prisma/source-deconstruction-repository.ts'
 import { PrismaContaminationReportRepository } from './prisma/contamination-report-repository.ts'
+import { PrismaSourceCleanupRepository } from './prisma/source-cleanup-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -172,6 +175,7 @@ import { createLocalMediaUploadStorageFromEnvironment } from './media/local-medi
 import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
+import { createFfmpegSourceCleanupProcessorFromEnvironment } from './media/ffmpeg-source-cleanup-processor.ts'
 import { createMediaTranscriberFromEnvironment } from './media/groq-media-transcriber.ts'
 import { createConfiguredRenderTargetRegistry } from './render-target-registry.ts'
 import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
@@ -275,6 +279,11 @@ SourceDeconstructionRepository {
 export function createContaminationReportRepository():
 ContaminationReportRepository {
   return new PrismaContaminationReportRepository(resolveV2Client())
+}
+
+export function createSourceCleanupRepository():
+SourceCleanupRepository {
+  return new PrismaSourceCleanupRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {
@@ -764,6 +773,61 @@ export function createProjectFinalExportWorker(
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
     ...(Number.isSafeInteger(configuredRetryMax) && configuredRetryMax > 0 ? { retryMaxDelayMs: configuredRetryMax } : {}),
+  })
+}
+
+export function createSourceCleanupWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
+  if (!artifactRoot) {
+    throw new DomainError(
+      'PERSISTENCE_NOT_CONFIGURED',
+      'Artifact root is not configured',
+    )
+  }
+  const configuredLease = Number(
+    environment.APOLLO_V2_RENDER_LEASE_MS ??
+    environment.APOLLO_V2_WORKER_LEASE_MS,
+  )
+  const configuredHeartbeat = Number(
+    environment.APOLLO_V2_RENDER_HEARTBEAT_MS ??
+    environment.APOLLO_V2_WORKER_HEARTBEAT_MS,
+  )
+  const configuredRetryBase = Number(
+    environment.APOLLO_V2_WORKER_RETRY_BASE_MS,
+  )
+  const configuredRetryMax = Number(
+    environment.APOLLO_V2_WORKER_RETRY_MAX_MS,
+  )
+  return runNextSourceCleanupOperationService({
+    operations: createPublicOperationRepository(),
+    cleanups: createSourceCleanupRepository(),
+    mediaArtifacts: createMediaArtifactQueryRepository(),
+    artifacts: createMediaArtifactPersistenceRepository(environment),
+    rights: createAssetRightsRepository(),
+    projects: createProjectWorkspaceQueryRepository(),
+    storage: createLocalMediaUploadStorageFromEnvironment(environment),
+    processor:
+      createFfmpegSourceCleanupProcessorFromEnvironment(environment),
+    artifactRoot,
+    clock,
+    ...(Number.isSafeInteger(configuredLease) && configuredLease > 0
+      ? { leaseDurationMs: configuredLease }
+      : {}),
+    ...(Number.isSafeInteger(configuredHeartbeat) &&
+      configuredHeartbeat > 0
+      ? { heartbeatIntervalMs: configuredHeartbeat }
+      : {}),
+    ...(Number.isSafeInteger(configuredRetryBase) &&
+      configuredRetryBase > 0
+      ? { retryBaseDelayMs: configuredRetryBase }
+      : {}),
+    ...(Number.isSafeInteger(configuredRetryMax) &&
+      configuredRetryMax > 0
+      ? { retryMaxDelayMs: configuredRetryMax }
+      : {}),
   })
 }
 

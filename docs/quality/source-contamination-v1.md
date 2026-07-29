@@ -23,7 +23,7 @@ Este gate entrega a fronteira normalizada para detectores internos ou externos.
 O request registra `provider`, `model`, `version`, sinais e confidence e rejeita
 campos livres. Portanto, um adapter de visão/áudio pode evoluir sem alterar o
 domínio. O gate não afirma que o Apollo treinou um modelo proprietário, não
-executa limpeza e não substitui F2.017/F2.019.
+executa limpeza e não substitui a limpeza F2.017 nem a limpeza avançada F2.019.
 
 ## Fluxo V2
 
@@ -117,8 +117,8 @@ contratos públicos.
 
 ## Limites deliberados
 
-- F2.016 diagnostica; F2.017 escolherá e executará trim, crop/reframe, cover ou
-  reject.
+- F2.016 diagnostica; F2.017 consome este laudo para escolher e executar trim,
+  crop/reframe, cover ou reject sem alterar o source.
 - Separação de stems, inpainting e restauração pertencem à limpeza avançada.
 - O detector pode ser trocado por adapter sem alterar o relatório canônico.
 - Nenhum achado destrutivo pode ser convertido em remoção automática por prompt

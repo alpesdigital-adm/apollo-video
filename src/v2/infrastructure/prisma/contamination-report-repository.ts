@@ -38,7 +38,7 @@ const SOURCE_INCLUDE = {
   },
 } satisfies Prisma.V2SourceDeconstructionReportInclude
 
-const REPORT_INCLUDE = {
+export const CONTAMINATION_REPORT_INCLUDE = {
   observations: {
     orderBy: [
       { startMs: 'asc' as const },
@@ -69,7 +69,7 @@ const REPORT_INCLUDE = {
 } satisfies Prisma.V2ContaminationReportInclude
 
 type ReportRow = Prisma.V2ContaminationReportGetPayload<{
-  include: typeof REPORT_INCLUDE
+  include: typeof CONTAMINATION_REPORT_INCLUDE
 }>
 
 function isPrismaCode(error: unknown, code: string): boolean {
@@ -559,7 +559,7 @@ implements ContaminationReportRepository {
         createdByClientId: input.actorClientId,
         idempotencyKey: input.idempotencyKey,
       },
-      include: REPORT_INCLUDE,
+      include: CONTAMINATION_REPORT_INCLUDE,
     })
     return row
       ? Object.freeze({
@@ -585,7 +585,7 @@ implements ContaminationReportRepository {
             createdByClientId: record.report.createdByClientId,
             idempotencyKey: record.idempotencyKey,
           },
-          include: REPORT_INCLUDE,
+          include: CONTAMINATION_REPORT_INCLUDE,
         })
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
@@ -650,7 +650,7 @@ implements ContaminationReportRepository {
         const stored =
           await transaction.v2ContaminationReport.findUniqueOrThrow({
             where: { id: report.id },
-            include: REPORT_INCLUDE,
+            include: CONTAMINATION_REPORT_INCLUDE,
           })
         return Object.freeze({
           report: hydrateContaminationReportRow(stored),
@@ -704,7 +704,7 @@ implements ContaminationReportRepository {
         workspaceId: input.workspaceId,
         projectId: input.projectId,
       },
-      include: REPORT_INCLUDE,
+      include: CONTAMINATION_REPORT_INCLUDE,
     })
     return row ? hydrateContaminationReportRow(row) : null
   }
@@ -760,7 +760,7 @@ implements ContaminationReportRepository {
             }
           : {}),
       },
-      include: REPORT_INCLUDE,
+      include: CONTAMINATION_REPORT_INCLUDE,
       orderBy: [
         { createdAt: 'desc' },
         { id: 'desc' },

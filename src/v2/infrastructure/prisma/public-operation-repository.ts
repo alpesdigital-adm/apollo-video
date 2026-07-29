@@ -7,7 +7,7 @@ import type {
   PublicOperationPersistenceResult,
   PublicOperationRecord,
   PublicOperationRepository,
-  PublicOperationContext,
+  PublicOperationCreationContext,
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
@@ -47,6 +47,7 @@ type StoredOperation = Prisma.V2PublicOperationGetPayload<{
     mediaIngest: true
     projectProxyRender: true
     projectFinalExport: true
+    sourceCleanupPlan: true
   }
 }>
 
@@ -69,6 +70,7 @@ const OPERATION_INCLUDE = {
   mediaIngest: true,
   projectProxyRender: true,
   projectFinalExport: true,
+  sourceCleanupPlan: true,
 } as const
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
@@ -155,11 +157,22 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   const ingestDetail = row.mediaIngest
   const projectRenderDetail = row.projectProxyRender
   const finalExportDetail = row.projectFinalExport
+  const sourceCleanupDetail = row.sourceCleanupPlan
   const isRender = row.type === 'artifact-render'
   const isIngest = row.type === 'media-ingest'
   const isProjectRender = row.type === 'project-proxy-render'
   const isFinalExport = row.type === 'project-final-export'
-  if (row.targetType !== 'media-artifact' || [isRender, isIngest, isProjectRender, isFinalExport].filter(Boolean).length !== 1) {
+  const isSourceCleanup = row.type === 'source-cleanup'
+  if (
+    row.targetType !== 'media-artifact' ||
+    [
+      isRender,
+      isIngest,
+      isProjectRender,
+      isFinalExport,
+      isSourceCleanup,
+    ].filter(Boolean).length !== 1
+  ) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
       'Stored PublicOperation context is invalid',
@@ -167,7 +180,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     )
   }
   if (isRender && (
-    !renderDetail || ingestDetail || projectRenderDetail || finalExportDetail || row.targetId !== renderDetail.artifactId ||
+    !renderDetail || ingestDetail || projectRenderDetail || finalExportDetail || sourceCleanupDetail || row.targetId !== renderDetail.artifactId ||
     row.workspaceId !== renderDetail.workspaceId ||
     renderDetail.manifest.artifactId !== renderDetail.artifactId ||
     renderDetail.authorization.artifactId !== renderDetail.artifactId ||
@@ -180,7 +193,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored render operation context is invalid', { operationId: row.id })
   }
   if (isIngest && (
-    !ingestDetail || renderDetail || projectRenderDetail || finalExportDetail || row.targetId !== ingestDetail.sourceArtifactId ||
+    !ingestDetail || renderDetail || projectRenderDetail || finalExportDetail || sourceCleanupDetail || row.targetId !== ingestDetail.sourceArtifactId ||
     row.workspaceId !== ingestDetail.workspaceId ||
     !ID_PATTERN.test(ingestDetail.projectId) || !ID_PATTERN.test(ingestDetail.sourceManifestId) ||
     ingestDetail.originalFileName.trim().length < 1
@@ -188,7 +201,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored ingest operation context is invalid', { operationId: row.id })
   }
   if (isProjectRender && (
-    !projectRenderDetail || renderDetail || ingestDetail || finalExportDetail ||
+    !projectRenderDetail || renderDetail || ingestDetail || finalExportDetail || sourceCleanupDetail ||
     row.targetId !== projectRenderDetail.outputArtifactId ||
     row.workspaceId !== projectRenderDetail.workspaceId ||
     ![projectRenderDetail.projectId, projectRenderDetail.projectVersionId, projectRenderDetail.editPlanSnapshotId,
@@ -200,7 +213,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy render context is invalid', { operationId: row.id })
   }
   if (isFinalExport && (
-    !finalExportDetail || renderDetail || ingestDetail || projectRenderDetail ||
+    !finalExportDetail || renderDetail || ingestDetail || projectRenderDetail || sourceCleanupDetail ||
     row.targetId !== finalExportDetail.outputArtifactId ||
     row.workspaceId !== finalExportDetail.workspaceId ||
     ![finalExportDetail.projectId, finalExportDetail.projectVersionId, finalExportDetail.editPlanSnapshotId,
@@ -221,6 +234,38 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     finalExportDetail.originalFileName.trim().length < 1
   )) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project final export context is invalid', { operationId: row.id })
+  }
+  if (isSourceCleanup && (
+    !sourceCleanupDetail || renderDetail || ingestDetail ||
+    projectRenderDetail || finalExportDetail ||
+    row.targetId !== sourceCleanupDetail.outputArtifactId ||
+    row.workspaceId !== sourceCleanupDetail.workspaceId ||
+    row.clientId !== sourceCleanupDetail.createdByClientId ||
+    sourceCleanupDetail.operationId !== row.id ||
+    sourceCleanupDetail.decision !== 'execute' ||
+    sourceCleanupDetail.postCleanupReviewRequired !== true ||
+    ![
+      sourceCleanupDetail.projectId,
+      sourceCleanupDetail.id,
+      sourceCleanupDetail.sourceArtifactId,
+      sourceCleanupDetail.sourceManifestId,
+      sourceCleanupDetail.outputArtifactId,
+      sourceCleanupDetail.outputManifestId,
+    ].every((value) =>
+      typeof value === 'string' && ID_PATTERN.test(value)) ||
+    ![
+      sourceCleanupDetail.planHash,
+      sourceCleanupDetail.sourceArtifactSha256,
+    ].every((value) => SHA256_PATTERN.test(value)) ||
+    !['trim', 'crop-reframe', 'cover'].includes(
+      sourceCleanupDetail.selectedStrategy,
+    )
+  )) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored source cleanup operation context is invalid',
+      { operationId: row.id },
+    )
   }
   const outputFields = checkpointFields(renderDetail)
   const hasAnyCheckpoint = outputFields.some((value) => value !== null)
@@ -310,8 +355,24 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       retryable: row.retryable,
       target: {
         type: 'media-artifact',
-        id: isRender ? renderDetail!.artifactId : isIngest ? ingestDetail!.sourceArtifactId : isProjectRender ? projectRenderDetail!.outputArtifactId : finalExportDetail!.outputArtifactId,
-        manifestId: isRender ? renderDetail!.manifestId : isIngest ? ingestDetail!.sourceManifestId : isProjectRender ? projectRenderDetail!.outputManifestId : finalExportDetail!.outputManifestId,
+        id: isRender
+          ? renderDetail!.artifactId
+          : isIngest
+            ? ingestDetail!.sourceArtifactId
+            : isProjectRender
+              ? projectRenderDetail!.outputArtifactId
+              : isFinalExport
+                ? finalExportDetail!.outputArtifactId
+                : sourceCleanupDetail!.outputArtifactId!,
+        manifestId: isRender
+          ? renderDetail!.manifestId
+          : isIngest
+            ? ingestDetail!.sourceManifestId
+            : isProjectRender
+              ? projectRenderDetail!.outputManifestId
+              : isFinalExport
+                ? finalExportDetail!.outputManifestId
+                : sourceCleanupDetail!.outputManifestId!,
       },
       ...(row.resultJson !== null ? { result: parseResult(row.resultJson) } : {}),
       ...(hasAnyError
@@ -356,7 +417,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         outputArtifactId: projectRenderDetail!.outputArtifactId,
         outputManifestId: projectRenderDetail!.outputManifestId,
         originalFileName: projectRenderDetail!.originalFileName,
-      } : {
+      } : isFinalExport ? {
         kind: 'project-final-export' as const,
         projectId: finalExportDetail!.projectId,
         projectVersionId: finalExportDetail!.projectVersionId,
@@ -390,6 +451,19 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
           ...(finalExportDetail!.approvalNote ? { note: finalExportDetail!.approvalNote } : {}),
         },
         originalFileName: finalExportDetail!.originalFileName,
+      } : {
+        kind: 'source-cleanup' as const,
+        projectId: sourceCleanupDetail!.projectId,
+        cleanupPlanId: sourceCleanupDetail!.id,
+        cleanupPlanHash: sourceCleanupDetail!.planHash,
+        sourceArtifactId: sourceCleanupDetail!.sourceArtifactId,
+        sourceArtifactSha256:
+          sourceCleanupDetail!.sourceArtifactSha256,
+        sourceManifestId: sourceCleanupDetail!.sourceManifestId,
+        outputArtifactId: sourceCleanupDetail!.outputArtifactId!,
+        outputManifestId: sourceCleanupDetail!.outputManifestId!,
+        strategy: sourceCleanupDetail!.selectedStrategy as
+          'trim' | 'crop-reframe' | 'cover',
       }),
     })
   } catch (error) {
@@ -655,7 +729,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
 
   async createOrReplay(input: {
     operation: PublicOperation
-    context: PublicOperationContext
+    context: PublicOperationCreationContext
     idempotencyKey: string
     requestFingerprint: string
   }, serializationAttempt = 1): Promise<PublicOperationPersistenceResult> {

@@ -104,6 +104,8 @@ model V2Workspace {
   contaminationProtectedRegions   V2ContaminationProtectedRegion[]
   contaminationFindings           V2ContaminationFinding[]
   contaminationOverlaps           V2ContaminationOverlap[]
+  sourceCleanupPlans              V2SourceCleanupPlan[]
+  sourceCleanupResults            V2SourceCleanupResult[]
 
   @@map("workspaces")
 }
@@ -154,6 +156,7 @@ model V2ApiClient {
   batchEditCommands           V2BatchEditCommand[]              @relation("BatchEditCommandCreator")
   sourceDeconstructionReports V2SourceDeconstructionReport[]     @relation("SourceDeconstructionCreator")
   contaminationReports        V2ContaminationReport[]            @relation("ContaminationReportCreator")
+  sourceCleanupPlans          V2SourceCleanupPlan[]               @relation("SourceCleanupCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -307,6 +310,8 @@ model V2Project {
   contaminationProtectedRegions V2ContaminationProtectedRegion[]
   contaminationFindings        V2ContaminationFinding[]
   contaminationOverlaps        V2ContaminationOverlap[]
+  sourceCleanupPlans           V2SourceCleanupPlan[]
+  sourceCleanupResults         V2SourceCleanupResult[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -712,6 +717,8 @@ model V2MediaArtifact {
   sourceDeconstructionReports  V2SourceDeconstructionReport[]
   sourceDeconstructionSegments V2SourceDeconstructionSegment[]
   contaminationReports         V2ContaminationReport[]
+  sourceCleanupSourcePlans     V2SourceCleanupPlan[]               @relation("SourceCleanupSourceArtifact")
+  sourceCleanupResults         V2SourceCleanupResult[]             @relation("SourceCleanupOutputArtifact")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -771,6 +778,8 @@ model V2MediaArtifactManifest {
   longFormIndexRuns          V2LongFormIndexRun[]
   validatedSegments          V2ValidatedSegment[]
   hierarchicalProcessingRuns V2HierarchicalProcessingRun[]
+  sourceCleanupResults        V2SourceCleanupResult[]
+  sourceCleanupPlans          V2SourceCleanupPlan[] @relation("SourceCleanupSourceManifest")
 
   @@unique([id, workspaceId])
   @@unique([artifactId, manifestHash])
@@ -1037,6 +1046,9 @@ model V2AssetRightsSnapshot {
   validatedSegments          V2ValidatedSegment[]
   semanticSearchDocuments    V2SemanticSearchDocument[]
   hierarchicalProcessingRuns V2HierarchicalProcessingRun[]
+  sourceCleanupPlans          V2SourceCleanupPlan[]   @relation("SourceCleanupSourceRights")
+  sourceCleanupSourceReviews  V2SourceCleanupResult[] @relation("SourceCleanupReviewSourceRights")
+  sourceCleanupOutputReviews  V2SourceCleanupResult[] @relation("SourceCleanupReviewOutputRights")
 
   @@unique([id, workspaceId])
   @@unique([artifactId, sequence])
@@ -1141,6 +1153,7 @@ model V2PublicOperation {
   mediaIngest         V2MediaIngestOperation?
   projectProxyRender  V2ProjectProxyRenderOperation?
   projectFinalExport  V2ProjectFinalExportOperation?
+  sourceCleanupPlan   V2SourceCleanupPlan?
   reviewPatchProposal V2ReviewPatchProposal?
   reviewPatchBatch    V2ReviewPatchBatch?
 
@@ -3314,6 +3327,7 @@ model V2ContaminationReport {
   protectedRegions       V2ContaminationProtectedRegion[]
   findings               V2ContaminationFinding[]
   overlaps               V2ContaminationOverlap[]
+  cleanupPlans           V2SourceCleanupPlan[]
 
   @@unique([id, workspaceId, projectId])
   @@unique([workspaceId, projectId, createdByClientId, idempotencyKey], map: "contamination_reports_workspace_project_actor_idem_key")
@@ -3413,6 +3427,7 @@ model V2ContaminationFinding {
   observation   V2ContaminationObservation @relation(fields: [observationId, reportId], references: [id, reportId], onDelete: Cascade, map: "contamination_findings_observation_fkey")
   leftOverlaps  V2ContaminationOverlap[]  @relation("ContaminationOverlapLeft")
   rightOverlaps V2ContaminationOverlap[]  @relation("ContaminationOverlapRight")
+  cleanupPlans  V2SourceCleanupPlan[]
 
   @@unique([id, reportId])
   @@unique([observationId, reportId])
@@ -3450,4 +3465,102 @@ model V2ContaminationOverlap {
   @@index([workspaceId, projectId, reportId, startMs], map: "contamination_overlaps_workspace_project_report_idx")
   @@index([workspaceId, confidence(sort: Desc)], map: "contamination_overlaps_workspace_confidence_idx")
   @@map("contamination_overlaps")
+}
+
+model V2SourceCleanupPlan {
+  id                          String    @id @db.VarChar(128)
+  workspaceId                 String    @db.VarChar(128)
+  projectId                   String    @db.VarChar(128)
+  contaminationReportId       String    @db.VarChar(128)
+  contaminationReportHash     String    @db.Char(64)
+  findingId                   String    @db.VarChar(128)
+  findingHash                 String    @db.Char(64)
+  sourceArtifactId            String    @db.VarChar(128)
+  sourceArtifactSha256        String    @db.Char(64)
+  sourceManifestId            String    @db.VarChar(128)
+  sourceDurationMs            Int
+  schemaVersion               String    @db.VarChar(64)
+  policyVersion               String    @db.VarChar(64)
+  policyJson                  String    @db.Text
+  policyHash                  String    @db.Char(64)
+  candidatesJson              String    @db.Text
+  candidatesHash              String    @db.Char(64)
+  selectedStrategy            String    @db.VarChar(32)
+  selectedActionJson          String    @db.Text
+  selectedActionHash          String    @db.Char(64)
+  decision                    String    @db.VarChar(16)
+  predictedResidualQuality    Float
+  predictedIntegrity          Float
+  predictedCost               Float
+  sourceImmutable             Boolean   @default(true)
+  rightsSnapshotId            String?   @db.VarChar(128)
+  rightsSnapshotHash          String?   @db.Char(64)
+  rightsDecision              String    @db.VarChar(16)
+  rightsReasonCodesJson       String    @db.Text
+  postCleanupReviewRequired   Boolean
+  operationId                 String?   @unique @db.VarChar(128)
+  outputArtifactId            String?   @db.VarChar(128)
+  outputManifestId            String?   @db.VarChar(128)
+  planJson                    String    @db.Text
+  planHash                    String    @db.Char(64)
+  requestFingerprint          String    @db.Char(64)
+  idempotencyKey              String    @db.VarChar(128)
+  createdByClientId           String    @db.VarChar(80)
+  createdAt                   DateTime  @db.Timestamptz(3)
+
+  workspace             V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "source_cleanup_plans_workspace_fkey")
+  project               V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "source_cleanup_plans_project_fkey")
+  contaminationReport   V2ContaminationReport    @relation(fields: [contaminationReportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "source_cleanup_plans_report_fkey")
+  finding               V2ContaminationFinding   @relation(fields: [findingId, contaminationReportId], references: [id, reportId], onDelete: Restrict, map: "source_cleanup_plans_finding_fkey")
+  sourceArtifact        V2MediaArtifact           @relation("SourceCleanupSourceArtifact", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_source_artifact_fkey")
+  sourceManifest        V2MediaArtifactManifest   @relation("SourceCleanupSourceManifest", fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_source_manifest_fkey")
+  createdBy             V2ApiClient               @relation("SourceCleanupCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_creator_fkey")
+  rightsSnapshot        V2AssetRightsSnapshot?     @relation("SourceCleanupSourceRights", fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_rights_snapshot_fkey")
+  operation             V2PublicOperation?        @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_operation_fkey")
+  result                V2SourceCleanupResult?
+
+  @@unique([id, workspaceId, projectId])
+  @@unique([operationId, workspaceId], map: "source_cleanup_plans_operation_workspace_key")
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey], map: "source_cleanup_plans_workspace_project_actor_idem_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)], map: "source_cleanup_plans_workspace_project_created_idx")
+  @@index([workspaceId, contaminationReportId, findingId, createdAt(sort: Desc)], map: "source_cleanup_plans_workspace_finding_created_idx")
+  @@index([workspaceId, sourceArtifactId, selectedStrategy, decision], map: "source_cleanup_plans_workspace_source_strategy_idx")
+  @@index([workspaceId, operationId], map: "source_cleanup_plans_workspace_operation_idx")
+  @@map("source_cleanup_plans")
+}
+
+model V2SourceCleanupResult {
+  cleanupPlanId            String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  outputArtifactId         String   @db.VarChar(128)
+  outputArtifactSha256     String   @db.Char(64)
+  outputManifestId         String   @db.VarChar(128)
+  strategy                 String   @db.VarChar(32)
+  visualPassed             Boolean
+  rightsPassed             Boolean
+  passed                   Boolean
+  residualQuality          Float
+  sourceRightsSnapshotId   String   @db.VarChar(128)
+  sourceRightsSnapshotHash String   @db.Char(64)
+  outputRightsSnapshotId   String   @db.VarChar(128)
+  outputRightsSnapshotHash String   @db.Char(64)
+  reviewJson               String   @db.Text
+  reviewHash               String   @db.Char(64)
+  completedAt              DateTime @db.Timestamptz(3)
+
+  workspace      V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "source_cleanup_results_workspace_fkey")
+  project        V2Project            @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "source_cleanup_results_project_fkey")
+  cleanupPlan    V2SourceCleanupPlan  @relation(fields: [cleanupPlanId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "source_cleanup_results_plan_fkey")
+  outputArtifact V2MediaArtifact      @relation("SourceCleanupOutputArtifact", fields: [outputArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_output_artifact_fkey")
+  outputManifest V2MediaArtifactManifest @relation(fields: [outputManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_output_manifest_fkey")
+  sourceRightsSnapshot V2AssetRightsSnapshot @relation("SourceCleanupReviewSourceRights", fields: [sourceRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_source_rights_fkey")
+  outputRightsSnapshot V2AssetRightsSnapshot @relation("SourceCleanupReviewOutputRights", fields: [outputRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_output_rights_fkey")
+
+  @@unique([workspaceId, outputArtifactId], map: "source_cleanup_results_workspace_outputArtifactId_key")
+  @@unique([workspaceId, outputManifestId], map: "source_cleanup_results_workspace_outputManifestId_key")
+  @@unique([cleanupPlanId, workspaceId, projectId], map: "source_cleanup_results_plan_workspace_project_key")
+  @@index([workspaceId, projectId, completedAt(sort: Desc)], map: "source_cleanup_results_workspace_project_completed_idx")
+  @@index([workspaceId, passed, completedAt(sort: Desc)], map: "source_cleanup_results_workspace_passed_idx")
+  @@map("source_cleanup_results")
 }

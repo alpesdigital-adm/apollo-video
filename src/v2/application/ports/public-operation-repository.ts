@@ -69,11 +69,30 @@ export interface ProjectFinalExportOperationContext {
   originalFileName: string
 }
 
+export interface SourceCleanupOperationContext {
+  kind: 'source-cleanup'
+  projectId: string
+  cleanupPlanId: string
+  cleanupPlanHash: string
+  sourceArtifactId: string
+  sourceArtifactSha256: string
+  sourceManifestId: string
+  outputArtifactId: string
+  outputManifestId: string
+  strategy: 'trim' | 'crop-reframe' | 'cover'
+}
+
 export type PublicOperationContext =
   | ArtifactRenderOperationContext
   | MediaIngestOperationContext
   | ProjectProxyRenderOperationContext
   | ProjectFinalExportOperationContext
+  | SourceCleanupOperationContext
+
+export type PublicOperationCreationContext = Exclude<
+  PublicOperationContext,
+  SourceCleanupOperationContext
+>
 
 export interface PublicOperationRecord {
   operation: Readonly<PublicOperation>
@@ -137,7 +156,7 @@ export interface PublicOperationRepository {
   }): Promise<PublicOperationPersistenceResult | null>
   createOrReplay(input: {
     operation: PublicOperation
-    context: PublicOperationContext
+    context: PublicOperationCreationContext
     idempotencyKey: string
     requestFingerprint: string
   }): Promise<PublicOperationPersistenceResult>

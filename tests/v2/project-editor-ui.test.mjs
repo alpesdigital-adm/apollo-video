@@ -221,6 +221,32 @@ test('T-FR-121 project editor exposes localized dual contamination diagnostics f
   assert.doesNotMatch(projectEditorSource, /sobreposição\{[^}]+\? '' : 'ões'\}/)
 })
 
+test('T-FR-122 project editor exposes API-backed cleanup decisions and post-cleanup review', () => {
+  assert.match(
+    projectEditorSource,
+    /\/source-cleanups\?limit=100/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="source-cleanup-action"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="source-cleanup-decision"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /expectedReportHash:\s*selectedContaminationReport\.reportHash/,
+  )
+  assert.match(projectEditorSource, /SOURCE_CLEANUP_STRATEGY_LABELS/)
+  assert.match(projectEditorSource, /postCleanupReview\?\.passed/)
+  assert.match(
+    projectEditorSource,
+    /activeOperation\?\.type === 'source-cleanup'/,
+  )
+  assert.match(projectEditorSource, /master intacto/)
+})
+
 test('T-FR-230 project editor exposes the persisted proxy verdict and blocks final export until release', () => {
   assert.match(projectEditorSource, /\/proxy-reviews/)
   assert.match(projectEditorSource, /data-testid="proxy-review-gate"/)
