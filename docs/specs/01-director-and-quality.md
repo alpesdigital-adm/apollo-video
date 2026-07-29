@@ -329,6 +329,82 @@ Regras:
 7. nenhum dos dois estados permite fabricar card, estatística ou depoimento;
 8. o plano permanece virtual até um gate posterior escolher o modo de prova.
 
+### 10.2 ProofIntegrityGate
+
+`ProofIntegrityGate` recebe o `ProofNeedRun`, a `VariantRecipe`, o
+`CompatibilityGraph`, o `EvidenceSegment` selecionado, o snapshot atual de
+rights e a descrição exata do contexto que a montagem pretende incluir. Ele
+não aceita contexto narrativo implícito nem autorização armazenada somente no
+cliente.
+
+Campos estruturados obrigatórios da recipe:
+
+```ts
+interface ProofIntegrityRecipeContext {
+  nodeId: string
+  nodeHash: Sha256
+  contextHash: Sha256
+  claimId: string
+  claimText?: string
+  productId: string
+  person?: string       // claim key integrity.person
+  period?: string       // claim key integrity.period
+  audienceTags: string[]
+  consentRequirement: 'approved' | 'approved-or-not-required'
+  contextHashBinding: Sha256
+}
+```
+
+O gate avalia oito dimensões: `claim`, `product`, `person`, `period`,
+`audience`, `consent`, `rights` e `context`. O match de audience exige que todos
+os tags esperados sejam suportados; o match de contexto exige range integral e
+todas as evidências adjacentes. Rights e consentimento são avaliados na data
+canônica da execução.
+
+Saídas:
+
+```ts
+type ProofIntegrityOutcome = 'approved' | 'blocked' | 'not-applicable'
+
+interface ProofIntegrityPresentation {
+  evidenceId: string
+  evidenceHash: Sha256
+  requiredContextRangeMs: [number, number]
+  requiredAdjacentEvidenceIds: string[]
+  visual: {
+    attribution: string
+    qualifiers: string[]
+    mandatory: true
+  }
+  verbal: {
+    attribution: string
+    qualifiers: string[]
+    mandatory: true
+  }
+}
+```
+
+`approved` exige todas as dimensões aplicáveis em `match` e libera o item para
+montagem. `blocked` sempre contém issue hard e nenhuma permissão de montagem.
+`not-applicable` é exclusivo de `no-proof-needed`.
+
+As únicas ações corretivas permitidas são completar o contexto estruturado,
+selecionar evidência existente compatível, restaurar o contexto obrigatório ou
+renovar direitos/consentimento. Nenhuma ação pode conter geração ou fabricação
+de prova.
+
+Presentation é um contrato de conteúdo, não uma sugestão de layout. O modo de
+prova posterior pode posicionar e estilizar o crédito, mas visual e verbal
+devem conservar attribution e qualifiers idênticos, além do range e adjacências
+obrigatórios.
+
+Execuções são append-only, idempotentes e vinculadas aos hashes de
+`ProofNeedRun`, recipe, node/context e evidência. Antes do commit, a camada de
+persistência revalida as identidades e o snapshot atual em transação
+serializável. A montagem deve consultar uma execução atual com
+`readyForAssembly=true`; uma aprovação histórica não substitui reavaliação
+após mudança de rights ou consentimento.
+
 ## 11. Geração de candidatos
 
 ### 11.1 Quando gerar alternativas

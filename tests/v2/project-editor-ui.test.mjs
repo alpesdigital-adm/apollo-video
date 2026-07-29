@@ -311,6 +311,35 @@ test('T-FR-130 project editor exposes API-backed proof needs without fabricated 
   assert.match(projectEditorSource, /card genérico: nunca gerado/)
 })
 
+test('T-FR-131 project editor exposes API-backed proof integrity without fabricated evidence', () => {
+  assert.match(
+    projectEditorSource,
+    /\/proof-integrity-runs\?limit=100/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-integrity-panel"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-integrity-dimensions"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-integrity-presentation"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-integrity-issue"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-integrity-no-fabrication"/,
+  )
+  assert.match(projectEditorSource, /Tela \+ fala/)
+  assert.match(projectEditorSource, /fabricação sugerida: nunca/)
+})
+
 test('T-FR-230 project editor exposes the persisted proxy verdict and blocks final export until release', () => {
   assert.match(projectEditorSource, /\/proxy-reviews/)
   assert.match(projectEditorSource, /data-testid="proxy-review-gate"/)

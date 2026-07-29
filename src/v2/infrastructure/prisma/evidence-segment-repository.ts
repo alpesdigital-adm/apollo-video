@@ -6,6 +6,7 @@ import {
 
 import type {
   EvidenceSegmentRepository,
+  EvidenceSegmentCurrentContext,
   EvidenceSegmentSearchQuery,
   EvidenceSegmentSearchResult,
   PersistedEvidenceSegment,
@@ -407,6 +408,33 @@ implements EvidenceSegmentRepository {
       },
     })
     return row ? hydrate(row) : null
+  }
+
+  async readCurrent(input: {
+    workspaceId: string
+    projectId: string
+    evidenceId: string
+  }): Promise<Readonly<EvidenceSegmentCurrentContext> | null> {
+    const row = await this.client.v2EvidenceSegment.findFirst({
+      where: {
+        id: input.evidenceId,
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+      },
+      include: {
+        sourceArtifact: {
+          include: { currentRightsSnapshot: true },
+        },
+      },
+    })
+    if (!row) return null
+    const currentRights = row.sourceArtifact.currentRightsSnapshot
+    return Object.freeze({
+      evidence: hydrate(row),
+      ...(currentRights
+        ? { currentRights: rightsSnapshot(currentRights) }
+        : {}),
+    })
   }
 
   async persist(

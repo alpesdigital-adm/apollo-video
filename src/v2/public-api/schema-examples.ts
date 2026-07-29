@@ -3445,6 +3445,148 @@ const proofNeedRunExample = {
   createdAt,
   runHash: 'b'.repeat(64),
 }
+const proofIntegrityCreateRequestExample = {
+  proofNeedRunId: proofNeedRunExample.id,
+  expectedProofNeedRunHash: proofNeedRunExample.runHash,
+  policyVersion: 'proof-integrity-policy/v1',
+  uses: [
+    {
+      proofNeedItemId: proofNeedItemExample.id,
+      includedContextRangeMs:
+        proofNeedSelectedEvidenceExample.contextRangeMs,
+      includedAdjacentEvidenceIds: [],
+    },
+  ],
+}
+const proofIntegrityRecipeContextExample = {
+  nodeId: 'compatibility-node-proof-example-1',
+  nodeHash: 'c'.repeat(64),
+  contextHash: 'd'.repeat(64),
+  claimId: proofNeedItemExample.claimId,
+  claimText: proofNeedItemExample.claimText,
+  productId: 'offer-immersao-example-1',
+  person: 'Cliente verificado',
+  period: '2025',
+  audienceTags: ['profissionais'],
+  consentRequirement: 'approved',
+  contextHashBinding: 'e'.repeat(64),
+}
+const proofIntegrityPresentationExample = {
+  schemaVersion: 'proof-integrity-presentation/v1',
+  evidenceId: proofNeedSelectedEvidenceExample.id,
+  evidenceHash: proofNeedSelectedEvidenceExample.evidenceHash,
+  requiredContextRangeMs:
+    proofNeedSelectedEvidenceExample.contextRangeMs,
+  requiredAdjacentEvidenceIds: [],
+  visual: {
+    attribution: 'Cliente verificado',
+    qualifiers: ['period:2025'],
+    mandatory: true,
+  },
+  verbal: {
+    attribution: 'Cliente verificado',
+    qualifiers: ['period:2025'],
+    mandatory: true,
+  },
+  presentationHash: 'f'.repeat(64),
+}
+const proofIntegrityEvaluationExample = {
+  id: 'proof-integrity-evaluation-example-1',
+  sequence: 1,
+  proofNeedItemId: proofNeedItemExample.id,
+  proofNeedItemHash: proofNeedItemExample.itemHash,
+  proofNeedResolution: 'selected-evidence',
+  selectedEvidenceId: proofNeedSelectedEvidenceExample.id,
+  selectedEvidenceHash:
+    proofNeedSelectedEvidenceExample.evidenceHash,
+  recipeContext: proofIntegrityRecipeContextExample,
+  use: {
+    includedContextRangeMs:
+      proofNeedSelectedEvidenceExample.contextRangeMs,
+    includedAdjacentEvidenceIds: [],
+  },
+  comparisons: [
+    {
+      dimension: 'claim',
+      expected: [proofNeedItemExample.claimText],
+      actual: [proofNeedItemExample.claimText],
+      outcome: 'match',
+    },
+    {
+      dimension: 'product',
+      expected: ['offer-immersao-example-1'],
+      actual: ['offer-immersao-example-1'],
+      outcome: 'match',
+    },
+    {
+      dimension: 'person',
+      expected: ['Cliente verificado'],
+      actual: ['Cliente verificado'],
+      outcome: 'match',
+    },
+    {
+      dimension: 'period',
+      expected: ['2025'],
+      actual: ['2025'],
+      outcome: 'match',
+    },
+    {
+      dimension: 'audience',
+      expected: ['profissionais'],
+      actual: ['profissionais'],
+      outcome: 'match',
+    },
+    {
+      dimension: 'rights',
+      expected: ['approved'],
+      actual: ['approved'],
+      outcome: 'match',
+    },
+    {
+      dimension: 'consent',
+      expected: ['approved'],
+      actual: ['approved'],
+      outcome: 'match',
+    },
+    {
+      dimension: 'context',
+      expected: ['800-8300'],
+      actual: ['800-8300'],
+      outcome: 'match',
+    },
+  ],
+  outcome: 'approved',
+  allowedForAssembly: true,
+  presentation: proofIntegrityPresentationExample,
+  fabricationSuggested: false,
+  evaluatedAt: createdAt,
+  evaluationHash: '1'.repeat(64),
+}
+const proofIntegrityRunExample = {
+  schemaVersion: 'proof-integrity-run/v1',
+  policyVersion: 'proof-integrity-policy/v1',
+  id: 'proof-integrity-run-example-1',
+  workspaceId,
+  projectId,
+  batchId: proofNeedRunExample.batchId,
+  targetRecipeId: proofNeedRunExample.targetRecipeId,
+  targetRecipeHash: proofNeedRunExample.targetRecipeHash,
+  proofNeedRunId: proofNeedRunExample.id,
+  proofNeedRunHash: proofNeedRunExample.runHash,
+  evaluations: [proofIntegrityEvaluationExample],
+  summary: {
+    evaluationCount: 1,
+    approvedCount: 1,
+    blockedCount: 0,
+    notApplicableCount: 0,
+    hardIssueCount: 0,
+    fabricationSuggestionCount: 0,
+    readyForAssembly: true,
+  },
+  createdByClientId: clientId,
+  createdAt,
+  runHash: '2'.repeat(64),
+}
 const variantPortfolioPreflightRunExample = {
   schemaVersion: 'variant-portfolio-preflight/v1',
   selectionVersion: 'variant-portfolio-selection/v1',
@@ -5927,6 +6069,33 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           runs: [proofNeedRunExample],
           nextCursor: proofNeedRunExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-proof-integrity-run-request/v1': [
+      proofIntegrityCreateRequestExample,
+    ],
+    'apollo://schemas/proof-integrity-run-mutated/v1': [
+      {
+        data: {
+          run: proofIntegrityRunExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/proof-integrity-run-read/v1': [
+      {
+        data: { run: proofIntegrityRunExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/proof-integrity-run-page/v1': [
+      {
+        data: {
+          runs: [proofIntegrityRunExample],
+          nextCursor: proofIntegrityRunExample.id,
         },
         meta: { apiVersion: 'v1' },
       },

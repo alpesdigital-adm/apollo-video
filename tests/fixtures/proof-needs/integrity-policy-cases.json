@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "proof-integrity-policy-eval/v1",
+  "cases": [
+    {
+      "id": "canonical-match",
+      "kind": "canonical-match",
+      "expectedOutcome": "approved",
+      "expectedReasons": []
+    },
+    {
+      "id": "normalized-text-match",
+      "kind": "normalized-text-match",
+      "expectedOutcome": "approved",
+      "expectedReasons": []
+    },
+    {
+      "id": "claim-drift",
+      "kind": "claim-drift",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["CLAIM_MISMATCH"]
+    },
+    {
+      "id": "product-drift",
+      "kind": "product-drift",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["PRODUCT_MISMATCH"]
+    },
+    {
+      "id": "person-drift",
+      "kind": "person-drift",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["PERSON_MISMATCH"]
+    },
+    {
+      "id": "period-drift",
+      "kind": "period-drift",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["PERIOD_MISMATCH"]
+    },
+    {
+      "id": "audience-drift",
+      "kind": "audience-drift",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["AUDIENCE_MISMATCH"]
+    },
+    {
+      "id": "consent-expired",
+      "kind": "consent-expired",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["CONSENT_EXPIRED"]
+    },
+    {
+      "id": "context-missing",
+      "kind": "context-missing",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["CONTEXT_RANGE_MISSING"]
+    },
+    {
+      "id": "context-incomplete",
+      "kind": "context-incomplete",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["CONTEXT_RANGE_INCOMPLETE"]
+    },
+    {
+      "id": "adjacent-context-missing",
+      "kind": "adjacent-context-missing",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["ADJACENT_CONTEXT_MISSING"]
+    },
+    {
+      "id": "recipe-person-unspecified",
+      "kind": "recipe-person-unspecified",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["RECIPE_PERSON_UNSPECIFIED", "PERSON_MISMATCH"]
+    },
+    {
+      "id": "proof-unavailable",
+      "kind": "proof-unavailable",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["PROOF_UNAVAILABLE"]
+    },
+    {
+      "id": "no-proof-needed",
+      "kind": "no-proof-needed",
+      "expectedOutcome": "not-applicable",
+      "expectedReasons": []
+    }
+  ]
+}

@@ -293,6 +293,78 @@ interface ProofNeedRunData {
   }
   createdAt: string
 }
+type ProofIntegrityOutcome =
+  | 'approved'
+  | 'blocked'
+  | 'not-applicable'
+type ProofIntegrityDimension =
+  | 'claim'
+  | 'product'
+  | 'person'
+  | 'period'
+  | 'audience'
+  | 'consent'
+  | 'rights'
+  | 'context'
+interface ProofIntegrityRunData {
+  id: string
+  targetRecipeId: string
+  proofNeedRunId: string
+  evaluations: {
+    id: string
+    sequence: number
+    proofNeedItemId: string
+    proofNeedResolution: ProofNeedResolution
+    selectedEvidenceId?: string
+    recipeContext?: {
+      claimText?: string
+      productId: string
+      person?: string
+      period?: string
+      audienceTags: string[]
+    }
+    comparisons: {
+      dimension: ProofIntegrityDimension
+      expected: string[]
+      actual: string[]
+      outcome: 'match' | 'mismatch' | 'missing' | 'expired'
+      reasonCode?: string
+    }[]
+    outcome: ProofIntegrityOutcome
+    allowedForAssembly: boolean
+    presentation?: {
+      requiredContextRangeMs: [number, number]
+      requiredAdjacentEvidenceIds: string[]
+      visual: {
+        attribution: string
+        qualifiers: string[]
+        mandatory: true
+      }
+      verbal: {
+        attribution: string
+        qualifiers: string[]
+        mandatory: true
+      }
+    }
+    issue?: {
+      reasonCodes: string[]
+      actions: string[]
+      fabricationSuggested: false
+      message: string
+    }
+    fabricationSuggested: false
+  }[]
+  summary: {
+    evaluationCount: number
+    approvedCount: number
+    blockedCount: number
+    notApplicableCount: number
+    hardIssueCount: number
+    fabricationSuggestionCount: 0
+    readyForAssembly: boolean
+  }
+  createdAt: string
+}
 interface PublicOperation {
   id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export' | 'source-cleanup'; status: string; phase: string;
   progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string
@@ -539,6 +611,29 @@ const PROOF_NEED_RESOLUTION_LABELS = Object.freeze({
   'no-proof-needed': 'Prova desnecessária',
 } satisfies Record<ProofNeedResolution, string>)
 
+const PROOF_INTEGRITY_DIMENSION_LABELS = Object.freeze({
+  claim: 'Afirmação',
+  product: 'Produto',
+  person: 'Pessoa',
+  period: 'Período',
+  audience: 'Público',
+  consent: 'Consentimento',
+  rights: 'Direitos',
+  context: 'Contexto',
+} satisfies Record<ProofIntegrityDimension, string>)
+
+const PROOF_INTEGRITY_ACTION_LABELS: Readonly<Record<string, string>> =
+Object.freeze({
+  'add-structured-recipe-context':
+    'Completar pessoa, período e público na receita',
+  'select-compatible-existing-evidence':
+    'Escolher outra evidência já existente',
+  'restore-required-evidence-context':
+    'Restaurar o contexto completo da evidência',
+  'renew-rights-or-consent':
+    'Renovar direitos ou consentimento',
+})
+
 function readableBytes(value: number | string): string {
   const bytes = typeof value === 'string' ? Number(value) : value
   if (!Number.isFinite(bytes)) return '—'
@@ -713,6 +808,10 @@ export default function ProjectWorkspacePage() {
   const [proofNeedRuns, setProofNeedRuns] =
     useState<ProofNeedRunData[]>([])
   const [proofNeedsLoading, setProofNeedsLoading] = useState(true)
+  const [proofIntegrityRuns, setProofIntegrityRuns] =
+    useState<ProofIntegrityRunData[]>([])
+  const [proofIntegrityLoading, setProofIntegrityLoading] =
+    useState(true)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -972,6 +1071,48 @@ export default function ProjectWorkspacePage() {
   useEffect(() => {
     void loadProofNeedRuns()
   }, [loadProofNeedRuns])
+  const loadProofIntegrityRuns = useCallback(
+    async (quiet = false) => {
+      if (!quiet) setProofIntegrityLoading(true)
+      try {
+        const response = await fetch(
+          `/v1/projects/${encodeURIComponent(projectId)}` +
+            '/proof-integrity-runs?limit=100',
+          {
+            headers: { accept: 'application/json' },
+            cache: 'no-store',
+          },
+        )
+        if (response.status === 401) {
+          router.replace('/login')
+          return
+        }
+        const payload = await response.json() as ApiEnvelope<{
+          runs: ProofIntegrityRunData[]
+        }>
+        if (!response.ok || !payload.data) {
+          throw new Error(apiError(
+            payload,
+            'Não foi possível carregar a integridade das provas.',
+          ))
+        }
+        setProofIntegrityRuns(payload.data.runs)
+      } catch (error) {
+        if (!quiet) {
+          setNotice(error instanceof Error
+            ? error.message
+            : 'Não foi possível carregar a integridade das provas.')
+        }
+      } finally {
+        if (!quiet) setProofIntegrityLoading(false)
+      }
+    },
+    [projectId, router],
+  )
+
+  useEffect(() => {
+    void loadProofIntegrityRuns()
+  }, [loadProofIntegrityRuns])
   useEffect(() => () => reviewElementLookup.current?.abort(), [])
   useEffect(() => {
     if (workspace?.editPlan?.state !== 'compiled' || !workspace.version) {
@@ -3688,6 +3829,194 @@ export default function ProjectWorkspacePage() {
                               data-testid="proof-need-no-generic-card"
                             >
                               card genérico: nunca gerado
+                            </p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section
+            aria-label="Integridade das provas escolhidas pelo Diretor"
+            className="mt-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
+            data-testid="proof-integrity-panel"
+          >
+            <div className="relative overflow-hidden border-b border-white/[0.07] px-5 py-5">
+              <div className="pointer-events-none absolute inset-y-0 right-0 w-44 bg-[linear-gradient(135deg,transparent_20%,rgba(78,132,93,.08)_20%,rgba(78,132,93,.08)_22%,transparent_22%,transparent_45%,rgba(183,132,48,.07)_45%,rgba(183,132,48,.07)_47%,transparent_47%)]" />
+              <div className="relative flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#9b8d72]">Integridade editorial</p>
+                  <h2 className="mt-1.5 text-base font-semibold tracking-[-0.02em] text-[#e8e3da]">A prova precisa caber na história sem perder o contexto.</h2>
+                  <p className="mt-1 max-w-3xl text-[10px] leading-5 text-[#6e6961]">Antes da montagem, o Diretor confronta afirmação, produto, pessoa, período, público, consentimento, direitos e contexto. Atribuição e ressalvas aprovadas viajam juntas na tela e na fala.</p>
+                </div>
+                <div className="flex items-center gap-2 font-mono text-[8px] uppercase tracking-[0.12em]">
+                  <span className="border border-[#4e835d]/30 px-2.5 py-1.5 text-[#72a47f]">
+                    {proofIntegrityRuns.reduce((total, run) =>
+                      total + run.summary.approvedCount, 0)} aprovadas
+                  </span>
+                  <span className="border border-[#a8524b]/35 px-2.5 py-1.5 text-[#c56e67]">
+                    {proofIntegrityRuns.reduce((total, run) =>
+                      total + run.summary.blockedCount, 0)} bloqueadas
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {proofIntegrityLoading ? (
+              <div className="px-5 py-10 text-center text-xs text-[#716c64]">
+                Conferindo contexto, direitos e consentimento…
+              </div>
+            ) : proofIntegrityRuns.length === 0 ? (
+              <div className="grid gap-2 px-5 py-9 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div>
+                  <p className="text-sm font-medium text-[#bdb7ae]">A conferência começa depois que uma necessidade de prova é resolvida.</p>
+                  <p className="mt-1 text-[10px] leading-5 text-[#69655e]">Nenhuma evidência entra na montagem enquanto esta etapa não comparar a receita e a autorização atuais.</p>
+                </div>
+                <span className="mt-2 border border-dashed border-white/[0.1] px-3 py-2 font-mono text-[8px] uppercase tracking-[0.14em] text-[#5f5a53] sm:mt-0">aguardando prova</span>
+              </div>
+            ) : (
+              <div className="divide-y divide-white/[0.06]">
+                {proofIntegrityRuns.map((run) => (
+                  <article
+                    className="px-5 py-5"
+                    data-testid="proof-integrity-run"
+                    key={run.id}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-semibold text-[#c9c4bb]">Conferência da receita {run.targetRecipeId.slice(-12)}</p>
+                        <p className="mt-1 font-mono text-[8px] text-[#625e57]">{run.summary.evaluationCount} prova{run.summary.evaluationCount === 1 ? '' : 's'} conferida{run.summary.evaluationCount === 1 ? '' : 's'} · nenhuma evidência fabricada</p>
+                      </div>
+                      <span
+                        className={`border px-2.5 py-1.5 text-[8px] font-semibold uppercase tracking-[0.11em] ${run.summary.readyForAssembly ? 'border-[#4f865f]/35 bg-[#4f865f]/[0.06] text-[#77af84]' : 'border-[#a8524b]/40 bg-[#a8524b]/[0.06] text-[#d17870]'}`}
+                        data-testid="proof-integrity-readiness"
+                      >
+                        {run.summary.readyForAssembly
+                          ? 'liberada para montagem'
+                          : 'montagem bloqueada'}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                      {run.evaluations.map((evaluation) => {
+                        const approved =
+                          evaluation.outcome === 'approved'
+                        const notApplicable =
+                          evaluation.outcome === 'not-applicable'
+                        const comparisonByDimension = new Map(
+                          evaluation.comparisons.map((entry) =>
+                            [entry.dimension, entry]),
+                        )
+                        return (
+                          <div
+                            className={`relative overflow-hidden border px-4 py-4 ${approved ? 'border-[#4f805d]/30 bg-[#4f805d]/[0.035]' : notApplicable ? 'border-white/[0.07] bg-white/[0.015]' : 'border-[#a8524b]/35 bg-[#a8524b]/[0.035]'}`}
+                            data-testid="proof-integrity-evaluation"
+                            key={evaluation.id}
+                          >
+                            <i className={`absolute inset-y-0 left-0 w-px ${approved ? 'bg-[#66a278]' : notApplicable ? 'bg-[#5f5a53]' : 'bg-[#c35e57]'}`} />
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="font-mono text-[8px] text-[#706a62]">prova {String(evaluation.sequence).padStart(2, '0')}</span>
+                              <span className={`text-[8px] font-bold uppercase tracking-[0.12em] ${approved ? 'text-[#74aa81]' : notApplicable ? 'text-[#827c73]' : 'text-[#cf7069]'}`}>
+                                {approved
+                                  ? 'íntegra'
+                                  : notApplicable
+                                    ? 'não se aplica'
+                                    : 'uso interrompido'}
+                              </span>
+                            </div>
+
+                            <div
+                              className="mt-4 grid grid-cols-2 gap-px overflow-hidden border border-white/[0.07] bg-white/[0.06] sm:grid-cols-4"
+                              data-testid="proof-integrity-dimensions"
+                            >
+                              {(Object.keys(
+                                PROOF_INTEGRITY_DIMENSION_LABELS,
+                              ) as ProofIntegrityDimension[]).map(
+                                (dimension) => {
+                                  const result =
+                                    comparisonByDimension.get(dimension)
+                                  const matched =
+                                    result?.outcome === 'match'
+                                  const failed = result &&
+                                    result.outcome !== 'match'
+                                  const status = matched
+                                    ? 'confere'
+                                    : result?.outcome === 'expired'
+                                      ? 'expirada'
+                                      : result?.outcome === 'missing'
+                                        ? 'ausente'
+                                        : failed
+                                          ? 'diverge'
+                                          : '—'
+                                  const comparison = result
+                                    ? `${result.expected.join(', ') || '—'} → ${result.actual.join(', ') || '—'}`
+                                    : 'Não se aplica'
+                                  return (
+                                    <div
+                                      aria-label={`${PROOF_INTEGRITY_DIMENSION_LABELS[dimension]}: ${comparison}`}
+                                      className={`relative min-w-0 bg-[#0a0a0a] px-2.5 py-2.5 ${matched ? 'bg-[linear-gradient(180deg,rgba(76,134,93,.075),rgba(10,10,10,1))]' : failed ? 'bg-[linear-gradient(180deg,rgba(168,82,75,.075),rgba(10,10,10,1))]' : ''}`}
+                                      key={dimension}
+                                      title={comparison}
+                                    >
+                                      <i className={`absolute inset-x-0 top-0 h-px ${matched ? 'bg-[#61a473]/70' : failed ? 'bg-[#c46159]/70' : 'bg-white/[0.08]'}`} />
+                                      <p className="text-[7px] font-semibold uppercase tracking-[0.08em] text-[#8b857c]">
+                                        {PROOF_INTEGRITY_DIMENSION_LABELS[dimension]}
+                                      </p>
+                                      <p className={`mt-1 font-mono text-[8px] uppercase tracking-[0.06em] ${matched ? 'text-[#6fa27b]' : failed ? 'text-[#c46c65]' : 'text-[#57534d]'}`}>
+                                        {status}
+                                      </p>
+                                      {failed ? (
+                                        <p className="mt-1 truncate font-mono text-[7px] text-[#78615e]">
+                                          {comparison}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  )
+                                },
+                              )}
+                            </div>
+
+                            {evaluation.presentation ? (
+                              <div
+                                className="mt-4 grid gap-3 border-t border-white/[0.06] pt-3 sm:grid-cols-[1fr_auto]"
+                                data-testid="proof-integrity-presentation"
+                              >
+                                <div>
+                                  <p className="text-[8px] font-semibold uppercase tracking-[0.13em] text-[#777168]">Crédito obrigatório</p>
+                                  <p className="mt-1 text-[10px] text-[#aaa39a]">{evaluation.presentation.visual.attribution}</p>
+                                  <div className="mt-2 flex flex-wrap gap-1">
+                                    {evaluation.presentation.visual.qualifiers.map((qualifier) => (
+                                      <span className="border border-[#9a7836]/25 px-1.5 py-0.5 font-mono text-[7px] text-[#a88a51]" key={qualifier}>{qualifier}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="border-l border-white/[0.06] pl-3 text-right">
+                                  <p className="text-[8px] uppercase tracking-[0.1em] text-[#676159]">Tela + fala</p>
+                                  <p className="mt-1 text-[9px] font-semibold text-[#78a584]">idênticas</p>
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {evaluation.issue ? (
+                              <div className="mt-4 border-t border-[#a8524b]/20 pt-3" data-testid="proof-integrity-issue">
+                                <p className="text-[9px] leading-4 text-[#b9827d]">{evaluation.issue.message}</p>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {evaluation.issue.actions.map((action) => (
+                                    <span className="border border-[#a8524b]/25 bg-[#a8524b]/[0.04] px-2 py-1 text-[8px] text-[#bc7771]" key={action}>
+                                      {PROOF_INTEGRITY_ACTION_LABELS[action] ??
+                                        action}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            <p className="mt-3 font-mono text-[8px] uppercase tracking-[0.1em] text-[#69766c]" data-testid="proof-integrity-no-fabrication">
+                              fabricação sugerida: nunca
                             </p>
                           </div>
                         )

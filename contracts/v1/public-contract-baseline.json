@@ -3015,6 +3015,142 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.projects.proof-integrity-runs.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-proof-integrity-run-request/v1",
+      "outputSchemaRef": "apollo://schemas/proof-integrity-run-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/proof-integrity-runs"
+      },
+      "toolName": "apollo.projects.proof-integrity-runs.create",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.proof-integrity-runs.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/proof-integrity-run-page/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/proof-integrity-runs"
+      },
+      "toolName": "apollo.projects.proof-integrity-runs.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "proofNeedRunId",
+          "description": "Optional exact ProofNeed run identity.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "targetRecipeId",
+          "description": "Optional exact VariantRecipe identity.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "outcome",
+          "description": "Optional evaluation outcome filter.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "blocked",
+              "not-applicable"
+            ]
+          }
+        },
+        {
+          "name": "readyForAssembly",
+          "description": "Optional assembly-readiness filter.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "limit",
+          "description": "Maximum ProofIntegrity runs to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        {
+          "name": "cursor",
+          "description": "Opaque cursor returned by the previous page.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.proof-integrity-runs.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/proof-integrity-run-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/proof-integrity-runs/{runId}"
+      },
+      "toolName": "apollo.projects.proof-integrity-runs.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.proof-needs.create": {
       "version": "1.0.0",
       "exposure": "public",
@@ -23331,6 +23467,77 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048
+        }
+      }
+    },
+    "apollo://schemas/create-proof-integrity-run-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proofNeedRunId",
+        "expectedProofNeedRunHash",
+        "policyVersion",
+        "uses"
+      ],
+      "properties": {
+        "proofNeedRunId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedProofNeedRunHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "policyVersion": {
+          "const": "proof-integrity-policy/v1"
+        },
+        "uses": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "proofNeedItemId",
+              "includedAdjacentEvidenceIds"
+            ],
+            "properties": {
+              "proofNeedItemId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "includedContextRangeMs": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 86399999
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 86400000
+                  }
+                ],
+                "items": false
+              },
+              "includedAdjacentEvidenceIds": {
+                "type": "array",
+                "maxItems": 64,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -49106,6 +49313,1897 @@
                     "type": "string",
                     "format": "date-time"
                   }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/proof-integrity-run-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run",
+            "replayed"
+          ],
+          "properties": {
+            "run": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "policyVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "batchId",
+                "targetRecipeId",
+                "targetRecipeHash",
+                "proofNeedRunId",
+                "proofNeedRunHash",
+                "evaluations",
+                "summary",
+                "createdByClientId",
+                "createdAt",
+                "runHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "proof-integrity-run/v1"
+                },
+                "policyVersion": {
+                  "const": "proof-integrity-policy/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "batchId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "targetRecipeId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "targetRecipeHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "proofNeedRunId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "proofNeedRunHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "evaluations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 16,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "sequence",
+                      "proofNeedItemId",
+                      "proofNeedItemHash",
+                      "proofNeedResolution",
+                      "use",
+                      "comparisons",
+                      "outcome",
+                      "allowedForAssembly",
+                      "fabricationSuggested",
+                      "evaluatedAt",
+                      "evaluationHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 16
+                      },
+                      "proofNeedItemId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "proofNeedItemHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "proofNeedResolution": {
+                        "enum": [
+                          "selected-evidence",
+                          "proof-unavailable",
+                          "no-proof-needed"
+                        ]
+                      },
+                      "selectedEvidenceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "selectedEvidenceHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "recipeContext": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "nodeId",
+                          "nodeHash",
+                          "contextHash",
+                          "claimId",
+                          "productId",
+                          "audienceTags",
+                          "consentRequirement",
+                          "contextHashBinding"
+                        ],
+                        "properties": {
+                          "nodeId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "nodeHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "contextHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "claimId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "claimText": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 2000
+                          },
+                          "productId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "person": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "period": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "audienceTags": {
+                            "type": "array",
+                            "maxItems": 64,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 240
+                            }
+                          },
+                          "consentRequirement": {
+                            "enum": [
+                              "approved",
+                              "approved-or-not-required"
+                            ]
+                          },
+                          "contextHashBinding": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "use": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "includedAdjacentEvidenceIds"
+                        ],
+                        "properties": {
+                          "includedContextRangeMs": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "prefixItems": [
+                              {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 86399999
+                              },
+                              {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 86400000
+                              }
+                            ],
+                            "items": false
+                          },
+                          "includedAdjacentEvidenceIds": {
+                            "type": "array",
+                            "maxItems": 64,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          }
+                        }
+                      },
+                      "comparisons": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "dimension",
+                            "expected",
+                            "actual",
+                            "outcome"
+                          ],
+                          "properties": {
+                            "dimension": {
+                              "enum": [
+                                "claim",
+                                "product",
+                                "person",
+                                "period",
+                                "audience",
+                                "consent",
+                                "rights",
+                                "context"
+                              ]
+                            },
+                            "expected": {
+                              "type": "array",
+                              "maxItems": 128,
+                              "items": {
+                                "type": "string",
+                                "maxLength": 2000
+                              }
+                            },
+                            "actual": {
+                              "type": "array",
+                              "maxItems": 128,
+                              "items": {
+                                "type": "string",
+                                "maxLength": 2000
+                              }
+                            },
+                            "outcome": {
+                              "enum": [
+                                "match",
+                                "mismatch",
+                                "missing",
+                                "expired"
+                              ]
+                            },
+                            "reasonCode": {
+                              "enum": [
+                                "PROOF_UNAVAILABLE",
+                                "EVIDENCE_MISSING",
+                                "EVIDENCE_IDENTITY_MISMATCH",
+                                "RECIPE_CLAIM_UNSPECIFIED",
+                                "RECIPE_CLAIM_MISMATCH",
+                                "RECIPE_PERSON_UNSPECIFIED",
+                                "RECIPE_PERIOD_UNSPECIFIED",
+                                "RECIPE_AUDIENCE_UNSPECIFIED",
+                                "EVIDENCE_AUDIENCE_UNSPECIFIED",
+                                "CLAIM_MISMATCH",
+                                "PRODUCT_MISMATCH",
+                                "PERSON_MISMATCH",
+                                "PERIOD_MISMATCH",
+                                "AUDIENCE_MISMATCH",
+                                "RIGHTS_SNAPSHOT_STALE",
+                                "RIGHTS_NOT_APPROVED",
+                                "RIGHTS_EXPIRED",
+                                "CONSENT_NOT_APPROVED",
+                                "CONSENT_EXPIRED",
+                                "EVIDENCE_INTEGRITY_BLOCKED",
+                                "CONTEXT_RANGE_MISSING",
+                                "CONTEXT_RANGE_INCOMPLETE",
+                                "ADJACENT_CONTEXT_MISSING"
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "outcome": {
+                        "enum": [
+                          "approved",
+                          "blocked",
+                          "not-applicable"
+                        ]
+                      },
+                      "allowedForAssembly": {
+                        "type": "boolean"
+                      },
+                      "presentation": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "evidenceId",
+                          "evidenceHash",
+                          "requiredContextRangeMs",
+                          "requiredAdjacentEvidenceIds",
+                          "visual",
+                          "verbal",
+                          "presentationHash"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": "proof-integrity-presentation/v1"
+                          },
+                          "evidenceId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "evidenceHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "requiredContextRangeMs": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "prefixItems": [
+                              {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 86399999
+                              },
+                              {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 86400000
+                              }
+                            ],
+                            "items": false
+                          },
+                          "requiredAdjacentEvidenceIds": {
+                            "type": "array",
+                            "maxItems": 64,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          },
+                          "visual": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "attribution",
+                              "qualifiers",
+                              "mandatory"
+                            ],
+                            "properties": {
+                              "attribution": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 240
+                              },
+                              "qualifiers": {
+                                "type": "array",
+                                "maxItems": 64,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                }
+                              },
+                              "mandatory": {
+                                "const": true
+                              }
+                            }
+                          },
+                          "verbal": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "attribution",
+                              "qualifiers",
+                              "mandatory"
+                            ],
+                            "properties": {
+                              "attribution": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 240
+                              },
+                              "qualifiers": {
+                                "type": "array",
+                                "maxItems": 64,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                }
+                              },
+                              "mandatory": {
+                                "const": true
+                              }
+                            }
+                          },
+                          "presentationHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "issue": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "severity",
+                          "reasonCodes",
+                          "actions",
+                          "fabricationSuggested",
+                          "message",
+                          "issueHash"
+                        ],
+                        "properties": {
+                          "code": {
+                            "const": "PROOF_INTEGRITY_BLOCKED"
+                          },
+                          "severity": {
+                            "const": "hard"
+                          },
+                          "reasonCodes": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 32,
+                            "uniqueItems": true,
+                            "items": {
+                              "enum": [
+                                "PROOF_UNAVAILABLE",
+                                "EVIDENCE_MISSING",
+                                "EVIDENCE_IDENTITY_MISMATCH",
+                                "RECIPE_CLAIM_UNSPECIFIED",
+                                "RECIPE_CLAIM_MISMATCH",
+                                "RECIPE_PERSON_UNSPECIFIED",
+                                "RECIPE_PERIOD_UNSPECIFIED",
+                                "RECIPE_AUDIENCE_UNSPECIFIED",
+                                "EVIDENCE_AUDIENCE_UNSPECIFIED",
+                                "CLAIM_MISMATCH",
+                                "PRODUCT_MISMATCH",
+                                "PERSON_MISMATCH",
+                                "PERIOD_MISMATCH",
+                                "AUDIENCE_MISMATCH",
+                                "RIGHTS_SNAPSHOT_STALE",
+                                "RIGHTS_NOT_APPROVED",
+                                "RIGHTS_EXPIRED",
+                                "CONSENT_NOT_APPROVED",
+                                "CONSENT_EXPIRED",
+                                "EVIDENCE_INTEGRITY_BLOCKED",
+                                "CONTEXT_RANGE_MISSING",
+                                "CONTEXT_RANGE_INCOMPLETE",
+                                "ADJACENT_CONTEXT_MISSING"
+                              ]
+                            }
+                          },
+                          "actions": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "uniqueItems": true,
+                            "items": {
+                              "enum": [
+                                "add-structured-recipe-context",
+                                "select-compatible-existing-evidence",
+                                "restore-required-evidence-context",
+                                "renew-rights-or-consent"
+                              ]
+                            }
+                          },
+                          "fabricationSuggested": {
+                            "const": false
+                          },
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000
+                          },
+                          "issueHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "fabricationSuggested": {
+                        "const": false
+                      },
+                      "evaluatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "evaluationHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "summary": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "evaluationCount",
+                    "approvedCount",
+                    "blockedCount",
+                    "notApplicableCount",
+                    "hardIssueCount",
+                    "fabricationSuggestionCount",
+                    "readyForAssembly"
+                  ],
+                  "properties": {
+                    "evaluationCount": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 16
+                    },
+                    "approvedCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "blockedCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "notApplicableCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "hardIssueCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "fabricationSuggestionCount": {
+                      "const": 0
+                    },
+                    "readyForAssembly": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "runHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/proof-integrity-run-page/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "runs"
+          ],
+          "properties": {
+            "runs": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "policyVersion",
+                  "id",
+                  "workspaceId",
+                  "projectId",
+                  "batchId",
+                  "targetRecipeId",
+                  "targetRecipeHash",
+                  "proofNeedRunId",
+                  "proofNeedRunHash",
+                  "evaluations",
+                  "summary",
+                  "createdByClientId",
+                  "createdAt",
+                  "runHash"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "proof-integrity-run/v1"
+                  },
+                  "policyVersion": {
+                    "const": "proof-integrity-policy/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "batchId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "targetRecipeId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "targetRecipeHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "proofNeedRunId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "proofNeedRunHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "evaluations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "sequence",
+                        "proofNeedItemId",
+                        "proofNeedItemHash",
+                        "proofNeedResolution",
+                        "use",
+                        "comparisons",
+                        "outcome",
+                        "allowedForAssembly",
+                        "fabricationSuggested",
+                        "evaluatedAt",
+                        "evaluationHash"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 16
+                        },
+                        "proofNeedItemId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "proofNeedItemHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "proofNeedResolution": {
+                          "enum": [
+                            "selected-evidence",
+                            "proof-unavailable",
+                            "no-proof-needed"
+                          ]
+                        },
+                        "selectedEvidenceId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "selectedEvidenceHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "recipeContext": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "nodeId",
+                            "nodeHash",
+                            "contextHash",
+                            "claimId",
+                            "productId",
+                            "audienceTags",
+                            "consentRequirement",
+                            "contextHashBinding"
+                          ],
+                          "properties": {
+                            "nodeId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "nodeHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "contextHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "claimId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "claimText": {
+                              "type": "string",
+                              "minLength": 2,
+                              "maxLength": 2000
+                            },
+                            "productId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "person": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 240
+                            },
+                            "period": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 240
+                            },
+                            "audienceTags": {
+                              "type": "array",
+                              "maxItems": 64,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 240
+                              }
+                            },
+                            "consentRequirement": {
+                              "enum": [
+                                "approved",
+                                "approved-or-not-required"
+                              ]
+                            },
+                            "contextHashBinding": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        "use": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "includedAdjacentEvidenceIds"
+                          ],
+                          "properties": {
+                            "includedContextRangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 86399999
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              ],
+                              "items": false
+                            },
+                            "includedAdjacentEvidenceIds": {
+                              "type": "array",
+                              "maxItems": 64,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              }
+                            }
+                          }
+                        },
+                        "comparisons": {
+                          "type": "array",
+                          "maxItems": 8,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "dimension",
+                              "expected",
+                              "actual",
+                              "outcome"
+                            ],
+                            "properties": {
+                              "dimension": {
+                                "enum": [
+                                  "claim",
+                                  "product",
+                                  "person",
+                                  "period",
+                                  "audience",
+                                  "consent",
+                                  "rights",
+                                  "context"
+                                ]
+                              },
+                              "expected": {
+                                "type": "array",
+                                "maxItems": 128,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 2000
+                                }
+                              },
+                              "actual": {
+                                "type": "array",
+                                "maxItems": 128,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 2000
+                                }
+                              },
+                              "outcome": {
+                                "enum": [
+                                  "match",
+                                  "mismatch",
+                                  "missing",
+                                  "expired"
+                                ]
+                              },
+                              "reasonCode": {
+                                "enum": [
+                                  "PROOF_UNAVAILABLE",
+                                  "EVIDENCE_MISSING",
+                                  "EVIDENCE_IDENTITY_MISMATCH",
+                                  "RECIPE_CLAIM_UNSPECIFIED",
+                                  "RECIPE_CLAIM_MISMATCH",
+                                  "RECIPE_PERSON_UNSPECIFIED",
+                                  "RECIPE_PERIOD_UNSPECIFIED",
+                                  "RECIPE_AUDIENCE_UNSPECIFIED",
+                                  "EVIDENCE_AUDIENCE_UNSPECIFIED",
+                                  "CLAIM_MISMATCH",
+                                  "PRODUCT_MISMATCH",
+                                  "PERSON_MISMATCH",
+                                  "PERIOD_MISMATCH",
+                                  "AUDIENCE_MISMATCH",
+                                  "RIGHTS_SNAPSHOT_STALE",
+                                  "RIGHTS_NOT_APPROVED",
+                                  "RIGHTS_EXPIRED",
+                                  "CONSENT_NOT_APPROVED",
+                                  "CONSENT_EXPIRED",
+                                  "EVIDENCE_INTEGRITY_BLOCKED",
+                                  "CONTEXT_RANGE_MISSING",
+                                  "CONTEXT_RANGE_INCOMPLETE",
+                                  "ADJACENT_CONTEXT_MISSING"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "outcome": {
+                          "enum": [
+                            "approved",
+                            "blocked",
+                            "not-applicable"
+                          ]
+                        },
+                        "allowedForAssembly": {
+                          "type": "boolean"
+                        },
+                        "presentation": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "evidenceId",
+                            "evidenceHash",
+                            "requiredContextRangeMs",
+                            "requiredAdjacentEvidenceIds",
+                            "visual",
+                            "verbal",
+                            "presentationHash"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": "proof-integrity-presentation/v1"
+                            },
+                            "evidenceId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "evidenceHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "requiredContextRangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 86399999
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              ],
+                              "items": false
+                            },
+                            "requiredAdjacentEvidenceIds": {
+                              "type": "array",
+                              "maxItems": 64,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              }
+                            },
+                            "visual": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "attribution",
+                                "qualifiers",
+                                "mandatory"
+                              ],
+                              "properties": {
+                                "attribution": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 240
+                                },
+                                "qualifiers": {
+                                  "type": "array",
+                                  "maxItems": 64,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500
+                                  }
+                                },
+                                "mandatory": {
+                                  "const": true
+                                }
+                              }
+                            },
+                            "verbal": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "attribution",
+                                "qualifiers",
+                                "mandatory"
+                              ],
+                              "properties": {
+                                "attribution": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 240
+                                },
+                                "qualifiers": {
+                                  "type": "array",
+                                  "maxItems": 64,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500
+                                  }
+                                },
+                                "mandatory": {
+                                  "const": true
+                                }
+                              }
+                            },
+                            "presentationHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        "issue": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "code",
+                            "severity",
+                            "reasonCodes",
+                            "actions",
+                            "fabricationSuggested",
+                            "message",
+                            "issueHash"
+                          ],
+                          "properties": {
+                            "code": {
+                              "const": "PROOF_INTEGRITY_BLOCKED"
+                            },
+                            "severity": {
+                              "const": "hard"
+                            },
+                            "reasonCodes": {
+                              "type": "array",
+                              "minItems": 1,
+                              "maxItems": 32,
+                              "uniqueItems": true,
+                              "items": {
+                                "enum": [
+                                  "PROOF_UNAVAILABLE",
+                                  "EVIDENCE_MISSING",
+                                  "EVIDENCE_IDENTITY_MISMATCH",
+                                  "RECIPE_CLAIM_UNSPECIFIED",
+                                  "RECIPE_CLAIM_MISMATCH",
+                                  "RECIPE_PERSON_UNSPECIFIED",
+                                  "RECIPE_PERIOD_UNSPECIFIED",
+                                  "RECIPE_AUDIENCE_UNSPECIFIED",
+                                  "EVIDENCE_AUDIENCE_UNSPECIFIED",
+                                  "CLAIM_MISMATCH",
+                                  "PRODUCT_MISMATCH",
+                                  "PERSON_MISMATCH",
+                                  "PERIOD_MISMATCH",
+                                  "AUDIENCE_MISMATCH",
+                                  "RIGHTS_SNAPSHOT_STALE",
+                                  "RIGHTS_NOT_APPROVED",
+                                  "RIGHTS_EXPIRED",
+                                  "CONSENT_NOT_APPROVED",
+                                  "CONSENT_EXPIRED",
+                                  "EVIDENCE_INTEGRITY_BLOCKED",
+                                  "CONTEXT_RANGE_MISSING",
+                                  "CONTEXT_RANGE_INCOMPLETE",
+                                  "ADJACENT_CONTEXT_MISSING"
+                                ]
+                              }
+                            },
+                            "actions": {
+                              "type": "array",
+                              "minItems": 1,
+                              "maxItems": 4,
+                              "uniqueItems": true,
+                              "items": {
+                                "enum": [
+                                  "add-structured-recipe-context",
+                                  "select-compatible-existing-evidence",
+                                  "restore-required-evidence-context",
+                                  "renew-rights-or-consent"
+                                ]
+                              }
+                            },
+                            "fabricationSuggested": {
+                              "const": false
+                            },
+                            "message": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 1000
+                            },
+                            "issueHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        "fabricationSuggested": {
+                          "const": false
+                        },
+                        "evaluatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "evaluationHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  },
+                  "summary": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "evaluationCount",
+                      "approvedCount",
+                      "blockedCount",
+                      "notApplicableCount",
+                      "hardIssueCount",
+                      "fabricationSuggestionCount",
+                      "readyForAssembly"
+                    ],
+                    "properties": {
+                      "evaluationCount": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 16
+                      },
+                      "approvedCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 16
+                      },
+                      "blockedCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 16
+                      },
+                      "notApplicableCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 16
+                      },
+                      "hardIssueCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 16
+                      },
+                      "fabricationSuggestionCount": {
+                        "const": 0
+                      },
+                      "readyForAssembly": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "createdByClientId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "runHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/proof-integrity-run-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run"
+          ],
+          "properties": {
+            "run": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "policyVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "batchId",
+                "targetRecipeId",
+                "targetRecipeHash",
+                "proofNeedRunId",
+                "proofNeedRunHash",
+                "evaluations",
+                "summary",
+                "createdByClientId",
+                "createdAt",
+                "runHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "proof-integrity-run/v1"
+                },
+                "policyVersion": {
+                  "const": "proof-integrity-policy/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "batchId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "targetRecipeId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "targetRecipeHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "proofNeedRunId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "proofNeedRunHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "evaluations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 16,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "sequence",
+                      "proofNeedItemId",
+                      "proofNeedItemHash",
+                      "proofNeedResolution",
+                      "use",
+                      "comparisons",
+                      "outcome",
+                      "allowedForAssembly",
+                      "fabricationSuggested",
+                      "evaluatedAt",
+                      "evaluationHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 16
+                      },
+                      "proofNeedItemId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "proofNeedItemHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "proofNeedResolution": {
+                        "enum": [
+                          "selected-evidence",
+                          "proof-unavailable",
+                          "no-proof-needed"
+                        ]
+                      },
+                      "selectedEvidenceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "selectedEvidenceHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "recipeContext": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "nodeId",
+                          "nodeHash",
+                          "contextHash",
+                          "claimId",
+                          "productId",
+                          "audienceTags",
+                          "consentRequirement",
+                          "contextHashBinding"
+                        ],
+                        "properties": {
+                          "nodeId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "nodeHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "contextHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "claimId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "claimText": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 2000
+                          },
+                          "productId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "person": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "period": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "audienceTags": {
+                            "type": "array",
+                            "maxItems": 64,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 240
+                            }
+                          },
+                          "consentRequirement": {
+                            "enum": [
+                              "approved",
+                              "approved-or-not-required"
+                            ]
+                          },
+                          "contextHashBinding": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "use": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "includedAdjacentEvidenceIds"
+                        ],
+                        "properties": {
+                          "includedContextRangeMs": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "prefixItems": [
+                              {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 86399999
+                              },
+                              {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 86400000
+                              }
+                            ],
+                            "items": false
+                          },
+                          "includedAdjacentEvidenceIds": {
+                            "type": "array",
+                            "maxItems": 64,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          }
+                        }
+                      },
+                      "comparisons": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "dimension",
+                            "expected",
+                            "actual",
+                            "outcome"
+                          ],
+                          "properties": {
+                            "dimension": {
+                              "enum": [
+                                "claim",
+                                "product",
+                                "person",
+                                "period",
+                                "audience",
+                                "consent",
+                                "rights",
+                                "context"
+                              ]
+                            },
+                            "expected": {
+                              "type": "array",
+                              "maxItems": 128,
+                              "items": {
+                                "type": "string",
+                                "maxLength": 2000
+                              }
+                            },
+                            "actual": {
+                              "type": "array",
+                              "maxItems": 128,
+                              "items": {
+                                "type": "string",
+                                "maxLength": 2000
+                              }
+                            },
+                            "outcome": {
+                              "enum": [
+                                "match",
+                                "mismatch",
+                                "missing",
+                                "expired"
+                              ]
+                            },
+                            "reasonCode": {
+                              "enum": [
+                                "PROOF_UNAVAILABLE",
+                                "EVIDENCE_MISSING",
+                                "EVIDENCE_IDENTITY_MISMATCH",
+                                "RECIPE_CLAIM_UNSPECIFIED",
+                                "RECIPE_CLAIM_MISMATCH",
+                                "RECIPE_PERSON_UNSPECIFIED",
+                                "RECIPE_PERIOD_UNSPECIFIED",
+                                "RECIPE_AUDIENCE_UNSPECIFIED",
+                                "EVIDENCE_AUDIENCE_UNSPECIFIED",
+                                "CLAIM_MISMATCH",
+                                "PRODUCT_MISMATCH",
+                                "PERSON_MISMATCH",
+                                "PERIOD_MISMATCH",
+                                "AUDIENCE_MISMATCH",
+                                "RIGHTS_SNAPSHOT_STALE",
+                                "RIGHTS_NOT_APPROVED",
+                                "RIGHTS_EXPIRED",
+                                "CONSENT_NOT_APPROVED",
+                                "CONSENT_EXPIRED",
+                                "EVIDENCE_INTEGRITY_BLOCKED",
+                                "CONTEXT_RANGE_MISSING",
+                                "CONTEXT_RANGE_INCOMPLETE",
+                                "ADJACENT_CONTEXT_MISSING"
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "outcome": {
+                        "enum": [
+                          "approved",
+                          "blocked",
+                          "not-applicable"
+                        ]
+                      },
+                      "allowedForAssembly": {
+                        "type": "boolean"
+                      },
+                      "presentation": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "evidenceId",
+                          "evidenceHash",
+                          "requiredContextRangeMs",
+                          "requiredAdjacentEvidenceIds",
+                          "visual",
+                          "verbal",
+                          "presentationHash"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": "proof-integrity-presentation/v1"
+                          },
+                          "evidenceId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "evidenceHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "requiredContextRangeMs": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "prefixItems": [
+                              {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 86399999
+                              },
+                              {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 86400000
+                              }
+                            ],
+                            "items": false
+                          },
+                          "requiredAdjacentEvidenceIds": {
+                            "type": "array",
+                            "maxItems": 64,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          },
+                          "visual": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "attribution",
+                              "qualifiers",
+                              "mandatory"
+                            ],
+                            "properties": {
+                              "attribution": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 240
+                              },
+                              "qualifiers": {
+                                "type": "array",
+                                "maxItems": 64,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                }
+                              },
+                              "mandatory": {
+                                "const": true
+                              }
+                            }
+                          },
+                          "verbal": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "attribution",
+                              "qualifiers",
+                              "mandatory"
+                            ],
+                            "properties": {
+                              "attribution": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 240
+                              },
+                              "qualifiers": {
+                                "type": "array",
+                                "maxItems": 64,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                }
+                              },
+                              "mandatory": {
+                                "const": true
+                              }
+                            }
+                          },
+                          "presentationHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "issue": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "severity",
+                          "reasonCodes",
+                          "actions",
+                          "fabricationSuggested",
+                          "message",
+                          "issueHash"
+                        ],
+                        "properties": {
+                          "code": {
+                            "const": "PROOF_INTEGRITY_BLOCKED"
+                          },
+                          "severity": {
+                            "const": "hard"
+                          },
+                          "reasonCodes": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 32,
+                            "uniqueItems": true,
+                            "items": {
+                              "enum": [
+                                "PROOF_UNAVAILABLE",
+                                "EVIDENCE_MISSING",
+                                "EVIDENCE_IDENTITY_MISMATCH",
+                                "RECIPE_CLAIM_UNSPECIFIED",
+                                "RECIPE_CLAIM_MISMATCH",
+                                "RECIPE_PERSON_UNSPECIFIED",
+                                "RECIPE_PERIOD_UNSPECIFIED",
+                                "RECIPE_AUDIENCE_UNSPECIFIED",
+                                "EVIDENCE_AUDIENCE_UNSPECIFIED",
+                                "CLAIM_MISMATCH",
+                                "PRODUCT_MISMATCH",
+                                "PERSON_MISMATCH",
+                                "PERIOD_MISMATCH",
+                                "AUDIENCE_MISMATCH",
+                                "RIGHTS_SNAPSHOT_STALE",
+                                "RIGHTS_NOT_APPROVED",
+                                "RIGHTS_EXPIRED",
+                                "CONSENT_NOT_APPROVED",
+                                "CONSENT_EXPIRED",
+                                "EVIDENCE_INTEGRITY_BLOCKED",
+                                "CONTEXT_RANGE_MISSING",
+                                "CONTEXT_RANGE_INCOMPLETE",
+                                "ADJACENT_CONTEXT_MISSING"
+                              ]
+                            }
+                          },
+                          "actions": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "uniqueItems": true,
+                            "items": {
+                              "enum": [
+                                "add-structured-recipe-context",
+                                "select-compatible-existing-evidence",
+                                "restore-required-evidence-context",
+                                "renew-rights-or-consent"
+                              ]
+                            }
+                          },
+                          "fabricationSuggested": {
+                            "const": false
+                          },
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000
+                          },
+                          "issueHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "fabricationSuggested": {
+                        "const": false
+                      },
+                      "evaluatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "evaluationHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "summary": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "evaluationCount",
+                    "approvedCount",
+                    "blockedCount",
+                    "notApplicableCount",
+                    "hardIssueCount",
+                    "fabricationSuggestionCount",
+                    "readyForAssembly"
+                  ],
+                  "properties": {
+                    "evaluationCount": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 16
+                    },
+                    "approvedCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "blockedCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "notApplicableCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "hardIssueCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "fabricationSuggestionCount": {
+                      "const": 0
+                    },
+                    "readyForAssembly": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "runHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
                 }
               }
             }

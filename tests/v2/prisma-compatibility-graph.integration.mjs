@@ -60,6 +60,59 @@ function fixtureSuffix() {
   return configured
 }
 
+function assertSafeE2eDatabaseUrl(value) {
+  assert.ok(
+    value,
+    'V2_DATABASE_URL must point to an isolated PostgreSQL database',
+  )
+  const url = new URL(value)
+  const databaseName = url.pathname.slice(1)
+  assert.match(
+    databaseName,
+    /(?:^|_)e2e(?:_|$)/,
+    'destructive E2E setup requires an explicitly isolated database',
+  )
+  assert.match(
+    url.searchParams.get('application_name') ?? '',
+    /^apollo-video-e2e-[a-z0-9-]{8,64}$/,
+    'E2E application_name must identify one supervised Apollo run',
+  )
+  for (const [parameter, maximum] of [
+    ['connection_limit', 5],
+    ['pool_timeout', 10],
+    ['connect_timeout', 10],
+  ]) {
+    const raw = url.searchParams.get(parameter) ?? ''
+    assert.match(
+      raw,
+      /^[1-9][0-9]*$/,
+      `${parameter} must be a positive integer`,
+    )
+    assert.ok(
+      Number(raw) <= maximum,
+      `${parameter} must not exceed ${maximum}`,
+    )
+  }
+  return url
+}
+
+test('T-OPS-REMOTE-E2E rejects unbounded or anonymous database clients', () => {
+  const safe =
+    'postgresql://test:test@127.0.0.1:5432/apollo_video_v2_e2e' +
+    '?application_name=apollo-video-e2e-safe1234' +
+    '&connection_limit=5&pool_timeout=10&connect_timeout=10'
+  assert.doesNotThrow(() => assertSafeE2eDatabaseUrl(safe))
+  for (const unsafe of [
+    safe.replace('apollo-video-e2e-safe1234', 'anonymous'),
+    safe.replace('connection_limit=5', 'connection_limit=6'),
+    safe.replace('pool_timeout=10', 'pool_timeout=11'),
+    safe.replace('connect_timeout=10', 'connect_timeout=11'),
+    safe.replace('apollo_video_v2_e2e', 'apollo_video_v2'),
+  ]) {
+    assert.throws(() => assertSafeE2eDatabaseUrl(unsafe))
+  }
+})
+
 function dimensions(score) {
   return [
     'completeness',
@@ -76,23 +129,13 @@ function dimensions(score) {
   }))
 }
 
-test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130 persists compatibility, exact validated-hook reuse, ProofNeeds and bounded portfolio preflights through PostgreSQL and /v1', {
+test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131 persists compatibility, exact validated-hook reuse, ProofNeeds, ProofIntegrity and bounded portfolio preflights through PostgreSQL and /v1', {
   skip:
     process.env.APOLLO_COMPATIBILITY_GRAPH_E2E !== '1' &&
     'set APOLLO_COMPATIBILITY_GRAPH_E2E=1 and use an isolated V2 database',
   timeout: 240_000,
 }, async () => {
-  assert.ok(
-    process.env.V2_DATABASE_URL,
-    'V2_DATABASE_URL must point to an isolated PostgreSQL database',
-  )
-  const databaseName = new URL(process.env.V2_DATABASE_URL)
-    .pathname.slice(1)
-  assert.match(
-    databaseName,
-    /(?:^|_)e2e(?:_|$)/,
-    'destructive E2E setup requires an explicitly isolated database',
-  )
+  assertSafeE2eDatabaseUrl(process.env.V2_DATABASE_URL)
 
   const { calculateCanonicalHash, stableSerialize } =
     await import('../../src/v2/domain/canonical-hash.ts')
@@ -798,7 +841,14 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130 persists compatibility, exact
       ...context,
       offerId: 'offer-apollo',
       audienceTags: ['especialistas'],
-      claims: [{ key: 'resultado', value: 'clareza' }],
+      claims: [
+        { key: 'resultado', value: lines.proof },
+        {
+          key: 'integrity.person',
+          value: 'Profissionais participantes',
+        },
+        { key: 'integrity.period', value: '2026' },
+      ],
       personaId: 'persona-especialista',
       locale: 'pt-BR',
       desiredAction: 'whatsapp',
@@ -1316,7 +1366,10 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130 persists compatibility, exact
               'Depoimento completo autorizado no roteiro de origem.',
             confidence: 0.99,
           },
-          qualifiers: [],
+          qualifiers: [{
+            value: 'period:2026',
+            confidence: 0.99,
+          }],
           subject: {
             value: 'Profissionais participantes',
             confidence: 0.99,
@@ -1325,7 +1378,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130 persists compatibility, exact
             value: 'Especialista autorizado',
             confidence: 0.99,
           },
-          compatibleOfferIds: [],
+          compatibleOfferIds: ['offer-apollo'],
           compatibleAudienceTags: ['especialistas'],
           compatibleObjections: [],
           credibilityScore: 0.96,
@@ -1354,14 +1407,19 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130 persists compatibility, exact
       JSON.stringify(evidencePayload),
     )
     const proofEvidence = evidencePayload.data.evidence
-    assert.equal(proofEvidence.integrityStatus, 'valid')
+    assert.equal(
+      proofEvidence.integrityStatus,
+      'context-required',
+    )
     assert.equal(proofEvidence.physicalMaterialized, false)
 
     const argumentBlock = fullRecipe.storyPlan.blocks.find(
       (block) => block.role === 'argument',
     )
     assert.ok(argumentBlock)
-    const argumentClaimId = argumentBlock.content.claimIds[0]
+    const argumentClaimId = argumentBlock.content.claimIds.find(
+      (claimId) => claimId === 'resultado',
+    )
     assert.ok(argumentClaimId)
     const proofEndpoint =
       `${baseUrl}/v1/projects/${projectId}/proof-needs`
@@ -1375,6 +1433,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130 persists compatibility, exact
         claimId: argumentClaimId,
         claimText: lines.proof,
         claimKind: 'outcome',
+        offerId: 'offer-apollo',
       }],
     }
     const selectedProofKey = `proof-need-selected-${suffix}`
@@ -1567,12 +1626,294 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130 persists compatibility, exact
       ),
       /constraint|check/i,
     )
+    const proofIntegrityEndpoint =
+      `${baseUrl}/v1/projects/${projectId}/proof-integrity-runs`
+    assert.equal(
+      (await fetch(proofIntegrityEndpoint)).status,
+      401,
+    )
+    const selectedIntegrityBody = {
+      proofNeedRunId: selectedProofRun.id,
+      expectedProofNeedRunHash: selectedProofRun.runHash,
+      policyVersion: 'proof-integrity-policy/v1',
+      uses: [{
+        proofNeedItemId: selectedProof.id,
+        includedContextRangeMs:
+          selectedProof.selectedEvidence.contextRangeMs,
+        includedAdjacentEvidenceIds: [],
+      }],
+    }
+    const selectedIntegrityKey =
+      `proof-integrity-selected-${suffix}`
+    const selectedIntegrityResponse = await fetch(
+      proofIntegrityEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': selectedIntegrityKey,
+        },
+        body: JSON.stringify(selectedIntegrityBody),
+      },
+    )
+    const selectedIntegrityPayload =
+      await selectedIntegrityResponse.json()
+    assert.equal(
+      selectedIntegrityResponse.status,
+      201,
+      JSON.stringify(selectedIntegrityPayload),
+    )
+    const selectedIntegrityRun =
+      selectedIntegrityPayload.data.run
+    const approvedIntegrity =
+      selectedIntegrityRun.evaluations[0]
+    assert.equal(selectedIntegrityPayload.data.replayed, false)
+    assert.equal(approvedIntegrity.outcome, 'approved')
+    assert.equal(approvedIntegrity.allowedForAssembly, true)
+    assert.equal(approvedIntegrity.comparisons.length, 8)
+    assert.ok(approvedIntegrity.comparisons.every(
+      (comparison) => comparison.outcome === 'match',
+    ))
+    assert.equal(
+      approvedIntegrity.recipeContext.claimText,
+      lines.proof,
+    )
+    assert.equal(
+      approvedIntegrity.recipeContext.productId,
+      'offer-apollo',
+    )
+    assert.equal(
+      approvedIntegrity.recipeContext.person,
+      'Profissionais participantes',
+    )
+    assert.equal(
+      approvedIntegrity.recipeContext.period,
+      '2026',
+    )
+    assert.deepEqual(
+      approvedIntegrity.presentation.visual,
+      approvedIntegrity.presentation.verbal,
+    )
+    assert.deepEqual(
+      approvedIntegrity.presentation.visual.qualifiers,
+      ['period:2026'],
+    )
+    assert.equal(
+      approvedIntegrity.presentation.visual.attribution,
+      'Especialista autorizado',
+    )
+    assert.equal(approvedIntegrity.fabricationSuggested, false)
+    assert.equal(
+      selectedIntegrityRun.summary.readyForAssembly,
+      true,
+    )
+    assert.equal(
+      selectedIntegrityRun.summary.fabricationSuggestionCount,
+      0,
+    )
+
+    const selectedIntegrityReplay = await fetch(
+      proofIntegrityEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': selectedIntegrityKey,
+        },
+        body: JSON.stringify(selectedIntegrityBody),
+      },
+    )
+    assert.equal(selectedIntegrityReplay.status, 200)
+    assert.equal(
+      (await selectedIntegrityReplay.json()).data.replayed,
+      true,
+    )
+    const selectedIntegrityMismatch = await fetch(
+      proofIntegrityEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': selectedIntegrityKey,
+        },
+        body: JSON.stringify({
+          ...selectedIntegrityBody,
+          uses: [],
+        }),
+      },
+    )
+    assert.equal(selectedIntegrityMismatch.status, 409)
+
+    const contextRange =
+      selectedProof.selectedEvidence.contextRangeMs
+    const blockedContextResponse = await fetch(
+      proofIntegrityEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key':
+            `proof-integrity-context-${suffix}`,
+        },
+        body: JSON.stringify({
+          ...selectedIntegrityBody,
+          uses: [{
+            proofNeedItemId: selectedProof.id,
+            includedContextRangeMs: [
+              contextRange[0] + 100,
+              contextRange[1] - 100,
+            ],
+            includedAdjacentEvidenceIds: [],
+          }],
+        }),
+      },
+    )
+    const blockedContextPayload =
+      await blockedContextResponse.json()
+    assert.equal(
+      blockedContextResponse.status,
+      201,
+      JSON.stringify(blockedContextPayload),
+    )
+    const blockedContext =
+      blockedContextPayload.data.run.evaluations[0]
+    assert.equal(blockedContext.outcome, 'blocked')
+    assert.equal(blockedContext.allowedForAssembly, false)
+    assert.ok(blockedContext.issue.reasonCodes.includes(
+      'CONTEXT_RANGE_INCOMPLETE',
+    ))
+    assert.ok(blockedContext.issue.actions.includes(
+      'restore-required-evidence-context',
+    ))
+    assert.equal(blockedContext.issue.fabricationSuggested, false)
+    assert.equal(
+      blockedContextPayload.data.run.summary.readyForAssembly,
+      false,
+    )
+
+    const unavailableIntegrityResponse = await fetch(
+      proofIntegrityEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key':
+            `proof-integrity-unavailable-${suffix}`,
+        },
+        body: JSON.stringify({
+          proofNeedRunId: unavailableProofPayload.data.run.id,
+          expectedProofNeedRunHash:
+            unavailableProofPayload.data.run.runHash,
+          policyVersion: 'proof-integrity-policy/v1',
+          uses: [],
+        }),
+      },
+    )
+    const unavailableIntegrityPayload =
+      await unavailableIntegrityResponse.json()
+    assert.equal(
+      unavailableIntegrityResponse.status,
+      201,
+      JSON.stringify(unavailableIntegrityPayload),
+    )
+    assert.equal(
+      unavailableIntegrityPayload.data.run.evaluations[0].outcome,
+      'blocked',
+    )
+    assert.deepEqual(
+      unavailableIntegrityPayload.data.run.evaluations[0]
+        .issue.reasonCodes,
+      ['PROOF_UNAVAILABLE'],
+    )
+
+    const noProofIntegrityResponse = await fetch(
+      proofIntegrityEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key':
+            `proof-integrity-none-${suffix}`,
+        },
+        body: JSON.stringify({
+          proofNeedRunId: noProofPayload.data.run.id,
+          expectedProofNeedRunHash:
+            noProofPayload.data.run.runHash,
+          policyVersion: 'proof-integrity-policy/v1',
+          uses: [],
+        }),
+      },
+    )
+    const noProofIntegrityPayload =
+      await noProofIntegrityResponse.json()
+    assert.equal(
+      noProofIntegrityResponse.status,
+      201,
+      JSON.stringify(noProofIntegrityPayload),
+    )
+    assert.equal(
+      noProofIntegrityPayload.data.run.evaluations[0].outcome,
+      'not-applicable',
+    )
+    assert.equal(
+      noProofIntegrityPayload.data.run.summary.readyForAssembly,
+      true,
+    )
+
+    const integrityRead = await fetch(
+      `${proofIntegrityEndpoint}/${selectedIntegrityRun.id}`,
+      { headers },
+    )
+    assert.equal(integrityRead.status, 200)
+    assert.equal(
+      (await integrityRead.json()).data.run.runHash,
+      selectedIntegrityRun.runHash,
+    )
+    const integrityList = await fetch(
+      `${proofIntegrityEndpoint}?outcome=blocked&readyForAssembly=false&limit=10`,
+      { headers },
+    )
+    assert.equal(integrityList.status, 200)
+    assert.equal((await integrityList.json()).data.runs.length, 2)
+    assert.equal(
+      await client.v2ProofIntegrityRun.count({
+        where: { workspaceId, projectId },
+      }),
+      4,
+    )
+    assert.equal(
+      await client.v2ProofIntegrityEvaluation.count({
+        where: { workspaceId, projectId },
+      }),
+      4,
+    )
+    await assert.rejects(
+      client.$executeRawUnsafe(
+        'UPDATE "proof_integrity_evaluations" SET "fabricationSuggested" = TRUE WHERE "id" = $1',
+        approvedIntegrity.id,
+      ),
+      /constraint|check/i,
+    )
+    await assert.rejects(
+      client.$executeRawUnsafe(
+        'UPDATE "proof_integrity_evaluations" SET "reasonCount" = 1 WHERE "id" = $1',
+        approvedIntegrity.id,
+      ),
+      /constraint|check/i,
+    )
+    await assert.rejects(
+      client.$executeRawUnsafe(
+        'UPDATE "proof_integrity_runs" SET "fabricationSuggestionCount" = 1 WHERE "id" = $1',
+        selectedIntegrityRun.id,
+      ),
+      /constraint|check/i,
+    )
     assert.equal(
       await client.v2MediaArtifact.count({
         where: { workspaceId },
       }),
       proofMediaCountBefore,
-      'ProofNeed planning must remain virtual and never materialize media',
+      'ProofNeed and ProofIntegrity planning must remain virtual and never materialize media',
     )
 
     const fullReplayResponse = await fetch(recipeEndpoint, {
@@ -1891,6 +2232,15 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130 persists compatibility, exact
       'apollo.projects.proof-needs.create',
       'apollo.projects.proof-needs.list',
       'apollo.projects.proof-needs.read',
+    ])
+    const proofIntegrityCapabilityIds =
+      capabilitiesPayload.data.capabilities
+        .map((capability) => capability.id)
+        .filter((id) => id.includes('proof-integrity-runs'))
+    assert.deepEqual(proofIntegrityCapabilityIds.sort(), [
+      'apollo.projects.proof-integrity-runs.create',
+      'apollo.projects.proof-integrity-runs.list',
+      'apollo.projects.proof-integrity-runs.read',
     ])
 
     assert.equal(

@@ -8,12 +8,8 @@ import {
   extractContiguous,
   planLongFormWorkflow,
   planProofMode,
-  proofIntegrityGate,
   querySemanticRepository,
 } from '../../src/v2/application/proof-and-longform.ts'
-import {
-  createEvidenceSegment,
-} from '../../src/v2/domain/semantic-reuse.ts'
 
 const cleanupContaminations = Object.freeze([
   {
@@ -53,24 +49,6 @@ const cleanupContaminations = Object.freeze([
   },
 ])
 
-const evidence = (patch = {}) => createEvidenceSegment({
-  id: 'e',
-  artifactId: 'a',
-  claim: 'Melhorou conversão',
-  qualifier: 'No período medido',
-  subject: 'Cliente',
-  attribution: 'Cliente A',
-  consent: 'approved',
-  contextWindowMs: [0, 5_000],
-  transcript: 'texto',
-  frameRefs: ['f'],
-  adjacentEvidenceIds: [],
-  category: 'testimonial',
-  integrity: 'valid',
-  requiresContext: true,
-  ...patch,
-})
-
 test(
   'T-FR-122 selects cleanup, keeps source immutable and rechecks visual/rights',
   () => {
@@ -98,41 +76,6 @@ test(
 
     assert.ok(strategies.has('reject'))
     assert.ok([...strategies].some((strategy) => strategy !== 'reject'))
-  },
-)
-
-test(
-  'T-FR-131 blocks incompatible proof and preserves attribution',
-  () => {
-    const item = evidence()
-    const recipe = {
-      claim: item.claim,
-      product: 'Apollo',
-      person: 'A',
-      period: '2026',
-      audience: 'gestores',
-      consentRequired: true,
-    }
-    const ok = proofIntegrityGate(item, recipe, {
-      product: 'Apollo',
-      person: 'A',
-      period: '2026',
-      audience: 'gestores',
-      expired: false,
-    })
-    assert.equal(ok.allowed, true)
-    assert.equal(ok.presentation.qualifier, item.qualifier)
-
-    const bad = proofIntegrityGate(item, recipe, {
-      product: 'Outro',
-      person: 'B',
-      period: '2025',
-      audience: 'alunos',
-      expired: true,
-    })
-    assert.equal(bad.allowed, false)
-    assert.equal(bad.issue.fabricationSuggested, false)
-    assert.ok(bad.reasons.length >= 4)
   },
 )
 

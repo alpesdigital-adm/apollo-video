@@ -1002,7 +1002,81 @@ Critérios de aceite:
 
 ### FR-131 — Integrity gate
 
-Não permitir montagem que altere sentido, retire ressalva ou fabrique claim.
+Toda prova selecionada por um `ProofNeed` deve passar por um gate imutável,
+fail-closed e vinculado à `VariantRecipe` exata antes de ficar elegível para
+montagem. O gate não escolhe um modo visual e não materializa mídia; ele decide
+se o uso editorial proposto preserva a verdade, a autorização e o contexto da
+evidência.
+
+Para cada item, o gate compara:
+
+- texto e identidade do claim da recipe com o claim do `EvidenceSegment`;
+- produto/oferta da recipe com as ofertas compatíveis da evidência;
+- pessoa ou sujeito declarados na recipe com o sujeito catalogado;
+- período estruturado na recipe com um qualifier temporal explícito;
+- todos os audience tags da recipe com os públicos autorizados da evidência;
+- exigência de consentimento com o snapshot atualmente vigente;
+- rights, expiração e identidade do snapshot atual;
+- range de contexto e evidências adjacentes exigidos com o trecho que será
+  efetivamente incluído na montagem.
+
+Pessoa e período não podem ser inferidos de copy livre. A recipe deve
+publicá-los em claims estruturados `integrity.person` e `integrity.period`.
+Ausência desses campos bloqueia o uso e produz uma ação para completar o
+contexto estruturado. Normalização pode remover diferenças superficiais de
+caixa, acento e espaço, mas não pode aproximar semanticamente pessoas, períodos,
+produtos ou claims distintos.
+
+O resultado por item é `approved`, `blocked` ou `not-applicable`:
+
+- `approved` exige oito comparações aprovadas, evidência selecionada,
+  autorização atual e contexto integral;
+- `blocked` impede montagem e contém issue hard, reason codes e ações
+  permitidas;
+- `not-applicable` existe somente para `no-proof-needed` e não autoriza inserir
+  uma prova por conveniência.
+
+Uma aprovação produz um presentation contract obrigatório. `attribution` e
+todos os `qualifiers` do `EvidenceSegment` devem aparecer com conteúdo idêntico
+nos modos visual e verbal; a etapa posterior pode escolher layout, duração e
+modo de prova, mas não pode omitir nem reescrever esses campos. Range de
+contexto e evidências adjacentes também seguem como precondições da montagem.
+
+Issues bloqueantes só podem recomendar:
+
+- completar o contexto estruturado da recipe;
+- escolher outra evidência existente e compatível;
+- restaurar o contexto original obrigatório;
+- renovar rights ou consentimento.
+
+O sistema nunca pode sugerir gerar, inventar, estimar ou reformular evidência
+para contornar o gate. `fabricationSuggested=false` é invariante de domínio,
+persistência, schema público e banco.
+
+Cada execução deve persistir o `ProofNeed` hash, recipe hash, node/context
+hashes, evidence hash, comparações, presentation contract, issue, ator,
+timestamp, fingerprint e idempotency key. A transação serializável revalida
+ator, recipe, ProofNeed, nodes, evidências e rights atuais antes do commit.
+Mudança de qualquer identidade relevante falha por conflito ou produz nova
+avaliação; uma aprovação antiga não libera montagem futura após expiração.
+
+Criação, leitura e listagem devem existir na API externa. A UI usa apenas essas
+rotas e mostra aprovação/bloqueio, as oito dimensões, atribuição, qualifiers e
+ações corretivas. O gate é bounded, não inicia provider, render ou
+materialização.
+
+Critérios de aceite:
+
+- policy eval inclui casos aprovados e falsos positivos/negativos críticos para
+  claim, produto, pessoa, período, audience, consent, rights e contexto;
+- prova incompatível, expirada ou descontextualizada nunca fica elegível;
+- visual e verbal preservam attribution e qualifiers byte a byte;
+- `proof-unavailable` bloqueia e `no-proof-needed` fica não aplicável;
+- replay converge e payload diferente com a mesma chave falha;
+- constraints rejeitam fabricação, aprovação incoerente e contagens
+  adulteradas;
+- API, PostgreSQL, UI e E2E observam o mesmo registro canônico;
+- a contagem de artifacts permanece inalterada.
 
 ### FR-132 — Modos de prova
 

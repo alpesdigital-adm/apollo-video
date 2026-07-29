@@ -50,6 +50,11 @@ export interface EvidenceSegmentSearchResult {
   reuseDecision: Readonly<EvidenceReuseDecision>
 }
 
+export interface EvidenceSegmentCurrentContext {
+  evidence: Readonly<PersistedEvidenceSegment>
+  currentRights?: Readonly<EvidenceRightsSnapshot>
+}
+
 export interface EvidenceSegmentRepository {
   readCreationContext(input: {
     workspaceId: string
@@ -61,6 +66,11 @@ export interface EvidenceSegmentRepository {
     projectId: string
     idempotencyKey: string
   }): Promise<Readonly<PersistedEvidenceSegment> | null>
+  readCurrent(input: {
+    workspaceId: string
+    projectId: string
+    evidenceId: string
+  }): Promise<Readonly<EvidenceSegmentCurrentContext> | null>
   persist(
     evidence: Readonly<PersistedEvidenceSegment>,
   ): Promise<Readonly<{

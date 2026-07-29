@@ -215,6 +215,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Declares proof against one exact StoryPlan, selects only currently authorized cataloged EvidenceSegments and persists no provider, render or media materialization work.',
     },
+    'apollo.projects.proof-integrity-runs.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Evaluates existing ProofNeed, recipe, evidence and current authorization hashes, persists an immutable fail-closed decision and starts no provider, render or media materialization work.',
+    },
     'apollo.batches.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one explicit bounded item matrix from existing approved workspace artifacts without starting provider work.',
