@@ -817,13 +817,19 @@ export function resumeLongFormIndexWorkflow(input: {
     'Long-form workflow changed before resume',
   )
   const failedIndex = workflow.stages.findIndex((stage) =>
+    stage.status === 'running' ||
     stage.status === 'failed' && stage.error?.retryable)
   assertDomain(
     failedIndex >= 0,
     'PRECONDITION_REQUIRED',
-    'Long-form workflow has no retryable failed stage',
+    'Long-form workflow has no interrupted or retryable failed stage',
   )
   const resumedAt = instant(input.resumedAt, 'resumedAt')
+  assertDomain(
+    Date.parse(resumedAt) >= Date.parse(workflow.updatedAt),
+    'INVALID_ARGUMENT',
+    'Workflow resume cannot move time backwards',
+  )
   const stages = [...workflow.stages]
   const failed = stages[failedIndex]!
   stages[failedIndex] = freezeStage({

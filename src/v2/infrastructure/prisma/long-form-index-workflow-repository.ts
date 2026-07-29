@@ -330,6 +330,83 @@ function stageData(
   }
 }
 
+function workflowBinding(
+  workflow: Readonly<LongFormIndexWorkflow>,
+) {
+  return {
+    schemaVersion: workflow.schemaVersion,
+    policyVersion: workflow.policyVersion,
+    id: workflow.id,
+    workspaceId: workflow.workspaceId,
+    projectId: workflow.projectId,
+    sourceArtifactId: workflow.sourceArtifactId,
+    sourceArtifactSha256: workflow.sourceArtifactSha256,
+    sourceManifestId: workflow.sourceManifestId,
+    sourceManifestHash: workflow.sourceManifestHash,
+    sourceTranscriptId: workflow.sourceTranscriptId,
+    sourceTranscriptHash: workflow.sourceTranscriptHash,
+    durationMs: workflow.durationMs,
+    budget: workflow.budget,
+    createdByClientId: workflow.createdByClientId,
+    createdAt: workflow.createdAt,
+    stageDefinitions: workflow.stages.map((stage) => ({
+      stage: stage.stage,
+      sequence: stage.sequence,
+      prerequisites: stage.prerequisites,
+      execution: stage.execution,
+      version: stage.version,
+      budget: stage.budget,
+      concurrency: stage.concurrency,
+    })),
+  }
+}
+
+function workflowMutableData(
+  workflow: Readonly<LongFormIndexWorkflow>,
+) {
+  return {
+    status: workflow.status,
+    completedStageCount: workflow.summary.completedStageCount,
+    searchableStageCount: workflow.summary.searchableStageCount,
+    resultCount: workflow.summary.resultCount,
+    costMinorUnits: workflow.summary.costMinorUnits,
+    elapsedMs: workflow.summary.elapsedMs,
+    nextStage: workflow.summary.nextStage,
+    duplicateSegments: workflow.summary.duplicateSegments,
+    resumable: workflow.summary.resumable,
+    workflowJson: stableSerialize(workflow),
+    runHash: workflow.runHash,
+    updatedAt: new Date(workflow.updatedAt),
+  }
+}
+
+function stageMutableData(
+  stage: Readonly<LongFormIndexStageCheckpoint>,
+) {
+  return {
+    status: stage.status,
+    inputHash: stage.inputHash,
+    idempotencyKey: stage.idempotencyKey,
+    attempt: stage.attempt,
+    outputHash: stage.outputHash ?? null,
+    resultCount: stage.resultCount,
+    searchable: stage.searchable,
+    costMinorUnits: stage.costMinorUnits,
+    elapsedMs: stage.elapsedMs,
+    startedAt: stage.startedAt
+      ? new Date(stage.startedAt)
+      : null,
+    completedAt: stage.completedAt
+      ? new Date(stage.completedAt)
+      : null,
+    errorCode: stage.error?.code ?? null,
+    errorMessage: stage.error?.message ?? null,
+    errorRetryable: stage.error?.retryable ?? null,
+    stageJson: stableSerialize(stage),
+    stageHash: stage.stageHash,
+  }
+}
+
 function operationData(operation: Readonly<PublicOperation>, input: {
   requestFingerprint: string
   idempotencyKey: string
@@ -775,5 +852,122 @@ implements LongFormIndexWorkflowRepository {
         ? { nextCursor: pageRows.at(-1)!.id }
         : {}),
     })
+  }
+
+  async replaceWithLease(input: {
+    workspaceId: string
+    projectId: string
+    workflowId: string
+    operationId: string
+    expectedRunHash: string
+    nextWorkflow: Readonly<LongFormIndexWorkflow>
+    leaseOwner: string
+    operationAttempt: number
+    now: string
+  }, attempt = 1): Promise<Readonly<LongFormIndexWorkflow> | null> {
+    const next = hydrateLongFormIndexWorkflow(input.nextWorkflow)
+    const now = new Date(input.now)
+    if (
+      Number.isNaN(now.getTime()) ||
+      next.id !== input.workflowId ||
+      next.workspaceId !== input.workspaceId ||
+      next.projectId !== input.projectId
+    ) {
+      throw new DomainError(
+        'INVALID_ARGUMENT',
+        'Long-form leased transition input is invalid',
+      )
+    }
+    try {
+      const replaced = await this.prisma.$transaction(
+        async (transaction) => {
+          const [stored, lease] = await Promise.all([
+            readRow(transaction, input),
+            transaction.v2PublicOperation.findFirst({
+              where: {
+                id: input.operationId,
+                workspaceId: input.workspaceId,
+                type: 'long-form-index',
+                status: 'running',
+                leaseOwner: input.leaseOwner,
+                attempt: input.operationAttempt,
+                leaseExpiresAt: { gt: now },
+              },
+              select: { id: true },
+            }),
+          ])
+          if (!stored || !lease ||
+            stored.operationId !== input.operationId) {
+            return false
+          }
+          const current = hydrateWorkflow(stored)
+          if (current.runHash !== input.expectedRunHash) {
+            return false
+          }
+          if (
+            stableSerialize(workflowBinding(current)) !==
+              stableSerialize(workflowBinding(next)) ||
+            Date.parse(next.updatedAt) <
+              Date.parse(current.updatedAt)
+          ) {
+            throw new DomainError(
+              'PERSISTENCE_CONFLICT',
+              'Long-form transition changed immutable workflow identity',
+            )
+          }
+          const updated =
+            await transaction.v2LongFormIndexWorkflow.updateMany({
+              where: {
+                id: input.workflowId,
+                workspaceId: input.workspaceId,
+                projectId: input.projectId,
+                runHash: input.expectedRunHash,
+                operationId: input.operationId,
+              },
+              data: workflowMutableData(next),
+            })
+          if (updated.count !== 1) return false
+          for (const [index, stage] of next.stages.entries()) {
+            const previous = current.stages[index]!
+            if (previous.stageHash === stage.stageHash) continue
+            const changed =
+              await transaction.v2LongFormIndexStageCheckpoint
+                .updateMany({
+                  where: {
+                    workflowId: input.workflowId,
+                    stage: stage.stage,
+                    stageHash: previous.stageHash,
+                  },
+                  data: stageMutableData(stage),
+                })
+            if (changed.count !== 1) {
+              throw new DomainError(
+                'PERSISTENCE_CONFLICT',
+                `Long-form stage ${stage.stage} changed concurrently`,
+              )
+            }
+          }
+          return true
+        },
+        {
+          isolationLevel:
+            Prisma.TransactionIsolationLevel.Serializable,
+        },
+      )
+      if (!replaced) return null
+    } catch (error) {
+      if (isPrismaCode(error, 'P2034') && attempt < 3) {
+        return this.replaceWithLease(input, attempt + 1)
+      }
+      if (isPrismaCode(error, 'P2034')) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Long-form stage transition conflicted repeatedly',
+        )
+      }
+      throw error
+    }
+    const row = await readRow(this.prisma, input)
+    return row ? hydrateWorkflow(row) : null
   }
 }

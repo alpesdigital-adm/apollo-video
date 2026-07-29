@@ -74,4 +74,15 @@ export interface LongFormIndexWorkflowRepository {
     limit: number
     cursor?: string
   }): Promise<Readonly<LongFormIndexWorkflowPage>>
+  replaceWithLease(input: {
+    workspaceId: string
+    projectId: string
+    workflowId: string
+    operationId: string
+    expectedRunHash: string
+    nextWorkflow: Readonly<LongFormIndexWorkflow>
+    leaseOwner: string
+    operationAttempt: number
+    now: string
+  }): Promise<Readonly<LongFormIndexWorkflow> | null>
 }
