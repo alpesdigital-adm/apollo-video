@@ -365,6 +365,84 @@ interface ProofIntegrityRunData {
   }
   createdAt: string
 }
+type ProofMode = 'cutaway' | 'split-screen' | 'proof-card'
+interface ProofModeRunData {
+  id: string
+  proofIntegrityRunId: string
+  proofIntegrityRunHash: string
+  formats: ('9:16' | '16:9' | '4:5' | '1:1' | '21:9')[]
+  rhythm: 'fast' | 'measured'
+  plans: {
+    id: string
+    proofIntegrityEvaluationId: string
+    proofIntegrityEvaluationHash: string
+    proofNeedItemId: string
+    claimText: string
+    sourceMediaType: 'video' | 'image' | 'audio' | 'document'
+    format: '9:16' | '16:9' | '4:5' | '1:1' | '21:9'
+    mode: ProofMode
+    selection: 'automatic' | 'manual-override'
+    reasonCodes: string[]
+    contextRequired: boolean
+    presentation: {
+      visual: {
+        attribution: string
+        qualifiers: string[]
+      }
+      verbal: {
+        attribution: string
+        qualifiers: string[]
+      }
+    }
+    timing: {
+      timelineEntryFrame: number
+      timelineEntryMs: number
+      minimumDurationFrames: number
+      targetDurationFrames: number
+      maximumDurationFrames: number
+      entryTransition: {
+        kind: 'cut' | 'crossfade'
+        durationFrames: number
+      }
+      exitTransition: {
+        kind: 'cut' | 'crossfade'
+        durationFrames: number
+      }
+    }
+    layout: {
+      canvas: { width: number; height: number }
+      safeRegion: {
+        x: number; y: number; width: number; height: number
+      }
+      evidenceRegion: {
+        x: number; y: number; width: number; height: number
+      }
+      presenterRegion?: {
+        x: number; y: number; width: number; height: number
+      }
+      creditRegion: {
+        x: number; y: number; width: number; height: number
+      }
+      qualifierRegion: {
+        x: number; y: number; width: number; height: number
+      }
+    }
+  }[]
+  summary: {
+    approvedEvidenceCount: number
+    formatCount: number
+    planCount: number
+    automaticCount: number
+    manualOverrideCount: number
+    cutawayCount: number
+    splitScreenCount: number
+    proofCardCount: number
+    allIntegrityBindingsPreserved: true
+    readyForCompilation: boolean
+  }
+  createdAt: string
+  runHash: string
+}
 interface PublicOperation {
   id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export' | 'source-cleanup'; status: string; phase: string;
   progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string
@@ -634,6 +712,24 @@ Object.freeze({
     'Renovar direitos ou consentimento',
 })
 
+const PROOF_MODE_LABELS = Object.freeze({
+  cutaway: 'Tela inteira',
+  'split-screen': 'Tela dividida',
+  'proof-card': 'Card de prova',
+} satisfies Record<ProofMode, string>)
+
+function proofModeRegionStyle(
+  region: { x: number; y: number; width: number; height: number },
+  canvas: { width: number; height: number },
+) {
+  return {
+    left: `${region.x / canvas.width * 100}%`,
+    top: `${region.y / canvas.height * 100}%`,
+    width: `${region.width / canvas.width * 100}%`,
+    height: `${region.height / canvas.height * 100}%`,
+  }
+}
+
 function readableBytes(value: number | string): string {
   const bytes = typeof value === 'string' ? Number(value) : value
   if (!Number.isFinite(bytes)) return '—'
@@ -812,6 +908,11 @@ export default function ProjectWorkspacePage() {
     useState<ProofIntegrityRunData[]>([])
   const [proofIntegrityLoading, setProofIntegrityLoading] =
     useState(true)
+  const [proofModeRuns, setProofModeRuns] =
+    useState<ProofModeRunData[]>([])
+  const [proofModesLoading, setProofModesLoading] = useState(true)
+  const [proofModeMutationId, setProofModeMutationId] =
+    useState<string | null>(null)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -1113,6 +1214,127 @@ export default function ProjectWorkspacePage() {
   useEffect(() => {
     void loadProofIntegrityRuns()
   }, [loadProofIntegrityRuns])
+  const loadProofModeRuns = useCallback(
+    async (quiet = false) => {
+      if (!quiet) setProofModesLoading(true)
+      try {
+        const response = await fetch(
+          `/v1/projects/${encodeURIComponent(projectId)}` +
+            '/proof-mode-runs?limit=100',
+          {
+            headers: { accept: 'application/json' },
+            cache: 'no-store',
+          },
+        )
+        if (response.status === 401) {
+          router.replace('/login')
+          return
+        }
+        const payload = await response.json() as ApiEnvelope<{
+          runs: ProofModeRunData[]
+        }>
+        if (!response.ok || !payload.data) {
+          throw new Error(apiError(
+            payload,
+            'Não foi possível carregar os modos de prova.',
+          ))
+        }
+        setProofModeRuns(payload.data.runs)
+      } catch (error) {
+        if (!quiet) {
+          setNotice(error instanceof Error
+            ? error.message
+            : 'Não foi possível carregar os modos de prova.')
+        }
+      } finally {
+        if (!quiet) setProofModesLoading(false)
+      }
+    },
+    [projectId, router],
+  )
+
+  useEffect(() => {
+    void loadProofModeRuns()
+  }, [loadProofModeRuns])
+
+  const applyProofModeOverride = useCallback(async (
+    run: ProofModeRunData,
+    target: ProofModeRunData['plans'][number],
+    mode: ProofMode,
+  ) => {
+    const mutationId = `${target.id}:${mode}`
+    setProofModeMutationId(mutationId)
+    try {
+      const retainedOverrides = run.plans
+        .filter((plan) =>
+          plan.selection === 'manual-override' &&
+          !(
+            plan.proofNeedItemId === target.proofNeedItemId &&
+            plan.format === target.format
+          ))
+        .map((plan) => ({
+          proofNeedItemId: plan.proofNeedItemId,
+          format: plan.format,
+          mode: plan.mode,
+          expectedEvaluationHash:
+            plan.proofIntegrityEvaluationHash,
+        }))
+      const response = await fetch(
+        `/v1/projects/${encodeURIComponent(projectId)}` +
+          '/proof-mode-runs',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json',
+            'idempotency-key':
+              `proof-mode-ui-${crypto.randomUUID()}`,
+          },
+          body: JSON.stringify({
+            proofIntegrityRunId: run.proofIntegrityRunId,
+            expectedProofIntegrityRunHash:
+              run.proofIntegrityRunHash,
+            policyVersion: 'proof-mode-policy/v1',
+            formats: run.formats,
+            rhythm: run.rhythm,
+            overrides: [
+              ...retainedOverrides,
+              {
+                proofNeedItemId: target.proofNeedItemId,
+                format: target.format,
+                mode,
+                expectedEvaluationHash:
+                  target.proofIntegrityEvaluationHash,
+              },
+            ],
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        run: ProofModeRunData
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível aplicar o modo de prova.',
+        ))
+      }
+      setNotice(
+        `${PROOF_MODE_LABELS[mode]} aplicado em ${target.format} como novo plano imutável.`,
+      )
+      await loadProofModeRuns(true)
+    } catch (error) {
+      setNotice(error instanceof Error
+        ? error.message
+        : 'Não foi possível aplicar o modo de prova.')
+    } finally {
+      setProofModeMutationId(null)
+    }
+  }, [loadProofModeRuns, projectId, router])
   useEffect(() => () => reviewElementLookup.current?.abort(), [])
   useEffect(() => {
     if (workspace?.editPlan?.state !== 'compiled' || !workspace.version) {
@@ -4018,6 +4240,212 @@ export default function ProjectWorkspacePage() {
                             <p className="mt-3 font-mono text-[8px] uppercase tracking-[0.1em] text-[#69766c]" data-testid="proof-integrity-no-fabrication">
                               fabricação sugerida: nunca
                             </p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section
+            aria-label="Modos de apresentação das provas"
+            className="mt-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
+            data-testid="proof-mode-panel"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/[0.07] px-5 py-5">
+              <div>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#9b8d72]">Composição da prova</p>
+                <h2 className="mt-1.5 text-base font-semibold tracking-[-0.02em] text-[#e8e3da]">Um layout seguro para cada segmento e formato.</h2>
+                <p className="mt-1 max-w-3xl text-[10px] leading-5 text-[#6e6961]">O Diretor escolhe tela inteira, tela dividida ou card conforme mídia, ritmo e contexto. Crédito e ressalvas permanecem obrigatórios; uma escolha manual cria outro plano imutável.</p>
+              </div>
+              <div className="flex gap-2 font-mono text-[8px] uppercase tracking-[0.12em]">
+                <span className="border border-[#4e835d]/30 px-2.5 py-1.5 text-[#72a47f]">
+                  {proofModeRuns.reduce((total, run) =>
+                    total + run.summary.planCount, 0)} planos
+                </span>
+                <span className="border border-[#9a7836]/30 px-2.5 py-1.5 text-[#b08c49]">
+                  {proofModeRuns.reduce((total, run) =>
+                    total + run.summary.manualOverrideCount, 0)} overrides
+                </span>
+              </div>
+            </div>
+
+            {proofModesLoading ? (
+              <div className="px-5 py-10 text-center text-xs text-[#716c64]">
+                Calculando timing, transições e áreas seguras…
+              </div>
+            ) : proofModeRuns.length === 0 ? (
+              <div className="grid gap-2 px-5 py-9 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div>
+                  <p className="text-sm font-medium text-[#bdb7ae]">Os modos aparecem depois que a integridade libera a montagem.</p>
+                  <p className="mt-1 text-[10px] leading-5 text-[#69655e]">Nenhum card ou cutaway é criado para uma prova bloqueada ou sem contexto suficiente.</p>
+                </div>
+                <span className="mt-2 border border-dashed border-white/[0.1] px-3 py-2 font-mono text-[8px] uppercase tracking-[0.14em] text-[#5f5a53] sm:mt-0">aguardando integridade</span>
+              </div>
+            ) : (
+              <div className="divide-y divide-white/[0.06]">
+                {proofModeRuns.map((run) => (
+                  <article
+                    className="px-5 py-5"
+                    data-testid="proof-mode-run"
+                    key={run.id}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-semibold text-[#c9c4bb]">
+                          {run.summary.approvedEvidenceCount} prova{run.summary.approvedEvidenceCount === 1 ? '' : 's'} · {run.summary.formatCount} formato{run.summary.formatCount === 1 ? '' : 's'} · ritmo {run.rhythm === 'fast' ? 'rápido' : 'medido'}
+                        </p>
+                        <p className="mt-1 font-mono text-[8px] text-[#625e57]">
+                          integridade preservada · sem nova mídia · {run.summary.manualOverrideCount} {run.summary.manualOverrideCount === 1 ? 'ajuste manual' : 'ajustes manuais'}
+                        </p>
+                      </div>
+                      <span className="border border-[#4f865f]/35 bg-[#4f865f]/[0.06] px-2.5 py-1.5 text-[8px] font-semibold uppercase tracking-[0.11em] text-[#77af84]">
+                        pronto para compilar
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                      {run.plans.map((plan) => {
+                        const canvas = plan.layout.canvas
+                        const visualMedia =
+                          plan.sourceMediaType === 'video' ||
+                          plan.sourceMediaType === 'image'
+                        const targetDurationSeconds =
+                          plan.timing.targetDurationFrames / 30
+                        return (
+                          <div
+                            className="grid gap-4 border border-white/[0.07] bg-white/[0.015] p-3 sm:grid-cols-[112px_1fr]"
+                            data-testid="proof-mode-plan"
+                            key={plan.id}
+                          >
+                            <div>
+                              <div
+                                className="relative mx-auto max-h-44 w-full overflow-hidden border border-white/[0.1] bg-[#11100f]"
+                                data-testid="proof-mode-visual-preview"
+                                style={{
+                                  aspectRatio:
+                                    `${canvas.width} / ${canvas.height}`,
+                                }}
+                              >
+                                <div
+                                  className="absolute bg-[#745f37]/25"
+                                  style={proofModeRegionStyle(
+                                    plan.layout.evidenceRegion,
+                                    canvas,
+                                  )}
+                                />
+                                {plan.layout.presenterRegion ? (
+                                  <div
+                                    className="absolute bg-[#455c63]/35"
+                                    style={proofModeRegionStyle(
+                                      plan.layout.presenterRegion,
+                                      canvas,
+                                    )}
+                                  />
+                                ) : null}
+                                <div
+                                  className="absolute border border-dashed border-white/20"
+                                  style={proofModeRegionStyle(
+                                    plan.layout.safeRegion,
+                                    canvas,
+                                  )}
+                                />
+                                <div
+                                  className="absolute bg-[#151515]/90"
+                                  style={proofModeRegionStyle(
+                                    plan.layout.qualifierRegion,
+                                    canvas,
+                                  )}
+                                />
+                                <div
+                                  className="absolute grid place-items-center bg-[#080808]/95 px-1 text-center text-[5px] font-semibold text-[#d9c9a8]"
+                                  style={proofModeRegionStyle(
+                                    plan.layout.creditRegion,
+                                    canvas,
+                                  )}
+                                >
+                                  crédito
+                                </div>
+                              </div>
+                              <p className="mt-2 text-center font-mono text-[8px] text-[#777168]">
+                                {plan.format} · {canvas.width}×{canvas.height}
+                              </p>
+                            </div>
+
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-[10px] font-semibold text-[#c9c3ba]">
+                                  {PROOF_MODE_LABELS[plan.mode]}
+                                </span>
+                                <span className={`font-mono text-[7px] uppercase tracking-[0.08em] ${plan.selection === 'manual-override' ? 'text-[#d2a54a]' : 'text-[#6f9f7a]'}`}>
+                                  {plan.selection === 'manual-override'
+                                    ? 'manual'
+                                    : 'diretor'}
+                                </span>
+                              </div>
+                              <p
+                                className="mt-2 text-[9px] leading-4 text-[#c7c0b5]"
+                                data-testid="proof-mode-claim"
+                              >
+                                “{plan.claimText}”
+                              </p>
+                              <p className="mt-2 truncate text-[9px] text-[#928b81]" title={plan.presentation.visual.attribution}>
+                                {plan.presentation.visual.attribution}
+                              </p>
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {plan.presentation.visual.qualifiers.map((qualifier) => (
+                                  <span className="border border-[#9a7836]/25 px-1.5 py-0.5 font-mono text-[7px] text-[#a88a51]" key={qualifier}>
+                                    {qualifier}
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-[7px] text-[#6e6961]">
+                                <span>entrada {plan.timing.entryTransition.kind === 'cut' ? 'corte' : `${plan.timing.entryTransition.durationFrames}f fade`}</span>
+                                <span>saída {plan.timing.exitTransition.kind === 'cut' ? 'corte' : `${plan.timing.exitTransition.durationFrames}f fade`}</span>
+                                <span>alvo {targetDurationSeconds.toFixed(1)}s</span>
+                                <span>{plan.contextRequired ? 'contexto integral' : 'contexto simples'}</span>
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-1">
+                                {(['cutaway', 'split-screen', 'proof-card'] as ProofMode[]).map((mode) => {
+                                  const unsafe =
+                                    mode !== 'proof-card' && !visualMedia ||
+                                    mode === 'proof-card' &&
+                                      plan.contextRequired
+                                  const pending =
+                                    proofModeMutationId ===
+                                      `${plan.id}:${mode}`
+                                  return (
+                                    <button
+                                      className={`border px-2 py-1 text-[7px] transition ${mode === plan.mode ? 'border-[#b78a37]/45 bg-[#b78a37]/[0.08] text-[#cba44f]' : unsafe ? 'cursor-not-allowed border-white/[0.04] text-[#393632]' : 'border-white/[0.09] text-[#7c766e] hover:border-white/[0.18] hover:text-[#b8b1a8]'}`}
+                                      disabled={
+                                        unsafe ||
+                                        mode === plan.mode ||
+                                        proofModeMutationId !== null
+                                      }
+                                      key={mode}
+                                      onClick={() => {
+                                        void applyProofModeOverride(
+                                          run,
+                                          plan,
+                                          mode,
+                                        )
+                                      }}
+                                      title={unsafe
+                                        ? 'Este modo removeria a mídia ou o contexto obrigatório.'
+                                        : `Aplicar ${PROOF_MODE_LABELS[mode]} somente neste segmento e formato`}
+                                      type="button"
+                                    >
+                                      {pending
+                                        ? 'aplicando…'
+                                        : PROOF_MODE_LABELS[mode]}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
                           </div>
                         )
                       })}

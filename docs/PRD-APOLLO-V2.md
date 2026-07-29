@@ -1080,7 +1080,88 @@ Critérios de aceite:
 
 ### FR-132 — Modos de prova
 
-Cutaway, split, card, montage, áudio com apoio visual ou cold open.
+O MVP deve transformar somente avaliações `approved` de um
+`ProofIntegrityRun` atual em uma matriz imutável `segmento × formato`. Cada
+plano escolhe um dos três modos executáveis:
+
+- `cutaway`: a evidência visual ocupa o canvas e substitui temporariamente o
+  presenter;
+- `split-screen`: presenter e evidência permanecem simultaneamente visíveis;
+- `proof-card`: a prova é apresentada em layout tipográfico/estático com
+  identificação e qualifiers.
+
+Montage, prova conduzida apenas por áudio e proof-first/cold open continuam
+como extensões futuras. Eles não podem ser aliases silenciosos dos três modos
+do MVP.
+
+Entradas obrigatórias:
+
+- ID e hash exatos do `ProofIntegrityRun`, que precisa estar
+  `readyForAssembly=true`;
+- `ProofNeedRun` e item correspondentes;
+- `EvidenceSegment` e artifact de origem atuais;
+- tipo real da mídia: `video`, `image`, `audio` ou `document`;
+- um a cinco formatos entre `9:16`, `16:9`, `4:5`, `1:1` e `21:9`;
+- ritmo `fast` ou `measured`;
+- overrides manuais opcionais, sempre vinculados a
+  `proofNeedItemId + format + expectedEvaluationHash`.
+
+Política automática inicial:
+
+| Condição | Modo |
+| --- | --- |
+| mídia não visual | `proof-card` |
+| contexto visual obrigatório | `split-screen` |
+| mídia visual + ritmo rápido | `cutaway` |
+| vídeo medido em 16:9/21:9 | `split-screen` |
+| imagem medida | `proof-card` |
+| demais vídeos medidos | `cutaway` |
+
+`cutaway` e `split-screen` exigem vídeo ou imagem. `proof-card` não pode
+substituir evidência marcada como `contextRequired`, pois isso removeria a
+mídia/contexto que fundamentaram a aprovação. Override manual pode mudar a
+preferência editorial, nunca relaxar essas invariantes.
+
+Cada `ProofModePlan` deve persistir:
+
+- evaluation, ProofNeed item, EvidenceSegment e artifact/hash exatos;
+- texto exato da claim do ProofNeed, sem gerar copy genérica no proof-card;
+- formato, ritmo, modo, origem automática/manual e reason codes;
+- frame/milissegundo de entrada derivados do ProofNeed;
+- context range integral e duração mínima/alvo/máxima;
+- transições explícitas de entrada/saída e duração em frames;
+- regiões em pixels para evidência, presenter, attribution e qualifiers;
+- canvas, safe area, contraste mínimo, fonte mínima e limites de texto;
+- o mesmo `ProofIntegrityPresentation` aprovado, sem reescrever attribution ou
+  qualifiers;
+- contrato do renderer `proof-presentation/v1`, sem materializar nova mídia
+  durante o planejamento.
+
+Layouts são determinísticos por modo e formato. Attribution e qualifiers ficam
+sempre dentro da safe area, não se sobrepõem e permanecem visual e verbalmente
+idênticos. Split-screen nunca sobrepõe presenter e evidência.
+
+Criação, leitura e listagem devem existir na API externa. A UI consome somente
+essas rotas, mostra preview proporcional ao canvas e permite override por
+segmento/formato gerando um novo run imutável. Criação é bounded, idempotente,
+serializável, não chama provider e não cria artifact.
+
+Critérios de aceite:
+
+- os 15 pares `cinco formatos × três modos` possuem visual golden e regiões
+  válidas;
+- seleção automática cobre mídia, formato, ritmo e contexto;
+- override afeta somente o segmento/formato escolhido e rejeita evaluation
+  stale;
+- prova bloqueada, expirou ou perdeu rights não recebe plano;
+- constraints rejeitam identificação ausente, modo/mídia incompatíveis e
+  proof-card que remova contexto obrigatório;
+- replay converge e payload diferente com a mesma chave falha;
+- API, PostgreSQL e UI observam o mesmo run canônico;
+- a contagem de media artifacts permanece inalterada;
+- renderer deve comprovar visualmente as quinze combinações formato/modo e
+  produzir MP4 real de cutaway, split-screen e proof-card antes de marcar o
+  requisito como entregue.
 
 ### FR-133 — Long-form indexing
 

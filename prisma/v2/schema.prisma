@@ -112,6 +112,8 @@ model V2Workspace {
   proofNeedItems                  V2ProofNeedItem[]
   proofIntegrityRuns              V2ProofIntegrityRun[]
   proofIntegrityEvaluations       V2ProofIntegrityEvaluation[]
+  proofModeRuns                   V2ProofModeRun[]
+  proofModePlans                  V2ProofModePlan[]
 
   @@map("workspaces")
 }
@@ -167,6 +169,7 @@ model V2ApiClient {
   validationEnvelopeDecisions     V2ValidationEnvelopeDecision[]   @relation("ValidationEnvelopeDecisionActor")
   createdProofNeedRuns            V2ProofNeedRun[]                 @relation("ProofNeedRunCreator")
   createdProofIntegrityRuns       V2ProofIntegrityRun[]            @relation("ProofIntegrityRunCreator")
+  createdProofModeRuns            V2ProofModeRun[]                 @relation("ProofModeRunCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -328,6 +331,8 @@ model V2Project {
   proofNeedItems                V2ProofNeedItem[]
   proofIntegrityRuns            V2ProofIntegrityRun[]
   proofIntegrityEvaluations     V2ProofIntegrityEvaluation[]
+  proofModeRuns                 V2ProofModeRun[]
+  proofModePlans                V2ProofModePlan[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -735,6 +740,7 @@ model V2MediaArtifact {
   contaminationReports         V2ContaminationReport[]
   sourceCleanupSourcePlans     V2SourceCleanupPlan[]            @relation("SourceCleanupSourceArtifact")
   sourceCleanupResults         V2SourceCleanupResult[]          @relation("SourceCleanupOutputArtifact")
+  proofModeSourcePlans         V2ProofModePlan[]                @relation("ProofModeSourceArtifact")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -1594,6 +1600,7 @@ model V2EvidenceSegment {
   createdBy                 V2ApiClient                  @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   selectedProofNeeds        V2ProofNeedItem[]
   proofIntegrityEvaluations V2ProofIntegrityEvaluation[]
+  proofModePlans             V2ProofModePlan[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -1922,6 +1929,7 @@ model V2ProofNeedRun {
   createdBy     V2ApiClient           @relation("ProofNeedRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   items         V2ProofNeedItem[]
   integrityRuns V2ProofIntegrityRun[]
+  proofModeRuns V2ProofModeRun[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId])
@@ -1965,6 +1973,7 @@ model V2ProofNeedItem {
   run                  V2ProofNeedRun               @relation(fields: [runId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
   selectedEvidence     V2EvidenceSegment?           @relation(fields: [selectedEvidenceId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   integrityEvaluations V2ProofIntegrityEvaluation[]
+  proofModePlans        V2ProofModePlan[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, runId])
@@ -2009,6 +2018,7 @@ model V2ProofIntegrityRun {
   proofNeedRun V2ProofNeedRun               @relation(fields: [proofNeedRunId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict)
   createdBy    V2ApiClient                  @relation("ProofIntegrityRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   evaluations  V2ProofIntegrityEvaluation[]
+  proofModeRuns V2ProofModeRun[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId])
@@ -2055,8 +2065,10 @@ model V2ProofIntegrityEvaluation {
   run              V2ProofIntegrityRun @relation(fields: [runId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
   proofNeedItem    V2ProofNeedItem     @relation(fields: [proofNeedItemId, workspaceId, proofNeedRunId], references: [id, workspaceId, runId], onDelete: Restrict)
   selectedEvidence V2EvidenceSegment?  @relation(fields: [selectedEvidenceId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  proofModePlans    V2ProofModePlan[]
 
   @@unique([id, workspaceId])
+  @@unique([id, workspaceId, runId])
   @@unique([runId, sequence])
   @@unique([runId, proofNeedItemId])
   @@index([workspaceId, projectId, outcome, evaluatedAt(sort: Desc)])
@@ -2065,6 +2077,108 @@ model V2ProofIntegrityEvaluation {
   @@index([workspaceId, selectedEvidenceId])
   @@index([workspaceId, allowedForAssembly, outcome])
   @@map("proof_integrity_evaluations")
+}
+
+model V2ProofModeRun {
+  id                           String   @id @db.VarChar(128)
+  workspaceId                  String   @db.VarChar(128)
+  projectId                    String   @db.VarChar(128)
+  batchId                      String   @db.VarChar(128)
+  proofIntegrityRunId          String   @db.VarChar(128)
+  proofIntegrityRunHash        String   @db.Char(64)
+  proofNeedRunId               String   @db.VarChar(128)
+  proofNeedRunHash             String   @db.Char(64)
+  schemaVersion                String   @db.VarChar(64)
+  policyVersion                String   @db.VarChar(64)
+  formatsText                  String   @db.Text
+  formatCount                  Int
+  rhythm                       String   @db.VarChar(16)
+  approvedEvidenceCount        Int
+  planCount                    Int
+  automaticCount               Int
+  manualOverrideCount          Int
+  cutawayCount                 Int
+  splitScreenCount             Int
+  proofCardCount               Int
+  allIntegrityBindingsPreserved Boolean
+  readyForCompilation          Boolean
+  runJson                      String   @db.Text
+  runHash                      String   @db.Char(64)
+  requestFingerprint           String   @db.Char(64)
+  idempotencyKey               String   @db.VarChar(128)
+  createdByClientId            String   @db.VarChar(80)
+  createdAt                    DateTime @db.Timestamptz(3)
+
+  workspace         V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project           V2Project           @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch             V2ProductionBatch   @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  proofIntegrityRun V2ProofIntegrityRun @relation(fields: [proofIntegrityRunId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict)
+  proofNeedRun      V2ProofNeedRun      @relation(fields: [proofNeedRunId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict)
+  createdBy         V2ApiClient         @relation("ProofModeRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  plans             V2ProofModePlan[]
+
+  @@unique([id, workspaceId])
+  @@unique([id, workspaceId, projectId])
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, proofIntegrityRunId, createdAt(sort: Desc)])
+  @@index([workspaceId, proofNeedRunId, createdAt(sort: Desc)])
+  @@index([workspaceId, readyForCompilation, createdAt(sort: Desc)])
+  @@map("proof_mode_runs")
+}
+
+model V2ProofModePlan {
+  id                           String   @id @db.VarChar(128)
+  workspaceId                  String   @db.VarChar(128)
+  projectId                    String   @db.VarChar(128)
+  runId                        String   @db.VarChar(128)
+  proofIntegrityRunId          String   @db.VarChar(128)
+  proofIntegrityEvaluationId   String   @db.VarChar(128)
+  proofIntegrityEvaluationHash String   @db.Char(64)
+  proofNeedRunId               String   @db.VarChar(128)
+  proofNeedItemId              String   @db.VarChar(128)
+  proofNeedItemHash            String   @db.Char(64)
+  claimText                    String   @db.VarChar(500)
+  sourceEvidenceId             String   @db.VarChar(128)
+  sourceEvidenceHash           String   @db.Char(64)
+  sourceArtifactId             String   @db.VarChar(128)
+  sourceMediaType              String   @db.VarChar(16)
+  sequence                     Int
+  format                       String   @db.VarChar(8)
+  rhythm                       String   @db.VarChar(16)
+  mode                         String   @db.VarChar(32)
+  selection                    String   @db.VarChar(32)
+  contextRequired              Boolean
+  identificationRequired       Boolean
+  reasonCodesText              String   @db.Text
+  reasonCount                  Int
+  presentationJson             String   @db.Text
+  presentationHash             String   @db.Char(64)
+  timingJson                   String   @db.Text
+  timingHash                   String   @db.Char(64)
+  layoutJson                   String   @db.Text
+  layoutHash                   String   @db.Char(64)
+  planJson                     String   @db.Text
+  planHash                     String   @db.Char(64)
+
+  workspace                V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                  V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  run                      V2ProofModeRun               @relation(fields: [runId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+  proofIntegrityEvaluation V2ProofIntegrityEvaluation  @relation(fields: [proofIntegrityEvaluationId, workspaceId, proofIntegrityRunId], references: [id, workspaceId, runId], onDelete: Restrict)
+  proofNeedItem            V2ProofNeedItem             @relation(fields: [proofNeedItemId, workspaceId, proofNeedRunId], references: [id, workspaceId, runId], onDelete: Restrict)
+  sourceEvidence           V2EvidenceSegment           @relation(fields: [sourceEvidenceId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact           V2MediaArtifact             @relation("ProofModeSourceArtifact", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([runId, sequence])
+  @@unique([runId, proofNeedItemId, format])
+  @@index([workspaceId, projectId, mode, format])
+  @@index([workspaceId, proofIntegrityRunId, proofIntegrityEvaluationId])
+  @@index([workspaceId, proofNeedRunId, proofNeedItemId])
+  @@index([workspaceId, sourceEvidenceId])
+  @@index([workspaceId, sourceArtifactId])
+  @@index([workspaceId, selection, format])
+  @@map("proof_mode_plans")
 }
 
 model V2SemanticSearchDocument {
@@ -2327,6 +2441,7 @@ model V2ProductionBatch {
   validationEnvelopeReuses   V2ValidationEnvelopeReuse[]
   proofNeedRuns              V2ProofNeedRun[]
   proofIntegrityRuns         V2ProofIntegrityRun[]
+  proofModeRuns              V2ProofModeRun[]
   variantPortfolioPreflights V2VariantPortfolioPreflightRun[]
   batchEditItemStates        V2BatchEditItemStateVersion[]
   batchEditPreflights        V2BatchEditPreflightRun[]

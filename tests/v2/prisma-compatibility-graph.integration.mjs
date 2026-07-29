@@ -129,7 +129,7 @@ function dimensions(score) {
   }))
 }
 
-test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131 persists compatibility, exact validated-hook reuse, ProofNeeds, ProofIntegrity and bounded portfolio preflights through PostgreSQL and /v1', {
+test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists compatibility, exact validated-hook reuse, ProofNeeds, ProofIntegrity, ProofMode and bounded portfolio preflights through PostgreSQL and /v1', {
   skip:
     process.env.APOLLO_COMPATIBILITY_GRAPH_E2E !== '1' &&
     'set APOLLO_COMPATIBILITY_GRAPH_E2E=1 and use an isolated V2 database',
@@ -1744,6 +1744,136 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131 persists compatibili
     )
     assert.equal(selectedIntegrityMismatch.status, 409)
 
+    const proofModeEndpoint =
+      `${baseUrl}/v1/projects/${projectId}/proof-mode-runs`
+    assert.equal((await fetch(proofModeEndpoint)).status, 401)
+    const proofModeBody = {
+      proofIntegrityRunId: selectedIntegrityRun.id,
+      expectedProofIntegrityRunHash: selectedIntegrityRun.runHash,
+      policyVersion: 'proof-mode-policy/v1',
+      formats: ['9:16', '16:9'],
+      rhythm: 'measured',
+      overrides: [],
+    }
+    const proofModeKey = `proof-mode-selected-${suffix}`
+    const proofModeResponse = await fetch(proofModeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': proofModeKey,
+      },
+      body: JSON.stringify(proofModeBody),
+    })
+    const proofModePayload = await proofModeResponse.json()
+    assert.equal(
+      proofModeResponse.status,
+      201,
+      JSON.stringify(proofModePayload),
+    )
+    const proofModeRun = proofModePayload.data.run
+    assert.equal(proofModePayload.data.replayed, false)
+    assert.equal(proofModeRun.summary.planCount, 2)
+    assert.equal(proofModeRun.summary.automaticCount, 2)
+    assert.equal(proofModeRun.summary.manualOverrideCount, 0)
+    assert.equal(
+      proofModeRun.summary.allIntegrityBindingsPreserved,
+      true,
+    )
+    assert.ok(proofModeRun.plans.every((plan) =>
+      plan.mode === 'split-screen' &&
+      plan.sourceMediaType === 'video' &&
+      plan.contextRequired &&
+      plan.identificationRequired &&
+      plan.presentation.presentationHash ===
+        approvedIntegrity.presentation.presentationHash &&
+      JSON.stringify(plan.presentation.visual) ===
+        JSON.stringify(plan.presentation.verbal) &&
+      plan.rendererContract.materializesNewMedia === false))
+    assert.deepEqual(
+      proofModeRun.plans.map((plan) => plan.format).sort(),
+      ['16:9', '9:16'],
+    )
+
+    const proofModeReplay = await fetch(proofModeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': proofModeKey,
+      },
+      body: JSON.stringify(proofModeBody),
+    })
+    assert.equal(proofModeReplay.status, 200)
+    assert.equal((await proofModeReplay.json()).data.replayed, true)
+    const proofModeMismatch = await fetch(proofModeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': proofModeKey,
+      },
+      body: JSON.stringify({
+        ...proofModeBody,
+        rhythm: 'fast',
+      }),
+    })
+    assert.equal(proofModeMismatch.status, 409)
+
+    const manualProofModeResponse = await fetch(
+      proofModeEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': `proof-mode-manual-${suffix}`,
+        },
+        body: JSON.stringify({
+          ...proofModeBody,
+          overrides: [{
+            proofNeedItemId: approvedIntegrity.proofNeedItemId,
+            format: '9:16',
+            mode: 'cutaway',
+            expectedEvaluationHash:
+              approvedIntegrity.evaluationHash,
+          }],
+        }),
+      },
+    )
+    const manualProofModePayload =
+      await manualProofModeResponse.json()
+    assert.equal(
+      manualProofModeResponse.status,
+      201,
+      JSON.stringify(manualProofModePayload),
+    )
+    assert.equal(
+      manualProofModePayload.data.run.summary.manualOverrideCount,
+      1,
+    )
+    assert.equal(
+      manualProofModePayload.data.run.plans.find((plan) =>
+        plan.format === '9:16').mode,
+      'cutaway',
+    )
+    assert.equal(
+      manualProofModePayload.data.run.plans.find((plan) =>
+        plan.format === '9:16').selection,
+      'manual-override',
+    )
+    const proofModeRead = await fetch(
+      `${proofModeEndpoint}/${proofModeRun.id}`,
+      { headers },
+    )
+    assert.equal(proofModeRead.status, 200)
+    assert.equal(
+      (await proofModeRead.json()).data.run.runHash,
+      proofModeRun.runHash,
+    )
+    const proofModeList = await fetch(
+      `${proofModeEndpoint}?mode=cutaway&format=9%3A16&manualOverride=true&limit=10`,
+      { headers },
+    )
+    assert.equal(proofModeList.status, 200)
+    assert.equal((await proofModeList.json()).data.runs.length, 1)
+
     const contextRange =
       selectedProof.selectedEvidence.contextRangeMs
     const blockedContextResponse = await fetch(
@@ -1887,6 +2017,18 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131 persists compatibili
       }),
       4,
     )
+    assert.equal(
+      await client.v2ProofModeRun.count({
+        where: { workspaceId, projectId },
+      }),
+      2,
+    )
+    assert.equal(
+      await client.v2ProofModePlan.count({
+        where: { workspaceId, projectId },
+      }),
+      4,
+    )
     await assert.rejects(
       client.$executeRawUnsafe(
         'UPDATE "proof_integrity_evaluations" SET "fabricationSuggested" = TRUE WHERE "id" = $1',
@@ -1908,12 +2050,27 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131 persists compatibili
       ),
       /constraint|check/i,
     )
+    await assert.rejects(
+      client.$executeRawUnsafe(
+        'UPDATE "proof_mode_plans" SET "identificationRequired" = FALSE WHERE "runId" = $1',
+        proofModeRun.id,
+      ),
+      /constraint|check/i,
+    )
+    await assert.rejects(
+      client.$executeRawUnsafe(
+        'UPDATE "proof_mode_plans" SET "mode" = $1 WHERE "runId" = $2',
+        'proof-card',
+        proofModeRun.id,
+      ),
+      /constraint|check/i,
+    )
     assert.equal(
       await client.v2MediaArtifact.count({
         where: { workspaceId },
       }),
       proofMediaCountBefore,
-      'ProofNeed and ProofIntegrity planning must remain virtual and never materialize media',
+      'ProofNeed, ProofIntegrity and ProofMode planning must remain virtual and never materialize media',
     )
 
     const fullReplayResponse = await fetch(recipeEndpoint, {
@@ -2241,6 +2398,15 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131 persists compatibili
       'apollo.projects.proof-integrity-runs.create',
       'apollo.projects.proof-integrity-runs.list',
       'apollo.projects.proof-integrity-runs.read',
+    ])
+    const proofModeCapabilityIds =
+      capabilitiesPayload.data.capabilities
+        .map((capability) => capability.id)
+        .filter((id) => id.includes('proof-mode-runs'))
+    assert.deepEqual(proofModeCapabilityIds.sort(), [
+      'apollo.projects.proof-mode-runs.create',
+      'apollo.projects.proof-mode-runs.list',
+      'apollo.projects.proof-mode-runs.read',
     ])
 
     assert.equal(

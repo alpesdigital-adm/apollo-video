@@ -340,6 +340,33 @@ test('T-FR-131 project editor exposes API-backed proof integrity without fabrica
   assert.match(projectEditorSource, /fabricação sugerida: nunca/)
 })
 
+test('T-FR-132 project editor previews proof modes and applies scoped overrides through v1', () => {
+  assert.match(projectEditorSource, /\/proof-mode-runs\?limit=100/)
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-mode-panel"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-mode-visual-preview"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-mode-claim"/,
+  )
+  assert.match(projectEditorSource, /plan\.claimText/)
+  assert.match(projectEditorSource, /proof-mode-policy\/v1/)
+  assert.match(projectEditorSource, /expectedEvaluationHash/)
+  assert.match(projectEditorSource, /expectedProofIntegrityRunHash/)
+  assert.match(projectEditorSource, /Tela inteira/)
+  assert.match(projectEditorSource, /Tela dividida/)
+  assert.match(projectEditorSource, /Card de prova/)
+  assert.match(
+    projectEditorSource,
+    /Este modo removeria a mídia ou o contexto obrigatório/,
+  )
+})
+
 test('T-FR-230 project editor exposes the persisted proxy verdict and blocks final export until release', () => {
   assert.match(projectEditorSource, /\/proxy-reviews/)
   assert.match(projectEditorSource, /data-testid="proxy-review-gate"/)

@@ -52,6 +52,7 @@ export interface EvidenceSegmentSearchResult {
 
 export interface EvidenceSegmentCurrentContext {
   evidence: Readonly<PersistedEvidenceSegment>
+  sourceMediaType: 'video' | 'image' | 'audio' | 'document'
   currentRights?: Readonly<EvidenceRightsSnapshot>
 }
 

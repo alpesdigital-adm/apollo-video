@@ -5,7 +5,11 @@ import { extname, isAbsolute, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
-import { renderMedia, selectComposition } from '@remotion/renderer'
+import {
+  renderMedia,
+  renderStill,
+  selectComposition,
+} from '@remotion/renderer'
 
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024
 
@@ -73,6 +77,7 @@ async function startPrivateAssetServer(inputProps) {
     if (!scene?.props || typeof scene.props !== 'object') continue
     if ('imageSrc' in scene.props) scene.props.imageSrc = await markLocation(scene.props.imageSrc)
     if ('videoSrc' in scene.props) scene.props.videoSrc = await markLocation(scene.props.videoSrc)
+    if ('evidenceSrc' in scene.props) scene.props.evidenceSrc = await markLocation(scene.props.evidenceSrc)
   }
   const server = createServer(async (request, response) => {
     try {
@@ -132,6 +137,7 @@ async function startPrivateAssetServer(inputProps) {
     if (!scene?.props || typeof scene.props !== 'object') continue
     if ('imageSrc' in scene.props) scene.props.imageSrc = unmarkLocation(scene.props.imageSrc)
     if ('videoSrc' in scene.props) scene.props.videoSrc = unmarkLocation(scene.props.videoSrc)
+    if ('evidenceSrc' in scene.props) scene.props.evidenceSrc = unmarkLocation(scene.props.evidenceSrc)
   }
   return {
     inputProps: markedProps,
@@ -160,6 +166,21 @@ async function main() {
   const height = positiveInteger(request.height, 'height', 8192)
   const fps = positiveInteger(request.fps, 'fps', 120)
   const durationInFrames = positiveInteger(request.durationInFrames, 'durationInFrames', 5_184_000)
+  const renderKind = request.renderKind ?? 'media'
+  if (renderKind !== 'media' && renderKind !== 'still') {
+    throw new Error('render kind is invalid')
+  }
+  const frame = renderKind === 'still'
+    ? Number(request.frame)
+    : 0
+  if (
+    renderKind === 'still' &&
+    (!Number.isSafeInteger(frame) ||
+      frame < 0 ||
+      frame >= durationInFrames)
+  ) {
+    throw new Error('still frame is invalid')
+  }
   if (!request.inputProps || typeof request.inputProps !== 'object' || Array.isArray(request.inputProps)) {
     throw new Error('render input props are invalid')
   }
@@ -173,20 +194,40 @@ async function main() {
       inputProps: privateAssets.inputProps,
       logLevel: 'error',
     })
-    await renderMedia({
-      serveUrl,
-      composition: { ...selected, width, height, fps, durationInFrames },
-      inputProps: privateAssets.inputProps,
-      codec: 'h264',
-      outputLocation: request.outputPath,
-      overwrite: true,
-      crf: 23,
-      pixelFormat: 'yuv420p',
-      imageFormat: 'jpeg',
-      concurrency: 1,
-      disallowParallelEncoding: true,
-      logLevel: 'error',
-    })
+    const composition = {
+      ...selected,
+      width,
+      height,
+      fps,
+      durationInFrames,
+    }
+    if (renderKind === 'still') {
+      await renderStill({
+        serveUrl,
+        composition,
+        inputProps: privateAssets.inputProps,
+        output: request.outputPath,
+        frame,
+        imageFormat: 'png',
+        overwrite: true,
+        logLevel: 'error',
+      })
+    } else {
+      await renderMedia({
+        serveUrl,
+        composition,
+        inputProps: privateAssets.inputProps,
+        codec: 'h264',
+        outputLocation: request.outputPath,
+        overwrite: true,
+        crf: 23,
+        pixelFormat: 'yuv420p',
+        imageFormat: 'jpeg',
+        concurrency: 1,
+        disallowParallelEncoding: true,
+        logLevel: 'error',
+      })
+    }
   } finally {
     await privateAssets.close()
   }

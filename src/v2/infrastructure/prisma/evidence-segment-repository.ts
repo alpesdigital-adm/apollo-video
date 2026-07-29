@@ -429,8 +429,20 @@ implements EvidenceSegmentRepository {
     })
     if (!row) return null
     const currentRights = row.sourceArtifact.currentRightsSnapshot
+    if (
+      !['video', 'image', 'audio', 'document'].includes(
+        row.sourceArtifact.mediaType,
+      )
+    ) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        `Evidence ${row.id} has an unsupported source media type`,
+      )
+    }
     return Object.freeze({
       evidence: hydrate(row),
+      sourceMediaType: row.sourceArtifact.mediaType as
+        EvidenceSegmentCurrentContext['sourceMediaType'],
       ...(currentRights
         ? { currentRights: rightsSnapshot(currentRights) }
         : {}),

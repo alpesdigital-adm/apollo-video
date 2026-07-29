@@ -48,6 +48,7 @@ import type { SourceCleanupRepository } from '../application/ports/source-cleanu
 import type { ValidationEnvelopeRepository } from '../application/ports/validation-envelope-repository.ts'
 import type { ProofNeedRepository } from '../application/ports/proof-need-repository.ts'
 import type { ProofIntegrityRepository } from '../application/ports/proof-integrity-repository.ts'
+import type { ProofModeRepository } from '../application/ports/proof-mode-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -133,6 +134,7 @@ import { PrismaSourceCleanupRepository } from './prisma/source-cleanup-repositor
 import { PrismaValidationEnvelopeRepository } from './prisma/validation-envelope-repository.ts'
 import { PrismaProofNeedRepository } from './prisma/proof-need-repository.ts'
 import { PrismaProofIntegrityRepository } from './prisma/proof-integrity-repository.ts'
+import { PrismaProofModeRepository } from './prisma/proof-mode-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -304,6 +306,10 @@ export function createProofNeedRepository(): ProofNeedRepository {
 export function createProofIntegrityRepository():
 ProofIntegrityRepository {
   return new PrismaProofIntegrityRepository(resolveV2Client())
+}
+
+export function createProofModeRepository(): ProofModeRepository {
+  return new PrismaProofModeRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {

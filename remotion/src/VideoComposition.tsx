@@ -10,6 +10,7 @@ import {
 } from 'remotion';
 import { CompositionProps, CreatorProfile, Scene } from './lib/types';
 import { getGrade, getGradeOverlayLayers, composeFilter } from './lib/grade';
+import { isProofPresentationActive } from './lib/proof-coordination';
 import { SubtitleOverlay } from './components/SubtitleOverlay';
 import { HookTitle } from './components/HookTitle';
 import { FullScreen } from './scenes/FullScreen';
@@ -24,6 +25,7 @@ import { CTA } from './scenes/CTA';
 import { StickFigures } from './scenes/StickFigures';
 import { ImageInsert, ImageInsertTrack } from './scenes/ImageInsert';
 import { AssetCard } from './scenes/AssetCard';
+import { ProofPresentation } from './scenes/ProofPresentation';
 import {
   LayoutSegmentRenderer,
   findActiveLayoutSegment,
@@ -41,7 +43,8 @@ const renderSceneComponent = (
   palette: any,
   stylePreset?: string,
   durationInFrames?: number,
-  creator?: CreatorProfile
+  creator?: CreatorProfile,
+  primaryVideoSrc?: string
 ): React.ReactNode => {
   const props: SceneComponentProps = {
     format,
@@ -77,6 +80,8 @@ const renderSceneComponent = (
       return <ImageInsert {...sceneProps} />;
     case 'asset-card':
       return <AssetCard {...sceneProps} />;
+    case 'proof-presentation':
+      return <ProofPresentation {...sceneProps} videoSrc={primaryVideoSrc} />;
     default:
       return null;
   }
@@ -212,6 +217,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
     'flow',
     'message',
     'stick-figures',
+    'proof-presentation',
   ]);
 
   // A free window shorter than this isn't worth a debut: the manchete would
@@ -313,6 +319,8 @@ export const VideoComposition: React.FC<CompositionProps> = ({
     sceneIntervals.some((iv) => f >= iv.from && f < iv.to);
   const isTweetActiveAt = (f: number): boolean =>
     tweetIntervals.some((iv) => f >= iv.from && f < iv.to);
+  const isProofActiveAt = (f: number): boolean =>
+    isProofPresentationActive(scenes, f, config.fps);
 
   const SUB_FADE_FRAMES = 8;
   // Rampa 0→1 quando isActiveAt liga, 1→0 quando desliga (crossfade suave).
@@ -349,7 +357,9 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   };
 
   const subtitleTopFactor = rampFor(isStageActiveAt);
-  const subtitleHideFactor = rampFor(isTweetActiveAt);
+  const subtitleHideFactor = isProofActiveAt(frame)
+    ? 1
+    : rampFor(isTweetActiveAt);
 
   const HOOK_FADE_FRAMES = 6;
   let hookVisibility = 0;
@@ -562,7 +572,15 @@ export const VideoComposition: React.FC<CompositionProps> = ({
             from={startFrame}
             durationInFrames={duration}
           >
-            {renderSceneComponent(scene, format, palette, stylePreset, duration, creator)}
+            {renderSceneComponent(
+              scene,
+              format,
+              palette,
+              stylePreset,
+              duration,
+              creator,
+              videoSrc,
+            )}
           </Sequence>
         );
       })}

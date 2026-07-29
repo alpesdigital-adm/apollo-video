@@ -219,6 +219,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Evaluates existing ProofNeed, recipe, evidence and current authorization hashes, persists an immutable fail-closed decision and starts no provider, render or media materialization work.',
     },
+    'apollo.projects.proof-mode-runs.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Plans a bounded matrix from approved existing evidence, keeps manual overrides hash-scoped and starts no provider, render or media materialization work.',
+    },
     'apollo.batches.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one explicit bounded item matrix from existing approved workspace artifacts without starting provider work.',

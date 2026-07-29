@@ -17,6 +17,7 @@ const SCENE_TYPES = [
   'stick-figures',
   'image-insert',
   'asset-card',
+  'proof-presentation',
 ] as const
 const SUBTITLE_STYLES = [
   'kinetic',
@@ -28,6 +29,7 @@ const SUBTITLE_STYLES = [
 const GRADE_PRESETS = ['natural', 'cinema', 'quente', 'frio', 'off'] as const
 const TOKEN_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/
 const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
+const SHA256_PATTERN = /^[a-f0-9]{64}$/
 
 type SceneType = (typeof SCENE_TYPES)[number]
 type SubtitleStyle = (typeof SUBTITLE_STYLES)[number]
@@ -177,11 +179,101 @@ function compileScene(
   )
   const sourceProps = record(scene.props, `props.scenes[${index}].props`)
   assertDomain(
-    !['imageSrc', 'imagePath', 'videoSrc'].some((key) => key in sourceProps),
+    !['imageSrc', 'imagePath', 'videoSrc', 'evidenceSrc']
+      .some((key) => key in sourceProps),
     'INVALID_RENDER_INPUT',
     `props.scenes[${index}].props cannot contain storage locations`,
   )
   const compiledProps: Record<string, unknown> = { ...sourceProps }
+  if (scene.type === 'proof-presentation') {
+    exactKeys(
+      sourceProps,
+      [
+        'schemaVersion',
+        'proofModePlanId',
+        'proofModePlanHash',
+        'proofNeedItemId',
+        'mode',
+        'sourceMediaType',
+        'evidenceAssetId',
+        'sourceStartFrame',
+        'claimText',
+        'attribution',
+        'qualifiers',
+        'verbalAttribution',
+        'verbalQualifiers',
+        'contextRequired',
+        'canvas',
+        'evidenceRegion',
+        'presenterRegion',
+        'creditRegion',
+        'qualifierRegion',
+        'minimumFontPixels',
+        'entryTransition',
+        'exitTransition',
+      ],
+      `props.scenes[${index}].props`,
+    )
+    const mode = sourceProps.mode
+    const sourceMediaType = sourceProps.sourceMediaType
+    assertDomain(
+      sourceProps.schemaVersion === 'proof-presentation/v1' &&
+        typeof mode === 'string' &&
+        ['cutaway', 'split-screen', 'proof-card'].includes(mode) &&
+        typeof sourceMediaType === 'string' &&
+        ['video', 'image', 'audio', 'document'].includes(sourceMediaType),
+      'INVALID_RENDER_INPUT',
+      `props.scenes[${index}] proof contract is invalid`,
+    )
+    assertDomain(
+      typeof sourceProps.proofModePlanHash === 'string' &&
+        SHA256_PATTERN.test(sourceProps.proofModePlanHash) &&
+        typeof sourceProps.claimText === 'string' &&
+        sourceProps.claimText.trim().length >= 2 &&
+        sourceProps.claimText.trim().length <= 500 &&
+        typeof sourceProps.attribution === 'string' &&
+        sourceProps.attribution === sourceProps.verbalAttribution &&
+        Array.isArray(sourceProps.qualifiers) &&
+        Array.isArray(sourceProps.verbalQualifiers) &&
+        JSON.stringify(sourceProps.qualifiers) ===
+          JSON.stringify(sourceProps.verbalQualifiers),
+      'INVALID_RENDER_INPUT',
+      `props.scenes[${index}] proof identity is invalid`,
+    )
+    const canvas = record(
+      sourceProps.canvas,
+      `props.scenes[${index}].props.canvas`,
+    )
+    exactKeys(
+      canvas,
+      ['width', 'height'],
+      `props.scenes[${index}].props.canvas`,
+    )
+    assertDomain(
+      canvas.width === input.output.width &&
+        canvas.height === input.output.height &&
+        Number.isSafeInteger(sourceProps.sourceStartFrame) &&
+        Number(sourceProps.sourceStartFrame) >= 0 &&
+        Number.isSafeInteger(sourceProps.minimumFontPixels) &&
+        Number(sourceProps.minimumFontPixels) >= 20,
+      'INVALID_RENDER_INPUT',
+      `props.scenes[${index}] proof canvas or timing is invalid`,
+    )
+    const expectedKinds = sourceMediaType === 'video'
+      ? ['video'] as const
+      : sourceMediaType === 'image'
+        ? ['image'] as const
+        : sourceMediaType === 'audio'
+          ? ['audio'] as const
+          : ['data'] as const
+    compiledProps.evidenceSrc = resolveAsset(
+      assets,
+      sourceProps.evidenceAssetId,
+      expectedKinds,
+      `props.scenes[${index}].props.evidenceAssetId`,
+    ).uri
+    delete compiledProps.evidenceAssetId
+  }
   if ('imageAssetId' in compiledProps) {
     compiledProps.imageSrc = resolveAsset(
       assets,
@@ -265,9 +357,10 @@ export function compileApolloVideoRenderProps(
     'RenderInput does not target the Apollo Video v1 composition',
   )
   assertDomain(
-    input.output.aspectRatio === '9:16' || input.output.aspectRatio === '16:9',
+    ['9:16', '16:9', '4:5', '1:1', '21:9']
+      .includes(input.output.aspectRatio),
     'INVALID_RENDER_INPUT',
-    'Apollo Video v1 renderer currently supports 9:16 and 16:9 outputs',
+    'Apollo Video v1 renderer does not support the requested output',
   )
   const props = record(input.props, 'props')
   exactKeys(
@@ -317,7 +410,10 @@ export function compileApolloVideoRenderProps(
     scenes,
     subtitles,
     videoSrc,
-    format: input.output.aspectRatio,
+    format: input.output.aspectRatio === '9:16' ||
+      input.output.aspectRatio === '4:5'
+      ? '9:16'
+      : '16:9',
     palette: compilePalette(props.palette),
   }
   if (props.stylePreset !== undefined) {

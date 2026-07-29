@@ -65,6 +65,11 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     return null;
   }
 
+  const hf = Math.max(0, Math.min(1, hideFactor));
+  if (hf >= 1) {
+    return null;
+  }
+
   if (format === '9:16') {
     // split-50's centered two-word mode keeps precedence — it is already on the
     // seam and must not be displaced.
@@ -80,10 +85,6 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
       );
     }
 
-    const hf = Math.max(0, Math.min(1, hideFactor));
-    if (hf >= 1) {
-      return null;
-    }
     // Camada 2: quando nenhuma regra de composição forçou o topo, a âncora por
     // batida (vision) decide. Combinada por max com o topFactor de composição —
     // palco (top) e âncora concordam; a âncora nunca sobrepõe split-50/hide

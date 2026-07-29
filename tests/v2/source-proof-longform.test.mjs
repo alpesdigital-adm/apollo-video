@@ -4,10 +4,8 @@ import {
   planCleanup,
 } from '../../src/v2/domain/source-deconstruction.ts'
 import {
-  PROOF_VISUAL_GOLDENS,
   extractContiguous,
   planLongFormWorkflow,
-  planProofMode,
   querySemanticRepository,
 } from '../../src/v2/application/proof-and-longform.ts'
 
@@ -76,50 +74,6 @@ test(
 
     assert.ok(strategies.has('reject'))
     assert.ok([...strategies].some((strategy) => strategy !== 'reject'))
-  },
-)
-
-test(
-  'T-FR-132 plans proof presentation and supports manual override',
-  () => {
-    assert.equal(PROOF_VISUAL_GOLDENS.length, 15)
-    assert.equal(
-      planProofMode({
-        media: 'video',
-        format: '9:16',
-        rhythm: 'fast',
-        contextRequired: false,
-      }).mode,
-      'cutaway',
-    )
-    assert.equal(
-      planProofMode({
-        media: 'image',
-        format: '1:1',
-        rhythm: 'measured',
-        contextRequired: true,
-      }).mode,
-      'split-screen',
-    )
-    assert.equal(
-      planProofMode({
-        media: 'text',
-        format: '21:9',
-        rhythm: 'measured',
-        contextRequired: false,
-      }).mode,
-      'proof-card',
-    )
-    assert.equal(
-      planProofMode({
-        media: 'video',
-        format: '4:5',
-        rhythm: 'fast',
-        contextRequired: false,
-        override: 'proof-card',
-      }).overrideApplied,
-      true,
-    )
   },
 )
 

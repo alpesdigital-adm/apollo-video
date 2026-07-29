@@ -7,7 +7,7 @@ export interface ColorPalette {
 }
 
 export interface Scene {
-  type: 'fullscreen' | 'lower-third' | 'split' | 'split-vertical' | 'card' | 'message' | 'number' | 'flow' | 'cta' | 'stick-figures' | 'image-insert' | 'asset-card';
+  type: 'fullscreen' | 'lower-third' | 'split' | 'split-vertical' | 'card' | 'message' | 'number' | 'flow' | 'cta' | 'stick-figures' | 'image-insert' | 'asset-card' | 'proof-presentation';
   from: number;
   to: number;
   fromFrame?: number;

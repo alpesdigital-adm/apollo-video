@@ -405,6 +405,91 @@ serializável. A montagem deve consultar uma execução atual com
 `readyForAssembly=true`; uma aprovação histórica não substitui reavaliação
 após mudança de rights ou consentimento.
 
+### 10.3 ProofModeRun
+
+O `ProofModeRun` recebe exclusivamente avaliações `approved` do gate anterior
+e compila uma matriz `EvidenceSegment × OutputAspectRatio`. Uma avaliação
+bloqueada nunca ganha layout.
+
+```ts
+type ProofMode = 'cutaway' | 'split-screen' | 'proof-card'
+type ProofRhythm = 'fast' | 'measured'
+
+interface ProofModeOverride {
+  proofNeedItemId: string
+  format: '9:16' | '16:9' | '4:5' | '1:1' | '21:9'
+  mode: ProofMode
+  expectedEvaluationHash: Sha256
+}
+
+interface ProofModePlan {
+  proofIntegrityEvaluationId: string
+  proofIntegrityEvaluationHash: Sha256
+  proofNeedItemId: string
+  claimText: string
+  sourceEvidenceId: string
+  sourceEvidenceHash: Sha256
+  sourceArtifactId: string
+  sourceMediaType: 'video' | 'image' | 'audio' | 'document'
+  format: OutputAspectRatio
+  rhythm: ProofRhythm
+  mode: ProofMode
+  selection: 'automatic' | 'manual-override'
+  contextRequired: boolean
+  identificationRequired: true
+  presentation: ProofIntegrityPresentation
+  timing: ProofModeTiming
+  layout: ProofModeLayout
+  rendererContract: {
+    kind: 'proof-presentation'
+    version: 1
+    materializesNewMedia: false
+  }
+  planHash: Sha256
+}
+```
+
+Seleção automática:
+
+1. `audio`/`document` → proof-card;
+2. contexto visual obrigatório → split-screen;
+3. vídeo/imagem em ritmo rápido → cutaway;
+4. vídeo medido em 16:9/21:9 → split-screen;
+5. imagem medida → proof-card;
+6. demais vídeos → cutaway.
+
+`cutaway` e `split-screen` exigem mídia visual. Contexto obrigatório impede
+proof-card. Override é permitido somente dentro desse conjunto seguro e exige
+o hash atual da evaluation.
+
+Timing conserva o frame/milissegundo calculado no ProofNeed e o range integral
+aprovado pelo ProofIntegrity. Duração mínima inicial: 1,5s para cutaway, 3s
+para split-screen e 2,5s para proof-card; se o contexto aprovado for maior, ele
+prevalece. Ritmo rápido usa corte; ritmo medido usa crossfade de 200ms na
+entrada. Saída é explicitamente registrada, nunca inferida pelo renderer.
+
+Layout usa pixels do preset canônico. Todos os modos reservam regiões distintas
+para attribution e qualifiers dentro da safe area. Split-screen usa composição
+vertical em canvas retrato e lado a lado em canvas paisagem. Proof-card usa
+fundo sólido e card central; cutaway mantém a fonte em tela inteira com
+identificação sobreposta apenas na região segura.
+
+Persistência é append-only e serializável. Antes do commit, revalidar:
+
+- ProofIntegrity ID/hash e `readyForAssembly`;
+- evaluation aprovada, presentation hash e EvidenceSegment;
+- ProofNeed item/hash;
+- artifact disponível e tipo de mídia;
+- current rights snapshot ainda igual ao snapshot da evidência;
+- API client ativo.
+
+A API `/v1/projects/{projectId}/proof-mode-runs` cria/lista e a rota
+`/{runId}` lê. UI e agentes usam as mesmas capabilities. Planejamento não chama
+provider, não renderiza e não cria artifact. O compiler V2 consome
+`rendererContract`, `claimText`, layout, timing e presentation do plano canônico
+para produzir a cena `proof-presentation`; a materialização posterior continua
+submetida a RenderInput, rights e lineage.
+
 ## 11. Geração de candidatos
 
 ### 11.1 Quando gerar alternativas

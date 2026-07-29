@@ -3587,6 +3587,128 @@ const proofIntegrityRunExample = {
   createdAt,
   runHash: '2'.repeat(64),
 }
+const proofModeCreateRequestExample = {
+  proofIntegrityRunId: proofIntegrityRunExample.id,
+  expectedProofIntegrityRunHash: proofIntegrityRunExample.runHash,
+  policyVersion: 'proof-mode-policy/v1',
+  formats: ['9:16'],
+  rhythm: 'measured',
+  overrides: [],
+}
+const proofModePlanExample = {
+  id: 'proof-mode-plan-example-1',
+  sequence: 1,
+  proofIntegrityEvaluationId: proofIntegrityEvaluationExample.id,
+  proofIntegrityEvaluationHash:
+    proofIntegrityEvaluationExample.evaluationHash,
+  proofNeedItemId: proofNeedItemExample.id,
+  proofNeedItemHash: proofNeedItemExample.itemHash,
+  claimText: proofNeedItemExample.claimText,
+  sourceEvidenceId: proofNeedSelectedEvidenceExample.id,
+  sourceEvidenceHash: proofNeedSelectedEvidenceExample.evidenceHash,
+  sourceArtifactId: proofNeedSelectedEvidenceExample.sourceArtifactId,
+  sourceMediaType: 'video',
+  format: '9:16',
+  rhythm: 'measured',
+  mode: 'cutaway',
+  selection: 'automatic',
+  reasonCodes: ['MEASURED_VISUAL_CUTAWAY'],
+  contextRequired: false,
+  identificationRequired: true,
+  presentation: proofIntegrityPresentationExample,
+  timing: {
+    timelineEntryFrame: proofNeedItemExample.moment.timelineFrame,
+    timelineEntryMs: proofNeedItemExample.moment.timelineMs,
+    sourceContextRangeMs:
+      proofNeedSelectedEvidenceExample.contextRangeMs,
+    minimumDurationFrames: 225,
+    targetDurationFrames: 225,
+    maximumDurationFrames: 240,
+    entryTransition: {
+      kind: 'crossfade',
+      durationFrames: 6,
+    },
+    exitTransition: {
+      kind: 'cut',
+      durationFrames: 0,
+    },
+    timingHash: '3'.repeat(64),
+  },
+  layout: {
+    schemaVersion: 'proof-mode-layout/v1',
+    format: '9:16',
+    canvas: { width: 1080, height: 1920 },
+    safeRegion: {
+      x: 54,
+      y: 96,
+      width: 972,
+      height: 1728,
+    },
+    evidenceRegion: {
+      x: 0,
+      y: 0,
+      width: 1080,
+      height: 1920,
+    },
+    creditRegion: {
+      x: 54,
+      y: 1652,
+      width: 972,
+      height: 172,
+    },
+    qualifierRegion: {
+      x: 54,
+      y: 1486,
+      width: 972,
+      height: 130,
+    },
+    backgroundTreatment: 'source',
+    layoutHash: '4'.repeat(64),
+  },
+  legibility: {
+    minimumContrast: 4.5,
+    minimumFontPixels: 28,
+    maximumAttributionCharacters: 96,
+    maximumQualifierCharacters: 160,
+    safeAreaRequired: true,
+  },
+  rendererContract: {
+    kind: 'proof-presentation',
+    version: 1,
+    materializesNewMedia: false,
+  },
+  planHash: '5'.repeat(64),
+}
+const proofModeRunExample = {
+  schemaVersion: 'proof-mode-run/v1',
+  policyVersion: 'proof-mode-policy/v1',
+  id: 'proof-mode-run-example-1',
+  workspaceId,
+  projectId,
+  batchId: proofIntegrityRunExample.batchId,
+  proofIntegrityRunId: proofIntegrityRunExample.id,
+  proofIntegrityRunHash: proofIntegrityRunExample.runHash,
+  proofNeedRunId: proofNeedRunExample.id,
+  proofNeedRunHash: proofNeedRunExample.runHash,
+  formats: ['9:16'],
+  rhythm: 'measured',
+  plans: [proofModePlanExample],
+  summary: {
+    approvedEvidenceCount: 1,
+    formatCount: 1,
+    planCount: 1,
+    automaticCount: 1,
+    manualOverrideCount: 0,
+    cutawayCount: 1,
+    splitScreenCount: 0,
+    proofCardCount: 0,
+    allIntegrityBindingsPreserved: true,
+    readyForCompilation: true,
+  },
+  createdByClientId: clientId,
+  createdAt,
+  runHash: '6'.repeat(64),
+}
 const variantPortfolioPreflightRunExample = {
   schemaVersion: 'variant-portfolio-preflight/v1',
   selectionVersion: 'variant-portfolio-selection/v1',
@@ -6096,6 +6218,33 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           runs: [proofIntegrityRunExample],
           nextCursor: proofIntegrityRunExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-proof-mode-run-request/v1': [
+      proofModeCreateRequestExample,
+    ],
+    'apollo://schemas/proof-mode-run-mutated/v1': [
+      {
+        data: {
+          run: proofModeRunExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/proof-mode-run-read/v1': [
+      {
+        data: { run: proofModeRunExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/proof-mode-run-page/v1': [
+      {
+        data: {
+          runs: [proofModeRunExample],
+          nextCursor: proofModeRunExample.id,
         },
         meta: { apiVersion: 'v1' },
       },
