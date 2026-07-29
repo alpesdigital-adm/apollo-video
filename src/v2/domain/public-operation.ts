@@ -18,6 +18,7 @@ export const PUBLIC_OPERATION_TYPES = [
   'project-proxy-render',
   'project-final-export',
   'source-cleanup',
+  'long-form-index',
 ] as const
 export type PublicOperationType = (typeof PUBLIC_OPERATION_TYPES)[number]
 
@@ -32,6 +33,12 @@ function isRenderOperation(type: PublicOperationType): boolean {
     type === 'source-cleanup'
 }
 
+function isLongFormIndexOperation(
+  type: PublicOperationType,
+): boolean {
+  return type === 'long-form-index'
+}
+
 export const PUBLIC_OPERATION_PHASES = [
   'queued',
   'materializing',
@@ -40,6 +47,9 @@ export const PUBLIC_OPERATION_PHASES = [
   'probing',
   'normalizing',
   'transcribing',
+  'diarizing',
+  'chunking',
+  'indexing',
   'verifying',
   'persisting',
   'waiting',
@@ -120,12 +130,26 @@ const INGEST_PHASE_ORDER = [
   'persisting',
 ] as const
 
+const LONG_FORM_INDEX_PHASE_ORDER = [
+  'probing',
+  'transcribing',
+  'diarizing',
+  'chunking',
+  'indexing',
+  'persisting',
+] as const
+
 export type PublicOperationRunningPhase =
   | (typeof RENDER_PHASE_ORDER)[number]
   | (typeof INGEST_PHASE_ORDER)[number]
+  | (typeof LONG_FORM_INDEX_PHASE_ORDER)[number]
 
 function runningPhasesFor(type: PublicOperationType): readonly PublicOperationRunningPhase[] {
-  return isRenderOperation(type) ? RENDER_PHASE_ORDER : INGEST_PHASE_ORDER
+  if (isRenderOperation(type)) return RENDER_PHASE_ORDER
+  if (isLongFormIndexOperation(type)) {
+    return LONG_FORM_INDEX_PHASE_ORDER
+  }
+  return INGEST_PHASE_ORDER
 }
 
 function progressUnit(type: PublicOperationType): string {
@@ -519,7 +543,7 @@ export function startPublicOperationAttempt(
   return freezeOperation({
     ...operation,
     status: 'running',
-    phase: isRenderOperation(operation.type) ? 'materializing' : 'assembling',
+    phase: runningPhasesFor(operation.type)[0],
     progress: {
       completed: 0,
       total: runningPhasesFor(operation.type).length,

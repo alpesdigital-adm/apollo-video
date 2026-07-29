@@ -75,6 +75,8 @@ function fixture(overrides = {}) {
     sourceArtifactSha256: sha('a'),
     sourceManifestId: 'manifest-long-form',
     sourceManifestHash: sha('b'),
+    sourceTranscriptId: 'transcript-long-form',
+    sourceTranscriptHash: sha('d'),
     durationMs: 7_200_000,
     versions,
     stageBudgets,

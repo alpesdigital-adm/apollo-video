@@ -32,6 +32,7 @@ import type { MvpCoreGateRepository } from '../application/ports/mvp-core-gate-r
 import type { SpeechSegmentCatalogRepository } from '../application/ports/speech-segment-catalog-repository.ts'
 import type { EvidenceSegmentRepository } from '../application/ports/evidence-segment-repository.ts'
 import type { LongFormIndexRepository } from '../application/ports/long-form-index-repository.ts'
+import type { LongFormIndexWorkflowRepository } from '../application/ports/long-form-index-workflow-repository.ts'
 import type { ValidatedSegmentRepository } from '../application/ports/validated-segment-repository.ts'
 import type { SemanticSearchRepository } from '../application/ports/semantic-search-repository.ts'
 import type { HierarchicalProcessingRepository } from '../application/ports/hierarchical-processing-repository.ts'
@@ -118,6 +119,7 @@ import { PrismaMvpCoreGateRepository } from './prisma/mvp-core-gate-repository.t
 import { PrismaSpeechSegmentCatalogRepository } from './prisma/speech-segment-catalog-repository.ts'
 import { PrismaEvidenceSegmentRepository } from './prisma/evidence-segment-repository.ts'
 import { PrismaLongFormIndexRepository } from './prisma/long-form-index-repository.ts'
+import { PrismaLongFormIndexWorkflowRepository } from './prisma/long-form-index-workflow-repository.ts'
 import { PrismaValidatedSegmentRepository } from './prisma/validated-segment-repository.ts'
 import { PrismaSemanticSearchRepository } from './prisma/semantic-search-repository.ts'
 import { PrismaHierarchicalProcessingRepository } from './prisma/hierarchical-processing-repository.ts'
@@ -310,6 +312,11 @@ ProofIntegrityRepository {
 
 export function createProofModeRepository(): ProofModeRepository {
   return new PrismaProofModeRepository(resolveV2Client())
+}
+
+export function createLongFormIndexWorkflowRepository():
+LongFormIndexWorkflowRepository {
+  return new PrismaLongFormIndexWorkflowRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {

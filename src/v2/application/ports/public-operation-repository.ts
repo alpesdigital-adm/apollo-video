@@ -82,16 +82,25 @@ export interface SourceCleanupOperationContext {
   strategy: 'trim' | 'crop-reframe' | 'cover'
 }
 
+export interface LongFormIndexOperationContext {
+  kind: 'long-form-index'
+  projectId: string
+  workflowId: string
+  sourceArtifactId: string
+  sourceManifestId: string
+}
+
 export type PublicOperationContext =
   | ArtifactRenderOperationContext
   | MediaIngestOperationContext
   | ProjectProxyRenderOperationContext
   | ProjectFinalExportOperationContext
   | SourceCleanupOperationContext
+  | LongFormIndexOperationContext
 
 export type PublicOperationCreationContext = Exclude<
   PublicOperationContext,
-  SourceCleanupOperationContext
+  SourceCleanupOperationContext | LongFormIndexOperationContext
 >
 
 export interface PublicOperationRecord {

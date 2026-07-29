@@ -182,6 +182,162 @@ const queuedSourceCleanupOperationExample = {
     manifestId: 'manifest-cleaned-example-1',
   },
 }
+const queuedLongFormIndexOperationExample = {
+  ...queuedMediaIngestOperationExample,
+  id: 'operation-long-form-example-1',
+  type: 'long-form-index',
+  progress: { completed: 0, total: 1, unit: 'stage' },
+  target: {
+    type: 'media-artifact',
+    id: 'artifact-long-form-example-1',
+    manifestId: 'manifest-long-form-example-1',
+  },
+}
+const longFormStageVersionsExample = Object.fromEntries(
+  ['probe', 'transcript', 'diarization', 'chunks', 'moments']
+    .map((stage) => [
+      stage,
+      {
+        provider: stage === 'probe' ? 'ffprobe' : 'apollo',
+        model: `${stage}-model`,
+        version: 'v1',
+      },
+    ]),
+)
+const longFormStageBudgetsExample = Object.fromEntries(
+  ['probe', 'transcript', 'diarization', 'chunks', 'moments']
+    .map((stage) => [
+      stage,
+      {
+        estimatedCostMinorUnits:
+          ['probe', 'transcript'].includes(stage) ? 0 : 25,
+        maximumCostMinorUnits: 100,
+        maximumElapsedMs: 3600000,
+      },
+    ]),
+)
+const longFormWorkflowBudgetExample = {
+  currency: 'USD',
+  maximumCostMinorUnits: 500,
+  maximumElapsedMs: 14400000,
+  maximumConcurrency: 4,
+}
+const longFormStageExample = (
+  stage: string,
+  sequence: number,
+  prerequisites: string[],
+  status: string,
+  outputHash?: string,
+) => ({
+  stage,
+  sequence,
+  prerequisites,
+  execution: ['probe', 'transcript'].includes(stage)
+    ? 'reuse'
+    : 'process',
+  status,
+  version:
+    longFormStageVersionsExample[
+      stage as keyof typeof longFormStageVersionsExample
+    ],
+  budget:
+    longFormStageBudgetsExample[
+      stage as keyof typeof longFormStageBudgetsExample
+    ],
+  concurrency: ['chunks', 'moments'].includes(stage) ? 4 : 1,
+  inputHash: String(sequence).repeat(64),
+  idempotencyKey:
+    `long-form-workflow-example-1:${stage}:${String(sequence).repeat(32)}`,
+  attempt: 0,
+  ...(outputHash ? { outputHash } : {}),
+  resultCount: outputHash ? 1 : 0,
+  searchable: stage === 'transcript',
+  costMinorUnits: 0,
+  elapsedMs: 0,
+  ...(outputHash ? { completedAt: createdAt } : {}),
+  stageHash: ['6', '7', '8', '9', 'a'][sequence - 1]!.repeat(64),
+})
+const longFormIndexWorkflowExample = {
+  schemaVersion: 'long-form-index-workflow/v1',
+  policyVersion: 'long-form-index-workflow-policy/v1',
+  id: 'long-form-workflow-example-1',
+  workspaceId,
+  projectId,
+  sourceArtifactId: 'artifact-long-form-example-1',
+  sourceArtifactSha256: 'a'.repeat(64),
+  sourceManifestId: 'manifest-long-form-example-1',
+  sourceManifestHash: 'b'.repeat(64),
+  sourceTranscriptId: 'transcript-long-form-example-1',
+  sourceTranscriptHash: 'c'.repeat(64),
+  durationMs: 7200000,
+  status: 'partial',
+  stages: [
+    longFormStageExample(
+      'probe',
+      1,
+      [],
+      'succeeded',
+      'd'.repeat(64),
+    ),
+    longFormStageExample(
+      'transcript',
+      2,
+      ['probe'],
+      'succeeded',
+      'c'.repeat(64),
+    ),
+    longFormStageExample(
+      'diarization',
+      3,
+      ['transcript'],
+      'ready',
+    ),
+    longFormStageExample(
+      'chunks',
+      4,
+      ['transcript', 'diarization'],
+      'pending',
+    ),
+    longFormStageExample(
+      'moments',
+      5,
+      ['chunks'],
+      'pending',
+    ),
+  ],
+  budget: longFormWorkflowBudgetExample,
+  summary: {
+    completedStageCount: 2,
+    searchableStageCount: 1,
+    resultCount: 2,
+    costMinorUnits: 0,
+    elapsedMs: 0,
+    nextStage: 'diarization',
+    duplicateSegments: false,
+    resumable: true,
+  },
+  createdByClientId: clientId,
+  createdAt,
+  updatedAt: createdAt,
+  runHash: 'f'.repeat(64),
+}
+const createLongFormIndexWorkflowRequestExample = {
+  sourceArtifactId: longFormIndexWorkflowExample.sourceArtifactId,
+  expectedArtifactSha256:
+    longFormIndexWorkflowExample.sourceArtifactSha256,
+  sourceManifestId: longFormIndexWorkflowExample.sourceManifestId,
+  expectedManifestHash:
+    longFormIndexWorkflowExample.sourceManifestHash,
+  sourceTranscript: {
+    id: longFormIndexWorkflowExample.sourceTranscriptId,
+    expectedHash:
+      longFormIndexWorkflowExample.sourceTranscriptHash,
+  },
+  policyVersion: longFormIndexWorkflowExample.policyVersion,
+  versions: longFormStageVersionsExample,
+  stageBudgets: longFormStageBudgetsExample,
+  budget: longFormWorkflowBudgetExample,
+}
 const versionComparisonExample = {
   before: {
     id: 'project-version-example-4',
@@ -4480,6 +4636,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v5': [
       { data: { operation: queuedSourceCleanupOperationExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v6': [
+      { data: { operation: queuedLongFormIndexOperationExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -4509,6 +4668,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v5': [
       { data: { operations: [queuedSourceCleanupOperationExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v6': [
+      { data: { operations: [queuedLongFormIndexOperationExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/webhook-delivery-list/v1': [
       {
@@ -7181,6 +7343,39 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             createdAt,
             revokedAt: '2026-07-12T20:10:00.000Z',
           },
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-long-form-index-workflow-request/v1': [
+      createLongFormIndexWorkflowRequestExample,
+    ],
+    'apollo://schemas/long-form-index-workflow-mutated/v1': [
+      {
+        data: {
+          workflow: longFormIndexWorkflowExample,
+          operation: queuedLongFormIndexOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/long-form-index-workflow-read/v1': [
+      {
+        data: {
+          workflow: longFormIndexWorkflowExample,
+          operation: queuedLongFormIndexOperationExample,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/long-form-index-workflow-page/v1': [
+      {
+        data: {
+          workflows: [{
+            workflow: longFormIndexWorkflowExample,
+            operation: queuedLongFormIndexOperationExample,
+          }],
         },
         meta: { apiVersion: 'v1' },
       },

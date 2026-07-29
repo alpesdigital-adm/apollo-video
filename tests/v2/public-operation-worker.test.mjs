@@ -18,6 +18,50 @@ import {
 test('only artifact render completion requires an output checkpoint', () => {
   assert.equal(requiresArtifactRenderCheckpoint('artifact-render'), true)
   assert.equal(requiresArtifactRenderCheckpoint('media-ingest'), false)
+  assert.equal(requiresArtifactRenderCheckpoint('long-form-index'), false)
+})
+
+test('long-form index operation exposes its six durable phases', () => {
+  const queued = createQueuedPublicOperation({
+    id: 'operation-long-form-test',
+    workspaceId: 'workspace-long-form-test',
+    clientId: 'client-long-form-test',
+    type: 'long-form-index',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-long-form-test',
+      manifestId: 'manifest-long-form-test',
+    },
+    createdAt: '2026-07-29T20:00:00.000Z',
+  })
+  let operation = startPublicOperationAttempt(
+    queued,
+    '2026-07-29T20:00:01.000Z',
+  )
+  assert.equal(operation.phase, 'probing')
+  for (const [index, phase] of [
+    'transcribing',
+    'diarizing',
+    'chunking',
+    'indexing',
+    'persisting',
+  ].entries()) {
+    operation = advancePublicOperationPhase(
+      operation,
+      phase,
+      `2026-07-29T20:00:0${index + 2}.000Z`,
+    )
+  }
+  const completed = succeedPublicOperation(
+    operation,
+    '2026-07-29T20:00:07.000Z',
+  )
+  assert.equal(completed.status, 'succeeded')
+  assert.deepEqual(completed.progress, {
+    completed: 6,
+    total: 6,
+    unit: 'stage',
+  })
 })
 
 function createClock() {

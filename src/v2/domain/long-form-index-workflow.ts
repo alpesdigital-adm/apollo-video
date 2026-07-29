@@ -95,6 +95,8 @@ export interface LongFormIndexWorkflow {
   sourceArtifactSha256: string
   sourceManifestId: string
   sourceManifestHash: string
+  sourceTranscriptId?: string
+  sourceTranscriptHash?: string
   durationMs: number
   status: 'queued' | 'running' | 'partial' | 'succeeded' | 'failed'
   stages: readonly Readonly<LongFormIndexStageCheckpoint>[]
@@ -348,6 +350,7 @@ function freezeRun(
 function stageInputHash(input: {
   sourceArtifactSha256: string
   sourceManifestHash: string
+  sourceTranscriptHash?: string
   durationMs: number
   stage: LongFormIndexStage
   prerequisites: readonly Readonly<LongFormIndexStageCheckpoint>[]
@@ -357,6 +360,7 @@ function stageInputHash(input: {
     policyVersion: LONG_FORM_INDEX_WORKFLOW_POLICY_VERSION,
     sourceArtifactSha256: input.sourceArtifactSha256,
     sourceManifestHash: input.sourceManifestHash,
+    sourceTranscriptHash: input.sourceTranscriptHash,
     durationMs: input.durationMs,
     stage: input.stage,
     prerequisiteOutputs: input.prerequisites.map((stage) => ({
@@ -393,6 +397,7 @@ function refreshPendingStages(
     const inputHash = stageInputHash({
       sourceArtifactSha256: run.sourceArtifactSha256,
       sourceManifestHash: run.sourceManifestHash,
+      sourceTranscriptHash: run.sourceTranscriptHash,
       durationMs: run.durationMs,
       stage: current.stage,
       prerequisites,
@@ -417,6 +422,8 @@ export function createLongFormIndexWorkflow(input: {
   sourceArtifactSha256: string
   sourceManifestId: string
   sourceManifestHash: string
+  sourceTranscriptId?: string
+  sourceTranscriptHash?: string
   durationMs: number
   versions: StageVersions
   stageBudgets: StageBudgets
@@ -439,6 +446,18 @@ export function createLongFormIndexWorkflow(input: {
     input.sourceManifestHash,
     'sourceManifestHash',
   )
+  assertDomain(
+    (input.sourceTranscriptId === undefined) ===
+      (input.sourceTranscriptHash === undefined),
+    'INVALID_ARGUMENT',
+    'source transcript ID and hash must be provided together',
+  )
+  const sourceTranscriptId = input.sourceTranscriptId
+    ? identity(input.sourceTranscriptId, 'sourceTranscriptId')
+    : undefined
+  const sourceTranscriptHash = input.sourceTranscriptHash
+    ? hash(input.sourceTranscriptHash, 'sourceTranscriptHash')
+    : undefined
   const durationMs = integer(
     input.durationMs,
     'durationMs',
@@ -498,6 +517,7 @@ export function createLongFormIndexWorkflow(input: {
       const inputHash = stageInputHash({
         sourceArtifactSha256,
         sourceManifestHash,
+        sourceTranscriptHash,
         durationMs,
         stage,
         prerequisites: prerequisiteStages,
@@ -581,6 +601,8 @@ export function createLongFormIndexWorkflow(input: {
       'sourceManifestId',
     ),
     sourceManifestHash,
+    ...(sourceTranscriptId ? { sourceTranscriptId } : {}),
+    ...(sourceTranscriptHash ? { sourceTranscriptHash } : {}),
     durationMs,
     status: 'queued',
     stages: Object.freeze(stages),
@@ -921,6 +943,22 @@ export function hydrateLongFormIndexWorkflow(
   )
   identity(workflow.sourceManifestId, 'workflow.sourceManifestId')
   hash(workflow.sourceManifestHash, 'workflow.sourceManifestHash')
+  assertDomain(
+    (workflow.sourceTranscriptId === undefined) ===
+      (workflow.sourceTranscriptHash === undefined),
+    'PERSISTENCE_CONFLICT',
+    'Stored long-form workflow transcript binding is invalid',
+  )
+  if (workflow.sourceTranscriptId) {
+    identity(
+      workflow.sourceTranscriptId,
+      'workflow.sourceTranscriptId',
+    )
+    hash(
+      workflow.sourceTranscriptHash,
+      'workflow.sourceTranscriptHash',
+    )
+  }
   integer(workflow.durationMs, 'workflow.durationMs', 1_000, 43_200_000)
   identity(workflow.createdByClientId, 'workflow.createdByClientId')
   instant(workflow.createdAt, 'workflow.createdAt')

@@ -6370,6 +6370,309 @@ const publicOperationSchemaV5 = {
   },
 }
 
+const publicOperationSchemaV6 = {
+  ...publicOperationSchemaV5,
+  properties: {
+    ...publicOperationSchemaV5.properties,
+    type: {
+      enum: [
+        'artifact-render',
+        'media-ingest',
+        'project-proxy-render',
+        'project-final-export',
+        'source-cleanup',
+        'long-form-index',
+      ],
+    },
+    phase: {
+      enum: [
+        'queued',
+        'assembling',
+        'probing',
+        'normalizing',
+        'transcribing',
+        'diarizing',
+        'chunking',
+        'indexing',
+        'materializing',
+        'rendering',
+        'verifying',
+        'persisting',
+        'waiting',
+        'retrying',
+        'completed',
+        'failed',
+        'canceled',
+      ],
+    },
+  },
+}
+
+const longFormStageNames = [
+  'probe',
+  'transcript',
+  'diarization',
+  'chunks',
+  'moments',
+]
+const longFormStageVersionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['provider', 'model', 'version'],
+  properties: {
+    provider: {
+      type: 'string',
+      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+    },
+    model: {
+      type: 'string',
+      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+    },
+    version: {
+      type: 'string',
+      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+    },
+  },
+}
+const longFormStageBudgetSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'estimatedCostMinorUnits',
+    'maximumCostMinorUnits',
+    'maximumElapsedMs',
+  ],
+  properties: {
+    estimatedCostMinorUnits: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 10000000,
+    },
+    maximumCostMinorUnits: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 10000000,
+    },
+    maximumElapsedMs: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 86400000,
+    },
+  },
+}
+const longFormStageMapSchema = (item: object) => ({
+  type: 'object',
+  additionalProperties: false,
+  required: longFormStageNames,
+  properties: Object.fromEntries(
+    longFormStageNames.map((stage) => [stage, item]),
+  ),
+})
+const longFormWorkflowBudgetSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'currency',
+    'maximumCostMinorUnits',
+    'maximumElapsedMs',
+    'maximumConcurrency',
+  ],
+  properties: {
+    currency: { const: 'USD' },
+    maximumCostMinorUnits: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 10000000,
+    },
+    maximumElapsedMs: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 86400000,
+    },
+    maximumConcurrency: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 32,
+    },
+  },
+}
+const longFormIndexStageCheckpointSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'stage',
+    'sequence',
+    'prerequisites',
+    'execution',
+    'status',
+    'version',
+    'budget',
+    'concurrency',
+    'inputHash',
+    'idempotencyKey',
+    'attempt',
+    'resultCount',
+    'searchable',
+    'costMinorUnits',
+    'elapsedMs',
+    'stageHash',
+  ],
+  properties: {
+    stage: { enum: longFormStageNames },
+    sequence: { type: 'integer', minimum: 1, maximum: 5 },
+    prerequisites: {
+      type: 'array',
+      maxItems: 2,
+      uniqueItems: true,
+      items: { enum: longFormStageNames },
+    },
+    execution: { enum: ['process', 'reuse'] },
+    status: {
+      enum: [
+        'pending',
+        'ready',
+        'running',
+        'succeeded',
+        'failed',
+        'budget-blocked',
+      ],
+    },
+    version: longFormStageVersionSchema,
+    budget: longFormStageBudgetSchema,
+    concurrency: { type: 'integer', minimum: 1, maximum: 32 },
+    inputHash: sha256Schema,
+    idempotencyKey: {
+      type: 'string',
+      minLength: 8,
+      maxLength: 256,
+    },
+    attempt: { type: 'integer', minimum: 0 },
+    outputHash: sha256Schema,
+    resultCount: { type: 'integer', minimum: 0 },
+    searchable: { type: 'boolean' },
+    costMinorUnits: { type: 'integer', minimum: 0 },
+    elapsedMs: { type: 'integer', minimum: 0 },
+    startedAt: dateTimeSchema,
+    completedAt: dateTimeSchema,
+    error: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['code', 'message', 'retryable'],
+      properties: {
+        code: {
+          type: 'string',
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$',
+        },
+        message: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 500,
+        },
+        retryable: { type: 'boolean' },
+      },
+    },
+    stageHash: sha256Schema,
+  },
+}
+const longFormIndexWorkflowSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion',
+    'policyVersion',
+    'id',
+    'workspaceId',
+    'projectId',
+    'sourceArtifactId',
+    'sourceArtifactSha256',
+    'sourceManifestId',
+    'sourceManifestHash',
+    'durationMs',
+    'status',
+    'stages',
+    'budget',
+    'summary',
+    'createdByClientId',
+    'createdAt',
+    'updatedAt',
+    'runHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'long-form-index-workflow/v1' },
+    policyVersion: {
+      const: 'long-form-index-workflow-policy/v1',
+    },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    sourceArtifactId: idSchema,
+    sourceArtifactSha256: sha256Schema,
+    sourceManifestId: idSchema,
+    sourceManifestHash: sha256Schema,
+    sourceTranscriptId: idSchema,
+    sourceTranscriptHash: sha256Schema,
+    durationMs: {
+      type: 'integer',
+      minimum: 1000,
+      maximum: 43200000,
+    },
+    status: {
+      enum: ['queued', 'running', 'partial', 'succeeded', 'failed'],
+    },
+    stages: {
+      type: 'array',
+      minItems: 5,
+      maxItems: 5,
+      items: longFormIndexStageCheckpointSchema,
+    },
+    budget: longFormWorkflowBudgetSchema,
+    summary: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'completedStageCount',
+        'searchableStageCount',
+        'resultCount',
+        'costMinorUnits',
+        'elapsedMs',
+        'duplicateSegments',
+        'resumable',
+      ],
+      properties: {
+        completedStageCount: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 5,
+        },
+        searchableStageCount: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 3,
+        },
+        resultCount: { type: 'integer', minimum: 0 },
+        costMinorUnits: { type: 'integer', minimum: 0 },
+        elapsedMs: { type: 'integer', minimum: 0 },
+        nextStage: { enum: longFormStageNames },
+        duplicateSegments: { const: false },
+        resumable: { const: true },
+      },
+    },
+    createdByClientId: idSchema,
+    createdAt: dateTimeSchema,
+    updatedAt: dateTimeSchema,
+    runHash: sha256Schema,
+  },
+}
+const longFormIndexWorkflowRecordSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['workflow', 'operation'],
+  properties: {
+    workflow: longFormIndexWorkflowSchema,
+    operation: publicOperationSchemaV6,
+  },
+}
+
 const semanticDiffItemSchema = {
   type: 'object',
   additionalProperties: false,
@@ -10284,6 +10587,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV5 },
     }),
   ),
+  defineSchema('public-operation-detail', 6, 'Public operation detail including durable long-form indexing',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation'],
+      properties: { operation: publicOperationSchemaV6 },
+    }),
+  ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
     successSchema({
       type: 'object',
@@ -10681,6 +10992,26 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           type: 'array',
           maxItems: 100,
           items: publicOperationSchemaV5,
+        },
+        nextCursor: {
+          type: 'string',
+          minLength: 8,
+          maxLength: 1024,
+          pattern: '^[A-Za-z0-9_-]+$',
+        },
+      },
+    }),
+  ),
+  defineSchema('public-operation-list', 6, 'Public operation list including durable long-form indexing',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operations'],
+      properties: {
+        operations: {
+          type: 'array',
+          maxItems: 100,
+          items: publicOperationSchemaV6,
         },
         nextCursor: {
           type: 'string',
@@ -15078,6 +15409,78 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['credential'],
       properties: { credential: apiCredentialSchema },
+    }),
+  ),
+  defineSchema('create-long-form-index-workflow-request', 1, 'Create a durable five-stage long-form indexing workflow', {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'sourceArtifactId',
+      'expectedArtifactSha256',
+      'sourceManifestId',
+      'expectedManifestHash',
+      'policyVersion',
+      'versions',
+      'stageBudgets',
+      'budget',
+    ],
+    properties: {
+      sourceArtifactId: idSchema,
+      expectedArtifactSha256: sha256Schema,
+      sourceManifestId: idSchema,
+      expectedManifestHash: sha256Schema,
+      sourceTranscript: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'expectedHash'],
+        properties: {
+          id: idSchema,
+          expectedHash: sha256Schema,
+        },
+      },
+      policyVersion: {
+        const: 'long-form-index-workflow-policy/v1',
+      },
+      versions: longFormStageMapSchema(
+        longFormStageVersionSchema,
+      ),
+      stageBudgets: longFormStageMapSchema(
+        longFormStageBudgetSchema,
+      ),
+      budget: longFormWorkflowBudgetSchema,
+    },
+  }),
+  defineSchema('long-form-index-workflow-mutated', 1, 'Accepted or idempotently replayed long-form indexing workflow',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['workflow', 'operation', 'replayed'],
+      properties: {
+        ...longFormIndexWorkflowRecordSchema.properties,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('long-form-index-workflow-read', 1, 'One durable long-form indexing workflow and its public operation',
+    successSchema(longFormIndexWorkflowRecordSchema),
+  ),
+  defineSchema('long-form-index-workflow-page', 1, 'Cursor page of durable long-form indexing workflows',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['workflows'],
+      properties: {
+        workflows: {
+          type: 'array',
+          maxItems: 100,
+          items: longFormIndexWorkflowRecordSchema,
+        },
+        nextCursor: {
+          type: 'string',
+          minLength: 3,
+          maxLength: 128,
+        },
+      },
     }),
   ),
   defineSchema('error-envelope', 1, 'Public API error envelope', {

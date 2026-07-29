@@ -175,6 +175,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable hierarchy of virtual chapters and moments bound to an exact video artifact, manifest and rights snapshot without materializing media.',
     },
+    'apollo.projects.long-form-index-workflows.create': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'May start transcription, diarization and hierarchical analysis provider work for a video up to twelve hours within explicit cost and elapsed-time budgets.',
+    },
     'apollo.projects.validated-segments.catalog': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable historical validation record bound to exact source hashes and current rights while preserving an explicit non-causal protected envelope.',

@@ -48,6 +48,7 @@ type StoredOperation = Prisma.V2PublicOperationGetPayload<{
     projectProxyRender: true
     projectFinalExport: true
     sourceCleanupPlan: true
+    longFormIndexWorkflow: true
   }
 }>
 
@@ -71,6 +72,7 @@ const OPERATION_INCLUDE = {
   projectProxyRender: true,
   projectFinalExport: true,
   sourceCleanupPlan: true,
+  longFormIndexWorkflow: true,
 } as const
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
@@ -158,11 +160,13 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   const projectRenderDetail = row.projectProxyRender
   const finalExportDetail = row.projectFinalExport
   const sourceCleanupDetail = row.sourceCleanupPlan
+  const longFormDetail = row.longFormIndexWorkflow
   const isRender = row.type === 'artifact-render'
   const isIngest = row.type === 'media-ingest'
   const isProjectRender = row.type === 'project-proxy-render'
   const isFinalExport = row.type === 'project-final-export'
   const isSourceCleanup = row.type === 'source-cleanup'
+  const isLongFormIndex = row.type === 'long-form-index'
   if (
     row.targetType !== 'media-artifact' ||
     [
@@ -171,6 +175,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       isProjectRender,
       isFinalExport,
       isSourceCleanup,
+      isLongFormIndex,
     ].filter(Boolean).length !== 1
   ) {
     throw new DomainError(
@@ -180,7 +185,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     )
   }
   if (isRender && (
-    !renderDetail || ingestDetail || projectRenderDetail || finalExportDetail || sourceCleanupDetail || row.targetId !== renderDetail.artifactId ||
+    !renderDetail || ingestDetail || projectRenderDetail || finalExportDetail || sourceCleanupDetail || longFormDetail || row.targetId !== renderDetail.artifactId ||
     row.workspaceId !== renderDetail.workspaceId ||
     renderDetail.manifest.artifactId !== renderDetail.artifactId ||
     renderDetail.authorization.artifactId !== renderDetail.artifactId ||
@@ -193,7 +198,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored render operation context is invalid', { operationId: row.id })
   }
   if (isIngest && (
-    !ingestDetail || renderDetail || projectRenderDetail || finalExportDetail || sourceCleanupDetail || row.targetId !== ingestDetail.sourceArtifactId ||
+    !ingestDetail || renderDetail || projectRenderDetail || finalExportDetail || sourceCleanupDetail || longFormDetail || row.targetId !== ingestDetail.sourceArtifactId ||
     row.workspaceId !== ingestDetail.workspaceId ||
     !ID_PATTERN.test(ingestDetail.projectId) || !ID_PATTERN.test(ingestDetail.sourceManifestId) ||
     ingestDetail.originalFileName.trim().length < 1
@@ -201,7 +206,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored ingest operation context is invalid', { operationId: row.id })
   }
   if (isProjectRender && (
-    !projectRenderDetail || renderDetail || ingestDetail || finalExportDetail || sourceCleanupDetail ||
+    !projectRenderDetail || renderDetail || ingestDetail || finalExportDetail || sourceCleanupDetail || longFormDetail ||
     row.targetId !== projectRenderDetail.outputArtifactId ||
     row.workspaceId !== projectRenderDetail.workspaceId ||
     ![projectRenderDetail.projectId, projectRenderDetail.projectVersionId, projectRenderDetail.editPlanSnapshotId,
@@ -213,7 +218,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy render context is invalid', { operationId: row.id })
   }
   if (isFinalExport && (
-    !finalExportDetail || renderDetail || ingestDetail || projectRenderDetail || sourceCleanupDetail ||
+    !finalExportDetail || renderDetail || ingestDetail || projectRenderDetail || sourceCleanupDetail || longFormDetail ||
     row.targetId !== finalExportDetail.outputArtifactId ||
     row.workspaceId !== finalExportDetail.workspaceId ||
     ![finalExportDetail.projectId, finalExportDetail.projectVersionId, finalExportDetail.editPlanSnapshotId,
@@ -237,7 +242,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   }
   if (isSourceCleanup && (
     !sourceCleanupDetail || renderDetail || ingestDetail ||
-    projectRenderDetail || finalExportDetail ||
+    projectRenderDetail || finalExportDetail || longFormDetail ||
     row.targetId !== sourceCleanupDetail.outputArtifactId ||
     row.workspaceId !== sourceCleanupDetail.workspaceId ||
     row.clientId !== sourceCleanupDetail.createdByClientId ||
@@ -264,6 +269,45 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
       'Stored source cleanup operation context is invalid',
+      { operationId: row.id },
+    )
+  }
+  if (isLongFormIndex && (
+    !longFormDetail || renderDetail || ingestDetail ||
+    projectRenderDetail || finalExportDetail ||
+    sourceCleanupDetail ||
+    row.targetId !== longFormDetail.sourceArtifactId ||
+    row.workspaceId !== longFormDetail.workspaceId ||
+    row.clientId !== longFormDetail.createdByClientId ||
+    longFormDetail.operationId !== row.id ||
+    ![
+      longFormDetail.id,
+      longFormDetail.projectId,
+      longFormDetail.sourceArtifactId,
+      longFormDetail.sourceManifestId,
+    ].every((value) => ID_PATTERN.test(value)) ||
+    ![
+      longFormDetail.sourceArtifactSha256,
+      longFormDetail.sourceManifestHash,
+      longFormDetail.runHash,
+    ].every((value) => SHA256_PATTERN.test(value)) ||
+    (
+      (longFormDetail.sourceTranscriptId === null) !==
+      (longFormDetail.sourceTranscriptHash === null)
+    ) ||
+    (
+      longFormDetail.sourceTranscriptId !== null &&
+      (
+        !ID_PATTERN.test(longFormDetail.sourceTranscriptId) ||
+        !SHA256_PATTERN.test(
+          longFormDetail.sourceTranscriptHash as string,
+        )
+      )
+    )
+  )) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored long-form index operation context is invalid',
       { operationId: row.id },
     )
   }
@@ -363,7 +407,9 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
               ? projectRenderDetail!.outputArtifactId
               : isFinalExport
                 ? finalExportDetail!.outputArtifactId
-                : sourceCleanupDetail!.outputArtifactId!,
+                : isSourceCleanup
+                  ? sourceCleanupDetail!.outputArtifactId!
+                  : longFormDetail!.sourceArtifactId,
         manifestId: isRender
           ? renderDetail!.manifestId
           : isIngest
@@ -372,7 +418,9 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
               ? projectRenderDetail!.outputManifestId
               : isFinalExport
                 ? finalExportDetail!.outputManifestId
-                : sourceCleanupDetail!.outputManifestId!,
+                : isSourceCleanup
+                  ? sourceCleanupDetail!.outputManifestId!
+                  : longFormDetail!.sourceManifestId,
       },
       ...(row.resultJson !== null ? { result: parseResult(row.resultJson) } : {}),
       ...(hasAnyError
@@ -451,7 +499,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
           ...(finalExportDetail!.approvalNote ? { note: finalExportDetail!.approvalNote } : {}),
         },
         originalFileName: finalExportDetail!.originalFileName,
-      } : {
+      } : isSourceCleanup ? {
         kind: 'source-cleanup' as const,
         projectId: sourceCleanupDetail!.projectId,
         cleanupPlanId: sourceCleanupDetail!.id,
@@ -464,6 +512,12 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         outputManifestId: sourceCleanupDetail!.outputManifestId!,
         strategy: sourceCleanupDetail!.selectedStrategy as
           'trim' | 'crop-reframe' | 'cover',
+      } : {
+        kind: 'long-form-index' as const,
+        projectId: longFormDetail!.projectId,
+        workflowId: longFormDetail!.id,
+        sourceArtifactId: longFormDetail!.sourceArtifactId,
+        sourceManifestId: longFormDetail!.sourceManifestId,
       }),
     })
   } catch (error) {
