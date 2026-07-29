@@ -157,6 +157,14 @@ const coverage = Object.freeze({
     mode: 'idempotent-create',
     evidence: 'F2-017 request fingerprint binds the exact contamination report hash, finding, strategy policy and actor; creation rechecks source artifact, manifest and current rights before atomically persisting one canonical plan and operation',
   },
+  'apollo.projects.validation-envelope-reuses.create': {
+    mode: 'idempotent-create',
+    evidence: 'F2-018 request fingerprint binds exact ValidatedSegment and VariantRecipe hashes, requested changes and actor; serializable creation rechecks both sources before persisting the plan and initial decision',
+  },
+  'apollo.projects.validation-envelope-reuses.approve': {
+    mode: 'validation-envelope-plan-action',
+    evidence: 'F2-018 request requires expectedPlanHash; serializable append compares the immutable plan, accepts one sequence-two decision and converges by actor-bound idempotency',
+  },
   'apollo.projects.annotations.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the current ProjectVersion, proxy artifact and proxy hash',
   },
@@ -342,6 +350,20 @@ function requiresBatchPartialRetry(capability) {
   assert.equal(capability.idempotency, 'required')
 }
 
+function requiresValidationEnvelopePlan(capability) {
+  assert.ok(capability.inputSchemaRef, `${capability.id} must publish an input schema`)
+  const schema = getPublicSchema(capability.inputSchemaRef).schema
+  assert.ok(
+    schema.required?.includes('expectedPlanHash'),
+    `${capability.id} must require expectedPlanHash`,
+  )
+  assert.ok(
+    schema.properties?.expectedPlanHash,
+    `${capability.id} must define expectedPlanHash`,
+  )
+  assert.equal(capability.idempotency, 'required')
+}
+
 test('every external mutation has an explicit precondition strategy', () => {
   assert.deepEqual(
     Object.keys(coverage).sort(),
@@ -397,6 +419,9 @@ test('every external mutation has an explicit precondition strategy', () => {
     if (decision.mode === 'batch-partial-retry-action') {
       requiresBatchPartialRetry(capability)
     }
+    if (decision.mode === 'validation-envelope-plan-action') {
+      requiresValidationEnvelopePlan(capability)
+    }
     if (decision.mode === 'idempotent-create') {
       assert.equal(capability.idempotency, 'required')
     }
@@ -417,7 +442,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 37,
+    'idempotent-create': 38,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,
@@ -427,5 +452,6 @@ test('the current public surface has no unguarded state replacement', () => {
     'take-library-revision-action': 1,
     'batch-edit-signed-action': 1,
     'batch-partial-retry-action': 1,
+    'validation-envelope-plan-action': 1,
   })
 })

@@ -20,15 +20,15 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.017, com a jornada integral do MVP Core e os
-dezessete primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
+Estado auditado após o gate F2.018, com a jornada integral do MVP Core e os
+dezoito primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **259 de 1.259 microtarefas verificadas como efetivamente entregues (20,6%)**;
-- **1.000 microtarefas abertas ou aguardando nova comprovação**;
+- **264 de 1.259 microtarefas verificadas como efetivamente entregues (21,0%)**;
+- **995 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 a F2.017 foram entregues, mas não encerram o
+  permanecem abertos; F2.001 a F2.018 foram entregues, mas não encerram o
   gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
@@ -59,6 +59,14 @@ reavalia visual e direitos e publica o resultado somente após
 `postCleanupReview`. As evidências detalhadas estão em
 `docs/quality/source-contamination-v1.md` e
 `docs/quality/source-cleanup-v1.md`.
+
+O validation envelope F2.018 compõe o range exato de um hook validado com
+body/proof/CTA novos, exclui hook/cold open e todo material excedente da recipe,
+protege automaticamente copy/take/framing/timing/opening conforme o escopo e
+exige decisão humana separada para registrar preservação ou perda da validação.
+Plano, composição e decisions log são imutáveis, idempotentes e operáveis por
+quatro capabilities `/v1`. Evidências:
+`docs/quality/validation-envelope-v1.md`.
 
 ---
 
@@ -1173,11 +1181,11 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.018 — Validation envelope [FR-124]
 
-- [ ] Representar quais partes validadas podem ser alteradas: copy, take, framing, timing e opening. Evidência T-FR-124.
-- [ ] Proteger automaticamente partes dentro do envelope durante reuso. Evidência T-FR-124.
-- [ ] Solicitar aprovação quando uma composição exigir sair do envelope. Evidência T-FR-124.
-- [ ] Registrar no decisions log se a validação foi preservada ou perdida. Evidência T-FR-124.
-- [ ] Testar reuso de hook com corpo/CTA novos sem material excedente. Evidência T-FR-124.
+- [x] Representar quais partes validadas podem ser alteradas: copy, take, framing, timing e opening. Evidência T-FR-124.
+- [x] Proteger automaticamente partes dentro do envelope durante reuso. Evidência T-FR-124.
+- [x] Solicitar aprovação quando uma composição exigir sair do envelope. Evidência T-FR-124.
+- [x] Registrar no decisions log se a validação foi preservada ou perdida. Evidência T-FR-124.
+- [x] Testar reuso de hook com corpo/CTA novos sem material excedente. Evidência T-FR-124.
 
 ### F2.019 — Proof need [FR-130]
 

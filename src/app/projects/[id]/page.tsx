@@ -178,6 +178,59 @@ interface SourceCleanupData {
     reviewedAt: string
   }
 }
+type ValidationEnvelopeAspect =
+  | 'copy'
+  | 'take'
+  | 'framing'
+  | 'timing'
+  | 'opening'
+interface ValidationEnvelopeReuseData {
+  plan: {
+    id: string
+    batchId: string
+    validatedSegmentId: string
+    sourceRangeMs: [number, number]
+    targetRecipeId: string
+    objective: string
+    aspectRules: {
+      aspect: ValidationEnvelopeAspect
+      state: 'protected' | 'mutable'
+    }[]
+    autoProtectedChanges: ValidationEnvelopeAspect[]
+    approvalRequiredChanges: ValidationEnvelopeAspect[]
+    approvalRequired: boolean
+    composition: {
+      clips: {
+        id: string
+        role: 'hook' | 'body' | 'proof' | 'cta'
+        sourceRangeMs: [number, number]
+      }[]
+      orderedRoles: ('hook' | 'body' | 'proof' | 'cta')[]
+      targetRecipeHookExcluded: true
+      validatedSourceOutsideEnvelopeIncluded: false
+      excessMaterialIncluded: false
+      durationMs: number
+    }
+    planHash: string
+    createdAt: string
+  }
+  decisions: {
+    id: string
+    validation: 'preserved' | 'pending-approval' | 'lost'
+    outcome: 'ready' | 'approval-required' | 'approved' | 'rejected'
+    lostAspects: ValidationEnvelopeAspect[]
+    note: string
+    createdAt: string
+  }[]
+  currentDecision: {
+    id: string
+    validation: 'preserved' | 'pending-approval' | 'lost'
+    outcome: 'ready' | 'approval-required' | 'approved' | 'rejected'
+    lostAspects: ValidationEnvelopeAspect[]
+    note: string
+    createdAt: string
+  }
+}
 interface PublicOperation {
   id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export' | 'source-cleanup'; status: string; phase: string;
   progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string
@@ -403,6 +456,14 @@ const SOURCE_CLEANUP_STRATEGY_LABELS = Object.freeze({
   reject: 'Fonte preservada',
 } satisfies Record<SourceCleanupStrategy, string>)
 
+const VALIDATION_ENVELOPE_ASPECT_LABELS = Object.freeze({
+  copy: 'Copy',
+  take: 'Take',
+  framing: 'Enquadramento',
+  timing: 'Timing',
+  opening: 'Abertura',
+} satisfies Record<ValidationEnvelopeAspect, string>)
+
 function readableBytes(value: number | string): string {
   const bytes = typeof value === 'string' ? Number(value) : value
   if (!Number.isFinite(bytes)) return '—'
@@ -502,6 +563,8 @@ export default function ProjectWorkspacePage() {
   const preservedPreviewTimeMs = useRef<number | null>(null)
   const selectedReviewVersionId = useRef<string | null>(null)
   const sourceCleanupIdempotencyKeys = useRef(new Map<string, string>())
+  const validationDecisionIdempotencyKeys =
+    useRef(new Map<string, string>())
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
@@ -566,6 +629,12 @@ export default function ProjectWorkspacePage() {
   const [sourceCleanups, setSourceCleanups] = useState<SourceCleanupData[]>([])
   const [sourceCleanupsLoading, setSourceCleanupsLoading] = useState(true)
   const [sourceCleanupBusyFindingId, setSourceCleanupBusyFindingId] = useState<string | null>(null)
+  const [validationEnvelopeReuses, setValidationEnvelopeReuses] =
+    useState<ValidationEnvelopeReuseData[]>([])
+  const [validationEnvelopeLoading, setValidationEnvelopeLoading] =
+    useState(true)
+  const [validationEnvelopeBusyId, setValidationEnvelopeBusyId] =
+    useState<string | null>(null)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -744,6 +813,48 @@ export default function ProjectWorkspacePage() {
   useEffect(() => {
     void loadSourceCleanups()
   }, [loadSourceCleanups])
+  const loadValidationEnvelopeReuses = useCallback(
+    async (quiet = false) => {
+      if (!quiet) setValidationEnvelopeLoading(true)
+      try {
+        const response = await fetch(
+          `/v1/projects/${encodeURIComponent(projectId)}` +
+            '/validation-envelope-reuses?limit=100',
+          {
+            headers: { accept: 'application/json' },
+            cache: 'no-store',
+          },
+        )
+        if (response.status === 401) {
+          router.replace('/login')
+          return
+        }
+        const payload = await response.json() as ApiEnvelope<{
+          reuses: ValidationEnvelopeReuseData[]
+        }>
+        if (!response.ok || !payload.data) {
+          throw new Error(apiError(
+            payload,
+            'Não foi possível carregar as proteções de reuso.',
+          ))
+        }
+        setValidationEnvelopeReuses(payload.data.reuses)
+      } catch (error) {
+        if (!quiet) {
+          setNotice(error instanceof Error
+            ? error.message
+            : 'Não foi possível carregar as proteções de reuso.')
+        }
+      } finally {
+        if (!quiet) setValidationEnvelopeLoading(false)
+      }
+    },
+    [projectId, router],
+  )
+
+  useEffect(() => {
+    void loadValidationEnvelopeReuses()
+  }, [loadValidationEnvelopeReuses])
   useEffect(() => () => reviewElementLookup.current?.abort(), [])
   useEffect(() => {
     if (workspace?.editPlan?.state !== 'compiled' || !workspace.version) {
@@ -1896,6 +2007,78 @@ export default function ProjectWorkspacePage() {
         : 'Não foi possível decidir a limpeza desta ocorrência.')
     } finally {
       setSourceCleanupBusyFindingId(null)
+    }
+  }
+
+  async function decideValidationEnvelope(
+    reuse: ValidationEnvelopeReuseData,
+    action: 'approve' | 'reject',
+  ) {
+    const requestIdentity = `${reuse.plan.id}:${action}`
+    const existingKey =
+      validationDecisionIdempotencyKeys.current.get(requestIdentity)
+    const idempotencyKey =
+      existingKey ??
+      `ui-validation-envelope-${crypto.randomUUID()}`
+    validationDecisionIdempotencyKeys.current.set(
+      requestIdentity,
+      idempotencyKey,
+    )
+    setValidationEnvelopeBusyId(reuse.plan.id)
+    setNotice(null)
+    try {
+      const response = await fetch(
+        `/v1/projects/${encodeURIComponent(projectId)}` +
+          `/validation-envelope-reuses/${encodeURIComponent(reuse.plan.id)}` +
+          '/approval',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': idempotencyKey,
+          },
+          body: JSON.stringify({
+            expectedPlanHash: reuse.plan.planHash,
+            action,
+            note: action === 'approve'
+              ? 'Mudança aprovada conscientemente; a validação histórica deixa de ser atribuída a esta composição.'
+              : 'Mudança recusada; preservar integralmente o envelope validado.',
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        reuse: ValidationEnvelopeReuseData
+        replayed: boolean
+      }>
+      if (!response.ok || !payload.data?.reuse) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível registrar a decisão de validação.',
+        ))
+      }
+      const decided = payload.data.reuse
+      setValidationEnvelopeReuses((current) => [
+        decided,
+        ...current.filter((item) =>
+          item.plan.id !== decided.plan.id),
+      ])
+      validationDecisionIdempotencyKeys.current.delete(
+        requestIdentity,
+      )
+      setNotice(action === 'approve'
+        ? 'Mudança aprovada. A composição registra explicitamente que a validação histórica foi perdida.'
+        : 'Mudança recusada. O hook continuará dentro do envelope validado.')
+      await loadValidationEnvelopeReuses(true)
+    } catch (error) {
+      setNotice(error instanceof Error
+        ? error.message
+        : 'Não foi possível registrar a decisão de validação.')
+    } finally {
+      setValidationEnvelopeBusyId(null)
     }
   }
 
@@ -3153,6 +3336,126 @@ export default function ProjectWorkspacePage() {
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+          </section>
+
+          <section
+            aria-label="Proteção de material validado durante o reuso"
+            className="mt-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
+            data-testid="validation-envelope-panel"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/[0.07] px-5 py-4">
+              <div>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#ad8950]">Reuso de material validado</p>
+                <h2 className="mt-1.5 text-base font-semibold tracking-[-0.02em] text-[#e8e3da]">O que fez o hook funcionar permanece cercado.</h2>
+                <p className="mt-1 max-w-3xl text-[10px] leading-5 text-[#6e6961]">Copy, take, enquadramento, timing e abertura são avaliados separadamente. Corpo e CTA entram por ranges exatos; o hook antigo da receita e qualquer sobra ficam de fora.</p>
+              </div>
+              <span className="border border-white/[0.08] px-2.5 py-1.5 font-mono text-[8px] uppercase tracking-[0.12em] text-[#706a61]">
+                {validationEnvelopeReuses.length} composiç{validationEnvelopeReuses.length === 1 ? 'ão' : 'ões'}
+              </span>
+            </div>
+
+            {validationEnvelopeLoading ? (
+              <div className="px-5 py-10 text-center text-xs text-[#716c64]">
+                Conferindo envelopes e decisões…
+              </div>
+            ) : validationEnvelopeReuses.length === 0 ? (
+              <div className="grid gap-2 px-5 py-9 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div>
+                  <p className="text-sm font-medium text-[#bdb7ae]">Nenhum hook validado foi composto neste projeto.</p>
+                  <p className="mt-1 text-[10px] leading-5 text-[#69655e]">Quando uma receita reutilizar material publicado, o envelope e a decisão do Diretor aparecerão aqui.</p>
+                </div>
+                <span className="mt-2 border border-dashed border-white/[0.1] px-3 py-2 font-mono text-[8px] uppercase tracking-[0.14em] text-[#5f5a53] sm:mt-0">aguardando reuso</span>
+              </div>
+            ) : (
+              <div className="divide-y divide-white/[0.06]">
+                {validationEnvelopeReuses.map((reuse) => {
+                  const current = reuse.currentDecision
+                  const pending =
+                    current.validation === 'pending-approval'
+                  const lost = current.validation === 'lost'
+                  return (
+                    <article
+                      className="grid gap-5 px-5 py-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(260px,.7fr)]"
+                      data-testid="validation-envelope-reuse"
+                      key={reuse.plan.id}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`h-1.5 w-1.5 rounded-full ${pending ? 'bg-[#d6a945] shadow-[0_0_10px_rgba(214,169,69,.4)]' : lost ? 'bg-[#d66a62]' : 'bg-[#69b27e]'}`} />
+                          <p className="text-[11px] font-semibold text-[#cbc5bb]">
+                            Hook validado + {reuse.plan.composition.orderedRoles.filter((role) => role !== 'hook').map((role) => role === 'body' ? 'corpo' : role === 'proof' ? 'prova' : 'CTA').join(' + ')}
+                          </p>
+                          <span
+                            className={`border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] ${pending ? 'border-[#a57c2d]/40 text-[#d0a448]' : lost ? 'border-[#a4514b]/40 text-[#cf746c]' : 'border-[#4c865d]/40 text-[#71b484]'}`}
+                            data-testid="validation-envelope-status"
+                          >
+                            {pending ? 'aprovação necessária' : lost ? 'validação perdida' : 'validação preservada'}
+                          </span>
+                        </div>
+                        <p className="mt-2 font-mono text-[8px] text-[#68635c]">
+                          {readableTimestamp(reuse.plan.sourceRangeMs[0])} → {readableTimestamp(reuse.plan.sourceRangeMs[1])} · {readableDuration(reuse.plan.composition.durationMs)} total · {reuse.plan.objective}
+                        </p>
+
+                        <div className="mt-4 grid grid-cols-5 overflow-hidden border border-white/[0.07]" data-testid="validation-envelope-aspects">
+                          {reuse.plan.aspectRules.map((rule) => (
+                            <div
+                              className={`relative min-w-0 border-r border-white/[0.06] px-2 py-3 last:border-r-0 ${rule.state === 'protected' ? 'bg-[#9f7a2e]/[0.06]' : 'bg-[#4e8560]/[0.04]'}`}
+                              key={rule.aspect}
+                            >
+                              <i className={`absolute inset-x-0 top-0 h-px ${rule.state === 'protected' ? 'bg-[#c99c3d]/70' : 'bg-[#5b9a6e]/55'}`} />
+                              <p className="truncate text-[8px] font-semibold uppercase tracking-[0.08em] text-[#9a9389]">{VALIDATION_ENVELOPE_ASPECT_LABELS[rule.aspect]}</p>
+                              <p className={`mt-1 text-[8px] ${rule.state === 'protected' ? 'text-[#bc984d]' : 'text-[#6f9f7b]'}`}>{rule.state === 'protected' ? 'protegido' : 'ajustável'}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[8px] text-[#676159]">
+                          <span>hook da receita: <strong className="font-medium text-[#82a28b]">excluído</strong></span>
+                          <span>sobra da fonte: <strong className="font-medium text-[#82a28b]">zero</strong></span>
+                          <span>clips exatos: <strong className="font-medium text-[#a69d91]">{reuse.plan.composition.clips.length}</strong></span>
+                        </div>
+                      </div>
+
+                      <div className={`border-l-2 pl-4 ${pending ? 'border-[#b98b32]' : lost ? 'border-[#b65852]' : 'border-[#568e66]'}`}>
+                        <p className="text-[8px] font-bold uppercase tracking-[0.16em] text-[#777168]">Decisão registrada</p>
+                        <p className={`mt-2 text-sm font-semibold ${pending ? 'text-[#d4aa4d]' : lost ? 'text-[#d27770]' : 'text-[#75b688]'}`}>
+                          {pending
+                            ? `${reuse.plan.approvalRequiredChanges.map((aspect) => VALIDATION_ENVELOPE_ASPECT_LABELS[aspect]).join(', ')} fora do envelope`
+                            : lost
+                              ? `Perdida em ${current.lostAspects.map((aspect) => VALIDATION_ENVELOPE_ASPECT_LABELS[aspect]).join(', ')}`
+                              : 'Proteção aplicada automaticamente'}
+                        </p>
+                        <p className="mt-2 text-[9px] leading-4 text-[#756f67]">{current.note}</p>
+                        {pending ? (
+                          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
+                            <button
+                              className="border border-[#4f8a60]/40 bg-[#4f8a60]/[0.07] px-3 py-2 text-[8px] font-semibold uppercase tracking-[0.1em] text-[#76ae83] transition hover:bg-[#4f8a60]/[0.12] disabled:cursor-not-allowed disabled:opacity-45"
+                              data-testid="validation-envelope-preserve"
+                              disabled={validationEnvelopeBusyId !== null}
+                              onClick={() => void decideValidationEnvelope(reuse, 'reject')}
+                              type="button"
+                            >
+                              Preservar validação
+                            </button>
+                            <button
+                              className="border border-[#a6524c]/40 bg-[#a6524c]/[0.07] px-3 py-2 text-[8px] font-semibold uppercase tracking-[0.1em] text-[#cc756e] transition hover:bg-[#a6524c]/[0.12] disabled:cursor-not-allowed disabled:opacity-45"
+                              data-testid="validation-envelope-approve-loss"
+                              disabled={validationEnvelopeBusyId !== null}
+                              onClick={() => void decideValidationEnvelope(reuse, 'approve')}
+                              type="button"
+                            >
+                              {validationEnvelopeBusyId === reuse.plan.id
+                                ? 'Registrando…'
+                                : 'Aprovar perda'}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  )
+                })}
               </div>
             )}
           </section>

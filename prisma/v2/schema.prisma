@@ -106,6 +106,8 @@ model V2Workspace {
   contaminationOverlaps           V2ContaminationOverlap[]
   sourceCleanupPlans              V2SourceCleanupPlan[]
   sourceCleanupResults            V2SourceCleanupResult[]
+  validationEnvelopeReuses        V2ValidationEnvelopeReuse[]
+  validationEnvelopeDecisions     V2ValidationEnvelopeDecision[]
 
   @@map("workspaces")
 }
@@ -123,40 +125,42 @@ model V2ApiClient {
   updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
   lastUsedAt  DateTime? @db.Timestamptz(3)
 
-  workspace                   V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  credentials                 V2ApiCredential[]
-  operations                  V2PublicOperation[]
-  mediaUploads                V2MediaUpload[]
-  mediaDownloadGrants         V2MediaDownloadGrant[]
-  createdWebhookEndpoints     V2WebhookEndpoint[]           @relation("WebhookEndpointCreator")
-  createdWebhookSubscriptions V2WebhookSubscription[]       @relation("WebhookSubscriptionCreator")
-  proxyReviewDecisions        V2ProxyReviewDecision[]
-  qualityIterations           V2QualityIteration[]
-  mvpCoreGates                V2MvpCoreGate[]
-  speechCatalogRuns           V2SpeechSegmentCatalogRun[]
-  evidenceSegments            V2EvidenceSegment[]
-  longFormIndexRuns           V2LongFormIndexRun[]
-  validatedSegments           V2ValidatedSegment[]
-  semanticSearchDocuments     V2SemanticSearchDocument[]
-  retrievalEvaluations        V2RetrievalEvaluation[]
-  hierarchicalProcessingRuns  V2HierarchicalProcessingRun[]
-  productionBatches           V2ProductionBatch[]           @relation("ProductionBatchCreator")
-  productionBatchActions      V2ProductionBatchAction[]     @relation("ProductionBatchActionActor")
-  scriptAlignmentRuns         V2ScriptAlignmentRun[]        @relation("ScriptAlignmentRunCreator")
-  scriptAlignmentReviews      V2ScriptAlignmentReview[]     @relation("ScriptAlignmentReviewActor")
-  takeLibraryRuns             V2TakeLibraryRun[]            @relation("TakeLibraryRunCreator")
-  takeLibrarySelections       V2TakeLibrarySelection[]      @relation("TakeLibrarySelectionActor")
-  compatibilityGraphRuns      V2CompatibilityGraphRun[]     @relation("CompatibilityGraphRunCreator")
-  variantRecipeRuns           V2VariantRecipeRun[]          @relation("VariantRecipeRunCreator")
-  updatedVariantPortfolioPolicies V2VariantPortfolioPolicy[] @relation("VariantPortfolioPolicyUpdater")
-  variantPortfolioPreflights  V2VariantPortfolioPreflightRun[] @relation("VariantPortfolioPreflightCreator")
-  updatedBatchEditPolicies    V2BatchEditPolicy[]               @relation("BatchEditPolicyUpdater")
-  batchEditItemStates         V2BatchEditItemStateVersion[]     @relation("BatchEditItemStateCreator")
-  batchEditPreflights         V2BatchEditPreflightRun[]         @relation("BatchEditPreflightCreator")
-  batchEditCommands           V2BatchEditCommand[]              @relation("BatchEditCommandCreator")
-  sourceDeconstructionReports V2SourceDeconstructionReport[]     @relation("SourceDeconstructionCreator")
-  contaminationReports        V2ContaminationReport[]            @relation("ContaminationReportCreator")
-  sourceCleanupPlans          V2SourceCleanupPlan[]               @relation("SourceCleanupCreator")
+  workspace                       V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  credentials                     V2ApiCredential[]
+  operations                      V2PublicOperation[]
+  mediaUploads                    V2MediaUpload[]
+  mediaDownloadGrants             V2MediaDownloadGrant[]
+  createdWebhookEndpoints         V2WebhookEndpoint[]              @relation("WebhookEndpointCreator")
+  createdWebhookSubscriptions     V2WebhookSubscription[]          @relation("WebhookSubscriptionCreator")
+  proxyReviewDecisions            V2ProxyReviewDecision[]
+  qualityIterations               V2QualityIteration[]
+  mvpCoreGates                    V2MvpCoreGate[]
+  speechCatalogRuns               V2SpeechSegmentCatalogRun[]
+  evidenceSegments                V2EvidenceSegment[]
+  longFormIndexRuns               V2LongFormIndexRun[]
+  validatedSegments               V2ValidatedSegment[]
+  semanticSearchDocuments         V2SemanticSearchDocument[]
+  retrievalEvaluations            V2RetrievalEvaluation[]
+  hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
+  productionBatches               V2ProductionBatch[]              @relation("ProductionBatchCreator")
+  productionBatchActions          V2ProductionBatchAction[]        @relation("ProductionBatchActionActor")
+  scriptAlignmentRuns             V2ScriptAlignmentRun[]           @relation("ScriptAlignmentRunCreator")
+  scriptAlignmentReviews          V2ScriptAlignmentReview[]        @relation("ScriptAlignmentReviewActor")
+  takeLibraryRuns                 V2TakeLibraryRun[]               @relation("TakeLibraryRunCreator")
+  takeLibrarySelections           V2TakeLibrarySelection[]         @relation("TakeLibrarySelectionActor")
+  compatibilityGraphRuns          V2CompatibilityGraphRun[]        @relation("CompatibilityGraphRunCreator")
+  variantRecipeRuns               V2VariantRecipeRun[]             @relation("VariantRecipeRunCreator")
+  updatedVariantPortfolioPolicies V2VariantPortfolioPolicy[]       @relation("VariantPortfolioPolicyUpdater")
+  variantPortfolioPreflights      V2VariantPortfolioPreflightRun[] @relation("VariantPortfolioPreflightCreator")
+  updatedBatchEditPolicies        V2BatchEditPolicy[]              @relation("BatchEditPolicyUpdater")
+  batchEditItemStates             V2BatchEditItemStateVersion[]    @relation("BatchEditItemStateCreator")
+  batchEditPreflights             V2BatchEditPreflightRun[]        @relation("BatchEditPreflightCreator")
+  batchEditCommands               V2BatchEditCommand[]             @relation("BatchEditCommandCreator")
+  sourceDeconstructionReports     V2SourceDeconstructionReport[]   @relation("SourceDeconstructionCreator")
+  contaminationReports            V2ContaminationReport[]          @relation("ContaminationReportCreator")
+  sourceCleanupPlans              V2SourceCleanupPlan[]            @relation("SourceCleanupCreator")
+  createdValidationEnvelopeReuses V2ValidationEnvelopeReuse[]      @relation("ValidationEnvelopeReuseCreator")
+  validationEnvelopeDecisions     V2ValidationEnvelopeDecision[]   @relation("ValidationEnvelopeDecisionActor")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -256,62 +260,64 @@ model V2Project {
   createdAt               DateTime @default(now()) @db.Timestamptz(3)
   updatedAt               DateTime @updatedAt @db.Timestamptz(3)
 
-  workspace                    V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  versions                     V2ProjectVersion[]              @relation("ProjectVersions")
-  snapshots                    V2ProjectSnapshot[]
-  currentVersion               V2ProjectVersion?               @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  duplicatedFromProject        V2Project?                      @relation("ProjectDuplicateSource", fields: [duplicatedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  duplicates                   V2Project[]                     @relation("ProjectDuplicateSource")
-  versionsForkedFrom           V2ProjectVersion[]              @relation("ForkedFromProject")
-  mediaUploads                 V2MediaUpload[]
-  mediaAssets                  V2ProjectMediaAsset[]
-  mediaTranscripts             V2MediaTranscript[]
-  mediaIngestOperations        V2MediaIngestOperation[]
-  proxyRenderOperations        V2ProjectProxyRenderOperation[]
-  finalExportOperations        V2ProjectFinalExportOperation[]
-  editCommands                 V2EditCommand[]
-  directorRuns                 V2DirectorRun[]
-  reviewAnnotations            V2ReviewAnnotation[]
-  renderElementMaps            V2RenderElementMap[]
-  reviewPatchProposals         V2ReviewPatchProposal[]
-  reviewPatchBatches           V2ReviewPatchBatch[]
-  proxyReviews                 V2ProxyReview[]
-  proxyReviewDecisions         V2ProxyReviewDecision[]
-  assetSelections              V2AssetSelection[]
-  qualityIterations            V2QualityIteration[]
-  mvpCoreGatesAsPrimary        V2MvpCoreGate[]                 @relation("MvpCoreGatePrimaryProject")
-  mvpCoreGatesAsCompanion      V2MvpCoreGate[]                 @relation("MvpCoreGateCompanionProject")
-  speechCatalogRuns            V2SpeechSegmentCatalogRun[]
-  speechSegments               V2SpeechSegment[]
-  evidenceSegments             V2EvidenceSegment[]
-  longFormIndexRuns            V2LongFormIndexRun[]
-  longFormChapters             V2LongFormChapter[]
-  longFormMoments              V2LongFormMoment[]
-  validatedSegments            V2ValidatedSegment[]
-  semanticSearchDocuments      V2SemanticSearchDocument[]
-  retrievalEvaluations         V2RetrievalEvaluation[]
-  hierarchicalProcessingRuns   V2HierarchicalProcessingRun[]
-  hierarchicalProcessingChunks V2HierarchicalProcessingChunk[]
-  hierarchicalTierExecutions   V2HierarchicalTierExecution[]
-  productionBatches            V2ProductionBatch[]
-  scriptAlignmentRuns          V2ScriptAlignmentRun[]
-  takeLibraryRuns              V2TakeLibraryRun[]
-  compatibilityGraphRuns       V2CompatibilityGraphRun[]
-  variantRecipeRuns            V2VariantRecipeRun[]
-  variantPortfolioPreflights   V2VariantPortfolioPreflightRun[]
-  batchEditPreflights          V2BatchEditPreflightRun[]
-  batchEditCommands            V2BatchEditCommand[]
-  productionBatchRetryJobs     V2ProductionBatchRetryJob[]
-  sourceDeconstructionReports  V2SourceDeconstructionReport[]
-  sourceDeconstructionSegments V2SourceDeconstructionSegment[]
-  sourceDeconstructionRanges   V2SourceDeconstructionRange[]
-  contaminationReports         V2ContaminationReport[]
-  contaminationObservations    V2ContaminationObservation[]
+  workspace                     V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  versions                      V2ProjectVersion[]               @relation("ProjectVersions")
+  snapshots                     V2ProjectSnapshot[]
+  currentVersion                V2ProjectVersion?                @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  duplicatedFromProject         V2Project?                       @relation("ProjectDuplicateSource", fields: [duplicatedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  duplicates                    V2Project[]                      @relation("ProjectDuplicateSource")
+  versionsForkedFrom            V2ProjectVersion[]               @relation("ForkedFromProject")
+  mediaUploads                  V2MediaUpload[]
+  mediaAssets                   V2ProjectMediaAsset[]
+  mediaTranscripts              V2MediaTranscript[]
+  mediaIngestOperations         V2MediaIngestOperation[]
+  proxyRenderOperations         V2ProjectProxyRenderOperation[]
+  finalExportOperations         V2ProjectFinalExportOperation[]
+  editCommands                  V2EditCommand[]
+  directorRuns                  V2DirectorRun[]
+  reviewAnnotations             V2ReviewAnnotation[]
+  renderElementMaps             V2RenderElementMap[]
+  reviewPatchProposals          V2ReviewPatchProposal[]
+  reviewPatchBatches            V2ReviewPatchBatch[]
+  proxyReviews                  V2ProxyReview[]
+  proxyReviewDecisions          V2ProxyReviewDecision[]
+  assetSelections               V2AssetSelection[]
+  qualityIterations             V2QualityIteration[]
+  mvpCoreGatesAsPrimary         V2MvpCoreGate[]                  @relation("MvpCoreGatePrimaryProject")
+  mvpCoreGatesAsCompanion       V2MvpCoreGate[]                  @relation("MvpCoreGateCompanionProject")
+  speechCatalogRuns             V2SpeechSegmentCatalogRun[]
+  speechSegments                V2SpeechSegment[]
+  evidenceSegments              V2EvidenceSegment[]
+  longFormIndexRuns             V2LongFormIndexRun[]
+  longFormChapters              V2LongFormChapter[]
+  longFormMoments               V2LongFormMoment[]
+  validatedSegments             V2ValidatedSegment[]
+  semanticSearchDocuments       V2SemanticSearchDocument[]
+  retrievalEvaluations          V2RetrievalEvaluation[]
+  hierarchicalProcessingRuns    V2HierarchicalProcessingRun[]
+  hierarchicalProcessingChunks  V2HierarchicalProcessingChunk[]
+  hierarchicalTierExecutions    V2HierarchicalTierExecution[]
+  productionBatches             V2ProductionBatch[]
+  scriptAlignmentRuns           V2ScriptAlignmentRun[]
+  takeLibraryRuns               V2TakeLibraryRun[]
+  compatibilityGraphRuns        V2CompatibilityGraphRun[]
+  variantRecipeRuns             V2VariantRecipeRun[]
+  variantPortfolioPreflights    V2VariantPortfolioPreflightRun[]
+  batchEditPreflights           V2BatchEditPreflightRun[]
+  batchEditCommands             V2BatchEditCommand[]
+  productionBatchRetryJobs      V2ProductionBatchRetryJob[]
+  sourceDeconstructionReports   V2SourceDeconstructionReport[]
+  sourceDeconstructionSegments  V2SourceDeconstructionSegment[]
+  sourceDeconstructionRanges    V2SourceDeconstructionRange[]
+  contaminationReports          V2ContaminationReport[]
+  contaminationObservations     V2ContaminationObservation[]
   contaminationProtectedRegions V2ContaminationProtectedRegion[]
-  contaminationFindings        V2ContaminationFinding[]
-  contaminationOverlaps        V2ContaminationOverlap[]
-  sourceCleanupPlans           V2SourceCleanupPlan[]
-  sourceCleanupResults         V2SourceCleanupResult[]
+  contaminationFindings         V2ContaminationFinding[]
+  contaminationOverlaps         V2ContaminationOverlap[]
+  sourceCleanupPlans            V2SourceCleanupPlan[]
+  sourceCleanupResults          V2SourceCleanupResult[]
+  validationEnvelopeReuses      V2ValidationEnvelopeReuse[]
+  validationEnvelopeDecisions   V2ValidationEnvelopeDecision[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -717,8 +723,8 @@ model V2MediaArtifact {
   sourceDeconstructionReports  V2SourceDeconstructionReport[]
   sourceDeconstructionSegments V2SourceDeconstructionSegment[]
   contaminationReports         V2ContaminationReport[]
-  sourceCleanupSourcePlans     V2SourceCleanupPlan[]               @relation("SourceCleanupSourceArtifact")
-  sourceCleanupResults         V2SourceCleanupResult[]             @relation("SourceCleanupOutputArtifact")
+  sourceCleanupSourcePlans     V2SourceCleanupPlan[]            @relation("SourceCleanupSourceArtifact")
+  sourceCleanupResults         V2SourceCleanupResult[]          @relation("SourceCleanupOutputArtifact")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -778,8 +784,8 @@ model V2MediaArtifactManifest {
   longFormIndexRuns          V2LongFormIndexRun[]
   validatedSegments          V2ValidatedSegment[]
   hierarchicalProcessingRuns V2HierarchicalProcessingRun[]
-  sourceCleanupResults        V2SourceCleanupResult[]
-  sourceCleanupPlans          V2SourceCleanupPlan[] @relation("SourceCleanupSourceManifest")
+  sourceCleanupResults       V2SourceCleanupResult[]
+  sourceCleanupPlans         V2SourceCleanupPlan[]            @relation("SourceCleanupSourceManifest")
 
   @@unique([id, workspaceId])
   @@unique([artifactId, manifestHash])
@@ -1046,9 +1052,9 @@ model V2AssetRightsSnapshot {
   validatedSegments          V2ValidatedSegment[]
   semanticSearchDocuments    V2SemanticSearchDocument[]
   hierarchicalProcessingRuns V2HierarchicalProcessingRun[]
-  sourceCleanupPlans          V2SourceCleanupPlan[]   @relation("SourceCleanupSourceRights")
-  sourceCleanupSourceReviews  V2SourceCleanupResult[] @relation("SourceCleanupReviewSourceRights")
-  sourceCleanupOutputReviews  V2SourceCleanupResult[] @relation("SourceCleanupReviewOutputRights")
+  sourceCleanupPlans         V2SourceCleanupPlan[]         @relation("SourceCleanupSourceRights")
+  sourceCleanupSourceReviews V2SourceCleanupResult[]       @relation("SourceCleanupReviewSourceRights")
+  sourceCleanupOutputReviews V2SourceCleanupResult[]       @relation("SourceCleanupReviewOutputRights")
 
   @@unique([id, workspaceId])
   @@unique([artifactId, sequence])
@@ -1405,14 +1411,14 @@ model V2MediaTranscript {
   transcriptJson   String   @db.Text
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace                  V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project                    V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  sourceArtifact             V2MediaArtifact               @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  sourceManifest             V2MediaArtifactManifest       @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  speechCatalogRuns          V2SpeechSegmentCatalogRun[]
-  speechSegments             V2SpeechSegment[]
-  evidenceSegments           V2EvidenceSegment[]
-  hierarchicalProcessingRuns V2HierarchicalProcessingRun[]
+  workspace                   V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                     V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact              V2MediaArtifact                @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceManifest              V2MediaArtifactManifest        @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  speechCatalogRuns           V2SpeechSegmentCatalogRun[]
+  speechSegments              V2SpeechSegment[]
+  evidenceSegments            V2EvidenceSegment[]
+  hierarchicalProcessingRuns  V2HierarchicalProcessingRun[]
   sourceDeconstructionReports V2SourceDeconstructionReport[]
 
   @@unique([id, workspaceId])
@@ -1490,13 +1496,13 @@ model V2SpeechSegment {
   segmentHash              String   @db.Char(64)
   createdAt                DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace         V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project           V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  catalogRun        V2SpeechSegmentCatalogRun @relation(fields: [catalogRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  sourceTranscript  V2MediaTranscript         @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  sourceArtifact    V2MediaArtifact           @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  evidenceSegments  V2EvidenceSegment[]
-  validatedSegments V2ValidatedSegment[]
+  workspace                    V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                      V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  catalogRun                   V2SpeechSegmentCatalogRun       @relation(fields: [catalogRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceTranscript             V2MediaTranscript               @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact               V2MediaArtifact                 @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  evidenceSegments             V2EvidenceSegment[]
+  validatedSegments            V2ValidatedSegment[]
   sourceDeconstructionSegments V2SourceDeconstructionSegment[]
 
   @@unique([id, workspaceId])
@@ -1760,13 +1766,14 @@ model V2ValidatedSegment {
   createdAt                DateTime  @default(now()) @db.Timestamptz(3)
   validatedSegmentHash     String    @db.Char(64)
 
-  workspace           V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project             V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  sourceArtifact      V2MediaArtifact         @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  sourceManifest      V2MediaArtifactManifest @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  sourceSpeechSegment V2SpeechSegment?        @relation(fields: [sourceSpeechSegmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  rightsSnapshot      V2AssetRightsSnapshot   @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  createdBy           V2ApiClient             @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace                V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                  V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact           V2MediaArtifact             @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceManifest           V2MediaArtifactManifest     @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceSpeechSegment      V2SpeechSegment?            @relation(fields: [sourceSpeechSegmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  rightsSnapshot           V2AssetRightsSnapshot       @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy                V2ApiClient                 @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  validationEnvelopeReuses V2ValidationEnvelopeReuse[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -1780,6 +1787,92 @@ model V2ValidatedSegment {
   @@index([workspaceId, expiresAt])
   @@index([workspaceId, rightsSnapshotId])
   @@map("validated_segments")
+}
+
+model V2ValidationEnvelopeReuse {
+  id                            String   @id @db.VarChar(128)
+  workspaceId                   String   @db.VarChar(128)
+  projectId                     String   @db.VarChar(128)
+  batchId                       String   @db.VarChar(128)
+  validatedSegmentId            String   @db.VarChar(128)
+  validatedSegmentHash          String   @db.Char(64)
+  sourceArtifactId              String   @db.VarChar(128)
+  sourceArtifactSha256          String   @db.Char(64)
+  sourceRangeStartMs            Int
+  sourceRangeEndMs              Int
+  targetRecipeId                String   @db.VarChar(128)
+  targetRecipeHash              String   @db.Char(64)
+  schemaVersion                 String   @db.VarChar(64)
+  policyVersion                 String   @db.VarChar(64)
+  objective                     String   @db.VarChar(128)
+  aspectRulesJson               String   @db.Text
+  protectedAspectsText          String   @db.Text
+  mutableAspectsText            String   @db.Text
+  requestedChangesJson          String   @db.Text
+  requestedChangeCount          Int
+  autoProtectedChangesText      String   @db.Text
+  approvalRequiredChangesText   String   @db.Text
+  approvalRequired              Boolean
+  initialValidation             String   @db.VarChar(32)
+  compositionJson               String   @db.Text
+  compositionHash               String   @db.Char(64)
+  excessMaterialIncluded        Boolean  @default(false)
+  validatedOutsideRangeIncluded Boolean  @default(false)
+  planJson                      String   @db.Text
+  planHash                      String   @db.Char(64)
+  requestFingerprint            String   @db.Char(64)
+  idempotencyKey                String   @db.VarChar(128)
+  createdByClientId             String   @db.VarChar(80)
+  createdAt                     DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch            V2ProductionBatch              @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  validatedSegment V2ValidatedSegment             @relation(fields: [validatedSegmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  targetRecipe     V2VariantRecipeRun             @relation(fields: [targetRecipeId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy        V2ApiClient                    @relation("ValidationEnvelopeReuseCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  decisions        V2ValidationEnvelopeDecision[]
+
+  @@unique([id, workspaceId])
+  @@unique([id, workspaceId, projectId])
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, validatedSegmentId, createdAt(sort: Desc)])
+  @@index([workspaceId, targetRecipeId, createdAt(sort: Desc)])
+  @@index([workspaceId, batchId, createdAt(sort: Desc)])
+  @@index([workspaceId, approvalRequired, initialValidation, createdAt(sort: Desc)])
+  @@map("validation_envelope_reuses")
+}
+
+model V2ValidationEnvelopeDecision {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  reusePlanId        String   @db.VarChar(128)
+  sequence           Int
+  schemaVersion      String   @db.VarChar(64)
+  kind               String   @db.VarChar(32)
+  outcome            String   @db.VarChar(32)
+  validation         String   @db.VarChar(32)
+  decisionJson       String   @db.Text
+  decisionHash       String   @db.Char(64)
+  requestFingerprint String   @db.Char(64)
+  idempotencyKey     String   @db.VarChar(128)
+  actorClientId      String   @db.VarChar(80)
+  createdAt          DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  reusePlan V2ValidationEnvelopeReuse @relation(fields: [reusePlanId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+  actor     V2ApiClient               @relation("ValidationEnvelopeDecisionActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([reusePlanId, sequence])
+  @@unique([workspaceId, projectId, actorClientId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, reusePlanId, sequence])
+  @@index([workspaceId, validation, createdAt(sort: Desc)])
+  @@map("validation_envelope_decisions")
 }
 
 model V2SemanticSearchDocument {
@@ -2030,22 +2123,23 @@ model V2ProductionBatch {
   createdAt              DateTime @db.Timestamptz(3)
   updatedAt              DateTime @db.Timestamptz(3)
 
-  workspace           V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project             V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  createdBy           V2ApiClient               @relation("ProductionBatchCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  items               V2ProductionBatchItem[]
-  actions             V2ProductionBatchAction[]
-  scriptAlignmentRuns V2ScriptAlignmentRun[]
-  takeLibraryRuns     V2TakeLibraryRun[]
-  compatibilityGraphs V2CompatibilityGraphRun[]
-  variantRecipes      V2VariantRecipeRun[]
+  workspace                  V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                    V2Project                        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy                  V2ApiClient                      @relation("ProductionBatchCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  items                      V2ProductionBatchItem[]
+  actions                    V2ProductionBatchAction[]
+  scriptAlignmentRuns        V2ScriptAlignmentRun[]
+  takeLibraryRuns            V2TakeLibraryRun[]
+  compatibilityGraphs        V2CompatibilityGraphRun[]
+  variantRecipes             V2VariantRecipeRun[]
+  validationEnvelopeReuses   V2ValidationEnvelopeReuse[]
   variantPortfolioPreflights V2VariantPortfolioPreflightRun[]
-  batchEditItemStates         V2BatchEditItemStateVersion[]
-  batchEditPreflights         V2BatchEditPreflightRun[]
-  batchEditCommands           V2BatchEditCommand[]
-  batchEditCommandItems       V2BatchEditCommandItem[]
-  batchEditInvalidations      V2BatchEditInvalidation[]
-  partialRetryJobs            V2ProductionBatchRetryJob[]
+  batchEditItemStates        V2BatchEditItemStateVersion[]
+  batchEditPreflights        V2BatchEditPreflightRun[]
+  batchEditCommands          V2BatchEditCommand[]
+  batchEditCommandItems      V2BatchEditCommandItem[]
+  batchEditInvalidations     V2BatchEditInvalidation[]
+  partialRetryJobs           V2ProductionBatchRetryJob[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
@@ -2221,14 +2315,14 @@ model V2CompatibilityGraphRun {
   createdByClientId  String   @db.VarChar(80)
   createdAt          DateTime @db.Timestamptz(3)
 
-  workspace      V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project        V2Project                  @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  batch          V2ProductionBatch          @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  takeLibrary    V2TakeLibraryRun           @relation(fields: [takeLibraryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  createdBy      V2ApiClient                @relation("CompatibilityGraphRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  nodes          V2CompatibilityGraphNode[]
-  edges          V2CompatibilityGraphEdge[]
-  variantRecipes V2VariantRecipeRun[]
+  workspace                  V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                    V2Project                        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch                      V2ProductionBatch                @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  takeLibrary                V2TakeLibraryRun                 @relation(fields: [takeLibraryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy                  V2ApiClient                      @relation("CompatibilityGraphRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  nodes                      V2CompatibilityGraphNode[]
+  edges                      V2CompatibilityGraphEdge[]
+  variantRecipes             V2VariantRecipeRun[]
   variantPortfolioPreflights V2VariantPortfolioPreflightRun[]
 
   @@unique([id, workspaceId])
@@ -2336,13 +2430,14 @@ model V2VariantRecipeRun {
   createdByClientId         String   @db.VarChar(80)
   createdAt                 DateTime @db.Timestamptz(3)
 
-  workspace          V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project            V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  batch              V2ProductionBatch        @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  compatibilityGraph V2CompatibilityGraphRun  @relation(fields: [compatibilityGraphId, workspaceId, projectId, batchId, takeLibraryId, compatibilityGraphRunHash], references: [id, workspaceId, projectId, batchId, takeLibraryId, runHash], onDelete: Restrict, map: "variant_recipe_runs_graph_scope_fkey")
-  takeLibrary        V2TakeLibraryRun         @relation(fields: [takeLibraryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  createdBy          V2ApiClient              @relation("VariantRecipeRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  lineage            V2VariantRecipeLineage[]
+  workspace                V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                  V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch                    V2ProductionBatch           @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  compatibilityGraph       V2CompatibilityGraphRun     @relation(fields: [compatibilityGraphId, workspaceId, projectId, batchId, takeLibraryId, compatibilityGraphRunHash], references: [id, workspaceId, projectId, batchId, takeLibraryId, runHash], onDelete: Restrict, map: "variant_recipe_runs_graph_scope_fkey")
+  takeLibrary              V2TakeLibraryRun            @relation(fields: [takeLibraryId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy                V2ApiClient                 @relation("VariantRecipeRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  lineage                  V2VariantRecipeLineage[]
+  validationEnvelopeReuses V2ValidationEnvelopeReuse[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, compatibilityGraphId], map: "variant_recipe_runs_lineage_scope_key")
@@ -2390,32 +2485,32 @@ model V2VariantRecipeLineage {
 }
 
 model V2VariantPortfolioPolicy {
-  workspaceId                      String   @db.VarChar(128)
-  schemaVersion                    String   @db.VarChar(64)
-  revision                         Int      @default(1)
-  defaultRecipeLimit               Int
-  maxRecipeLimit                   Int
-  maxOutputCount                   Int
-  minCompatibilityEdgeScore       Decimal  @db.Decimal(6, 3)
-  minRecipeScore                   Decimal  @db.Decimal(6, 3)
-  minHookCoverage                  Int
-  minBodyCoverage                  Int
-  minCtaCoverage                   Int
-  maxRecipesPerSemanticCluster     Int
-  maxCandidateScanCount            Int
-  estimatedCostPerOutputMinorUnits Int
+  workspaceId                       String   @db.VarChar(128)
+  schemaVersion                     String   @db.VarChar(64)
+  revision                          Int      @default(1)
+  defaultRecipeLimit                Int
+  maxRecipeLimit                    Int
+  maxOutputCount                    Int
+  minCompatibilityEdgeScore         Decimal  @db.Decimal(6, 3)
+  minRecipeScore                    Decimal  @db.Decimal(6, 3)
+  minHookCoverage                   Int
+  minBodyCoverage                   Int
+  minCtaCoverage                    Int
+  maxRecipesPerSemanticCluster      Int
+  maxCandidateScanCount             Int
+  estimatedCostPerOutputMinorUnits  Int
   estimatedDurationSecondsPerOutput Int
-  estimatedStorageBytesPerOutput   BigInt
-  maxConcurrentJobs                Int
-  confirmationTtlSeconds           Int
-  policyJson                       String   @db.Text
-  policyHash                       String   @db.Char(64)
-  updatedByClientId                String   @db.VarChar(80)
-  createdAt                        DateTime @db.Timestamptz(3)
-  updatedAt                        DateTime @db.Timestamptz(3)
+  estimatedStorageBytesPerOutput    BigInt
+  maxConcurrentJobs                 Int
+  confirmationTtlSeconds            Int
+  policyJson                        String   @db.Text
+  policyHash                        String   @db.Char(64)
+  updatedByClientId                 String   @db.VarChar(80)
+  createdAt                         DateTime @db.Timestamptz(3)
+  updatedAt                         DateTime @db.Timestamptz(3)
 
-  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  updatedBy V2ApiClient @relation("VariantPortfolioPolicyUpdater", fields: [updatedByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace  V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  updatedBy  V2ApiClient                      @relation("VariantPortfolioPolicyUpdater", fields: [updatedByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   preflights V2VariantPortfolioPreflightRun[]
 
   @@id([workspaceId, revision])
@@ -2426,50 +2521,50 @@ model V2VariantPortfolioPolicy {
 }
 
 model V2VariantPortfolioPreflightRun {
-  id                        String   @id @db.VarChar(128)
-  workspaceId               String   @db.VarChar(128)
-  projectId                 String   @db.VarChar(128)
-  batchId                   String   @db.VarChar(128)
-  compatibilityGraphId      String   @db.VarChar(128)
-  compatibilityGraphRunHash String   @db.Char(64)
-  takeLibraryId             String   @db.VarChar(128)
-  schemaVersion             String   @db.VarChar(64)
-  selectionVersion          String   @db.VarChar(64)
-  objective                 String   @db.VarChar(128)
-  status                    String   @db.VarChar(32)
-  resultJson                String   @db.Text
-  policyHash                String   @db.Char(64)
+  id                        String    @id @db.VarChar(128)
+  workspaceId               String    @db.VarChar(128)
+  projectId                 String    @db.VarChar(128)
+  batchId                   String    @db.VarChar(128)
+  compatibilityGraphId      String    @db.VarChar(128)
+  compatibilityGraphRunHash String    @db.Char(64)
+  takeLibraryId             String    @db.VarChar(128)
+  schemaVersion             String    @db.VarChar(64)
+  selectionVersion          String    @db.VarChar(64)
+  objective                 String    @db.VarChar(128)
+  status                    String    @db.VarChar(32)
+  resultJson                String    @db.Text
+  policyHash                String    @db.Char(64)
   requestedRecipeCount      Int
   effectiveRecipeLimit      Int
   batchVariantCount         Int
   budgetRemainingMinorUnits Int
-  theoreticalCandidateCount Decimal  @db.Decimal(38, 0)
-  eligibleCandidateCount    Decimal  @db.Decimal(38, 0)
+  theoreticalCandidateCount Decimal   @db.Decimal(38, 0)
+  eligibleCandidateCount    Decimal   @db.Decimal(38, 0)
   scannedCandidateCount     Int
   selectedRecipeCount       Int
   outputVariantCount        Int
   plannedJobCount           Int
-  jobsCreated               Int      @default(0)
+  jobsCreated               Int       @default(0)
   estimatedCostMinorUnits   Int
   estimatedDurationSeconds  Int
   estimatedStorageBytes     BigInt
   reusedRecipeCount         Int
-  productMaterialized       Boolean  @default(false)
+  productMaterialized       Boolean   @default(false)
   confirmationRequired      Boolean
   confirmationSatisfied     Boolean
   confirmationExpiresAt     DateTime? @db.Timestamptz(3)
-  runHash                   String   @db.Char(64)
-  requestFingerprint        String   @db.Char(64)
-  idempotencyKey            String   @db.VarChar(128)
-  createdByClientId         String   @db.VarChar(80)
-  createdAt                 DateTime @db.Timestamptz(3)
+  runHash                   String    @db.Char(64)
+  requestFingerprint        String    @db.Char(64)
+  idempotencyKey            String    @db.VarChar(128)
+  createdByClientId         String    @db.VarChar(80)
+  createdAt                 DateTime  @db.Timestamptz(3)
 
-  workspace          V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project            V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  batch              V2ProductionBatch           @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  compatibilityGraph V2CompatibilityGraphRun     @relation(fields: [compatibilityGraphId, workspaceId, projectId, batchId, takeLibraryId, compatibilityGraphRunHash], references: [id, workspaceId, projectId, batchId, takeLibraryId, runHash], onDelete: Restrict, map: "variant_portfolio_preflight_graph_scope_fkey")
-  policy             V2VariantPortfolioPolicy    @relation(fields: [workspaceId, policyHash], references: [workspaceId, policyHash], onDelete: Restrict, map: "variant_portfolio_preflight_policy_scope_fkey")
-  createdBy          V2ApiClient                 @relation("VariantPortfolioPreflightCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace          V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project            V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch              V2ProductionBatch        @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  compatibilityGraph V2CompatibilityGraphRun  @relation(fields: [compatibilityGraphId, workspaceId, projectId, batchId, takeLibraryId, compatibilityGraphRunHash], references: [id, workspaceId, projectId, batchId, takeLibraryId, runHash], onDelete: Restrict, map: "variant_portfolio_preflight_graph_scope_fkey")
+  policy             V2VariantPortfolioPolicy @relation(fields: [workspaceId, policyHash], references: [workspaceId, policyHash], onDelete: Restrict, map: "variant_portfolio_preflight_policy_scope_fkey")
+  createdBy          V2ApiClient              @relation("VariantPortfolioPreflightCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
@@ -2481,24 +2576,24 @@ model V2VariantPortfolioPreflightRun {
 }
 
 model V2BatchEditPolicy {
-  workspaceId                   String   @db.VarChar(128)
-  schemaVersion                 String   @db.VarChar(64)
-  revision                      Int      @default(1)
-  defaultMode                   String   @db.VarChar(32)
-  maxItemCount                  Int
-  diffSampleSize                Int
-  replaceCtaCostMinorUnits      Int
-  subtitleStyleCostMinorUnits   Int
-  brandKitCostMinorUnits        Int
-  confirmationTtlSeconds        Int
-  policyJson                    String   @db.Text
-  policyHash                    String   @db.Char(64)
-  updatedByClientId             String   @db.VarChar(80)
-  createdAt                     DateTime @db.Timestamptz(3)
-  updatedAt                     DateTime @db.Timestamptz(3)
+  workspaceId                 String   @db.VarChar(128)
+  schemaVersion               String   @db.VarChar(64)
+  revision                    Int      @default(1)
+  defaultMode                 String   @db.VarChar(32)
+  maxItemCount                Int
+  diffSampleSize              Int
+  replaceCtaCostMinorUnits    Int
+  subtitleStyleCostMinorUnits Int
+  brandKitCostMinorUnits      Int
+  confirmationTtlSeconds      Int
+  policyJson                  String   @db.Text
+  policyHash                  String   @db.Char(64)
+  updatedByClientId           String   @db.VarChar(80)
+  createdAt                   DateTime @db.Timestamptz(3)
+  updatedAt                   DateTime @db.Timestamptz(3)
 
-  workspace  V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  updatedBy  V2ApiClient                @relation("BatchEditPolicyUpdater", fields: [updatedByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace  V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  updatedBy  V2ApiClient               @relation("BatchEditPolicyUpdater", fields: [updatedByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   preflights V2BatchEditPreflightRun[]
 
   @@id([workspaceId, revision])
@@ -2523,13 +2618,13 @@ model V2BatchEditItemStateVersion {
   createdByClientId       String   @db.VarChar(80)
   createdAt               DateTime @db.Timestamptz(3)
 
-  workspace     V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  batch         V2ProductionBatch            @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  item          V2ProductionBatchItem        @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
-  createdBy     V2ApiClient                  @relation("BatchEditItemStateCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  previousState V2BatchEditItemStateVersion? @relation("BatchEditStateLineage", fields: [itemId, previousStateHash], references: [itemId, stateHash], onDelete: Restrict)
+  workspace     V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch         V2ProductionBatch             @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  item          V2ProductionBatchItem         @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+  createdBy     V2ApiClient                   @relation("BatchEditItemStateCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  previousState V2BatchEditItemStateVersion?  @relation("BatchEditStateLineage", fields: [itemId, previousStateHash], references: [itemId, stateHash], onDelete: Restrict)
   nextStates    V2BatchEditItemStateVersion[] @relation("BatchEditStateLineage")
-  sourceCommand V2BatchEditCommand?          @relation("BatchEditCommandStates", fields: [sourceCommandId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Restrict)
+  sourceCommand V2BatchEditCommand?           @relation("BatchEditCommandStates", fields: [sourceCommandId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Restrict)
   beforeResults V2BatchEditCommandItem[]      @relation("BatchEditBeforeState")
   afterResults  V2BatchEditCommandItem[]      @relation("BatchEditAfterState")
 
@@ -2573,11 +2668,11 @@ model V2BatchEditPreflightRun {
   createdByClientId         String    @db.VarChar(80)
   createdAt                 DateTime  @db.Timestamptz(3)
 
-  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project   V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  batch     V2ProductionBatch @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  policy    V2BatchEditPolicy @relation(fields: [workspaceId, policyHash], references: [workspaceId, policyHash], onDelete: Restrict)
-  createdBy V2ApiClient       @relation("BatchEditPreflightCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project           @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch     V2ProductionBatch   @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  policy    V2BatchEditPolicy   @relation(fields: [workspaceId, policyHash], references: [workspaceId, policyHash], onDelete: Restrict)
+  createdBy V2ApiClient         @relation("BatchEditPreflightCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   command   V2BatchEditCommand?
 
   @@unique([id, workspaceId, batchId, preflightHash])
@@ -2589,40 +2684,40 @@ model V2BatchEditPreflightRun {
 }
 
 model V2BatchEditCommand {
-  id                      String   @id @db.VarChar(128)
-  workspaceId             String   @db.VarChar(128)
-  projectId               String   @db.VarChar(128)
-  batchId                 String   @db.VarChar(128)
-  preflightId             String   @unique @db.VarChar(128)
-  preflightHash           String   @db.Char(64)
-  schemaVersion           String   @db.VarChar(64)
-  status                  String   @db.VarChar(32)
-  mode                    String   @db.VarChar(32)
-  operationType           String   @db.VarChar(32)
-  operationValueRef       String   @db.VarChar(128)
-  resultJson              String   @db.Text
-  batchRevision           Int
-  batchDefinitionHash     String   @db.Char(64)
-  policyHash              String   @db.Char(64)
-  scopeHash               String   @db.Char(64)
-  affectedItemCount       Int
-  appliedItemCount        Int
-  skippedItemCount        Int
-  unchangedItemCount      Int
-  invalidationCount       Int
-  costMinorUnits          Int
-  commandHash             String   @db.Char(64)
-  requestFingerprint      String   @db.Char(64)
-  idempotencyKey          String   @db.VarChar(128)
-  createdByClientId       String   @db.VarChar(80)
-  createdAt               DateTime @db.Timestamptz(3)
+  id                  String   @id @db.VarChar(128)
+  workspaceId         String   @db.VarChar(128)
+  projectId           String   @db.VarChar(128)
+  batchId             String   @db.VarChar(128)
+  preflightId         String   @unique @db.VarChar(128)
+  preflightHash       String   @db.Char(64)
+  schemaVersion       String   @db.VarChar(64)
+  status              String   @db.VarChar(32)
+  mode                String   @db.VarChar(32)
+  operationType       String   @db.VarChar(32)
+  operationValueRef   String   @db.VarChar(128)
+  resultJson          String   @db.Text
+  batchRevision       Int
+  batchDefinitionHash String   @db.Char(64)
+  policyHash          String   @db.Char(64)
+  scopeHash           String   @db.Char(64)
+  affectedItemCount   Int
+  appliedItemCount    Int
+  skippedItemCount    Int
+  unchangedItemCount  Int
+  invalidationCount   Int
+  costMinorUnits      Int
+  commandHash         String   @db.Char(64)
+  requestFingerprint  String   @db.Char(64)
+  idempotencyKey      String   @db.VarChar(128)
+  createdByClientId   String   @db.VarChar(80)
+  createdAt           DateTime @db.Timestamptz(3)
 
-  workspace     V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project       V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  batch         V2ProductionBatch              @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  preflight     V2BatchEditPreflightRun        @relation(fields: [preflightId, workspaceId, batchId, preflightHash], references: [id, workspaceId, batchId, preflightHash], onDelete: Restrict)
-  createdBy     V2ApiClient                    @relation("BatchEditCommandCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  stateVersions V2BatchEditItemStateVersion[]  @relation("BatchEditCommandStates")
+  workspace     V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project       V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch         V2ProductionBatch             @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  preflight     V2BatchEditPreflightRun       @relation(fields: [preflightId, workspaceId, batchId, preflightHash], references: [id, workspaceId, batchId, preflightHash], onDelete: Restrict)
+  createdBy     V2ApiClient                   @relation("BatchEditCommandCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  stateVersions V2BatchEditItemStateVersion[] @relation("BatchEditCommandStates")
   items         V2BatchEditCommandItem[]
 
   @@unique([id, workspaceId, batchId])
@@ -2635,26 +2730,26 @@ model V2BatchEditCommand {
 }
 
 model V2BatchEditCommandItem {
-  workspaceId       String   @db.VarChar(128)
-  batchId           String   @db.VarChar(128)
-  commandId         String   @db.VarChar(128)
-  itemId            String   @db.VarChar(128)
-  status            String   @db.VarChar(32)
-  targetRef         String   @db.VarChar(260)
+  workspaceId         String  @db.VarChar(128)
+  batchId             String  @db.VarChar(128)
+  commandId           String  @db.VarChar(128)
+  itemId              String  @db.VarChar(128)
+  status              String  @db.VarChar(32)
+  targetRef           String  @db.VarChar(260)
   beforeStateRevision Int
-  beforeStateHash   String   @db.Char(64)
-  afterStateRevision Int?
-  afterStateHash    String?  @db.Char(64)
-  costMinorUnits    Int
-  resultJson        String   @db.Text
-  resultHash        String   @db.Char(64)
+  beforeStateHash     String  @db.Char(64)
+  afterStateRevision  Int?
+  afterStateHash      String? @db.Char(64)
+  costMinorUnits      Int
+  resultJson          String  @db.Text
+  resultHash          String  @db.Char(64)
 
-  workspace   V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  batch       V2ProductionBatch            @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  command     V2BatchEditCommand           @relation(fields: [commandId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
-  item        V2ProductionBatchItem        @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
-  beforeState V2BatchEditItemStateVersion  @relation("BatchEditBeforeState", fields: [itemId, beforeStateHash], references: [itemId, stateHash], onDelete: Restrict)
-  afterState  V2BatchEditItemStateVersion? @relation("BatchEditAfterState", fields: [itemId, afterStateHash], references: [itemId, stateHash], onDelete: Restrict)
+  workspace     V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch         V2ProductionBatch            @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  command       V2BatchEditCommand           @relation(fields: [commandId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+  item          V2ProductionBatchItem        @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+  beforeState   V2BatchEditItemStateVersion  @relation("BatchEditBeforeState", fields: [itemId, beforeStateHash], references: [itemId, stateHash], onDelete: Restrict)
+  afterState    V2BatchEditItemStateVersion? @relation("BatchEditAfterState", fields: [itemId, afterStateHash], references: [itemId, stateHash], onDelete: Restrict)
   invalidations V2BatchEditInvalidation[]
 
   @@id([commandId, itemId])
@@ -2666,20 +2761,20 @@ model V2BatchEditCommandItem {
 }
 
 model V2BatchEditInvalidation {
-  workspaceId     String   @db.VarChar(128)
-  batchId         String   @db.VarChar(128)
-  commandId       String   @db.VarChar(128)
-  itemId          String   @db.VarChar(128)
-  step            String   @db.VarChar(32)
-  sequence        Int
-  targetRef       String   @db.VarChar(260)
-  invalidationHash String  @db.Char(64)
-  createdAt       DateTime @db.Timestamptz(3)
+  workspaceId      String   @db.VarChar(128)
+  batchId          String   @db.VarChar(128)
+  commandId        String   @db.VarChar(128)
+  itemId           String   @db.VarChar(128)
+  step             String   @db.VarChar(32)
+  sequence         Int
+  targetRef        String   @db.VarChar(260)
+  invalidationHash String   @db.Char(64)
+  createdAt        DateTime @db.Timestamptz(3)
 
-  workspace   V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  batch       V2ProductionBatch       @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  item        V2ProductionBatchItem   @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
-  commandItem V2BatchEditCommandItem  @relation(fields: [commandId, itemId], references: [commandId, itemId], onDelete: Cascade)
+  workspace   V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch       V2ProductionBatch      @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  item        V2ProductionBatchItem  @relation(fields: [itemId, workspaceId, batchId], references: [id, workspaceId, batchId], onDelete: Cascade)
+  commandItem V2BatchEditCommandItem @relation(fields: [commandId, itemId], references: [commandId, itemId], onDelete: Cascade)
 
   @@id([commandId, itemId, step])
   @@unique([commandId, itemId, sequence])
@@ -2706,15 +2801,15 @@ model V2ProductionBatchItem {
   updatedAt     DateTime @db.Timestamptz(3)
   itemHash      String   @db.Char(64)
 
-  workspace V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  batch     V2ProductionBatch               @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  steps     V2ProductionBatchStep[]
-  artifacts V2ProductionBatchItemArtifact[]
-  actions   V2ProductionBatchAction[]
-  batchEditStates       V2BatchEditItemStateVersion[]
-  batchEditCommandItems V2BatchEditCommandItem[]
+  workspace              V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch                  V2ProductionBatch               @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  steps                  V2ProductionBatchStep[]
+  artifacts              V2ProductionBatchItemArtifact[]
+  actions                V2ProductionBatchAction[]
+  batchEditStates        V2BatchEditItemStateVersion[]
+  batchEditCommandItems  V2BatchEditCommandItem[]
   batchEditInvalidations V2BatchEditInvalidation[]
-  partialRetryJobs      V2ProductionBatchRetryJob[]
+  partialRetryJobs       V2ProductionBatchRetryJob[]
 
   @@unique([id, workspaceId, batchId])
   @@unique([batchId, sequence])
@@ -2785,10 +2880,10 @@ model V2ProductionBatchAction {
   actorClientId         String   @db.VarChar(80)
   createdAt             DateTime @db.Timestamptz(3)
 
-  workspace V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  batch     V2ProductionBatch      @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  item      V2ProductionBatchItem? @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  actor     V2ApiClient            @relation("ProductionBatchActionActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch     V2ProductionBatch           @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  item      V2ProductionBatchItem?      @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  actor     V2ApiClient                 @relation("ProductionBatchActionActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   retryJobs V2ProductionBatchRetryJob[]
 
   @@unique([workspaceId, actorClientId, idempotencyKey])
@@ -3198,13 +3293,13 @@ model V2SourceDeconstructionReport {
   createdByClientId        String   @db.VarChar(80)
   createdAt                DateTime @db.Timestamptz(3)
 
-  workspace        V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project          V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  sourceArtifact   V2MediaArtifact    @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  sourceTranscript V2MediaTranscript  @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  createdBy        V2ApiClient        @relation("SourceDeconstructionCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  segments         V2SourceDeconstructionSegment[]
-  cleanRanges      V2SourceDeconstructionRange[]
+  workspace            V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project              V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact       V2MediaArtifact                 @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceTranscript     V2MediaTranscript               @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy            V2ApiClient                     @relation("SourceDeconstructionCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  segments             V2SourceDeconstructionSegment[]
+  cleanRanges          V2SourceDeconstructionRange[]
   contaminationReports V2ContaminationReport[]
 
   @@unique([id, workspaceId, projectId])
@@ -3217,33 +3312,33 @@ model V2SourceDeconstructionReport {
 }
 
 model V2SourceDeconstructionSegment {
-  id                    String   @id @db.VarChar(128)
-  workspaceId           String   @db.VarChar(128)
-  projectId             String   @db.VarChar(128)
-  reportId              String   @db.VarChar(128)
-  sourceArtifactId      String   @db.VarChar(128)
-  sourceSpeechSegmentId String   @db.VarChar(128)
+  id                    String  @id @db.VarChar(128)
+  workspaceId           String  @db.VarChar(128)
+  projectId             String  @db.VarChar(128)
+  reportId              String  @db.VarChar(128)
+  sourceArtifactId      String  @db.VarChar(128)
+  sourceSpeechSegmentId String  @db.VarChar(128)
   sourceSegmentId       Int
   startMs               Int
   endMs                 Int
-  semanticRole          String   @db.VarChar(16)
+  semanticRole          String  @db.VarChar(16)
   roleConfidence        Float
-  roleReasonCodesJson   String   @db.Text
+  roleReasonCodesJson   String  @db.Text
   essential             Boolean
   included              Boolean
   includedForContext    Boolean
   completeThoughtScore  Float
-  classification        String   @db.VarChar(24)
-  exactText             String   @db.Text
-  normalizedText        String   @db.Text
-  sourceSegmentHash     String   @db.Char(64)
-  analysisHash          String   @db.Char(64)
+  classification        String  @db.VarChar(24)
+  exactText             String  @db.Text
+  normalizedText        String  @db.Text
+  sourceSegmentHash     String  @db.Char(64)
+  analysisHash          String  @db.Char(64)
 
-  workspace           V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project             V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  report              V2SourceDeconstructionReport  @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
-  sourceArtifact      V2MediaArtifact               @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  sourceSpeechSegment V2SpeechSegment               @relation(fields: [sourceSpeechSegmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace           V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project             V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  report              V2SourceDeconstructionReport @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+  sourceArtifact      V2MediaArtifact              @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceSpeechSegment V2SpeechSegment              @relation(fields: [sourceSpeechSegmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@unique([reportId, sourceSpeechSegmentId])
   @@unique([reportId, sourceSegmentId])
@@ -3254,22 +3349,22 @@ model V2SourceDeconstructionSegment {
 }
 
 model V2SourceDeconstructionRange {
-  id                         String   @id @db.VarChar(128)
-  workspaceId                String   @db.VarChar(128)
-  projectId                  String   @db.VarChar(128)
-  reportId                   String   @db.VarChar(128)
+  id                         String  @id @db.VarChar(128)
+  workspaceId                String  @db.VarChar(128)
+  projectId                  String  @db.VarChar(128)
+  reportId                   String  @db.VarChar(128)
   sequence                   Int
   startMs                    Int
   endMs                      Int
   speechStartMs              Int
   speechEndMs                Int
-  sourceSpeechSegmentIdsJson String   @db.Text
-  rolesJson                  String   @db.Text
-  exactText                  String   @db.Text
+  sourceSpeechSegmentIdsJson String  @db.Text
+  rolesJson                  String  @db.Text
+  exactText                  String  @db.Text
   confidence                 Float
   contextPreserved           Boolean
-  boundaryReasonCodesJson    String   @db.Text
-  rangeHash                  String   @db.Char(64)
+  boundaryReasonCodesJson    String  @db.Text
+  rangeHash                  String  @db.Char(64)
 
   workspace V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project   V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
@@ -3283,51 +3378,51 @@ model V2SourceDeconstructionRange {
 }
 
 model V2ContaminationReport {
-  id                                String   @id @db.VarChar(128)
-  workspaceId                       String   @db.VarChar(128)
-  projectId                         String   @db.VarChar(128)
-  sourceDeconstructionReportId      String   @db.VarChar(128)
-  sourceDeconstructionReportHash    String   @db.Char(64)
-  sourceArtifactId                  String   @db.VarChar(128)
-  sourceArtifactSha256              String   @db.Char(64)
-  sourceDurationMs                  Int
-  schemaVersion                     String   @db.VarChar(64)
-  policyVersion                     String   @db.VarChar(64)
-  analyzerProvider                  String   @db.VarChar(128)
-  analyzerModel                     String   @db.VarChar(128)
-  analyzerVersion                   String   @db.VarChar(128)
-  observationBatchHash              String   @db.Char(64)
-  analyzerJson                      String   @db.Text
-  analyzerHash                      String   @db.Char(64)
-  policyJson                        String   @db.Text
-  policyHash                        String   @db.Char(64)
-  reportJson                        String   @db.Text
-  reportHash                        String   @db.Char(64)
-  decision                          String   @db.VarChar(40)
-  humanReviewRequired               Boolean
-  confidence                        Float
-  findingCount                      Int
-  observationCount                  Int
-  protectedRegionCount              Int
-  overlapCount                      Int
-  safeCount                         Int
-  reviewCount                       Int
-  destructiveCount                  Int
-  requestFingerprint                String   @db.Char(64)
-  idempotencyKey                    String   @db.VarChar(128)
-  createdByClientId                 String   @db.VarChar(80)
-  createdAt                         DateTime @db.Timestamptz(3)
+  id                             String   @id @db.VarChar(128)
+  workspaceId                    String   @db.VarChar(128)
+  projectId                      String   @db.VarChar(128)
+  sourceDeconstructionReportId   String   @db.VarChar(128)
+  sourceDeconstructionReportHash String   @db.Char(64)
+  sourceArtifactId               String   @db.VarChar(128)
+  sourceArtifactSha256           String   @db.Char(64)
+  sourceDurationMs               Int
+  schemaVersion                  String   @db.VarChar(64)
+  policyVersion                  String   @db.VarChar(64)
+  analyzerProvider               String   @db.VarChar(128)
+  analyzerModel                  String   @db.VarChar(128)
+  analyzerVersion                String   @db.VarChar(128)
+  observationBatchHash           String   @db.Char(64)
+  analyzerJson                   String   @db.Text
+  analyzerHash                   String   @db.Char(64)
+  policyJson                     String   @db.Text
+  policyHash                     String   @db.Char(64)
+  reportJson                     String   @db.Text
+  reportHash                     String   @db.Char(64)
+  decision                       String   @db.VarChar(40)
+  humanReviewRequired            Boolean
+  confidence                     Float
+  findingCount                   Int
+  observationCount               Int
+  protectedRegionCount           Int
+  overlapCount                   Int
+  safeCount                      Int
+  reviewCount                    Int
+  destructiveCount               Int
+  requestFingerprint             String   @db.Char(64)
+  idempotencyKey                 String   @db.VarChar(128)
+  createdByClientId              String   @db.VarChar(80)
+  createdAt                      DateTime @db.Timestamptz(3)
 
-  workspace              V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project                V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_reports_project_workspace_fkey")
-  sourceDeconstruction   V2SourceDeconstructionReport   @relation(fields: [sourceDeconstructionReportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "contamination_reports_source_deconstruction_fkey")
-  sourceArtifact         V2MediaArtifact                @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "contamination_reports_source_artifact_fkey")
-  createdBy              V2ApiClient                    @relation("ContaminationReportCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "contamination_reports_creator_fkey")
-  observations           V2ContaminationObservation[]
-  protectedRegions       V2ContaminationProtectedRegion[]
-  findings               V2ContaminationFinding[]
-  overlaps               V2ContaminationOverlap[]
-  cleanupPlans           V2SourceCleanupPlan[]
+  workspace            V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project              V2Project                        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_reports_project_workspace_fkey")
+  sourceDeconstruction V2SourceDeconstructionReport     @relation(fields: [sourceDeconstructionReportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "contamination_reports_source_deconstruction_fkey")
+  sourceArtifact       V2MediaArtifact                  @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "contamination_reports_source_artifact_fkey")
+  createdBy            V2ApiClient                      @relation("ContaminationReportCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "contamination_reports_creator_fkey")
+  observations         V2ContaminationObservation[]
+  protectedRegions     V2ContaminationProtectedRegion[]
+  findings             V2ContaminationFinding[]
+  overlaps             V2ContaminationOverlap[]
+  cleanupPlans         V2SourceCleanupPlan[]
 
   @@unique([id, workspaceId, projectId])
   @@unique([workspaceId, projectId, createdByClientId, idempotencyKey], map: "contamination_reports_workspace_project_actor_idem_key")
@@ -3339,11 +3434,11 @@ model V2ContaminationReport {
 }
 
 model V2ContaminationObservation {
-  id               String   @id @db.VarChar(128)
-  workspaceId      String   @db.VarChar(128)
-  projectId        String   @db.VarChar(128)
-  reportId         String   @db.VarChar(128)
-  kind             String   @db.VarChar(32)
+  id               String @id @db.VarChar(128)
+  workspaceId      String @db.VarChar(128)
+  projectId        String @db.VarChar(128)
+  reportId         String @db.VarChar(128)
+  kind             String @db.VarChar(32)
   startMs          Int
   endMs            Int
   regionX          Float?
@@ -3351,17 +3446,17 @@ model V2ContaminationObservation {
   regionWidth      Float?
   regionHeight     Float?
   confidence       Float
-  detectorProvider String   @db.VarChar(128)
-  detectorModel    String   @db.VarChar(128)
-  detectorVersion  String   @db.VarChar(128)
-  detectorHash     String   @db.Char(64)
-  signalsJson      String   @db.Text
-  signalsHash      String   @db.Char(64)
-  observationHash  String   @db.Char(64)
+  detectorProvider String @db.VarChar(128)
+  detectorModel    String @db.VarChar(128)
+  detectorVersion  String @db.VarChar(128)
+  detectorHash     String @db.Char(64)
+  signalsJson      String @db.Text
+  signalsHash      String @db.Char(64)
+  observationHash  String @db.Char(64)
 
-  workspace V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_observations_workspace_fkey")
-  project   V2Project              @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_observations_project_fkey")
-  report    V2ContaminationReport  @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "contamination_observations_report_fkey")
+  workspace V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_observations_workspace_fkey")
+  project   V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_observations_project_fkey")
+  report    V2ContaminationReport   @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "contamination_observations_report_fkey")
   finding   V2ContaminationFinding?
 
   @@unique([id, reportId])
@@ -3371,20 +3466,20 @@ model V2ContaminationObservation {
 }
 
 model V2ContaminationProtectedRegion {
-  id          String   @id @db.VarChar(128)
-  workspaceId String   @db.VarChar(128)
-  projectId   String   @db.VarChar(128)
-  reportId    String   @db.VarChar(128)
-  kind        String   @db.VarChar(32)
-  startMs     Int
-  endMs       Int
-  regionX     Float
-  regionY     Float
-  regionWidth Float
+  id           String @id @db.VarChar(128)
+  workspaceId  String @db.VarChar(128)
+  projectId    String @db.VarChar(128)
+  reportId     String @db.VarChar(128)
+  kind         String @db.VarChar(32)
+  startMs      Int
+  endMs        Int
+  regionX      Float
+  regionY      Float
+  regionWidth  Float
   regionHeight Float
-  confidence  Float
-  source      String   @db.VarChar(128)
-  regionHash  String   @db.Char(64)
+  confidence   Float
+  source       String @db.VarChar(128)
+  regionHash   String @db.Char(64)
 
   workspace V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_protected_regions_workspace_fkey")
   project   V2Project             @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_protected_regions_project_fkey")
@@ -3397,12 +3492,12 @@ model V2ContaminationProtectedRegion {
 }
 
 model V2ContaminationFinding {
-  id                               String   @id @db.VarChar(128)
-  workspaceId                      String   @db.VarChar(128)
-  projectId                        String   @db.VarChar(128)
-  reportId                         String   @db.VarChar(128)
-  observationId                    String   @db.VarChar(128)
-  kind                             String   @db.VarChar(32)
+  id                               String  @id @db.VarChar(128)
+  workspaceId                      String  @db.VarChar(128)
+  projectId                        String  @db.VarChar(128)
+  reportId                         String  @db.VarChar(128)
+  observationId                    String  @db.VarChar(128)
+  kind                             String  @db.VarChar(32)
   startMs                          Int
   endMs                            Int
   regionX                          Float?
@@ -3412,21 +3507,21 @@ model V2ContaminationFinding {
   confidence                       Float
   overlapsEssentialTime            Boolean
   essentialOverlapRatio            Float
-  protectedRegionIdsJson           String   @db.Text
+  protectedRegionIdsJson           String  @db.Text
   protectedRegionIntersectionRatio Float
-  removalImpact                    String   @db.VarChar(32)
+  removalImpact                    String  @db.VarChar(32)
   removalWouldDestroyEssential     Boolean
   requiresHumanReview              Boolean
-  reasonCodesJson                  String   @db.Text
-  observationHash                  String   @db.Char(64)
-  findingHash                      String   @db.Char(64)
+  reasonCodesJson                  String  @db.Text
+  observationHash                  String  @db.Char(64)
+  findingHash                      String  @db.Char(64)
 
-  workspace     V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_findings_workspace_fkey")
-  project       V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_findings_project_fkey")
-  report        V2ContaminationReport     @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "contamination_findings_report_fkey")
+  workspace     V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_findings_workspace_fkey")
+  project       V2Project                  @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_findings_project_fkey")
+  report        V2ContaminationReport      @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "contamination_findings_report_fkey")
   observation   V2ContaminationObservation @relation(fields: [observationId, reportId], references: [id, reportId], onDelete: Cascade, map: "contamination_findings_observation_fkey")
-  leftOverlaps  V2ContaminationOverlap[]  @relation("ContaminationOverlapLeft")
-  rightOverlaps V2ContaminationOverlap[]  @relation("ContaminationOverlapRight")
+  leftOverlaps  V2ContaminationOverlap[]   @relation("ContaminationOverlapLeft")
+  rightOverlaps V2ContaminationOverlap[]   @relation("ContaminationOverlapRight")
   cleanupPlans  V2SourceCleanupPlan[]
 
   @@unique([id, reportId])
@@ -3438,12 +3533,12 @@ model V2ContaminationFinding {
 }
 
 model V2ContaminationOverlap {
-  id                   String   @id @db.VarChar(128)
-  workspaceId          String   @db.VarChar(128)
-  projectId            String   @db.VarChar(128)
-  reportId             String   @db.VarChar(128)
-  leftFindingId        String   @db.VarChar(128)
-  rightFindingId       String   @db.VarChar(128)
+  id                   String  @id @db.VarChar(128)
+  workspaceId          String  @db.VarChar(128)
+  projectId            String  @db.VarChar(128)
+  reportId             String  @db.VarChar(128)
+  leftFindingId        String  @db.VarChar(128)
+  rightFindingId       String  @db.VarChar(128)
   startMs              Int
   endMs                Int
   spatiallyOverlapping Boolean
@@ -3452,11 +3547,11 @@ model V2ContaminationOverlap {
   intersectionWidth    Float?
   intersectionHeight   Float?
   confidence           Float
-  overlapHash          String   @db.Char(64)
+  overlapHash          String  @db.Char(64)
 
-  workspace    V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_overlaps_workspace_fkey")
-  project      V2Project             @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_overlaps_project_fkey")
-  report       V2ContaminationReport @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "contamination_overlaps_report_fkey")
+  workspace    V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "contamination_overlaps_workspace_fkey")
+  project      V2Project              @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "contamination_overlaps_project_fkey")
+  report       V2ContaminationReport  @relation(fields: [reportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "contamination_overlaps_report_fkey")
   leftFinding  V2ContaminationFinding @relation("ContaminationOverlapLeft", fields: [leftFindingId, reportId], references: [id, reportId], onDelete: Cascade, map: "contamination_overlaps_left_finding_fkey")
   rightFinding V2ContaminationFinding @relation("ContaminationOverlapRight", fields: [rightFindingId, reportId], references: [id, reportId], onDelete: Cascade, map: "contamination_overlaps_right_finding_fkey")
 
@@ -3468,56 +3563,56 @@ model V2ContaminationOverlap {
 }
 
 model V2SourceCleanupPlan {
-  id                          String    @id @db.VarChar(128)
-  workspaceId                 String    @db.VarChar(128)
-  projectId                   String    @db.VarChar(128)
-  contaminationReportId       String    @db.VarChar(128)
-  contaminationReportHash     String    @db.Char(64)
-  findingId                   String    @db.VarChar(128)
-  findingHash                 String    @db.Char(64)
-  sourceArtifactId            String    @db.VarChar(128)
-  sourceArtifactSha256        String    @db.Char(64)
-  sourceManifestId            String    @db.VarChar(128)
-  sourceDurationMs            Int
-  schemaVersion               String    @db.VarChar(64)
-  policyVersion               String    @db.VarChar(64)
-  policyJson                  String    @db.Text
-  policyHash                  String    @db.Char(64)
-  candidatesJson              String    @db.Text
-  candidatesHash              String    @db.Char(64)
-  selectedStrategy            String    @db.VarChar(32)
-  selectedActionJson          String    @db.Text
-  selectedActionHash          String    @db.Char(64)
-  decision                    String    @db.VarChar(16)
-  predictedResidualQuality    Float
-  predictedIntegrity          Float
-  predictedCost               Float
-  sourceImmutable             Boolean   @default(true)
-  rightsSnapshotId            String?   @db.VarChar(128)
-  rightsSnapshotHash          String?   @db.Char(64)
-  rightsDecision              String    @db.VarChar(16)
-  rightsReasonCodesJson       String    @db.Text
-  postCleanupReviewRequired   Boolean
-  operationId                 String?   @unique @db.VarChar(128)
-  outputArtifactId            String?   @db.VarChar(128)
-  outputManifestId            String?   @db.VarChar(128)
-  planJson                    String    @db.Text
-  planHash                    String    @db.Char(64)
-  requestFingerprint          String    @db.Char(64)
-  idempotencyKey              String    @db.VarChar(128)
-  createdByClientId           String    @db.VarChar(80)
-  createdAt                   DateTime  @db.Timestamptz(3)
+  id                        String   @id @db.VarChar(128)
+  workspaceId               String   @db.VarChar(128)
+  projectId                 String   @db.VarChar(128)
+  contaminationReportId     String   @db.VarChar(128)
+  contaminationReportHash   String   @db.Char(64)
+  findingId                 String   @db.VarChar(128)
+  findingHash               String   @db.Char(64)
+  sourceArtifactId          String   @db.VarChar(128)
+  sourceArtifactSha256      String   @db.Char(64)
+  sourceManifestId          String   @db.VarChar(128)
+  sourceDurationMs          Int
+  schemaVersion             String   @db.VarChar(64)
+  policyVersion             String   @db.VarChar(64)
+  policyJson                String   @db.Text
+  policyHash                String   @db.Char(64)
+  candidatesJson            String   @db.Text
+  candidatesHash            String   @db.Char(64)
+  selectedStrategy          String   @db.VarChar(32)
+  selectedActionJson        String   @db.Text
+  selectedActionHash        String   @db.Char(64)
+  decision                  String   @db.VarChar(16)
+  predictedResidualQuality  Float
+  predictedIntegrity        Float
+  predictedCost             Float
+  sourceImmutable           Boolean  @default(true)
+  rightsSnapshotId          String?  @db.VarChar(128)
+  rightsSnapshotHash        String?  @db.Char(64)
+  rightsDecision            String   @db.VarChar(16)
+  rightsReasonCodesJson     String   @db.Text
+  postCleanupReviewRequired Boolean
+  operationId               String?  @unique @db.VarChar(128)
+  outputArtifactId          String?  @db.VarChar(128)
+  outputManifestId          String?  @db.VarChar(128)
+  planJson                  String   @db.Text
+  planHash                  String   @db.Char(64)
+  requestFingerprint        String   @db.Char(64)
+  idempotencyKey            String   @db.VarChar(128)
+  createdByClientId         String   @db.VarChar(80)
+  createdAt                 DateTime @db.Timestamptz(3)
 
-  workspace             V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "source_cleanup_plans_workspace_fkey")
-  project               V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "source_cleanup_plans_project_fkey")
-  contaminationReport   V2ContaminationReport    @relation(fields: [contaminationReportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "source_cleanup_plans_report_fkey")
-  finding               V2ContaminationFinding   @relation(fields: [findingId, contaminationReportId], references: [id, reportId], onDelete: Restrict, map: "source_cleanup_plans_finding_fkey")
-  sourceArtifact        V2MediaArtifact           @relation("SourceCleanupSourceArtifact", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_source_artifact_fkey")
-  sourceManifest        V2MediaArtifactManifest   @relation("SourceCleanupSourceManifest", fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_source_manifest_fkey")
-  createdBy             V2ApiClient               @relation("SourceCleanupCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_creator_fkey")
-  rightsSnapshot        V2AssetRightsSnapshot?     @relation("SourceCleanupSourceRights", fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_rights_snapshot_fkey")
-  operation             V2PublicOperation?        @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_operation_fkey")
-  result                V2SourceCleanupResult?
+  workspace           V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "source_cleanup_plans_workspace_fkey")
+  project             V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "source_cleanup_plans_project_fkey")
+  contaminationReport V2ContaminationReport   @relation(fields: [contaminationReportId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "source_cleanup_plans_report_fkey")
+  finding             V2ContaminationFinding  @relation(fields: [findingId, contaminationReportId], references: [id, reportId], onDelete: Restrict, map: "source_cleanup_plans_finding_fkey")
+  sourceArtifact      V2MediaArtifact         @relation("SourceCleanupSourceArtifact", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_source_artifact_fkey")
+  sourceManifest      V2MediaArtifactManifest @relation("SourceCleanupSourceManifest", fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_source_manifest_fkey")
+  createdBy           V2ApiClient             @relation("SourceCleanupCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_creator_fkey")
+  rightsSnapshot      V2AssetRightsSnapshot?  @relation("SourceCleanupSourceRights", fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_rights_snapshot_fkey")
+  operation           V2PublicOperation?      @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_plans_operation_fkey")
+  result              V2SourceCleanupResult?
 
   @@unique([id, workspaceId, projectId])
   @@unique([operationId, workspaceId], map: "source_cleanup_plans_operation_workspace_key")
@@ -3549,13 +3644,13 @@ model V2SourceCleanupResult {
   reviewHash               String   @db.Char(64)
   completedAt              DateTime @db.Timestamptz(3)
 
-  workspace      V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "source_cleanup_results_workspace_fkey")
-  project        V2Project            @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "source_cleanup_results_project_fkey")
-  cleanupPlan    V2SourceCleanupPlan  @relation(fields: [cleanupPlanId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "source_cleanup_results_plan_fkey")
-  outputArtifact V2MediaArtifact      @relation("SourceCleanupOutputArtifact", fields: [outputArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_output_artifact_fkey")
-  outputManifest V2MediaArtifactManifest @relation(fields: [outputManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_output_manifest_fkey")
-  sourceRightsSnapshot V2AssetRightsSnapshot @relation("SourceCleanupReviewSourceRights", fields: [sourceRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_source_rights_fkey")
-  outputRightsSnapshot V2AssetRightsSnapshot @relation("SourceCleanupReviewOutputRights", fields: [outputRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_output_rights_fkey")
+  workspace            V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "source_cleanup_results_workspace_fkey")
+  project              V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "source_cleanup_results_project_fkey")
+  cleanupPlan          V2SourceCleanupPlan     @relation(fields: [cleanupPlanId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade, map: "source_cleanup_results_plan_fkey")
+  outputArtifact       V2MediaArtifact         @relation("SourceCleanupOutputArtifact", fields: [outputArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_output_artifact_fkey")
+  outputManifest       V2MediaArtifactManifest @relation(fields: [outputManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_output_manifest_fkey")
+  sourceRightsSnapshot V2AssetRightsSnapshot   @relation("SourceCleanupReviewSourceRights", fields: [sourceRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_source_rights_fkey")
+  outputRightsSnapshot V2AssetRightsSnapshot   @relation("SourceCleanupReviewOutputRights", fields: [outputRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "source_cleanup_results_output_rights_fkey")
 
   @@unique([workspaceId, outputArtifactId], map: "source_cleanup_results_workspace_outputArtifactId_key")
   @@unique([workspaceId, outputManifestId], map: "source_cleanup_results_workspace_outputManifestId_key")

@@ -2151,6 +2151,154 @@ const sourceCleanupRecordExample = {
   plan: sourceCleanupPlanExample,
   operation: queuedSourceCleanupOperationExample,
 }
+const validationEnvelopeCreateRequestExample = {
+  batchId: 'production-batch-validation-example-1',
+  validatedSegmentId: validatedSegmentExample.id,
+  expectedValidatedSegmentHash:
+    validatedSegmentExample.validatedSegmentHash,
+  targetRecipeId: 'variant-recipe-validation-example-1',
+  expectedTargetRecipeHash: '2'.repeat(64),
+  policyVersion: 'validation-envelope-policy/v1',
+  requestedChanges: [{
+    aspect: 'framing',
+    required: false,
+    rationale: 'Adaptar o enquadramento ao formato vertical.',
+  }],
+}
+const validationEnvelopeCompositionExample = {
+  schemaVersion: 'validation-envelope-composition/v1',
+  clips: [
+    {
+      id: 'validation-clip-hook-example-1',
+      role: 'hook',
+      source: 'validated-segment-envelope',
+      sourceArtifactId: validatedSegmentExample.sourceArtifactId,
+      sourceHash: validatedSegmentExample.sourceArtifactSha256,
+      sourceRangeMs:
+        validatedSegmentExample.protectedEnvelope.sourceRangeMs,
+      sourceSegmentId:
+        validatedSegmentExample.sourceSpeechSegmentId,
+      durationMs: 7_000,
+    },
+    {
+      id: 'validation-clip-body-example-1',
+      role: 'body',
+      source: 'target-variant-recipe',
+      sourceArtifactId: 'artifact-body-validation-example-1',
+      sourceHash: '3'.repeat(64),
+      sourceRangeMs: [10_000, 25_000],
+      sourceSegmentId: 'recipe-segment-body-validation-example-1',
+      takeId: 'take-body-validation-example-1',
+      durationMs: 15_000,
+    },
+    {
+      id: 'validation-clip-cta-example-1',
+      role: 'cta',
+      source: 'target-variant-recipe',
+      sourceArtifactId: 'artifact-cta-validation-example-1',
+      sourceHash: '4'.repeat(64),
+      sourceRangeMs: [30_000, 35_000],
+      sourceSegmentId: 'recipe-segment-cta-validation-example-1',
+      takeId: 'take-cta-validation-example-1',
+      durationMs: 5_000,
+    },
+  ],
+  orderedRoles: ['hook', 'body', 'cta'],
+  includedSourceSegmentIds: [
+    validatedSegmentExample.sourceSpeechSegmentId,
+    'recipe-segment-body-validation-example-1',
+    'recipe-segment-cta-validation-example-1',
+  ],
+  excludedTargetRecipeSegmentIds: [
+    'recipe-segment-hook-validation-example-1',
+  ],
+  targetRecipeHookExcluded: true,
+  validatedSourceOutsideEnvelopeIncluded: false,
+  excessMaterialIncluded: false,
+  durationMs: 27_000,
+  compositionHash: '5'.repeat(64),
+}
+const validationEnvelopePlanExample = {
+  schemaVersion: 'validation-envelope-reuse/v1',
+  policyVersion: 'validation-envelope-policy/v1',
+  id: 'validation-envelope-reuse-example-1',
+  workspaceId,
+  projectId,
+  batchId: validationEnvelopeCreateRequestExample.batchId,
+  validatedSegmentId: validatedSegmentExample.id,
+  validatedSegmentHash:
+    validatedSegmentExample.validatedSegmentHash,
+  sourceArtifactId: validatedSegmentExample.sourceArtifactId,
+  sourceArtifactSha256:
+    validatedSegmentExample.sourceArtifactSha256,
+  sourceRangeMs:
+    validatedSegmentExample.protectedEnvelope.sourceRangeMs,
+  targetRecipeId:
+    validationEnvelopeCreateRequestExample.targetRecipeId,
+  targetRecipeHash:
+    validationEnvelopeCreateRequestExample.expectedTargetRecipeHash,
+  objective: 'lead-generation',
+  aspectRules: [
+    {
+      aspect: 'copy',
+      state: 'protected',
+      source: 'opening-edit-evidence',
+    },
+    {
+      aspect: 'take',
+      state: 'protected',
+      source: 'opening-edit-evidence',
+    },
+    {
+      aspect: 'framing',
+      state: 'protected',
+      source: 'opening-edit-evidence',
+    },
+    {
+      aspect: 'timing',
+      state: 'protected',
+      source: 'opening-edit-evidence',
+    },
+    {
+      aspect: 'opening',
+      state: 'protected',
+      source: 'opening-edit-evidence',
+    },
+  ],
+  protectedAspects: ['copy', 'take', 'framing', 'timing', 'opening'],
+  mutableAspects: [],
+  requestedChanges:
+    validationEnvelopeCreateRequestExample.requestedChanges,
+  autoProtectedChanges: ['framing'],
+  approvalRequiredChanges: [],
+  approvalRequired: false,
+  initialValidation: 'preserved',
+  composition: validationEnvelopeCompositionExample,
+  createdByClientId: clientId,
+  createdAt,
+  planHash: '6'.repeat(64),
+}
+const validationEnvelopeInitialDecisionExample = {
+  schemaVersion: 'validation-envelope-decision/v1',
+  id: 'validation-envelope-decision-example-1',
+  reusePlanId: validationEnvelopePlanExample.id,
+  sequence: 1,
+  kind: 'created',
+  outcome: 'ready',
+  validation: 'preserved',
+  appliedChanges: [],
+  blockedChanges: ['framing'],
+  lostAspects: [],
+  note: 'Validation envelope preserved automatically.',
+  actorClientId: clientId,
+  createdAt,
+  decisionHash: '7'.repeat(64),
+}
+const validationEnvelopeRecordExample = {
+  plan: validationEnvelopePlanExample,
+  decisions: [validationEnvelopeInitialDecisionExample],
+  currentDecision: validationEnvelopeInitialDecisionExample,
+}
 const productionBatchCreateRequestExample = {
   projectId,
   name: 'Campanha de descoberta — julho',
@@ -5609,6 +5757,40 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           cleanups: [sourceCleanupRecordExample],
           nextCursor: sourceCleanupPlanExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-validation-envelope-reuse-request/v1': [
+      validationEnvelopeCreateRequestExample,
+    ],
+    'apollo://schemas/decide-validation-envelope-reuse-request/v1': [
+      {
+        expectedPlanHash: validationEnvelopePlanExample.planHash,
+        action: 'approve',
+        note: 'Aprovo conscientemente a perda da validação histórica.',
+      },
+    ],
+    'apollo://schemas/validation-envelope-reuse-mutated/v1': [
+      {
+        data: {
+          reuse: validationEnvelopeRecordExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/validation-envelope-reuse-read/v1': [
+      {
+        data: { reuse: validationEnvelopeRecordExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/validation-envelope-reuse-page/v1': [
+      {
+        data: {
+          reuses: [validationEnvelopeRecordExample],
+          nextCursor: validationEnvelopePlanExample.id,
         },
         meta: { apiVersion: 'v1' },
       },

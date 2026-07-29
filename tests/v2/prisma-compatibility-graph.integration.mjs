@@ -76,7 +76,7 @@ function dimensions(score) {
   }))
 }
 
-test('T-FR-083/T-FR-084/T-FR-085 persists compatibility, source-referencing recipes and bounded portfolio preflights through PostgreSQL and /v1', {
+test('T-FR-083/T-FR-084/T-FR-085/T-FR-124 persists compatibility, exact validated-hook reuse and bounded portfolio preflights through PostgreSQL and /v1', {
   skip:
     process.env.APOLLO_COMPATIBILITY_GRAPH_E2E !== '1' &&
     'set APOLLO_COMPATIBILITY_GRAPH_E2E=1 and use an isolated V2 database',
@@ -98,6 +98,17 @@ test('T-FR-083/T-FR-084/T-FR-085 persists compatibility, source-referencing reci
     await import('../../src/v2/domain/canonical-hash.ts')
   const { createMediaTranscript } =
     await import('../../src/v2/domain/media-transcript.ts')
+  const { createMediaArtifactManifestV2 } =
+    await import('../../src/v2/domain/media-artifact.ts')
+  const {
+    assetRightsRevision,
+  } = await import('../../src/v2/domain/asset-rights.ts')
+  const { setAssetRightsService } =
+    await import('../../src/v2/application/set-asset-rights.ts')
+  const { PrismaAssetRightsRepository } =
+    await import(
+      '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
+    )
   const {
     createScriptAlignmentRun,
     importScriptDocument,
@@ -124,6 +135,12 @@ test('T-FR-083/T-FR-084/T-FR-085 persists compatibility, source-referencing reci
   const batchId = `compat-e2e-batch-${suffix}`
   const alignmentId = `compat-e2e-alignment-${suffix}`
   const artifactId = `compat-e2e-artifact-${suffix}`
+  const validatedArtifactId =
+    `compat-e2e-validated-artifact-${suffix}`
+  const validatedManifestId =
+    `compat-e2e-validated-manifest-${suffix}`
+  const validatedTranscriptId =
+    `compat-e2e-validated-transcript-${suffix}`
   const createdAt = new Date('2026-07-28T01:10:00.000Z')
   let server
   let serverLogs = ''
@@ -151,7 +168,11 @@ test('T-FR-083/T-FR-084/T-FR-085 persists compatibility, source-referencing reci
       workspaceId,
       name: 'Compatibility graph E2E',
       environment: 'production',
-      scopes: ['projects:read', 'projects:write'],
+      scopes: [
+        'projects:read',
+        'projects:write',
+        'projects:approve',
+      ],
     })
     await client.v2Project.create({
       data: {
@@ -358,6 +379,128 @@ test('T-FR-083/T-FR-084/T-FR-085 persists compatibility, source-referencing reci
         transcriptJson: stableSerialize(transcript),
         createdAt,
       },
+    })
+    const validatedArtifactSha256 = '9'.repeat(64)
+    const validatedArtifactKey =
+      `fixtures/${validatedArtifactId}.mp4`
+    const validatedManifest = createMediaArtifactManifestV2({
+      artifactKey: validatedArtifactKey,
+      artifactSha256: validatedArtifactSha256,
+      byteSize: 1_000_000,
+      mediaType: 'video',
+      container: 'mp4',
+      recipe: {
+        id: 'validated-hook-fixture',
+        version: '1.0.0',
+        parameters: { source: 'published-reel' },
+      },
+      sources: [],
+      probe: {
+        width: 1080,
+        height: 1920,
+        duration: 12,
+        fps: 30,
+      },
+    })
+    await client.v2MediaArtifact.create({
+      data: {
+        id: validatedArtifactId,
+        workspaceId,
+        artifactKey: validatedArtifactKey,
+        sha256: validatedArtifactSha256,
+        byteSize: 1_000_000n,
+        mediaType: 'video',
+        container: 'mp4',
+        status: 'available',
+        createdAt,
+      },
+    })
+    await client.v2MediaArtifactManifest.create({
+      data: {
+        id: validatedManifestId,
+        workspaceId,
+        artifactId: validatedArtifactId,
+        schemaVersion: validatedManifest.schemaVersion,
+        manifestHash: validatedManifest.manifestHash,
+        recipeId: validatedManifest.recipe.id,
+        recipeVersion: validatedManifest.recipe.version,
+        parametersHash:
+          validatedManifest.recipe.parametersHash,
+        manifestJson: stableSerialize(validatedManifest),
+        createdAt,
+      },
+    })
+    await client.v2ProjectMediaAsset.create({
+      data: {
+        id: randomUUID(),
+        workspaceId,
+        projectId,
+        artifactId: validatedArtifactId,
+        role: 'source-master',
+        originalFileName: 'published-validated-hook.mp4',
+        createdAt,
+      },
+    })
+    const validatedTranscript = createMediaTranscript({
+      language: 'pt-BR',
+      text: 'Pare de desperdiçar verba antes de validar seu criativo.',
+      provider: 'controlled-e2e',
+      model: 'validation-envelope-e2e',
+      words: [
+        { word: 'Pare', start: 1, end: 1.4 },
+        { word: 'de', start: 1.41, end: 1.6 },
+        { word: 'desperdiçar', start: 1.61, end: 2.3 },
+        { word: 'verba', start: 2.31, end: 2.7 },
+        { word: 'antes', start: 2.71, end: 3.1 },
+        { word: 'de', start: 3.11, end: 3.3 },
+        { word: 'validar', start: 3.31, end: 3.8 },
+        { word: 'seu', start: 3.81, end: 4.1 },
+        { word: 'criativo.', start: 4.11, end: 4.8 },
+      ],
+      segments: [{
+        id: 90,
+        start: 1,
+        end: 4.8,
+        text:
+          'Pare de desperdiçar verba antes de validar seu criativo.',
+        confidence: 0.99,
+      }],
+    })
+    await client.v2MediaTranscript.create({
+      data: {
+        id: validatedTranscriptId,
+        workspaceId,
+        projectId,
+        sourceArtifactId: validatedArtifactId,
+        sourceManifestId: validatedManifestId,
+        schemaVersion: validatedTranscript.schemaVersion,
+        language: validatedTranscript.language,
+        provider: validatedTranscript.provider,
+        model: validatedTranscript.model,
+        transcriptHash: validatedTranscript.transcriptHash,
+        transcriptJson: stableSerialize(validatedTranscript),
+        createdAt,
+      },
+    })
+    await setAssetRightsService({
+      repository: new PrismaAssetRightsRepository(client),
+      clock: () => createdAt,
+      createId: () => `compat-e2e-validated-rights-${suffix}`,
+    })({
+      workspaceId,
+      artifactId: validatedArtifactId,
+      baseRevision: assetRightsRevision(validatedArtifactId, 0),
+      draft: {
+        status: 'approved',
+        allowedUses: ['rendering', 'editorial-reuse'],
+        prohibitedUses: [],
+        allowedLocales: ['pt-BR'],
+        consent: {
+          status: 'not-required',
+          allowedUses: [],
+        },
+      },
+      actor: { type: 'api-client', id: issued.client.id },
     })
     const alignment = createScriptAlignmentRun({
       id: alignmentId,
@@ -780,6 +923,310 @@ test('T-FR-083/T-FR-084/T-FR-085 persists compatibility, source-referencing reci
       fullRecipe.scores.averageEdgeScore,
     )
 
+    const speechResponse = await fetch(
+      `${baseUrl}/v1/projects/${projectId}/speech-segments`,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key':
+            `validation-envelope-speech-${suffix}`,
+        },
+        body: JSON.stringify({
+          sourceTranscriptId: validatedTranscriptId,
+          expectedTranscriptHash:
+            validatedTranscript.transcriptHash,
+          extractionPolicyVersion:
+            'speech-segment-extraction/v1',
+          producer: {
+            provider: 'apollo',
+            model: 'validation-envelope-e2e',
+            version: '1.0.0',
+            confidence: 0.99,
+          },
+          annotations: [{
+            sourceSegmentId: 90,
+            speaker: {
+              value: 'person-specialist',
+              confidence: 0.99,
+            },
+            intentions: [{
+              value: 'Hook',
+              confidence: 0.99,
+            }],
+          }],
+        }),
+      },
+    )
+    const speechPayload = await speechResponse.json()
+    assert.equal(
+      speechResponse.status,
+      201,
+      JSON.stringify(speechPayload),
+    )
+    const validatedSpeechSegment =
+      speechPayload.data.run.segments[0]
+    assert.ok(validatedSpeechSegment)
+
+    const validatedResponse = await fetch(
+      `${baseUrl}/v1/projects/${projectId}/validated-segments`,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key':
+            `validation-envelope-segment-${suffix}`,
+        },
+        body: JSON.stringify({
+          sourceArtifactId: validatedArtifactId,
+          expectedArtifactSha256: validatedArtifactSha256,
+          sourceManifestId: validatedManifestId,
+          expectedManifestHash: validatedManifest.manifestHash,
+          sourceSpeechSegmentId: validatedSpeechSegment.id,
+          expectedSpeechSegmentHash:
+            validatedSpeechSegment.segmentHash,
+          policyVersion: 'validated-segment/v1',
+          scope: {
+            unit: 'hook',
+            evidenceScope: 'opening-edit',
+          },
+          source: {
+            platform: 'instagram',
+            publicationRef: 'validated-reel-e2e',
+            observedAt: '2026-07-10T12:00:00.000Z',
+          },
+          performance: {
+            metric: 'three-second-hold-rate',
+            value: 0.81,
+            unit: 'ratio',
+            sampleSize: 25_000,
+            period: {
+              start: '2026-07-01T12:00:00.000Z',
+              end: '2026-07-10T12:00:00.000Z',
+            },
+          },
+          validatedAt: '2026-07-20T12:00:00.000Z',
+        }),
+      },
+    )
+    const validatedPayload = await validatedResponse.json()
+    assert.equal(
+      validatedResponse.status,
+      201,
+      JSON.stringify(validatedPayload),
+    )
+    const validatedSegment = validatedPayload.data.segment
+    const mediaCountBeforeEnvelope =
+      await client.v2MediaArtifact.count({
+        where: { workspaceId },
+      })
+    const validationEndpoint =
+      `${baseUrl}/v1/projects/${projectId}` +
+      '/validation-envelope-reuses'
+    const preservedBody = {
+      batchId,
+      validatedSegmentId: validatedSegment.id,
+      expectedValidatedSegmentHash:
+        validatedSegment.validatedSegmentHash,
+      targetRecipeId: fullRecipe.id,
+      expectedTargetRecipeHash: fullRecipe.runHash,
+      policyVersion: 'validation-envelope-policy/v1',
+      requestedChanges: [{
+        aspect: 'framing',
+        required: false,
+        rationale:
+          'Ajuste opcional que deve ser bloqueado automaticamente.',
+      }],
+    }
+    const preservedKey =
+      `validation-envelope-preserved-${suffix}`
+    const preservedResponse = await fetch(validationEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': preservedKey,
+      },
+      body: JSON.stringify(preservedBody),
+    })
+    const preservedPayload = await preservedResponse.json()
+    assert.equal(
+      preservedResponse.status,
+      201,
+      JSON.stringify(preservedPayload),
+    )
+    const preserved = preservedPayload.data.reuse
+    assert.equal(
+      preserved.currentDecision.validation,
+      'preserved',
+    )
+    assert.deepEqual(
+      preserved.currentDecision.blockedChanges,
+      ['framing'],
+    )
+    assert.equal(
+      preserved.plan.composition
+        .targetRecipeHookExcluded,
+      true,
+    )
+    assert.equal(
+      preserved.plan.composition
+        .validatedSourceOutsideEnvelopeIncluded,
+      false,
+    )
+    assert.equal(
+      preserved.plan.composition.excessMaterialIncluded,
+      false,
+    )
+    assert.deepEqual(
+      preserved.plan.composition.clips[0].sourceRangeMs,
+      validatedSegment.protectedEnvelope.sourceRangeMs,
+    )
+    assert.deepEqual(
+      preserved.plan.composition.orderedRoles,
+      ['hook', 'body', 'proof', 'cta'],
+    )
+    assert.ok(
+      preserved.plan.composition
+        .excludedTargetRecipeSegmentIds
+        .includes(
+          fullRecipe.sourceSegments.find((segment) =>
+            segment.usage === 'primary' &&
+            segment.role === 'hook').id,
+        ),
+    )
+    assert.ok(
+      preserved.plan.composition
+        .excludedTargetRecipeSegmentIds
+        .includes(
+          fullRecipe.sourceSegments.find((segment) =>
+            segment.usage === 'cold-open').id,
+        ),
+    )
+    const preservedReplay = await fetch(validationEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': preservedKey,
+      },
+      body: JSON.stringify(preservedBody),
+    })
+    assert.equal(preservedReplay.status, 200)
+    assert.equal((await preservedReplay.json()).data.replayed, true)
+
+    const approvalResponse = await fetch(validationEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key':
+          `validation-envelope-approval-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...preservedBody,
+        requestedChanges: [{
+          aspect: 'opening',
+          required: true,
+          rationale:
+            'A composição exige uma prova antes do hook validado.',
+        }],
+      }),
+    })
+    const approvalPayload = await approvalResponse.json()
+    assert.equal(
+      approvalResponse.status,
+      201,
+      JSON.stringify(approvalPayload),
+    )
+    const pending = approvalPayload.data.reuse
+    assert.equal(pending.plan.approvalRequired, true)
+    assert.equal(
+      pending.currentDecision.validation,
+      'pending-approval',
+    )
+    const approvalKey =
+      `validation-envelope-decide-${suffix}`
+    const decidedResponse = await fetch(
+      `${validationEndpoint}/${pending.plan.id}/approval`,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': approvalKey,
+        },
+        body: JSON.stringify({
+          expectedPlanHash: pending.plan.planHash,
+          action: 'approve',
+          note:
+            'Aprovo conscientemente a perda da validação histórica.',
+        }),
+      },
+    )
+    const decidedPayload = await decidedResponse.json()
+    assert.equal(
+      decidedResponse.status,
+      201,
+      JSON.stringify(decidedPayload),
+    )
+    assert.equal(
+      decidedPayload.data.reuse.currentDecision.validation,
+      'lost',
+    )
+    assert.deepEqual(
+      decidedPayload.data.reuse.currentDecision.lostAspects,
+      ['opening'],
+    )
+    const decisionReplay = await fetch(
+      `${validationEndpoint}/${pending.plan.id}/approval`,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': approvalKey,
+        },
+        body: JSON.stringify({
+          expectedPlanHash: pending.plan.planHash,
+          action: 'approve',
+          note:
+            'Aprovo conscientemente a perda da validação histórica.',
+        }),
+      },
+    )
+    assert.equal(decisionReplay.status, 200)
+    assert.equal((await decisionReplay.json()).data.replayed, true)
+    const reuseRead = await fetch(
+      `${validationEndpoint}/${pending.plan.id}`,
+      { headers },
+    )
+    assert.equal(reuseRead.status, 200)
+    assert.equal(
+      (await reuseRead.json()).data.reuse.decisions.length,
+      2,
+    )
+    const reuseList = await fetch(
+      `${validationEndpoint}?batchId=${batchId}&limit=10`,
+      { headers },
+    )
+    assert.equal(reuseList.status, 200)
+    assert.equal((await reuseList.json()).data.reuses.length, 2)
+    assert.equal(
+      await client.v2ValidationEnvelopeReuse.count({
+        where: { workspaceId, projectId },
+      }),
+      2,
+    )
+    assert.equal(
+      await client.v2ValidationEnvelopeDecision.count({
+        where: { workspaceId, projectId },
+      }),
+      3,
+    )
+    assert.equal(
+      await client.v2MediaArtifact.count({
+        where: { workspaceId },
+      }),
+      mediaCountBeforeEnvelope,
+      'validation-envelope composition must reference exact ranges without materializing media',
+    )
+
     const fullReplayResponse = await fetch(recipeEndpoint, {
       method: 'POST',
       headers: {
@@ -1077,6 +1524,17 @@ test('T-FR-083/T-FR-084/T-FR-085 persists compatibility, source-referencing reci
       'apollo.batches.variant-portfolio-preflights.list',
       'apollo.batches.variant-portfolio-preflights.read',
     ])
+    const validationEnvelopeCapabilityIds =
+      capabilitiesPayload.data.capabilities
+        .map((capability) => capability.id)
+        .filter((id) =>
+          id.includes('validation-envelope-reuses'))
+    assert.deepEqual(validationEnvelopeCapabilityIds.sort(), [
+      'apollo.projects.validation-envelope-reuses.approve',
+      'apollo.projects.validation-envelope-reuses.create',
+      'apollo.projects.validation-envelope-reuses.list',
+      'apollo.projects.validation-envelope-reuses.read',
+    ])
 
     assert.equal(
       await client.v2CompatibilityGraphRun.count({
@@ -1174,6 +1632,35 @@ test('T-FR-083/T-FR-084/T-FR-085 persists compatibility, source-referencing reci
           UPDATE "variant_portfolio_preflight_runs"
           SET "productMaterialized" = true
           WHERE "workspaceId" = ${workspaceId}
+        `,
+      ),
+    )
+    await assert.rejects(
+      client.$executeRaw(
+        Prisma.sql`
+          UPDATE "validation_envelope_reuses"
+          SET "excessMaterialIncluded" = true
+          WHERE "id" = ${preserved.plan.id}
+        `,
+      ),
+    )
+    await assert.rejects(
+      client.$executeRaw(
+        Prisma.sql`
+          UPDATE "validation_envelope_decisions"
+          SET "validation" = 'lost'
+          WHERE "reusePlanId" = ${pending.plan.id}
+            AND "sequence" = 1
+        `,
+      ),
+    )
+    await assert.rejects(
+      client.$executeRaw(
+        Prisma.sql`
+          UPDATE "validation_envelope_decisions"
+          SET "sequence" = 3
+          WHERE "reusePlanId" = ${pending.plan.id}
+            AND "sequence" = 2
         `,
       ),
     )

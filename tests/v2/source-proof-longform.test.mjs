@@ -1,7 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  applyValidationEnvelope,
   planCleanup,
 } from '../../src/v2/domain/source-deconstruction.ts'
 import {
@@ -101,44 +100,6 @@ test(
 
     assert.ok(strategies.has('reject'))
     assert.ok([...strategies].some((strategy) => strategy !== 'reject'))
-  },
-)
-
-test(
-  'T-FR-124 protects validation envelope and reuses hook with new body/CTA only',
-  () => {
-    const kept = applyValidationEnvelope(
-      {
-        segmentId: 'hook',
-        protected: ['copy', 'take', 'timing', 'opening'],
-        scope: 'hook',
-      },
-      {
-        changes: [],
-        composition: {
-          hookId: 'hook',
-          bodyId: 'new-body',
-          ctaId: 'new-cta',
-        },
-      },
-    )
-    assert.equal(kept.allowed, true)
-    assert.equal(kept.decisionLog.validation, 'preserved')
-    assert.equal(kept.decisionLog.excessMaterialIncluded, false)
-    assert.equal(
-      applyValidationEnvelope(
-        {
-          segmentId: 'hook',
-          protected: ['copy'],
-          scope: 'hook',
-        },
-        {
-          changes: ['copy'],
-          composition: { hookId: 'hook', bodyId: 'b', ctaId: 'c' },
-        },
-      ).approvalRequired,
-      true,
-    )
   },
 )
 

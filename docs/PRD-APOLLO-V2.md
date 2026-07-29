@@ -937,7 +937,20 @@ Separação voz/música, inpainting, remoção de legenda e restauração em fas
 
 ### FR-124 — Validation envelope
 
-Preservar copy, take ou opening edit conforme validationScope.
+O reuso de material historicamente validado deve representar separadamente
+`copy`, `take`, `framing`, `timing` e `opening`. O conjunto protegido é derivado
+do `validationScope` persistido, nunca declarado livremente pelo solicitante.
+
+Mudar opcionalmente um aspecto protegido deve ser bloqueado de forma automática.
+Quando a nova composição exigir a mudança, o sistema deve abrir uma decisão
+humana explícita: rejeitar preserva a validação; aprovar registra que a
+validação histórica foi perdida e quais aspectos saíram do envelope.
+
+Para reutilizar um hook com corpo/prova/CTA novos, a composição deve referenciar
+somente o range validado do hook e os ranges primários necessários da recipe
+alvo. O hook, cold open e qualquer excesso da recipe alvo devem ser excluídos.
+Plano, composição e decisions log são imutáveis, versionados, idempotentes,
+vinculados aos hashes exatos das fontes e operáveis pela API pública.
 
 ---
 

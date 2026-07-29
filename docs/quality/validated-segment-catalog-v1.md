@@ -54,6 +54,16 @@ O preflight recebe uma nova recipe e retorna uma decisão explícita. Mudanças 
 aspectos protegidos, uso em papel incompatível, expiração, direitos alterados ou
 alegação causal tornam o reuso incompatível, sem apagar a evidência histórica.
 
+O slice F2.018 adiciona a camada executável de composição sem alterar este
+registro histórico. `validation-envelope-policy/v1` representa também
+`framing`: evidência `opening-edit` protege copy, take, framing, timing e
+opening. Mudança opcional protegida é bloqueada automaticamente; mudança
+obrigatória abre aprovação separada. Aprovar registra a perda exata no decisions
+log, rejeitar preserva a validação. A composição inclui somente o range
+protegido do hook e body/proof/CTA primários da recipe nova, excluindo hook,
+cold open e excesso. Detalhes e evidências:
+`docs/quality/validation-envelope-v1.md`.
+
 ## 4. Evidência de performance
 
 Cada registro contém:

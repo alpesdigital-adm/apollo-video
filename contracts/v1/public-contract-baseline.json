@@ -4104,6 +4104,147 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.validation-envelope-reuses.approve": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:approve"
+      ],
+      "inputSchemaRef": "apollo://schemas/decide-validation-envelope-reuse-request/v1",
+      "outputSchemaRef": "apollo://schemas/validation-envelope-reuse-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/validation-envelope-reuses/{reusePlanId}/approval"
+      },
+      "toolName": "apollo.projects.validation-envelope-reuses.approve",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.validation-envelope-reuses.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-validation-envelope-reuse-request/v1",
+      "outputSchemaRef": "apollo://schemas/validation-envelope-reuse-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/validation-envelope-reuses"
+      },
+      "toolName": "apollo.projects.validation-envelope-reuses.create",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.validation-envelope-reuses.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/validation-envelope-reuse-page/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/validation-envelope-reuses"
+      },
+      "toolName": "apollo.projects.validation-envelope-reuses.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "validatedSegmentId",
+          "description": "Optional exact validated hook identity.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "batchId",
+          "description": "Optional exact target production batch.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "limit",
+          "description": "Maximum reuse plans to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        {
+          "name": "cursor",
+          "description": "Opaque cursor returned by the previous page.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.validation-envelope-reuses.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/validation-envelope-reuse-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/validation-envelope-reuses/{reusePlanId}"
+      },
+      "toolName": "apollo.projects.validation-envelope-reuses.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.version-comparisons.act": {
       "version": "1.0.0",
       "exposure": "public",
@@ -24026,6 +24167,79 @@
         }
       }
     },
+    "apollo://schemas/create-validation-envelope-reuse-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "batchId",
+        "validatedSegmentId",
+        "expectedValidatedSegmentHash",
+        "targetRecipeId",
+        "expectedTargetRecipeHash",
+        "policyVersion",
+        "requestedChanges"
+      ],
+      "properties": {
+        "batchId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "validatedSegmentId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedValidatedSegmentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "targetRecipeId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedTargetRecipeHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "policyVersion": {
+          "const": "validation-envelope-policy/v1"
+        },
+        "requestedChanges": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "aspect",
+              "required",
+              "rationale"
+            ],
+            "properties": {
+              "aspect": {
+                "enum": [
+                  "copy",
+                  "take",
+                  "framing",
+                  "timing",
+                  "opening"
+                ]
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 500
+              }
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/create-variant-portfolio-preflight-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -24255,6 +24469,32 @@
             "minLength": 3,
             "maxLength": 128
           }
+        }
+      }
+    },
+    "apollo://schemas/decide-validation-envelope-reuse-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedPlanHash",
+        "action",
+        "note"
+      ],
+      "properties": {
+        "expectedPlanHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "action": {
+          "enum": [
+            "approve",
+            "reject"
+          ]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 1000
         }
       }
     },
@@ -71187,6 +71427,2128 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 128
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/validation-envelope-reuse-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reuse",
+            "replayed"
+          ],
+          "properties": {
+            "reuse": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "plan",
+                "decisions",
+                "currentDecision"
+              ],
+              "properties": {
+                "plan": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "policyVersion",
+                    "id",
+                    "workspaceId",
+                    "projectId",
+                    "batchId",
+                    "validatedSegmentId",
+                    "validatedSegmentHash",
+                    "sourceArtifactId",
+                    "sourceArtifactSha256",
+                    "sourceRangeMs",
+                    "targetRecipeId",
+                    "targetRecipeHash",
+                    "objective",
+                    "aspectRules",
+                    "protectedAspects",
+                    "mutableAspects",
+                    "requestedChanges",
+                    "autoProtectedChanges",
+                    "approvalRequiredChanges",
+                    "approvalRequired",
+                    "initialValidation",
+                    "composition",
+                    "createdByClientId",
+                    "createdAt",
+                    "planHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "validation-envelope-reuse/v1"
+                    },
+                    "policyVersion": {
+                      "const": "validation-envelope-policy/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "batchId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "validatedSegmentId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "validatedSegmentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sourceArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceRangeMs": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "prefixItems": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 86399999
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 86400000
+                        }
+                      ],
+                      "items": false
+                    },
+                    "targetRecipeId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "targetRecipeHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objective": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "aspectRules": {
+                      "type": "array",
+                      "minItems": 5,
+                      "maxItems": 5,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "aspect",
+                          "state",
+                          "source"
+                        ],
+                        "properties": {
+                          "aspect": {
+                            "enum": [
+                              "copy",
+                              "take",
+                              "framing",
+                              "timing",
+                              "opening"
+                            ]
+                          },
+                          "state": {
+                            "enum": [
+                              "protected",
+                              "mutable"
+                            ]
+                          },
+                          "source": {
+                            "enum": [
+                              "copy-evidence",
+                              "spoken-take-evidence",
+                              "opening-edit-evidence"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "protectedAspects": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "mutableAspects": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "requestedChanges": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "aspect",
+                          "required",
+                          "rationale"
+                        ],
+                        "properties": {
+                          "aspect": {
+                            "enum": [
+                              "copy",
+                              "take",
+                              "framing",
+                              "timing",
+                              "opening"
+                            ]
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "rationale": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "autoProtectedChanges": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "approvalRequiredChanges": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "approvalRequired": {
+                      "type": "boolean"
+                    },
+                    "initialValidation": {
+                      "enum": [
+                        "preserved",
+                        "pending-approval"
+                      ]
+                    },
+                    "composition": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "clips",
+                        "orderedRoles",
+                        "includedSourceSegmentIds",
+                        "excludedTargetRecipeSegmentIds",
+                        "targetRecipeHookExcluded",
+                        "validatedSourceOutsideEnvelopeIncluded",
+                        "excessMaterialIncluded",
+                        "durationMs",
+                        "compositionHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "validation-envelope-composition/v1"
+                        },
+                        "clips": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 4,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "role",
+                              "source",
+                              "sourceArtifactId",
+                              "sourceHash",
+                              "sourceRangeMs",
+                              "sourceSegmentId",
+                              "durationMs"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "role": {
+                                "enum": [
+                                  "hook",
+                                  "body",
+                                  "proof",
+                                  "cta"
+                                ]
+                              },
+                              "source": {
+                                "enum": [
+                                  "validated-segment-envelope",
+                                  "target-variant-recipe"
+                                ]
+                              },
+                              "sourceArtifactId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "sourceHash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "sourceRangeMs": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "prefixItems": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 86399999
+                                  },
+                                  {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 86400000
+                                  }
+                                ],
+                                "items": false
+                              },
+                              "sourceSegmentId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "takeId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "durationMs": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 86400000
+                              }
+                            }
+                          }
+                        },
+                        "orderedRoles": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 4,
+                          "items": {
+                            "enum": [
+                              "hook",
+                              "body",
+                              "proof",
+                              "cta"
+                            ]
+                          }
+                        },
+                        "includedSourceSegmentIds": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 4,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "excludedTargetRecipeSegmentIds": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 100,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "targetRecipeHookExcluded": {
+                          "const": true
+                        },
+                        "validatedSourceOutsideEnvelopeIncluded": {
+                          "const": false
+                        },
+                        "excessMaterialIncluded": {
+                          "const": false
+                        },
+                        "durationMs": {
+                          "type": "integer",
+                          "minimum": 3,
+                          "maximum": 86400000
+                        },
+                        "compositionHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "createdByClientId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "planHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "decisions": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 2,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "reusePlanId",
+                      "sequence",
+                      "kind",
+                      "outcome",
+                      "validation",
+                      "appliedChanges",
+                      "blockedChanges",
+                      "lostAspects",
+                      "note",
+                      "actorClientId",
+                      "createdAt",
+                      "decisionHash"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "validation-envelope-decision/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "reusePlanId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2
+                      },
+                      "kind": {
+                        "enum": [
+                          "created",
+                          "approval"
+                        ]
+                      },
+                      "outcome": {
+                        "enum": [
+                          "ready",
+                          "approval-required",
+                          "approved",
+                          "rejected"
+                        ]
+                      },
+                      "validation": {
+                        "enum": [
+                          "preserved",
+                          "pending-approval",
+                          "lost"
+                        ]
+                      },
+                      "appliedChanges": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "blockedChanges": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "lostAspects": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "note": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 1000
+                      },
+                      "actorClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "decisionHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "currentDecision": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "reusePlanId",
+                    "sequence",
+                    "kind",
+                    "outcome",
+                    "validation",
+                    "appliedChanges",
+                    "blockedChanges",
+                    "lostAspects",
+                    "note",
+                    "actorClientId",
+                    "createdAt",
+                    "decisionHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "validation-envelope-decision/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "reusePlanId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2
+                    },
+                    "kind": {
+                      "enum": [
+                        "created",
+                        "approval"
+                      ]
+                    },
+                    "outcome": {
+                      "enum": [
+                        "ready",
+                        "approval-required",
+                        "approved",
+                        "rejected"
+                      ]
+                    },
+                    "validation": {
+                      "enum": [
+                        "preserved",
+                        "pending-approval",
+                        "lost"
+                      ]
+                    },
+                    "appliedChanges": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "blockedChanges": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "lostAspects": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "note": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 1000
+                    },
+                    "actorClientId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "decisionHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/validation-envelope-reuse-page/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reuses"
+          ],
+          "properties": {
+            "reuses": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "plan",
+                  "decisions",
+                  "currentDecision"
+                ],
+                "properties": {
+                  "plan": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "policyVersion",
+                      "id",
+                      "workspaceId",
+                      "projectId",
+                      "batchId",
+                      "validatedSegmentId",
+                      "validatedSegmentHash",
+                      "sourceArtifactId",
+                      "sourceArtifactSha256",
+                      "sourceRangeMs",
+                      "targetRecipeId",
+                      "targetRecipeHash",
+                      "objective",
+                      "aspectRules",
+                      "protectedAspects",
+                      "mutableAspects",
+                      "requestedChanges",
+                      "autoProtectedChanges",
+                      "approvalRequiredChanges",
+                      "approvalRequired",
+                      "initialValidation",
+                      "composition",
+                      "createdByClientId",
+                      "createdAt",
+                      "planHash"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "validation-envelope-reuse/v1"
+                      },
+                      "policyVersion": {
+                        "const": "validation-envelope-policy/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "workspaceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "projectId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "batchId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "validatedSegmentId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "validatedSegmentHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceRangeMs": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "prefixItems": [
+                          {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 86399999
+                          },
+                          {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 86400000
+                          }
+                        ],
+                        "items": false
+                      },
+                      "targetRecipeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "targetRecipeHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "objective": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "aspectRules": {
+                        "type": "array",
+                        "minItems": 5,
+                        "maxItems": 5,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "aspect",
+                            "state",
+                            "source"
+                          ],
+                          "properties": {
+                            "aspect": {
+                              "enum": [
+                                "copy",
+                                "take",
+                                "framing",
+                                "timing",
+                                "opening"
+                              ]
+                            },
+                            "state": {
+                              "enum": [
+                                "protected",
+                                "mutable"
+                              ]
+                            },
+                            "source": {
+                              "enum": [
+                                "copy-evidence",
+                                "spoken-take-evidence",
+                                "opening-edit-evidence"
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "protectedAspects": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "mutableAspects": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "requestedChanges": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "aspect",
+                            "required",
+                            "rationale"
+                          ],
+                          "properties": {
+                            "aspect": {
+                              "enum": [
+                                "copy",
+                                "take",
+                                "framing",
+                                "timing",
+                                "opening"
+                              ]
+                            },
+                            "required": {
+                              "type": "boolean"
+                            },
+                            "rationale": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 500
+                            }
+                          }
+                        }
+                      },
+                      "autoProtectedChanges": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "approvalRequiredChanges": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "approvalRequired": {
+                        "type": "boolean"
+                      },
+                      "initialValidation": {
+                        "enum": [
+                          "preserved",
+                          "pending-approval"
+                        ]
+                      },
+                      "composition": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "schemaVersion",
+                          "clips",
+                          "orderedRoles",
+                          "includedSourceSegmentIds",
+                          "excludedTargetRecipeSegmentIds",
+                          "targetRecipeHookExcluded",
+                          "validatedSourceOutsideEnvelopeIncluded",
+                          "excessMaterialIncluded",
+                          "durationMs",
+                          "compositionHash"
+                        ],
+                        "properties": {
+                          "schemaVersion": {
+                            "const": "validation-envelope-composition/v1"
+                          },
+                          "clips": {
+                            "type": "array",
+                            "minItems": 3,
+                            "maxItems": 4,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "role",
+                                "source",
+                                "sourceArtifactId",
+                                "sourceHash",
+                                "sourceRangeMs",
+                                "sourceSegmentId",
+                                "durationMs"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "role": {
+                                  "enum": [
+                                    "hook",
+                                    "body",
+                                    "proof",
+                                    "cta"
+                                  ]
+                                },
+                                "source": {
+                                  "enum": [
+                                    "validated-segment-envelope",
+                                    "target-variant-recipe"
+                                  ]
+                                },
+                                "sourceArtifactId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "sourceHash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "sourceRangeMs": {
+                                  "type": "array",
+                                  "minItems": 2,
+                                  "maxItems": 2,
+                                  "prefixItems": [
+                                    {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 86399999
+                                    },
+                                    {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 86400000
+                                    }
+                                  ],
+                                  "items": false
+                                },
+                                "sourceSegmentId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "takeId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "durationMs": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              }
+                            }
+                          },
+                          "orderedRoles": {
+                            "type": "array",
+                            "minItems": 3,
+                            "maxItems": 4,
+                            "items": {
+                              "enum": [
+                                "hook",
+                                "body",
+                                "proof",
+                                "cta"
+                              ]
+                            }
+                          },
+                          "includedSourceSegmentIds": {
+                            "type": "array",
+                            "minItems": 3,
+                            "maxItems": 4,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          },
+                          "excludedTargetRecipeSegmentIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 100,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          },
+                          "targetRecipeHookExcluded": {
+                            "const": true
+                          },
+                          "validatedSourceOutsideEnvelopeIncluded": {
+                            "const": false
+                          },
+                          "excessMaterialIncluded": {
+                            "const": false
+                          },
+                          "durationMs": {
+                            "type": "integer",
+                            "minimum": 3,
+                            "maximum": 86400000
+                          },
+                          "compositionHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "createdByClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "planHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  },
+                  "decisions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "id",
+                        "reusePlanId",
+                        "sequence",
+                        "kind",
+                        "outcome",
+                        "validation",
+                        "appliedChanges",
+                        "blockedChanges",
+                        "lostAspects",
+                        "note",
+                        "actorClientId",
+                        "createdAt",
+                        "decisionHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "validation-envelope-decision/v1"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "reusePlanId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2
+                        },
+                        "kind": {
+                          "enum": [
+                            "created",
+                            "approval"
+                          ]
+                        },
+                        "outcome": {
+                          "enum": [
+                            "ready",
+                            "approval-required",
+                            "approved",
+                            "rejected"
+                          ]
+                        },
+                        "validation": {
+                          "enum": [
+                            "preserved",
+                            "pending-approval",
+                            "lost"
+                          ]
+                        },
+                        "appliedChanges": {
+                          "type": "array",
+                          "maxItems": 5,
+                          "uniqueItems": true,
+                          "items": {
+                            "enum": [
+                              "copy",
+                              "take",
+                              "framing",
+                              "timing",
+                              "opening"
+                            ]
+                          }
+                        },
+                        "blockedChanges": {
+                          "type": "array",
+                          "maxItems": 5,
+                          "uniqueItems": true,
+                          "items": {
+                            "enum": [
+                              "copy",
+                              "take",
+                              "framing",
+                              "timing",
+                              "opening"
+                            ]
+                          }
+                        },
+                        "lostAspects": {
+                          "type": "array",
+                          "maxItems": 5,
+                          "uniqueItems": true,
+                          "items": {
+                            "enum": [
+                              "copy",
+                              "take",
+                              "framing",
+                              "timing",
+                              "opening"
+                            ]
+                          }
+                        },
+                        "note": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 1000
+                        },
+                        "actorClientId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "decisionHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    }
+                  },
+                  "currentDecision": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "reusePlanId",
+                      "sequence",
+                      "kind",
+                      "outcome",
+                      "validation",
+                      "appliedChanges",
+                      "blockedChanges",
+                      "lostAspects",
+                      "note",
+                      "actorClientId",
+                      "createdAt",
+                      "decisionHash"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "validation-envelope-decision/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "reusePlanId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2
+                      },
+                      "kind": {
+                        "enum": [
+                          "created",
+                          "approval"
+                        ]
+                      },
+                      "outcome": {
+                        "enum": [
+                          "ready",
+                          "approval-required",
+                          "approved",
+                          "rejected"
+                        ]
+                      },
+                      "validation": {
+                        "enum": [
+                          "preserved",
+                          "pending-approval",
+                          "lost"
+                        ]
+                      },
+                      "appliedChanges": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "blockedChanges": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "lostAspects": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "note": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 1000
+                      },
+                      "actorClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "decisionHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/validation-envelope-reuse-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reuse"
+          ],
+          "properties": {
+            "reuse": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "plan",
+                "decisions",
+                "currentDecision"
+              ],
+              "properties": {
+                "plan": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "policyVersion",
+                    "id",
+                    "workspaceId",
+                    "projectId",
+                    "batchId",
+                    "validatedSegmentId",
+                    "validatedSegmentHash",
+                    "sourceArtifactId",
+                    "sourceArtifactSha256",
+                    "sourceRangeMs",
+                    "targetRecipeId",
+                    "targetRecipeHash",
+                    "objective",
+                    "aspectRules",
+                    "protectedAspects",
+                    "mutableAspects",
+                    "requestedChanges",
+                    "autoProtectedChanges",
+                    "approvalRequiredChanges",
+                    "approvalRequired",
+                    "initialValidation",
+                    "composition",
+                    "createdByClientId",
+                    "createdAt",
+                    "planHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "validation-envelope-reuse/v1"
+                    },
+                    "policyVersion": {
+                      "const": "validation-envelope-policy/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "batchId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "validatedSegmentId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "validatedSegmentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sourceArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceRangeMs": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "prefixItems": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 86399999
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 86400000
+                        }
+                      ],
+                      "items": false
+                    },
+                    "targetRecipeId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "targetRecipeHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objective": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "aspectRules": {
+                      "type": "array",
+                      "minItems": 5,
+                      "maxItems": 5,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "aspect",
+                          "state",
+                          "source"
+                        ],
+                        "properties": {
+                          "aspect": {
+                            "enum": [
+                              "copy",
+                              "take",
+                              "framing",
+                              "timing",
+                              "opening"
+                            ]
+                          },
+                          "state": {
+                            "enum": [
+                              "protected",
+                              "mutable"
+                            ]
+                          },
+                          "source": {
+                            "enum": [
+                              "copy-evidence",
+                              "spoken-take-evidence",
+                              "opening-edit-evidence"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "protectedAspects": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "mutableAspects": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "requestedChanges": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "aspect",
+                          "required",
+                          "rationale"
+                        ],
+                        "properties": {
+                          "aspect": {
+                            "enum": [
+                              "copy",
+                              "take",
+                              "framing",
+                              "timing",
+                              "opening"
+                            ]
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "rationale": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "autoProtectedChanges": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "approvalRequiredChanges": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "approvalRequired": {
+                      "type": "boolean"
+                    },
+                    "initialValidation": {
+                      "enum": [
+                        "preserved",
+                        "pending-approval"
+                      ]
+                    },
+                    "composition": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "clips",
+                        "orderedRoles",
+                        "includedSourceSegmentIds",
+                        "excludedTargetRecipeSegmentIds",
+                        "targetRecipeHookExcluded",
+                        "validatedSourceOutsideEnvelopeIncluded",
+                        "excessMaterialIncluded",
+                        "durationMs",
+                        "compositionHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "validation-envelope-composition/v1"
+                        },
+                        "clips": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 4,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "role",
+                              "source",
+                              "sourceArtifactId",
+                              "sourceHash",
+                              "sourceRangeMs",
+                              "sourceSegmentId",
+                              "durationMs"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "role": {
+                                "enum": [
+                                  "hook",
+                                  "body",
+                                  "proof",
+                                  "cta"
+                                ]
+                              },
+                              "source": {
+                                "enum": [
+                                  "validated-segment-envelope",
+                                  "target-variant-recipe"
+                                ]
+                              },
+                              "sourceArtifactId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "sourceHash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "sourceRangeMs": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "prefixItems": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 86399999
+                                  },
+                                  {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 86400000
+                                  }
+                                ],
+                                "items": false
+                              },
+                              "sourceSegmentId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "takeId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "durationMs": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 86400000
+                              }
+                            }
+                          }
+                        },
+                        "orderedRoles": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 4,
+                          "items": {
+                            "enum": [
+                              "hook",
+                              "body",
+                              "proof",
+                              "cta"
+                            ]
+                          }
+                        },
+                        "includedSourceSegmentIds": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 4,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "excludedTargetRecipeSegmentIds": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 100,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "targetRecipeHookExcluded": {
+                          "const": true
+                        },
+                        "validatedSourceOutsideEnvelopeIncluded": {
+                          "const": false
+                        },
+                        "excessMaterialIncluded": {
+                          "const": false
+                        },
+                        "durationMs": {
+                          "type": "integer",
+                          "minimum": 3,
+                          "maximum": 86400000
+                        },
+                        "compositionHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "createdByClientId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "planHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "decisions": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 2,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "reusePlanId",
+                      "sequence",
+                      "kind",
+                      "outcome",
+                      "validation",
+                      "appliedChanges",
+                      "blockedChanges",
+                      "lostAspects",
+                      "note",
+                      "actorClientId",
+                      "createdAt",
+                      "decisionHash"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "validation-envelope-decision/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "reusePlanId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2
+                      },
+                      "kind": {
+                        "enum": [
+                          "created",
+                          "approval"
+                        ]
+                      },
+                      "outcome": {
+                        "enum": [
+                          "ready",
+                          "approval-required",
+                          "approved",
+                          "rejected"
+                        ]
+                      },
+                      "validation": {
+                        "enum": [
+                          "preserved",
+                          "pending-approval",
+                          "lost"
+                        ]
+                      },
+                      "appliedChanges": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "blockedChanges": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "lostAspects": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "copy",
+                            "take",
+                            "framing",
+                            "timing",
+                            "opening"
+                          ]
+                        }
+                      },
+                      "note": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 1000
+                      },
+                      "actorClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "decisionHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "currentDecision": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "reusePlanId",
+                    "sequence",
+                    "kind",
+                    "outcome",
+                    "validation",
+                    "appliedChanges",
+                    "blockedChanges",
+                    "lostAspects",
+                    "note",
+                    "actorClientId",
+                    "createdAt",
+                    "decisionHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "validation-envelope-decision/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "reusePlanId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2
+                    },
+                    "kind": {
+                      "enum": [
+                        "created",
+                        "approval"
+                      ]
+                    },
+                    "outcome": {
+                      "enum": [
+                        "ready",
+                        "approval-required",
+                        "approved",
+                        "rejected"
+                      ]
+                    },
+                    "validation": {
+                      "enum": [
+                        "preserved",
+                        "pending-approval",
+                        "lost"
+                      ]
+                    },
+                    "appliedChanges": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "blockedChanges": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "lostAspects": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "copy",
+                          "take",
+                          "framing",
+                          "timing",
+                          "opening"
+                        ]
+                      }
+                    },
+                    "note": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 1000
+                    },
+                    "actorClientId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "decisionHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
                     }
                   }
                 }

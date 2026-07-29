@@ -203,6 +203,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates only a reversible derived artifact from one exact diagnosed finding; the source remains immutable, unsafe strategies are rejected and publication is gated by visual and rights review.',
     },
+    'apollo.projects.validation-envelope-reuses.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable source-reference composition, blocks optional protected changes and starts no provider, render or media materialization work.',
+    },
+    'apollo.projects.validation-envelope-reuses.approve': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Approval explicitly records the loss of historical validation for exact protected aspects; rejection preserves the validation envelope.',
+    },
     'apollo.batches.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one explicit bounded item matrix from existing approved workspace artifacts without starting provider work.',

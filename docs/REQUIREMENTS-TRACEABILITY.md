@@ -141,7 +141,7 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-120 | Source Deconstruction | S3 | D1,D2 | clean range, report, contexto preservado e comparação source/clean | T-FR-120 domínio/Golden Reel + API/PostgreSQL E2E + UI desktop/mobile + produção `d2bb805` |
 | FR-121 | Contaminação | S3 | D1,D2 | cinco tipos localizados por range/região/confidence, impacto de remoção e diagnóstico Director/humano | T-FR-121 + seis fixtures audiovisuais + API/PostgreSQL E2E + UI + produção `e00727f` |
 | FR-122 | Limpeza MVP | S3 | D1,D5 | trim/reframe/cover/reject | visual golden |
-| FR-124 | Validation envelope | S3 | D1,D7 | copy/take/opening protegidos | policy |
+| FR-124 | Validation envelope | S3 | D1,D7 | copy/take/framing/timing/opening derivados do escopo; proteção automática; saída com aprovação e log preserved/lost; hook exato + corpo/prova/CTA sem excesso | T-FR-124 domínio + API/PostgreSQL E2E + constraints + UI `/v1` |
 | FR-130 | Proof need | S1,S3 | D2 | story solicita evidência adequada | golden |
 | FR-131 | Integrity gate | S1,S3 | D2,D7 | prova incompatível bloqueada | policy |
 | FR-132 | Modos de prova | S1,S2 | D2,D3,D5 | cutaway/split/card renderizam | visual golden |

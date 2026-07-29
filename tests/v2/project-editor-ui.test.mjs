@@ -247,6 +247,40 @@ test('T-FR-122 project editor exposes API-backed cleanup decisions and post-clea
   assert.match(projectEditorSource, /master intacto/)
 })
 
+test('T-FR-124 project editor exposes API-backed validation envelopes and explicit approval', () => {
+  assert.match(
+    projectEditorSource,
+    /\/validation-envelope-reuses\?limit=100/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="validation-envelope-panel"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="validation-envelope-aspects"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="validation-envelope-status"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="validation-envelope-preserve"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="validation-envelope-approve-loss"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /expectedPlanHash: reuse\.plan\.planHash/,
+  )
+  assert.match(projectEditorSource, /projects:approve|\/approval/)
+  assert.match(projectEditorSource, /sobra da fonte:/)
+  assert.match(projectEditorSource, /targetRecipeHookExcluded/)
+})
+
 test('T-FR-230 project editor exposes the persisted proxy verdict and blocks final export until release', () => {
   assert.match(projectEditorSource, /\/proxy-reviews/)
   assert.match(projectEditorSource, /data-testid="proxy-review-gate"/)
