@@ -6496,7 +6496,7 @@ const longFormWorkflowBudgetSchema = {
     },
   },
 }
-const longFormIndexStageCheckpointSchema = {
+const longFormIndexStageCheckpointSchemaV2 = {
   type: 'object',
   additionalProperties: false,
   required: [
@@ -6548,6 +6548,23 @@ const longFormIndexStageCheckpointSchema = {
     },
     attempt: { type: 'integer', minimum: 0 },
     outputHash: sha256Schema,
+    outputReference: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id'],
+      properties: {
+        type: {
+          enum: [
+            'media-artifact-manifest',
+            'media-transcript',
+            'speaker-diarization-run',
+            'hierarchical-processing-run',
+            'long-form-index-run',
+          ],
+        },
+        id: idSchema,
+      },
+    },
     resultCount: { type: 'integer', minimum: 0 },
     searchable: { type: 'boolean' },
     costMinorUnits: { type: 'integer', minimum: 0 },
@@ -6574,7 +6591,15 @@ const longFormIndexStageCheckpointSchema = {
     stageHash: sha256Schema,
   },
 }
-const longFormIndexWorkflowSchema = {
+const {
+  outputReference: _longFormOutputReference,
+  ...longFormIndexStageCheckpointPropertiesV1
+} = longFormIndexStageCheckpointSchemaV2.properties
+const longFormIndexStageCheckpointSchemaV1 = {
+  ...longFormIndexStageCheckpointSchemaV2,
+  properties: longFormIndexStageCheckpointPropertiesV1,
+}
+const longFormIndexWorkflowSchemaV2 = {
   type: 'object',
   additionalProperties: false,
   required: [
@@ -6623,7 +6648,7 @@ const longFormIndexWorkflowSchema = {
       type: 'array',
       minItems: 5,
       maxItems: 5,
-      items: longFormIndexStageCheckpointSchema,
+      items: longFormIndexStageCheckpointSchemaV2,
     },
     budget: longFormWorkflowBudgetSchema,
     summary: {
@@ -6663,12 +6688,33 @@ const longFormIndexWorkflowSchema = {
     runHash: sha256Schema,
   },
 }
-const longFormIndexWorkflowRecordSchema = {
+const longFormIndexWorkflowSchemaV1 = {
+  ...longFormIndexWorkflowSchemaV2,
+  properties: {
+    ...longFormIndexWorkflowSchemaV2.properties,
+    stages: {
+      type: 'array',
+      minItems: 5,
+      maxItems: 5,
+      items: longFormIndexStageCheckpointSchemaV1,
+    },
+  },
+}
+const longFormIndexWorkflowRecordSchemaV1 = {
   type: 'object',
   additionalProperties: false,
   required: ['workflow', 'operation'],
   properties: {
-    workflow: longFormIndexWorkflowSchema,
+    workflow: longFormIndexWorkflowSchemaV1,
+    operation: publicOperationSchemaV6,
+  },
+}
+const longFormIndexWorkflowRecordSchemaV2 = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['workflow', 'operation'],
+  properties: {
+    workflow: longFormIndexWorkflowSchemaV2,
     operation: publicOperationSchemaV6,
   },
 }
@@ -15456,13 +15502,27 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['workflow', 'operation', 'replayed'],
       properties: {
-        ...longFormIndexWorkflowRecordSchema.properties,
+        ...longFormIndexWorkflowRecordSchemaV1.properties,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('long-form-index-workflow-mutated', 2, 'Accepted or idempotently replayed long-form indexing workflow with typed stage outputs',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['workflow', 'operation', 'replayed'],
+      properties: {
+        ...longFormIndexWorkflowRecordSchemaV2.properties,
         replayed: { type: 'boolean' },
       },
     }),
   ),
   defineSchema('long-form-index-workflow-read', 1, 'One durable long-form indexing workflow and its public operation',
-    successSchema(longFormIndexWorkflowRecordSchema),
+    successSchema(longFormIndexWorkflowRecordSchemaV1),
+  ),
+  defineSchema('long-form-index-workflow-read', 2, 'One durable long-form indexing workflow with typed stage outputs and its public operation',
+    successSchema(longFormIndexWorkflowRecordSchemaV2),
   ),
   defineSchema('long-form-index-workflow-page', 1, 'Cursor page of durable long-form indexing workflows',
     successSchema({
@@ -15473,7 +15533,26 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         workflows: {
           type: 'array',
           maxItems: 100,
-          items: longFormIndexWorkflowRecordSchema,
+          items: longFormIndexWorkflowRecordSchemaV1,
+        },
+        nextCursor: {
+          type: 'string',
+          minLength: 3,
+          maxLength: 128,
+        },
+      },
+    }),
+  ),
+  defineSchema('long-form-index-workflow-page', 2, 'Cursor page of durable long-form indexing workflows with typed stage outputs',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['workflows'],
+      properties: {
+        workflows: {
+          type: 'array',
+          maxItems: 100,
+          items: longFormIndexWorkflowRecordSchemaV2,
         },
         nextCursor: {
           type: 'string',

@@ -2791,7 +2791,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.long-form-index-workflows.create": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "exposure": "public",
       "operationKind": "job",
       "authMode": "required",
@@ -2799,7 +2799,7 @@
         "projects:write"
       ],
       "inputSchemaRef": "apollo://schemas/create-long-form-index-workflow-request/v1",
-      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-mutated/v1",
+      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-mutated/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/projects/{projectId}/long-form-index-workflows"
@@ -2817,14 +2817,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.long-form-index-workflows.list": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "projects:read"
       ],
-      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-page/v1",
+      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-page/v2",
       "endpoint": {
         "method": "GET",
         "path": "/v1/projects/{projectId}/long-form-index-workflows"
@@ -2888,14 +2888,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.long-form-index-workflows.read": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "projects:read"
       ],
-      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-read/v1",
+      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-read/v2",
       "endpoint": {
         "method": "GET",
         "path": "/v1/projects/{projectId}/long-form-index-workflows/{workflowId}"
@@ -32497,6 +32497,648 @@
         }
       }
     },
+    "apollo://schemas/long-form-index-workflow-mutated/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "workflow",
+            "operation",
+            "replayed"
+          ],
+          "properties": {
+            "workflow": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "policyVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "sourceArtifactId",
+                "sourceArtifactSha256",
+                "sourceManifestId",
+                "sourceManifestHash",
+                "durationMs",
+                "status",
+                "stages",
+                "budget",
+                "summary",
+                "createdByClientId",
+                "createdAt",
+                "updatedAt",
+                "runHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "long-form-index-workflow/v1"
+                },
+                "policyVersion": {
+                  "const": "long-form-index-workflow-policy/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceArtifactSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sourceManifestId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceManifestHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sourceTranscriptId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceTranscriptHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "durationMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 43200000
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "partial",
+                    "succeeded",
+                    "failed"
+                  ]
+                },
+                "stages": {
+                  "type": "array",
+                  "minItems": 5,
+                  "maxItems": 5,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "stage",
+                      "sequence",
+                      "prerequisites",
+                      "execution",
+                      "status",
+                      "version",
+                      "budget",
+                      "concurrency",
+                      "inputHash",
+                      "idempotencyKey",
+                      "attempt",
+                      "resultCount",
+                      "searchable",
+                      "costMinorUnits",
+                      "elapsedMs",
+                      "stageHash"
+                    ],
+                    "properties": {
+                      "stage": {
+                        "enum": [
+                          "probe",
+                          "transcript",
+                          "diarization",
+                          "chunks",
+                          "moments"
+                        ]
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5
+                      },
+                      "prerequisites": {
+                        "type": "array",
+                        "maxItems": 2,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "probe",
+                            "transcript",
+                            "diarization",
+                            "chunks",
+                            "moments"
+                          ]
+                        }
+                      },
+                      "execution": {
+                        "enum": [
+                          "process",
+                          "reuse"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "pending",
+                          "ready",
+                          "running",
+                          "succeeded",
+                          "failed",
+                          "budget-blocked"
+                        ]
+                      },
+                      "version": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "provider",
+                          "model",
+                          "version"
+                        ],
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                          },
+                          "model": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                          },
+                          "version": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                          }
+                        }
+                      },
+                      "budget": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "estimatedCostMinorUnits",
+                          "maximumCostMinorUnits",
+                          "maximumElapsedMs"
+                        ],
+                        "properties": {
+                          "estimatedCostMinorUnits": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000000
+                          },
+                          "maximumCostMinorUnits": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000000
+                          },
+                          "maximumElapsedMs": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 86400000
+                          }
+                        }
+                      },
+                      "concurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 32
+                      },
+                      "inputHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "idempotencyKey": {
+                        "type": "string",
+                        "minLength": 8,
+                        "maxLength": 256
+                      },
+                      "attempt": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "outputHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "outputReference": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "id"
+                        ],
+                        "properties": {
+                          "type": {
+                            "enum": [
+                              "media-artifact-manifest",
+                              "media-transcript",
+                              "speaker-diarization-run",
+                              "hierarchical-processing-run",
+                              "long-form-index-run"
+                            ]
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      },
+                      "resultCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "searchable": {
+                        "type": "boolean"
+                      },
+                      "costMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "elapsedMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "startedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "completedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "error": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "message",
+                          "retryable"
+                        ],
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                          },
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "retryable": {
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      "stageHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "budget": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "currency",
+                    "maximumCostMinorUnits",
+                    "maximumElapsedMs",
+                    "maximumConcurrency"
+                  ],
+                  "properties": {
+                    "currency": {
+                      "const": "USD"
+                    },
+                    "maximumCostMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000000
+                    },
+                    "maximumElapsedMs": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 86400000
+                    },
+                    "maximumConcurrency": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 32
+                    }
+                  }
+                },
+                "summary": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "completedStageCount",
+                    "searchableStageCount",
+                    "resultCount",
+                    "costMinorUnits",
+                    "elapsedMs",
+                    "duplicateSegments",
+                    "resumable"
+                  ],
+                  "properties": {
+                    "completedStageCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 5
+                    },
+                    "searchableStageCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "resultCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "costMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "elapsedMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "nextStage": {
+                      "enum": [
+                        "probe",
+                        "transcript",
+                        "diarization",
+                        "chunks",
+                        "moments"
+                      ]
+                    },
+                    "duplicateSegments": {
+                      "const": false
+                    },
+                    "resumable": {
+                      "const": true
+                    }
+                  }
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "runHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "operation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "type",
+                "status",
+                "phase",
+                "cancelable",
+                "retryable",
+                "target",
+                "attempt",
+                "maxAttempts",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "public-operation/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "type": {
+                  "enum": [
+                    "artifact-render",
+                    "media-ingest",
+                    "project-proxy-render",
+                    "project-final-export",
+                    "source-cleanup",
+                    "long-form-index"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "waiting",
+                    "retrying",
+                    "succeeded",
+                    "failed",
+                    "canceled"
+                  ]
+                },
+                "phase": {
+                  "enum": [
+                    "queued",
+                    "assembling",
+                    "probing",
+                    "normalizing",
+                    "transcribing",
+                    "diarizing",
+                    "chunking",
+                    "indexing",
+                    "materializing",
+                    "rendering",
+                    "verifying",
+                    "persisting",
+                    "waiting",
+                    "retrying",
+                    "completed",
+                    "failed",
+                    "canceled"
+                  ]
+                },
+                "progress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "completed"
+                  ],
+                  "properties": {
+                    "completed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "unit": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                    }
+                  }
+                },
+                "cancelable": {
+                  "type": "boolean"
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "target": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id",
+                    "manifestId"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "media-artifact"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "manifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "result": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "resource"
+                  ],
+                  "properties": {
+                    "resource": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "manifestId"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "media-artifact"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "manifestId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "error": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "maxAttempts": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "startedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/long-form-index-workflow-page/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -33129,6 +33771,662 @@
         }
       }
     },
+    "apollo://schemas/long-form-index-workflow-page/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "workflows"
+          ],
+          "properties": {
+            "workflows": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workflow",
+                  "operation"
+                ],
+                "properties": {
+                  "workflow": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "policyVersion",
+                      "id",
+                      "workspaceId",
+                      "projectId",
+                      "sourceArtifactId",
+                      "sourceArtifactSha256",
+                      "sourceManifestId",
+                      "sourceManifestHash",
+                      "durationMs",
+                      "status",
+                      "stages",
+                      "budget",
+                      "summary",
+                      "createdByClientId",
+                      "createdAt",
+                      "updatedAt",
+                      "runHash"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "long-form-index-workflow/v1"
+                      },
+                      "policyVersion": {
+                        "const": "long-form-index-workflow-policy/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "workspaceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "projectId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceManifestId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceManifestHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceTranscriptId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceTranscriptHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "durationMs": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 43200000
+                      },
+                      "status": {
+                        "enum": [
+                          "queued",
+                          "running",
+                          "partial",
+                          "succeeded",
+                          "failed"
+                        ]
+                      },
+                      "stages": {
+                        "type": "array",
+                        "minItems": 5,
+                        "maxItems": 5,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "stage",
+                            "sequence",
+                            "prerequisites",
+                            "execution",
+                            "status",
+                            "version",
+                            "budget",
+                            "concurrency",
+                            "inputHash",
+                            "idempotencyKey",
+                            "attempt",
+                            "resultCount",
+                            "searchable",
+                            "costMinorUnits",
+                            "elapsedMs",
+                            "stageHash"
+                          ],
+                          "properties": {
+                            "stage": {
+                              "enum": [
+                                "probe",
+                                "transcript",
+                                "diarization",
+                                "chunks",
+                                "moments"
+                              ]
+                            },
+                            "sequence": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 5
+                            },
+                            "prerequisites": {
+                              "type": "array",
+                              "maxItems": 2,
+                              "uniqueItems": true,
+                              "items": {
+                                "enum": [
+                                  "probe",
+                                  "transcript",
+                                  "diarization",
+                                  "chunks",
+                                  "moments"
+                                ]
+                              }
+                            },
+                            "execution": {
+                              "enum": [
+                                "process",
+                                "reuse"
+                              ]
+                            },
+                            "status": {
+                              "enum": [
+                                "pending",
+                                "ready",
+                                "running",
+                                "succeeded",
+                                "failed",
+                                "budget-blocked"
+                              ]
+                            },
+                            "version": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "provider",
+                                "model",
+                                "version"
+                              ],
+                              "properties": {
+                                "provider": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                                },
+                                "model": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                                },
+                                "version": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                                }
+                              }
+                            },
+                            "budget": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "estimatedCostMinorUnits",
+                                "maximumCostMinorUnits",
+                                "maximumElapsedMs"
+                              ],
+                              "properties": {
+                                "estimatedCostMinorUnits": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000000
+                                },
+                                "maximumCostMinorUnits": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000000
+                                },
+                                "maximumElapsedMs": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              }
+                            },
+                            "concurrency": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 32
+                            },
+                            "inputHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "idempotencyKey": {
+                              "type": "string",
+                              "minLength": 8,
+                              "maxLength": 256
+                            },
+                            "attempt": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "outputHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "outputReference": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "type",
+                                "id"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "enum": [
+                                    "media-artifact-manifest",
+                                    "media-transcript",
+                                    "speaker-diarization-run",
+                                    "hierarchical-processing-run",
+                                    "long-form-index-run"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                }
+                              }
+                            },
+                            "resultCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "searchable": {
+                              "type": "boolean"
+                            },
+                            "costMinorUnits": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "elapsedMs": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "startedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "completedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "error": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "code",
+                                "message",
+                                "retryable"
+                              ],
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                                },
+                                "message": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                },
+                                "retryable": {
+                                  "type": "boolean"
+                                }
+                              }
+                            },
+                            "stageHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      },
+                      "budget": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "currency",
+                          "maximumCostMinorUnits",
+                          "maximumElapsedMs",
+                          "maximumConcurrency"
+                        ],
+                        "properties": {
+                          "currency": {
+                            "const": "USD"
+                          },
+                          "maximumCostMinorUnits": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000000
+                          },
+                          "maximumElapsedMs": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 86400000
+                          },
+                          "maximumConcurrency": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 32
+                          }
+                        }
+                      },
+                      "summary": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "completedStageCount",
+                          "searchableStageCount",
+                          "resultCount",
+                          "costMinorUnits",
+                          "elapsedMs",
+                          "duplicateSegments",
+                          "resumable"
+                        ],
+                        "properties": {
+                          "completedStageCount": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 5
+                          },
+                          "searchableStageCount": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 3
+                          },
+                          "resultCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "costMinorUnits": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "elapsedMs": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "nextStage": {
+                            "enum": [
+                              "probe",
+                              "transcript",
+                              "diarization",
+                              "chunks",
+                              "moments"
+                            ]
+                          },
+                          "duplicateSegments": {
+                            "const": false
+                          },
+                          "resumable": {
+                            "const": true
+                          }
+                        }
+                      },
+                      "createdByClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "runHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  },
+                  "operation": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "type",
+                      "status",
+                      "phase",
+                      "cancelable",
+                      "retryable",
+                      "target",
+                      "attempt",
+                      "maxAttempts",
+                      "createdAt",
+                      "updatedAt"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "public-operation/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "type": {
+                        "enum": [
+                          "artifact-render",
+                          "media-ingest",
+                          "project-proxy-render",
+                          "project-final-export",
+                          "source-cleanup",
+                          "long-form-index"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "queued",
+                          "running",
+                          "waiting",
+                          "retrying",
+                          "succeeded",
+                          "failed",
+                          "canceled"
+                        ]
+                      },
+                      "phase": {
+                        "enum": [
+                          "queued",
+                          "assembling",
+                          "probing",
+                          "normalizing",
+                          "transcribing",
+                          "diarizing",
+                          "chunking",
+                          "indexing",
+                          "materializing",
+                          "rendering",
+                          "verifying",
+                          "persisting",
+                          "waiting",
+                          "retrying",
+                          "completed",
+                          "failed",
+                          "canceled"
+                        ]
+                      },
+                      "progress": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "completed"
+                        ],
+                        "properties": {
+                          "completed": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "total": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "unit": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                          }
+                        }
+                      },
+                      "cancelable": {
+                        "type": "boolean"
+                      },
+                      "retryable": {
+                        "type": "boolean"
+                      },
+                      "target": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "id",
+                          "manifestId"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "media-artifact"
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "manifestId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      },
+                      "result": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "resource"
+                        ],
+                        "properties": {
+                          "resource": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "type",
+                              "id",
+                              "manifestId"
+                            ],
+                            "properties": {
+                              "type": {
+                                "const": "media-artifact"
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "manifestId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "error": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "message",
+                          "retryable"
+                        ],
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                          },
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "retryable": {
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      "attempt": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxAttempts": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "startedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "completedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/long-form-index-workflow-read/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -33371,6 +34669,644 @@
                       "outputHash": {
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "searchable": {
+                        "type": "boolean"
+                      },
+                      "costMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "elapsedMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "startedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "completedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "error": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "message",
+                          "retryable"
+                        ],
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                          },
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "retryable": {
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      "stageHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                },
+                "budget": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "currency",
+                    "maximumCostMinorUnits",
+                    "maximumElapsedMs",
+                    "maximumConcurrency"
+                  ],
+                  "properties": {
+                    "currency": {
+                      "const": "USD"
+                    },
+                    "maximumCostMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000000
+                    },
+                    "maximumElapsedMs": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 86400000
+                    },
+                    "maximumConcurrency": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 32
+                    }
+                  }
+                },
+                "summary": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "completedStageCount",
+                    "searchableStageCount",
+                    "resultCount",
+                    "costMinorUnits",
+                    "elapsedMs",
+                    "duplicateSegments",
+                    "resumable"
+                  ],
+                  "properties": {
+                    "completedStageCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 5
+                    },
+                    "searchableStageCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "resultCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "costMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "elapsedMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "nextStage": {
+                      "enum": [
+                        "probe",
+                        "transcript",
+                        "diarization",
+                        "chunks",
+                        "moments"
+                      ]
+                    },
+                    "duplicateSegments": {
+                      "const": false
+                    },
+                    "resumable": {
+                      "const": true
+                    }
+                  }
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "runHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "operation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "type",
+                "status",
+                "phase",
+                "cancelable",
+                "retryable",
+                "target",
+                "attempt",
+                "maxAttempts",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "public-operation/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "type": {
+                  "enum": [
+                    "artifact-render",
+                    "media-ingest",
+                    "project-proxy-render",
+                    "project-final-export",
+                    "source-cleanup",
+                    "long-form-index"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "waiting",
+                    "retrying",
+                    "succeeded",
+                    "failed",
+                    "canceled"
+                  ]
+                },
+                "phase": {
+                  "enum": [
+                    "queued",
+                    "assembling",
+                    "probing",
+                    "normalizing",
+                    "transcribing",
+                    "diarizing",
+                    "chunking",
+                    "indexing",
+                    "materializing",
+                    "rendering",
+                    "verifying",
+                    "persisting",
+                    "waiting",
+                    "retrying",
+                    "completed",
+                    "failed",
+                    "canceled"
+                  ]
+                },
+                "progress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "completed"
+                  ],
+                  "properties": {
+                    "completed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "unit": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                    }
+                  }
+                },
+                "cancelable": {
+                  "type": "boolean"
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "target": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id",
+                    "manifestId"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "media-artifact"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "manifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "result": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "resource"
+                  ],
+                  "properties": {
+                    "resource": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "manifestId"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "media-artifact"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "manifestId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "error": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "maxAttempts": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "startedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/long-form-index-workflow-read/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "workflow",
+            "operation"
+          ],
+          "properties": {
+            "workflow": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "policyVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "sourceArtifactId",
+                "sourceArtifactSha256",
+                "sourceManifestId",
+                "sourceManifestHash",
+                "durationMs",
+                "status",
+                "stages",
+                "budget",
+                "summary",
+                "createdByClientId",
+                "createdAt",
+                "updatedAt",
+                "runHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "long-form-index-workflow/v1"
+                },
+                "policyVersion": {
+                  "const": "long-form-index-workflow-policy/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceArtifactSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sourceManifestId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceManifestHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sourceTranscriptId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceTranscriptHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "durationMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 43200000
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "partial",
+                    "succeeded",
+                    "failed"
+                  ]
+                },
+                "stages": {
+                  "type": "array",
+                  "minItems": 5,
+                  "maxItems": 5,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "stage",
+                      "sequence",
+                      "prerequisites",
+                      "execution",
+                      "status",
+                      "version",
+                      "budget",
+                      "concurrency",
+                      "inputHash",
+                      "idempotencyKey",
+                      "attempt",
+                      "resultCount",
+                      "searchable",
+                      "costMinorUnits",
+                      "elapsedMs",
+                      "stageHash"
+                    ],
+                    "properties": {
+                      "stage": {
+                        "enum": [
+                          "probe",
+                          "transcript",
+                          "diarization",
+                          "chunks",
+                          "moments"
+                        ]
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5
+                      },
+                      "prerequisites": {
+                        "type": "array",
+                        "maxItems": 2,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "probe",
+                            "transcript",
+                            "diarization",
+                            "chunks",
+                            "moments"
+                          ]
+                        }
+                      },
+                      "execution": {
+                        "enum": [
+                          "process",
+                          "reuse"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "pending",
+                          "ready",
+                          "running",
+                          "succeeded",
+                          "failed",
+                          "budget-blocked"
+                        ]
+                      },
+                      "version": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "provider",
+                          "model",
+                          "version"
+                        ],
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                          },
+                          "model": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                          },
+                          "version": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                          }
+                        }
+                      },
+                      "budget": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "estimatedCostMinorUnits",
+                          "maximumCostMinorUnits",
+                          "maximumElapsedMs"
+                        ],
+                        "properties": {
+                          "estimatedCostMinorUnits": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000000
+                          },
+                          "maximumCostMinorUnits": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000000
+                          },
+                          "maximumElapsedMs": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 86400000
+                          }
+                        }
+                      },
+                      "concurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 32
+                      },
+                      "inputHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "idempotencyKey": {
+                        "type": "string",
+                        "minLength": 8,
+                        "maxLength": 256
+                      },
+                      "attempt": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "outputHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "outputReference": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "id"
+                        ],
+                        "properties": {
+                          "type": {
+                            "enum": [
+                              "media-artifact-manifest",
+                              "media-transcript",
+                              "speaker-diarization-run",
+                              "hierarchical-processing-run",
+                              "long-form-index-run"
+                            ]
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
                       },
                       "resultCount": {
                         "type": "integer",

@@ -20,6 +20,17 @@ export const LONG_FORM_INDEX_STAGES = [
 export type LongFormIndexStage =
   (typeof LONG_FORM_INDEX_STAGES)[number]
 
+export const LONG_FORM_INDEX_STAGE_OUTPUT_TYPES = Object.freeze({
+  probe: 'media-artifact-manifest',
+  transcript: 'media-transcript',
+  diarization: 'speaker-diarization-run',
+  chunks: 'hierarchical-processing-run',
+  moments: 'long-form-index-run',
+} as const)
+
+export type LongFormIndexStageOutputType =
+  (typeof LONG_FORM_INDEX_STAGE_OUTPUT_TYPES)[LongFormIndexStage]
+
 export const LONG_FORM_INDEX_STAGE_DEPENDENCIES:
 Readonly<Record<LongFormIndexStage, readonly LongFormIndexStage[]>> =
   Object.freeze({
@@ -71,6 +82,10 @@ export interface LongFormIndexStageCheckpoint {
   idempotencyKey: string
   attempt: number
   outputHash?: string
+  outputReference?: Readonly<{
+    type: LongFormIndexStageOutputType
+    id: string
+  }>
   resultCount: number
   searchable: boolean
   costMinorUnits: number
@@ -131,6 +146,7 @@ type StageBudgets = Readonly<
 type ReusableOutputs = Readonly<
   Partial<Record<LongFormIndexStage, Readonly<{
     outputHash: string
+    outputEntityId: string
     resultCount: number
   }>>>
 >
@@ -262,6 +278,13 @@ function freezeStage(
     prerequisites: Object.freeze([...withoutHash.prerequisites]),
     version: Object.freeze({ ...withoutHash.version }),
     budget: Object.freeze({ ...withoutHash.budget }),
+    ...(withoutHash.outputReference
+      ? {
+          outputReference: Object.freeze({
+            ...withoutHash.outputReference,
+          }),
+        }
+      : {}),
     ...(withoutHash.error
       ? { error: Object.freeze({ ...withoutHash.error }) }
       : {}),
@@ -366,6 +389,7 @@ function stageInputHash(input: {
     prerequisiteOutputs: input.prerequisites.map((stage) => ({
       stage: stage.stage,
       outputHash: stage.outputHash,
+      outputReference: stage.outputReference,
     })),
     version: input.version,
   })
@@ -543,6 +567,13 @@ export function createLongFormIndexWorkflow(input: {
           reusableOutput.outputHash,
           `reusableOutputs.${stage}.outputHash`,
         ),
+        outputReference: Object.freeze({
+          type: LONG_FORM_INDEX_STAGE_OUTPUT_TYPES[stage],
+          id: identity(
+            reusableOutput.outputEntityId,
+            `reusableOutputs.${stage}.outputEntityId`,
+          ),
+        }),
         resultCount: integer(
           reusableOutput.resultCount,
           `reusableOutputs.${stage}.resultCount`,
@@ -671,6 +702,7 @@ export function completeLongFormIndexStage(input: {
   expectedRunHash: string
   expectedInputHash: string
   outputHash: string
+  outputEntityId: string
   resultCount: number
   costMinorUnits: number
   elapsedMs: number
@@ -731,6 +763,10 @@ export function completeLongFormIndexStage(input: {
     ...current,
     status: 'succeeded',
     outputHash: hash(input.outputHash, 'outputHash'),
+    outputReference: Object.freeze({
+      type: LONG_FORM_INDEX_STAGE_OUTPUT_TYPES[input.stage],
+      id: identity(input.outputEntityId, 'outputEntityId'),
+    }),
     resultCount,
     searchable:
       ['transcript', 'chunks', 'moments'].includes(input.stage),
@@ -889,9 +925,21 @@ function assertStage(
     assertDomain(
       stage.resultCount >= 1 &&
         Boolean(stage.completedAt) &&
+        stage.outputReference?.type ===
+          LONG_FORM_INDEX_STAGE_OUTPUT_TYPES[stage.stage] &&
         !stage.error,
       'PERSISTENCE_CONFLICT',
       `Stored completed long-form stage ${index + 1} is invalid`,
+    )
+    identity(
+      stage.outputReference?.id,
+      `stages[${index}].outputReference.id`,
+    )
+  } else {
+    assertDomain(
+      !stage.outputHash && !stage.outputReference,
+      'PERSISTENCE_CONFLICT',
+      `Stored incomplete long-form stage ${index + 1} has output`,
     )
   }
   if (stage.status === 'running') {

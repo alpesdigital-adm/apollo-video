@@ -170,6 +170,21 @@ test('F2.022 creates one API-first durable workflow and reuses exact probe and t
     'diarization',
   )
   assert.equal(created.record.workflow.summary.costMinorUnits, 0)
+  assert.deepEqual(
+    created.record.workflow.stages
+      .slice(0, 2)
+      .map((stage) => stage.outputReference),
+    [
+      {
+        type: 'media-artifact-manifest',
+        id: 'manifest-long-form',
+      },
+      {
+        type: 'media-transcript',
+        id: 'transcript-long-form',
+      },
+    ],
+  )
 
   const replayed = await create(request())
   assert.equal(replayed.replayed, true)

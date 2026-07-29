@@ -63,9 +63,14 @@ function initialWorkflow() {
     versions,
     stageBudgets,
     reusableOutputs: {
-      probe: { outputHash: sha('probe'), resultCount: 1 },
+      probe: {
+        outputHash: sha('probe'),
+        outputEntityId: 'manifest-long-form-worker',
+        resultCount: 1,
+      },
       transcript: {
         outputHash: sha('transcript'),
+        outputEntityId: 'transcript-long-form-worker',
         resultCount: 3200,
       },
     },
@@ -210,6 +215,8 @@ test('F2.022 worker skips exact reuse, runs remaining stages and settles one dur
         assert.equal(input.signal.aborted, false)
         return {
           outputHash: sha(`output-${input.checkpoint.stage}`),
+          outputEntityId:
+            `${input.checkpoint.stage}-long-form-worker`,
           resultCount:
             input.checkpoint.stage === 'moments' ? 24 : 120,
           costMinorUnits: 10,
@@ -299,6 +306,7 @@ test('F2.022 worker aborts without checkpoint promotion after lease loss', async
         await input.heartbeat()
         return {
           outputHash: sha('stale-output'),
+          outputEntityId: 'diarization-stale-worker',
           resultCount: 1,
           costMinorUnits: 1,
           elapsedMs: 1,

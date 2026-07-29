@@ -81,8 +81,16 @@ function fixture(overrides = {}) {
     versions,
     stageBudgets,
     reusableOutputs: {
-      probe: { outputHash: sha('c'), resultCount: 1 },
-      transcript: { outputHash: sha('d'), resultCount: 1_800 },
+      probe: {
+        outputHash: sha('c'),
+        outputEntityId: 'manifest-long-form',
+        resultCount: 1,
+      },
+      transcript: {
+        outputHash: sha('d'),
+        outputEntityId: 'transcript-long-form',
+        resultCount: 1_800,
+      },
     },
     budget: {
       currency: 'USD',
@@ -110,6 +118,7 @@ function runStage(workflow, stage, second, output, resultCount, cost) {
     expectedInputHash:
       running.stages.find((item) => item.stage === stage).inputHash,
     outputHash: output,
+    outputEntityId: `${stage}-output-${second}`,
     resultCount,
     costMinorUnits: cost,
     elapsedMs: 100,
@@ -187,6 +196,10 @@ test('T-FR-133 resumes after restart without changing stage identity', () => {
     stage.stage === 'chunks')
   assert.equal(afterRestart.idempotencyKey, beforeRestart.idempotencyKey)
   assert.equal(afterRestart.outputHash, beforeRestart.outputHash)
+  assert.deepEqual(afterRestart.outputReference, {
+    type: 'hierarchical-processing-run',
+    id: 'chunks-output-3',
+  })
   assert.equal(afterRestart.resultCount, 24)
   assert.equal(hydrated.summary.duplicateSegments, false)
   assert.throws(
@@ -239,9 +252,21 @@ test('T-FR-133 retries only the failed stage with the same input', () => {
 test('T-FR-133 blocks a stage before exceeding the global budget', () => {
   const workflow = createLongFormIndexWorkflow(fixture({
     reusableOutputs: {
-      probe: { outputHash: sha('c'), resultCount: 1 },
-      transcript: { outputHash: sha('d'), resultCount: 1_800 },
-      diarization: { outputHash: sha('e'), resultCount: 2 },
+      probe: {
+        outputHash: sha('c'),
+        outputEntityId: 'manifest-long-form',
+        resultCount: 1,
+      },
+      transcript: {
+        outputHash: sha('d'),
+        outputEntityId: 'transcript-long-form',
+        resultCount: 1_800,
+      },
+      diarization: {
+        outputHash: sha('e'),
+        outputEntityId: 'diarization-long-form',
+        resultCount: 2,
+      },
     },
     budget: {
       currency: 'USD',
@@ -286,6 +311,7 @@ test('T-FR-133 rejects stale completion and persisted tampering', () => {
         running.stages.find((stage) =>
           stage.stage === 'diarization').inputHash,
       outputHash: sha('e'),
+      outputEntityId: 'diarization-long-form',
       resultCount: 2,
       costMinorUnits: 100,
       elapsedMs: 100,
@@ -298,5 +324,13 @@ test('T-FR-133 rejects stale completion and persisted tampering', () => {
   assert.throws(
     () => hydrateLongFormIndexWorkflow(tampered),
     /hash is invalid/,
+  )
+  const unboundOutput = structuredClone(
+    runStage(workflow, 'diarization', 1, sha('e'), 2, 100),
+  )
+  delete unboundOutput.stages[2].outputReference
+  assert.throws(
+    () => hydrateLongFormIndexWorkflow(unboundOutput),
+    /completed long-form stage 3 is invalid/,
   )
 })

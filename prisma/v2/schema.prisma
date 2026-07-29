@@ -1693,6 +1693,8 @@ model V2LongFormIndexStageCheckpoint {
   idempotencyKey    String    @db.VarChar(256)
   attempt           Int
   outputHash        String?   @db.Char(64)
+  outputEntityType  String?   @db.VarChar(64)
+  outputEntityId    String?   @db.VarChar(128)
   resultCount       Int
   searchable        Boolean
   costMinorUnits    Int

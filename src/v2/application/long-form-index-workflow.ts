@@ -308,6 +308,7 @@ export function createLongFormIndexWorkflowService(dependencies: {
       reusableOutputs: {
         probe: {
           outputHash: context.probeOutputHash,
+          outputEntityId: sourceManifestId,
           resultCount: 1,
         },
         ...(context.sourceTranscript
@@ -315,6 +316,8 @@ export function createLongFormIndexWorkflowService(dependencies: {
               transcript: {
                 outputHash:
                   context.sourceTranscript.transcriptHash,
+                outputEntityId:
+                  context.sourceTranscript.id,
                 resultCount:
                   context.sourceTranscript.resultCount,
               },

@@ -222,6 +222,13 @@ const longFormWorkflowBudgetExample = {
   maximumElapsedMs: 14400000,
   maximumConcurrency: 4,
 }
+const longFormOutputTypeByStage = {
+  probe: 'media-artifact-manifest',
+  transcript: 'media-transcript',
+  diarization: 'speaker-diarization-run',
+  chunks: 'hierarchical-processing-run',
+  moments: 'long-form-index-run',
+}
 const longFormStageExample = (
   stage: string,
   sequence: number,
@@ -250,6 +257,19 @@ const longFormStageExample = (
     `long-form-workflow-example-1:${stage}:${String(sequence).repeat(32)}`,
   attempt: 0,
   ...(outputHash ? { outputHash } : {}),
+  ...(outputHash
+    ? {
+        outputReference: {
+          type:
+            longFormOutputTypeByStage[
+              stage as keyof typeof longFormOutputTypeByStage
+            ],
+          id: stage === 'probe'
+            ? 'manifest-long-form-example-1'
+            : `${stage}-long-form-example-1`,
+        },
+      }
+    : {}),
   resultCount: outputHash ? 1 : 0,
   searchable: stage === 'transcript',
   costMinorUnits: 0,
@@ -320,6 +340,16 @@ const longFormIndexWorkflowExample = {
   createdAt,
   updatedAt: createdAt,
   runHash: 'f'.repeat(64),
+}
+const longFormIndexWorkflowExampleV1 = {
+  ...longFormIndexWorkflowExample,
+  stages: longFormIndexWorkflowExample.stages.map((stage) => {
+    const {
+      outputReference: _outputReference,
+      ...legacyStage
+    } = stage
+    return legacyStage
+  }),
 }
 const createLongFormIndexWorkflowRequestExample = {
   sourceArtifactId: longFormIndexWorkflowExample.sourceArtifactId,
@@ -7353,6 +7383,16 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/long-form-index-workflow-mutated/v1': [
       {
         data: {
+          workflow: longFormIndexWorkflowExampleV1,
+          operation: queuedLongFormIndexOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/long-form-index-workflow-mutated/v2': [
+      {
+        data: {
           workflow: longFormIndexWorkflowExample,
           operation: queuedLongFormIndexOperationExample,
           replayed: false,
@@ -7363,6 +7403,15 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/long-form-index-workflow-read/v1': [
       {
         data: {
+          workflow: longFormIndexWorkflowExampleV1,
+          operation: queuedLongFormIndexOperationExample,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/long-form-index-workflow-read/v2': [
+      {
+        data: {
           workflow: longFormIndexWorkflowExample,
           operation: queuedLongFormIndexOperationExample,
         },
@@ -7370,6 +7419,17 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
     ],
     'apollo://schemas/long-form-index-workflow-page/v1': [
+      {
+        data: {
+          workflows: [{
+            workflow: longFormIndexWorkflowExampleV1,
+            operation: queuedLongFormIndexOperationExample,
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/long-form-index-workflow-page/v2': [
       {
         data: {
           workflows: [{

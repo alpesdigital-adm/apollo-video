@@ -5,6 +5,7 @@ import type {
 
 export interface LongFormIndexStageResult {
   outputHash: string
+  outputEntityId: string
   resultCount: number
   costMinorUnits: number
   elapsedMs: number

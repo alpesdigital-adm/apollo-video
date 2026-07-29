@@ -215,6 +215,10 @@ function hydrateWorkflow(
       stored.idempotencyKey !== stage.idempotencyKey ||
       stored.attempt !== stage.attempt ||
       stored.outputHash !== (stage.outputHash ?? null) ||
+      stored.outputEntityType !==
+        (stage.outputReference?.type ?? null) ||
+      stored.outputEntityId !==
+        (stage.outputReference?.id ?? null) ||
       stored.resultCount !== stage.resultCount ||
       stored.searchable !== stage.searchable ||
       stored.costMinorUnits !== stage.costMinorUnits ||
@@ -312,6 +316,8 @@ function stageData(
     idempotencyKey: stage.idempotencyKey,
     attempt: stage.attempt,
     outputHash: stage.outputHash,
+    outputEntityType: stage.outputReference?.type,
+    outputEntityId: stage.outputReference?.id,
     resultCount: stage.resultCount,
     searchable: stage.searchable,
     costMinorUnits: stage.costMinorUnits,
@@ -389,6 +395,8 @@ function stageMutableData(
     idempotencyKey: stage.idempotencyKey,
     attempt: stage.attempt,
     outputHash: stage.outputHash ?? null,
+    outputEntityType: stage.outputReference?.type ?? null,
+    outputEntityId: stage.outputReference?.id ?? null,
     resultCount: stage.resultCount,
     searchable: stage.searchable,
     costMinorUnits: stage.costMinorUnits,

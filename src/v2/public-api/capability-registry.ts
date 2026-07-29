@@ -1818,7 +1818,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.long-form-index-workflows.list',
-    version: '1.0.0',
+    version: '1.1.0',
     title: 'List long-form index workflows',
     description: 'Lists durable five-stage indexing workflows, partial-search availability, budgets and their public operations.',
     exposure: 'public',
@@ -1826,7 +1826,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:read'],
     outputSchemaRef:
-      'apollo://schemas/long-form-index-workflow-page/v1',
+      'apollo://schemas/long-form-index-workflow-page/v2',
     endpoint: {
       method: 'GET',
       path:
@@ -1882,7 +1882,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.long-form-index-workflows.create',
-    version: '1.0.0',
+    version: '1.1.0',
     title: 'Create long-form index workflow',
     description: 'Creates a durable, resumable and budget-bounded probe, transcript, diarization, chunk and moment indexing workflow for an immutable video master.',
     exposure: 'public',
@@ -1892,7 +1892,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     inputSchemaRef:
       'apollo://schemas/create-long-form-index-workflow-request/v1',
     outputSchemaRef:
-      'apollo://schemas/long-form-index-workflow-mutated/v1',
+      'apollo://schemas/long-form-index-workflow-mutated/v2',
     endpoint: {
       method: 'POST',
       path:
@@ -1909,7 +1909,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.long-form-index-workflows.read',
-    version: '1.0.0',
+    version: '1.1.0',
     title: 'Read long-form index workflow',
     description: 'Reads one durable workflow with immutable checkpoints, partial-search status, cost and operation progress.',
     exposure: 'public',
@@ -1917,7 +1917,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:read'],
     outputSchemaRef:
-      'apollo://schemas/long-form-index-workflow-read/v1',
+      'apollo://schemas/long-form-index-workflow-read/v2',
     endpoint: {
       method: 'GET',
       path:

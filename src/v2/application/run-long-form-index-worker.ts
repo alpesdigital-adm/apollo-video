@@ -309,6 +309,7 @@ export function runNextLongFormIndexOperationService(
           expectedRunHash: workflow.runHash,
           expectedInputHash: checkpoint.inputHash,
           outputHash: result.outputHash,
+          outputEntityId: result.outputEntityId,
           resultCount: result.resultCount,
           costMinorUnits: result.costMinorUnits,
           elapsedMs: result.elapsedMs,
