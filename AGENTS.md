@@ -161,6 +161,53 @@ Não faça deploy do produto novo enquanto qualquer gate falhar:
 
 Commit e push podem ocorrer por slices coerentes. Deploy somente depois dos gates aplicáveis e nunca para “ver se funciona” em produção.
 
+## Segurança obrigatória para E2E remoto e processos efêmeros
+
+Em 29 de julho de 2026, processos do Apollo mantiveram ou reabriram pools contra
+`apollo_video_v2_e2e` na VPS. Conexões órfãs impediram `DROP DATABASE`, deixaram
+processos `dropdb` esperando por horas e contribuíram para pressão de memória em
+uma máquina sem swap. Matar `dropdb` tratou apenas o sintoma; o cliente que
+reconectava era a causa.
+
+Estas regras são vinculantes para agentes, scripts manuais e CI:
+
+1. **VPS não é o ambiente E2E padrão.** Prefira PostgreSQL descartável local. Um
+   banco remoto só pode ser usado quando estiver explicitamente isolado de
+   produção e a saúde do host permitir.
+2. **É proibido usar `dropdb` ou `DROP DATABASE` no ciclo E2E remoto.** Reset de
+   estado usa tabelas/schema do banco dedicado e só começa depois que todos os
+   clientes do run foram encerrados.
+3. **É proibido iniciar servidor, worker, browser ou túnel remoto em modo
+   fire-and-forget.** Todo processo efêmero precisa de owner, PID, run ID, prazo
+   máximo e cleanup em `finally`. Interrupção, timeout, compactação ou mudança de
+   permissões não dispensam o cleanup.
+4. A URL E2E deve declarar `application_name=apollo-video-e2e-<run-id>`,
+   `connection_limit` máximo de 5, `pool_timeout` máximo de 10 segundos e
+   `connect_timeout` máximo de 10 segundos. A role E2E deve ter connection limit
+   baixo e timeouts de sessão ociosa configurados no servidor.
+5. Antes do run, adquirir exclusividade para o banco e verificar
+   `pg_stat_activity`. Se houver outro `application_name` E2E, conexão antiga,
+   tentativa de DROP ou origem desconhecida, o run aborta sem criar processos
+   adicionais.
+6. Antes de usar a VPS, verificar memória livre, swap/OOM, CPU steal, load e
+   ocupação de `max_connections`. CPU steal sustentado acima de 10%, menos de
+   2 GiB livres, evento recente de OOM ou mais de 50% das conexões ocupadas
+   bloqueiam o E2E remoto.
+7. A ordem de cleanup é: fechar browser; parar app/workers; aguardar
+   `PrismaClient.$disconnect()`; encerrar o túnel pertencente ao run; verificar
+   zero backends do `application_name`. Só depois outro reset ou run pode
+   começar.
+8. **Timeout não prova encerramento.** Depois de qualquer timeout, conferir o
+   processo cliente e os backends no servidor. Se sessões reaparecerem, localizar
+   e parar o cliente que reconecta; não iniciar novos `dropdb`, `docker exec`,
+   testes ou browsers.
+9. O postflight precisa registrar PIDs encerrados, browsers fechados, túnel
+   encerrado quando for do run e contagem zero de conexões órfãs. Postflight
+   inconclusivo bloqueia novo E2E remoto e deploy.
+10. Se o proprietário informar que um incidente na VPS está em resolução, o
+    agente atua somente em arquivos e procedimentos locais até liberação
+    explícita; não investiga nem “ajuda” executando comandos remotos em paralelo.
+
 ## Projeto real usado como E2E de recuperação
 
 O primeiro E2E deve usar o master bruto já preservado do projeto de boas-vindas da Imersão.

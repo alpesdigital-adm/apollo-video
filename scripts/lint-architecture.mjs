@@ -7,6 +7,10 @@ const v2Root = join(repositoryRoot, 'src', 'v2')
 const publicRoutesRoot = join(repositoryRoot, 'src', 'app', 'v1')
 const applicationUiRoot = join(repositoryRoot, 'src', 'app')
 const legacyRuntimeRoot = join(repositoryRoot, 'src', 'lib')
+const operationalRoots = [
+  join(repositoryRoot, 'scripts'),
+  join(repositoryRoot, 'tests', 'v2'),
+]
 const compositionRoots = new Set(['public-api/authentication.ts'])
 const forbiddenLegacyPaths = [
   'prisma/schema.prisma',
@@ -103,8 +107,39 @@ for (const file of await files(applicationUiRoot)) {
   }
 }
 
+const destructiveRemoteDatabasePatterns = [
+  {
+    pattern: new RegExp(`\\b${'drop' + 'db'}\\b`, 'i'),
+    reason: 'operational code must not invoke the database-drop CLI',
+  },
+  {
+    pattern: new RegExp(`\\b${'DROP'}\\s+${'DATABASE'}\\b`, 'i'),
+    reason: 'operational code must reset an isolated schema, never drop a remote database',
+  },
+]
+for (const root of operationalRoots) {
+  for (const file of await files(root)) {
+    if (!/\.(mjs|cjs|js|ts|tsx|ps1|sh)$/.test(file)) continue
+    if (file === fileURLToPath(import.meta.url)) continue
+    const rel = normalized(relative(repositoryRoot, file))
+    const source = await readFile(file, 'utf8')
+    for (const rule of destructiveRemoteDatabasePatterns) {
+      if (rule.pattern.test(source)) {
+        violations.push(`${rel}: ${rule.reason}`)
+      }
+    }
+    if (/detached\s*:\s*true/.test(source)) {
+      violations.push(
+        `${rel}: E2E processes must remain supervised and cannot be detached`,
+      )
+    }
+  }
+}
+
 if (violations.length) {
   console.error(violations.join('\n'))
   process.exit(1)
 }
-console.log('Architecture boundaries verified: only the Postgres/API-first Apollo runtime exists')
+console.log(
+  'Architecture and E2E operational boundaries verified: only the supervised Postgres/API-first Apollo runtime exists',
+)
