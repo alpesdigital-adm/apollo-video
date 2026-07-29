@@ -1189,10 +1189,10 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F2.019 — Proof need [FR-130]
 
-- [ ] Fazer StoryPlan declarar tipo, função e momento de prova necessários. Evidência T-FR-130.
-- [ ] Consultar EvidenceSegments compatíveis antes de gerar card genérico. Evidência T-FR-130.
-- [ ] Permitir ausência explícita quando não houver prova adequada. Evidência: `proof-unavailable` sem card fabricado.
-- [ ] Criar golden stories que pedem depoimento, dado, demonstração e nenhuma prova. Evidência T-FR-130.
+- [x] Fazer StoryPlan declarar tipo, função e momento de prova necessários. Evidência T-FR-130.
+- [x] Consultar EvidenceSegments compatíveis antes de gerar card genérico. Evidência T-FR-130.
+- [x] Permitir ausência explícita quando não houver prova adequada. Evidência: `proof-unavailable` sem card fabricado.
+- [x] Criar golden stories que pedem depoimento, dado, demonstração e nenhuma prova. Evidência T-FR-130.
 
 ### F2.020 — Integrity gate de prova [FR-131]
 

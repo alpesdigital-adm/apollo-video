@@ -23,7 +23,7 @@ Este gate entrega a fronteira normalizada para detectores internos ou externos.
 O request registra `provider`, `model`, `version`, sinais e confidence e rejeita
 campos livres. Portanto, um adapter de visão/áudio pode evoluir sem alterar o
 domínio. O gate não afirma que o Apollo treinou um modelo proprietário, não
-executa limpeza e não substitui a limpeza F2.017 nem a limpeza avançada F2.019.
+executa limpeza e não substitui a limpeza F2.017 nem a limpeza avançada F3.017.
 
 ## Fluxo V2
 

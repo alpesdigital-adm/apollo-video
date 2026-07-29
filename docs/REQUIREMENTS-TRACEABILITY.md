@@ -142,7 +142,7 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-121 | Contaminação | S3 | D1,D2 | cinco tipos localizados por range/região/confidence, impacto de remoção e diagnóstico Director/humano | T-FR-121 + seis fixtures audiovisuais + API/PostgreSQL E2E + UI + produção `e00727f` |
 | FR-122 | Limpeza MVP | S3 | D1,D5 | trim/reframe/cover/reject | visual golden |
 | FR-124 | Validation envelope | S3 | D1,D7 | copy/take/framing/timing/opening derivados do escopo; proteção automática; saída com aprovação e log preserved/lost; hook exato + corpo/prova/CTA sem excesso | T-FR-124 domínio + API/PostgreSQL E2E + constraints + UI `/v1` |
-| FR-130 | Proof need | S1,S3 | D2 | story solicita evidência adequada | golden |
+| FR-130 | Proof need | S1,S3 | D2 | StoryPlan declara claim/tipo/função/momento; busca EvidenceSegments autorizados primeiro; seleciona evidência exata ou registra `proof-unavailable`/`no-proof-needed`; card genérico é impossível | T-FR-130 golden + round-trip canônico + API/PostgreSQL E2E + constraints + UI `/v1` |
 | FR-131 | Integrity gate | S1,S3 | D2,D7 | prova incompatível bloqueada | policy |
 | FR-132 | Modos de prova | S1,S2 | D2,D3,D5 | cutaway/split/card renderizam | visual golden |
 | FR-133 | Long-form indexing | S3 | D1,D2,D4 | 2h indexável em background | performance |

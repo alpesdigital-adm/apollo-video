@@ -231,6 +231,68 @@ interface ValidationEnvelopeReuseData {
     createdAt: string
   }
 }
+type ProofNeedType =
+  | 'testimonial'
+  | 'data'
+  | 'demonstration'
+  | 'none'
+type ProofNeedResolution =
+  | 'selected-evidence'
+  | 'proof-unavailable'
+  | 'no-proof-needed'
+interface ProofNeedRunData {
+  id: string
+  objective: string
+  targetRecipeId: string
+  items: {
+    id: string
+    sequence: number
+    claimText: string
+    type: ProofNeedType
+    function:
+      | 'build-trust'
+      | 'substantiate-quantified-claim'
+      | 'demonstrate-mechanism'
+      | 'no-proof-needed'
+    required: boolean
+    moment: {
+      placement:
+        | 'existing-proof-block'
+        | 'after-claim-before-next-block'
+        | 'not-applicable'
+      timelineFrame: number
+      timelineMs: number
+    }
+    search: {
+      strategy: 'evidence-first'
+      attempted: boolean
+      categories: string[]
+      candidateEvidenceIds: string[]
+      rejectedEvidence: {
+        evidenceId: string
+        reasons: string[]
+      }[]
+    }
+    resolution: ProofNeedResolution
+    selectedEvidence?: {
+      id: string
+      category: string
+      sourceRangeMs: [number, number]
+      contextRangeMs: [number, number]
+      score: number
+    }
+    proofUnavailable: boolean
+    genericCardGenerated: false
+  }[]
+  summary: {
+    needCount: number
+    selectedEvidenceCount: number
+    proofUnavailableCount: number
+    noProofNeededCount: number
+    genericCardCount: 0
+  }
+  createdAt: string
+}
 interface PublicOperation {
   id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export' | 'source-cleanup'; status: string; phase: string;
   progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string
@@ -464,6 +526,19 @@ const VALIDATION_ENVELOPE_ASPECT_LABELS = Object.freeze({
   opening: 'Abertura',
 } satisfies Record<ValidationEnvelopeAspect, string>)
 
+const PROOF_NEED_TYPE_LABELS = Object.freeze({
+  testimonial: 'Depoimento',
+  data: 'Dado',
+  demonstration: 'Demonstração',
+  none: 'Sem prova',
+} satisfies Record<ProofNeedType, string>)
+
+const PROOF_NEED_RESOLUTION_LABELS = Object.freeze({
+  'selected-evidence': 'Evidência selecionada',
+  'proof-unavailable': 'Prova indisponível',
+  'no-proof-needed': 'Prova desnecessária',
+} satisfies Record<ProofNeedResolution, string>)
+
 function readableBytes(value: number | string): string {
   const bytes = typeof value === 'string' ? Number(value) : value
   if (!Number.isFinite(bytes)) return '—'
@@ -635,6 +710,9 @@ export default function ProjectWorkspacePage() {
     useState(true)
   const [validationEnvelopeBusyId, setValidationEnvelopeBusyId] =
     useState<string | null>(null)
+  const [proofNeedRuns, setProofNeedRuns] =
+    useState<ProofNeedRunData[]>([])
+  const [proofNeedsLoading, setProofNeedsLoading] = useState(true)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -855,6 +933,45 @@ export default function ProjectWorkspacePage() {
   useEffect(() => {
     void loadValidationEnvelopeReuses()
   }, [loadValidationEnvelopeReuses])
+  const loadProofNeedRuns = useCallback(async (quiet = false) => {
+    if (!quiet) setProofNeedsLoading(true)
+    try {
+      const response = await fetch(
+        `/v1/projects/${encodeURIComponent(projectId)}` +
+          '/proof-needs?limit=100',
+        {
+          headers: { accept: 'application/json' },
+          cache: 'no-store',
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as ApiEnvelope<{
+        runs: ProofNeedRunData[]
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(apiError(
+          payload,
+          'Não foi possível carregar as necessidades de prova.',
+        ))
+      }
+      setProofNeedRuns(payload.data.runs)
+    } catch (error) {
+      if (!quiet) {
+        setNotice(error instanceof Error
+          ? error.message
+          : 'Não foi possível carregar as necessidades de prova.')
+      }
+    } finally {
+      if (!quiet) setProofNeedsLoading(false)
+    }
+  }, [projectId, router])
+
+  useEffect(() => {
+    void loadProofNeedRuns()
+  }, [loadProofNeedRuns])
   useEffect(() => () => reviewElementLookup.current?.abort(), [])
   useEffect(() => {
     if (workspace?.editPlan?.state !== 'compiled' || !workspace.version) {
@@ -3456,6 +3573,128 @@ export default function ProjectWorkspacePage() {
                     </article>
                   )
                 })}
+              </div>
+            )}
+          </section>
+
+          <section
+            aria-label="Necessidades de prova declaradas pelo Diretor"
+            className="mt-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
+            data-testid="proof-need-panel"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/[0.07] px-5 py-4">
+              <div>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#8c9f78]">Direção de prova</p>
+                <h2 className="mt-1.5 text-base font-semibold tracking-[-0.02em] text-[#e8e3da]">Cada afirmação sabe que prova precisa — e onde ela entra.</h2>
+                <p className="mt-1 max-w-3xl text-[10px] leading-5 text-[#6e6961]">O Diretor procura primeiro no catálogo autorizado de evidências. Se nada compatível existir, registra a ausência com clareza; nunca inventa um card genérico para preencher o espaço.</p>
+              </div>
+              <span className="border border-white/[0.08] px-2.5 py-1.5 font-mono text-[8px] uppercase tracking-[0.12em] text-[#706a61]">
+                {proofNeedRuns.reduce((total, run) =>
+                  total + run.summary.needCount, 0)} necessidades
+              </span>
+            </div>
+
+            {proofNeedsLoading ? (
+              <div className="px-5 py-10 text-center text-xs text-[#716c64]">
+                Consultando StoryPlans e evidências…
+              </div>
+            ) : proofNeedRuns.length === 0 ? (
+              <div className="grid gap-2 px-5 py-9 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div>
+                  <p className="text-sm font-medium text-[#bdb7ae]">Nenhuma necessidade de prova foi declarada neste projeto.</p>
+                  <p className="mt-1 text-[10px] leading-5 text-[#69655e]">Quando o Diretor avaliar as afirmações de uma receita, tipo, função, momento e resultado da busca aparecerão aqui.</p>
+                </div>
+                <span className="mt-2 border border-dashed border-white/[0.1] px-3 py-2 font-mono text-[8px] uppercase tracking-[0.14em] text-[#5f5a53] sm:mt-0">aguardando direção</span>
+              </div>
+            ) : (
+              <div className="divide-y divide-white/[0.06]">
+                {proofNeedRuns.map((run) => (
+                  <article
+                    className="px-5 py-5"
+                    data-testid="proof-need-run"
+                    key={run.id}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-semibold text-[#c9c4bb]">{run.objective}</p>
+                        <p className="mt-1 font-mono text-[8px] text-[#625e57]">receita {run.targetRecipeId.slice(-12)} · {run.summary.needCount} declaraç{run.summary.needCount === 1 ? 'ão' : 'ões'}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 font-mono text-[8px]">
+                        <span className="border border-[#4e835d]/30 px-2 py-1 text-[#72a47f]">{run.summary.selectedEvidenceCount} selecionada{run.summary.selectedEvidenceCount === 1 ? '' : 's'}</span>
+                        <span className="border border-[#a27834]/30 px-2 py-1 text-[#bd9550]">{run.summary.proofUnavailableCount} indisponível</span>
+                        <span className="border border-white/[0.08] px-2 py-1 text-[#777169]">{run.summary.noProofNeededCount} dispensada</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                      {run.items.map((item) => {
+                        const selected =
+                          item.resolution === 'selected-evidence'
+                        const unavailable =
+                          item.resolution === 'proof-unavailable'
+                        return (
+                          <div
+                            className={`relative overflow-hidden border px-4 py-4 ${selected ? 'border-[#4f805d]/30 bg-[#4f805d]/[0.035]' : unavailable ? 'border-[#9f7836]/30 bg-[#9f7836]/[0.035]' : 'border-white/[0.07] bg-white/[0.015]'}`}
+                            data-testid="proof-need-item"
+                            key={item.id}
+                          >
+                            <i className={`absolute inset-y-0 left-0 w-px ${selected ? 'bg-[#66a278]' : unavailable ? 'bg-[#c29343]' : 'bg-[#5f5a53]'}`} />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[8px] font-bold uppercase tracking-[0.14em] text-[#9b958b]">{PROOF_NEED_TYPE_LABELS[item.type]}</span>
+                              <span
+                                className={`border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.08em] ${selected ? 'border-[#4d845d]/35 text-[#73aa81]' : unavailable ? 'border-[#a27a34]/40 text-[#c49b50]' : 'border-white/[0.09] text-[#837d74]'}`}
+                                data-testid="proof-need-resolution"
+                              >
+                                {PROOF_NEED_RESOLUTION_LABELS[item.resolution]}
+                              </span>
+                            </div>
+                            <p className="mt-3 text-[11px] leading-5 text-[#bbb5ac]">“{item.claimText}”</p>
+
+                            <div className="mt-3 grid grid-cols-[84px_1fr] gap-x-3 gap-y-1 text-[9px] leading-4">
+                              <span className="uppercase tracking-[0.1em] text-[#5f5a53]">Momento</span>
+                              <span className="text-[#888178]" data-testid="proof-need-moment">
+                                {item.moment.placement === 'existing-proof-block'
+                                  ? 'bloco de prova existente'
+                                  : item.moment.placement === 'after-claim-before-next-block'
+                                    ? 'após a afirmação, antes do próximo bloco'
+                                    : 'não aplicável'} · {readableTimestamp(item.moment.timelineMs)}
+                              </span>
+                              <span className="uppercase tracking-[0.1em] text-[#5f5a53]">Busca</span>
+                              <span className="text-[#888178]" data-testid="proof-need-evidence-first">
+                                {item.search.attempted
+                                  ? `evidência primeiro · ${item.search.candidateEvidenceIds.length} candidata(s)`
+                                  : 'dispensada pela política'}
+                              </span>
+                            </div>
+
+                            {item.selectedEvidence ? (
+                              <div className="mt-3 border-t border-white/[0.06] pt-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <p className="text-[9px] font-semibold text-[#84aa8e]">{item.selectedEvidence.category}</p>
+                                  <span className="font-mono text-[8px] text-[#6c786f]">{Math.round(item.selectedEvidence.score * 100)}% aderente</span>
+                                </div>
+                                <p className="mt-1 font-mono text-[8px] text-[#656159]">
+                                  contexto {readableTimestamp(item.selectedEvidence.contextRangeMs[0])} → {readableTimestamp(item.selectedEvidence.contextRangeMs[1])}
+                                </p>
+                              </div>
+                            ) : unavailable ? (
+                              <p className="mt-3 border-t border-[#9c7332]/20 pt-3 text-[9px] leading-4 text-[#9e855b]">O espaço permanece explicitamente sem prova até existir uma evidência compatível e autorizada.</p>
+                            ) : (
+                              <p className="mt-3 border-t border-white/[0.06] pt-3 text-[9px] leading-4 text-[#767169]">A política classificou a afirmação como baixo risco; inserir prova aqui reduziria o ritmo sem acrescentar confiança.</p>
+                            )}
+
+                            <p
+                              className="mt-3 font-mono text-[8px] uppercase tracking-[0.1em] text-[#69766c]"
+                              data-testid="proof-need-no-generic-card"
+                            >
+                              card genérico: nunca gerado
+                            </p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </article>
+                ))}
               </div>
             )}
           </section>

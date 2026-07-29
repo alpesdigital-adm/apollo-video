@@ -5,13 +5,11 @@ import {
 } from '../../src/v2/domain/source-deconstruction.ts'
 import {
   PROOF_VISUAL_GOLDENS,
-  declareProofNeed,
   extractContiguous,
   planLongFormWorkflow,
   planProofMode,
   proofIntegrityGate,
   querySemanticRepository,
-  selectProof,
 } from '../../src/v2/application/proof-and-longform.ts'
 import {
   createEvidenceSegment,
@@ -100,40 +98,6 @@ test(
 
     assert.ok(strategies.has('reject'))
     assert.ok([...strategies].some((strategy) => strategy !== 'reject'))
-  },
-)
-
-test(
-  'T-FR-130 declares proof needs and searches evidence before generic cards',
-  () => {
-    const needs = [
-      declareProofNeed({
-        objective: 'sale',
-        claimRisk: 0.8,
-        momentMs: 1_000,
-      }),
-      declareProofNeed({
-        objective: 'awareness',
-        claimRisk: 0.8,
-        momentMs: 1_000,
-      }),
-      declareProofNeed({
-        objective: 'warming',
-        claimRisk: 0.8,
-        momentMs: 1_000,
-      }),
-      declareProofNeed({
-        objective: 'sale',
-        claimRisk: 0.1,
-        momentMs: 1_000,
-      }),
-    ]
-    assert.deepEqual(
-      needs.map((need) => need.type),
-      ['testimonial', 'data', 'demonstration', 'none'],
-    )
-    assert.equal(selectProof(needs[0], [evidence()]).decision, 'use-evidence')
-    assert.equal(selectProof(needs[0], []).generatedGenericCard, false)
   },
 )
 

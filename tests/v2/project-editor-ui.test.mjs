@@ -281,6 +281,36 @@ test('T-FR-124 project editor exposes API-backed validation envelopes and explic
   assert.match(projectEditorSource, /targetRecipeHookExcluded/)
 })
 
+test('T-FR-130 project editor exposes API-backed proof needs without fabricated cards', () => {
+  assert.match(projectEditorSource, /\/proof-needs\?limit=100/)
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-need-panel"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-need-item"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-need-moment"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-need-evidence-first"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-need-resolution"/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-need-no-generic-card"/,
+  )
+  assert.match(projectEditorSource, /Prova indisponível/)
+  assert.match(projectEditorSource, /card genérico: nunca gerado/)
+})
+
 test('T-FR-230 project editor exposes the persisted proxy verdict and blocks final export until release', () => {
   assert.match(projectEditorSource, /\/proxy-reviews/)
   assert.match(projectEditorSource, /data-testid="proxy-review-gate"/)

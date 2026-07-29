@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "proof-need-golden-stories/v1",
+  "stories": [
+    {
+      "id": "golden-testimonial",
+      "claimKind": "outcome",
+      "claimText": "O método ajudou a equipe a converter melhor.",
+      "expectedType": "testimonial",
+      "expectedFunction": "build-trust",
+      "expectedResolution": "selected-evidence",
+      "evidenceCategory": "testimonial"
+    },
+    {
+      "id": "golden-data",
+      "claimKind": "quantified",
+      "claimText": "A conversão medida aumentou em vinte por cento.",
+      "expectedType": "data",
+      "expectedFunction": "substantiate-quantified-claim",
+      "expectedResolution": "selected-evidence",
+      "evidenceCategory": "financial-result"
+    },
+    {
+      "id": "golden-demonstration",
+      "claimKind": "mechanism",
+      "claimText": "O painel distribui cada lead para o responsável correto.",
+      "expectedType": "demonstration",
+      "expectedFunction": "demonstrate-mechanism",
+      "expectedResolution": "selected-evidence",
+      "evidenceCategory": "demonstration"
+    },
+    {
+      "id": "golden-no-proof",
+      "claimKind": "low-risk",
+      "claimText": "Vamos começar pela definição do objetivo.",
+      "expectedType": "none",
+      "expectedFunction": "no-proof-needed",
+      "expectedResolution": "no-proof-needed"
+    }
+  ]
+}

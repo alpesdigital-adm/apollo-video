@@ -958,7 +958,47 @@ vinculados aos hashes exatos das fontes e operáveis pela API pública.
 
 ### FR-130 — Proof need
 
-StoryPlan identifica onde precisa de prova e qual tipo resolve a afirmação/objeção.
+O StoryPlan deve declarar a necessidade de prova sobre uma afirmação real de
+um bloco narrativo, antes de escolher apresentação ou gerar qualquer asset. A
+declaração contém:
+
+- `storyBlockId`, `claimId` e texto exato da afirmação;
+- classificação do claim (`outcome`, `quantified`, `mechanism` ou `low-risk`);
+- tipo de prova derivado (`testimonial`, `data`, `demonstration` ou `none`);
+- função editorial derivada: construir confiança, sustentar número, demonstrar
+  mecanismo ou registrar que prova não é necessária;
+- posição narrativa e temporal exata, vinculada ao StoryPlan e EditPlan da
+  mesma `VariantRecipe`;
+- auditoria da busca, resolução e evidência selecionada, quando existir.
+
+Antes de qualquer fallback, o Diretor consulta `EvidenceSegments` compatíveis
+no workspace/projeto, aplicando claim, categoria, contexto, oferta, objeção,
+integridade, rights, consent e expiração. Somente um segmento autorizado e do
+tipo requerido pode ser selecionado.
+
+Se não houver evidência adequada, a saída obrigatória é
+`proof-unavailable`. O Diretor não pode preencher a lacuna com estatística,
+depoimento, inferência, texto ilustrativo ou card genérico fabricado. Claims de
+baixo risco podem receber `no-proof-needed`, decisão distinta de ausência de
+evidência.
+
+As declarações fazem parte de um StoryPlan direcionado, são imutáveis,
+versionadas e vinculadas aos hashes exatos da recipe e do StoryPlan base.
+Criação, leitura e listagem devem existir na API externa; a interface consome
+as mesmas rotas. A criação é idempotente, revalida recipe, evidência, rights e
+consent no commit e não materializa mídia nem inicia provider/render.
+
+Critérios de aceite:
+
+- golden stories cobrem depoimento, dado, demonstração e nenhuma prova;
+- o momento aponta para o bloco de prova existente ou para a fronteira exata
+  depois do claim;
+- candidato incompatível ou não autorizado nunca é selecionado;
+- ausência fica explícita e pesquisável;
+- `genericCardGenerated=false` e `genericCardCount=0` são invariantes de
+  domínio e banco;
+- replay converge; payload diferente com a mesma chave falha;
+- API, PostgreSQL, interface e regressão provam o mesmo estado.
 
 ### FR-131 — Integrity gate
 

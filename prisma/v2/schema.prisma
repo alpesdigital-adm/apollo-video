@@ -108,6 +108,8 @@ model V2Workspace {
   sourceCleanupResults            V2SourceCleanupResult[]
   validationEnvelopeReuses        V2ValidationEnvelopeReuse[]
   validationEnvelopeDecisions     V2ValidationEnvelopeDecision[]
+  proofNeedRuns                   V2ProofNeedRun[]
+  proofNeedItems                  V2ProofNeedItem[]
 
   @@map("workspaces")
 }
@@ -161,6 +163,7 @@ model V2ApiClient {
   sourceCleanupPlans              V2SourceCleanupPlan[]            @relation("SourceCleanupCreator")
   createdValidationEnvelopeReuses V2ValidationEnvelopeReuse[]      @relation("ValidationEnvelopeReuseCreator")
   validationEnvelopeDecisions     V2ValidationEnvelopeDecision[]   @relation("ValidationEnvelopeDecisionActor")
+  createdProofNeedRuns            V2ProofNeedRun[]                 @relation("ProofNeedRunCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -318,6 +321,8 @@ model V2Project {
   sourceCleanupResults          V2SourceCleanupResult[]
   validationEnvelopeReuses      V2ValidationEnvelopeReuse[]
   validationEnvelopeDecisions   V2ValidationEnvelopeDecision[]
+  proofNeedRuns                 V2ProofNeedRun[]
+  proofNeedItems                V2ProofNeedItem[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -1582,6 +1587,7 @@ model V2EvidenceSegment {
   sourceArtifact      V2MediaArtifact       @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   rightsSnapshot      V2AssetRightsSnapshot @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy           V2ApiClient           @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  selectedProofNeeds  V2ProofNeedItem[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -1875,6 +1881,93 @@ model V2ValidationEnvelopeDecision {
   @@map("validation_envelope_decisions")
 }
 
+model V2ProofNeedRun {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  batchId               String   @db.VarChar(128)
+  targetRecipeId        String   @db.VarChar(128)
+  targetRecipeHash      String   @db.Char(64)
+  baseStoryPlanId       String   @db.VarChar(128)
+  baseStoryPlanHash     String   @db.Char(64)
+  schemaVersion         String   @db.VarChar(64)
+  policyVersion         String   @db.VarChar(64)
+  objective             String   @db.VarChar(128)
+  storyPlanJson         String   @db.Text
+  storyPlanHash         String   @db.Char(64)
+  needCount             Int
+  requiredCount         Int
+  evidenceSearchCount   Int
+  selectedEvidenceCount Int
+  proofUnavailableCount Int
+  noProofNeededCount    Int
+  genericCardCount      Int      @default(0)
+  runJson               String   @db.Text
+  runHash               String   @db.Char(64)
+  requestFingerprint    String   @db.Char(64)
+  idempotencyKey        String   @db.VarChar(128)
+  createdByClientId     String   @db.VarChar(80)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  workspace    V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project      V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch        V2ProductionBatch  @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  targetRecipe V2VariantRecipeRun @relation(fields: [targetRecipeId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy    V2ApiClient        @relation("ProofNeedRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  items        V2ProofNeedItem[]
+
+  @@unique([id, workspaceId])
+  @@unique([id, workspaceId, projectId])
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, batchId, createdAt(sort: Desc)])
+  @@index([workspaceId, targetRecipeId, createdAt(sort: Desc)])
+  @@index([workspaceId, proofUnavailableCount, createdAt(sort: Desc)])
+  @@map("proof_need_runs")
+}
+
+model V2ProofNeedItem {
+  id                     String  @id @db.VarChar(128)
+  workspaceId            String  @db.VarChar(128)
+  projectId              String  @db.VarChar(128)
+  runId                  String  @db.VarChar(128)
+  sequence               Int
+  storyBlockId           String  @db.VarChar(128)
+  claimId                String  @db.VarChar(128)
+  claimText              String  @db.Text
+  claimKind              String  @db.VarChar(32)
+  type                   String  @db.VarChar(32)
+  function               String  @db.VarChar(64)
+  required               Boolean
+  momentJson             String  @db.Text
+  momentFrame            Int
+  momentMs               Int
+  searchAttempted        Boolean
+  searchedCategoriesText String  @db.Text
+  candidateCount         Int
+  resolution             String  @db.VarChar(32)
+  selectedEvidenceId     String? @db.VarChar(128)
+  selectedEvidenceHash   String? @db.Char(64)
+  proofUnavailable       Boolean
+  genericCardGenerated   Boolean @default(false)
+  itemJson               String  @db.Text
+  itemHash               String  @db.Char(64)
+
+  workspace        V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  run              V2ProofNeedRun     @relation(fields: [runId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+  selectedEvidence V2EvidenceSegment? @relation(fields: [selectedEvidenceId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([runId, sequence])
+  @@unique([runId, storyBlockId, claimId])
+  @@index([workspaceId, projectId, resolution, type])
+  @@index([workspaceId, runId, sequence])
+  @@index([workspaceId, selectedEvidenceId])
+  @@index([workspaceId, proofUnavailable, type])
+  @@map("proof_need_items")
+}
+
 model V2SemanticSearchDocument {
   id                       String                      @id @db.VarChar(128)
   workspaceId              String                      @db.VarChar(128)
@@ -2133,6 +2226,7 @@ model V2ProductionBatch {
   compatibilityGraphs        V2CompatibilityGraphRun[]
   variantRecipes             V2VariantRecipeRun[]
   validationEnvelopeReuses   V2ValidationEnvelopeReuse[]
+  proofNeedRuns              V2ProofNeedRun[]
   variantPortfolioPreflights V2VariantPortfolioPreflightRun[]
   batchEditItemStates        V2BatchEditItemStateVersion[]
   batchEditPreflights        V2BatchEditPreflightRun[]
@@ -2438,6 +2532,7 @@ model V2VariantRecipeRun {
   createdBy                V2ApiClient                 @relation("VariantRecipeRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   lineage                  V2VariantRecipeLineage[]
   validationEnvelopeReuses V2ValidationEnvelopeReuse[]
+  proofNeedRuns            V2ProofNeedRun[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, compatibilityGraphId], map: "variant_recipe_runs_lineage_scope_key")

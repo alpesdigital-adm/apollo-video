@@ -271,6 +271,64 @@ interface StoryBlock {
 }
 ```
 
+### 10.1 ProofNeed
+
+`ProofNeed` não é um pedido genérico de “colocar prova”. É uma declaração
+versionada sobre um claim real do bloco:
+
+```ts
+interface ProofNeed {
+  id: string
+  storyBlockId: string
+  claimId: string
+  claimText: string
+  claimKind: 'outcome' | 'quantified' | 'mechanism' | 'low-risk'
+  type: 'testimonial' | 'data' | 'demonstration' | 'none'
+  function:
+    | 'build-trust'
+    | 'substantiate-quantified-claim'
+    | 'demonstrate-mechanism'
+    | 'no-proof-needed'
+  required: boolean
+  moment: {
+    placement:
+      | 'existing-proof-block'
+      | 'after-claim-before-next-block'
+      | 'not-applicable'
+    timelineFrame: number
+    timelineMs: number
+  }
+  search: {
+    strategy: 'evidence-first'
+    attempted: boolean
+    categories: EvidenceCategory[]
+    candidateEvidenceIds: string[]
+    rejectedEvidence: {
+      evidenceId: string
+      reasons: string[]
+    }[]
+  }
+  resolution:
+    | 'selected-evidence'
+    | 'proof-unavailable'
+    | 'no-proof-needed'
+  selectedEvidenceId?: string
+  proofUnavailable: boolean
+  genericCardGenerated: false
+}
+```
+
+Regras:
+
+1. tipo, função e categorias são derivados da classificação do claim;
+2. o momento vem do StoryPlan/EditPlan exatos da recipe;
+3. a busca consulta o catálogo autorizado antes de qualquer apresentação;
+4. direitos, consentimento, claim e contexto são reavaliados no commit;
+5. sem candidato adequado, registrar `proof-unavailable`;
+6. `no-proof-needed` é reservado a claims de baixo risco;
+7. nenhum dos dois estados permite fabricar card, estatística ou depoimento;
+8. o plano permanece virtual até um gate posterior escolher o modo de prova.
+
 ## 11. Geração de candidatos
 
 ### 11.1 Quando gerar alternativas
@@ -687,4 +745,3 @@ Métricas:
 - Limite de auto-complete por workspace.
 - Política de promoção automática de modelos/prompts.
 - Retenção de artifacts rejeitados.
-

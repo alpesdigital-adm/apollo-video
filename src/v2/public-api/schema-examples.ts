@@ -3336,6 +3336,115 @@ const variantRecipeRunExample = {
   createdAt,
   runHash: 'c'.repeat(64),
 }
+const proofNeedCreateRequestExample = {
+  batchId: variantRecipeRunExample.batchId,
+  targetRecipeId: variantRecipeRunExample.id,
+  expectedTargetRecipeHash: variantRecipeRunExample.runHash,
+  policyVersion: 'proof-need-policy/v1',
+  declarations: [
+    {
+      storyBlockId: variantStoryBlocksExample[1].id,
+      claimId: variantStoryBlocksExample[1].content.claimIds[0],
+      claimText: 'Clientes recuperaram confiança para falar em público.',
+      claimKind: 'outcome',
+      offerId: 'offer-immersao-example-1',
+      objection: 'Ainda não acredito que funciona para mim.',
+    },
+  ],
+}
+const proofNeedMomentExample = {
+  placement: 'after-claim-before-next-block',
+  afterStoryBlockId:
+    proofNeedCreateRequestExample.declarations[0].storyBlockId,
+  beforeStoryBlockId: variantStoryBlocksExample[2].id,
+  timelineFrame: 291,
+  timelineMs: 9_700,
+}
+const proofNeedSelectedEvidenceExample = {
+  id: 'evidence-proof-need-example-1',
+  evidenceHash: '8'.repeat(64),
+  category: 'testimonial',
+  sourceArtifactId: 'artifact-proof-need-example-1',
+  sourceRangeMs: [1_200, 7_800],
+  contextRangeMs: [800, 8_300],
+  score: 0.94,
+}
+const proofNeedItemExample = {
+  id: 'proof-need-item-example-1',
+  sequence: 1,
+  storyBlockId:
+    proofNeedCreateRequestExample.declarations[0].storyBlockId,
+  claimId: proofNeedCreateRequestExample.declarations[0].claimId,
+  claimText: proofNeedCreateRequestExample.declarations[0].claimText,
+  claimKind: 'outcome',
+  type: 'testimonial',
+  function: 'build-trust',
+  required: true,
+  moment: proofNeedMomentExample,
+  search: {
+    strategy: 'evidence-first',
+    attempted: true,
+    categories: ['testimonial', 'case-study'],
+    candidateEvidenceIds: [proofNeedSelectedEvidenceExample.id],
+    rejectedEvidence: [],
+  },
+  resolution: 'selected-evidence',
+  selectedEvidence: proofNeedSelectedEvidenceExample,
+  proofUnavailable: false,
+  genericCardGenerated: false,
+  itemHash: '9'.repeat(64),
+}
+const proofDirectedStoryPlanExample = {
+  schemaVersion: 'proof-directed-story-plan/v1',
+  id: 'proof-directed-story-plan-example-1',
+  baseStoryPlanId: variantStoryPlanExample.id,
+  baseStoryPlanHash: variantStoryPlanExample.storyHash,
+  objective: variantRecipeRunExample.objective,
+  acts: variantStoryPlanExample.acts,
+  blocks: variantStoryPlanExample.blocks,
+  proofNeeds: [
+    {
+      id: proofNeedItemExample.id,
+      storyBlockId: proofNeedItemExample.storyBlockId,
+      claimId: proofNeedItemExample.claimId,
+      type: proofNeedItemExample.type,
+      function: proofNeedItemExample.function,
+      required: true,
+      moment: proofNeedMomentExample,
+      resolution: 'selected-evidence',
+      selectedEvidenceId: proofNeedSelectedEvidenceExample.id,
+      proofUnavailable: false,
+    },
+  ],
+  storyPlanHash: 'a'.repeat(64),
+}
+const proofNeedRunExample = {
+  schemaVersion: 'proof-need-run/v1',
+  policyVersion: 'proof-need-policy/v1',
+  id: 'proof-need-run-example-1',
+  workspaceId,
+  projectId,
+  batchId: variantRecipeRunExample.batchId,
+  targetRecipeId: variantRecipeRunExample.id,
+  targetRecipeHash: variantRecipeRunExample.runHash,
+  baseStoryPlanId: variantStoryPlanExample.id,
+  baseStoryPlanHash: variantStoryPlanExample.storyHash,
+  objective: variantRecipeRunExample.objective,
+  storyPlan: proofDirectedStoryPlanExample,
+  items: [proofNeedItemExample],
+  summary: {
+    needCount: 1,
+    requiredCount: 1,
+    evidenceSearchCount: 1,
+    selectedEvidenceCount: 1,
+    proofUnavailableCount: 0,
+    noProofNeededCount: 0,
+    genericCardCount: 0,
+  },
+  createdByClientId: clientId,
+  createdAt,
+  runHash: 'b'.repeat(64),
+}
 const variantPortfolioPreflightRunExample = {
   schemaVersion: 'variant-portfolio-preflight/v1',
   selectionVersion: 'variant-portfolio-selection/v1',
@@ -5791,6 +5900,33 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           reuses: [validationEnvelopeRecordExample],
           nextCursor: validationEnvelopePlanExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-proof-need-run-request/v1': [
+      proofNeedCreateRequestExample,
+    ],
+    'apollo://schemas/proof-need-run-mutated/v1': [
+      {
+        data: {
+          run: proofNeedRunExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/proof-need-run-read/v1': [
+      {
+        data: { run: proofNeedRunExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/proof-need-run-page/v1': [
+      {
+        data: {
+          runs: [proofNeedRunExample],
+          nextCursor: proofNeedRunExample.id,
         },
         meta: { apiVersion: 'v1' },
       },

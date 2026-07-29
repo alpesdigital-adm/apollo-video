@@ -46,6 +46,7 @@ import type { SourceDeconstructionRepository } from '../application/ports/source
 import type { ContaminationReportRepository } from '../application/ports/contamination-report-repository.ts'
 import type { SourceCleanupRepository } from '../application/ports/source-cleanup-repository.ts'
 import type { ValidationEnvelopeRepository } from '../application/ports/validation-envelope-repository.ts'
+import type { ProofNeedRepository } from '../application/ports/proof-need-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -129,6 +130,7 @@ import { PrismaSourceDeconstructionRepository } from './prisma/source-deconstruc
 import { PrismaContaminationReportRepository } from './prisma/contamination-report-repository.ts'
 import { PrismaSourceCleanupRepository } from './prisma/source-cleanup-repository.ts'
 import { PrismaValidationEnvelopeRepository } from './prisma/validation-envelope-repository.ts'
+import { PrismaProofNeedRepository } from './prisma/proof-need-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -291,6 +293,10 @@ SourceCleanupRepository {
 export function createValidationEnvelopeRepository():
 ValidationEnvelopeRepository {
   return new PrismaValidationEnvelopeRepository(resolveV2Client())
+}
+
+export function createProofNeedRepository(): ProofNeedRepository {
+  return new PrismaProofNeedRepository(resolveV2Client())
 }
 
 export function createMaterializationAuthorizationRepository(): MaterializationAuthorizationRepository {

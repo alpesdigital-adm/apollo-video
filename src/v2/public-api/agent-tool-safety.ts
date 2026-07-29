@@ -211,6 +211,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'human-approval',
       reason: 'Approval explicitly records the loss of historical validation for exact protected aspects; rejection preserves the validation envelope.',
     },
+    'apollo.projects.proof-needs.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Declares proof against one exact StoryPlan, selects only currently authorized cataloged EvidenceSegments and persists no provider, render or media materialization work.',
+    },
     'apollo.batches.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one explicit bounded item matrix from existing approved workspace artifacts without starting provider work.',

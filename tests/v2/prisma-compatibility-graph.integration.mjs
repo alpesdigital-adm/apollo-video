@@ -76,7 +76,7 @@ function dimensions(score) {
   }))
 }
 
-test('T-FR-083/T-FR-084/T-FR-085/T-FR-124 persists compatibility, exact validated-hook reuse and bounded portfolio preflights through PostgreSQL and /v1', {
+test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130 persists compatibility, exact validated-hook reuse, ProofNeeds and bounded portfolio preflights through PostgreSQL and /v1', {
   skip:
     process.env.APOLLO_COMPATIBILITY_GRAPH_E2E !== '1' &&
     'set APOLLO_COMPATIBILITY_GRAPH_E2E=1 and use an isolated V2 database',
@@ -379,6 +379,26 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124 persists compatibility, exact validate
         transcriptJson: stableSerialize(transcript),
         createdAt,
       },
+    })
+    await setAssetRightsService({
+      repository: new PrismaAssetRightsRepository(client),
+      clock: () => createdAt,
+      createId: () => `compat-e2e-source-rights-${suffix}`,
+    })({
+      workspaceId,
+      artifactId,
+      baseRevision: assetRightsRevision(artifactId, 0),
+      draft: {
+        status: 'approved',
+        allowedUses: ['rendering', 'editorial-reuse'],
+        prohibitedUses: [],
+        allowedLocales: ['pt-BR'],
+        consent: {
+          status: 'approved',
+          allowedUses: ['rendering', 'editorial-reuse'],
+        },
+      },
+      actor: { type: 'api-client', id: issued.client.id },
     })
     const validatedArtifactSha256 = '9'.repeat(64)
     const validatedArtifactKey =
@@ -1227,6 +1247,334 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124 persists compatibility, exact validate
       'validation-envelope composition must reference exact ranges without materializing media',
     )
 
+    const proofMediaCountBefore =
+      await client.v2MediaArtifact.count({
+        where: { workspaceId },
+      })
+    const proofSpeechResponse = await fetch(
+      `${baseUrl}/v1/projects/${projectId}/speech-segments`,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key': `proof-need-speech-${suffix}`,
+        },
+        body: JSON.stringify({
+          sourceTranscriptId:
+            `compat-e2e-transcript-${suffix}`,
+          expectedTranscriptHash: transcript.transcriptHash,
+          extractionPolicyVersion:
+            'speech-segment-extraction/v1',
+          producer: {
+            provider: 'apollo',
+            model: 'proof-need-e2e',
+            version: '1.0.0',
+            confidence: 0.99,
+          },
+          annotations: [{
+            sourceSegmentId: 1,
+            speaker: {
+              value: 'person-specialist',
+              confidence: 0.99,
+            },
+            intentions: [{
+              value: 'Proof source',
+              confidence: 0.99,
+            }],
+          }],
+        }),
+      },
+    )
+    const proofSpeechPayload = await proofSpeechResponse.json()
+    assert.equal(
+      proofSpeechResponse.status,
+      201,
+      JSON.stringify(proofSpeechPayload),
+    )
+    const proofSpeech = proofSpeechPayload.data.run.segments[0]
+    assert.ok(proofSpeech)
+
+    const evidenceResponse = await fetch(
+      `${baseUrl}/v1/projects/${projectId}/evidence-segments`,
+      {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'idempotency-key':
+            `proof-need-evidence-${suffix}`,
+        },
+        body: JSON.stringify({
+          sourceSpeechSegmentId: proofSpeech.id,
+          expectedSpeechSegmentHash: proofSpeech.segmentHash,
+          category: 'testimonial',
+          claim: {
+            value: lines.proof,
+            confidence: 0.99,
+          },
+          context: {
+            value:
+              'Depoimento completo autorizado no roteiro de origem.',
+            confidence: 0.99,
+          },
+          qualifiers: [],
+          subject: {
+            value: 'Profissionais participantes',
+            confidence: 0.99,
+          },
+          attribution: {
+            value: 'Especialista autorizado',
+            confidence: 0.99,
+          },
+          compatibleOfferIds: [],
+          compatibleAudienceTags: ['especialistas'],
+          compatibleObjections: [],
+          credibilityScore: 0.96,
+          specificityScore: 0.94,
+          authenticityScore: 0.98,
+          contextRangeMs: [
+            0,
+            Math.ceil(words.at(-1).end * 1_000),
+          ],
+          frameRefs: ['proof-need-frame-e2e'],
+          adjacentEvidenceIds: [],
+          requiresContext: false,
+          producer: {
+            provider: 'apollo',
+            model: 'proof-need-e2e',
+            version: '1.0.0',
+            confidence: 0.99,
+          },
+        }),
+      },
+    )
+    const evidencePayload = await evidenceResponse.json()
+    assert.equal(
+      evidenceResponse.status,
+      201,
+      JSON.stringify(evidencePayload),
+    )
+    const proofEvidence = evidencePayload.data.evidence
+    assert.equal(proofEvidence.integrityStatus, 'valid')
+    assert.equal(proofEvidence.physicalMaterialized, false)
+
+    const argumentBlock = fullRecipe.storyPlan.blocks.find(
+      (block) => block.role === 'argument',
+    )
+    assert.ok(argumentBlock)
+    const argumentClaimId = argumentBlock.content.claimIds[0]
+    assert.ok(argumentClaimId)
+    const proofEndpoint =
+      `${baseUrl}/v1/projects/${projectId}/proof-needs`
+    const selectedProofBody = {
+      batchId,
+      targetRecipeId: fullRecipe.id,
+      expectedTargetRecipeHash: fullRecipe.runHash,
+      policyVersion: 'proof-need-policy/v1',
+      declarations: [{
+        storyBlockId: argumentBlock.id,
+        claimId: argumentClaimId,
+        claimText: lines.proof,
+        claimKind: 'outcome',
+      }],
+    }
+    const selectedProofKey = `proof-need-selected-${suffix}`
+    const selectedProofResponse = await fetch(proofEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': selectedProofKey,
+      },
+      body: JSON.stringify(selectedProofBody),
+    })
+    const selectedProofPayload = await selectedProofResponse.json()
+    assert.equal(
+      selectedProofResponse.status,
+      201,
+      JSON.stringify(selectedProofPayload),
+    )
+    assert.equal(selectedProofPayload.data.replayed, false)
+    const selectedProofRun = selectedProofPayload.data.run
+    const selectedProof = selectedProofRun.items[0]
+    assert.equal(selectedProof.type, 'testimonial')
+    assert.equal(selectedProof.function, 'build-trust')
+    assert.equal(
+      selectedProof.moment.placement,
+      'existing-proof-block',
+    )
+    assert.ok(selectedProof.moment.proofStoryBlockId)
+    assert.equal(selectedProof.search.strategy, 'evidence-first')
+    assert.equal(selectedProof.search.attempted, true)
+    assert.ok(
+      selectedProof.search.candidateEvidenceIds.includes(
+        proofEvidence.id,
+      ),
+    )
+    assert.equal(
+      selectedProof.selectedEvidence.id,
+      proofEvidence.id,
+    )
+    assert.equal(
+      selectedProof.selectedEvidence.evidenceHash,
+      proofEvidence.evidenceHash,
+    )
+    assert.equal(selectedProof.resolution, 'selected-evidence')
+    assert.equal(selectedProof.genericCardGenerated, false)
+    assert.equal(selectedProofRun.summary.genericCardCount, 0)
+    assert.equal(
+      selectedProofRun.storyPlan.proofNeeds[0]
+        .selectedEvidenceId,
+      proofEvidence.id,
+    )
+
+    const selectedProofReplay = await fetch(proofEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': selectedProofKey,
+      },
+      body: JSON.stringify(selectedProofBody),
+    })
+    assert.equal(selectedProofReplay.status, 200)
+    assert.equal(
+      (await selectedProofReplay.json()).data.replayed,
+      true,
+    )
+    const selectedProofMismatch = await fetch(proofEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': selectedProofKey,
+      },
+      body: JSON.stringify({
+        ...selectedProofBody,
+        declarations: [{
+          ...selectedProofBody.declarations[0],
+          claimKind: 'low-risk',
+        }],
+      }),
+    })
+    assert.equal(selectedProofMismatch.status, 409)
+
+    const unavailableProofResponse = await fetch(proofEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key':
+          `proof-need-unavailable-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...selectedProofBody,
+        declarations: [{
+          storyBlockId: argumentBlock.id,
+          claimId: argumentClaimId,
+          claimText: lines.body,
+          claimKind: 'mechanism',
+        }],
+      }),
+    })
+    const unavailableProofPayload =
+      await unavailableProofResponse.json()
+    assert.equal(
+      unavailableProofResponse.status,
+      201,
+      JSON.stringify(unavailableProofPayload),
+    )
+    const unavailableProof =
+      unavailableProofPayload.data.run.items[0]
+    assert.equal(unavailableProof.type, 'demonstration')
+    assert.equal(
+      unavailableProof.resolution,
+      'proof-unavailable',
+    )
+    assert.equal(unavailableProof.proofUnavailable, true)
+    assert.equal('selectedEvidence' in unavailableProof, false)
+    assert.equal(unavailableProof.genericCardGenerated, false)
+
+    const noProofResponse = await fetch(proofEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `proof-need-none-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...selectedProofBody,
+        declarations: [{
+          storyBlockId: argumentBlock.id,
+          claimId: argumentClaimId,
+          claimText: lines.body,
+          claimKind: 'low-risk',
+        }],
+      }),
+    })
+    const noProofPayload = await noProofResponse.json()
+    assert.equal(
+      noProofResponse.status,
+      201,
+      JSON.stringify(noProofPayload),
+    )
+    const noProof = noProofPayload.data.run.items[0]
+    assert.equal(noProof.type, 'none')
+    assert.equal(noProof.search.attempted, false)
+    assert.equal(noProof.resolution, 'no-proof-needed')
+    assert.equal(noProof.genericCardGenerated, false)
+
+    const proofRead = await fetch(
+      `${proofEndpoint}/${selectedProofRun.id}`,
+      { headers },
+    )
+    assert.equal(proofRead.status, 200)
+    assert.equal(
+      (await proofRead.json()).data.run.runHash,
+      selectedProofRun.runHash,
+    )
+    const proofList = await fetch(
+      `${proofEndpoint}?resolution=proof-unavailable&limit=10`,
+      { headers },
+    )
+    assert.equal(proofList.status, 200)
+    assert.equal((await proofList.json()).data.runs.length, 1)
+    assert.equal(
+      await client.v2ProofNeedRun.count({
+        where: { workspaceId, projectId },
+      }),
+      3,
+    )
+    assert.equal(
+      await client.v2ProofNeedItem.count({
+        where: { workspaceId, projectId },
+      }),
+      3,
+    )
+    await assert.rejects(
+      client.$executeRawUnsafe(
+        'UPDATE "proof_need_items" SET "genericCardGenerated" = TRUE WHERE "id" = $1',
+        selectedProof.id,
+      ),
+      /constraint|check/i,
+    )
+    await assert.rejects(
+      client.$executeRawUnsafe(
+        'UPDATE "proof_need_items" SET "resolution" = $1 WHERE "id" = $2',
+        'proof-unavailable',
+        selectedProof.id,
+      ),
+      /constraint|check/i,
+    )
+    await assert.rejects(
+      client.$executeRawUnsafe(
+        'UPDATE "proof_need_runs" SET "genericCardCount" = 1 WHERE "id" = $1',
+        selectedProofRun.id,
+      ),
+      /constraint|check/i,
+    )
+    assert.equal(
+      await client.v2MediaArtifact.count({
+        where: { workspaceId },
+      }),
+      proofMediaCountBefore,
+      'ProofNeed planning must remain virtual and never materialize media',
+    )
+
     const fullReplayResponse = await fetch(recipeEndpoint, {
       method: 'POST',
       headers: {
@@ -1534,6 +1882,15 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124 persists compatibility, exact validate
       'apollo.projects.validation-envelope-reuses.create',
       'apollo.projects.validation-envelope-reuses.list',
       'apollo.projects.validation-envelope-reuses.read',
+    ])
+    const proofNeedCapabilityIds =
+      capabilitiesPayload.data.capabilities
+        .map((capability) => capability.id)
+        .filter((id) => id.includes('proof-needs'))
+    assert.deepEqual(proofNeedCapabilityIds.sort(), [
+      'apollo.projects.proof-needs.create',
+      'apollo.projects.proof-needs.list',
+      'apollo.projects.proof-needs.read',
     ])
 
     assert.equal(
