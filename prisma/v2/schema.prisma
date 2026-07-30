@@ -1997,7 +1997,9 @@ model V2ContiguousEvaluationEvidence {
   workspaceId           String   @db.VarChar(128)
   projectId             String   @db.VarChar(128)
   indexRunId            String   @db.VarChar(128)
+  indexRunHash          String   @db.Char(64)
   momentId              String   @db.VarChar(128)
+  momentHash            String   @db.Char(64)
   kind                  String   @db.VarChar(32)
   dimensionsJson        String   @db.Text
   startMs               Int

@@ -51,6 +51,12 @@ function sourceRow(overrides = {}) {
         contiguousEvaluationEvidence: dimensions.map(
           ([dimension, kind], index) => ({
             id: `evidence-${dimension}-repository`,
+            indexRunId:
+              'index-contiguous-evaluation-repository',
+            indexRunHash: sha('a'),
+            momentId:
+              'moment-contiguous-evaluation-repository',
+            momentHash: sha('d'),
             kind,
             dimensionsJson: `["${dimension}"]`,
             startMs: 5_000,

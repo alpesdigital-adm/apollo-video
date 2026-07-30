@@ -4,23 +4,14 @@ import type {
   ContiguousQualityObservation,
   ContiguousSourceMoment,
 } from '../../domain/contiguous-extraction.ts'
+import type {
+  ContiguousEvaluationEvidence,
+} from '../../domain/contiguous-evaluation-evidence.ts'
 
-export type ContiguousEvaluationEvidenceKind =
-  | 'transcript-boundary'
-  | 'transcript-density'
-  | 'rights-integrity'
-  | 'audio-analysis'
-  | 'visual-analysis'
-
-export interface ContiguousEvaluationEvidence {
-  id: string
-  kind: ContiguousEvaluationEvidenceKind
-  dimensions: readonly ContiguousQualityDimension[]
-  rangeMs: readonly [number, number]
-  producer: Readonly<ContiguousEvaluationProducer>
-  evidenceHash: string
-  facts: Readonly<Record<string, string | number | boolean>>
-}
+export type {
+  ContiguousEvaluationEvidence,
+  ContiguousEvaluationEvidenceKind,
+} from '../../domain/contiguous-evaluation-evidence.ts'
 
 export interface ContiguousEvaluationMomentSource {
   id: string

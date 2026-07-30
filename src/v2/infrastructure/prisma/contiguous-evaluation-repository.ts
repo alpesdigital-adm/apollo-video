@@ -193,6 +193,10 @@ async function readSourceWithClient(
           moment.contiguousEvaluationEvidence.map((evidence) =>
             Object.freeze({
               id: evidence.id,
+              sourceIndexRunId: evidence.indexRunId,
+              sourceIndexRunHash: evidence.indexRunHash,
+              sourceMomentId: evidence.momentId,
+              sourceMomentHash: evidence.momentHash,
               kind: evidence.kind as
                 ContiguousEvaluationSource['moments'][number][
                   'evidence'

@@ -17,6 +17,10 @@ const dimensionEvidence = {
 function evidence(id, kind, dimension, value) {
   return {
     id,
+    sourceIndexRunId: 'index-contiguous-evaluation',
+    sourceIndexRunHash: sha('a'),
+    sourceMomentId: 'moment-contiguous-evaluation',
+    sourceMomentHash: sha('d'),
     kind,
     dimensions: [dimension],
     rangeMs: [5_000, 125_000],
@@ -199,7 +203,16 @@ test('T-FR-134 internal producer replays before provider execution and rejects s
   assert.equal(replay.run.runHash, first.run.runHash)
   assert.equal(value.providerCalls(), 1)
 
-  value.setSource(source({ indexRunHash: sha('9') }))
+  value.setSource(source({
+    indexRunHash: sha('9'),
+    moments: source().moments.map((moment) => ({
+      ...moment,
+      evidence: moment.evidence.map((item) => ({
+        ...item,
+        sourceIndexRunHash: sha('9'),
+      })),
+    })),
+  }))
   await assert.rejects(
     value.produce(request),
     (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -231,6 +244,12 @@ test('T-FR-134 internal producer rejects fabricated evidence and incomplete deci
     ...source().moments[0],
     id: 'moment-contiguous-evaluation-2',
     momentHash: sha('8'),
+    evidence: source().moments[0].evidence.map((item) => ({
+      ...item,
+      id: `${item.id}-2`,
+      sourceMomentId: 'moment-contiguous-evaluation-2',
+      sourceMomentHash: sha('8'),
+    })),
   }
   const incomplete = fixture({
     source: source({

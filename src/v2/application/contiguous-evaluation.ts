@@ -127,6 +127,10 @@ function assertSource(
         new Set(evidenceIds).size !== evidenceIds.length ||
         moment.evidence.some((evidence) =>
           !ID.test(evidence.id) ||
+          evidence.sourceIndexRunId !== source.indexRunId ||
+          evidence.sourceIndexRunHash !== source.indexRunHash ||
+          evidence.sourceMomentId !== moment.id ||
+          evidence.sourceMomentHash !== moment.momentHash ||
           !HASH.test(evidence.evidenceHash) ||
           !TOKEN.test(evidence.producer?.provider) ||
           !TOKEN.test(evidence.producer?.model) ||
