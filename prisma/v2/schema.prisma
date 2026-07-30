@@ -117,6 +117,8 @@ model V2Workspace {
   proofIntegrityEvaluations       V2ProofIntegrityEvaluation[]
   proofModeRuns                   V2ProofModeRun[]
   proofModePlans                  V2ProofModePlan[]
+  contiguousMomentEvaluations     V2ContiguousMomentEvaluation[]
+  contiguousExtractions           V2ContiguousExtraction[]
 
   @@map("workspaces")
 }
@@ -153,6 +155,7 @@ model V2ApiClient {
   semanticSearchDocuments         V2SemanticSearchDocument[]
   retrievalEvaluations            V2RetrievalEvaluation[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
+  contiguousExtractions            V2ContiguousExtraction[]
   productionBatches               V2ProductionBatch[]              @relation("ProductionBatchCreator")
   productionBatchActions          V2ProductionBatchAction[]        @relation("ProductionBatchActionActor")
   scriptAlignmentRuns             V2ScriptAlignmentRun[]           @relation("ScriptAlignmentRunCreator")
@@ -341,6 +344,8 @@ model V2Project {
   proofIntegrityEvaluations     V2ProofIntegrityEvaluation[]
   proofModeRuns                 V2ProofModeRun[]
   proofModePlans                V2ProofModePlan[]
+  contiguousMomentEvaluations   V2ContiguousMomentEvaluation[]
+  contiguousExtractions         V2ContiguousExtraction[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -1838,6 +1843,8 @@ model V2LongFormIndexRun {
   createdBy      V2ApiClient             @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   chapters       V2LongFormChapter[]
   moments        V2LongFormMoment[]
+  contiguousEvaluations V2ContiguousMomentEvaluation[] @relation("ContiguousEvaluationIndexRun")
+  contiguousExtractions V2ContiguousExtraction[] @relation("ContiguousExtractionIndexRun")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -1925,6 +1932,8 @@ model V2LongFormMoment {
   indexRun       V2LongFormIndexRun @relation(fields: [indexRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   chapter        V2LongFormChapter  @relation(fields: [chapterId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   sourceArtifact V2MediaArtifact    @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  contiguousEvaluations V2ContiguousMomentEvaluation[] @relation("ContiguousEvaluationMoment")
+  contiguousExtractions V2ContiguousExtraction[] @relation("ContiguousExtractionMoment")
 
   @@unique([id, workspaceId])
   @@unique([indexRunId, sourceMomentId])
@@ -1936,6 +1945,80 @@ model V2LongFormMoment {
   @@index([workspaceId, sourceArtifactId, recommendedStartMs])
   @@index([workspaceId, topicNormalized])
   @@map("long_form_moments")
+}
+
+model V2ContiguousMomentEvaluation {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  indexRunId            String   @db.VarChar(128)
+  momentId              String   @db.VarChar(128)
+  policyVersion         String   @db.VarChar(64)
+  objectiveTagsJson     String   @db.Text
+  semanticStartMs       Int
+  semanticEndMs         Int
+  selfContainedScore    Float
+  densityScore          Float
+  integrityScore        Float
+  audioScore            Float
+  visualScore           Float
+  selfContainedEvidenceJson String @db.Text
+  densityEvidenceJson   String   @db.Text
+  integrityEvidenceJson String   @db.Text
+  audioEvidenceJson     String   @db.Text
+  visualEvidenceJson    String   @db.Text
+  evaluationHash        String   @db.Char(64)
+  active                Boolean  @default(true)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  indexRun  V2LongFormIndexRun @relation("ContiguousEvaluationIndexRun", fields: [indexRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  moment    V2LongFormMoment @relation("ContiguousEvaluationMoment", fields: [momentId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, momentId, policyVersion, evaluationHash])
+  @@index([workspaceId, projectId, active, createdAt(sort: Desc)])
+  @@index([workspaceId, momentId, active])
+  @@index([workspaceId, indexRunId, active])
+  @@map("contiguous_moment_evaluations")
+}
+
+model V2ContiguousExtraction {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  sourceIndexRunId      String   @db.VarChar(128)
+  selectedMomentId      String   @db.VarChar(128)
+  policyVersion         String   @db.VarChar(64)
+  objective             String   @db.VarChar(240)
+  topic                 String   @db.VarChar(500)
+  targetDurationMs      Int
+  toleranceMs           Int
+  selectedStartMs       Int
+  selectedEndMs         Int
+  selectedCandidateHash String   @db.Char(64)
+  storyPlanJson         String   @db.Text
+  editPlanJson          String   @db.Text
+  resultJson            String   @db.Text
+  resultHash            String   @db.Char(64)
+  requestFingerprint    String   @db.Char(64)
+  idempotencyKey        String   @db.VarChar(128)
+  createdByClientId     String   @db.VarChar(80)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace     V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project       V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceIndexRun V2LongFormIndexRun @relation("ContiguousExtractionIndexRun", fields: [sourceIndexRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  selectedMoment V2LongFormMoment @relation("ContiguousExtractionMoment", fields: [selectedMomentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy     V2ApiClient @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, sourceIndexRunId, createdAt(sort: Desc)])
+  @@index([workspaceId, selectedMomentId])
+  @@map("contiguous_extractions")
 }
 
 model V2ValidatedSegment {
