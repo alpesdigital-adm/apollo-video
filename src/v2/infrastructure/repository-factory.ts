@@ -152,6 +152,12 @@ import {
 import {
   createFfmpegContiguousAudioEvidenceProviderFromEnvironment,
 } from './analysis/ffmpeg-contiguous-audio-evidence-provider.ts'
+import {
+  VisualContiguousEvidenceAnalyzer,
+} from './analysis/visual-contiguous-evidence-analyzer.ts'
+import {
+  createFfmpegContiguousVisualEvidenceProviderFromEnvironment,
+} from './analysis/ffmpeg-contiguous-visual-evidence-provider.ts'
 import { PrismaLongFormIndexWorkflowRepository } from './prisma/long-form-index-workflow-repository.ts'
 import { PrismaSpeakerDiarizationRepository } from './prisma/speaker-diarization-repository.ts'
 import { PrismaValidatedSegmentRepository } from './prisma/validated-segment-repository.ts'
@@ -320,6 +326,21 @@ export function createAudioContiguousEvidenceProducer(
     repository: createContiguousEvidenceRepository(),
     analyzer: new AudioContiguousEvidenceAnalyzer(
       createFfmpegContiguousAudioEvidenceProviderFromEnvironment(
+        environment,
+      ),
+    ),
+    createRunId: () => randomUUID(),
+    createEvidenceId: () => randomUUID(),
+  })
+}
+
+export function createVisualContiguousEvidenceProducer(
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  return produceContiguousEvidenceService({
+    repository: createContiguousEvidenceRepository(),
+    analyzer: new VisualContiguousEvidenceAnalyzer(
+      createFfmpegContiguousVisualEvidenceProviderFromEnvironment(
         environment,
       ),
     ),
@@ -502,6 +523,8 @@ export function createLongFormDerivedStageProcessorFromEnvironment(
     createTranscriptDensityContiguousEvidenceProducer()
   const produceAudioEvidence =
     createAudioContiguousEvidenceProducer(environment)
+  const produceVisualEvidence =
+    createVisualContiguousEvidenceProducer(environment)
   const numberFromEnvironment = (
     name: string,
     fallback: number,
@@ -537,6 +560,10 @@ export function createLongFormDerivedStageProcessorFromEnvironment(
       Object.freeze({
         kind: 'audio-analysis' as const,
         produce: produceAudioEvidence,
+      }),
+      Object.freeze({
+        kind: 'visual-analysis' as const,
+        produce: produceVisualEvidence,
       }),
     ]),
     createId: (kind, sourceId) =>

@@ -46,6 +46,7 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
       TranscriptDensityContiguousEvidenceAnalyzer,
     },
     { AudioContiguousEvidenceAnalyzer },
+    { VisualContiguousEvidenceAnalyzer },
     { nodeApiCredentialCrypto },
     route,
     readRoute,
@@ -72,6 +73,7 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     import('../../src/v2/infrastructure/analysis/rights-integrity-contiguous-evidence-analyzer.ts'),
     import('../../src/v2/infrastructure/analysis/transcript-contiguous-evidence-analyzers.ts'),
     import('../../src/v2/infrastructure/analysis/audio-contiguous-evidence-analyzer.ts'),
+    import('../../src/v2/infrastructure/analysis/visual-contiguous-evidence-analyzer.ts'),
     import('../../src/v2/infrastructure/security/api-credential.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/route.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/[workflowId]/route.ts'),
@@ -383,6 +385,31 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
                   silenceRatio: 0,
                   audibleSignal: true,
                   clippingRisk: false,
+                }))
+              },
+            }),
+          },
+          {
+            kind: 'visual-analysis',
+            analyzer: new VisualContiguousEvidenceAnalyzer({
+              async measure(input) {
+                return input.windows.map((window) => ({
+                  momentId: window.momentId,
+                  rangeMs: window.rangeMs,
+                  durationMs:
+                    window.rangeMs[1] - window.rangeMs[0],
+                  sampledFrameCount: 30,
+                  averageLuma: 0.5,
+                  averageSaturation: 0.25,
+                  averageTemporalDifference: 0.05,
+                  temporalOutlierRatio: 0,
+                  repeatedPixelRatio: 0,
+                  broadcastRangeViolationRatio: 0,
+                  blackDurationMs: 0,
+                  blackRatio: 0,
+                  freezeDurationMs: 0,
+                  freezeRatio: 0,
+                  sceneChangeCount: 1,
                 }))
               },
             }),
