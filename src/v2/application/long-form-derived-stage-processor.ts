@@ -136,6 +136,18 @@ export interface LongFormContiguousEvidenceProducer {
   }): Promise<unknown>
 }
 
+export interface LongFormContiguousEvaluationProducer {
+  produce(input: {
+    workspaceId: string
+    projectId: string
+    indexRunId: string
+    actor: Readonly<{ type: 'api-client'; id: string }>
+    idempotencyKey: string
+    signal: AbortSignal
+    fence: Readonly<LongFormStagePersistenceFence>
+  }): Promise<unknown>
+}
+
 function sameVersion(
   left: Readonly<LongFormIndexStageVersion>,
   right: Readonly<LongFormIndexStageVersion>,
@@ -553,6 +565,8 @@ export function createLongFormDerivedStageProcessor(
     diarization: SpeakerDiarizationRepository
     contiguousEvidenceProducers:
       readonly Readonly<LongFormContiguousEvidenceProducer>[]
+    contiguousEvaluation:
+      Readonly<LongFormContiguousEvaluationProducer>
     createId: (
       kind:
         | 'hierarchical-processing-run'
@@ -1015,6 +1029,33 @@ export function createLongFormDerivedStageProcessor(
         ),
       })
     }
+    if (input.signal.aborted || !(await input.heartbeat())) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Long-form moments lease was lost before contiguous evaluation',
+      )
+    }
+    await dependencies.contiguousEvaluation.produce({
+      workspaceId: workflow.workspaceId,
+      projectId: workflow.projectId,
+      indexRunId: persistedRun.id,
+      actor: Object.freeze({
+        type: 'api-client',
+        id: workflow.createdByClientId,
+      }),
+      idempotencyKey: `quality-evaluation-${calculateCanonicalHash({
+        stageIdempotencyKey: input.checkpoint.idempotencyKey,
+        indexRunId: persistedRun.id,
+        indexRunHash: persistedRun.recordHash,
+        evaluator: 'contiguous-evidence-policy/1.0.0',
+      }).slice(0, 48)}`,
+      signal: input.signal,
+      fence: stageFence(
+        input,
+        'moments',
+        clock().toISOString(),
+      ),
+    })
     return momentResult(persistedRun, elapsedMs)
   }
 

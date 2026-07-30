@@ -296,6 +296,8 @@ function processorFixture(options = {}) {
   let longFormContextReadCount = 0
   const contiguousEvidenceRequests = []
   let contiguousEvidenceCallCount = 0
+  const contiguousEvaluationRequests = []
+  let contiguousEvaluationCallCount = 0
   const hierarchicalFences = []
   const longFormFences = []
   const transcriptEvidenceBatches = []
@@ -427,6 +429,22 @@ function processorFixture(options = {}) {
         return { replayed: false }
       },
     })),
+    contiguousEvaluation: {
+      async produce(input) {
+        contiguousEvaluationCallCount += 1
+        contiguousEvaluationRequests.push(input)
+        if (
+          options.evaluationLeaseLost ||
+          options.evaluationLeaseLostOnce &&
+            contiguousEvaluationCallCount === 1
+        ) {
+          const error = new Error('lease lost')
+          error.code = 'VERSION_CONFLICT'
+          throw error
+        }
+        return { replayed: false }
+      },
+    },
     createId(kind, sourceId) {
       return sourceId
         ? `${kind}-${sourceId}`
@@ -460,6 +478,9 @@ function processorFixture(options = {}) {
     contiguousEvidenceRequests,
     getContiguousEvidenceCallCount: () =>
       contiguousEvidenceCallCount,
+    contiguousEvaluationRequests,
+    getContiguousEvaluationCallCount: () =>
+      contiguousEvaluationCallCount,
   }
 }
 
@@ -609,6 +630,8 @@ async function runningMomentsFixture(options = {}) {
     longFormLeaseLost: options.longFormLeaseLost,
     rightsEvidenceLeaseLostOnce:
       options.rightsEvidenceLeaseLostOnce,
+    evaluationLeaseLostOnce:
+      options.evaluationLeaseLostOnce,
     rights: options.rights,
     onHierarchicalFindRun:
       options.onHierarchicalFindRun,
@@ -625,6 +648,7 @@ test('T-FR-133 moments derive anonymous speakers only from temporal overlap and 
   const stored = fixture.getLongForm()
   assert.equal(result.resultCount, stored.momentCount)
   assert.equal(fixture.contiguousEvidenceRequests.length, 5)
+  assert.equal(fixture.contiguousEvaluationRequests.length, 1)
   assert.deepEqual(
     new Set(fixture.contiguousEvidenceRequests.map(
       (request) => request.kind,
@@ -653,6 +677,10 @@ test('T-FR-133 moments derive anonymous speakers only from temporal overlap and 
   )
   assert.equal(
     fixture.contiguousEvidenceRequests[0].fence.stage,
+    'moments',
+  )
+  assert.equal(
+    fixture.contiguousEvaluationRequests[0].fence.stage,
     'moments',
   )
   assert.ok(stored.moments.length >= 1)
@@ -759,6 +787,48 @@ test('T-FR-134 moments resume contiguous evidence without duplicating the persis
   assert.equal(
     setup.fixture.getContiguousEvidenceCallCount(),
     6,
+  )
+  assert.equal(
+    setup.fixture.getContiguousEvaluationCallCount(),
+    1,
+  )
+})
+
+test('T-FR-134 moments resume fenced evaluation after all evidence without duplicating the index', async () => {
+  const setup = await runningMomentsFixture({
+    evaluationLeaseLostOnce: true,
+  })
+  await assert.rejects(
+    setup.fixture.processor.process(
+      processInput(setup.workflow),
+    ),
+    (error) => error.code === 'VERSION_CONFLICT',
+  )
+  assert.equal(setup.fixture.getLongFormPersistCount(), 1)
+  assert.equal(
+    setup.fixture.getContiguousEvidenceCallCount(),
+    5,
+  )
+  assert.equal(
+    setup.fixture.getContiguousEvaluationCallCount(),
+    1,
+  )
+
+  const replay = await setup.fixture.processor.process(
+    processInput(setup.workflow),
+  )
+  assert.equal(
+    replay.outputEntityId,
+    setup.fixture.getLongForm().id,
+  )
+  assert.equal(setup.fixture.getLongFormPersistCount(), 1)
+  assert.equal(
+    setup.fixture.getContiguousEvidenceCallCount(),
+    10,
+  )
+  assert.equal(
+    setup.fixture.getContiguousEvaluationCallCount(),
+    2,
   )
 })
 

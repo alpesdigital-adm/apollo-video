@@ -25,6 +25,9 @@ import { runNextSourceCleanupOperationService } from '../application/run-source-
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
 import {
+  produceContiguousEvaluationsService,
+} from '../application/contiguous-evaluation.ts'
+import {
   createSpeakerDiarizationStageProcessor,
 } from '../application/speaker-diarization-stage-processor.ts'
 import {
@@ -158,6 +161,9 @@ import {
 import {
   createFfmpegContiguousVisualEvidenceProviderFromEnvironment,
 } from './analysis/ffmpeg-contiguous-visual-evidence-provider.ts'
+import {
+  DeterministicContiguousEvaluationProvider,
+} from './analysis/deterministic-contiguous-evaluation-provider.ts'
 import { PrismaLongFormIndexWorkflowRepository } from './prisma/long-form-index-workflow-repository.ts'
 import { PrismaSpeakerDiarizationRepository } from './prisma/speaker-diarization-repository.ts'
 import { PrismaValidatedSegmentRepository } from './prisma/validated-segment-repository.ts'
@@ -354,6 +360,15 @@ ContiguousEvaluationRepository {
   return new PrismaContiguousEvaluationRepository(resolveV2Client())
 }
 
+export function createContiguousEvaluationProducer() {
+  return produceContiguousEvaluationsService({
+    repository: createContiguousEvaluationRepository(),
+    provider: new DeterministicContiguousEvaluationProvider(),
+    createRunId: () => randomUUID(),
+    createEvaluationId: () => randomUUID(),
+  })
+}
+
 export function createValidatedSegmentRepository(): ValidatedSegmentRepository {
   return new PrismaValidatedSegmentRepository(resolveV2Client())
 }
@@ -525,6 +540,8 @@ export function createLongFormDerivedStageProcessorFromEnvironment(
     createAudioContiguousEvidenceProducer(environment)
   const produceVisualEvidence =
     createVisualContiguousEvidenceProducer(environment)
+  const produceEvaluation =
+    createContiguousEvaluationProducer()
   const numberFromEnvironment = (
     name: string,
     fallback: number,
@@ -566,6 +583,9 @@ export function createLongFormDerivedStageProcessorFromEnvironment(
         produce: produceVisualEvidence,
       }),
     ]),
+    contiguousEvaluation: Object.freeze({
+      produce: produceEvaluation,
+    }),
     createId: (kind, sourceId) =>
       sourceId
         ? `${kind}-${calculateVersionHash({

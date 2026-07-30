@@ -7,6 +7,9 @@ import type {
 import type {
   ContiguousEvaluationEvidence,
 } from '../../domain/contiguous-evaluation-evidence.ts'
+import type {
+  LongFormStagePersistenceFence,
+} from './long-form-stage-persistence.ts'
 
 export type {
   ContiguousEvaluationEvidence,
@@ -118,4 +121,11 @@ export interface ContiguousEvaluationRepository {
     run: Readonly<PersistedContiguousEvaluationRun>
     replayed: boolean
   }>>
+  persistWithLongFormLease(input: {
+    run: Readonly<PersistedContiguousEvaluationRun>
+    fence: Readonly<LongFormStagePersistenceFence>
+  }): Promise<Readonly<{
+    run: Readonly<PersistedContiguousEvaluationRun>
+    replayed: boolean
+  }> | null>
 }

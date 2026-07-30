@@ -39,7 +39,11 @@ function sourceRow(overrides = {}) {
     sourceManifestHash: sha('c'),
     durationMs: 7_200_000,
     rightsSnapshot: rights,
-    sourceArtifact: { currentRightsSnapshot: rights },
+    sourceArtifact: {
+      mediaType: 'video',
+      status: 'available',
+      currentRightsSnapshot: rights,
+    },
     moments: [
       {
         id: 'moment-contiguous-evaluation-repository',
@@ -81,6 +85,7 @@ function fixture(options = {}) {
   let storedEvaluations = []
   let deactivated = false
   let providerCalls = 0
+  let fenceChecks = 0
   const initial = options.sourceRow ?? sourceRow()
   const transactional =
     options.transactionSourceRow ?? initial
@@ -108,6 +113,22 @@ function fixture(options = {}) {
         v2ApiClient: {
           async findFirst() {
             return { id: 'client-contiguous-evaluation-repository' }
+          },
+        },
+        v2PublicOperation: {
+          async findFirst() {
+            fenceChecks += 1
+            return options.leaseAvailable === false
+              ? null
+              : { id: 'operation-contiguous-evaluation' }
+          },
+        },
+        v2LongFormIndexStageCheckpoint: {
+          async findFirst() {
+            fenceChecks += 1
+            return options.leaseAvailable === false
+              ? null
+              : { id: 'stage-contiguous-evaluation' }
           },
         },
         v2ContiguousMomentEvaluation: {
@@ -182,6 +203,7 @@ function fixture(options = {}) {
     storedEvaluations: () => storedEvaluations,
     deactivated: () => deactivated,
     providerCalls: () => providerCalls,
+    fenceChecks: () => fenceChecks,
   }
 }
 
@@ -194,6 +216,19 @@ const request = {
     id: 'client-contiguous-evaluation-repository',
   },
   idempotencyKey: 'contiguous-evaluation-repository-key',
+}
+
+const fence = {
+  workspaceId: request.workspaceId,
+  projectId: request.projectId,
+  workflowId: 'workflow-contiguous-evaluation',
+  operationId: 'operation-contiguous-evaluation',
+  stage: 'moments',
+  expectedStageInputHash: sha('f'),
+  expectedStageIdempotencyKey: 'moments-stage-key',
+  leaseOwner: 'worker-contiguous-evaluation',
+  operationAttempt: 1,
+  now: '2026-07-31T00:20:00.000Z',
 }
 
 test('T-FR-134 Prisma evaluation adapter revalidates and persists one canonical run atomically', async () => {
@@ -234,4 +269,22 @@ test('T-FR-134 Prisma evaluation adapter rejects source drift inside the seriali
   assert.equal(value.storedRun(), undefined)
   assert.equal(value.storedEvaluations().length, 0)
   assert.equal(value.deactivated(), false)
+})
+
+test('T-FR-134 Prisma evaluation adapter persists behind the moments lease and rejects lease loss', async () => {
+  const active = fixture()
+  const created = await active.produce({ ...request, fence })
+  assert.equal(created.replayed, false)
+  assert.equal(active.fenceChecks(), 2)
+  assert.equal(active.storedEvaluations().length, 1)
+
+  const lost = fixture({ leaseAvailable: false })
+  await assert.rejects(
+    lost.produce({ ...request, fence }),
+    (error) => error.code === 'VERSION_CONFLICT',
+  )
+  assert.equal(lost.fenceChecks(), 2)
+  assert.equal(lost.storedRun(), undefined)
+  assert.equal(lost.storedEvaluations().length, 0)
+  assert.equal(lost.deactivated(), false)
 })
