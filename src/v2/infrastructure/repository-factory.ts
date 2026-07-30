@@ -23,6 +23,7 @@ import { runNextProjectProxyRenderOperationService } from '../application/run-pr
 import { runNextProjectFinalExportOperationService } from '../application/run-project-final-export-worker.ts'
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
+import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
 import {
   createSpeakerDiarizationStageProcessor,
 } from '../application/speaker-diarization-stage-processor.ts'
@@ -138,6 +139,9 @@ import { PrismaLongFormIndexRepository } from './prisma/long-form-index-reposito
 import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
 import { PrismaContiguousEvidenceRepository } from './prisma/contiguous-evidence-repository.ts'
 import { PrismaContiguousEvaluationRepository } from './prisma/contiguous-evaluation-repository.ts'
+import {
+  RightsIntegrityContiguousEvidenceAnalyzer,
+} from './analysis/rights-integrity-contiguous-evidence-analyzer.ts'
 import { PrismaLongFormIndexWorkflowRepository } from './prisma/long-form-index-workflow-repository.ts'
 import { PrismaSpeakerDiarizationRepository } from './prisma/speaker-diarization-repository.ts'
 import { PrismaValidatedSegmentRepository } from './prisma/validated-segment-repository.ts'
@@ -268,6 +272,15 @@ ContiguousExtractionRepository {
 export function createContiguousEvidenceRepository():
 ContiguousEvidenceRepository {
   return new PrismaContiguousEvidenceRepository(resolveV2Client())
+}
+
+export function createRightsIntegrityContiguousEvidenceProducer() {
+  return produceContiguousEvidenceService({
+    repository: createContiguousEvidenceRepository(),
+    analyzer: new RightsIntegrityContiguousEvidenceAnalyzer(),
+    createRunId: () => randomUUID(),
+    createEvidenceId: () => randomUUID(),
+  })
 }
 
 export function createContiguousEvaluationRepository():
