@@ -128,6 +128,11 @@ function assertSource(
         moment.evidence.some((evidence) =>
           !ID.test(evidence.id) ||
           !HASH.test(evidence.evidenceHash) ||
+          !TOKEN.test(evidence.producer?.provider) ||
+          !TOKEN.test(evidence.producer?.model) ||
+          !TOKEN.test(evidence.producer?.version) ||
+          !HASH.test(evidence.producer?.inputHash) ||
+          !HASH.test(evidence.producer?.outputHash) ||
           !Array.isArray(evidence.dimensions) ||
           evidence.dimensions.length < 1 ||
           evidence.dimensions.some((dimension) =>

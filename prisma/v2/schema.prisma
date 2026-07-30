@@ -117,6 +117,8 @@ model V2Workspace {
   proofIntegrityEvaluations       V2ProofIntegrityEvaluation[]
   proofModeRuns                   V2ProofModeRun[]
   proofModePlans                  V2ProofModePlan[]
+  contiguousEvaluationRuns       V2ContiguousEvaluationRun[]
+  contiguousEvaluationEvidence   V2ContiguousEvaluationEvidence[]
   contiguousMomentEvaluations     V2ContiguousMomentEvaluation[]
   contiguousExtractions           V2ContiguousExtraction[]
 
@@ -155,6 +157,7 @@ model V2ApiClient {
   semanticSearchDocuments         V2SemanticSearchDocument[]
   retrievalEvaluations            V2RetrievalEvaluation[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
+  contiguousEvaluationRuns        V2ContiguousEvaluationRun[]
   contiguousExtractions            V2ContiguousExtraction[]
   productionBatches               V2ProductionBatch[]              @relation("ProductionBatchCreator")
   productionBatchActions          V2ProductionBatchAction[]        @relation("ProductionBatchActionActor")
@@ -344,6 +347,8 @@ model V2Project {
   proofIntegrityEvaluations     V2ProofIntegrityEvaluation[]
   proofModeRuns                 V2ProofModeRun[]
   proofModePlans                V2ProofModePlan[]
+  contiguousEvaluationRuns     V2ContiguousEvaluationRun[]
+  contiguousEvaluationEvidence V2ContiguousEvaluationEvidence[]
   contiguousMomentEvaluations   V2ContiguousMomentEvaluation[]
   contiguousExtractions         V2ContiguousExtraction[]
 
@@ -1843,6 +1848,8 @@ model V2LongFormIndexRun {
   createdBy      V2ApiClient             @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   chapters       V2LongFormChapter[]
   moments        V2LongFormMoment[]
+  contiguousEvaluationRuns V2ContiguousEvaluationRun[] @relation("ContiguousEvaluationRunIndex")
+  contiguousEvaluationEvidence V2ContiguousEvaluationEvidence[] @relation("ContiguousEvidenceIndex")
   contiguousEvaluations V2ContiguousMomentEvaluation[] @relation("ContiguousEvaluationIndexRun")
   contiguousExtractions V2ContiguousExtraction[] @relation("ContiguousExtractionIndexRun")
 
@@ -1932,6 +1939,7 @@ model V2LongFormMoment {
   indexRun       V2LongFormIndexRun @relation(fields: [indexRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   chapter        V2LongFormChapter  @relation(fields: [chapterId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   sourceArtifact V2MediaArtifact    @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  contiguousEvaluationEvidence V2ContiguousEvaluationEvidence[] @relation("ContiguousEvidenceMoment")
   contiguousEvaluations V2ContiguousMomentEvaluation[] @relation("ContiguousEvaluationMoment")
   contiguousExtractions V2ContiguousExtraction[] @relation("ContiguousExtractionMoment")
 
@@ -1947,10 +1955,82 @@ model V2LongFormMoment {
   @@map("long_form_moments")
 }
 
+model V2ContiguousEvaluationRun {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  sourceIndexRunId      String   @db.VarChar(128)
+  sourceIndexRunHash    String   @db.Char(64)
+  policyVersion         String   @db.VarChar(64)
+  producerProvider      String   @db.VarChar(128)
+  producerModel         String   @db.VarChar(128)
+  producerVersion       String   @db.VarChar(128)
+  producerInputHash     String   @db.Char(64)
+  producerOutputHash    String   @db.Char(64)
+  decisionsJson         String   @db.Text
+  evaluationCount       Int
+  rejectedCount         Int
+  requestFingerprint    String   @db.Char(64)
+  idempotencyKey        String   @db.VarChar(128)
+  createdByClientId     String   @db.VarChar(80)
+  createdAt             DateTime @db.Timestamptz(3)
+  runJson               String   @db.Text
+  runHash               String   @db.Char(64)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceIndexRun V2LongFormIndexRun @relation("ContiguousEvaluationRunIndex", fields: [sourceIndexRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy V2ApiClient @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  evaluations V2ContiguousMomentEvaluation[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, sourceIndexRunId, createdByClientId, idempotencyKey])
+  @@unique([workspaceId, runHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceIndexRunId, createdAt(sort: Desc)])
+  @@index([workspaceId, producerProvider, producerModel, producerVersion, createdAt(sort: Desc)])
+  @@map("contiguous_evaluation_runs")
+}
+
+model V2ContiguousEvaluationEvidence {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  indexRunId            String   @db.VarChar(128)
+  momentId              String   @db.VarChar(128)
+  kind                  String   @db.VarChar(32)
+  dimensionsJson        String   @db.Text
+  startMs               Int
+  endMs                 Int
+  producerProvider      String   @db.VarChar(128)
+  producerModel         String   @db.VarChar(128)
+  producerVersion       String   @db.VarChar(128)
+  producerInputHash     String   @db.Char(64)
+  producerOutputHash    String   @db.Char(64)
+  factsJson             String   @db.Text
+  evidenceHash          String   @db.Char(64)
+  active                Boolean  @default(true)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  indexRun V2LongFormIndexRun @relation("ContiguousEvidenceIndex", fields: [indexRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  moment V2LongFormMoment @relation("ContiguousEvidenceMoment", fields: [momentId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, momentId, evidenceHash])
+  @@index([workspaceId, projectId, active, createdAt(sort: Desc)])
+  @@index([workspaceId, indexRunId, active])
+  @@index([workspaceId, momentId, active])
+  @@index([workspaceId, kind, active])
+  @@map("contiguous_evaluation_evidence")
+}
+
 model V2ContiguousMomentEvaluation {
   id                    String   @id @db.VarChar(128)
   workspaceId           String   @db.VarChar(128)
   projectId             String   @db.VarChar(128)
+  runId                 String   @db.VarChar(128)
   indexRunId            String   @db.VarChar(128)
   momentId              String   @db.VarChar(128)
   policyVersion         String   @db.VarChar(64)
@@ -1978,6 +2058,7 @@ model V2ContiguousMomentEvaluation {
 
   workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project   V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  run       V2ContiguousEvaluationRun @relation(fields: [runId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   indexRun  V2LongFormIndexRun @relation("ContiguousEvaluationIndexRun", fields: [indexRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   moment    V2LongFormMoment @relation("ContiguousEvaluationMoment", fields: [momentId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   extractions V2ContiguousExtraction[]
@@ -1985,6 +2066,7 @@ model V2ContiguousMomentEvaluation {
   @@unique([id, workspaceId])
   @@unique([workspaceId, momentId, policyVersion, evaluationHash])
   @@index([workspaceId, projectId, active, createdAt(sort: Desc)])
+  @@index([workspaceId, runId])
   @@index([workspaceId, momentId, active])
   @@index([workspaceId, indexRunId, active])
   @@index([workspaceId, producerProvider, producerModel, producerVersion, createdAt(sort: Desc)])

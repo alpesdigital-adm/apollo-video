@@ -1,0 +1,231 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+const [
+  { produceContiguousEvaluationsService },
+  { PrismaContiguousEvaluationRepository },
+] = await Promise.all([
+  import('../../src/v2/application/contiguous-evaluation.ts'),
+  import(
+    '../../src/v2/infrastructure/prisma/contiguous-evaluation-repository.ts'
+  ),
+])
+
+const sha = (value) => value.repeat(64).slice(0, 64)
+const dimensions = [
+  ['selfContained', 'transcript-boundary'],
+  ['density', 'transcript-density'],
+  ['integrity', 'rights-integrity'],
+  ['audio', 'audio-analysis'],
+  ['visual', 'visual-analysis'],
+]
+
+function sourceRow(overrides = {}) {
+  const rights = {
+    id: 'rights-contiguous-evaluation-repository',
+    status: 'approved',
+    consentStatus: 'not-required',
+    expiresAt: null,
+    consentExpiresAt: null,
+  }
+  return {
+    id: 'index-contiguous-evaluation-repository',
+    workspaceId: 'workspace-contiguous-evaluation-repository',
+    projectId: 'project-contiguous-evaluation-repository',
+    recordHash: sha('a'),
+    sourceArtifactId: 'artifact-contiguous-evaluation-repository',
+    sourceArtifactSha256: sha('b'),
+    sourceManifestId: 'manifest-contiguous-evaluation-repository',
+    sourceManifestHash: sha('c'),
+    durationMs: 7_200_000,
+    rightsSnapshot: rights,
+    sourceArtifact: { currentRightsSnapshot: rights },
+    moments: [
+      {
+        id: 'moment-contiguous-evaluation-repository',
+        momentHash: sha('d'),
+        chapterId: 'chapter-contiguous-evaluation-repository',
+        topicNormalized: 'aquisicao',
+        recommendedStartMs: 10_000,
+        recommendedEndMs: 110_000,
+        contiguousEvaluationEvidence: dimensions.map(
+          ([dimension, kind], index) => ({
+            id: `evidence-${dimension}-repository`,
+            kind,
+            dimensionsJson: `["${dimension}"]`,
+            startMs: 5_000,
+            endMs: 125_000,
+            producerProvider: 'apollo',
+            producerModel: `${kind}-analyzer`,
+            producerVersion: '1.0.0',
+            producerInputHash: sha(`${index + 1}`),
+            producerOutputHash: sha(`${index + 2}`),
+            factsJson: '{"measured":true,"value":0.9}',
+            evidenceHash: sha(`${index + 3}`),
+          }),
+        ),
+      },
+    ],
+    ...overrides,
+  }
+}
+
+function fixture(options = {}) {
+  let storedRun
+  let storedEvaluations = []
+  let deactivated = false
+  let providerCalls = 0
+  const initial = options.sourceRow ?? sourceRow()
+  const transactional =
+    options.transactionSourceRow ?? initial
+  const runDelegate = {
+    async findUnique() {
+      return storedRun
+        ? { ...storedRun, evaluations: storedEvaluations }
+        : null
+    },
+  }
+  const client = {
+    v2LongFormIndexRun: {
+      async findFirst() {
+        return initial
+      },
+    },
+    v2ContiguousEvaluationRun: runDelegate,
+    async $transaction(callback) {
+      return callback({
+        v2LongFormIndexRun: {
+          async findFirst() {
+            return transactional
+          },
+        },
+        v2ApiClient: {
+          async findFirst() {
+            return { id: 'client-contiguous-evaluation-repository' }
+          },
+        },
+        v2ContiguousMomentEvaluation: {
+          async updateMany() {
+            deactivated = true
+            return { count: 0 }
+          },
+          async createMany(input) {
+            storedEvaluations = input.data
+            return { count: input.data.length }
+          },
+        },
+        v2ContiguousEvaluationRun: {
+          async create(input) {
+            storedRun = input.data
+            return storedRun
+          },
+          async findUniqueOrThrow() {
+            return {
+              ...storedRun,
+              evaluations: storedEvaluations,
+            }
+          },
+        },
+      })
+    },
+  }
+  const repository =
+    new PrismaContiguousEvaluationRepository(client)
+  const produce = produceContiguousEvaluationsService({
+    repository,
+    provider: {
+      identity: {
+        provider: 'apollo',
+        model: 'contiguous-quality-evaluator',
+        version: '1.0.0',
+      },
+      async evaluate() {
+        providerCalls += 1
+        return [
+          {
+            status: 'evaluated',
+            momentId:
+              'moment-contiguous-evaluation-repository',
+            objectiveTags: ['education'],
+            semanticRangeMs: [5_000, 125_000],
+            scores: Object.fromEntries(
+              dimensions.map(([dimension]) => [
+                dimension,
+                {
+                  value: 0.9,
+                  evidenceRefs: [
+                    `evidence-${dimension}-repository`,
+                  ],
+                },
+              ]),
+            ),
+          },
+        ]
+      },
+    },
+    createRunId: () =>
+      'contiguous-evaluation-run-repository',
+    createEvaluationId: () =>
+      'contiguous-evaluation-record-repository',
+    clock: () => new Date('2026-07-31T00:20:00.000Z'),
+  })
+  return {
+    produce,
+    repository,
+    storedRun: () => storedRun,
+    storedEvaluations: () => storedEvaluations,
+    deactivated: () => deactivated,
+    providerCalls: () => providerCalls,
+  }
+}
+
+const request = {
+  workspaceId: 'workspace-contiguous-evaluation-repository',
+  projectId: 'project-contiguous-evaluation-repository',
+  indexRunId: 'index-contiguous-evaluation-repository',
+  actor: {
+    type: 'api-client',
+    id: 'client-contiguous-evaluation-repository',
+  },
+  idempotencyKey: 'contiguous-evaluation-repository-key',
+}
+
+test('T-FR-134 Prisma evaluation adapter revalidates and persists one canonical run atomically', async () => {
+  const value = fixture()
+  const created = await value.produce(request)
+
+  assert.equal(created.replayed, false)
+  assert.equal(value.storedRun().evaluationCount, 1)
+  assert.equal(value.storedRun().rejectedCount, 0)
+  assert.equal(value.storedEvaluations().length, 1)
+  assert.equal(
+    value.storedEvaluations()[0].runId,
+    created.run.id,
+  )
+  assert.equal(value.deactivated(), true)
+  assert.deepEqual(
+    await value.repository.findIdempotent({
+      workspaceId: request.workspaceId,
+      projectId: request.projectId,
+      sourceIndexRunId: request.indexRunId,
+      createdByClientId: request.actor.id,
+      idempotencyKey: request.idempotencyKey,
+    }),
+    created.run,
+  )
+  assert.equal(value.providerCalls(), 1)
+})
+
+test('T-FR-134 Prisma evaluation adapter rejects source drift inside the serializable transaction', async () => {
+  const value = fixture({
+    transactionSourceRow: sourceRow({ recordHash: sha('9') }),
+  })
+
+  await assert.rejects(
+    value.produce(request),
+    (error) => error.code === 'VERSION_CONFLICT',
+  )
+  assert.equal(value.storedRun(), undefined)
+  assert.equal(value.storedEvaluations().length, 0)
+  assert.equal(value.deactivated(), false)
+})

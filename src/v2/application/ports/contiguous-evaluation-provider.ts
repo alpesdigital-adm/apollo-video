@@ -17,6 +17,7 @@ export interface ContiguousEvaluationEvidence {
   kind: ContiguousEvaluationEvidenceKind
   dimensions: readonly ContiguousQualityDimension[]
   rangeMs: readonly [number, number]
+  producer: Readonly<ContiguousEvaluationProducer>
   evidenceHash: string
   facts: Readonly<Record<string, string | number | boolean>>
 }

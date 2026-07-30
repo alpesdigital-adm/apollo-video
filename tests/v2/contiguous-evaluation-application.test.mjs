@@ -20,6 +20,13 @@ function evidence(id, kind, dimension, value) {
     kind,
     dimensions: [dimension],
     rangeMs: [5_000, 125_000],
+    producer: {
+      provider: 'apollo',
+      model: `${kind}-analyzer`,
+      version: '1.0.0',
+      inputHash: sha('4'),
+      outputHash: sha('5'),
+    },
     evidenceHash: sha(value),
     facts: { measured: true, value: 0.9 },
   }
