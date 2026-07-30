@@ -329,3 +329,34 @@ test('F2.022 worker aborts without checkpoint promotion after lease loss', async
     undefined,
   )
 })
+
+test('F2.022 supervised shutdown reaches the active stage and prevents promotion', async () => {
+  const fixture = workerFixture()
+  const controller = new AbortController()
+  let stageSignal
+  const run = runNextLongFormIndexOperationService({
+    operations: fixture.operations,
+    workflows: fixture.workflows,
+    processor: {
+      async process(input) {
+        stageSignal = input.signal
+        controller.abort()
+        assert.equal(input.signal.aborted, true)
+        throw new Error('worker shutdown')
+      },
+    },
+    clock: advancingClock(),
+    leaseDurationMs: 30_000,
+    heartbeatIntervalMs: 10_000,
+  })
+  const outcome = await run(
+    'worker-long-form-shutdown',
+    controller.signal,
+  )
+  assert.equal(outcome.status, 'retrying')
+  assert.equal(stageSignal.aborted, true)
+  assert.equal(
+    fixture.getWorkflow().stages[2].outputHash,
+    undefined,
+  )
+})

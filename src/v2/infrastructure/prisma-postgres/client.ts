@@ -24,3 +24,9 @@ export function getV2PostgresClient(): PrismaClient {
 
   return globalForV2Prisma.apolloV2Postgres
 }
+
+export async function disconnectV2PostgresClient(): Promise<void> {
+  const client = globalForV2Prisma.apolloV2Postgres
+  globalForV2Prisma.apolloV2Postgres = undefined
+  await client?.$disconnect()
+}

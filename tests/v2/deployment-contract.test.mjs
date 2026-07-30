@@ -23,6 +23,26 @@ test('production deploy waits for PostgreSQL before migrating or replacing conta
   assert.ok(waitForPostgres >= 0)
   assert.ok(migration > waitForPostgres)
   assert.ok(firstReplacement > migration)
+  assert.match(
+    script,
+    /LONG_FORM_WORKER=.*long-form-worker/,
+  )
+  assert.match(
+    script,
+    /run-v2-long-form-worker\.mjs/,
+  )
+  assert.match(
+    script,
+    /GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR.*must be a positive integer/s,
+  )
+  assert.match(
+    script,
+    /Long-form provider credentials are not configured/,
+  )
+  assert.match(
+    script,
+    /for worker in "\$\{INGEST_WORKER\}" "\$\{RENDER_WORKER\}" "\$\{WEBHOOK_WORKER\}" "\$\{LONG_FORM_WORKER\}"/,
+  )
 })
 
 test('build tracing excludes ephemeral runtime artifacts and process logs stay outside the repository', async () => {

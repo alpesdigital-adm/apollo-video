@@ -103,7 +103,9 @@ export function runNextLongFormIndexOperationService(
 
   return async function runNext(
     leaseOwner: string,
+    signal?: AbortSignal,
   ): Promise<Readonly<LongFormIndexWorkerOutcome> | null> {
+    if (signal?.aborted) return null
     const claimedAt = clock()
     const claimed = await dependencies.operations.claimNext({
       leaseOwner,
@@ -124,6 +126,8 @@ export function runNextLongFormIndexOperationService(
     const workflowId = context.workflowId
     const operationAttempt = claimed.lease.attempt
     const abortController = new AbortController()
+    const abortFromOwner = () => abortController.abort()
+    signal?.addEventListener('abort', abortFromOwner, { once: true })
     let stopped = false
     let leaseLost = false
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -440,6 +444,7 @@ export function runNextLongFormIndexOperationService(
       })
     } finally {
       stopHeartbeat()
+      signal?.removeEventListener('abort', abortFromOwner)
     }
   }
 }

@@ -6,6 +6,7 @@ CONTAINER="${APOLLO_CONTAINER:-apollo-video}"
 INGEST_WORKER="${APOLLO_INGEST_WORKER_CONTAINER:-${CONTAINER}-ingest-worker}"
 RENDER_WORKER="${APOLLO_RENDER_WORKER_CONTAINER:-${CONTAINER}-render-worker}"
 WEBHOOK_WORKER="${APOLLO_WEBHOOK_WORKER_CONTAINER:-${CONTAINER}-webhook-worker}"
+LONG_FORM_WORKER="${APOLLO_LONG_FORM_WORKER_CONTAINER:-${CONTAINER}-long-form-worker}"
 APP_ROOT="${APOLLO_APP_ROOT:-/apps/apollo-video}"
 ENV_FILE="${APOLLO_ENV_FILE:-${APP_ROOT}/.env}"
 DOMAIN="${APOLLO_DOMAIN:-apollo.alpesd.com.br}"
@@ -35,6 +36,21 @@ docker run --rm \
     }
     if (baseUrl.protocol !== "https:" || baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash) {
       console.error("APOLLO_MEDIA_UPLOAD_BASE_URL must be a clean HTTPS origin");
+      process.exit(1);
+    }
+    const longFormPricing = [
+      ["GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR", process.env.GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR],
+      ["OPENAI_DIARIZATION_COST_MINOR_UNITS_PER_HOUR", process.env.OPENAI_DIARIZATION_COST_MINOR_UNITS_PER_HOUR],
+    ];
+    for (const [name, raw] of longFormPricing) {
+      const value = Number(raw);
+      if (!Number.isSafeInteger(value) || value < 1) {
+        console.error(name + " must be a positive integer");
+        process.exit(1);
+      }
+    }
+    if ((process.env.GROQ_API_KEY ?? "").length < 20 || (process.env.OPENAI_API_KEY ?? "").length < 20) {
+      console.error("Long-form provider credentials are not configured");
       process.exit(1);
     }
   '
@@ -100,6 +116,7 @@ remove_container "${CONTAINER}"
 remove_container "${INGEST_WORKER}"
 remove_container "${RENDER_WORKER}"
 remove_container "${WEBHOOK_WORKER}"
+remove_container "${LONG_FORM_WORKER}"
 
 docker run -d \
   --name "${CONTAINER}" \
@@ -164,6 +181,14 @@ docker run -d \
   "${IMAGE}" \
   ./node_modules/.bin/tsx scripts/run-v2-webhook-worker.mjs
 
+docker run -d \
+  --name "${LONG_FORM_WORKER}" \
+  --memory 2g \
+  --cpus 2 \
+  "${COMMON_RUNTIME[@]}" \
+  "${IMAGE}" \
+  ./node_modules/.bin/tsx scripts/run-v2-long-form-worker.mjs
+
 for attempt in $(seq 1 30); do
   health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${CONTAINER}")"
   if [[ "${health}" == "healthy" ]]; then
@@ -177,12 +202,12 @@ for attempt in $(seq 1 30); do
 done
 
 test "$(docker inspect --format '{{.State.Health.Status}}' "${CONTAINER}")" = "healthy"
-for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}"; do
+for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}" "${LONG_FORM_WORKER}"; do
   test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
 done
 
 sleep 5
-for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}"; do
+for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}" "${LONG_FORM_WORKER}"; do
   test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
   test "$(docker inspect --format '{{.RestartCount}}' "${worker}")" = "0"
 done

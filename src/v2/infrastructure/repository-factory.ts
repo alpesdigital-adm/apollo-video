@@ -22,6 +22,7 @@ import { runNextMediaIngestOperationService } from '../application/run-media-ing
 import { runNextProjectProxyRenderOperationService } from '../application/run-project-proxy-render-worker.ts'
 import { runNextProjectFinalExportOperationService } from '../application/run-project-final-export-worker.ts'
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
+import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
 import {
   createSpeakerDiarizationStageProcessor,
 } from '../application/speaker-diarization-stage-processor.ts'
@@ -932,6 +933,52 @@ export function createMediaIngestWorker(
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
     ...(Number.isSafeInteger(configuredRetryMax) && configuredRetryMax > 0 ? { retryMaxDelayMs: configuredRetryMax } : {}),
+  })
+}
+
+export function createLongFormIndexWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const configuredLease = Number(
+    environment.APOLLO_V2_LONG_FORM_LEASE_MS ??
+      environment.APOLLO_V2_WORKER_LEASE_MS,
+  )
+  const configuredHeartbeat = Number(
+    environment.APOLLO_V2_LONG_FORM_HEARTBEAT_MS ??
+      environment.APOLLO_V2_WORKER_HEARTBEAT_MS,
+  )
+  const configuredRetryBase = Number(
+    environment.APOLLO_V2_WORKER_RETRY_BASE_MS,
+  )
+  const configuredRetryMax = Number(
+    environment.APOLLO_V2_WORKER_RETRY_MAX_MS,
+  )
+  return runNextLongFormIndexOperationService({
+    operations: createPublicOperationRepository(),
+    workflows: createLongFormIndexWorkflowRepository(),
+    processor:
+      createTranscribedLongFormStageProcessorFromEnvironment(
+        environment,
+        clock,
+      ),
+    clock,
+    ...(Number.isSafeInteger(configuredLease) &&
+      configuredLease > 0
+      ? { leaseDurationMs: configuredLease }
+      : {}),
+    ...(Number.isSafeInteger(configuredHeartbeat) &&
+      configuredHeartbeat > 0
+      ? { heartbeatIntervalMs: configuredHeartbeat }
+      : {}),
+    ...(Number.isSafeInteger(configuredRetryBase) &&
+      configuredRetryBase > 0
+      ? { retryBaseDelayMs: configuredRetryBase }
+      : {}),
+    ...(Number.isSafeInteger(configuredRetryMax) &&
+      configuredRetryMax > 0
+      ? { retryMaxDelayMs: configuredRetryMax }
+      : {}),
   })
 }
 
