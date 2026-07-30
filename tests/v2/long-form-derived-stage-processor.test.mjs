@@ -294,6 +294,8 @@ function processorFixture(options = {}) {
   let hierarchicalFindRunCount = 0
   let diarizationFindRunCount = 0
   let longFormContextReadCount = 0
+  const rightsEvidenceRequests = []
+  let rightsEvidenceCallCount = 0
   const hierarchicalFences = []
   const longFormFences = []
   const hierarchicalRepository = {
@@ -398,6 +400,22 @@ function processorFixture(options = {}) {
         throw new Error('not used by derived stages')
       },
     },
+    contiguousRightsEvidence: {
+      async produce(input) {
+        rightsEvidenceCallCount += 1
+        rightsEvidenceRequests.push(input)
+        if (
+          options.rightsEvidenceLeaseLost ||
+          options.rightsEvidenceLeaseLostOnce &&
+            rightsEvidenceCallCount === 1
+        ) {
+          const error = new Error('lease lost')
+          error.code = 'VERSION_CONFLICT'
+          throw error
+        }
+        return { replayed: false }
+      },
+    },
     createId(kind, sourceId) {
       return sourceId
         ? `${kind}-${sourceId}`
@@ -427,6 +445,9 @@ function processorFixture(options = {}) {
       longFormContextReadCount,
     hierarchicalFences,
     longFormFences,
+    rightsEvidenceRequests,
+    getRightsEvidenceCallCount: () =>
+      rightsEvidenceCallCount,
   }
 }
 
@@ -574,6 +595,8 @@ async function runningMomentsFixture(options = {}) {
     hierarchical: chunkFixture.getHierarchical(),
     diarization: setup.diarization,
     longFormLeaseLost: options.longFormLeaseLost,
+    rightsEvidenceLeaseLostOnce:
+      options.rightsEvidenceLeaseLostOnce,
     rights: options.rights,
     onHierarchicalFindRun:
       options.onHierarchicalFindRun,
@@ -589,6 +612,15 @@ test('T-FR-133 moments derive anonymous speakers only from temporal overlap and 
   )
   const stored = fixture.getLongForm()
   assert.equal(result.resultCount, stored.momentCount)
+  assert.equal(fixture.rightsEvidenceRequests.length, 1)
+  assert.equal(
+    fixture.rightsEvidenceRequests[0].indexRunId,
+    stored.id,
+  )
+  assert.equal(
+    fixture.rightsEvidenceRequests[0].fence.stage,
+    'moments',
+  )
   assert.ok(stored.moments.length >= 1)
   const knownSpeakerIds = new Set(
     diarization.segments.map((segment) => segment.speakerKey),
@@ -664,6 +696,30 @@ test('T-FR-133 moments fail closed without temporal speaker evidence or when the
   )
   assert.equal(lost.fixture.getLongForm(), undefined)
   assert.equal(lost.fixture.longFormFences.length, 1)
+})
+
+test('T-FR-134 moments resume rights evidence without duplicating the persisted index', async () => {
+  const setup = await runningMomentsFixture({
+    rightsEvidenceLeaseLostOnce: true,
+  })
+  await assert.rejects(
+    setup.fixture.processor.process(
+      processInput(setup.workflow),
+    ),
+    (error) => error.code === 'VERSION_CONFLICT',
+  )
+  assert.equal(setup.fixture.getLongFormPersistCount(), 1)
+  assert.equal(setup.fixture.getRightsEvidenceCallCount(), 1)
+
+  const replay = await setup.fixture.processor.process(
+    processInput(setup.workflow),
+  )
+  assert.equal(
+    replay.outputEntityId,
+    setup.fixture.getLongForm().id,
+  )
+  assert.equal(setup.fixture.getLongFormPersistCount(), 1)
+  assert.equal(setup.fixture.getRightsEvidenceCallCount(), 2)
 })
 
 test('T-FR-133 derived stages fail closed after rights revocation and the router rejects unconfigured stages', async () => {

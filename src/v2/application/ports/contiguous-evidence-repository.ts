@@ -5,6 +5,9 @@ import type {
 import type {
   ContiguousQualityDimension,
 } from '../../domain/contiguous-extraction.ts'
+import type {
+  LongFormStagePersistenceFence,
+} from './long-form-stage-persistence.ts'
 
 export interface ContiguousEvidenceMomentSource {
   id: string
@@ -86,4 +89,11 @@ export interface ContiguousEvidenceRepository {
     run: Readonly<PersistedContiguousEvidenceRun>
     replayed: boolean
   }>>
+  persistWithLongFormLease(input: {
+    run: Readonly<PersistedContiguousEvidenceRun>
+    fence: Readonly<LongFormStagePersistenceFence>
+  }): Promise<Readonly<{
+    run: Readonly<PersistedContiguousEvidenceRun>
+    replayed: boolean
+  }> | null>
 }

@@ -26,6 +26,7 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     { setAssetRightsService },
     { createLongFormTranscriptStageProcessor },
     { createSpeakerDiarizationStageProcessor },
+    { produceContiguousEvidenceService },
     {
       createLongFormDerivedStageProcessor,
       createLongFormIndexStageRouter,
@@ -37,7 +38,9 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     { PrismaSpeakerDiarizationRepository },
     { PrismaHierarchicalProcessingRepository },
     { PrismaLongFormIndexRepository },
+    { PrismaContiguousEvidenceRepository },
     { PrismaPublicOperationRepository },
+    { RightsIntegrityContiguousEvidenceAnalyzer },
     { nodeApiCredentialCrypto },
     route,
     readRoute,
@@ -50,6 +53,7 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     import('../../src/v2/application/set-asset-rights.ts'),
     import('../../src/v2/application/long-form-transcript-stage-processor.ts'),
     import('../../src/v2/application/speaker-diarization-stage-processor.ts'),
+    import('../../src/v2/application/contiguous-evidence.ts'),
     import('../../src/v2/application/long-form-derived-stage-processor.ts'),
     import('../../src/v2/application/run-long-form-index-worker.ts'),
     import('../../src/v2/infrastructure/prisma/api-client-repository.ts'),
@@ -58,7 +62,9 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     import('../../src/v2/infrastructure/prisma/speaker-diarization-repository.ts'),
     import('../../src/v2/infrastructure/prisma/hierarchical-processing-repository.ts'),
     import('../../src/v2/infrastructure/prisma/long-form-index-repository.ts'),
+    import('../../src/v2/infrastructure/prisma/contiguous-evidence-repository.ts'),
     import('../../src/v2/infrastructure/prisma/public-operation-repository.ts'),
+    import('../../src/v2/infrastructure/analysis/rights-integrity-contiguous-evidence-analyzer.ts'),
     import('../../src/v2/infrastructure/security/api-credential.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/route.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/[workflowId]/route.ts'),
@@ -337,6 +343,18 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
           new PrismaHierarchicalProcessingRepository(client),
         longForm: new PrismaLongFormIndexRepository(client),
         diarization: speaker,
+        contiguousRightsEvidence: {
+          produce: produceContiguousEvidenceService({
+            repository:
+              new PrismaContiguousEvidenceRepository(client),
+            analyzer:
+              new RightsIntegrityContiguousEvidenceAnalyzer(),
+            createRunId: () =>
+              `rights-evidence-run-${randomUUID()}`,
+            createEvidenceId: () =>
+              `rights-evidence-${randomUUID()}`,
+          }),
+        },
         createId: (kind, sourceId) =>
           `${kind}-${sourceId ?? suffix}-${randomUUID().slice(0, 8)}`,
       })

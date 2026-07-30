@@ -1,5 +1,8 @@
 import { DomainError } from '../domain/errors.ts'
 import {
+  calculateCanonicalHash,
+} from '../domain/canonical-hash.ts'
+import {
   HIERARCHICAL_CHUNK_POLICY_VERSION,
   HIERARCHICAL_COST_POLICY,
   HIERARCHICAL_PROCESSING_POLICY_VERSION,
@@ -111,6 +114,18 @@ export interface LongFormDerivedStageConfiguration {
 type StageProcessInput = Parameters<
   LongFormIndexStageProcessor['process']
 >[0]
+
+export interface LongFormContiguousRightsEvidenceProducer {
+  produce(input: {
+    workspaceId: string
+    projectId: string
+    indexRunId: string
+    actor: Readonly<{ type: 'api-client'; id: string }>
+    idempotencyKey: string
+    signal: AbortSignal
+    fence: Readonly<LongFormStagePersistenceFence>
+  }): Promise<unknown>
+}
 
 function sameVersion(
   left: Readonly<LongFormIndexStageVersion>,
@@ -483,6 +498,8 @@ export function createLongFormDerivedStageProcessor(
     hierarchical: HierarchicalProcessingRepository
     longForm: LongFormIndexRepository
     diarization: SpeakerDiarizationRepository
+    contiguousRightsEvidence:
+      LongFormContiguousRightsEvidenceProducer
     createId: (
       kind:
         | 'hierarchical-processing-run'
@@ -840,16 +857,14 @@ export function createLongFormDerivedStageProcessor(
           Math.ceil(monotonicClock() - startedAt),
         )
     assertIndexingRights(built.run)
-    if (built.replayed) {
-      return momentResult(built.run, elapsedMs)
-    }
-    if (!candidate) {
+    let persistedRun = built.run
+    if (!built.replayed && !candidate) {
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
         'Long-form moments produced no persistable output',
       )
     }
-    if (elapsedMs > budget.maximumElapsedMs) {
+    if (!built.replayed && elapsedMs > budget.maximumElapsedMs) {
       throw new DomainError(
         'PRECONDITION_REQUIRED',
         'Long-form moments exceeded its approved execution budget',
@@ -867,22 +882,51 @@ export function createLongFormDerivedStageProcessor(
         'Long-form moments lease was lost before persistence',
       )
     }
-    const persisted =
-      await dependencies.longForm.persistWithLongFormLease({
-        run: candidate,
-        fence: stageFence(
-          input,
-          'moments',
-          clock().toISOString(),
-        ),
-      })
-    if (!persisted) {
+    if (!built.replayed) {
+      const persisted =
+        await dependencies.longForm.persistWithLongFormLease({
+          run: candidate!,
+          fence: stageFence(
+            input,
+            'moments',
+            clock().toISOString(),
+          ),
+        })
+      if (!persisted) {
+        throw new DomainError(
+          'VERSION_CONFLICT',
+          'Long-form moments lease was lost during persistence',
+        )
+      }
+      persistedRun = persisted.run
+    }
+    if (input.signal.aborted || !(await input.heartbeat())) {
       throw new DomainError(
         'VERSION_CONFLICT',
-        'Long-form moments lease was lost during persistence',
+        'Long-form moments lease was lost before rights evidence',
       )
     }
-    return momentResult(persisted.run, elapsedMs)
+    await dependencies.contiguousRightsEvidence.produce({
+      workspaceId: workflow.workspaceId,
+      projectId: workflow.projectId,
+      indexRunId: persistedRun.id,
+      actor: Object.freeze({
+        type: 'api-client',
+        id: workflow.createdByClientId,
+      }),
+      idempotencyKey: `rights-integrity-${calculateCanonicalHash({
+        stageIdempotencyKey: input.checkpoint.idempotencyKey,
+        indexRunId: persistedRun.id,
+        indexRunHash: persistedRun.recordHash,
+      }).slice(0, 48)}`,
+      signal: input.signal,
+      fence: stageFence(
+        input,
+        'moments',
+        clock().toISOString(),
+      ),
+    })
+    return momentResult(persistedRun, elapsedMs)
   }
 
   return Object.freeze({

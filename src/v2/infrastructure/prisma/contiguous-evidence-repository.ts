@@ -273,6 +273,56 @@ implements ContiguousEvidenceRepository {
     run: Readonly<PersistedContiguousEvidenceRun>,
     attempt = 1,
   ): ReturnType<ContiguousEvidenceRepository['persist']> {
+    const persisted = await this.persistInternal(
+      run,
+      undefined,
+      attempt,
+    )
+    if (!persisted) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Unfenced contiguous evidence persistence unexpectedly lost a lease',
+      )
+    }
+    return persisted
+  }
+
+  async persistWithLongFormLease(
+    input: Parameters<
+      ContiguousEvidenceRepository['persistWithLongFormLease']
+    >[0],
+  ): ReturnType<
+    ContiguousEvidenceRepository['persistWithLongFormLease']
+  > {
+    if (
+      input.fence.stage !== 'moments' ||
+      input.fence.workspaceId !== input.run.workspaceId ||
+      input.fence.projectId !== input.run.projectId
+    ) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Contiguous evidence fence does not match its run',
+      )
+    }
+    return this.persistInternal(input.run, input.fence)
+  }
+
+  private async persistInternal(
+    run: Readonly<PersistedContiguousEvidenceRun>,
+    fence?: Parameters<
+      ContiguousEvidenceRepository['persistWithLongFormLease']
+    >[0]['fence'],
+    attempt = 1,
+  ): ReturnType<
+    ContiguousEvidenceRepository['persistWithLongFormLease']
+  > {
+    const fenceNow = fence ? new Date(fence.now) : undefined
+    if (fenceNow && Number.isNaN(fenceNow.getTime())) {
+      throw new DomainError(
+        'INVALID_ARGUMENT',
+        'Contiguous evidence fence instant is invalid',
+      )
+    }
     try {
       const row = await this.client.$transaction(
         async (transaction) => {
@@ -297,6 +347,39 @@ implements ContiguousEvidenceRepository {
               'VERSION_CONFLICT',
               'Contiguous evidence source or actor is unavailable',
             )
+          }
+          if (fence) {
+            const [operation, stage] = await Promise.all([
+              transaction.v2PublicOperation.findFirst({
+                where: {
+                  id: fence.operationId,
+                  workspaceId: run.workspaceId,
+                  type: 'long-form-index',
+                  status: 'running',
+                  leaseOwner: fence.leaseOwner,
+                  attempt: fence.operationAttempt,
+                  leaseExpiresAt: { gt: fenceNow! },
+                },
+                select: { id: true },
+              }),
+              transaction.v2LongFormIndexStageCheckpoint.findFirst({
+                where: {
+                  workflowId: fence.workflowId,
+                  workspaceId: run.workspaceId,
+                  projectId: run.projectId,
+                  stage: 'moments',
+                  status: 'running',
+                  inputHash: fence.expectedStageInputHash,
+                  idempotencyKey:
+                    fence.expectedStageIdempotencyKey,
+                  workflow: {
+                    operationId: fence.operationId,
+                  },
+                },
+                select: { id: true },
+              }),
+            ])
+            if (!operation || !stage) return null
           }
           assertRunBinding(run, source)
           await transaction.v2ContiguousEvaluationEvidence.updateMany({
@@ -363,10 +446,11 @@ implements ContiguousEvidenceRepository {
             Prisma.TransactionIsolationLevel.Serializable,
         },
       )
+      if (!row) return null
       return Object.freeze({ run: hydrate(row), replayed: false })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
-        return this.persist(run, attempt + 1)
+        return this.persistInternal(run, fence, attempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
         const replay = await this.findIdempotent({

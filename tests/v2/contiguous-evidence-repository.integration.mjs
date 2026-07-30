@@ -48,6 +48,7 @@ function fixture(options = {}) {
   let storedEvidence = []
   let deactivated = false
   let analyzerCalls = 0
+  let fenceChecks = 0
   const initial = options.sourceRow ?? sourceRow()
   const transactional =
     options.transactionSourceRow ?? initial
@@ -74,6 +75,22 @@ function fixture(options = {}) {
         v2ApiClient: {
           async findFirst() {
             return { id: 'client-contiguous-evidence-repository' }
+          },
+        },
+        v2PublicOperation: {
+          async findFirst() {
+            fenceChecks += 1
+            return options.leaseAvailable === false
+              ? null
+              : { id: 'operation-contiguous-evidence' }
+          },
+        },
+        v2LongFormIndexStageCheckpoint: {
+          async findFirst() {
+            fenceChecks += 1
+            return options.leaseAvailable === false
+              ? null
+              : { id: 'stage-contiguous-evidence' }
           },
         },
         v2ContiguousEvaluationEvidence: {
@@ -135,6 +152,7 @@ function fixture(options = {}) {
     storedEvidence: () => storedEvidence,
     deactivated: () => deactivated,
     analyzerCalls: () => analyzerCalls,
+    fenceChecks: () => fenceChecks,
   }
 }
 
@@ -147,6 +165,19 @@ const request = {
     id: 'client-contiguous-evidence-repository',
   },
   idempotencyKey: 'contiguous-evidence-repository-key',
+}
+
+const fence = {
+  workspaceId: request.workspaceId,
+  projectId: request.projectId,
+  workflowId: 'workflow-contiguous-evidence',
+  operationId: 'operation-contiguous-evidence',
+  stage: 'moments',
+  expectedStageInputHash: sha('f'),
+  expectedStageIdempotencyKey: 'moments-stage-key',
+  leaseOwner: 'worker-contiguous-evidence',
+  operationAttempt: 1,
+  now: '2026-07-31T01:30:00.000Z',
 }
 
 test('T-FR-134 Prisma evidence adapter revalidates and persists one analyzer run atomically', async () => {
@@ -184,4 +215,22 @@ test('T-FR-134 Prisma evidence adapter rejects source drift inside the serializa
   assert.equal(value.storedRun(), undefined)
   assert.equal(value.storedEvidence().length, 0)
   assert.equal(value.deactivated(), false)
+})
+
+test('T-FR-134 Prisma evidence adapter fences worker persistence and rejects a lost moments lease', async () => {
+  const active = fixture()
+  const created = await active.produce({ ...request, fence })
+  assert.equal(created.replayed, false)
+  assert.equal(active.fenceChecks(), 2)
+  assert.equal(active.storedEvidence().length, 1)
+
+  const lost = fixture({ leaseAvailable: false })
+  await assert.rejects(
+    lost.produce({ ...request, fence }),
+    (error) => error.code === 'VERSION_CONFLICT',
+  )
+  assert.equal(lost.fenceChecks(), 2)
+  assert.equal(lost.storedRun(), undefined)
+  assert.equal(lost.storedEvidence().length, 0)
+  assert.equal(lost.deactivated(), false)
 })

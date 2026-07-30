@@ -11,6 +11,9 @@ import {
   createContiguousEvaluationEvidence,
 } from '../domain/contiguous-evaluation-evidence.ts'
 import { DomainError } from '../domain/errors.ts'
+import type {
+  LongFormStagePersistenceFence,
+} from './ports/long-form-stage-persistence.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -117,6 +120,7 @@ export function produceContiguousEvidenceService(
     actor: Readonly<{ type: 'api-client'; id: string }>
     idempotencyKey: string
     signal?: AbortSignal
+    fence?: Readonly<LongFormStagePersistenceFence>
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
@@ -273,6 +277,30 @@ export function produceContiguousEvidenceService(
         ...runBody,
         runHash: calculateCanonicalHash(runBody),
       })
+    if (request.fence) {
+      if (
+        request.fence.workspaceId !== workspaceId ||
+        request.fence.projectId !== projectId ||
+        request.fence.stage !== 'moments'
+      ) {
+        throw new DomainError(
+          'VERSION_CONFLICT',
+          'Contiguous evidence fence does not match the moments request',
+        )
+      }
+      const persisted =
+        await dependencies.repository.persistWithLongFormLease({
+          run,
+          fence: request.fence,
+        })
+      if (!persisted) {
+        throw new DomainError(
+          'VERSION_CONFLICT',
+          'Contiguous evidence lease was lost during persistence',
+        )
+      }
+      return persisted
+    }
     return dependencies.repository.persist(run)
   }
 }

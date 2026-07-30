@@ -449,6 +449,8 @@ export function createLongFormDerivedStageProcessorFromEnvironment(
 ) {
   const defaults =
     DEFAULT_LONG_FORM_DERIVED_STAGE_CONFIGURATION
+  const produceRightsEvidence =
+    createRightsIntegrityContiguousEvidenceProducer()
   const numberFromEnvironment = (
     name: string,
     fallback: number,
@@ -468,6 +470,9 @@ export function createLongFormDerivedStageProcessorFromEnvironment(
     hierarchical: createHierarchicalProcessingRepository(),
     longForm: createLongFormIndexRepository(),
     diarization: createSpeakerDiarizationRepository(),
+    contiguousRightsEvidence: Object.freeze({
+      produce: produceRightsEvidence,
+    }),
     createId: (kind, sourceId) =>
       sourceId
         ? `${kind}-${calculateVersionHash({
