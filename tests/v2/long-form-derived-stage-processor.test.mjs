@@ -140,8 +140,12 @@ function runningChunksWorkflow(options = {}) {
     sourceArtifactSha256: identities.sourceArtifactSha256,
     sourceManifestId: identities.sourceManifestId,
     sourceManifestHash: identities.sourceManifestHash,
-    sourceTranscriptId: identities.sourceTranscriptId,
-    sourceTranscriptHash: identities.sourceTranscriptHash,
+    ...(options.generatedTranscript
+      ? {}
+      : {
+          sourceTranscriptId: identities.sourceTranscriptId,
+          sourceTranscriptHash: identities.sourceTranscriptHash,
+        }),
     durationMs: 600_000,
     versions,
     stageBudgets: budgets(options.stageBudgets),
@@ -151,11 +155,15 @@ function runningChunksWorkflow(options = {}) {
         outputEntityId: identities.sourceManifestId,
         resultCount: 1,
       },
-      transcript: {
-        outputHash: identities.sourceTranscriptHash,
-        outputEntityId: identities.sourceTranscriptId,
-        resultCount: 4,
-      },
+      ...(options.generatedTranscript
+        ? {}
+        : {
+            transcript: {
+              outputHash: identities.sourceTranscriptHash,
+              outputEntityId: identities.sourceTranscriptId,
+              resultCount: 4,
+            },
+          }),
     },
     budget: {
       currency: 'USD',
@@ -166,11 +174,34 @@ function runningChunksWorkflow(options = {}) {
     createdByClientId: identities.clientId,
     createdAt: '2026-07-30T12:00:00.000Z',
   })
+  let transcriptReady = initial
+  if (options.generatedTranscript) {
+    const startedTranscript = startLongFormIndexStage({
+      workflow: initial,
+      stage: 'transcript',
+      expectedRunHash: initial.runHash,
+      startedAt: '2026-07-30T12:00:01.000Z',
+    })
+    transcriptReady = completeLongFormIndexStage({
+      workflow: startedTranscript,
+      stage: 'transcript',
+      expectedRunHash: startedTranscript.runHash,
+      expectedInputHash: startedTranscript.stages[1].inputHash,
+      outputHash: identities.sourceTranscriptHash,
+      outputEntityId: identities.sourceTranscriptId,
+      resultCount: 4,
+      costMinorUnits: 1,
+      elapsedMs: 1_000,
+      completedAt: '2026-07-30T12:00:02.000Z',
+    })
+  }
   const startedDiarization = startLongFormIndexStage({
-    workflow: initial,
+    workflow: transcriptReady,
     stage: 'diarization',
-    expectedRunHash: initial.runHash,
-    startedAt: '2026-07-30T12:00:01.000Z',
+    expectedRunHash: transcriptReady.runHash,
+    startedAt: options.generatedTranscript
+      ? '2026-07-30T12:00:03.000Z'
+      : '2026-07-30T12:00:01.000Z',
   })
   const diarization = diarizationRun(
     startedDiarization,
@@ -187,14 +218,18 @@ function runningChunksWorkflow(options = {}) {
     resultCount: diarization.segmentCount,
     costMinorUnits: diarization.costMinorUnits,
     elapsedMs: diarization.elapsedMs,
-    completedAt: '2026-07-30T12:00:02.000Z',
+    completedAt: options.generatedTranscript
+      ? '2026-07-30T12:00:04.000Z'
+      : '2026-07-30T12:00:02.000Z',
   })
   return {
     workflow: startLongFormIndexStage({
       workflow: completedDiarization,
       stage: 'chunks',
       expectedRunHash: completedDiarization.runHash,
-      startedAt: '2026-07-30T12:00:03.000Z',
+      startedAt: options.generatedTranscript
+        ? '2026-07-30T12:00:05.000Z'
+        : '2026-07-30T12:00:03.000Z',
     }),
     diarization,
   }
@@ -442,6 +477,32 @@ test('T-FR-133 chunks persist exactly once behind the workflow lease and replay 
   assert.deepEqual(replay, first)
   assert.equal(fixture.getHierarchicalPersistCount(), 1)
   assert.equal(fixture.hierarchicalFences.length, 1)
+})
+
+test('T-FR-133 chunks consume the persisted transcript checkpoint when the workflow generated it', async () => {
+  const setup = runningChunksWorkflow({
+    generatedTranscript: true,
+  })
+  assert.equal(setup.workflow.sourceTranscriptId, undefined)
+  assert.equal(setup.workflow.sourceTranscriptHash, undefined)
+  const fixture = processorFixture({
+    diarization: setup.diarization,
+  })
+
+  const result = await fixture.processor.process(
+    processInput(setup.workflow),
+  )
+
+  assert.equal(result.resultCount, 2)
+  assert.equal(
+    fixture.getHierarchical().sourceTranscriptId,
+    identities.sourceTranscriptId,
+  )
+  assert.equal(
+    fixture.getHierarchical().sourceTranscriptHash,
+    identities.sourceTranscriptHash,
+  )
+  assert.equal(fixture.getHierarchicalPersistCount(), 1)
 })
 
 test('T-FR-133 chunks fail before work when cost is unapproved and never publish after lease loss', async () => {

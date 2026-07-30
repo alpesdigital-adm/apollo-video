@@ -39,6 +39,31 @@ function replayResult(
   })
 }
 
+function transcriptOutput(
+  workflow: Parameters<
+    LongFormIndexStageProcessor['process']
+  >[0]['workflow'],
+): Readonly<{ id: string; hash: string }> {
+  const checkpoint = workflow.stages.find(
+    (candidate) => candidate.stage === 'transcript',
+  )
+  if (
+    !checkpoint ||
+    checkpoint.status !== 'succeeded' ||
+    !checkpoint.outputReference ||
+    !checkpoint.outputHash
+  ) {
+    throw new DomainError(
+      'PRECONDITION_REQUIRED',
+      'Speaker diarization requires a persisted transcript output',
+    )
+  }
+  return Object.freeze({
+    id: checkpoint.outputReference.id,
+    hash: checkpoint.outputHash,
+  })
+}
+
 export function createSpeakerDiarizationStageProcessor(
   dependencies: {
     repository: SpeakerDiarizationRepository
@@ -88,6 +113,7 @@ export function createSpeakerDiarizationStageProcessor(
           'Speaker diarization processor requires a running diarization stage',
         )
       }
+      const transcript = transcriptOutput(workflow)
       const context =
         await dependencies.repository.readSourceContext({
           workspaceId: workflow.workspaceId,
@@ -106,9 +132,9 @@ export function createSpeakerDiarizationStageProcessor(
         context.sourceManifestId !== workflow.sourceManifestId ||
         context.sourceManifestHash !== workflow.sourceManifestHash ||
         context.sourceTranscriptId !==
-          workflow.sourceTranscriptId ||
+          transcript.id ||
         context.sourceTranscriptHash !==
-          workflow.sourceTranscriptHash ||
+          transcript.hash ||
         context.durationMs !== workflow.durationMs
       ) {
         throw new DomainError(
@@ -127,7 +153,7 @@ export function createSpeakerDiarizationStageProcessor(
             workflow.sourceArtifactSha256 ||
           existing.sourceManifestHash !== workflow.sourceManifestHash ||
           existing.sourceTranscriptHash !==
-            workflow.sourceTranscriptHash ||
+            transcript.hash ||
           existing.provider.id !== checkpoint.version.provider ||
           existing.provider.model !== checkpoint.version.model ||
           existing.provider.version !== checkpoint.version.version

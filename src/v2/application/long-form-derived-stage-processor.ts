@@ -324,6 +324,10 @@ function assertHierarchicalBinding(
   run: Readonly<PersistedHierarchicalProcessingRun>,
   expectedHash: string,
 ): void {
+  const transcriptOutput = succeededOutput(
+    workflow,
+    'transcript',
+  )
   if (
     run.workspaceId !== workflow.workspaceId ||
     run.projectId !== workflow.projectId ||
@@ -331,8 +335,8 @@ function assertHierarchicalBinding(
     run.sourceArtifactSha256 !== workflow.sourceArtifactSha256 ||
     run.sourceManifestId !== workflow.sourceManifestId ||
     run.sourceManifestHash !== workflow.sourceManifestHash ||
-    run.sourceTranscriptId !== workflow.sourceTranscriptId ||
-    run.sourceTranscriptHash !== workflow.sourceTranscriptHash ||
+    run.sourceTranscriptId !== transcriptOutput.id ||
+    run.sourceTranscriptHash !== transcriptOutput.hash ||
     run.durationMs !== workflow.durationMs ||
     run.runHash !== expectedHash ||
     run.idempotencyKey !== checkpoint.idempotencyKey
@@ -350,6 +354,10 @@ function assertDiarizationBinding(
   run: Readonly<SpeakerDiarizationRun>,
   expectedHash: string,
 ): void {
+  const transcriptOutput = succeededOutput(
+    workflow,
+    'transcript',
+  )
   if (
     run.workspaceId !== workflow.workspaceId ||
     run.projectId !== workflow.projectId ||
@@ -358,8 +366,8 @@ function assertDiarizationBinding(
     run.sourceArtifactSha256 !== workflow.sourceArtifactSha256 ||
     run.sourceManifestId !== workflow.sourceManifestId ||
     run.sourceManifestHash !== workflow.sourceManifestHash ||
-    run.sourceTranscriptId !== workflow.sourceTranscriptId ||
-    run.sourceTranscriptHash !== workflow.sourceTranscriptHash ||
+    run.sourceTranscriptId !== transcriptOutput.id ||
+    run.sourceTranscriptHash !== transcriptOutput.hash ||
     run.durationMs !== workflow.durationMs ||
     run.runHash !== expectedHash ||
     run.idempotencyKey !== checkpoint.idempotencyKey
@@ -530,15 +538,10 @@ export function createLongFormDerivedStageProcessor(
       configuration.chunks.stageVersion,
     )
     const workflow = input.workflow
-    if (
-      !workflow.sourceTranscriptId ||
-      !workflow.sourceTranscriptHash
-    ) {
-      throw new DomainError(
-        'PRECONDITION_REQUIRED',
-        'Long-form chunks require a persisted source transcript',
-      )
-    }
+    const transcriptOutput = succeededOutput(
+      workflow,
+      'transcript',
+    )
     const chunkCount = Math.ceil(
       workflow.durationMs /
         configuration.chunks.chunkDurationMs,
@@ -609,8 +612,8 @@ export function createLongFormDerivedStageProcessor(
         workflow.sourceArtifactSha256,
       sourceManifestId: workflow.sourceManifestId,
       expectedManifestHash: workflow.sourceManifestHash,
-      sourceTranscriptId: workflow.sourceTranscriptId,
-      expectedTranscriptHash: workflow.sourceTranscriptHash,
+      sourceTranscriptId: transcriptOutput.id,
+      expectedTranscriptHash: transcriptOutput.hash,
       processingPolicyVersion:
         HIERARCHICAL_PROCESSING_POLICY_VERSION,
       chunking: Object.freeze({

@@ -10,6 +10,7 @@ import {
   hydrateSpeakerDiarizationRun,
 } from '../../src/v2/domain/speaker-diarization.ts'
 import {
+  completeLongFormIndexStage,
   createLongFormIndexWorkflow,
   startLongFormIndexStage,
 } from '../../src/v2/domain/long-form-index-workflow.ts'
@@ -408,7 +409,7 @@ test('T-FR-133 OpenAI adapter fails closed without leaking credentials or paths'
   })
 })
 
-function runningDiarizationWorkflow() {
+function runningDiarizationWorkflow(options = {}) {
   const versions = Object.freeze({
     probe: {
       provider: 'ffprobe',
@@ -456,8 +457,12 @@ function runningDiarizationWorkflow() {
     sourceArtifactSha256: sha('artifact'),
     sourceManifestId: 'manifest-diarization',
     sourceManifestHash: sha('manifest'),
-    sourceTranscriptId: 'transcript-diarization',
-    sourceTranscriptHash: sha('transcript'),
+    ...(options.generatedTranscript
+      ? {}
+      : {
+          sourceTranscriptId: 'transcript-diarization',
+          sourceTranscriptHash: sha('transcript'),
+        }),
     durationMs: 7_200_000,
     versions,
     stageBudgets,
@@ -467,11 +472,15 @@ function runningDiarizationWorkflow() {
         outputEntityId: 'manifest-diarization',
         resultCount: 1,
       },
-      transcript: {
-        outputHash: sha('transcript'),
-        outputEntityId: 'transcript-diarization',
-        resultCount: 1200,
-      },
+      ...(options.generatedTranscript
+        ? {}
+        : {
+            transcript: {
+              outputHash: sha('transcript'),
+              outputEntityId: 'transcript-diarization',
+              resultCount: 1200,
+            },
+          }),
     },
     budget: {
       currency: 'USD',
@@ -482,16 +491,43 @@ function runningDiarizationWorkflow() {
     createdByClientId: 'client-diarization',
     createdAt: '2026-07-29T21:00:00.000Z',
   })
+  let transcriptReady = ready
+  if (options.generatedTranscript) {
+    const startedTranscript = startLongFormIndexStage({
+      workflow: ready,
+      stage: 'transcript',
+      expectedRunHash: ready.runHash,
+      startedAt: '2026-07-29T21:00:01.000Z',
+    })
+    transcriptReady = completeLongFormIndexStage({
+      workflow: startedTranscript,
+      stage: 'transcript',
+      expectedRunHash: startedTranscript.runHash,
+      expectedInputHash: startedTranscript.stages[1].inputHash,
+      outputHash: sha('transcript'),
+      outputEntityId: 'transcript-diarization',
+      resultCount: 1200,
+      costMinorUnits: 1,
+      elapsedMs: 1,
+      completedAt: '2026-07-29T21:00:02.000Z',
+    })
+  }
   return startLongFormIndexStage({
-    workflow: ready,
+    workflow: transcriptReady,
     stage: 'diarization',
-    expectedRunHash: ready.runHash,
-    startedAt: '2026-07-29T21:00:01.000Z',
+    expectedRunHash: transcriptReady.runHash,
+    startedAt: options.generatedTranscript
+      ? '2026-07-29T21:00:03.000Z'
+      : '2026-07-29T21:00:01.000Z',
   })
 }
 
 test('T-FR-133 stage processor prepares immutable audio, persists lineage and replays without provider cost', async () => {
-  const workflow = runningDiarizationWorkflow()
+  const workflow = runningDiarizationWorkflow({
+    generatedTranscript: true,
+  })
+  assert.equal(workflow.sourceTranscriptId, undefined)
+  assert.equal(workflow.sourceTranscriptHash, undefined)
   const checkpoint = workflow.stages.find(
     (stage) => stage.stage === 'diarization',
   )
