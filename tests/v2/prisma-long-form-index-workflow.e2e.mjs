@@ -5,7 +5,7 @@ import test from 'node:test'
 import { NextRequest } from 'next/server'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
-test('T-FR-133 resumes a generated-transcript two-hour master after worker restart without duplication', {
+test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two-minute window', {
   skip:
     process.env.APOLLO_LONG_FORM_WORKFLOW_E2E !== '1' &&
     'set APOLLO_LONG_FORM_WORKFLOW_E2E=1 with an isolated local V2 database',
@@ -13,8 +13,33 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
 }, async () => {
   assert.ok(process.env.V2_DATABASE_URL)
   process.env.APOLLO_API_ENVIRONMENT = 'production'
-  const databaseName =
-    new URL(process.env.V2_DATABASE_URL).pathname.slice(1)
+  const databaseUrl = new URL(process.env.V2_DATABASE_URL)
+  assert.ok(
+    ['localhost', '127.0.0.1', '::1'].includes(
+      databaseUrl.hostname,
+    ),
+    'this E2E is restricted to disposable local PostgreSQL',
+  )
+  const applicationName =
+    databaseUrl.searchParams.get('application_name')
+  assert.match(
+    applicationName ?? '',
+    /^apollo-video-e2e-[a-z0-9-]+$/,
+  )
+  const boundedConnectionParameter = (
+    name,
+    maximum,
+  ) => {
+    const value = Number(databaseUrl.searchParams.get(name))
+    assert.ok(
+      Number.isInteger(value) && value >= 1 && value <= maximum,
+      `${name} must be between 1 and ${maximum}`,
+    )
+  }
+  boundedConnectionParameter('connection_limit', 5)
+  boundedConnectionParameter('pool_timeout', 10)
+  boundedConnectionParameter('connect_timeout', 10)
+  const databaseName = databaseUrl.pathname.slice(1)
   assert.match(databaseName, /(?:^|_)e2e(?:_|$)/)
 
   const [
@@ -50,9 +75,12 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     { AudioContiguousEvidenceAnalyzer },
     { VisualContiguousEvidenceAnalyzer },
     { DeterministicContiguousEvaluationProvider },
+    { disconnectV2PostgresClient },
     { nodeApiCredentialCrypto },
     route,
     readRoute,
+    extractionRoute,
+    readExtractionRoute,
   ] = await Promise.all([
     import('../../src/v2/domain/media-artifact.ts'),
     import('../../src/v2/domain/media-transcript.ts'),
@@ -80,9 +108,12 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     import('../../src/v2/infrastructure/analysis/audio-contiguous-evidence-analyzer.ts'),
     import('../../src/v2/infrastructure/analysis/visual-contiguous-evidence-analyzer.ts'),
     import('../../src/v2/infrastructure/analysis/deterministic-contiguous-evaluation-provider.ts'),
+    import('../../src/v2/infrastructure/prisma-postgres/client.ts'),
     import('../../src/v2/infrastructure/security/api-credential.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/route.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/[workflowId]/route.ts'),
+    import('../../src/app/v1/projects/[projectId]/contiguous-extractions/route.ts'),
+    import('../../src/app/v1/projects/[projectId]/contiguous-extractions/[extractionId]/route.ts'),
   ])
 
   let prisma = new PrismaClient()
@@ -277,12 +308,15 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     )
     const workflowId = created.data.workflow.id
 
-    const transcriptSegments = Array.from({ length: 24 }, (_, index) => ({
-      id: index,
-      start: index * 300,
-      end: (index + 1) * 300,
-      text: `Bloco editorial ${index + 1} com contexto e evidência preservados.`,
-    }))
+    const transcriptSegments = Array.from({ length: 24 }, (_, index) => {
+      const start = index * 300 + 60
+      return {
+        id: index,
+        start,
+        end: start + 120,
+        text: `Bloco editorial ${index + 1} com contexto e evidência preservados.`,
+      }
+    })
     const transcript = createMediaTranscript({
       language: 'pt-BR',
       text: transcriptSegments.map((segment) => segment.text).join(' '),
@@ -604,12 +638,171 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
       }),
       24,
     )
-    assert.ok(
-      await prisma.v2LongFormMoment.count({
+    const momentCount = await prisma.v2LongFormMoment.count({
+      where: { workspaceId },
+    })
+    assert.ok(momentCount > 0)
+    assert.equal(
+      await prisma.v2ContiguousEvaluationEvidence.count({
         where: { workspaceId },
-      }) > 0,
+      }),
+      momentCount * 5,
+    )
+    assert.equal(
+      await prisma.v2ContiguousMomentEvaluation.count({
+        where: { workspaceId, active: true },
+      }),
+      momentCount,
+    )
+    const evaluated =
+      await prisma.v2ContiguousMomentEvaluation.findFirst({
+        where: {
+          workspaceId,
+          projectId,
+          active: true,
+        },
+        include: { moment: true },
+        orderBy: { id: 'asc' },
+      })
+    assert.ok(evaluated)
+    assert.ok(
+      JSON.parse(evaluated.objectiveTagsJson)
+        .includes('discovery'),
+    )
+    assert.equal(
+      evaluated.semanticEndMs - evaluated.semanticStartMs,
+      120_000,
+    )
+
+    const extractionIdempotencyKey =
+      `contiguous-extraction-e2e-${suffix}`
+    const extractionBody = {
+      objective: 'discovery',
+      topic: evaluated.moment.topicNormalized,
+      targetDurationMs: 120_000,
+      toleranceMs: 0,
+      fps: 30,
+    }
+    const createExtractionRequest = () => new NextRequest(
+      `http://localhost/v1/projects/${projectId}/contiguous-extractions`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${issued.token}`,
+          'content-type': 'application/json',
+          'idempotency-key': extractionIdempotencyKey,
+        },
+        body: JSON.stringify(extractionBody),
+      },
+    )
+    const extractionResponse = await extractionRoute.POST(
+      createExtractionRequest(),
+      { params: Promise.resolve({ projectId }) },
+    )
+    const extraction = await extractionResponse.json()
+    assert.equal(
+      extractionResponse.status,
+      201,
+      JSON.stringify(extraction),
+    )
+    const selected = extraction.data.extraction.candidates.find(
+      (candidate) =>
+        candidate.candidateHash ===
+          extraction.data.extraction.selectedCandidateHash,
+    )
+    assert.ok(selected)
+    assert.equal(
+      selected.sourceRangeMs[1] - selected.sourceRangeMs[0],
+      120_000,
+    )
+    assert.equal(
+      extraction.data.extraction.storyPlan.mode,
+      'contiguous',
+    )
+    assert.equal(
+      extraction.data.extraction.editPlan.synthesizedRanges,
+      false,
+    )
+    assert.equal(
+      extraction.data.extraction.editPlan.videoTracks.length,
+      1,
+    )
+
+    const replayResponse = await extractionRoute.POST(
+      createExtractionRequest(),
+      { params: Promise.resolve({ projectId }) },
+    )
+    const replay = await replayResponse.json()
+    assert.equal(replayResponse.status, 200, JSON.stringify(replay))
+    assert.equal(replay.data.replayed, true)
+    assert.equal(
+      replay.data.extraction.id,
+      extraction.data.extraction.id,
+    )
+
+    const extractionReadResponse = await readExtractionRoute.GET(
+      new NextRequest(
+        `http://localhost/v1/projects/${projectId}/contiguous-extractions/${extraction.data.extraction.id}`,
+        {
+          headers: {
+            authorization: `Bearer ${issued.token}`,
+            'x-request-id': `contiguous-extraction-read-${suffix}`,
+          },
+        },
+      ),
+      {
+        params: Promise.resolve({
+          projectId,
+          extractionId: extraction.data.extraction.id,
+        }),
+      },
+    )
+    const extractionRead = await extractionReadResponse.json()
+    assert.equal(
+      extractionReadResponse.status,
+      200,
+      JSON.stringify(extractionRead),
+    )
+    assert.equal(
+      extractionRead.data.extraction.resultHash,
+      extraction.data.extraction.resultHash,
+    )
+    assert.equal(
+      await prisma.v2ContiguousExtraction.count({
+        where: { workspaceId, projectId },
+      }),
+      1,
     )
   } finally {
-    await prisma.$disconnect()
+    const cleanup = await Promise.allSettled([
+      prisma.$disconnect(),
+      disconnectV2PostgresClient(),
+    ])
+    const cleanupFailure = cleanup.find(
+      (result) => result.status === 'rejected',
+    )
+    const postflightUrl = new URL(databaseUrl)
+    postflightUrl.searchParams.set(
+      'application_name',
+      `${applicationName}-postflight`,
+    )
+    postflightUrl.searchParams.set('connection_limit', '1')
+    const postflight = new PrismaClient({
+      datasourceUrl: postflightUrl.toString(),
+    })
+    let orphanCount = -1
+    try {
+      const rows = await postflight.$queryRawUnsafe(
+        'SELECT COUNT(*)::int AS count FROM pg_stat_activity WHERE application_name = $1',
+        applicationName,
+      )
+      orphanCount = Number(rows[0]?.count ?? -1)
+    } finally {
+      await postflight.$disconnect()
+    }
+    if (cleanupFailure?.status === 'rejected') {
+      throw cleanupFailure.reason
+    }
+    assert.equal(orphanCount, 0)
   }
 })
