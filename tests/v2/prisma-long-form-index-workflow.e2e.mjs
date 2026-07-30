@@ -40,6 +40,7 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     { PrismaPublicOperationRepository },
     { nodeApiCredentialCrypto },
     route,
+    readRoute,
   ] = await Promise.all([
     import('../../src/v2/domain/media-artifact.ts'),
     import('../../src/v2/domain/media-transcript.ts'),
@@ -60,6 +61,7 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     import('../../src/v2/infrastructure/prisma/public-operation-repository.ts'),
     import('../../src/v2/infrastructure/security/api-credential.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/route.ts'),
+    import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/[workflowId]/route.ts'),
   ])
 
   let prisma = new PrismaClient()
@@ -374,6 +376,38 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
       `worker-before-restart-${suffix}`,
     )
     assert.equal(interrupted?.status, 'retrying')
+    const partialResponse = await readRoute.GET(
+      new NextRequest(
+        `http://localhost/v1/projects/${projectId}/long-form-index-workflows/${workflowId}`,
+        {
+          headers: {
+            authorization: `Bearer ${issued.token}`,
+            'x-request-id': `long-form-partial-${suffix}`,
+          },
+        },
+      ),
+      {
+        params: Promise.resolve({ projectId, workflowId }),
+      },
+    )
+    const partial = await partialResponse.json()
+    assert.equal(partialResponse.status, 200, JSON.stringify(partial))
+    assert.equal(partial.data.operation.status, 'retrying')
+    assert.equal(partial.data.workflow.summary.searchableStageCount, 1)
+    assert.deepEqual(
+      partial.data.workflow.stages.map((stage) => ({
+        stage: stage.stage,
+        status: stage.status,
+        searchable: stage.searchable,
+      })),
+      [
+        { stage: 'probe', status: 'succeeded', searchable: false },
+        { stage: 'transcript', status: 'succeeded', searchable: true },
+        { stage: 'diarization', status: 'succeeded', searchable: false },
+        { stage: 'chunks', status: 'failed', searchable: false },
+        { stage: 'moments', status: 'pending', searchable: false },
+      ],
+    )
     assert.equal(
       await prisma.v2MediaTranscript.count({ where: { workspaceId } }),
       1,
