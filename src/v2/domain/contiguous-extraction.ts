@@ -29,6 +29,8 @@ export interface ContiguousQualityObservation {
 export interface ContiguousSourceMoment {
   id: string
   momentHash: string
+  evaluationId: string
+  evaluationHash: string
   indexRunId: string
   sourceArtifactId: string
   sourceArtifactSha256: string
@@ -52,8 +54,11 @@ export interface ContiguousSourceMoment {
 }
 
 export interface ContiguousExtractionCandidate {
+  sourceIndexRunId: string
   sourceMomentId: string
   sourceMomentHash: string
+  sourceEvaluationId: string
+  sourceEvaluationHash: string
   sourceRangeMs: readonly [number, number]
   durationMs: number
   durationDeltaMs: number
@@ -127,6 +132,25 @@ export interface ContiguousExtractionResult {
   }>
   editPlan: Readonly<ContiguousExtractionEditPlan>
   resultHash: string
+}
+
+export function calculateContiguousMomentEvaluationHash(input: {
+  momentId: string
+  momentHash: string
+  indexRunId: string
+  objectiveTags: readonly string[]
+  semanticRangeMs: readonly [number, number]
+  scores: ContiguousSourceMoment['scores']
+}): string {
+  return calculateCanonicalHash({
+    policyVersion: CONTIGUOUS_EXTRACTION_POLICY_VERSION,
+    momentId: input.momentId,
+    momentHash: input.momentHash,
+    indexRunId: input.indexRunId,
+    objectiveTags: input.objectiveTags,
+    semanticRangeMs: input.semanticRangeMs,
+    scores: input.scores,
+  })
 }
 
 function identity(value: string, field: string): string {
@@ -264,12 +288,20 @@ function normalizedMoment(
     'INVALID_ARGUMENT',
     `moments[${index}].objectiveTags is invalid`,
   )
-  return Object.freeze({
+  const normalized = Object.freeze({
     ...value,
     id: identity(value.id, `moments[${index}].id`),
     momentHash: hash(
       value.momentHash,
       `moments[${index}].momentHash`,
+    ),
+    evaluationId: identity(
+      value.evaluationId,
+      `moments[${index}].evaluationId`,
+    ),
+    evaluationHash: hash(
+      value.evaluationHash,
+      `moments[${index}].evaluationHash`,
     ),
     indexRunId: identity(
       value.indexRunId,
@@ -306,6 +338,19 @@ function normalizedMoment(
     ),
     scores: Object.freeze(scores),
   })
+  assertDomain(
+    calculateContiguousMomentEvaluationHash({
+      momentId: normalized.id,
+      momentHash: normalized.momentHash,
+      indexRunId: normalized.indexRunId,
+      objectiveTags: normalized.objectiveTags,
+      semanticRangeMs: normalized.semanticRangeMs,
+      scores: normalized.scores,
+    }) === normalized.evaluationHash,
+    'INVALID_ARGUMENT',
+    `moments[${index}] evaluation hash is invalid`,
+  )
+  return normalized
 }
 
 function candidate(
@@ -342,8 +387,11 @@ function candidate(
     )].sort(),
   )
   const body = {
+    sourceIndexRunId: moment.indexRunId,
     sourceMomentId: moment.id,
     sourceMomentHash: moment.momentHash,
+    sourceEvaluationId: moment.evaluationId,
+    sourceEvaluationHash: moment.evaluationHash,
     sourceRangeMs: moment.semanticRangeMs,
     durationMs,
     durationDeltaMs,
@@ -516,6 +564,8 @@ export function extractContiguous(input: {
       selectedMoment.chapterId,
       selectedMoment.id,
       selectedMoment.momentHash,
+      selectedMoment.evaluationId,
+      selectedMoment.evaluationHash,
       selectedMoment.rightsSnapshotId,
       ...selected.evidenceRefs,
     ]),

@@ -5,6 +5,9 @@ import {
   createContiguousExtractionService,
   readContiguousExtractionService,
 } from '../../src/v2/application/contiguous-extraction.ts'
+import {
+  calculateContiguousMomentEvaluationHash,
+} from '../../src/v2/domain/contiguous-extraction.ts'
 
 const sha = (value) => value.repeat(64).slice(0, 64)
 const observation = (value, reference) => ({
@@ -13,9 +16,11 @@ const observation = (value, reference) => ({
 })
 
 function sourceMoment() {
-  return {
+  const value = {
     id: 'moment-contiguous-app-1',
     momentHash: sha('a'),
+    evaluationId: 'evaluation-contiguous-app-1',
+    evaluationHash: '',
     indexRunId: 'index-contiguous-app-1',
     sourceArtifactId: 'artifact-contiguous-app-1',
     sourceArtifactSha256: sha('b'),
@@ -37,6 +42,18 @@ function sourceMoment() {
       audio: observation(0.9, 'evidence-audio-app-1'),
       visual: observation(0.8, 'evidence-visual-app-1'),
     },
+  }
+  return {
+    ...value,
+    evaluationHash:
+      calculateContiguousMomentEvaluationHash({
+        momentId: value.id,
+        momentHash: value.momentHash,
+        indexRunId: value.indexRunId,
+        objectiveTags: value.objectiveTags,
+        semanticRangeMs: value.semanticRangeMs,
+        scores: value.scores,
+      }),
   }
 }
 

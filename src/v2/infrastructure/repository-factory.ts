@@ -44,6 +44,7 @@ import type { MvpCoreGateRepository } from '../application/ports/mvp-core-gate-r
 import type { SpeechSegmentCatalogRepository } from '../application/ports/speech-segment-catalog-repository.ts'
 import type { EvidenceSegmentRepository } from '../application/ports/evidence-segment-repository.ts'
 import type { LongFormIndexRepository } from '../application/ports/long-form-index-repository.ts'
+import type { ContiguousExtractionRepository } from '../application/ports/contiguous-extraction-repository.ts'
 import type { LongFormIndexWorkflowRepository } from '../application/ports/long-form-index-workflow-repository.ts'
 import type { SpeakerDiarizationRepository } from '../application/ports/speaker-diarization-repository.ts'
 import type { ValidatedSegmentRepository } from '../application/ports/validated-segment-repository.ts'
@@ -132,6 +133,7 @@ import { PrismaMvpCoreGateRepository } from './prisma/mvp-core-gate-repository.t
 import { PrismaSpeechSegmentCatalogRepository } from './prisma/speech-segment-catalog-repository.ts'
 import { PrismaEvidenceSegmentRepository } from './prisma/evidence-segment-repository.ts'
 import { PrismaLongFormIndexRepository } from './prisma/long-form-index-repository.ts'
+import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
 import { PrismaLongFormIndexWorkflowRepository } from './prisma/long-form-index-workflow-repository.ts'
 import { PrismaSpeakerDiarizationRepository } from './prisma/speaker-diarization-repository.ts'
 import { PrismaValidatedSegmentRepository } from './prisma/validated-segment-repository.ts'
@@ -252,6 +254,11 @@ export function createEvidenceSegmentRepository(): EvidenceSegmentRepository {
 
 export function createLongFormIndexRepository(): LongFormIndexRepository {
   return new PrismaLongFormIndexRepository(resolveV2Client())
+}
+
+export function createContiguousExtractionRepository():
+ContiguousExtractionRepository {
+  return new PrismaContiguousExtractionRepository(resolveV2Client())
 }
 
 export function createValidatedSegmentRepository(): ValidatedSegmentRepository {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  calculateContiguousMomentEvaluationHash,
   extractContiguous,
 } from '../../src/v2/domain/contiguous-extraction.ts'
 
@@ -13,9 +14,11 @@ function score(value, evidence) {
 }
 
 function moment(overrides = {}) {
-  return {
+  const value = {
     id: 'moment-contiguous-1',
     momentHash: sha('a'),
+    evaluationId: 'evaluation-contiguous-1',
+    evaluationHash: '',
     indexRunId: 'long-form-index-run-1',
     sourceArtifactId: 'artifact-contiguous-1',
     sourceArtifactSha256: sha('b'),
@@ -38,6 +41,19 @@ function moment(overrides = {}) {
       visual: score(0.8, 'evidence-visual-1'),
     },
     ...overrides,
+  }
+  return {
+    ...value,
+    evaluationHash:
+      overrides.evaluationHash ??
+      calculateContiguousMomentEvaluationHash({
+        momentId: value.id,
+        momentHash: value.momentHash,
+        indexRunId: value.indexRunId,
+        objectiveTags: value.objectiveTags,
+        semanticRangeMs: value.semanticRangeMs,
+        scores: value.scores,
+      }),
   }
 }
 

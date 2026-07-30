@@ -1975,6 +1975,7 @@ model V2ContiguousMomentEvaluation {
   project   V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   indexRun  V2LongFormIndexRun @relation("ContiguousEvaluationIndexRun", fields: [indexRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   moment    V2LongFormMoment @relation("ContiguousEvaluationMoment", fields: [momentId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  extractions V2ContiguousExtraction[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, momentId, policyVersion, evaluationHash])
@@ -1990,6 +1991,7 @@ model V2ContiguousExtraction {
   projectId             String   @db.VarChar(128)
   sourceIndexRunId      String   @db.VarChar(128)
   selectedMomentId      String   @db.VarChar(128)
+  selectedEvaluationId  String   @db.VarChar(128)
   policyVersion         String   @db.VarChar(64)
   objective             String   @db.VarChar(240)
   topic                 String   @db.VarChar(500)
@@ -2011,6 +2013,7 @@ model V2ContiguousExtraction {
   project       V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   sourceIndexRun V2LongFormIndexRun @relation("ContiguousExtractionIndexRun", fields: [sourceIndexRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   selectedMoment V2LongFormMoment @relation("ContiguousExtractionMoment", fields: [selectedMomentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  selectedEvaluation V2ContiguousMomentEvaluation @relation(fields: [selectedEvaluationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy     V2ApiClient @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@unique([id, workspaceId])
@@ -2018,6 +2021,7 @@ model V2ContiguousExtraction {
   @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, sourceIndexRunId, createdAt(sort: Desc)])
   @@index([workspaceId, selectedMomentId])
+  @@index([workspaceId, selectedEvaluationId])
   @@map("contiguous_extractions")
 }
 
