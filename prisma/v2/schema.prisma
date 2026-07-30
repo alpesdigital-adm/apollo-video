@@ -1967,6 +1967,11 @@ model V2ContiguousMomentEvaluation {
   integrityEvidenceJson String   @db.Text
   audioEvidenceJson     String   @db.Text
   visualEvidenceJson    String   @db.Text
+  producerProvider      String   @db.VarChar(128)
+  producerModel         String   @db.VarChar(128)
+  producerVersion       String   @db.VarChar(128)
+  producerInputHash     String   @db.Char(64)
+  producerOutputHash    String   @db.Char(64)
   evaluationHash        String   @db.Char(64)
   active                Boolean  @default(true)
   createdAt             DateTime @default(now()) @db.Timestamptz(3)
@@ -1982,6 +1987,7 @@ model V2ContiguousMomentEvaluation {
   @@index([workspaceId, projectId, active, createdAt(sort: Desc)])
   @@index([workspaceId, momentId, active])
   @@index([workspaceId, indexRunId, active])
+  @@index([workspaceId, producerProvider, producerModel, producerVersion, createdAt(sort: Desc)])
   @@map("contiguous_moment_evaluations")
 }
 

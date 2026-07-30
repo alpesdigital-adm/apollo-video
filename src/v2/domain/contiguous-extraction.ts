@@ -21,6 +21,14 @@ const DIMENSIONS = [
 export type ContiguousQualityDimension =
   (typeof DIMENSIONS)[number]
 
+export interface ContiguousEvaluationProducer {
+  provider: string
+  model: string
+  version: string
+  inputHash: string
+  outputHash: string
+}
+
 export interface ContiguousQualityObservation {
   value: number
   evidenceRefs: readonly string[]
@@ -31,6 +39,7 @@ export interface ContiguousSourceMoment {
   momentHash: string
   evaluationId: string
   evaluationHash: string
+  evaluationProducer: Readonly<ContiguousEvaluationProducer>
   indexRunId: string
   sourceArtifactId: string
   sourceArtifactSha256: string
@@ -59,6 +68,7 @@ export interface ContiguousExtractionCandidate {
   sourceMomentHash: string
   sourceEvaluationId: string
   sourceEvaluationHash: string
+  sourceEvaluationProducer: Readonly<ContiguousEvaluationProducer>
   sourceRangeMs: readonly [number, number]
   durationMs: number
   durationDeltaMs: number
@@ -141,6 +151,7 @@ export function calculateContiguousMomentEvaluationHash(input: {
   objectiveTags: readonly string[]
   semanticRangeMs: readonly [number, number]
   scores: ContiguousSourceMoment['scores']
+  producer: Readonly<ContiguousEvaluationProducer>
 }): string {
   return calculateCanonicalHash({
     policyVersion: CONTIGUOUS_EXTRACTION_POLICY_VERSION,
@@ -150,7 +161,27 @@ export function calculateContiguousMomentEvaluationHash(input: {
     objectiveTags: input.objectiveTags,
     semanticRangeMs: input.semanticRangeMs,
     scores: input.scores,
+    producer: input.producer,
   })
+}
+
+export function createContiguousMomentEvaluation(
+  input: Omit<ContiguousSourceMoment, 'evaluationHash'>,
+): Readonly<ContiguousSourceMoment> {
+  const evaluationHash =
+    calculateContiguousMomentEvaluationHash({
+      momentId: input.id,
+      momentHash: input.momentHash,
+      indexRunId: input.indexRunId,
+      objectiveTags: input.objectiveTags,
+      semanticRangeMs: input.semanticRangeMs,
+      scores: input.scores,
+      producer: input.evaluationProducer,
+    })
+  return normalizedMoment(
+    Object.freeze({ ...input, evaluationHash }),
+    0,
+  )
 }
 
 function identity(value: string, field: string): string {
@@ -220,6 +251,30 @@ function range(
 
 function normalizeTag(value: string): string {
   return text(value, 'objectiveTags[]', 120).toLocaleLowerCase('pt-BR')
+}
+
+function evaluationProducer(
+  value: Readonly<ContiguousEvaluationProducer>,
+  field: string,
+): Readonly<ContiguousEvaluationProducer> {
+  const token = /^[a-z0-9][a-z0-9._/-]{0,127}$/
+  const provider = value?.provider?.trim()
+  const model = value?.model?.trim()
+  const version = value?.version?.trim()
+  assertDomain(
+    token.test(provider) &&
+      token.test(model) &&
+      token.test(version),
+    'INVALID_ARGUMENT',
+    `${field} identity is invalid`,
+  )
+  return Object.freeze({
+    provider,
+    model,
+    version,
+    inputHash: hash(value.inputHash, `${field}.inputHash`),
+    outputHash: hash(value.outputHash, `${field}.outputHash`),
+  })
 }
 
 function normalizedMoment(
@@ -303,6 +358,10 @@ function normalizedMoment(
       value.evaluationHash,
       `moments[${index}].evaluationHash`,
     ),
+    evaluationProducer: evaluationProducer(
+      value.evaluationProducer,
+      `moments[${index}].evaluationProducer`,
+    ),
     indexRunId: identity(
       value.indexRunId,
       `moments[${index}].indexRunId`,
@@ -346,6 +405,7 @@ function normalizedMoment(
       objectiveTags: normalized.objectiveTags,
       semanticRangeMs: normalized.semanticRangeMs,
       scores: normalized.scores,
+      producer: normalized.evaluationProducer,
     }) === normalized.evaluationHash,
     'INVALID_ARGUMENT',
     `moments[${index}] evaluation hash is invalid`,
@@ -392,6 +452,7 @@ function candidate(
     sourceMomentHash: moment.momentHash,
     sourceEvaluationId: moment.evaluationId,
     sourceEvaluationHash: moment.evaluationHash,
+    sourceEvaluationProducer: moment.evaluationProducer,
     sourceRangeMs: moment.semanticRangeMs,
     durationMs,
     durationDeltaMs,

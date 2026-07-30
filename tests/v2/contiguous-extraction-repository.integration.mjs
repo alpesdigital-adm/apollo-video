@@ -14,6 +14,13 @@ const [
 ])
 
 const sha = (value) => value.repeat(64).slice(0, 64)
+const evaluationProducer = {
+  provider: 'apollo',
+  model: 'contiguous-quality-evaluator',
+  version: '1.0.0',
+  inputHash: sha('d'),
+  outputHash: sha('e'),
+}
 const evidence = {
   selfContained: ['evidence-self-repository'],
   density: ['evidence-density-repository'],
@@ -36,6 +43,7 @@ const evaluationHash =
     objectiveTags: ['education'],
     semanticRangeMs: [3_495_000, 3_615_000],
     scores,
+    producer: evaluationProducer,
   })
 
 function evaluationRow(overrides = {}) {
@@ -71,6 +79,11 @@ function evaluationRow(overrides = {}) {
       '["evidence-audio-repository"]',
     visualEvidenceJson:
       '["evidence-visual-repository"]',
+    producerProvider: evaluationProducer.provider,
+    producerModel: evaluationProducer.model,
+    producerVersion: evaluationProducer.version,
+    producerInputHash: evaluationProducer.inputHash,
+    producerOutputHash: evaluationProducer.outputHash,
     evaluationHash,
     active: true,
     createdAt: new Date('2026-07-30T22:30:00.000Z'),

@@ -9224,6 +9224,7 @@ const contiguousExtractionCandidateSchema = {
     'sourceMomentHash',
     'sourceEvaluationId',
     'sourceEvaluationHash',
+    'sourceEvaluationProducer',
     'sourceRangeMs',
     'durationMs',
     'durationDeltaMs',
@@ -9238,6 +9239,24 @@ const contiguousExtractionCandidateSchema = {
     sourceMomentHash: sha256Schema,
     sourceEvaluationId: idSchema,
     sourceEvaluationHash: sha256Schema,
+    sourceEvaluationProducer: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'provider',
+        'model',
+        'version',
+        'inputHash',
+        'outputHash',
+      ],
+      properties: {
+        provider: idSchema,
+        model: idSchema,
+        version: idSchema,
+        inputHash: sha256Schema,
+        outputHash: sha256Schema,
+      },
+    },
     sourceRangeMs: contiguousRangeMsSchema,
     durationMs: {
       type: 'integer',

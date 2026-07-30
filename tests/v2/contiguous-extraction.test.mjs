@@ -3,11 +3,19 @@ import test from 'node:test'
 
 import {
   calculateContiguousMomentEvaluationHash,
+  createContiguousMomentEvaluation,
   extractContiguous,
 } from '../../src/v2/domain/contiguous-extraction.ts'
 
 const sha = (value) =>
   value.repeat(64).slice(0, 64)
+const evaluationProducer = {
+  provider: 'apollo',
+  model: 'contiguous-quality-evaluator',
+  version: '1.0.0',
+  inputHash: sha('d'),
+  outputHash: sha('e'),
+}
 
 function score(value, evidence) {
   return { value, evidenceRefs: [evidence] }
@@ -19,6 +27,7 @@ function moment(overrides = {}) {
     momentHash: sha('a'),
     evaluationId: 'evaluation-contiguous-1',
     evaluationHash: '',
+    evaluationProducer,
     indexRunId: 'long-form-index-run-1',
     sourceArtifactId: 'artifact-contiguous-1',
     sourceArtifactSha256: sha('b'),
@@ -53,6 +62,7 @@ function moment(overrides = {}) {
         objectiveTags: value.objectiveTags,
         semanticRangeMs: value.semanticRangeMs,
         scores: value.scores,
+        producer: value.evaluationProducer,
       }),
   }
 }
@@ -198,5 +208,24 @@ test('T-FR-134 binds output identity to source lineage, quality evidence and pol
   )
   assert.ok(
     first.editPlan.lineageRefs.includes('evidence-integrity-1'),
+  )
+})
+
+test('T-FR-134 trusted evaluation identity binds exact producer input and output', () => {
+  const { evaluationHash: _ignored, ...source } = moment()
+  const created = createContiguousMomentEvaluation(source)
+  const changed = createContiguousMomentEvaluation({
+    ...source,
+    evaluationProducer: {
+      ...source.evaluationProducer,
+      outputHash: sha('f'),
+    },
+  })
+
+  assert.equal(created.evaluationHash, moment().evaluationHash)
+  assert.notEqual(created.evaluationHash, changed.evaluationHash)
+  assert.equal(
+    created.evaluationProducer.model,
+    'contiguous-quality-evaluator',
   )
 })

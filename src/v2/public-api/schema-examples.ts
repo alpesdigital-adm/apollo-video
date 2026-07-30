@@ -4272,6 +4272,13 @@ const contiguousExtractionExample = {
       sourceMomentHash: longFormMomentTrafficExample.momentHash,
       sourceEvaluationId: 'contiguous-evaluation-example-1',
       sourceEvaluationHash: 'b'.repeat(64),
+      sourceEvaluationProducer: {
+        provider: 'apollo',
+        model: 'contiguous-quality-evaluator',
+        version: '1.0.0',
+        inputHash: '1'.repeat(64),
+        outputHash: '2'.repeat(64),
+      },
       sourceRangeMs: [3_495_000, 3_615_000],
       durationMs: 120_000,
       durationDeltaMs: 0,

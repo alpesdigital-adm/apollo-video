@@ -10,6 +10,13 @@ import {
 } from '../../src/v2/domain/contiguous-extraction.ts'
 
 const sha = (value) => value.repeat(64).slice(0, 64)
+const evaluationProducer = {
+  provider: 'apollo',
+  model: 'contiguous-quality-evaluator',
+  version: '1.0.0',
+  inputHash: sha('d'),
+  outputHash: sha('e'),
+}
 const observation = (value, reference) => ({
   value,
   evidenceRefs: [reference],
@@ -21,6 +28,7 @@ function sourceMoment() {
     momentHash: sha('a'),
     evaluationId: 'evaluation-contiguous-app-1',
     evaluationHash: '',
+    evaluationProducer,
     indexRunId: 'index-contiguous-app-1',
     sourceArtifactId: 'artifact-contiguous-app-1',
     sourceArtifactSha256: sha('b'),
@@ -53,6 +61,7 @@ function sourceMoment() {
         objectiveTags: value.objectiveTags,
         semanticRangeMs: value.semanticRangeMs,
         scores: value.scores,
+        producer: value.evaluationProducer,
       }),
   }
 }

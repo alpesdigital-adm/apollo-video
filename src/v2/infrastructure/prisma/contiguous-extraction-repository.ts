@@ -245,6 +245,13 @@ implements ContiguousExtractionRepository {
         momentHash: row.moment.momentHash,
         evaluationId: row.id,
         evaluationHash: row.evaluationHash,
+        evaluationProducer: Object.freeze({
+          provider: row.producerProvider,
+          model: row.producerModel,
+          version: row.producerVersion,
+          inputHash: row.producerInputHash,
+          outputHash: row.producerOutputHash,
+        }),
         indexRunId: row.indexRun.id,
         sourceArtifactId: row.indexRun.sourceArtifactId,
         sourceArtifactSha256:
