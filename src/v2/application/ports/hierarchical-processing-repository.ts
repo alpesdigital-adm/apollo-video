@@ -36,6 +36,8 @@ export interface HierarchicalProcessingSourceContext {
     id: string
     status: string
     consentStatus: string
+    expiresAt?: string
+    consentExpiresAt?: string
   }>
   previousRun?: Readonly<PersistedHierarchicalProcessingRun>
 }

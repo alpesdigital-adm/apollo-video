@@ -30,6 +30,7 @@ import type {
   PersistedHierarchicalProcessingRun,
 } from './ports/hierarchical-processing-repository.ts'
 import type {
+  LongFormIndexCreationContext,
   LongFormIndexRepository,
   PersistedLongFormIndexRun,
 } from './ports/long-form-index-repository.ts'
@@ -252,6 +253,67 @@ function assertIndexingRights(
     throw new DomainError(
       'ASSET_RIGHTS_BLOCKED',
       'Long-form source rights no longer allow indexing',
+    )
+  }
+}
+
+function assertCurrentIndexingRights(
+  rights: Readonly<{
+    status: string
+    consentStatus: string
+    expiresAt?: string
+    consentExpiresAt?: string
+  }>,
+  now: string,
+): void {
+  const nowMs = Date.parse(now)
+  const expiresAtMs = rights.expiresAt
+    ? Date.parse(rights.expiresAt)
+    : undefined
+  const consentExpiresAtMs = rights.consentExpiresAt
+    ? Date.parse(rights.consentExpiresAt)
+    : undefined
+  if (
+    !Number.isFinite(nowMs) ||
+    (expiresAtMs !== undefined &&
+      !Number.isFinite(expiresAtMs)) ||
+    (consentExpiresAtMs !== undefined &&
+      !Number.isFinite(consentExpiresAtMs))
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Long-form source rights contain an invalid expiry instant',
+    )
+  }
+  if (
+    rights.status !== 'approved' ||
+    !['approved', 'not-required'].includes(rights.consentStatus) ||
+    (expiresAtMs !== undefined && expiresAtMs <= nowMs) ||
+    (consentExpiresAtMs !== undefined &&
+      consentExpiresAtMs <= nowMs)
+  ) {
+    throw new DomainError(
+      'ASSET_RIGHTS_BLOCKED',
+      'Long-form source rights no longer allow indexing',
+    )
+  }
+}
+
+function assertLongFormCreationBinding(
+  workflow: Readonly<LongFormIndexWorkflow>,
+  context: Readonly<LongFormIndexCreationContext>,
+): void {
+  if (
+    context.sourceArtifactId !== workflow.sourceArtifactId ||
+    context.sourceArtifactSha256 !==
+      workflow.sourceArtifactSha256 ||
+    context.sourceManifestId !== workflow.sourceManifestId ||
+    context.sourceManifestHash !== workflow.sourceManifestHash ||
+    context.durationMs !== workflow.durationMs
+  ) {
+    throw new DomainError(
+      'VERSION_CONFLICT',
+      'Long-form source changed before moment indexing',
     )
   }
 }
@@ -501,8 +563,23 @@ export function createLongFormDerivedStageProcessor(
       | Readonly<PersistedHierarchicalProcessingRun>
       | undefined
     const bufferedRepository: HierarchicalProcessingRepository = {
-      readSourceContext: (request) =>
-        dependencies.hierarchical.readSourceContext(request),
+      async readSourceContext(request) {
+        const context =
+          await dependencies.hierarchical.readSourceContext(request)
+        if (input.signal.aborted) {
+          throw new DomainError(
+            'VERSION_CONFLICT',
+            'Long-form chunks operation was aborted during source validation',
+          )
+        }
+        if (context) {
+          assertCurrentIndexingRights(
+            context.rights,
+            clock().toISOString(),
+          )
+        }
+        return context
+      },
       findIdempotent: (request) =>
         dependencies.hierarchical.findIdempotent(request),
       findRun: (request) =>
@@ -576,6 +653,12 @@ export function createLongFormDerivedStageProcessor(
         'Long-form chunks exceeded its approved execution budget',
       )
     }
+    if (input.signal.aborted) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Long-form chunks operation was aborted before persistence',
+      )
+    }
     if (!(await input.heartbeat())) {
       throw new DomainError(
         'VERSION_CONFLICT',
@@ -609,6 +692,17 @@ export function createLongFormDerivedStageProcessor(
       configuration.moments.stageVersion,
     )
     const workflow = input.workflow
+    const budget = effectiveStageBudget(
+      workflow,
+      input.checkpoint,
+      0,
+    )
+    if (!(await input.heartbeat())) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Long-form moments lease was lost before execution',
+      )
+    }
     const chunksOutput = succeededOutput(workflow, 'chunks')
     const diarizationOutput =
       succeededOutput(workflow, 'diarization')
@@ -625,6 +719,12 @@ export function createLongFormDerivedStageProcessor(
           runId: diarizationOutput.id,
         }),
       ])
+    if (input.signal.aborted) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Long-form moments operation was aborted during prerequisite validation',
+      )
+    }
     if (!hierarchicalRun || !diarizationRun) {
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
@@ -644,17 +744,30 @@ export function createLongFormDerivedStageProcessor(
       diarizationOutput.hash,
     )
     assertIndexingRights(hierarchicalRun)
-    const budget = effectiveStageBudget(
-      workflow,
-      input.checkpoint,
-      0,
-    )
-    if (!(await input.heartbeat())) {
+    const creationContext =
+      await dependencies.longForm.readCreationContext({
+        workspaceId: workflow.workspaceId,
+        projectId: workflow.projectId,
+        sourceArtifactId: workflow.sourceArtifactId,
+        sourceManifestId: workflow.sourceManifestId,
+      })
+    if (!creationContext) {
       throw new DomainError(
-        'VERSION_CONFLICT',
-        'Long-form moments lease was lost before execution',
+        'PROJECT_NOT_FOUND',
+        'Long-form source is no longer available for moment indexing',
       )
     }
+    if (input.signal.aborted) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Long-form moments operation was aborted during rights validation',
+      )
+    }
+    assertLongFormCreationBinding(workflow, creationContext)
+    assertCurrentIndexingRights(
+      creationContext.rights,
+      clock().toISOString(),
+    )
     const hierarchy = hierarchyInputs(
       hierarchicalRun,
       diarizationRun,
@@ -664,8 +777,18 @@ export function createLongFormDerivedStageProcessor(
       | Readonly<PersistedLongFormIndexRun>
       | undefined
     const bufferedRepository: LongFormIndexRepository = {
-      readCreationContext: (request) =>
-        dependencies.longForm.readCreationContext(request),
+      async readCreationContext(request) {
+        if (
+          request.workspaceId !== workflow.workspaceId ||
+          request.projectId !== workflow.projectId ||
+          request.sourceArtifactId !==
+            workflow.sourceArtifactId ||
+          request.sourceManifestId !== workflow.sourceManifestId
+        ) {
+          return null
+        }
+        return creationContext
+      },
       findIdempotent: (request) =>
         dependencies.longForm.findIdempotent(request),
       async persist(run) {
@@ -727,6 +850,12 @@ export function createLongFormDerivedStageProcessor(
       throw new DomainError(
         'PRECONDITION_REQUIRED',
         'Long-form moments exceeded its approved execution budget',
+      )
+    }
+    if (input.signal.aborted) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Long-form moments operation was aborted before persistence',
       )
     }
     if (!(await input.heartbeat())) {

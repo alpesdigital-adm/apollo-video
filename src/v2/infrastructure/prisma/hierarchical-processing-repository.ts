@@ -567,6 +567,19 @@ implements HierarchicalProcessingRepository {
         status: artifact.currentRightsSnapshot.status,
         consentStatus:
           artifact.currentRightsSnapshot.consentStatus,
+        ...(artifact.currentRightsSnapshot.expiresAt
+          ? {
+              expiresAt:
+                artifact.currentRightsSnapshot.expiresAt.toISOString(),
+            }
+          : {}),
+        ...(artifact.currentRightsSnapshot.consentExpiresAt
+          ? {
+              consentExpiresAt:
+                artifact.currentRightsSnapshot.consentExpiresAt
+                  .toISOString(),
+            }
+          : {}),
       }),
       ...(previousRun ? { previousRun } : {}),
     })
@@ -805,6 +818,29 @@ implements HierarchicalProcessingRepository {
           throw new DomainError(
             'PERSISTENCE_CONFLICT',
             'Hierarchical processing context is no longer available',
+          )
+        }
+        if (
+          fence &&
+          (
+            artifact.currentRightsSnapshot.status !== 'approved' ||
+            !['approved', 'not-required'].includes(
+              artifact.currentRightsSnapshot.consentStatus,
+            ) ||
+            (
+              artifact.currentRightsSnapshot.expiresAt &&
+              artifact.currentRightsSnapshot.expiresAt <= fenceNow!
+            ) ||
+            (
+              artifact.currentRightsSnapshot.consentExpiresAt &&
+              artifact.currentRightsSnapshot.consentExpiresAt <=
+                fenceNow!
+            )
+          )
+        ) {
+          throw new DomainError(
+            'ASSET_RIGHTS_BLOCKED',
+            'Hierarchical source rights no longer allow long-form indexing',
           )
         }
         if (

@@ -798,6 +798,29 @@ implements LongFormIndexRepository {
             'Long-form commit context is no longer available',
           )
         }
+        if (
+          fence &&
+          (
+            artifact.currentRightsSnapshot.status !== 'approved' ||
+            !['approved', 'not-required'].includes(
+              artifact.currentRightsSnapshot.consentStatus,
+            ) ||
+            (
+              artifact.currentRightsSnapshot.expiresAt &&
+              artifact.currentRightsSnapshot.expiresAt <= fenceNow!
+            ) ||
+            (
+              artifact.currentRightsSnapshot.consentExpiresAt &&
+              artifact.currentRightsSnapshot.consentExpiresAt <=
+                fenceNow!
+            )
+          )
+        ) {
+          throw new DomainError(
+            'ASSET_RIGHTS_BLOCKED',
+            'Long-form source rights no longer allow moment indexing',
+          )
+        }
         const manifest = parseManifest(
           manifestRow.manifestJson,
           manifestRow.manifestHash,

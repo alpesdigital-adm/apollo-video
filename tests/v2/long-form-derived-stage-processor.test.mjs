@@ -255,10 +255,16 @@ function processorFixture(options = {}) {
   let longForm
   let hierarchicalPersistCount = 0
   let longFormPersistCount = 0
+  let hierarchicalSourceReadCount = 0
+  let hierarchicalFindRunCount = 0
+  let diarizationFindRunCount = 0
+  let longFormContextReadCount = 0
   const hierarchicalFences = []
   const longFormFences = []
   const hierarchicalRepository = {
     async readSourceContext() {
+      hierarchicalSourceReadCount += 1
+      options.onHierarchicalSourceRead?.()
       return sourceContext(options.rights)
     },
     async findIdempotent(input) {
@@ -267,6 +273,8 @@ function processorFixture(options = {}) {
         : null
     },
     async findRun(input) {
+      hierarchicalFindRunCount += 1
+      options.onHierarchicalFindRun?.()
       return hierarchical?.id === input.runId
         ? hierarchical
         : null
@@ -287,6 +295,8 @@ function processorFixture(options = {}) {
   }
   const longFormRepository = {
     async readCreationContext() {
+      longFormContextReadCount += 1
+      options.onLongFormContextRead?.()
       return Object.freeze({
         sourceArtifactId: identities.sourceArtifactId,
         sourceArtifactSha256:
@@ -300,6 +310,15 @@ function processorFixture(options = {}) {
           status: options.rights?.status ?? 'approved',
           consentStatus:
             options.rights?.consentStatus ?? 'not-required',
+          ...(options.rights?.expiresAt
+            ? { expiresAt: options.rights.expiresAt }
+            : {}),
+          ...(options.rights?.consentExpiresAt
+            ? {
+                consentExpiresAt:
+                  options.rights.consentExpiresAt,
+              }
+            : {}),
         }),
       })
     },
@@ -331,6 +350,8 @@ function processorFixture(options = {}) {
         throw new Error('not used by derived stages')
       },
       async findRun(input) {
+        diarizationFindRunCount += 1
+        options.onDiarizationFindRun?.()
         return options.diarization?.id === input.runId
           ? options.diarization
           : null
@@ -361,12 +382,20 @@ function processorFixture(options = {}) {
     getHierarchicalPersistCount: () =>
       hierarchicalPersistCount,
     getLongFormPersistCount: () => longFormPersistCount,
+    getHierarchicalSourceReadCount: () =>
+      hierarchicalSourceReadCount,
+    getHierarchicalFindRunCount: () =>
+      hierarchicalFindRunCount,
+    getDiarizationFindRunCount: () =>
+      diarizationFindRunCount,
+    getLongFormContextReadCount: () =>
+      longFormContextReadCount,
     hierarchicalFences,
     longFormFences,
   }
 }
 
-function processInput(workflow) {
+function processInput(workflow, options = {}) {
   return Object.freeze({
     workflow,
     checkpoint: workflow.stages.find(
@@ -377,8 +406,9 @@ function processInput(workflow) {
       owner: 'worker-derived-stages',
       attempt: 1,
     }),
-    signal: new AbortController().signal,
-    heartbeat: async () => true,
+    signal:
+      options.signal ?? new AbortController().signal,
+    heartbeat: options.heartbeat ?? (async () => true),
   })
 }
 
@@ -483,6 +513,9 @@ async function runningMomentsFixture(options = {}) {
     hierarchical: chunkFixture.getHierarchical(),
     diarization: setup.diarization,
     longFormLeaseLost: options.longFormLeaseLost,
+    rights: options.rights,
+    onHierarchicalFindRun:
+      options.onHierarchicalFindRun,
   })
   return { workflow, fixture, diarization: setup.diarization }
 }
@@ -597,4 +630,67 @@ test('T-FR-133 derived stages fail closed after rights revocation and the router
     }),
     (error) => error.code === 'PERSISTENCE_NOT_CONFIGURED',
   )
+})
+
+test('T-FR-133 derived stages validate heartbeat, cancellation and current rights before publication', async () => {
+  const chunks = runningChunksWorkflow()
+  const controller = new AbortController()
+  const cancelled = processorFixture({
+    diarization: chunks.diarization,
+    onHierarchicalSourceRead: () => controller.abort(),
+  })
+  await assert.rejects(
+    cancelled.processor.process(processInput(
+      chunks.workflow,
+      { signal: controller.signal },
+    )),
+    (error) =>
+      error.code === 'VERSION_CONFLICT' &&
+      /aborted during source validation/.test(error.message),
+  )
+  assert.equal(cancelled.getHierarchicalSourceReadCount(), 1)
+  assert.equal(cancelled.getHierarchicalPersistCount(), 0)
+  assert.equal(cancelled.hierarchicalFences.length, 0)
+
+  const moments = await runningMomentsFixture()
+  let heartbeatCount = 0
+  await assert.rejects(
+    moments.fixture.processor.process(processInput(
+      moments.workflow,
+      {
+        heartbeat: async () => {
+          heartbeatCount += 1
+          return false
+        },
+      },
+    )),
+    (error) =>
+      error.code === 'VERSION_CONFLICT' &&
+      /lease was lost before execution/.test(error.message),
+  )
+  assert.equal(heartbeatCount, 1)
+  assert.equal(
+    moments.fixture.getHierarchicalFindRunCount(),
+    0,
+  )
+  assert.equal(moments.fixture.getDiarizationFindRunCount(), 0)
+  assert.equal(moments.fixture.getLongFormContextReadCount(), 0)
+  assert.equal(moments.fixture.getLongFormPersistCount(), 0)
+
+  const expired = await runningMomentsFixture({
+    rights: {
+      status: 'approved',
+      consentStatus: 'not-required',
+      expiresAt: '2026-07-30T12:00:04.000Z',
+    },
+  })
+  await assert.rejects(
+    expired.fixture.processor.process(
+      processInput(expired.workflow),
+    ),
+    (error) => error.code === 'ASSET_RIGHTS_BLOCKED',
+  )
+  assert.equal(expired.fixture.getLongFormContextReadCount(), 1)
+  assert.equal(expired.fixture.getLongFormPersistCount(), 0)
+  assert.equal(expired.fixture.longFormFences.length, 0)
 })
