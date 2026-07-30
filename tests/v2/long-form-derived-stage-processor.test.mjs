@@ -408,6 +408,7 @@ function processorFixture(options = {}) {
       'rights-integrity',
       'transcript-boundary',
       'transcript-density',
+      'audio-analysis',
     ].map((kind) => ({
       kind,
       async produce(input) {
@@ -622,7 +623,7 @@ test('T-FR-133 moments derive anonymous speakers only from temporal overlap and 
   )
   const stored = fixture.getLongForm()
   assert.equal(result.resultCount, stored.momentCount)
-  assert.equal(fixture.contiguousEvidenceRequests.length, 3)
+  assert.equal(fixture.contiguousEvidenceRequests.length, 4)
   assert.deepEqual(
     new Set(fixture.contiguousEvidenceRequests.map(
       (request) => request.kind,
@@ -631,6 +632,7 @@ test('T-FR-133 moments derive anonymous speakers only from temporal overlap and 
       'rights-integrity',
       'transcript-boundary',
       'transcript-density',
+      'audio-analysis',
     ]),
   )
   assert.equal(fixture.transcriptEvidenceBatches.length, 1)
@@ -754,7 +756,7 @@ test('T-FR-134 moments resume contiguous evidence without duplicating the persis
   assert.equal(setup.fixture.getLongFormPersistCount(), 1)
   assert.equal(
     setup.fixture.getContiguousEvidenceCallCount(),
-    4,
+    5,
   )
 })
 

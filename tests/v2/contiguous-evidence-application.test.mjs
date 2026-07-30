@@ -15,6 +15,9 @@ function source(overrides = {}) {
     indexRunHash: sha('a'),
     sourceArtifactId: 'artifact-contiguous-evidence',
     sourceArtifactSha256: sha('b'),
+    sourceArtifactKey:
+      'workspaces/contiguous-evidence/master.mp4',
+    sourceArtifactByteSize: '2000000',
     sourceManifestId: 'manifest-contiguous-evidence',
     sourceManifestHash: sha('c'),
     sourceDurationMs: 7_200_000,
@@ -110,6 +113,15 @@ test('T-FR-134 evidence producer replays before analyzer and rejects source drif
   await value.produce(request)
   const replay = await value.produce(request)
   assert.equal(replay.replayed, true)
+  assert.equal(value.calls(), 1)
+
+  value.setSource(source({
+    sourceArtifactKey:
+      'relocated/contiguous-evidence/master.mp4',
+    sourceArtifactByteSize: '3000000',
+  }))
+  const relocatedReplay = await value.produce(request)
+  assert.equal(relocatedReplay.replayed, true)
   assert.equal(value.calls(), 1)
 
   value.setSource(source({ indexRunHash: sha('9') }))

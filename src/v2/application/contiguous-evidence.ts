@@ -1,8 +1,9 @@
-import type {
-  ContiguousEvidenceAnalyzer,
-  ContiguousEvidenceRepository,
-  ContiguousEvidenceSource,
-  PersistedContiguousEvidenceRun,
+import {
+  portableContiguousEvidenceSource,
+  type ContiguousEvidenceAnalyzer,
+  type ContiguousEvidenceRepository,
+  type ContiguousEvidenceSource,
+  type PersistedContiguousEvidenceRun,
 } from './ports/contiguous-evidence-repository.ts'
 import {
   calculateCanonicalHash,
@@ -73,6 +74,29 @@ function assertSource(
     !HASH.test(source.indexRunHash) ||
     !ID.test(source.sourceArtifactId) ||
     !HASH.test(source.sourceArtifactSha256) ||
+    (
+      source.sourceArtifactKey !== undefined &&
+      (
+        typeof source.sourceArtifactKey !== 'string' ||
+        source.sourceArtifactKey.length < 1 ||
+        source.sourceArtifactKey.length > 512 ||
+        source.sourceArtifactKey.startsWith('/') ||
+        source.sourceArtifactKey.includes('\\') ||
+        source.sourceArtifactKey.split('/').some(
+          (part) => !part || part === '.' || part === '..',
+        )
+      )
+    ) ||
+    (
+      source.sourceArtifactByteSize !== undefined &&
+      !/^[1-9][0-9]{0,18}$/.test(
+        source.sourceArtifactByteSize,
+      )
+    ) ||
+    (
+      (source.sourceArtifactKey === undefined) !==
+      (source.sourceArtifactByteSize === undefined)
+    ) ||
     !ID.test(source.sourceManifestId) ||
     !HASH.test(source.sourceManifestHash) ||
     !ID.test(source.rightsSnapshotId) ||
@@ -198,7 +222,7 @@ export function produceContiguousEvidenceService(
     const analyzerInputHash = calculateCanonicalHash({
       schemaVersion: 'contiguous-evidence-analyzer-input/v1',
       analyzer,
-      source,
+      source: portableContiguousEvidenceSource(source),
     })
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'produce-contiguous-evidence-request/v1',

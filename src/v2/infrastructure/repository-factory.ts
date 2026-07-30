@@ -146,6 +146,12 @@ import {
   TranscriptBoundaryContiguousEvidenceAnalyzer,
   TranscriptDensityContiguousEvidenceAnalyzer,
 } from './analysis/transcript-contiguous-evidence-analyzers.ts'
+import {
+  AudioContiguousEvidenceAnalyzer,
+} from './analysis/audio-contiguous-evidence-analyzer.ts'
+import {
+  createFfmpegContiguousAudioEvidenceProviderFromEnvironment,
+} from './analysis/ffmpeg-contiguous-audio-evidence-provider.ts'
 import { PrismaLongFormIndexWorkflowRepository } from './prisma/long-form-index-workflow-repository.ts'
 import { PrismaSpeakerDiarizationRepository } from './prisma/speaker-diarization-repository.ts'
 import { PrismaValidatedSegmentRepository } from './prisma/validated-segment-repository.ts'
@@ -302,6 +308,21 @@ export function createTranscriptDensityContiguousEvidenceProducer() {
     repository: createContiguousEvidenceRepository(),
     analyzer:
       new TranscriptDensityContiguousEvidenceAnalyzer(),
+    createRunId: () => randomUUID(),
+    createEvidenceId: () => randomUUID(),
+  })
+}
+
+export function createAudioContiguousEvidenceProducer(
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  return produceContiguousEvidenceService({
+    repository: createContiguousEvidenceRepository(),
+    analyzer: new AudioContiguousEvidenceAnalyzer(
+      createFfmpegContiguousAudioEvidenceProviderFromEnvironment(
+        environment,
+      ),
+    ),
     createRunId: () => randomUUID(),
     createEvidenceId: () => randomUUID(),
   })
@@ -479,6 +500,8 @@ export function createLongFormDerivedStageProcessorFromEnvironment(
     createTranscriptBoundaryContiguousEvidenceProducer()
   const produceTranscriptDensityEvidence =
     createTranscriptDensityContiguousEvidenceProducer()
+  const produceAudioEvidence =
+    createAudioContiguousEvidenceProducer(environment)
   const numberFromEnvironment = (
     name: string,
     fallback: number,
@@ -510,6 +533,10 @@ export function createLongFormDerivedStageProcessorFromEnvironment(
       Object.freeze({
         kind: 'rights-integrity' as const,
         produce: produceRightsEvidence,
+      }),
+      Object.freeze({
+        kind: 'audio-analysis' as const,
+        produce: produceAudioEvidence,
       }),
     ]),
     createId: (kind, sourceId) =>

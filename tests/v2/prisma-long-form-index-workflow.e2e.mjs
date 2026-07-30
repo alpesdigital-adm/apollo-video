@@ -45,6 +45,7 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
       TranscriptBoundaryContiguousEvidenceAnalyzer,
       TranscriptDensityContiguousEvidenceAnalyzer,
     },
+    { AudioContiguousEvidenceAnalyzer },
     { nodeApiCredentialCrypto },
     route,
     readRoute,
@@ -70,6 +71,7 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     import('../../src/v2/infrastructure/prisma/public-operation-repository.ts'),
     import('../../src/v2/infrastructure/analysis/rights-integrity-contiguous-evidence-analyzer.ts'),
     import('../../src/v2/infrastructure/analysis/transcript-contiguous-evidence-analyzers.ts'),
+    import('../../src/v2/infrastructure/analysis/audio-contiguous-evidence-analyzer.ts'),
     import('../../src/v2/infrastructure/security/api-credential.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/route.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/[workflowId]/route.ts'),
@@ -363,6 +365,27 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
             kind: 'rights-integrity',
             analyzer:
               new RightsIntegrityContiguousEvidenceAnalyzer(),
+          },
+          {
+            kind: 'audio-analysis',
+            analyzer: new AudioContiguousEvidenceAnalyzer({
+              async measure(input) {
+                return input.windows.map((window) => ({
+                  momentId: window.momentId,
+                  rangeMs: window.rangeMs,
+                  durationMs:
+                    window.rangeMs[1] - window.rangeMs[0],
+                  integratedLufs: -18,
+                  truePeakDbfs: -2,
+                  meanVolumeDb: -21,
+                  maximumVolumeDb: -2,
+                  silenceDurationMs: 0,
+                  silenceRatio: 0,
+                  audibleSignal: true,
+                  clippingRisk: false,
+                }))
+              },
+            }),
           },
         ].map(({ kind, analyzer }) => ({
           kind,

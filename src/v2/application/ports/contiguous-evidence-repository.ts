@@ -27,6 +27,8 @@ export interface ContiguousEvidenceSource {
   indexRunHash: string
   sourceArtifactId: string
   sourceArtifactSha256: string
+  sourceArtifactKey?: string
+  sourceArtifactByteSize?: string
   sourceManifestId: string
   sourceManifestHash: string
   sourceDurationMs: number
@@ -34,6 +36,20 @@ export interface ContiguousEvidenceSource {
   rightsStatus: 'approved' | 'blocked'
   consentStatus: 'approved' | 'not-required' | 'blocked'
   moments: readonly Readonly<ContiguousEvidenceMomentSource>[]
+}
+
+export function portableContiguousEvidenceSource(
+  source: Readonly<ContiguousEvidenceSource>,
+): Readonly<Omit<
+  ContiguousEvidenceSource,
+  'sourceArtifactKey' | 'sourceArtifactByteSize'
+>> {
+  const {
+    sourceArtifactKey: _sourceArtifactKey,
+    sourceArtifactByteSize: _sourceArtifactByteSize,
+    ...portable
+  } = source
+  return Object.freeze(portable)
 }
 
 export interface ContiguousEvidenceObservation {

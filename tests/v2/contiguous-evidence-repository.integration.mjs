@@ -43,7 +43,14 @@ function sourceRow(overrides = {}) {
     sourceManifestHash: sha('c'),
     durationMs: 7_200_000,
     rightsSnapshot: rights,
-    sourceArtifact: { currentRightsSnapshot: rights },
+    sourceArtifact: {
+      artifactKey:
+        'workspaces/contiguous-evidence/master.mp4',
+      byteSize: BigInt(2_000_000),
+      mediaType: 'video',
+      status: 'available',
+      currentRightsSnapshot: rights,
+    },
     moments: [{
       id: 'moment-contiguous-evidence-repository',
       momentHash: sha('d'),
@@ -315,6 +322,14 @@ test('T-FR-134 Prisma evidence source hydrates exact transcript sidecar for both
   assert.equal(
     source.moments[0].transcriptEvidence.evidenceHash,
     row.moments[0].transcriptEvidence.evidenceHash,
+  )
+  assert.equal(
+    source.sourceArtifactKey,
+    row.sourceArtifact.artifactKey,
+  )
+  assert.equal(
+    source.sourceArtifactByteSize,
+    row.sourceArtifact.byteSize.toString(),
   )
   const signal = new AbortController().signal
   const [boundary, density] = await Promise.all([

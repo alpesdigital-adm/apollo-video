@@ -123,6 +123,7 @@ export interface LongFormContiguousEvidenceProducer {
     | 'transcript-boundary'
     | 'transcript-density'
     | 'rights-integrity'
+    | 'audio-analysis'
   produce(input: {
     workspaceId: string
     projectId: string
@@ -602,12 +603,13 @@ export function createLongFormDerivedStageProcessor(
       (producer) => producer.kind,
     )
   if (
-    evidenceKinds.length !== 3 ||
-    new Set(evidenceKinds).size !== 3 ||
+    evidenceKinds.length !== 4 ||
+    new Set(evidenceKinds).size !== 4 ||
     ![
       'transcript-boundary',
       'transcript-density',
       'rights-integrity',
+      'audio-analysis',
     ].every((kind) => evidenceKinds.includes(
       kind as typeof evidenceKinds[number],
     ))

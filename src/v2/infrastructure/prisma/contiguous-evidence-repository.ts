@@ -3,10 +3,11 @@ import {
   type PrismaClient,
 } from '../../../../generated/prisma-v2/index.js'
 
-import type {
-  ContiguousEvidenceRepository,
-  ContiguousEvidenceSource,
-  PersistedContiguousEvidenceRun,
+import {
+  portableContiguousEvidenceSource,
+  type ContiguousEvidenceRepository,
+  type ContiguousEvidenceSource,
+  type PersistedContiguousEvidenceRun,
 } from '../../application/ports/contiguous-evidence-repository.ts'
 import {
   calculateCanonicalHash,
@@ -87,6 +88,8 @@ async function readSourceWithClient(
   const current = row.sourceArtifact.currentRightsSnapshot
   if (
     !current ||
+    row.sourceArtifact.status !== 'available' ||
+    !['video', 'audio'].includes(row.sourceArtifact.mediaType) ||
     current.id !== rights.id ||
     rights.status !== 'approved' ||
     !['approved', 'not-required'].includes(rights.consentStatus) ||
@@ -105,6 +108,9 @@ async function readSourceWithClient(
     indexRunHash: row.recordHash,
     sourceArtifactId: row.sourceArtifactId,
     sourceArtifactSha256: row.sourceArtifactSha256,
+    sourceArtifactKey: row.sourceArtifact.artifactKey,
+    sourceArtifactByteSize:
+      row.sourceArtifact.byteSize.toString(),
     sourceManifestId: row.sourceManifestId,
     sourceManifestHash: row.sourceManifestHash,
     sourceDurationMs: row.durationMs,
@@ -224,7 +230,7 @@ function assertRunBinding(
   const analyzerInputHash = calculateCanonicalHash({
     schemaVersion: 'contiguous-evidence-analyzer-input/v1',
     analyzer: run.analyzer,
-    source,
+    source: portableContiguousEvidenceSource(source),
   })
   const requestFingerprint = calculateCanonicalHash({
     schemaVersion: 'produce-contiguous-evidence-request/v1',
