@@ -76,6 +76,7 @@ model V2Workspace {
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks    V2HierarchicalProcessingChunk[]
   hierarchicalTierExecutions      V2HierarchicalTierExecution[]
+  longFormMomentTranscriptEvidence V2LongFormMomentTranscriptEvidence[]
   productionBatches               V2ProductionBatch[]
   productionBatchItems            V2ProductionBatchItem[]
   productionBatchSteps            V2ProductionBatchStep[]
@@ -322,6 +323,7 @@ model V2Project {
   hierarchicalProcessingRuns    V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks  V2HierarchicalProcessingChunk[]
   hierarchicalTierExecutions    V2HierarchicalTierExecution[]
+  longFormMomentTranscriptEvidence V2LongFormMomentTranscriptEvidence[]
   productionBatches             V2ProductionBatch[]
   scriptAlignmentRuns           V2ScriptAlignmentRun[]
   takeLibraryRuns               V2TakeLibraryRun[]
@@ -1462,6 +1464,7 @@ model V2MediaTranscript {
   speechSegments              V2SpeechSegment[]
   evidenceSegments            V2EvidenceSegment[]
   hierarchicalProcessingRuns  V2HierarchicalProcessingRun[]
+  longFormMomentTranscriptEvidence V2LongFormMomentTranscriptEvidence[]
   longFormIndexWorkflows      V2LongFormIndexWorkflow[]
   speakerDiarizationRuns      V2SpeakerDiarizationRun[]
   sourceDeconstructionReports V2SourceDeconstructionReport[]
@@ -1851,6 +1854,7 @@ model V2LongFormIndexRun {
   createdBy      V2ApiClient             @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   chapters       V2LongFormChapter[]
   moments        V2LongFormMoment[]
+  transcriptEvidence V2LongFormMomentTranscriptEvidence[]
   contiguousEvidenceRuns V2ContiguousEvidenceRun[] @relation("ContiguousEvidenceRunIndex")
   contiguousEvaluationRuns V2ContiguousEvaluationRun[] @relation("ContiguousEvaluationRunIndex")
   contiguousEvaluationEvidence V2ContiguousEvaluationEvidence[] @relation("ContiguousEvidenceIndex")
@@ -1946,6 +1950,7 @@ model V2LongFormMoment {
   contiguousEvaluationEvidence V2ContiguousEvaluationEvidence[] @relation("ContiguousEvidenceMoment")
   contiguousEvaluations V2ContiguousMomentEvaluation[] @relation("ContiguousEvaluationMoment")
   contiguousExtractions V2ContiguousExtraction[] @relation("ContiguousExtractionMoment")
+  transcriptEvidence V2LongFormMomentTranscriptEvidence?
 
   @@unique([id, workspaceId])
   @@unique([indexRunId, sourceMomentId])
@@ -1957,6 +1962,42 @@ model V2LongFormMoment {
   @@index([workspaceId, sourceArtifactId, recommendedStartMs])
   @@index([workspaceId, topicNormalized])
   @@map("long_form_moments")
+}
+
+model V2LongFormMomentTranscriptEvidence {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  indexRunId            String   @db.VarChar(128)
+  indexRunHash          String   @db.Char(64)
+  momentId              String   @db.VarChar(128)
+  momentHash            String   @db.Char(64)
+  hierarchicalRunId     String   @db.VarChar(128)
+  hierarchicalRunHash   String   @db.Char(64)
+  sourceTranscriptId    String   @db.VarChar(128)
+  sourceTranscriptHash  String   @db.Char(64)
+  spansJson             String   @db.Text
+  spanCount             Int
+  startMs               Int
+  endMs                 Int
+  wordCount             Int
+  evidenceHash          String   @db.Char(64)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  indexRun V2LongFormIndexRun @relation(fields: [indexRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  moment V2LongFormMoment @relation(fields: [momentId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  hierarchicalRun V2HierarchicalProcessingRun @relation(fields: [hierarchicalRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceTranscript V2MediaTranscript @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([momentId, workspaceId])
+  @@unique([workspaceId, evidenceHash])
+  @@index([workspaceId, projectId, indexRunId])
+  @@index([workspaceId, hierarchicalRunId])
+  @@index([workspaceId, sourceTranscriptId])
+  @@map("long_form_moment_transcript_evidence")
 }
 
 model V2ContiguousEvaluationRun {
@@ -2733,6 +2774,7 @@ model V2HierarchicalProcessingRun {
   successorRuns    V2HierarchicalProcessingRun[]   @relation("HierarchicalPreviousRun")
   chunks           V2HierarchicalProcessingChunk[]
   tierExecutions   V2HierarchicalTierExecution[]
+  longFormMomentTranscriptEvidence V2LongFormMomentTranscriptEvidence[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])

@@ -41,6 +41,10 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     { PrismaContiguousEvidenceRepository },
     { PrismaPublicOperationRepository },
     { RightsIntegrityContiguousEvidenceAnalyzer },
+    {
+      TranscriptBoundaryContiguousEvidenceAnalyzer,
+      TranscriptDensityContiguousEvidenceAnalyzer,
+    },
     { nodeApiCredentialCrypto },
     route,
     readRoute,
@@ -65,6 +69,7 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
     import('../../src/v2/infrastructure/prisma/contiguous-evidence-repository.ts'),
     import('../../src/v2/infrastructure/prisma/public-operation-repository.ts'),
     import('../../src/v2/infrastructure/analysis/rights-integrity-contiguous-evidence-analyzer.ts'),
+    import('../../src/v2/infrastructure/analysis/transcript-contiguous-evidence-analyzers.ts'),
     import('../../src/v2/infrastructure/security/api-credential.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/route.ts'),
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/[workflowId]/route.ts'),
@@ -343,18 +348,34 @@ test('T-FR-133 resumes a generated-transcript two-hour master after worker resta
           new PrismaHierarchicalProcessingRepository(client),
         longForm: new PrismaLongFormIndexRepository(client),
         diarization: speaker,
-        contiguousRightsEvidence: {
+        contiguousEvidenceProducers: [
+          {
+            kind: 'transcript-boundary',
+            analyzer:
+              new TranscriptBoundaryContiguousEvidenceAnalyzer(),
+          },
+          {
+            kind: 'transcript-density',
+            analyzer:
+              new TranscriptDensityContiguousEvidenceAnalyzer(),
+          },
+          {
+            kind: 'rights-integrity',
+            analyzer:
+              new RightsIntegrityContiguousEvidenceAnalyzer(),
+          },
+        ].map(({ kind, analyzer }) => ({
+          kind,
           produce: produceContiguousEvidenceService({
             repository:
               new PrismaContiguousEvidenceRepository(client),
-            analyzer:
-              new RightsIntegrityContiguousEvidenceAnalyzer(),
+            analyzer,
             createRunId: () =>
-              `rights-evidence-run-${randomUUID()}`,
+              `${kind}-run-${randomUUID()}`,
             createEvidenceId: () =>
-              `rights-evidence-${randomUUID()}`,
+              `${kind}-evidence-${randomUUID()}`,
           }),
-        },
+        })),
         createId: (kind, sourceId) =>
           `${kind}-${sourceId ?? suffix}-${randomUUID().slice(0, 8)}`,
       })

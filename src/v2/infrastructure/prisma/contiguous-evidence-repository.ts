@@ -15,6 +15,9 @@ import {
 import {
   createContiguousEvaluationEvidence,
 } from '../../domain/contiguous-evaluation-evidence.ts'
+import {
+  createLongFormMomentTranscriptEvidence,
+} from '../../domain/long-form-transcript-evidence.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 
@@ -73,7 +76,10 @@ async function readSourceWithClient(
       sourceArtifact: {
         include: { currentRightsSnapshot: true },
       },
-      moments: { orderBy: { ordinal: 'asc' } },
+      moments: {
+        orderBy: { ordinal: 'asc' },
+        include: { transcriptEvidence: true },
+      },
     },
   })
   if (!row) return null
@@ -106,15 +112,46 @@ async function readSourceWithClient(
     rightsStatus: 'approved' as const,
     consentStatus:
       rights.consentStatus as 'approved' | 'not-required',
-    moments: Object.freeze(row.moments.map((moment) =>
-      Object.freeze({
+    moments: Object.freeze(row.moments.map((moment) => {
+      const transcriptEvidence = moment.transcriptEvidence
+        ? createLongFormMomentTranscriptEvidence({
+            id: moment.transcriptEvidence.id,
+            workspaceId:
+              moment.transcriptEvidence.workspaceId,
+            projectId: moment.transcriptEvidence.projectId,
+            indexRunId:
+              moment.transcriptEvidence.indexRunId,
+            indexRunHash:
+              moment.transcriptEvidence.indexRunHash,
+            momentId: moment.transcriptEvidence.momentId,
+            momentHash:
+              moment.transcriptEvidence.momentHash,
+            hierarchicalRunId:
+              moment.transcriptEvidence.hierarchicalRunId,
+            hierarchicalRunHash:
+              moment.transcriptEvidence.hierarchicalRunHash,
+            sourceTranscriptId:
+              moment.transcriptEvidence.sourceTranscriptId,
+            sourceTranscriptHash:
+              moment.transcriptEvidence.sourceTranscriptHash,
+            spans: canonical(
+              moment.transcriptEvidence.spansJson,
+              `long-form transcript spans ${moment.id}`,
+            ),
+          })
+        : undefined
+      return Object.freeze({
         id: moment.id,
         momentHash: moment.momentHash,
         recommendedRangeMs: Object.freeze([
           moment.recommendedStartMs,
           moment.recommendedEndMs,
         ]) as readonly [number, number],
-      }))),
+        ...(transcriptEvidence
+          ? { transcriptEvidence }
+          : {}),
+      })
+    })),
   })
 }
 

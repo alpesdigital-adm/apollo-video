@@ -4,10 +4,21 @@ import test from 'node:test'
 const [
   { produceContiguousEvidenceService },
   { PrismaContiguousEvidenceRepository },
+  { calculateCanonicalHash, stableSerialize },
+  { createLongFormMomentTranscriptEvidence },
+  {
+    TranscriptBoundaryContiguousEvidenceAnalyzer,
+    TranscriptDensityContiguousEvidenceAnalyzer,
+  },
 ] = await Promise.all([
   import('../../src/v2/application/contiguous-evidence.ts'),
   import(
     '../../src/v2/infrastructure/prisma/contiguous-evidence-repository.ts'
+  ),
+  import('../../src/v2/domain/canonical-hash.ts'),
+  import('../../src/v2/domain/long-form-transcript-evidence.ts'),
+  import(
+    '../../src/v2/infrastructure/analysis/transcript-contiguous-evidence-analyzers.ts'
   ),
 ])
 
@@ -40,6 +51,60 @@ function sourceRow(overrides = {}) {
       recommendedEndMs: 110_000,
     }],
     ...overrides,
+  }
+}
+
+function transcriptSidecarRow() {
+  const spanContent = {
+    id: 'span-contiguous-evidence-repository',
+    sourceSegmentId: 1,
+    rangeMs: [10_000, 110_000],
+    text: 'Uma ideia completa para extração.',
+    textHash: calculateCanonicalHash(
+      'Uma ideia completa para extração.',
+    ),
+    wordCount: 5,
+    chunkIds: ['chunk-contiguous-evidence-repository'],
+  }
+  const span = {
+    ...spanContent,
+    spanHash: calculateCanonicalHash(spanContent),
+  }
+  const evidence = createLongFormMomentTranscriptEvidence({
+    id: 'sidecar-contiguous-evidence-repository',
+    workspaceId:
+      'workspace-contiguous-evidence-repository',
+    projectId: 'project-contiguous-evidence-repository',
+    indexRunId: 'index-contiguous-evidence-repository',
+    indexRunHash: sha('a'),
+    momentId: 'moment-contiguous-evidence-repository',
+    momentHash: sha('d'),
+    hierarchicalRunId:
+      'hierarchical-contiguous-evidence-repository',
+    hierarchicalRunHash: sha('e'),
+    sourceTranscriptId:
+      'transcript-contiguous-evidence-repository',
+    sourceTranscriptHash: sha('f'),
+    spans: [span],
+  })
+  return {
+    id: evidence.id,
+    workspaceId: evidence.workspaceId,
+    projectId: evidence.projectId,
+    indexRunId: evidence.indexRunId,
+    indexRunHash: evidence.indexRunHash,
+    momentId: evidence.momentId,
+    momentHash: evidence.momentHash,
+    hierarchicalRunId: evidence.hierarchicalRunId,
+    hierarchicalRunHash: evidence.hierarchicalRunHash,
+    sourceTranscriptId: evidence.sourceTranscriptId,
+    sourceTranscriptHash: evidence.sourceTranscriptHash,
+    spansJson: stableSerialize(evidence.spans),
+    spanCount: evidence.spanCount,
+    startMs: evidence.rangeMs[0],
+    endMs: evidence.rangeMs[1],
+    wordCount: evidence.wordCount,
+    evidenceHash: evidence.evidenceHash,
   }
 }
 
@@ -233,4 +298,34 @@ test('T-FR-134 Prisma evidence adapter fences worker persistence and rejects a l
   assert.equal(lost.storedRun(), undefined)
   assert.equal(lost.storedEvidence().length, 0)
   assert.equal(lost.deactivated(), false)
+})
+
+test('T-FR-134 Prisma evidence source hydrates exact transcript sidecar for both analyzers', async () => {
+  const row = sourceRow()
+  row.moments[0].transcriptEvidence =
+    transcriptSidecarRow()
+  const value = fixture({ sourceRow: row })
+  const source = await value.repository.readSource({
+    workspaceId: request.workspaceId,
+    projectId: request.projectId,
+    indexRunId: request.indexRunId,
+    now: fence.now,
+  })
+
+  assert.equal(
+    source.moments[0].transcriptEvidence.evidenceHash,
+    row.moments[0].transcriptEvidence.evidenceHash,
+  )
+  const signal = new AbortController().signal
+  const [boundary, density] = await Promise.all([
+    new TranscriptBoundaryContiguousEvidenceAnalyzer()
+      .analyze(source, signal),
+    new TranscriptDensityContiguousEvidenceAnalyzer()
+      .analyze(source, signal),
+  ])
+  assert.deepEqual(boundary[0].dimensions, [
+    'selfContained',
+    'integrity',
+  ])
+  assert.deepEqual(density[0].dimensions, ['density'])
 })

@@ -294,10 +294,11 @@ function processorFixture(options = {}) {
   let hierarchicalFindRunCount = 0
   let diarizationFindRunCount = 0
   let longFormContextReadCount = 0
-  const rightsEvidenceRequests = []
-  let rightsEvidenceCallCount = 0
+  const contiguousEvidenceRequests = []
+  let contiguousEvidenceCallCount = 0
   const hierarchicalFences = []
   const longFormFences = []
+  const transcriptEvidenceBatches = []
   const hierarchicalRepository = {
     async readSourceContext() {
       hierarchicalSourceReadCount += 1
@@ -369,6 +370,9 @@ function processorFixture(options = {}) {
     },
     async persistWithLongFormLease(input) {
       longFormFences.push(input.fence)
+      transcriptEvidenceBatches.push(
+        input.transcriptEvidence,
+      )
       if (options.longFormLeaseLost) return null
       longFormPersistCount += 1
       longForm = input.run
@@ -400,14 +404,19 @@ function processorFixture(options = {}) {
         throw new Error('not used by derived stages')
       },
     },
-    contiguousRightsEvidence: {
+    contiguousEvidenceProducers: [
+      'rights-integrity',
+      'transcript-boundary',
+      'transcript-density',
+    ].map((kind) => ({
+      kind,
       async produce(input) {
-        rightsEvidenceCallCount += 1
-        rightsEvidenceRequests.push(input)
+        contiguousEvidenceCallCount += 1
+        contiguousEvidenceRequests.push({ ...input, kind })
         if (
           options.rightsEvidenceLeaseLost ||
           options.rightsEvidenceLeaseLostOnce &&
-            rightsEvidenceCallCount === 1
+            contiguousEvidenceCallCount === 1
         ) {
           const error = new Error('lease lost')
           error.code = 'VERSION_CONFLICT'
@@ -415,7 +424,7 @@ function processorFixture(options = {}) {
         }
         return { replayed: false }
       },
-    },
+    })),
     createId(kind, sourceId) {
       return sourceId
         ? `${kind}-${sourceId}`
@@ -445,9 +454,10 @@ function processorFixture(options = {}) {
       longFormContextReadCount,
     hierarchicalFences,
     longFormFences,
-    rightsEvidenceRequests,
-    getRightsEvidenceCallCount: () =>
-      rightsEvidenceCallCount,
+    transcriptEvidenceBatches,
+    contiguousEvidenceRequests,
+    getContiguousEvidenceCallCount: () =>
+      contiguousEvidenceCallCount,
   }
 }
 
@@ -612,13 +622,33 @@ test('T-FR-133 moments derive anonymous speakers only from temporal overlap and 
   )
   const stored = fixture.getLongForm()
   assert.equal(result.resultCount, stored.momentCount)
-  assert.equal(fixture.rightsEvidenceRequests.length, 1)
+  assert.equal(fixture.contiguousEvidenceRequests.length, 3)
+  assert.deepEqual(
+    new Set(fixture.contiguousEvidenceRequests.map(
+      (request) => request.kind,
+    )),
+    new Set([
+      'rights-integrity',
+      'transcript-boundary',
+      'transcript-density',
+    ]),
+  )
+  assert.equal(fixture.transcriptEvidenceBatches.length, 1)
   assert.equal(
-    fixture.rightsEvidenceRequests[0].indexRunId,
+    fixture.transcriptEvidenceBatches[0].length,
+    stored.momentCount,
+  )
+  assert.equal(
+    fixture.transcriptEvidenceBatches[0][0]
+      .hierarchicalRunHash,
+    fixture.getHierarchical().runHash,
+  )
+  assert.equal(
+    fixture.contiguousEvidenceRequests[0].indexRunId,
     stored.id,
   )
   assert.equal(
-    fixture.rightsEvidenceRequests[0].fence.stage,
+    fixture.contiguousEvidenceRequests[0].fence.stage,
     'moments',
   )
   assert.ok(stored.moments.length >= 1)
@@ -698,7 +728,7 @@ test('T-FR-133 moments fail closed without temporal speaker evidence or when the
   assert.equal(lost.fixture.longFormFences.length, 1)
 })
 
-test('T-FR-134 moments resume rights evidence without duplicating the persisted index', async () => {
+test('T-FR-134 moments resume contiguous evidence without duplicating the persisted index', async () => {
   const setup = await runningMomentsFixture({
     rightsEvidenceLeaseLostOnce: true,
   })
@@ -709,7 +739,10 @@ test('T-FR-134 moments resume rights evidence without duplicating the persisted 
     (error) => error.code === 'VERSION_CONFLICT',
   )
   assert.equal(setup.fixture.getLongFormPersistCount(), 1)
-  assert.equal(setup.fixture.getRightsEvidenceCallCount(), 1)
+  assert.equal(
+    setup.fixture.getContiguousEvidenceCallCount(),
+    1,
+  )
 
   const replay = await setup.fixture.processor.process(
     processInput(setup.workflow),
@@ -719,7 +752,10 @@ test('T-FR-134 moments resume rights evidence without duplicating the persisted 
     setup.fixture.getLongForm().id,
   )
   assert.equal(setup.fixture.getLongFormPersistCount(), 1)
-  assert.equal(setup.fixture.getRightsEvidenceCallCount(), 2)
+  assert.equal(
+    setup.fixture.getContiguousEvidenceCallCount(),
+    4,
+  )
 })
 
 test('T-FR-133 derived stages fail closed after rights revocation and the router rejects unconfigured stages', async () => {

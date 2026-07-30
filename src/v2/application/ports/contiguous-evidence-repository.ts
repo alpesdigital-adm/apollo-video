@@ -8,11 +8,16 @@ import type {
 import type {
   LongFormStagePersistenceFence,
 } from './long-form-stage-persistence.ts'
+import type {
+  LongFormMomentTranscriptEvidence,
+} from '../../domain/long-form-transcript-evidence.ts'
 
 export interface ContiguousEvidenceMomentSource {
   id: string
   momentHash: string
   recommendedRangeMs: readonly [number, number]
+  transcriptEvidence?:
+    Readonly<LongFormMomentTranscriptEvidence>
 }
 
 export interface ContiguousEvidenceSource {

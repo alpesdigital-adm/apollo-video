@@ -7,6 +7,9 @@ import type {
 import type {
   LongFormStagePersistenceFence,
 } from './long-form-stage-persistence.ts'
+import type {
+  LongFormMomentTranscriptEvidence,
+} from '../../domain/long-form-transcript-evidence.ts'
 
 export interface LongFormRightsSnapshot {
   id: string
@@ -109,6 +112,8 @@ export interface LongFormIndexRepository {
   }>>
   persistWithLongFormLease(input: {
     run: Readonly<PersistedLongFormIndexRun>
+    transcriptEvidence:
+      readonly Readonly<LongFormMomentTranscriptEvidence>[]
     fence: Readonly<LongFormStagePersistenceFence>
   }): Promise<Readonly<{
     run: Readonly<PersistedLongFormIndexRun>

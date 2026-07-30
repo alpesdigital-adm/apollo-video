@@ -10,6 +10,9 @@ import {
 import {
   createContiguousEvaluationEvidence,
 } from '../domain/contiguous-evaluation-evidence.ts'
+import {
+  createLongFormMomentTranscriptEvidence,
+} from '../domain/long-form-transcript-evidence.ts'
 import { DomainError } from '../domain/errors.ts'
 import type {
   LongFormStagePersistenceFence,
@@ -82,8 +85,49 @@ function assertSource(
     source.moments.length > 10_000 ||
     new Set(source.moments.map((moment) => moment.id)).size !==
       source.moments.length ||
-    source.moments.some((moment) =>
-      !ID.test(moment.id) ||
+    source.moments.some((moment) => {
+      let transcriptEvidenceValid = true
+      if (moment.transcriptEvidence) {
+        try {
+          const rebuilt =
+            createLongFormMomentTranscriptEvidence({
+              id: moment.transcriptEvidence.id,
+              workspaceId:
+                moment.transcriptEvidence.workspaceId,
+              projectId:
+                moment.transcriptEvidence.projectId,
+              indexRunId:
+                moment.transcriptEvidence.indexRunId,
+              indexRunHash:
+                moment.transcriptEvidence.indexRunHash,
+              momentId:
+                moment.transcriptEvidence.momentId,
+              momentHash:
+                moment.transcriptEvidence.momentHash,
+              hierarchicalRunId:
+                moment.transcriptEvidence.hierarchicalRunId,
+              hierarchicalRunHash:
+                moment.transcriptEvidence.hierarchicalRunHash,
+              sourceTranscriptId:
+                moment.transcriptEvidence.sourceTranscriptId,
+              sourceTranscriptHash:
+                moment.transcriptEvidence.sourceTranscriptHash,
+              spans: moment.transcriptEvidence.spans,
+            })
+          transcriptEvidenceValid =
+            rebuilt.evidenceHash ===
+              moment.transcriptEvidence.evidenceHash &&
+            rebuilt.workspaceId === source.workspaceId &&
+            rebuilt.projectId === source.projectId &&
+            rebuilt.indexRunId === source.indexRunId &&
+            rebuilt.indexRunHash === source.indexRunHash &&
+            rebuilt.momentId === moment.id &&
+            rebuilt.momentHash === moment.momentHash
+        } catch {
+          transcriptEvidenceValid = false
+        }
+      }
+      return !ID.test(moment.id) ||
       !HASH.test(moment.momentHash) ||
       !Array.isArray(moment.recommendedRangeMs) ||
       moment.recommendedRangeMs.length !== 2 ||
@@ -92,8 +136,9 @@ function assertSource(
       moment.recommendedRangeMs[0] < 0 ||
       moment.recommendedRangeMs[1] <=
         moment.recommendedRangeMs[0] ||
-      moment.recommendedRangeMs[1] > source.sourceDurationMs,
-    )
+      moment.recommendedRangeMs[1] > source.sourceDurationMs ||
+      !transcriptEvidenceValid
+    })
   ) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',

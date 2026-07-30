@@ -35,6 +35,14 @@ import {
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import {
+  createLongFormMomentTranscriptEvidence,
+  type LongFormMomentTranscriptEvidence,
+} from '../../domain/long-form-transcript-evidence.ts'
+import type {
+  HierarchicalAggregation,
+  HierarchicalEvidenceSpan,
+} from '../../domain/hierarchical-processing.ts'
 import { normalizeSpeechText } from '../../domain/speech-segment-catalog.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 
@@ -510,6 +518,132 @@ function runData(run: Readonly<PersistedLongFormIndexRun>) {
   }
 }
 
+function transcriptEvidenceData(
+  evidence: Readonly<LongFormMomentTranscriptEvidence>,
+  createdAt: string,
+) {
+  return {
+    id: evidence.id,
+    workspaceId: evidence.workspaceId,
+    projectId: evidence.projectId,
+    indexRunId: evidence.indexRunId,
+    indexRunHash: evidence.indexRunHash,
+    momentId: evidence.momentId,
+    momentHash: evidence.momentHash,
+    hierarchicalRunId: evidence.hierarchicalRunId,
+    hierarchicalRunHash: evidence.hierarchicalRunHash,
+    sourceTranscriptId: evidence.sourceTranscriptId,
+    sourceTranscriptHash: evidence.sourceTranscriptHash,
+    spansJson: stableSerialize(evidence.spans),
+    spanCount: evidence.spanCount,
+    startMs: evidence.rangeMs[0],
+    endMs: evidence.rangeMs[1],
+    wordCount: evidence.wordCount,
+    evidenceHash: evidence.evidenceHash,
+    createdAt: new Date(createdAt),
+  }
+}
+
+function assertTranscriptEvidenceBinding(
+  run: Readonly<PersistedLongFormIndexRun>,
+  evidence:
+    readonly Readonly<LongFormMomentTranscriptEvidence>[],
+  hierarchical: {
+    id: string
+    runHash: string
+    sourceTranscriptId: string
+    sourceTranscriptHash: string
+    evidenceSpansJson: string
+    aggregationJson: string
+  },
+): void {
+  const allSpans = parseJson(
+    hierarchical.evidenceSpansJson,
+    'hierarchical evidence spans',
+  ) as readonly Readonly<HierarchicalEvidenceSpan>[]
+  const aggregation = parseJson(
+    hierarchical.aggregationJson,
+    'hierarchical aggregation',
+  ) as Readonly<HierarchicalAggregation>
+  if (
+    stableSerialize(allSpans) !==
+      hierarchical.evidenceSpansJson ||
+    stableSerialize(aggregation) !==
+      hierarchical.aggregationJson ||
+    evidence.length !== run.moments.length ||
+    new Set(evidence.map((item) => item.momentId)).size !==
+      run.moments.length
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Long-form transcript evidence bundle is incomplete',
+    )
+  }
+  for (const item of evidence) {
+    const moment = run.moments.find(
+      (candidate) => candidate.id === item.momentId,
+    )
+    const sourceMoment = moment
+      ? aggregation.moments.find(
+          (candidate) =>
+            candidate.id === moment.sourceMomentId,
+        )
+      : undefined
+    const expectedSpans = sourceMoment
+      ? sourceMoment.evidenceSpanIds.map((spanId) =>
+          allSpans.find((span) => span.id === spanId))
+      : []
+    let rebuilt:
+      | Readonly<LongFormMomentTranscriptEvidence>
+      | undefined
+    try {
+      rebuilt = createLongFormMomentTranscriptEvidence({
+        id: item.id,
+        workspaceId: item.workspaceId,
+        projectId: item.projectId,
+        indexRunId: item.indexRunId,
+        indexRunHash: item.indexRunHash,
+        momentId: item.momentId,
+        momentHash: item.momentHash,
+        hierarchicalRunId: item.hierarchicalRunId,
+        hierarchicalRunHash: item.hierarchicalRunHash,
+        sourceTranscriptId: item.sourceTranscriptId,
+        sourceTranscriptHash: item.sourceTranscriptHash,
+        spans: item.spans,
+      })
+    } catch {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Long-form transcript evidence failed validation',
+      )
+    }
+    if (
+      !moment ||
+      !sourceMoment ||
+      expectedSpans.some((span) => !span) ||
+      item.workspaceId !== run.workspaceId ||
+      item.projectId !== run.projectId ||
+      item.indexRunId !== run.id ||
+      item.indexRunHash !== run.recordHash ||
+      item.momentHash !== moment.momentHash ||
+      item.hierarchicalRunId !== hierarchical.id ||
+      item.hierarchicalRunHash !== hierarchical.runHash ||
+      item.sourceTranscriptId !==
+        hierarchical.sourceTranscriptId ||
+      item.sourceTranscriptHash !==
+        hierarchical.sourceTranscriptHash ||
+      item.evidenceHash !== rebuilt.evidenceHash ||
+      stableSerialize(item.spans) !==
+        stableSerialize(expectedSpans)
+    ) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Long-form transcript evidence source changed before commit',
+      )
+    }
+  }
+}
+
 function parseManifest(
   manifestJson: string,
   expectedHash: string,
@@ -634,7 +768,7 @@ implements LongFormIndexRepository {
   async persist(
     run: Readonly<PersistedLongFormIndexRun>,
   ): ReturnType<LongFormIndexRepository['persist']> {
-    const persisted = await this.persistInternal(run)
+    const persisted = await this.persistInternal(run, [])
     if (!persisted) {
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
@@ -666,11 +800,17 @@ implements LongFormIndexRepository {
         'Long-form index fence belongs to another tenant or project',
       )
     }
-    return this.persistInternal(input.run, input.fence)
+    return this.persistInternal(
+      input.run,
+      input.transcriptEvidence,
+      input.fence,
+    )
   }
 
   private async persistInternal(
     run: Readonly<PersistedLongFormIndexRun>,
+    transcriptEvidence:
+      readonly Readonly<LongFormMomentTranscriptEvidence>[],
     fence?: Parameters<
       LongFormIndexRepository['persistWithLongFormLease']
     >[0]['fence'],
@@ -753,6 +893,46 @@ implements LongFormIndexRepository {
           ) {
             return null
           }
+          const hierarchicalRunId =
+            transcriptEvidence[0]?.hierarchicalRunId
+          if (!hierarchicalRunId) {
+            throw new DomainError(
+              'PERSISTENCE_CONFLICT',
+              'Long-form moments require transcript evidence lineage',
+            )
+          }
+          const hierarchical =
+            await transaction.v2HierarchicalProcessingRun.findFirst({
+              where: {
+                id: hierarchicalRunId,
+                workspaceId: run.workspaceId,
+                projectId: run.projectId,
+                sourceArtifactId: run.sourceArtifactId,
+                sourceArtifactSha256:
+                  run.sourceArtifactSha256,
+                sourceManifestId: run.sourceManifestId,
+                sourceManifestHash: run.sourceManifestHash,
+              },
+              select: {
+                id: true,
+                runHash: true,
+                sourceTranscriptId: true,
+                sourceTranscriptHash: true,
+                evidenceSpansJson: true,
+                aggregationJson: true,
+              },
+            })
+          if (!hierarchical) {
+            throw new DomainError(
+              'VERSION_CONFLICT',
+              'Hierarchical transcript lineage is unavailable',
+            )
+          }
+          assertTranscriptEvidenceBinding(
+            run,
+            transcriptEvidence,
+            hierarchical,
+          )
         }
         const [artifact, actor] = await Promise.all([
           transaction.v2MediaArtifact.findFirst({
@@ -855,6 +1035,13 @@ implements LongFormIndexRepository {
         await transaction.v2LongFormMoment.createMany({
           data: run.moments.map(momentData),
         })
+        if (transcriptEvidence.length > 0) {
+          await transaction
+            .v2LongFormMomentTranscriptEvidence.createMany({
+              data: transcriptEvidence.map((item) =>
+                transcriptEvidenceData(item, run.createdAt)),
+            })
+        }
         const created = await transaction.v2LongFormIndexRun.findUnique({
           where: { id: run.id },
           include: includeHierarchy(),
@@ -874,7 +1061,12 @@ implements LongFormIndexRepository {
       })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
-        return this.persistInternal(run, fence, attempt + 1)
+        return this.persistInternal(
+          run,
+          transcriptEvidence,
+          fence,
+          attempt + 1,
+        )
       }
       if (isPrismaCode(error, 'P2002')) {
         const replay = await this.findIdempotent({
@@ -892,7 +1084,12 @@ implements LongFormIndexRepository {
           return Object.freeze({ run: replay, replayed: true })
         }
         if (attempt < 3) {
-          return this.persistInternal(run, fence, attempt + 1)
+          return this.persistInternal(
+            run,
+            transcriptEvidence,
+            fence,
+            attempt + 1,
+          )
         }
       }
       if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) {

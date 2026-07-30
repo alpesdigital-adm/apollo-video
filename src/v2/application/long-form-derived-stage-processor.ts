@@ -19,6 +19,9 @@ import {
   type LongFormChapterInput,
   type LongFormMomentInput,
 } from '../domain/long-form-moment.ts'
+import {
+  createLongFormMomentTranscriptEvidence,
+} from '../domain/long-form-transcript-evidence.ts'
 import type {
   SpeakerDiarizationRun,
 } from '../domain/speaker-diarization.ts'
@@ -115,7 +118,11 @@ type StageProcessInput = Parameters<
   LongFormIndexStageProcessor['process']
 >[0]
 
-export interface LongFormContiguousRightsEvidenceProducer {
+export interface LongFormContiguousEvidenceProducer {
+  kind:
+    | 'transcript-boundary'
+    | 'transcript-density'
+    | 'rights-integrity'
   produce(input: {
     workspaceId: string
     projectId: string
@@ -493,19 +500,64 @@ function momentResult(
   })
 }
 
+function transcriptEvidenceForMoments(
+  run: Readonly<PersistedLongFormIndexRun>,
+  hierarchical: Readonly<PersistedHierarchicalProcessingRun>,
+  createId: (sourceId: string) => string,
+) {
+  return Object.freeze(run.moments.map((moment) => {
+    const sourceMoment = hierarchical.aggregation.moments.find(
+      (candidate) => candidate.id === moment.sourceMomentId,
+    )
+    if (!sourceMoment) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Long-form moment lost its hierarchical transcript source',
+      )
+    }
+    const spans = sourceMoment.evidenceSpanIds.map((spanId) => {
+      const span = hierarchical.evidenceSpans.find(
+        (candidate) => candidate.id === spanId,
+      )
+      if (!span) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Long-form moment references missing transcript evidence',
+        )
+      }
+      return span
+    })
+    return createLongFormMomentTranscriptEvidence({
+      id: createId(moment.id),
+      workspaceId: run.workspaceId,
+      projectId: run.projectId,
+      indexRunId: run.id,
+      indexRunHash: run.recordHash,
+      momentId: moment.id,
+      momentHash: moment.momentHash,
+      hierarchicalRunId: hierarchical.id,
+      hierarchicalRunHash: hierarchical.runHash,
+      sourceTranscriptId: hierarchical.sourceTranscriptId,
+      sourceTranscriptHash: hierarchical.sourceTranscriptHash,
+      spans,
+    })
+  }))
+}
+
 export function createLongFormDerivedStageProcessor(
   dependencies: {
     hierarchical: HierarchicalProcessingRepository
     longForm: LongFormIndexRepository
     diarization: SpeakerDiarizationRepository
-    contiguousRightsEvidence:
-      LongFormContiguousRightsEvidenceProducer
+    contiguousEvidenceProducers:
+      readonly Readonly<LongFormContiguousEvidenceProducer>[]
     createId: (
       kind:
         | 'hierarchical-processing-run'
         | 'long-form-index-run'
         | 'long-form-chapter'
-        | 'long-form-moment',
+        | 'long-form-moment'
+        | 'long-form-transcript-evidence',
       sourceId?: string,
     ) => string
     clock?: () => Date
@@ -543,6 +595,26 @@ export function createLongFormDerivedStageProcessor(
     throw new DomainError(
       'PERSISTENCE_NOT_CONFIGURED',
       'Long-form derived stage configuration is invalid',
+    )
+  }
+  const evidenceKinds =
+    dependencies.contiguousEvidenceProducers.map(
+      (producer) => producer.kind,
+    )
+  if (
+    evidenceKinds.length !== 3 ||
+    new Set(evidenceKinds).size !== 3 ||
+    ![
+      'transcript-boundary',
+      'transcript-density',
+      'rights-integrity',
+    ].every((kind) => evidenceKinds.includes(
+      kind as typeof evidenceKinds[number],
+    ))
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_NOT_CONFIGURED',
+      'Long-form moments require all transcript and rights evidence producers',
     )
   }
 
@@ -858,6 +930,14 @@ export function createLongFormDerivedStageProcessor(
         )
     assertIndexingRights(built.run)
     let persistedRun = built.run
+    const transcriptEvidence = transcriptEvidenceForMoments(
+      built.run,
+      hierarchicalRun,
+      (sourceId) => dependencies.createId(
+        'long-form-transcript-evidence',
+        sourceId,
+      ),
+    )
     if (!built.replayed && !candidate) {
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
@@ -886,6 +966,7 @@ export function createLongFormDerivedStageProcessor(
       const persisted =
         await dependencies.longForm.persistWithLongFormLease({
           run: candidate!,
+          transcriptEvidence,
           fence: stageFence(
             input,
             'moments',
@@ -900,32 +981,36 @@ export function createLongFormDerivedStageProcessor(
       }
       persistedRun = persisted.run
     }
-    if (input.signal.aborted || !(await input.heartbeat())) {
-      throw new DomainError(
-        'VERSION_CONFLICT',
-        'Long-form moments lease was lost before rights evidence',
-      )
-    }
-    await dependencies.contiguousRightsEvidence.produce({
-      workspaceId: workflow.workspaceId,
-      projectId: workflow.projectId,
-      indexRunId: persistedRun.id,
-      actor: Object.freeze({
-        type: 'api-client',
-        id: workflow.createdByClientId,
-      }),
-      idempotencyKey: `rights-integrity-${calculateCanonicalHash({
-        stageIdempotencyKey: input.checkpoint.idempotencyKey,
+    for (const producer of
+      dependencies.contiguousEvidenceProducers) {
+      if (input.signal.aborted || !(await input.heartbeat())) {
+        throw new DomainError(
+          'VERSION_CONFLICT',
+          'Long-form moments lease was lost before contiguous evidence',
+        )
+      }
+      await producer.produce({
+        workspaceId: workflow.workspaceId,
+        projectId: workflow.projectId,
         indexRunId: persistedRun.id,
-        indexRunHash: persistedRun.recordHash,
-      }).slice(0, 48)}`,
-      signal: input.signal,
-      fence: stageFence(
-        input,
-        'moments',
-        clock().toISOString(),
-      ),
-    })
+        actor: Object.freeze({
+          type: 'api-client',
+          id: workflow.createdByClientId,
+        }),
+        idempotencyKey: `${producer.kind}-${calculateCanonicalHash({
+          stageIdempotencyKey: input.checkpoint.idempotencyKey,
+          indexRunId: persistedRun.id,
+          indexRunHash: persistedRun.recordHash,
+          evidenceKind: producer.kind,
+        }).slice(0, 48)}`,
+        signal: input.signal,
+        fence: stageFence(
+          input,
+          'moments',
+          clock().toISOString(),
+        ),
+      })
+    }
     return momentResult(persistedRun, elapsedMs)
   }
 

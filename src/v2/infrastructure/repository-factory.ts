@@ -142,6 +142,10 @@ import { PrismaContiguousEvaluationRepository } from './prisma/contiguous-evalua
 import {
   RightsIntegrityContiguousEvidenceAnalyzer,
 } from './analysis/rights-integrity-contiguous-evidence-analyzer.ts'
+import {
+  TranscriptBoundaryContiguousEvidenceAnalyzer,
+  TranscriptDensityContiguousEvidenceAnalyzer,
+} from './analysis/transcript-contiguous-evidence-analyzers.ts'
 import { PrismaLongFormIndexWorkflowRepository } from './prisma/long-form-index-workflow-repository.ts'
 import { PrismaSpeakerDiarizationRepository } from './prisma/speaker-diarization-repository.ts'
 import { PrismaValidatedSegmentRepository } from './prisma/validated-segment-repository.ts'
@@ -278,6 +282,26 @@ export function createRightsIntegrityContiguousEvidenceProducer() {
   return produceContiguousEvidenceService({
     repository: createContiguousEvidenceRepository(),
     analyzer: new RightsIntegrityContiguousEvidenceAnalyzer(),
+    createRunId: () => randomUUID(),
+    createEvidenceId: () => randomUUID(),
+  })
+}
+
+export function createTranscriptBoundaryContiguousEvidenceProducer() {
+  return produceContiguousEvidenceService({
+    repository: createContiguousEvidenceRepository(),
+    analyzer:
+      new TranscriptBoundaryContiguousEvidenceAnalyzer(),
+    createRunId: () => randomUUID(),
+    createEvidenceId: () => randomUUID(),
+  })
+}
+
+export function createTranscriptDensityContiguousEvidenceProducer() {
+  return produceContiguousEvidenceService({
+    repository: createContiguousEvidenceRepository(),
+    analyzer:
+      new TranscriptDensityContiguousEvidenceAnalyzer(),
     createRunId: () => randomUUID(),
     createEvidenceId: () => randomUUID(),
   })
@@ -451,6 +475,10 @@ export function createLongFormDerivedStageProcessorFromEnvironment(
     DEFAULT_LONG_FORM_DERIVED_STAGE_CONFIGURATION
   const produceRightsEvidence =
     createRightsIntegrityContiguousEvidenceProducer()
+  const produceTranscriptBoundaryEvidence =
+    createTranscriptBoundaryContiguousEvidenceProducer()
+  const produceTranscriptDensityEvidence =
+    createTranscriptDensityContiguousEvidenceProducer()
   const numberFromEnvironment = (
     name: string,
     fallback: number,
@@ -470,9 +498,20 @@ export function createLongFormDerivedStageProcessorFromEnvironment(
     hierarchical: createHierarchicalProcessingRepository(),
     longForm: createLongFormIndexRepository(),
     diarization: createSpeakerDiarizationRepository(),
-    contiguousRightsEvidence: Object.freeze({
-      produce: produceRightsEvidence,
-    }),
+    contiguousEvidenceProducers: Object.freeze([
+      Object.freeze({
+        kind: 'transcript-boundary' as const,
+        produce: produceTranscriptBoundaryEvidence,
+      }),
+      Object.freeze({
+        kind: 'transcript-density' as const,
+        produce: produceTranscriptDensityEvidence,
+      }),
+      Object.freeze({
+        kind: 'rights-integrity' as const,
+        produce: produceRightsEvidence,
+      }),
+    ]),
     createId: (kind, sourceId) =>
       sourceId
         ? `${kind}-${calculateVersionHash({

@@ -171,6 +171,7 @@ test('T-FR-133 long-form repository fences tenant and missing operation lease be
   await assert.rejects(
     repository.persistWithLongFormLease({
       run,
+      transcriptEvidence: [],
       fence: {
         ...baseFence,
         projectId: 'project-fencing-other',
@@ -183,11 +184,129 @@ test('T-FR-133 long-form repository fences tenant and missing operation lease be
   assert.equal(
     await repository.persistWithLongFormLease({
       run,
+      transcriptEvidence: [],
       fence: { ...baseFence, stage: 'moments' },
     }),
     null,
   )
   assert.equal(fixture.transactions(), 1)
+})
+
+test('T-FR-134 long-form repository revalidates transcript sidecar against the hierarchical run', async () => {
+  const [
+    { PrismaLongFormIndexRepository },
+    { createLongFormMomentTranscriptEvidence },
+    { calculateCanonicalHash, stableSerialize },
+  ] = await Promise.all([
+    import(
+      '../../src/v2/infrastructure/prisma/long-form-index-repository.ts'
+    ),
+    import(
+      '../../src/v2/domain/long-form-transcript-evidence.ts'
+    ),
+    import('../../src/v2/domain/canonical-hash.ts'),
+  ])
+  const spanContent = {
+    id: 'span-fencing-transcript',
+    sourceSegmentId: 1,
+    rangeMs: [10_000, 40_000],
+    text: 'Contexto completo preservado.',
+    textHash: calculateCanonicalHash(
+      'Contexto completo preservado.',
+    ),
+    wordCount: 3,
+    chunkIds: ['chunk-fencing-transcript'],
+  }
+  const span = {
+    ...spanContent,
+    spanHash: calculateCanonicalHash(spanContent),
+  }
+  const run = {
+    id: 'index-fencing-transcript',
+    workspaceId: baseFence.workspaceId,
+    projectId: baseFence.projectId,
+    sourceArtifactId: 'artifact-fencing-transcript',
+    sourceArtifactSha256: 'b'.repeat(64),
+    sourceManifestId: 'manifest-fencing-transcript',
+    sourceManifestHash: 'c'.repeat(64),
+    recordHash: 'd'.repeat(64),
+    idempotencyKey:
+      baseFence.expectedStageIdempotencyKey,
+    moments: [{
+      id: 'moment-fencing-transcript',
+      sourceMomentId: 'hierarchical-moment-fencing',
+      momentHash: 'e'.repeat(64),
+    }],
+  }
+  const evidence = createLongFormMomentTranscriptEvidence({
+    id: 'sidecar-fencing-transcript',
+    workspaceId: run.workspaceId,
+    projectId: run.projectId,
+    indexRunId: run.id,
+    indexRunHash: run.recordHash,
+    momentId: run.moments[0].id,
+    momentHash: run.moments[0].momentHash,
+    hierarchicalRunId: 'hierarchical-run-fencing',
+    hierarchicalRunHash: 'f'.repeat(64),
+    sourceTranscriptId: 'transcript-fencing',
+    sourceTranscriptHash: '1'.repeat(64),
+    spans: [span],
+  })
+  const aggregation = {
+    chapters: [],
+    moments: [{
+      id: run.moments[0].sourceMomentId,
+      evidenceSpanIds: [span.id],
+    }],
+    evidencePreserved: true,
+  }
+  const repository = new PrismaLongFormIndexRepository({
+    async $transaction(callback) {
+      return callback({
+        v2LongFormIndexRun: {
+          async findUnique() {
+            return null
+          },
+        },
+        v2PublicOperation: {
+          async findFirst() {
+            return { id: baseFence.operationId }
+          },
+        },
+        v2LongFormIndexStageCheckpoint: {
+          async findFirst() {
+            return { id: 'stage-fencing-transcript' }
+          },
+        },
+        v2HierarchicalProcessingRun: {
+          async findFirst() {
+            return {
+              id: evidence.hierarchicalRunId,
+              runHash: '9'.repeat(64),
+              sourceTranscriptId:
+                evidence.sourceTranscriptId,
+              sourceTranscriptHash:
+                evidence.sourceTranscriptHash,
+              evidenceSpansJson: stableSerialize([span]),
+              aggregationJson:
+                stableSerialize(aggregation),
+            }
+          },
+        },
+      })
+    },
+  })
+
+  await assert.rejects(
+    repository.persistWithLongFormLease({
+      run,
+      transcriptEvidence: [evidence],
+      fence: { ...baseFence, stage: 'moments' },
+    }),
+    (error) =>
+      error.code === 'VERSION_CONFLICT' &&
+      /transcript evidence source changed/.test(error.message),
+  )
 })
 
 test('T-FR-133 transcript repository refuses publication without the exact operation lease', async () => {
