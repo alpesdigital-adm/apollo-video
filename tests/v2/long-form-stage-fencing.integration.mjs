@@ -83,6 +83,76 @@ test('T-FR-133 hierarchical repository fences tenant and missing operation lease
   assert.equal(fixture.transactions(), 1)
 })
 
+test('T-FR-133 hierarchical fence binds chunks to the persisted transcript checkpoint output', async () => {
+  const {
+    PrismaHierarchicalProcessingRepository,
+  } = await import(
+    '../../src/v2/infrastructure/prisma/hierarchical-processing-repository.ts'
+  )
+  let stageWhere
+  const repository = new PrismaHierarchicalProcessingRepository({
+    async $transaction(callback) {
+      return callback({
+        v2HierarchicalProcessingRun: {
+          async findUnique() {
+            return null
+          },
+        },
+        v2PublicOperation: {
+          async findFirst() {
+            return { id: baseFence.operationId }
+          },
+        },
+        v2LongFormIndexStageCheckpoint: {
+          async findFirst(input) {
+            stageWhere = input.where
+            return null
+          },
+        },
+      })
+    },
+  })
+  const run = {
+    workspaceId: baseFence.workspaceId,
+    projectId: baseFence.projectId,
+    sourceArtifactId: 'artifact-fencing',
+    sourceArtifactSha256: 'b'.repeat(64),
+    sourceManifestId: 'manifest-fencing',
+    sourceManifestHash: 'c'.repeat(64),
+    sourceTranscriptId: 'generated-transcript-fencing',
+    sourceTranscriptHash: 'd'.repeat(64),
+    idempotencyKey: baseFence.expectedStageIdempotencyKey,
+  }
+
+  assert.equal(
+    await repository.persistWithLongFormLease({
+      run,
+      fence: { ...baseFence, stage: 'chunks' },
+    }),
+    null,
+  )
+  assert.deepEqual(
+    stageWhere.workflow.stages,
+    {
+      some: {
+        stage: 'transcript',
+        status: 'succeeded',
+        outputEntityType: 'media-transcript',
+        outputEntityId: run.sourceTranscriptId,
+        outputHash: run.sourceTranscriptHash,
+      },
+    },
+  )
+  assert.equal(
+    stageWhere.workflow.sourceTranscriptId,
+    undefined,
+  )
+  assert.equal(
+    stageWhere.workflow.sourceTranscriptHash,
+    undefined,
+  )
+})
+
 test('T-FR-133 long-form repository fences tenant and missing operation lease before writing moments', async () => {
   const {
     PrismaLongFormIndexRepository,

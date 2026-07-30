@@ -735,8 +735,15 @@ implements HierarchicalProcessingRepository {
                     run.sourceArtifactSha256,
                   sourceManifestId: run.sourceManifestId,
                   sourceManifestHash: run.sourceManifestHash,
-                  sourceTranscriptId: run.sourceTranscriptId,
-                  sourceTranscriptHash: run.sourceTranscriptHash,
+                  stages: {
+                    some: {
+                      stage: 'transcript',
+                      status: 'succeeded',
+                      outputEntityType: 'media-transcript',
+                      outputEntityId: run.sourceTranscriptId,
+                      outputHash: run.sourceTranscriptHash,
+                    },
+                  },
                 },
               },
               select: { id: true },

@@ -12,6 +12,7 @@ test('T-FR-133 indexes a generated-transcript two-hour master through the public
   timeout: 120_000,
 }, async () => {
   assert.ok(process.env.V2_DATABASE_URL)
+  process.env.APOLLO_API_ENVIRONMENT = 'production'
   const databaseName =
     new URL(process.env.V2_DATABASE_URL).pathname.slice(1)
   assert.match(databaseName, /(?:^|_)e2e(?:_|$)/)
@@ -71,6 +72,7 @@ test('T-FR-133 indexes a generated-transcript two-hour master through the public
   const artifactSha256 = 'a'.repeat(64)
   let transcriptCalls = 0
   let diarizationCalls = 0
+  let stageFailure
 
   try {
     await prisma.v2Workspace.create({
@@ -247,7 +249,11 @@ test('T-FR-133 indexes a generated-transcript two-hour master through the public
       202,
       JSON.stringify(created),
     )
-    assert.equal(created.data.sourceTranscriptId, undefined)
+    assert.equal(
+      created.data.workflow.sourceTranscriptId,
+      undefined,
+    )
+    const workflowId = created.data.workflow.id
 
     const transcriptSegments = Array.from({ length: 24 }, (_, index) => ({
       id: index,
@@ -330,30 +336,127 @@ test('T-FR-133 indexes a generated-transcript two-hour master through the public
       createId: (kind, sourceId) =>
         `${kind}-${sourceId ?? suffix}-${randomUUID().slice(0, 8)}`,
     })
+    const stageRouter = createLongFormIndexStageRouter({
+      transcript: transcriptProcessor,
+      diarization: diarizationProcessor,
+      chunks: derived,
+      moments: derived,
+    })
     const worker = runNextLongFormIndexOperationService({
       operations: new PrismaPublicOperationRepository(prisma),
       workflows,
-      processor: createLongFormIndexStageRouter({
-        transcript: transcriptProcessor,
-        diarization: diarizationProcessor,
-        chunks: derived,
-        moments: derived,
-      }),
+      processor: {
+        async process(input) {
+          try {
+            return await stageRouter.process(input)
+          } catch (error) {
+            stageFailure = {
+              name: error?.name,
+              code: error?.code,
+              message: error?.message,
+            }
+            throw error
+          }
+        },
+      },
       leaseDurationMs: 30_000,
       heartbeatIntervalMs: 10_000,
     })
     const outcome = await worker(`worker-e2e-${suffix}`)
-    assert.equal(outcome?.status, 'succeeded')
+    if (outcome?.status !== 'succeeded') {
+      const [failed, operation] = await Promise.all([
+        prisma.v2LongFormIndexWorkflow.findUnique({
+          where: { id: workflowId },
+          select: {
+            status: true,
+            runHash: true,
+            workflowJson: true,
+            updatedAt: true,
+            stages: {
+              orderBy: { sequence: 'asc' },
+              select: {
+                stage: true,
+                status: true,
+                stageHash: true,
+                stageJson: true,
+                errorCode: true,
+                errorMessage: true,
+              },
+            },
+          },
+        }),
+        prisma.v2PublicOperation.findUnique({
+          where: { id: outcome.operationId },
+          select: {
+            status: true,
+            phase: true,
+            errorCode: true,
+            errorMessage: true,
+            attempt: true,
+          },
+        }),
+      ])
+      const projected = failed
+        ? {
+            status: failed.status,
+            runHash: failed.runHash,
+            workflow: JSON.parse(failed.workflowJson),
+            updatedAt: failed.updatedAt.toISOString(),
+            stages: failed.stages.map((stage) => ({
+              stage: stage.stage,
+              status: stage.status,
+              stageHash: stage.stageHash,
+              storedStage: JSON.parse(stage.stageJson),
+              errorCode: stage.errorCode,
+              errorMessage: stage.errorMessage,
+            })),
+          }
+        : null
+      assert.fail(JSON.stringify({
+        outcome,
+        stageFailure,
+        operation,
+        persisted: projected,
+      }))
+    }
     assert.equal(await worker(`worker-e2e-${suffix}`), null)
 
     const stored = await workflows.read({
       workspaceId,
       projectId,
-      workflowId: created.data.id,
+      workflowId,
     })
     assert.ok(stored)
     assert.equal(stored.workflow.status, 'succeeded')
+    assert.equal(stored.operation.status, 'succeeded')
+    assert.equal(stored.operation.phase, 'completed')
     assert.equal(stored.workflow.sourceTranscriptId, undefined)
+    assert.equal(stored.workflow.durationMs, 7_200_000)
+    assert.equal(stored.workflow.summary.completedStageCount, 5)
+    assert.equal(stored.workflow.summary.searchableStageCount, 3)
+    assert.equal(stored.workflow.summary.duplicateSegments, false)
+    assert.ok(
+      stored.workflow.summary.costMinorUnits <=
+        stored.workflow.budget.maximumCostMinorUnits,
+    )
+    assert.ok(
+      stored.workflow.summary.elapsedMs <=
+        stored.workflow.budget.maximumElapsedMs,
+    )
+    assert.deepEqual(
+      stored.workflow.stages.map((stage) => ({
+        stage: stage.stage,
+        status: stage.status,
+        searchable: stage.searchable,
+      })),
+      [
+        { stage: 'probe', status: 'succeeded', searchable: false },
+        { stage: 'transcript', status: 'succeeded', searchable: true },
+        { stage: 'diarization', status: 'succeeded', searchable: false },
+        { stage: 'chunks', status: 'succeeded', searchable: true },
+        { stage: 'moments', status: 'succeeded', searchable: true },
+      ],
+    )
     assert.equal(transcriptCalls, 1)
     assert.equal(diarizationCalls, 1)
     assert.equal(
@@ -369,6 +472,17 @@ test('T-FR-133 indexes a generated-transcript two-hour master through the public
     assert.equal(
       await prisma.v2LongFormIndexRun.count({ where: { workspaceId } }),
       1,
+    )
+    assert.equal(
+      await prisma.v2HierarchicalProcessingChunk.count({
+        where: { workspaceId },
+      }),
+      24,
+    )
+    assert.ok(
+      await prisma.v2LongFormMoment.count({
+        where: { workspaceId },
+      }) > 0,
     )
   } finally {
     await prisma.$disconnect()
