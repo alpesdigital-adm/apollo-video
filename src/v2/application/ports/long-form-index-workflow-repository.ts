@@ -1,6 +1,7 @@
 import type {
   LongFormIndexWorkflow,
 } from '../../domain/long-form-index-workflow.ts'
+import type { MediaTranscript } from '../../domain/media-transcript.ts'
 import type {
   PublicOperation,
 } from '../../domain/public-operation.ts'
@@ -35,6 +36,22 @@ export interface LongFormIndexWorkflowPage {
   workflows:
     readonly Readonly<PersistedLongFormIndexWorkflow>[]
   nextCursor?: string
+}
+
+export interface LongFormTranscriptStageContext {
+  operationId: string
+  createdByClientId: string
+  sourceArtifactId: string
+  sourceArtifactKey: string
+  sourceArtifactByteSize: bigint
+  sourceArtifactSha256: string
+  sourceManifestId: string
+  sourceManifestHash: string
+  durationMs: number
+  language: string
+  stageStatus: 'running' | 'succeeded'
+  stageInputHash: string
+  stageIdempotencyKey: string
 }
 
 export interface LongFormIndexWorkflowRepository {
@@ -74,6 +91,45 @@ export interface LongFormIndexWorkflowRepository {
     limit: number
     cursor?: string
   }): Promise<Readonly<LongFormIndexWorkflowPage>>
+  readTranscriptStageContext(input: {
+    workspaceId: string
+    projectId: string
+    workflowId: string
+  }): Promise<Readonly<LongFormTranscriptStageContext> | null>
+  findTranscriptStageReplay(input: {
+    workspaceId: string
+    projectId: string
+    sourceArtifactId: string
+    sourceManifestId: string
+    provider: string
+    model: string
+    providerVersion: string
+  }): Promise<Readonly<{
+    id: string
+    transcript: Readonly<MediaTranscript>
+  }> | null>
+  persistTranscriptWithLease(input: {
+    workspaceId: string
+    projectId: string
+    workflowId: string
+    operationId: string
+    expectedStageInputHash: string
+    expectedStageIdempotencyKey: string
+    leaseOwner: string
+    operationAttempt: number
+    transcriptId: string
+    transcript: Readonly<MediaTranscript>
+    providerVersion: string
+    sourceArtifactId: string
+    sourceArtifactSha256: string
+    sourceManifestId: string
+    sourceManifestHash: string
+    now: string
+  }): Promise<Readonly<{
+    id: string
+    transcript: Readonly<MediaTranscript>
+    replayed: boolean
+  }> | null>
   replaceWithLease(input: {
     workspaceId: string
     projectId: string

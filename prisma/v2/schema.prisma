@@ -1436,6 +1436,7 @@ model V2MediaTranscript {
   language         String   @db.VarChar(35)
   provider         String   @db.VarChar(64)
   model            String   @db.VarChar(128)
+  providerVersion  String   @default("legacy") @db.VarChar(128)
   transcriptHash   String   @db.Char(64)
   transcriptJson   String   @db.Text
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
@@ -1456,6 +1457,7 @@ model V2MediaTranscript {
   @@unique([sourceArtifactId, transcriptHash])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId])
+  @@index([workspaceId, sourceArtifactId, provider, model, providerVersion])
   @@map("media_transcripts")
 }
 

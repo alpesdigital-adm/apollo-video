@@ -26,6 +26,9 @@ import {
   createSpeakerDiarizationStageProcessor,
 } from '../application/speaker-diarization-stage-processor.ts'
 import {
+  createLongFormTranscriptStageProcessor,
+} from '../application/long-form-transcript-stage-processor.ts'
+import {
   createLongFormDerivedStageProcessor,
   createLongFormIndexStageRouter,
   DEFAULT_LONG_FORM_DERIVED_STAGE_CONFIGURATION,
@@ -372,6 +375,39 @@ export function createSpeakerDiarizationStageProcessorFromEnvironment(
   })
 }
 
+export function createLongFormTranscriptStageProcessorFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const pricingMinorUnitsPerHour = Number(
+    environment.GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR,
+  )
+  if (
+    !Number.isSafeInteger(pricingMinorUnitsPerHour) ||
+    pricingMinorUnitsPerHour < 1
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_NOT_CONFIGURED',
+      'Groq transcription pricing is not configured',
+    )
+  }
+  return createLongFormTranscriptStageProcessor({
+    repository: createLongFormIndexWorkflowRepository(),
+    transcriber: createMediaTranscriberFromEnvironment(environment),
+    audio:
+      createFfmpegSpeakerDiarizationAudioPreparerFromEnvironment(
+        environment,
+      ),
+    createTranscriptId: (transcriptHash) =>
+      `transcript-${transcriptHash}`,
+    providerVersion:
+      environment.GROQ_TRANSCRIBE_ADAPTER_VERSION?.trim() ||
+      'groq-audio-transcriptions/v1',
+    pricingMinorUnitsPerHour,
+    clock,
+  })
+}
+
 export function createLongFormDerivedStageProcessorFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
@@ -436,6 +472,11 @@ export function createTranscribedLongFormStageProcessorFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  const transcript =
+    createLongFormTranscriptStageProcessorFromEnvironment(
+      environment,
+      clock,
+    )
   const diarization =
     createSpeakerDiarizationStageProcessorFromEnvironment(
       environment,
@@ -447,6 +488,7 @@ export function createTranscribedLongFormStageProcessorFromEnvironment(
       clock,
     )
   return createLongFormIndexStageRouter({
+    transcript,
     diarization,
     chunks: derived,
     moments: derived,

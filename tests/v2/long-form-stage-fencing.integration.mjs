@@ -119,3 +119,80 @@ test('T-FR-133 long-form repository fences tenant and missing operation lease be
   )
   assert.equal(fixture.transactions(), 1)
 })
+
+test('T-FR-133 transcript repository refuses publication without the exact operation lease', async () => {
+  const [
+    { PrismaLongFormIndexWorkflowRepository },
+    { createMediaTranscript },
+  ] = await Promise.all([
+    import(
+      '../../src/v2/infrastructure/prisma/long-form-index-workflow-repository.ts'
+    ),
+    import('../../src/v2/domain/media-transcript.ts'),
+  ])
+  let createCount = 0
+  const transaction = {
+    v2MediaTranscript: {
+      async findFirst() {
+        return null
+      },
+      async create() {
+        createCount += 1
+      },
+    },
+    v2LongFormIndexWorkflow: {
+      async findFirst() {
+        return null
+      },
+    },
+    v2PublicOperation: {
+      async findFirst() {
+        return null
+      },
+    },
+    v2MediaArtifact: {
+      async findFirst() {
+        return null
+      },
+    },
+    v2MediaArtifactManifest: {
+      async findFirst() {
+        return null
+      },
+    },
+    v2Project: {
+      async findFirst() {
+        return null
+      },
+    },
+  }
+  const repository = new PrismaLongFormIndexWorkflowRepository({
+    async $transaction(callback) {
+      return callback(transaction)
+    },
+  })
+  const transcript = createMediaTranscript({
+    language: 'pt-BR',
+    text: 'Transcript cercado.',
+    words: [{ word: 'Transcript', start: 0, end: 0.4 }],
+    segments: [{
+      id: 0,
+      start: 0,
+      end: 0.4,
+      text: 'Transcript cercado.',
+    }],
+    provider: 'groq',
+    model: 'whisper-large-v3',
+  })
+  const result = await repository.persistTranscriptWithLease({
+    ...baseFence,
+    transcriptId: `transcript-${transcript.transcriptHash}`,
+    transcript,
+    sourceArtifactId: 'artifact-fencing',
+    sourceArtifactSha256: 'b'.repeat(64),
+    sourceManifestId: 'manifest-fencing',
+    sourceManifestHash: 'c'.repeat(64),
+  })
+  assert.equal(result, null)
+  assert.equal(createCount, 0)
+})

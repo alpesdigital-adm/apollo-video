@@ -25,6 +25,7 @@ import {
   type MediaArtifactManifest,
 } from '../../domain/media-artifact.ts'
 import { createMediaTranscript } from '../../domain/media-transcript.ts'
+import type { MediaTranscript } from '../../domain/media-transcript.ts'
 import {
   assertPublicOperation,
   type PublicOperation,
@@ -54,6 +55,27 @@ function parseJson(value: string, field: string): unknown {
       `Stored ${field} is invalid JSON`,
     )
   }
+}
+
+function stringArray(value: string, field: string): string[] {
+  const parsed = parseJson(value, field)
+  if (
+    !Array.isArray(parsed) ||
+    parsed.some((item) => typeof item !== 'string')
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `Stored ${field} is invalid`,
+    )
+  }
+  return parsed
+}
+
+function optionalStringArray(
+  value: string | null,
+  field: string,
+): string[] | undefined {
+  return value === null ? undefined : stringArray(value, field)
 }
 
 function parseManifest(
@@ -102,6 +124,84 @@ function hydrateTranscript(row: {
     )
   }
   return transcript
+}
+
+function assertTranscriptRights(
+  rights: Readonly<{
+    status: string
+    allowedUsesJson: string
+    prohibitedUsesJson: string
+    allowedWorkspaceIdsJson: string
+    allowedLocalesJson: string | null
+    expiresAt: Date | null
+    consentStatus: string
+    consentAllowedUsesJson: string
+    consentAllowedLocalesJson: string | null
+    consentExpiresAt: Date | null
+  }> | null | undefined,
+  workspaceId: string,
+  language: string,
+  now: Date,
+): void {
+  const allowedUses = rights
+    ? stringArray(rights.allowedUsesJson, 'rights allowed uses')
+    : []
+  const prohibitedUses = rights
+    ? stringArray(
+        rights.prohibitedUsesJson,
+        'rights prohibited uses',
+      )
+    : []
+  const allowedWorkspaces = rights
+    ? stringArray(
+        rights.allowedWorkspaceIdsJson,
+        'rights allowed workspaces',
+      )
+    : []
+  const allowedLocales = rights
+    ? optionalStringArray(
+        rights.allowedLocalesJson,
+        'rights allowed locales',
+      )
+    : undefined
+  const consentAllowedUses = rights
+    ? stringArray(
+        rights.consentAllowedUsesJson,
+        'consent allowed uses',
+      )
+    : []
+  const consentAllowedLocales = rights
+    ? optionalStringArray(
+        rights.consentAllowedLocalesJson,
+        'consent allowed locales',
+      )
+    : undefined
+  if (
+    !rights ||
+    rights.status !== 'approved' ||
+    !allowedUses.includes('transcription') ||
+    prohibitedUses.includes('transcription') ||
+    !allowedWorkspaces.includes(workspaceId) ||
+    (allowedLocales !== undefined &&
+      !allowedLocales.includes(language)) ||
+    (rights.expiresAt && rights.expiresAt <= now) ||
+    (
+      rights.consentStatus !== 'not-required' &&
+      (
+        rights.consentStatus !== 'approved' ||
+        !consentAllowedUses.includes('transcription') ||
+        (consentAllowedLocales !== undefined &&
+          !consentAllowedLocales.includes(language))
+      )
+    ) ||
+    (rights.consentExpiresAt &&
+      rights.consentExpiresAt <= now)
+  ) {
+    throw new DomainError(
+      'ASSET_RIGHTS_BLOCKED',
+      'Long-form source rights do not allow transcription',
+    )
+  }
 }
 
 function durationMs(manifest: MediaArtifactManifest): number {
@@ -860,6 +960,322 @@ implements LongFormIndexWorkflowRepository {
         ? { nextCursor: pageRows.at(-1)!.id }
         : {}),
     })
+  }
+
+  async readTranscriptStageContext(input: {
+    workspaceId: string
+    projectId: string
+    workflowId: string
+  }) {
+    const row = await readRow(this.prisma, input)
+    if (!row) return null
+    const workflow = hydrateWorkflow(row)
+    const stage = workflow.stages.find(
+      (candidate) => candidate.stage === 'transcript',
+    )
+    if (
+      !stage ||
+      !['running', 'succeeded'].includes(stage.status)
+    ) {
+      return null
+    }
+    const [artifact, manifest, project] = await Promise.all([
+      this.prisma.v2MediaArtifact.findFirst({
+        where: {
+          id: workflow.sourceArtifactId,
+          workspaceId: workflow.workspaceId,
+          sha256: workflow.sourceArtifactSha256,
+          mediaType: 'video',
+          status: 'available',
+          projectAssets: {
+            some: {
+              projectId: workflow.projectId,
+              workspaceId: workflow.workspaceId,
+            },
+          },
+        },
+        include: { currentRightsSnapshot: true },
+      }),
+      this.prisma.v2MediaArtifactManifest.findFirst({
+        where: {
+          id: workflow.sourceManifestId,
+          workspaceId: workflow.workspaceId,
+          artifactId: workflow.sourceArtifactId,
+          manifestHash: workflow.sourceManifestHash,
+        },
+        select: { id: true },
+      }),
+      this.prisma.v2Project.findFirst({
+        where: {
+          id: workflow.projectId,
+          workspaceId: workflow.workspaceId,
+        },
+        select: { locale: true },
+      }),
+    ])
+    if (!artifact || !manifest || !project) return null
+    const language = project.locale ?? 'pt-BR'
+    assertTranscriptRights(
+      artifact.currentRightsSnapshot,
+      workflow.workspaceId,
+      language,
+      new Date(),
+    )
+    return Object.freeze({
+      operationId: row.operationId,
+      createdByClientId: workflow.createdByClientId,
+      sourceArtifactId: workflow.sourceArtifactId,
+      sourceArtifactKey: artifact.artifactKey,
+      sourceArtifactByteSize: artifact.byteSize,
+      sourceArtifactSha256: workflow.sourceArtifactSha256,
+      sourceManifestId: workflow.sourceManifestId,
+      sourceManifestHash: workflow.sourceManifestHash,
+      durationMs: workflow.durationMs,
+      language,
+      stageStatus:
+        stage.status === 'succeeded' ? 'succeeded' : 'running',
+      stageInputHash: stage.inputHash,
+      stageIdempotencyKey: stage.idempotencyKey,
+    })
+  }
+
+  async findTranscriptStageReplay(input: {
+    workspaceId: string
+    projectId: string
+    sourceArtifactId: string
+    sourceManifestId: string
+    provider: string
+    model: string
+    providerVersion: string
+  }) {
+    const row = await this.prisma.v2MediaTranscript.findFirst({
+      where: input,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        transcriptHash: true,
+        transcriptJson: true,
+      },
+    })
+    return row
+      ? Object.freeze({
+          id: row.id,
+          transcript: hydrateTranscript(row),
+        })
+      : null
+  }
+
+  async persistTranscriptWithLease(input: {
+    workspaceId: string
+    projectId: string
+    workflowId: string
+    operationId: string
+    expectedStageInputHash: string
+    expectedStageIdempotencyKey: string
+    leaseOwner: string
+    operationAttempt: number
+    transcriptId: string
+    transcript: Readonly<MediaTranscript>
+    providerVersion: string
+    sourceArtifactId: string
+    sourceArtifactSha256: string
+    sourceManifestId: string
+    sourceManifestHash: string
+    now: string
+  }, attempt = 1): Promise<Readonly<{
+    id: string
+    transcript: Readonly<MediaTranscript>
+    replayed: boolean
+  }> | null> {
+    const transcript = createMediaTranscript(input.transcript)
+    const now = new Date(input.now)
+    if (
+      Number.isNaN(now.getTime()) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/.test(
+        input.transcriptId,
+      ) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(
+        input.providerVersion,
+      )
+    ) {
+      throw new DomainError(
+        'INVALID_ARGUMENT',
+        'Transcript persistence input is invalid',
+      )
+    }
+    try {
+      const outcome = await this.prisma.$transaction(
+        async (transaction) => {
+          const replay =
+            await transaction.v2MediaTranscript.findFirst({
+              where: {
+                workspaceId: input.workspaceId,
+                projectId: input.projectId,
+                sourceArtifactId: input.sourceArtifactId,
+                sourceManifestId: input.sourceManifestId,
+                provider: transcript.provider,
+                model: transcript.model,
+                providerVersion: input.providerVersion,
+                transcriptHash: transcript.transcriptHash,
+              },
+              select: {
+                id: true,
+                transcriptHash: true,
+                transcriptJson: true,
+              },
+            })
+          const [stored, lease, artifact, manifest, project] =
+            await Promise.all([
+              readRow(transaction, input),
+              transaction.v2PublicOperation.findFirst({
+                where: {
+                  id: input.operationId,
+                  workspaceId: input.workspaceId,
+                  type: 'long-form-index',
+                  status: 'running',
+                  leaseOwner: input.leaseOwner,
+                  attempt: input.operationAttempt,
+                  leaseExpiresAt: { gt: now },
+                },
+                select: { id: true },
+              }),
+              transaction.v2MediaArtifact.findFirst({
+                where: {
+                  id: input.sourceArtifactId,
+                  workspaceId: input.workspaceId,
+                  sha256: input.sourceArtifactSha256,
+                  mediaType: 'video',
+                  status: 'available',
+                  projectAssets: {
+                    some: {
+                      projectId: input.projectId,
+                      workspaceId: input.workspaceId,
+                    },
+                  },
+                },
+                include: { currentRightsSnapshot: true },
+              }),
+              transaction.v2MediaArtifactManifest.findFirst({
+                where: {
+                  id: input.sourceManifestId,
+                  workspaceId: input.workspaceId,
+                  artifactId: input.sourceArtifactId,
+                  manifestHash: input.sourceManifestHash,
+                },
+                select: { id: true },
+              }),
+              transaction.v2Project.findFirst({
+                where: {
+                  id: input.projectId,
+                  workspaceId: input.workspaceId,
+                },
+                select: { locale: true },
+              }),
+            ])
+          if (
+            !stored ||
+            !lease ||
+            !artifact ||
+            !manifest ||
+            !project ||
+            stored.operationId !== input.operationId
+          ) {
+            return null
+          }
+          const workflow = hydrateWorkflow(stored)
+          const stage = workflow.stages.find(
+            (candidate) => candidate.stage === 'transcript',
+          )
+          if (
+            workflow.sourceArtifactId !== input.sourceArtifactId ||
+            workflow.sourceArtifactSha256 !==
+              input.sourceArtifactSha256 ||
+            workflow.sourceManifestId !== input.sourceManifestId ||
+            workflow.sourceManifestHash !==
+              input.sourceManifestHash ||
+            stage?.status !== 'running' ||
+            stage.inputHash !== input.expectedStageInputHash ||
+            stage.idempotencyKey !==
+              input.expectedStageIdempotencyKey
+          ) {
+            return null
+          }
+          assertTranscriptRights(
+            artifact.currentRightsSnapshot,
+            input.workspaceId,
+            project.locale ?? 'pt-BR',
+            now,
+          )
+          if (replay) {
+            const hydrated = hydrateTranscript(replay)
+            return Object.freeze({
+              id: replay.id,
+              transcript: hydrated,
+              replayed: true,
+            })
+          }
+          await transaction.v2MediaTranscript.create({
+            data: {
+              id: input.transcriptId,
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              sourceArtifactId: input.sourceArtifactId,
+              sourceManifestId: input.sourceManifestId,
+              schemaVersion: transcript.schemaVersion,
+              language: transcript.language,
+              provider: transcript.provider,
+              model: transcript.model,
+              providerVersion: input.providerVersion,
+              transcriptHash: transcript.transcriptHash,
+              transcriptJson: stableSerialize(transcript),
+              createdAt: now,
+            },
+          })
+          return Object.freeze({
+            id: input.transcriptId,
+            transcript,
+            replayed: false,
+          })
+        },
+        {
+          isolationLevel:
+            Prisma.TransactionIsolationLevel.Serializable,
+        },
+      )
+      return outcome
+    } catch (error) {
+      if (isPrismaCode(error, 'P2034') && attempt < 3) {
+        return this.persistTranscriptWithLease(input, attempt + 1)
+      }
+      if (isPrismaCode(error, 'P2002')) {
+        const replay = await this.findTranscriptStageReplay({
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          sourceArtifactId: input.sourceArtifactId,
+          sourceManifestId: input.sourceManifestId,
+          provider: transcript.provider,
+          model: transcript.model,
+          providerVersion: input.providerVersion,
+        })
+        if (
+          replay?.transcript.transcriptHash ===
+          transcript.transcriptHash
+        ) {
+          return Object.freeze({ ...replay, replayed: true })
+        }
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Transcript identity collided with different content',
+        )
+      }
+      if (isPrismaCode(error, 'P2034')) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Transcript persistence conflicted repeatedly',
+        )
+      }
+      throw error
+    }
   }
 
   async replaceWithLease(input: {
