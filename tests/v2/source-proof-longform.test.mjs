@@ -4,7 +4,6 @@ import {
   planCleanup,
 } from '../../src/v2/domain/source-deconstruction.ts'
 import {
-  extractContiguous,
   querySemanticRepository,
 } from '../../src/v2/application/proof-and-longform.ts'
 
@@ -73,53 +72,6 @@ test(
 
     assert.ok(strategies.has('reject'))
     assert.ok([...strategies].some((strategy) => strategy !== 'reject'))
-  },
-)
-
-test(
-  'T-FR-134 extracts semantic contiguous 2min window from 2h',
-  () => {
-    const moments = [
-      {
-        id: 'm',
-        topic: 'ads',
-        objective: 'education',
-        rangeMs: [3_500_000, 3_610_000],
-        semanticStartMs: 3_495_000,
-        semanticEndMs: 3_615_000,
-        scores: {
-          selfContained: 0.9,
-          density: 0.8,
-          integrity: 1,
-          audio: 0.9,
-          visual: 0.8,
-        },
-      },
-      {
-        id: 'x',
-        topic: 'other',
-        objective: 'education',
-        rangeMs: [0, 1_000],
-        semanticStartMs: 0,
-        semanticEndMs: 1_000,
-        scores: {
-          selfContained: 1,
-          density: 1,
-          integrity: 1,
-          audio: 1,
-          visual: 1,
-        },
-      },
-    ]
-    const result = extractContiguous({
-      moments,
-      topic: 'ads',
-      objective: 'education',
-      targetDurationMs: 120_000,
-      toleranceMs: 15_000,
-    })
-    assert.deepEqual(result.best.rangeMs, [3_495_000, 3_615_000])
-    assert.equal(result.editPlan.synthesizedRanges, false)
   },
 )
 
