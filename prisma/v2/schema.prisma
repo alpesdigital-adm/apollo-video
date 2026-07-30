@@ -117,6 +117,7 @@ model V2Workspace {
   proofIntegrityEvaluations       V2ProofIntegrityEvaluation[]
   proofModeRuns                   V2ProofModeRun[]
   proofModePlans                  V2ProofModePlan[]
+  contiguousEvidenceRuns         V2ContiguousEvidenceRun[]
   contiguousEvaluationRuns       V2ContiguousEvaluationRun[]
   contiguousEvaluationEvidence   V2ContiguousEvaluationEvidence[]
   contiguousMomentEvaluations     V2ContiguousMomentEvaluation[]
@@ -157,6 +158,7 @@ model V2ApiClient {
   semanticSearchDocuments         V2SemanticSearchDocument[]
   retrievalEvaluations            V2RetrievalEvaluation[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
+  contiguousEvidenceRuns          V2ContiguousEvidenceRun[]
   contiguousEvaluationRuns        V2ContiguousEvaluationRun[]
   contiguousExtractions            V2ContiguousExtraction[]
   productionBatches               V2ProductionBatch[]              @relation("ProductionBatchCreator")
@@ -347,6 +349,7 @@ model V2Project {
   proofIntegrityEvaluations     V2ProofIntegrityEvaluation[]
   proofModeRuns                 V2ProofModeRun[]
   proofModePlans                V2ProofModePlan[]
+  contiguousEvidenceRuns       V2ContiguousEvidenceRun[]
   contiguousEvaluationRuns     V2ContiguousEvaluationRun[]
   contiguousEvaluationEvidence V2ContiguousEvaluationEvidence[]
   contiguousMomentEvaluations   V2ContiguousMomentEvaluation[]
@@ -1848,6 +1851,7 @@ model V2LongFormIndexRun {
   createdBy      V2ApiClient             @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   chapters       V2LongFormChapter[]
   moments        V2LongFormMoment[]
+  contiguousEvidenceRuns V2ContiguousEvidenceRun[] @relation("ContiguousEvidenceRunIndex")
   contiguousEvaluationRuns V2ContiguousEvaluationRun[] @relation("ContiguousEvaluationRunIndex")
   contiguousEvaluationEvidence V2ContiguousEvaluationEvidence[] @relation("ContiguousEvidenceIndex")
   contiguousEvaluations V2ContiguousMomentEvaluation[] @relation("ContiguousEvaluationIndexRun")
@@ -1992,10 +1996,43 @@ model V2ContiguousEvaluationRun {
   @@map("contiguous_evaluation_runs")
 }
 
+model V2ContiguousEvidenceRun {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  sourceIndexRunId      String   @db.VarChar(128)
+  sourceIndexRunHash    String   @db.Char(64)
+  analyzerKind          String   @db.VarChar(32)
+  analyzerProvider      String   @db.VarChar(128)
+  analyzerModel         String   @db.VarChar(128)
+  analyzerVersion       String   @db.VarChar(128)
+  evidenceCount         Int
+  requestFingerprint    String   @db.Char(64)
+  idempotencyKey        String   @db.VarChar(128)
+  createdByClientId     String   @db.VarChar(80)
+  createdAt             DateTime @db.Timestamptz(3)
+  runJson               String   @db.Text
+  runHash               String   @db.Char(64)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceIndexRun V2LongFormIndexRun @relation("ContiguousEvidenceRunIndex", fields: [sourceIndexRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy V2ApiClient @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  evidence V2ContiguousEvaluationEvidence[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, sourceIndexRunId, createdByClientId, idempotencyKey])
+  @@unique([workspaceId, runHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceIndexRunId, analyzerKind, createdAt(sort: Desc)])
+  @@map("contiguous_evidence_runs")
+}
+
 model V2ContiguousEvaluationEvidence {
   id                    String   @id @db.VarChar(128)
   workspaceId           String   @db.VarChar(128)
   projectId             String   @db.VarChar(128)
+  runId                 String   @db.VarChar(128)
   indexRunId            String   @db.VarChar(128)
   indexRunHash          String   @db.Char(64)
   momentId              String   @db.VarChar(128)
@@ -2016,6 +2053,7 @@ model V2ContiguousEvaluationEvidence {
 
   workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project V2Project @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  run V2ContiguousEvidenceRun @relation(fields: [runId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   indexRun V2LongFormIndexRun @relation("ContiguousEvidenceIndex", fields: [indexRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   moment V2LongFormMoment @relation("ContiguousEvidenceMoment", fields: [momentId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
 
