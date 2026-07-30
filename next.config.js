@@ -3,6 +3,12 @@ const path = require('path')
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   outputFileTracingRoot: __dirname,
+  outputFileTracingExcludes: {
+    '/*': [
+      './.apollo/**/*',
+      './output/**/*',
+    ],
+  },
   webpack: (config) => {
     config.resolve.alias = {
       ...(config.resolve.alias || {}),

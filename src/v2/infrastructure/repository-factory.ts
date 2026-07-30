@@ -25,6 +25,11 @@ import { runNextSourceCleanupOperationService } from '../application/run-source-
 import {
   createSpeakerDiarizationStageProcessor,
 } from '../application/speaker-diarization-stage-processor.ts'
+import {
+  createLongFormDerivedStageProcessor,
+  createLongFormIndexStageRouter,
+  DEFAULT_LONG_FORM_DERIVED_STAGE_CONFIGURATION,
+} from '../application/long-form-derived-stage-processor.ts'
 import { calculateVersionHash } from '../application/version-hash.ts'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
@@ -364,6 +369,87 @@ export function createSpeakerDiarizationStageProcessorFromEnvironment(
     createRunId: () => `diarization-run-${randomUUID()}`,
     clock,
     pricingMinorUnitsPerHour,
+  })
+}
+
+export function createLongFormDerivedStageProcessorFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const defaults =
+    DEFAULT_LONG_FORM_DERIVED_STAGE_CONFIGURATION
+  const numberFromEnvironment = (
+    name: string,
+    fallback: number,
+  ): number => {
+    const raw = environment[name]?.trim()
+    if (!raw) return fallback
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) {
+      throw new DomainError(
+        'PERSISTENCE_NOT_CONFIGURED',
+        `${name} must be a finite number`,
+      )
+    }
+    return parsed
+  }
+  return createLongFormDerivedStageProcessor({
+    hierarchical: createHierarchicalProcessingRepository(),
+    longForm: createLongFormIndexRepository(),
+    diarization: createSpeakerDiarizationRepository(),
+    createId: (kind, sourceId) =>
+      sourceId
+        ? `${kind}-${calculateVersionHash({
+            sourceId,
+            nonce: randomUUID(),
+          }).slice(0, 40)}`
+        : `${kind}-${randomUUID()}`,
+    clock,
+    configuration: Object.freeze({
+      chunks: Object.freeze({
+        ...defaults.chunks,
+        chunkDurationMs: numberFromEnvironment(
+          'APOLLO_LONG_FORM_CHUNK_DURATION_MS',
+          defaults.chunks.chunkDurationMs,
+        ),
+        overlapMs: numberFromEnvironment(
+          'APOLLO_LONG_FORM_CHUNK_OVERLAP_MS',
+          defaults.chunks.overlapMs,
+        ),
+        maximumWorkingSetBytes: numberFromEnvironment(
+          'APOLLO_LONG_FORM_MAX_WORKING_SET_BYTES',
+          defaults.chunks.maximumWorkingSetBytes,
+        ),
+      }),
+      moments: Object.freeze({
+        ...defaults.moments,
+        producerConfidence: numberFromEnvironment(
+          'APOLLO_LONG_FORM_PRODUCER_CONFIDENCE',
+          defaults.moments.producerConfidence,
+        ),
+      }),
+    }),
+  })
+}
+
+export function createTranscribedLongFormStageProcessorFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const diarization =
+    createSpeakerDiarizationStageProcessorFromEnvironment(
+      environment,
+      clock,
+    )
+  const derived =
+    createLongFormDerivedStageProcessorFromEnvironment(
+      environment,
+      clock,
+    )
+  return createLongFormIndexStageRouter({
+    diarization,
+    chunks: derived,
+    moments: derived,
   })
 }
 

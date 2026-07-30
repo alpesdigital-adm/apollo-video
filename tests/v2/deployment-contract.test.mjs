@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const deployScriptUrl = new URL('../../infra/deploy/apollo-vps.sh', import.meta.url)
+const nextConfigUrl = new URL('../../next.config.js', import.meta.url)
+const agentInstructionsUrl = new URL('../../AGENTS.md', import.meta.url)
 
 test('production deploy waits for PostgreSQL before migrating or replacing containers', async () => {
   const script = await readFile(deployScriptUrl, 'utf8')
@@ -21,4 +23,23 @@ test('production deploy waits for PostgreSQL before migrating or replacing conta
   assert.ok(waitForPostgres >= 0)
   assert.ok(migration > waitForPostgres)
   assert.ok(firstReplacement > migration)
+})
+
+test('build tracing excludes ephemeral runtime artifacts and process logs stay outside the repository', async () => {
+  const [configuration, instructions] = await Promise.all([
+    readFile(nextConfigUrl, 'utf8'),
+    readFile(agentInstructionsUrl, 'utf8'),
+  ])
+  assert.match(
+    configuration,
+    /outputFileTracingExcludes:\s*\{[\s\S]*'\/\*':\s*\[[\s\S]*'\.\/\.apollo\/\*\*\/\*'[\s\S]*'\.\/output\/\*\*\/\*'/,
+  )
+  assert.match(
+    instructions,
+    /Logs, PID files e stdout\/stderr[\s\S]*fora da raiz rastreada pelo build/,
+  )
+  assert.match(
+    instructions,
+    /proibido criar novamente `ssh-tunnel\*\.log`/,
+  )
 })

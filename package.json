@@ -40,6 +40,7 @@
     "test:integration:validated-segments": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-validated-segment-catalog.integration.mjs",
     "test:integration:hybrid-search": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-hybrid-search.integration.mjs",
     "test:integration:hierarchical-processing": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-hierarchical-processing.integration.mjs",
+    "test:integration:long-form-stage-fencing": "node node_modules/tsx/dist/cli.mjs --test tests/v2/long-form-stage-fencing.integration.mjs",
     "test:integration:source-deconstruction": "node node_modules/tsx/dist/cli.mjs --test tests/v2/prisma-source-deconstruction.integration.mjs",
     "test:integration:contamination-reports": "node --env-file=.env node_modules/tsx/dist/cli.mjs --test tests/v2/prisma-contamination-report.integration.mjs",
     "test:integration:production-batches": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-production-batch.integration.mjs",

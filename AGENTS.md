@@ -207,6 +207,12 @@ Estas regras são vinculantes para agentes, scripts manuais e CI:
 10. Se o proprietário informar que um incidente na VPS está em resolução, o
     agente atua somente em arquivos e procedimentos locais até liberação
     explícita; não investiga nem “ajuda” executando comandos remotos em paralelo.
+11. Logs, PID files e stdout/stderr de servidor, worker, browser, SSH ou túnel
+    ficam fora da raiz rastreada pelo build (use diretório temporário com owner e
+    run ID). É proibido criar novamente `ssh-tunnel*.log` ou outro log de processo
+    dentro de `.apollo/`; o postflight arquiva a evidência fora do repositório e
+    remove o diretório efêmero. Antes de um build, confirmar que não existe
+    processo dono do arquivo; nunca contornar um handle ativo apagando o log.
 
 ## Projeto real usado como E2E de recuperação
 

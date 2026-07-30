@@ -8,6 +8,9 @@ import type {
   HierarchicalVisionObservation,
   ProcessingTier,
 } from '../../domain/hierarchical-processing.ts'
+import type {
+  LongFormStagePersistenceFence,
+} from './long-form-stage-persistence.ts'
 
 export interface HierarchicalProcessingSourceContext {
   sourceArtifactId: string
@@ -148,4 +151,11 @@ export interface HierarchicalProcessingRepository {
     run: Readonly<PersistedHierarchicalProcessingRun>
     replayed: boolean
   }>>
+  persistWithLongFormLease(input: {
+    run: Readonly<PersistedHierarchicalProcessingRun>
+    fence: Readonly<LongFormStagePersistenceFence>
+  }): Promise<Readonly<{
+    run: Readonly<PersistedHierarchicalProcessingRun>
+    replayed: boolean
+  }> | null>
 }

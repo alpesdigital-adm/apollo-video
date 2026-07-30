@@ -606,8 +606,66 @@ implements HierarchicalProcessingRepository {
 
   async persist(
     run: Readonly<PersistedHierarchicalProcessingRun>,
-    attempt = 1,
   ): ReturnType<HierarchicalProcessingRepository['persist']> {
+    const persisted = await this.persistInternal(run)
+    if (!persisted) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Unfenced hierarchical persistence unexpectedly lost a lease',
+      )
+    }
+    return persisted
+  }
+
+  async persistWithLongFormLease(
+    input: Parameters<
+      HierarchicalProcessingRepository[
+        'persistWithLongFormLease'
+      ]
+    >[0],
+  ): ReturnType<
+    HierarchicalProcessingRepository[
+      'persistWithLongFormLease'
+    ]
+  > {
+    if (input.fence.stage !== 'chunks') {
+      throw new DomainError(
+        'INVALID_ARGUMENT',
+        'Hierarchical output requires the chunks stage fence',
+      )
+    }
+    if (
+      input.fence.workspaceId !== input.run.workspaceId ||
+      input.fence.projectId !== input.run.projectId
+    ) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Hierarchical output fence belongs to another tenant or project',
+      )
+    }
+    return this.persistInternal(input.run, input.fence)
+  }
+
+  private async persistInternal(
+    run: Readonly<PersistedHierarchicalProcessingRun>,
+    fence?: Parameters<
+      HierarchicalProcessingRepository[
+        'persistWithLongFormLease'
+      ]
+    >[0]['fence'],
+    attempt = 1,
+  ): ReturnType<
+    HierarchicalProcessingRepository[
+      'persistWithLongFormLease'
+    ]
+  > {
+    const fenceNow = fence ? new Date(fence.now) : undefined
+    if (fenceNow && Number.isNaN(fenceNow.getTime())) {
+      throw new DomainError(
+        'INVALID_ARGUMENT',
+        'Hierarchical persistence fence instant is invalid',
+      )
+    }
     try {
       return await this.client.$transaction(async (transaction) => {
         const existing =
@@ -632,6 +690,53 @@ implements HierarchicalProcessingRepository {
             run: hydrateRun(existing),
             replayed: true,
           })
+        }
+        if (fence) {
+          const [operation, stage] = await Promise.all([
+            transaction.v2PublicOperation.findFirst({
+              where: {
+                id: fence.operationId,
+                workspaceId: run.workspaceId,
+                type: 'long-form-index',
+                status: 'running',
+                leaseOwner: fence.leaseOwner,
+                attempt: fence.operationAttempt,
+                leaseExpiresAt: { gt: fenceNow! },
+              },
+              select: { id: true },
+            }),
+            transaction.v2LongFormIndexStageCheckpoint.findFirst({
+              where: {
+                workflowId: fence.workflowId,
+                workspaceId: run.workspaceId,
+                projectId: run.projectId,
+                stage: 'chunks',
+                status: 'running',
+                inputHash: fence.expectedStageInputHash,
+                idempotencyKey:
+                  fence.expectedStageIdempotencyKey,
+                workflow: {
+                  operationId: fence.operationId,
+                  sourceArtifactId: run.sourceArtifactId,
+                  sourceArtifactSha256:
+                    run.sourceArtifactSha256,
+                  sourceManifestId: run.sourceManifestId,
+                  sourceManifestHash: run.sourceManifestHash,
+                  sourceTranscriptId: run.sourceTranscriptId,
+                  sourceTranscriptHash: run.sourceTranscriptHash,
+                },
+              },
+              select: { id: true },
+            }),
+          ])
+          if (
+            !operation ||
+            !stage ||
+            run.idempotencyKey !==
+              fence.expectedStageIdempotencyKey
+          ) {
+            return null
+          }
         }
         const [artifact, manifest, transcript, actor, previous] =
           await Promise.all([
@@ -746,7 +851,7 @@ implements HierarchicalProcessingRepository {
       })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
-        return this.persist(run, attempt + 1)
+        return this.persistInternal(run, fence, attempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
         const replay = await this.findIdempotent({

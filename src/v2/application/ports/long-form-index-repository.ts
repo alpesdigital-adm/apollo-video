@@ -4,6 +4,9 @@ import type {
   LongFormMomentPreview,
   LongFormProducer,
 } from '../../domain/long-form-moment.ts'
+import type {
+  LongFormStagePersistenceFence,
+} from './long-form-stage-persistence.ts'
 
 export interface LongFormRightsSnapshot {
   id: string
@@ -104,6 +107,13 @@ export interface LongFormIndexRepository {
     run: Readonly<PersistedLongFormIndexRun>
     replayed: boolean
   }>>
+  persistWithLongFormLease(input: {
+    run: Readonly<PersistedLongFormIndexRun>
+    fence: Readonly<LongFormStagePersistenceFence>
+  }): Promise<Readonly<{
+    run: Readonly<PersistedLongFormIndexRun>
+    replayed: boolean
+  }> | null>
   search(
     query: Readonly<LongFormMomentSearchQuery>,
   ): Promise<readonly Readonly<LongFormMomentSearchResult>[]>

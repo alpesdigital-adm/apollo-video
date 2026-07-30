@@ -633,8 +633,58 @@ implements LongFormIndexRepository {
 
   async persist(
     run: Readonly<PersistedLongFormIndexRun>,
-    attempt = 1,
   ): ReturnType<LongFormIndexRepository['persist']> {
+    const persisted = await this.persistInternal(run)
+    if (!persisted) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Unfenced long-form persistence unexpectedly lost a lease',
+      )
+    }
+    return persisted
+  }
+
+  async persistWithLongFormLease(
+    input: Parameters<
+      LongFormIndexRepository['persistWithLongFormLease']
+    >[0],
+  ): ReturnType<
+    LongFormIndexRepository['persistWithLongFormLease']
+  > {
+    if (input.fence.stage !== 'moments') {
+      throw new DomainError(
+        'INVALID_ARGUMENT',
+        'Long-form index output requires the moments stage fence',
+      )
+    }
+    if (
+      input.fence.workspaceId !== input.run.workspaceId ||
+      input.fence.projectId !== input.run.projectId
+    ) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Long-form index fence belongs to another tenant or project',
+      )
+    }
+    return this.persistInternal(input.run, input.fence)
+  }
+
+  private async persistInternal(
+    run: Readonly<PersistedLongFormIndexRun>,
+    fence?: Parameters<
+      LongFormIndexRepository['persistWithLongFormLease']
+    >[0]['fence'],
+    attempt = 1,
+  ): ReturnType<
+    LongFormIndexRepository['persistWithLongFormLease']
+  > {
+    const fenceNow = fence ? new Date(fence.now) : undefined
+    if (fenceNow && Number.isNaN(fenceNow.getTime())) {
+      throw new DomainError(
+        'INVALID_ARGUMENT',
+        'Long-form persistence fence instant is invalid',
+      )
+    }
     try {
       return await this.client.$transaction(async (transaction) => {
         const existing = await transaction.v2LongFormIndexRun.findUnique({
@@ -658,6 +708,51 @@ implements LongFormIndexRepository {
             run: hydrateRun(existing),
             replayed: true,
           })
+        }
+        if (fence) {
+          const [operation, stage] = await Promise.all([
+            transaction.v2PublicOperation.findFirst({
+              where: {
+                id: fence.operationId,
+                workspaceId: run.workspaceId,
+                type: 'long-form-index',
+                status: 'running',
+                leaseOwner: fence.leaseOwner,
+                attempt: fence.operationAttempt,
+                leaseExpiresAt: { gt: fenceNow! },
+              },
+              select: { id: true },
+            }),
+            transaction.v2LongFormIndexStageCheckpoint.findFirst({
+              where: {
+                workflowId: fence.workflowId,
+                workspaceId: run.workspaceId,
+                projectId: run.projectId,
+                stage: 'moments',
+                status: 'running',
+                inputHash: fence.expectedStageInputHash,
+                idempotencyKey:
+                  fence.expectedStageIdempotencyKey,
+                workflow: {
+                  operationId: fence.operationId,
+                  sourceArtifactId: run.sourceArtifactId,
+                  sourceArtifactSha256:
+                    run.sourceArtifactSha256,
+                  sourceManifestId: run.sourceManifestId,
+                  sourceManifestHash: run.sourceManifestHash,
+                },
+              },
+              select: { id: true },
+            }),
+          ])
+          if (
+            !operation ||
+            !stage ||
+            run.idempotencyKey !==
+              fence.expectedStageIdempotencyKey
+          ) {
+            return null
+          }
         }
         const [artifact, actor] = await Promise.all([
           transaction.v2MediaArtifact.findFirst({
@@ -756,7 +851,7 @@ implements LongFormIndexRepository {
       })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
-        return this.persist(run, attempt + 1)
+        return this.persistInternal(run, fence, attempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
         const replay = await this.findIdempotent({
@@ -773,7 +868,9 @@ implements LongFormIndexRepository {
           }
           return Object.freeze({ run: replay, replayed: true })
         }
-        if (attempt < 3) return this.persist(run, attempt + 1)
+        if (attempt < 3) {
+          return this.persistInternal(run, fence, attempt + 1)
+        }
       }
       if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) {
         throw new DomainError(
