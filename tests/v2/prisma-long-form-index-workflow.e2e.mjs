@@ -5,7 +5,7 @@ import test from 'node:test'
 import { NextRequest } from 'next/server'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
-test('T-FR-133 indexes a generated-transcript two-hour master through the public API, worker and PostgreSQL', {
+test('T-FR-133 resumes a generated-transcript two-hour master after worker restart without duplication', {
   skip:
     process.env.APOLLO_LONG_FORM_WORKFLOW_E2E !== '1' &&
     'set APOLLO_LONG_FORM_WORKFLOW_E2E=1 with an isolated local V2 database',
@@ -62,7 +62,7 @@ test('T-FR-133 indexes a generated-transcript two-hour master through the public
     import('../../src/app/v1/projects/[projectId]/long-form-index-workflows/route.ts'),
   ])
 
-  const prisma = new PrismaClient()
+  let prisma = new PrismaClient()
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `long-form-workflow-e2e-${suffix}`
   const projectId = `long-form-project-e2e-${suffix}`
@@ -72,7 +72,6 @@ test('T-FR-133 indexes a generated-transcript two-hour master through the public
   const artifactSha256 = 'a'.repeat(64)
   let transcriptCalls = 0
   let diarizationCalls = 0
-  let stageFailure
 
   try {
     await prisma.v2Workspace.create({
@@ -285,11 +284,13 @@ test('T-FR-133 indexes a generated-transcript two-hour master through the public
       },
       async cleanup() {},
     }
-    const workflows =
-      new PrismaLongFormIndexWorkflowRepository(prisma)
-    const speaker = new PrismaSpeakerDiarizationRepository(prisma)
-    const transcriptProcessor =
-      createLongFormTranscriptStageProcessor({
+    const createRuntime = (client, interruptChunks = false) => {
+      const workflows =
+        new PrismaLongFormIndexWorkflowRepository(client)
+      const speaker =
+        new PrismaSpeakerDiarizationRepository(client)
+      const transcriptProcessor =
+        createLongFormTranscriptStageProcessor({
         repository: workflows,
         transcriber: {
           async transcribe() {
@@ -302,8 +303,8 @@ test('T-FR-133 indexes a generated-transcript two-hour master through the public
         providerVersion: 'groq-audio-transcriptions/v1',
         pricingMinorUnitsPerHour: 1,
       })
-    const diarizationProcessor =
-      createSpeakerDiarizationStageProcessor({
+      const diarizationProcessor =
+        createSpeakerDiarizationStageProcessor({
         repository: speaker,
         provider: {
           async diarize() {
@@ -329,99 +330,82 @@ test('T-FR-133 indexes a generated-transcript two-hour master through the public
         createRunId: () => `diarization-run-${suffix}`,
         pricingMinorUnitsPerHour: 1,
       })
-    const derived = createLongFormDerivedStageProcessor({
-      hierarchical: new PrismaHierarchicalProcessingRepository(prisma),
-      longForm: new PrismaLongFormIndexRepository(prisma),
-      diarization: speaker,
-      createId: (kind, sourceId) =>
-        `${kind}-${sourceId ?? suffix}-${randomUUID().slice(0, 8)}`,
-    })
-    const stageRouter = createLongFormIndexStageRouter({
-      transcript: transcriptProcessor,
-      diarization: diarizationProcessor,
-      chunks: derived,
-      moments: derived,
-    })
-    const worker = runNextLongFormIndexOperationService({
-      operations: new PrismaPublicOperationRepository(prisma),
-      workflows,
-      processor: {
-        async process(input) {
-          try {
-            return await stageRouter.process(input)
-          } catch (error) {
-            stageFailure = {
-              name: error?.name,
-              code: error?.code,
-              message: error?.message,
+      const derived = createLongFormDerivedStageProcessor({
+        hierarchical:
+          new PrismaHierarchicalProcessingRepository(client),
+        longForm: new PrismaLongFormIndexRepository(client),
+        diarization: speaker,
+        createId: (kind, sourceId) =>
+          `${kind}-${sourceId ?? suffix}-${randomUUID().slice(0, 8)}`,
+      })
+      const stageRouter = createLongFormIndexStageRouter({
+        transcript: transcriptProcessor,
+        diarization: diarizationProcessor,
+        chunks: derived,
+        moments: derived,
+      })
+      let interrupted = false
+      const worker = runNextLongFormIndexOperationService({
+        operations: new PrismaPublicOperationRepository(client),
+        workflows,
+        processor: {
+          async process(input) {
+            if (
+              interruptChunks &&
+              !interrupted &&
+              input.checkpoint.stage === 'chunks'
+            ) {
+              interrupted = true
+              throw new Error('controlled worker restart')
             }
-            throw error
+            return stageRouter.process(input)
           }
         },
-      },
-      leaseDurationMs: 30_000,
-      heartbeatIntervalMs: 10_000,
-    })
-    const outcome = await worker(`worker-e2e-${suffix}`)
-    if (outcome?.status !== 'succeeded') {
-      const [failed, operation] = await Promise.all([
-        prisma.v2LongFormIndexWorkflow.findUnique({
-          where: { id: workflowId },
-          select: {
-            status: true,
-            runHash: true,
-            workflowJson: true,
-            updatedAt: true,
-            stages: {
-              orderBy: { sequence: 'asc' },
-              select: {
-                stage: true,
-                status: true,
-                stageHash: true,
-                stageJson: true,
-                errorCode: true,
-                errorMessage: true,
-              },
-            },
-          },
-        }),
-        prisma.v2PublicOperation.findUnique({
-          where: { id: outcome.operationId },
-          select: {
-            status: true,
-            phase: true,
-            errorCode: true,
-            errorMessage: true,
-            attempt: true,
-          },
-        }),
-      ])
-      const projected = failed
-        ? {
-            status: failed.status,
-            runHash: failed.runHash,
-            workflow: JSON.parse(failed.workflowJson),
-            updatedAt: failed.updatedAt.toISOString(),
-            stages: failed.stages.map((stage) => ({
-              stage: stage.stage,
-              status: stage.status,
-              stageHash: stage.stageHash,
-              storedStage: JSON.parse(stage.stageJson),
-              errorCode: stage.errorCode,
-              errorMessage: stage.errorMessage,
-            })),
-          }
-        : null
-      assert.fail(JSON.stringify({
-        outcome,
-        stageFailure,
-        operation,
-        persisted: projected,
-      }))
+        leaseDurationMs: 30_000,
+        heartbeatIntervalMs: 10_000,
+        retryBaseDelayMs: 1,
+        retryMaxDelayMs: 1,
+      })
+      return { workflows, worker }
     }
-    assert.equal(await worker(`worker-e2e-${suffix}`), null)
 
-    const stored = await workflows.read({
+    const interruptedRuntime = createRuntime(prisma, true)
+    const interrupted = await interruptedRuntime.worker(
+      `worker-before-restart-${suffix}`,
+    )
+    assert.equal(interrupted?.status, 'retrying')
+    assert.equal(
+      await prisma.v2MediaTranscript.count({ where: { workspaceId } }),
+      1,
+    )
+    assert.equal(
+      await prisma.v2SpeakerDiarizationRun.count({
+        where: { workspaceId },
+      }),
+      1,
+    )
+    assert.equal(
+      await prisma.v2HierarchicalProcessingRun.count({
+        where: { workspaceId },
+      }),
+      0,
+    )
+
+    await prisma.$disconnect()
+    prisma = new PrismaClient()
+    const restartedRuntime = createRuntime(prisma)
+    const outcome = await restartedRuntime.worker(
+      `worker-after-restart-${suffix}`,
+    )
+    assert.equal(outcome?.status, 'succeeded')
+    assert.equal(
+      await restartedRuntime.worker(
+        `worker-after-restart-${suffix}`,
+      ),
+      null,
+    )
+
+    const stored = await restartedRuntime.workflows.read({
       workspaceId,
       projectId,
       workflowId,
