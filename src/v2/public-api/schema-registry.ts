@@ -9166,6 +9166,234 @@ const proofNeedRunSchema = {
     runHash: sha256Schema,
   },
 }
+
+const contiguousScoreSchema = {
+  type: 'number',
+  minimum: 0,
+  maximum: 1,
+}
+
+const contiguousRangeMsSchema = {
+  type: 'array',
+  minItems: 2,
+  maxItems: 2,
+  items: {
+    type: 'integer',
+    minimum: 0,
+    maximum: 43_200_000,
+  },
+}
+
+const contiguousActorSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'id'],
+  properties: {
+    type: { const: 'api-client' },
+    id: idSchema,
+  },
+}
+
+const contiguousScoreBreakdownSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'selfContained',
+    'density',
+    'integrity',
+    'audio',
+    'visual',
+    'duration',
+  ],
+  properties: {
+    selfContained: contiguousScoreSchema,
+    density: contiguousScoreSchema,
+    integrity: contiguousScoreSchema,
+    audio: contiguousScoreSchema,
+    visual: contiguousScoreSchema,
+    duration: contiguousScoreSchema,
+  },
+}
+
+const contiguousExtractionCandidateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'sourceIndexRunId',
+    'sourceMomentId',
+    'sourceMomentHash',
+    'sourceEvaluationId',
+    'sourceEvaluationHash',
+    'sourceRangeMs',
+    'durationMs',
+    'durationDeltaMs',
+    'score',
+    'scoreBreakdown',
+    'evidenceRefs',
+    'candidateHash',
+  ],
+  properties: {
+    sourceIndexRunId: idSchema,
+    sourceMomentId: idSchema,
+    sourceMomentHash: sha256Schema,
+    sourceEvaluationId: idSchema,
+    sourceEvaluationHash: sha256Schema,
+    sourceRangeMs: contiguousRangeMsSchema,
+    durationMs: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 43_200_000,
+    },
+    durationDeltaMs: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 3_600_000,
+    },
+    score: contiguousScoreSchema,
+    scoreBreakdown: contiguousScoreBreakdownSchema,
+    evidenceRefs: {
+      type: 'array',
+      minItems: 5,
+      maxItems: 160,
+      uniqueItems: true,
+      items: idSchema,
+    },
+    candidateHash: sha256Schema,
+  },
+}
+
+const contiguousExtractionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion',
+    'policyVersion',
+    'id',
+    'workspaceId',
+    'projectId',
+    'objective',
+    'topic',
+    'targetDurationMs',
+    'toleranceMs',
+    'candidates',
+    'selectedCandidateHash',
+    'storyPlan',
+    'editPlan',
+    'resultHash',
+    'createdBy',
+    'createdAt',
+  ],
+  properties: {
+    schemaVersion: {
+      const: 'contiguous-extraction-result/v1',
+    },
+    policyVersion: { const: 'contiguous-extraction/v1' },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    objective: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 240,
+    },
+    topic: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 500,
+    },
+    targetDurationMs: {
+      type: 'integer',
+      minimum: 1_000,
+      maximum: 3_600_000,
+    },
+    toleranceMs: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 3_600_000,
+    },
+    candidates: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 10_000,
+      items: contiguousExtractionCandidateSchema,
+    },
+    selectedCandidateHash: sha256Schema,
+    storyPlan: {
+      type: 'object',
+      required: [
+        'schemaVersion',
+        'id',
+        'mode',
+        'sourceRangeId',
+        'objective',
+        'targetDurationMs',
+        'acts',
+        'blocks',
+      ],
+      properties: {
+        schemaVersion: { const: 1 },
+        id: idSchema,
+        mode: { const: 'contiguous' },
+        sourceRangeId: idSchema,
+        objective: { type: 'string' },
+        targetDurationMs: { type: 'object' },
+        acts: { type: 'array', minItems: 1 },
+        blocks: { type: 'array', minItems: 1, maxItems: 1 },
+      },
+    },
+    editPlan: {
+      type: 'object',
+      required: [
+        'schemaVersion',
+        'state',
+        'mode',
+        'id',
+        'storyPlanId',
+        'fps',
+        'durationFrames',
+        'sources',
+        'videoTracks',
+        'synthesizedRanges',
+        'lineageRefs',
+        'movementPolicy',
+        'selectionHash',
+      ],
+      properties: {
+        schemaVersion: { const: 2 },
+        state: { const: 'compiled' },
+        mode: { const: 'contiguous' },
+        id: idSchema,
+        storyPlanId: idSchema,
+        fps: { type: 'integer', minimum: 1, maximum: 120 },
+        durationFrames: { type: 'integer', minimum: 1 },
+        sources: { type: 'array', minItems: 1, maxItems: 1 },
+        videoTracks: { type: 'array', minItems: 1, maxItems: 1 },
+        synthesizedRanges: { const: false },
+        lineageRefs: {
+          type: 'array',
+          minItems: 6,
+          maxItems: 256,
+          items: { type: 'string' },
+        },
+        movementPolicy: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['automaticZoom', 'reason'],
+          properties: {
+            automaticZoom: { const: false },
+            reason: {
+              const: 'contiguous-source-preservation',
+            },
+          },
+        },
+        selectionHash: sha256Schema,
+      },
+    },
+    resultHash: sha256Schema,
+    createdBy: contiguousActorSchema,
+    createdAt: dateTimeSchema,
+  },
+}
 const proofIntegrityOutcomeSchema = {
   enum: ['approved', 'blocked', 'not-applicable'],
 }
@@ -13813,6 +14041,76 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           items: validationEnvelopeReuseRecordSchema,
         },
         nextCursor: idSchema,
+      },
+    }),
+  ),
+  defineSchema(
+    'create-contiguous-extraction-request',
+    1,
+    'Select one semantic long-form window by objective, topic and target duration',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'objective',
+        'topic',
+        'targetDurationMs',
+        'toleranceMs',
+        'fps',
+      ],
+      properties: {
+        objective: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 240,
+        },
+        topic: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 500,
+        },
+        targetDurationMs: {
+          type: 'integer',
+          minimum: 1_000,
+          maximum: 3_600_000,
+        },
+        toleranceMs: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 3_600_000,
+        },
+        fps: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 120,
+        },
+      },
+    },
+  ),
+  defineSchema(
+    'contiguous-extraction-mutated',
+    1,
+    'Created or replayed immutable contiguous extraction',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['extraction', 'replayed'],
+      properties: {
+        extraction: contiguousExtractionSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'contiguous-extraction-read',
+    1,
+    'Read one immutable contiguous extraction',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['extraction'],
+      properties: {
+        extraction: contiguousExtractionSchema,
       },
     }),
   ),

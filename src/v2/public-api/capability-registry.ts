@@ -1794,6 +1794,57 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     ],
   },
   {
+    id: 'apollo.projects.contiguous-extractions.create',
+    version: '1.0.0',
+    title: 'Create a contiguous long-form extraction',
+    description: 'Selects one authorized semantic source window for an objective, topic and target duration and compiles a single-source StoryPlan and EditPlan without multi-range synthesis.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef:
+      'apollo://schemas/create-contiguous-extraction-request/v1',
+    outputSchemaRef:
+      'apollo://schemas/contiguous-extraction-mutated/v1',
+    endpoint: {
+      method: 'POST',
+      path:
+        '/v1/projects/{projectId}/contiguous-extractions',
+    },
+    toolName:
+      'apollo.projects.contiguous-extractions.create',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'required',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.contiguous-extractions.read',
+    version: '1.0.0',
+    title: 'Read a contiguous long-form extraction',
+    description: 'Reads an immutable contiguous extraction with ranked evidence, one source range and its compiled StoryPlan and EditPlan.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef:
+      'apollo://schemas/contiguous-extraction-read/v1',
+    endpoint: {
+      method: 'GET',
+      path:
+        '/v1/projects/{projectId}/contiguous-extractions/{extractionId}',
+    },
+    toolName:
+      'apollo.projects.contiguous-extractions.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.projects.long-form-moments.catalog',
     version: '1.0.0',
     title: 'Catalog hierarchical long-form moments',

@@ -4247,6 +4247,144 @@ const batchEditCommandExample = {
   commandHash: '3'.repeat(64),
 }
 
+const contiguousExtractionRequestExample = {
+  objective: 'education',
+  topic: 'aquisicao por anuncios',
+  targetDurationMs: 120_000,
+  toleranceMs: 15_000,
+  fps: 30,
+}
+const contiguousCandidateHash = 'c'.repeat(64)
+const contiguousExtractionExample = {
+  schemaVersion: 'contiguous-extraction-result/v1',
+  policyVersion: 'contiguous-extraction/v1',
+  id: 'contiguous-extraction-example-1',
+  workspaceId,
+  projectId,
+  objective: contiguousExtractionRequestExample.objective,
+  topic: contiguousExtractionRequestExample.topic,
+  targetDurationMs: contiguousExtractionRequestExample.targetDurationMs,
+  toleranceMs: contiguousExtractionRequestExample.toleranceMs,
+  candidates: [
+    {
+      sourceIndexRunId: longFormIndexRunExample.id,
+      sourceMomentId: longFormMomentTrafficExample.id,
+      sourceMomentHash: longFormMomentTrafficExample.momentHash,
+      sourceEvaluationId: 'contiguous-evaluation-example-1',
+      sourceEvaluationHash: 'b'.repeat(64),
+      sourceRangeMs: [3_495_000, 3_615_000],
+      durationMs: 120_000,
+      durationDeltaMs: 0,
+      score: 0.92,
+      scoreBreakdown: {
+        selfContained: 0.94,
+        density: 0.91,
+        integrity: 0.96,
+        audio: 0.9,
+        visual: 0.89,
+        duration: 1,
+      },
+      evidenceRefs: [
+        'evidence-contiguous-self-contained',
+        'evidence-contiguous-density',
+        'evidence-contiguous-integrity',
+        'evidence-contiguous-audio',
+        'evidence-contiguous-visual',
+      ],
+      candidateHash: contiguousCandidateHash,
+    },
+  ],
+  selectedCandidateHash: contiguousCandidateHash,
+  storyPlan: {
+    schemaVersion: 1,
+    id: 'contiguous-extraction-example-1:story-plan',
+    mode: 'contiguous',
+    sourceRangeId: 'contiguous-extraction-example-1:source-range',
+    objective: contiguousExtractionRequestExample.objective,
+    targetDurationMs: { min: 120_000, max: 120_000 },
+    acts: [
+      {
+        id: 'contiguous-extraction-example-1:development',
+        role: 'development',
+        blockIds: ['contiguous-extraction-example-1:source-block'],
+      },
+    ],
+    blocks: [
+      {
+        id: 'contiguous-extraction-example-1:source-block',
+        actId: 'contiguous-extraction-example-1:development',
+        role: 'argument',
+        intent: contiguousExtractionRequestExample.objective,
+        dependencies: [],
+        sourceCandidateIds: [longFormMomentTrafficExample.id],
+        durationTargetMs: {
+          min: 120_000,
+          ideal: 120_000,
+          max: 120_000,
+        },
+        content: { claimIds: [], qualifierIds: [], proofIds: [] },
+        presentation: 'source-video',
+        sourceRangeId: 'contiguous-extraction-example-1:source-range',
+      },
+    ],
+  },
+  editPlan: {
+    schemaVersion: 2,
+    state: 'compiled',
+    mode: 'contiguous',
+    id: 'contiguous-extraction-example-1:edit-plan',
+    storyPlanId: 'contiguous-extraction-example-1:story-plan',
+    fps: 30,
+    durationFrames: 3_600,
+    sources: [
+      {
+        id: 'contiguous-extraction-example-1:source',
+        artifactId: longFormIndexRunExample.sourceArtifactId,
+        artifactSha256: longFormIndexRunExample.sourceArtifactSha256,
+        manifestId: longFormIndexRunExample.sourceManifestId,
+        manifestHash: longFormIndexRunExample.sourceManifestHash,
+        kind: 'video',
+      },
+    ],
+    videoTracks: [
+      {
+        id: 'contiguous-extraction-example-1:base-video',
+        kind: 'base-video',
+        clips: [
+          {
+            id: 'contiguous-extraction-example-1:clip',
+            sourceArtifactId: longFormIndexRunExample.sourceArtifactId,
+            sourceInFrame: 104_850,
+            sourceOutFrame: 108_450,
+            timelineInFrame: 0,
+            timelineOutFrame: 3_600,
+            rate: 1,
+          },
+        ],
+      },
+    ],
+    synthesizedRanges: false,
+    lineageRefs: [
+      longFormIndexRunExample.id,
+      longFormChapterTrafficExample.id,
+      longFormMomentTrafficExample.id,
+      longFormMomentTrafficExample.momentHash,
+      'contiguous-evaluation-example-1',
+      'b'.repeat(64),
+      rightsSnapshotId,
+      'evidence-contiguous-self-contained',
+    ],
+    movementPolicy: {
+      automaticZoom: false,
+      reason: 'contiguous-source-preservation',
+    },
+    selectionHash: contiguousCandidateHash,
+  },
+  resultHash: 'd'.repeat(64),
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/health-response/v1': [
@@ -6430,6 +6568,24 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           reuses: [validationEnvelopeRecordExample],
           nextCursor: validationEnvelopePlanExample.id,
         },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-contiguous-extraction-request/v1': [
+      contiguousExtractionRequestExample,
+    ],
+    'apollo://schemas/contiguous-extraction-mutated/v1': [
+      {
+        data: {
+          extraction: contiguousExtractionExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/contiguous-extraction-read/v1': [
+      {
+        data: { extraction: contiguousExtractionExample },
         meta: { apiVersion: 'v1' },
       },
     ],

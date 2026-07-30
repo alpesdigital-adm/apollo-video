@@ -219,6 +219,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Declares proof against one exact StoryPlan, selects only currently authorized cataloged EvidenceSegments and persists no provider, render or media materialization work.',
     },
+    'apollo.projects.contiguous-extractions.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Selects one immutable virtual range from trusted persisted evaluations, preserves the source artifact, forbids synthesized ranges and automatic zoom, and starts no provider, render or media materialization work.',
+    },
     'apollo.projects.proof-integrity-runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Evaluates existing ProofNeed, recipe, evidence and current authorization hashes, persists an immutable fail-closed decision and starts no provider, render or media materialization work.',
