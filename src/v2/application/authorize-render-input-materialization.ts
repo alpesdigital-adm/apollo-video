@@ -16,6 +16,8 @@ import type {
   RenderTargetRegistry,
 } from './ports/render-reconstruction-readiness.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import type { WorkspaceLutRepository } from './ports/workspace-lut-repository.ts'
+import { evaluateRenderInputLutRights } from './evaluate-render-input-lut-rights.ts'
 
 function validateId(value: string, field: string): string {
   const normalized = value.trim()
@@ -33,6 +35,7 @@ export function authorizeRenderInputMaterializationService(dependencies: {
   assetAvailability: RenderInputAssetAvailability
   targets: RenderTargetRegistry
   rights: AssetRightsRepository
+  luts: WorkspaceLutRepository
   authorizations: MaterializationAuthorizationRepository
   clock: () => Date
   createId: () => string
@@ -126,7 +129,7 @@ export function authorizeRenderInputMaterializationService(dependencies: {
 
     const rightsByArtifact = await dependencies.rights.findCurrentForArtifacts(
       workspaceId,
-      input.assets.map((asset) => asset.artifactId),
+      input.assets.filter((asset) => asset.kind !== 'lut').map((asset) => asset.artifactId),
     )
     const decisions = []
     for (const asset of input.assets) {
@@ -138,11 +141,9 @@ export function authorizeRenderInputMaterializationService(dependencies: {
           assetKind: asset.kind,
         })
       }
-      const evaluated = evaluateAssetUse(
-        rightsByArtifact.get(asset.artifactId) ?? null,
-        context,
-        now,
-      )
+      const evaluated = asset.kind === 'lut'
+        ? await evaluateRenderInputLutRights(dependencies.luts, workspaceId, asset)
+        : evaluateAssetUse(rightsByArtifact.get(asset.artifactId) ?? null, context, now)
       decisions.push({
         artifactId: asset.artifactId,
         assetOrdinal: asset.ordinal,

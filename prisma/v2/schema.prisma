@@ -1412,6 +1412,8 @@ model V2AssetUseDecision {
   assetOrdinal     Int
   assetKind        String    @db.VarChar(16)
   rightsSnapshotId String?   @db.VarChar(128)
+  policySnapshotId String?   @db.VarChar(128)
+  policySnapshotHash String? @db.Char(64)
   outcome          String    @db.VarChar(16)
   reasonCodesJson  String    @db.Text
   evaluatedAt      DateTime  @db.Timestamptz(3)
@@ -1425,6 +1427,7 @@ model V2AssetUseDecision {
   @@unique([authorizationId, assetOrdinal])
   @@index([workspaceId, artifactId, evaluatedAt(sort: Desc)])
   @@index([workspaceId, rightsSnapshotId])
+  @@index([workspaceId, policySnapshotId])
   @@map("asset_use_decisions")
 }
 

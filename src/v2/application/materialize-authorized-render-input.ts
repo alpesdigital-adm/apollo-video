@@ -18,6 +18,8 @@ import type {
   RenderTargetRegistry,
 } from './ports/render-reconstruction-readiness.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import type { WorkspaceLutRepository } from './ports/workspace-lut-repository.ts'
+import { evaluateRenderInputLutRights } from './evaluate-render-input-lut-rights.ts'
 
 export interface MaterializedRenderInputReceipt {
   schemaVersion: 'materialized-render-input-receipt/v1'
@@ -106,6 +108,7 @@ export function materializeAuthorizedRenderInputService(dependencies: {
   assetAvailability: RenderInputAssetAvailability
   targets: RenderTargetRegistry
   rights: AssetRightsRepository
+  luts: WorkspaceLutRepository
   authorizations: MaterializationAuthorizationRepository
   resolverForWorkspace: (workspaceId: string) => RenderInputAssetResolver
   clock: () => Date
@@ -174,7 +177,7 @@ export function materializeAuthorizedRenderInputService(dependencies: {
     })
     const currentRights = await dependencies.rights.findCurrentForArtifacts(
       workspaceId,
-      input.assets.map((asset) => asset.artifactId),
+      input.assets.filter((asset) => asset.kind !== 'lut').map((asset) => asset.artifactId),
     )
     const snapshotIdentities: Array<{ ordinal: number; id: string; hash: string }> = []
     for (const asset of input.assets) {
@@ -193,21 +196,24 @@ export function materializeAuthorizedRenderInputService(dependencies: {
         revalidationFailure('ASSET_AUTHORIZATION_MISMATCH', asset)
       }
       const snapshot = currentRights.get(asset.artifactId) ?? null
-      const currentDecision = evaluateAssetUse(snapshot, useContext, revalidatedAt)
+      const currentDecision = asset.kind === 'lut'
+        ? await evaluateRenderInputLutRights(dependencies.luts, workspaceId, asset)
+        : evaluateAssetUse(snapshot, useContext, revalidatedAt)
       if (currentDecision.outcome !== 'allow') {
         revalidationFailure('ASSET_RIGHTS_DENIED', asset)
       }
       if (
-        !snapshot ||
-        authorizedDecision.rightsSnapshotId !== snapshot.id ||
-        authorizedDecision.rightsSnapshotHash !== snapshot.snapshotHash
+        !currentDecision.rightsSnapshotId ||
+        !currentDecision.rightsSnapshotHash ||
+        authorizedDecision.rightsSnapshotId !== currentDecision.rightsSnapshotId ||
+        authorizedDecision.rightsSnapshotHash !== currentDecision.rightsSnapshotHash
       ) {
         revalidationFailure('ASSET_RIGHTS_SNAPSHOT_CHANGED', asset)
       }
       snapshotIdentities.push({
         ordinal: asset.ordinal,
-        id: snapshot.id,
-        hash: snapshot.snapshotHash,
+        id: currentDecision.rightsSnapshotId,
+        hash: currentDecision.rightsSnapshotHash,
       })
     }
 

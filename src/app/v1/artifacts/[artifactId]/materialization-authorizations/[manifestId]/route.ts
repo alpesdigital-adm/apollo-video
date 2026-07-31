@@ -10,6 +10,7 @@ import {
   createMediaArtifactQueryRepository,
   createProtectedRenderInputStore,
   createRenderInputAssetAvailability,
+  createWorkspaceLutRepository,
 } from '@/v2/infrastructure/repository-factory'
 import { createConfiguredRenderTargetRegistry } from '@/v2/infrastructure/render-target-registry'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
@@ -81,6 +82,7 @@ export async function POST(
       assetAvailability: createRenderInputAssetAvailability(),
       targets: createConfiguredRenderTargetRegistry(),
       rights: createAssetRightsRepository(),
+      luts: createWorkspaceLutRepository(),
       authorizations: createMaterializationAuthorizationRepository(),
       clock: () => new Date(),
       createId: () => `materialization-auth-${randomUUID()}`,

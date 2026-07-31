@@ -988,7 +988,7 @@ export function createProtectedRenderInputStore(): ProtectedRenderInputStore {
 }
 
 export function createRenderInputAssetAvailability(): RenderInputAssetAvailability {
-  return new PrismaRenderInputAssetAvailability(resolveV2Client())
+  return new PrismaRenderInputAssetAvailability(resolveV2Client(), createWorkspaceLutRepository())
 }
 
 export function createRenderInputAssetResolver(
@@ -1005,6 +1005,7 @@ export function createRenderInputAssetResolver(
   return new LocalArtifactRenderInputResolver(resolveV2Client(), {
     root,
     workspaceId,
+    luts: createWorkspaceLutRepository(),
   })
 }
 
@@ -1018,6 +1019,7 @@ export function createAuthorizedRenderInputMaterializer(
     assetAvailability: createRenderInputAssetAvailability(),
     targets: createConfiguredRenderTargetRegistry(environment),
     rights: createAssetRightsRepository(),
+    luts: createWorkspaceLutRepository(),
     authorizations: createMaterializationAuthorizationRepository(),
     resolverForWorkspace: (workspaceId) =>
       createRenderInputAssetResolver(workspaceId, environment),

@@ -89,7 +89,11 @@ function hydrateAuthorization(row: StoredAuthorization): MaterializationAuthoriz
         ) ||
         (decision.outcome === 'allow' && reasonCodes.length > 0) ||
         (decision.outcome === 'deny' && reasonCodes.length === 0) ||
-        (decision.rightsSnapshotId !== null && !decision.rightsSnapshot)
+        ((decision.policySnapshotId === null) !== (decision.policySnapshotHash === null)) ||
+        (decision.rightsSnapshotId !== null && !decision.rightsSnapshot) ||
+        (decision.assetKind === 'lut' && decision.rightsSnapshotId !== null) ||
+        (decision.assetKind !== 'lut' && decision.rightsSnapshotId !== decision.policySnapshotId) ||
+        (decision.rightsSnapshot?.snapshotHash !== undefined && decision.rightsSnapshot.snapshotHash !== decision.policySnapshotHash)
       ) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Stored asset use decision is invalid')
       }
@@ -99,10 +103,10 @@ function hydrateAuthorization(row: StoredAuthorization): MaterializationAuthoriz
         assetKind: decision.assetKind,
         outcome: decision.outcome as 'allow' | 'deny',
         reasonCodes: reasonCodes as AssetUseDenialCode[],
-        ...(decision.rightsSnapshotId
+        ...(decision.policySnapshotId
           ? {
-              rightsSnapshotId: decision.rightsSnapshotId,
-              rightsSnapshotHash: decision.rightsSnapshot?.snapshotHash,
+              rightsSnapshotId: decision.policySnapshotId,
+              rightsSnapshotHash: decision.policySnapshotHash as string,
             }
           : {}),
         ...(decision.validUntil
@@ -261,7 +265,9 @@ export class PrismaMaterializationAuthorizationRepository
             artifactId: decision.artifactId,
             assetOrdinal: decision.assetOrdinal,
             assetKind: decision.assetKind,
-            rightsSnapshotId: decision.rightsSnapshotId,
+            rightsSnapshotId: decision.assetKind === 'lut' ? undefined : decision.rightsSnapshotId,
+            policySnapshotId: decision.rightsSnapshotId,
+            policySnapshotHash: decision.rightsSnapshotHash,
             outcome: decision.outcome,
             reasonCodesJson: stableSerialize(decision.reasonCodes),
             evaluatedAt: new Date(input.authorization.evaluatedAt),
