@@ -1,21 +1,141 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts';
 import { createExportMatrix, OUTPUT_FORMATS, parseCube, preflightExports, renderExportCell, resolveColorPlan, SDR_COLOR_FIXTURES, selectWorkspaceLut } from '../../src/v2/domain/color-and-export.ts';
 
-const transform = (id, kind, version = '1') => ({ id, kind, version, enabled: true });
+const sourceColor = {
+  colorSpace: 'camera-log',
+  transfer: 'log',
+  primaries: 'bt2020',
+  matrix: 'bt2020-ncl',
+  range: 'limited',
+  bitDepth: 10,
+};
+const workingColor = {
+  colorSpace: 'acescg',
+  transfer: 'linear',
+  primaries: 'aces-ap1',
+  matrix: 'rgb',
+  range: 'full',
+  bitDepth: 16,
+};
+const outputColor = {
+  colorSpace: 'rec709',
+  transfer: 'bt709',
+  primaries: 'bt709',
+  matrix: 'bt709',
+  range: 'limited',
+  bitDepth: 10,
+};
+const transform = (
+  id,
+  kind,
+  input,
+  output,
+  { version = '1', enabled = true, lut, parameters = {} } = {},
+) => ({
+  id,
+  kind,
+  version,
+  enabled,
+  input,
+  output,
+  implementation: {
+    provider: 'apollo',
+    version: '1.0.0',
+    parameters,
+    parametersHash: calculateCanonicalHash(parameters),
+  },
+  ...(lut ? { lut } : {}),
+});
+const basePlan = () => ({
+  schemaVersion: 'color-plan/v1',
+  metadata: sourceColor,
+  outputMetadata: outputColor,
+  global: [
+    transform('technical-log-to-working', 'technical', sourceColor, workingColor),
+    transform('camera-match-reference-a', 'match', workingColor, workingColor),
+    transform(
+      'creative-film-look',
+      'creative-lut',
+      workingColor,
+      workingColor,
+      {
+        lut: {
+          artifactId: 'lut-film-look',
+          sha256: 'a'.repeat(64),
+        },
+      },
+    ),
+    transform('output-rec709', 'output', workingColor, outputColor),
+  ],
+});
 const identityCube = `TITLE \"Identidade ç\"\nLUT_3D_SIZE 2\n0 0 0\n0 0 1\n0 1 0\n0 1 1\n1 0 0\n1 0 1\n1 1 0\n1 1 1`;
 
 test('T-FR-180 compiles the color pipeline in fixed order without duplicate transforms', () => {
-  const output = resolveColorPlan({ metadata: { colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709' }, global: [transform('out', 'output'), transform('tech', 'technical'), transform('lut', 'creative-lut'), transform('match', 'match')] }, {});
-  assert.deepEqual(output.transforms.map(item => item.kind), ['technical', 'match', 'creative-lut', 'output']);
-  assert.match(output.manifestKey, /tech@1/);
+  const plan = basePlan();
+  plan.global.reverse();
+  const output = resolveColorPlan(plan, {});
+  assert.deepEqual(output.stages.map(item => item.kind), ['technical', 'match', 'creative-lut', 'output']);
+  assert.match(output.manifestKey, /technical:technical-log-to-working@1/);
+  assert.equal(output.sourceMetadata.transfer, 'log');
+  assert.equal(output.outputMetadata.transfer, 'bt709');
+  assert.match(output.pipelineHash, /^[a-f0-9]{64}$/);
   assert.equal(SDR_COLOR_FIXTURES.length, 3);
 });
 
 test('T-FR-182 applies deterministic local overrides without changing sibling segments', () => {
-  const plan = { metadata: { colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709' }, global: [transform('base', 'creative-lut')], segments: { a: [transform('warm', 'creative-lut', '2')] } };
-  assert.equal(resolveColorPlan(plan, { segmentId: 'a' }).transforms[0].id, 'warm');
-  assert.equal(resolveColorPlan(plan, { segmentId: 'b' }).transforms[0].id, 'base');
+  const plan = basePlan();
+  plan.segments = {
+    a: [
+      transform(
+        'creative-warm',
+        'creative-lut',
+        workingColor,
+        workingColor,
+        {
+          version: '2',
+          lut: {
+            artifactId: 'lut-warm',
+            sha256: 'b'.repeat(64),
+          },
+        },
+      ),
+    ],
+  };
+  assert.equal(resolveColorPlan(plan, { segmentId: 'a' }).stages[2].id, 'creative-warm');
+  assert.equal(resolveColorPlan(plan, { segmentId: 'b' }).stages[2].id, 'creative-film-look');
+});
+
+test('T-FR-180 rejects duplicate stages, broken color chains and LUT reuse outside its stage', () => {
+  const duplicate = basePlan();
+  duplicate.global.push(
+    transform('technical-again', 'technical', sourceColor, workingColor),
+  );
+  assert.throws(
+    () => resolveColorPlan(duplicate, {}),
+    /cannot apply a color stage twice/,
+  );
+
+  const broken = basePlan();
+  broken.global = broken.global.map((item) =>
+    item.kind === 'output'
+      ? transform('output-broken', 'output', sourceColor, outputColor)
+      : item);
+  assert.throws(
+    () => resolveColorPlan(broken, {}),
+    /input does not match prior output/,
+  );
+
+  const invalidLut = basePlan();
+  invalidLut.global = invalidLut.global.map((item) =>
+    item.kind === 'match'
+      ? { ...item, lut: { artifactId: 'lut-wrong', sha256: 'c'.repeat(64) } }
+      : item);
+  assert.throws(
+    () => resolveColorPlan(invalidLut, {}),
+    /allowed only for an enabled creative LUT/,
+  );
 });
 
 test('T-FR-181 parses valid unicode LUT, rejects malformed LUT and supports explicit none', () => {

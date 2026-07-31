@@ -1,25 +1,295 @@
+import { calculateCanonicalHash } from './canonical-hash.ts'
+import { assertDomain } from './errors.ts'
+
 export const OUTPUT_FORMATS = ['9:16', '16:9', '4:5', '1:1', '21:9'] as const;
 export type OutputFormat = typeof OUTPUT_FORMATS[number];
 
-export type ColorTransform = { id: string; kind: 'technical' | 'match' | 'creative-lut' | 'output'; version: string; enabled: boolean };
-export type ColorMetadata = { colorSpace: string; transfer: string; primaries: string };
+export const COLOR_TRANSFORM_ORDER = [
+  'technical',
+  'match',
+  'creative-lut',
+  'output',
+] as const
+export type ColorTransformKind = typeof COLOR_TRANSFORM_ORDER[number]
+
+export type ColorMetadata = {
+  colorSpace: string
+  transfer: string
+  primaries: string
+  matrix: string
+  range: 'full' | 'limited'
+  bitDepth: number
+}
+
+export type ColorTransform = {
+  id: string
+  kind: ColorTransformKind
+  version: string
+  enabled: boolean
+  input: ColorMetadata
+  output: ColorMetadata
+  implementation: {
+    provider: string
+    version: string
+    parameters: Readonly<Record<string, string | number | boolean>>
+    parametersHash: string
+  }
+  lut?: {
+    artifactId: string
+    sha256: string
+  }
+}
+
 export type ColorPlan = {
-  metadata: ColorMetadata;
-  global: ColorTransform[];
-  sources?: Record<string, ColorTransform[]>;
-  cameras?: Record<string, ColorTransform[]>;
-  segments?: Record<string, ColorTransform[]>;
-};
+  schemaVersion: 'color-plan/v1'
+  metadata: ColorMetadata
+  outputMetadata: ColorMetadata
+  global: ColorTransform[]
+  sources?: Record<string, ColorTransform[]>
+  cameras?: Record<string, ColorTransform[]>
+  segments?: Record<string, ColorTransform[]>
+}
 
-const ORDER: ColorTransform['kind'][] = ['technical', 'match', 'creative-lut', 'output'];
+const TOKEN = /^[a-z0-9][a-z0-9._/-]{0,127}$/
+const SHA_256 = /^[a-f0-9]{64}$/
 
-export function resolveColorPlan(plan: ColorPlan, ref: { sourceId?: string; cameraId?: string; segmentId?: string }) {
-  const layers = [plan.global, ref.sourceId ? plan.sources?.[ref.sourceId] : undefined, ref.cameraId ? plan.cameras?.[ref.cameraId] : undefined, ref.segmentId ? plan.segments?.[ref.segmentId] : undefined];
-  const selected = new Map<ColorTransform['kind'], ColorTransform>();
-  for (const layer of layers) for (const transform of layer ?? []) if (transform.enabled) selected.set(transform.kind, transform);
-  const transforms = ORDER.flatMap(kind => selected.has(kind) ? [selected.get(kind)!] : []);
-  if (new Set(transforms.map(item => item.kind)).size !== transforms.length) throw new Error('duplicate-color-transform');
-  return { metadata: plan.metadata, transforms, manifestKey: transforms.map(item => `${item.id}@${item.version}`).join('>') || 'color:none' };
+function normalizedToken(value: unknown, field: string) {
+  assertDomain(
+    typeof value === 'string' && TOKEN.test(value.trim().toLowerCase()),
+    'INVALID_ARGUMENT',
+    `${field} is invalid`,
+  )
+  return value.trim().toLowerCase()
+}
+
+function normalizedMetadata(
+  value: Readonly<ColorMetadata>,
+  field: string,
+): Readonly<ColorMetadata> {
+  assertDomain(
+    value && typeof value === 'object',
+    'INVALID_ARGUMENT',
+    `${field} is invalid`,
+  )
+  assertDomain(
+    value.range === 'full' || value.range === 'limited',
+    'INVALID_ARGUMENT',
+    `${field}.range is invalid`,
+  )
+  assertDomain(
+    Number.isSafeInteger(value.bitDepth) &&
+      value.bitDepth >= 8 &&
+      value.bitDepth <= 32,
+    'INVALID_ARGUMENT',
+    `${field}.bitDepth is invalid`,
+  )
+  return Object.freeze({
+    colorSpace: normalizedToken(value.colorSpace, `${field}.colorSpace`),
+    transfer: normalizedToken(value.transfer, `${field}.transfer`),
+    primaries: normalizedToken(value.primaries, `${field}.primaries`),
+    matrix: normalizedToken(value.matrix, `${field}.matrix`),
+    range: value.range,
+    bitDepth: value.bitDepth,
+  })
+}
+
+function sameMetadata(
+  left: Readonly<ColorMetadata>,
+  right: Readonly<ColorMetadata>,
+) {
+  return calculateCanonicalHash(left) === calculateCanonicalHash(right)
+}
+
+function normalizedTransform(
+  value: Readonly<ColorTransform>,
+  field: string,
+): Readonly<ColorTransform> {
+  assertDomain(
+    value && typeof value === 'object' &&
+      COLOR_TRANSFORM_ORDER.includes(value.kind),
+    'INVALID_ARGUMENT',
+    `${field}.kind is invalid`,
+  )
+  assertDomain(
+    typeof value.enabled === 'boolean',
+    'INVALID_ARGUMENT',
+    `${field}.enabled is invalid`,
+  )
+  const parameters = value.implementation?.parameters
+  assertDomain(
+    parameters &&
+      typeof parameters === 'object' &&
+      !Array.isArray(parameters) &&
+      Object.entries(parameters).every(([key, nested]) =>
+        TOKEN.test(key) &&
+        (
+          typeof nested === 'string' ||
+          typeof nested === 'boolean' ||
+          (typeof nested === 'number' && Number.isFinite(nested))
+        )),
+    'INVALID_ARGUMENT',
+    `${field}.implementation.parameters is invalid`,
+  )
+  const normalizedParameters = Object.freeze(
+    Object.fromEntries(
+      Object.entries(parameters).sort(([left], [right]) =>
+        left.localeCompare(right)),
+    ),
+  )
+  const parametersHash = String(
+    value.implementation?.parametersHash ?? '',
+  ).trim().toLowerCase()
+  assertDomain(
+    SHA_256.test(parametersHash) &&
+      parametersHash === calculateCanonicalHash(normalizedParameters),
+    'INVALID_ARGUMENT',
+    `${field}.implementation.parametersHash does not match parameters`,
+  )
+  const input = normalizedMetadata(value.input, `${field}.input`)
+  const output = normalizedMetadata(value.output, `${field}.output`)
+  assertDomain(
+    value.enabled || sameMetadata(input, output),
+    'INVALID_ARGUMENT',
+    `${field} disabled stage must be an explicit colorimetric bypass`,
+  )
+  if (value.kind === 'creative-lut' && value.enabled) {
+    assertDomain(
+      value.lut &&
+        TOKEN.test(value.lut.artifactId) &&
+        SHA_256.test(value.lut.sha256),
+      'INVALID_ARGUMENT',
+      `${field}.lut must bind an immutable artifact`,
+    )
+  } else {
+    assertDomain(
+      value.lut === undefined,
+      'INVALID_ARGUMENT',
+      `${field}.lut is allowed only for an enabled creative LUT`,
+    )
+  }
+  return Object.freeze({
+    id: normalizedToken(value.id, `${field}.id`),
+    kind: value.kind,
+    version: normalizedToken(value.version, `${field}.version`),
+    enabled: value.enabled,
+    input,
+    output,
+    implementation: Object.freeze({
+      provider: normalizedToken(
+        value.implementation?.provider,
+        `${field}.implementation.provider`,
+      ),
+      version: normalizedToken(
+        value.implementation?.version,
+        `${field}.implementation.version`,
+      ),
+      parameters: normalizedParameters,
+      parametersHash,
+    }),
+    ...(value.lut
+      ? {
+          lut: Object.freeze({
+            artifactId: normalizedToken(
+              value.lut.artifactId,
+              `${field}.lut.artifactId`,
+            ),
+            sha256: value.lut.sha256,
+          }),
+        }
+      : {}),
+  })
+}
+
+function normalizeLayer(
+  value: readonly Readonly<ColorTransform>[] | undefined,
+  field: string,
+) {
+  const transforms = (value ?? []).map((transform, index) =>
+    normalizedTransform(transform, `${field}[${index}]`))
+  assertDomain(
+    new Set(transforms.map((transform) => transform.kind)).size ===
+      transforms.length,
+    'INVALID_ARGUMENT',
+    `${field} cannot apply a color stage twice`,
+  )
+  return transforms
+}
+
+export function resolveColorPlan(
+  plan: Readonly<ColorPlan>,
+  ref: Readonly<{
+    sourceId?: string
+    cameraId?: string
+    segmentId?: string
+  }>,
+) {
+  assertDomain(
+    plan.schemaVersion === 'color-plan/v1',
+    'INVALID_ARGUMENT',
+    'ColorPlan schemaVersion is invalid',
+  )
+  const sourceMetadata = normalizedMetadata(plan.metadata, 'metadata')
+  const outputMetadata = normalizedMetadata(
+    plan.outputMetadata,
+    'outputMetadata',
+  )
+  const layers = [
+    normalizeLayer(plan.global, 'global'),
+    ...(ref.sourceId
+      ? [normalizeLayer(plan.sources?.[ref.sourceId], `sources.${ref.sourceId}`)]
+      : []),
+    ...(ref.cameraId
+      ? [normalizeLayer(plan.cameras?.[ref.cameraId], `cameras.${ref.cameraId}`)]
+      : []),
+    ...(ref.segmentId
+      ? [normalizeLayer(plan.segments?.[ref.segmentId], `segments.${ref.segmentId}`)]
+      : []),
+  ]
+  const selected = new Map<ColorTransformKind, Readonly<ColorTransform>>()
+  for (const layer of layers) {
+    for (const transform of layer) selected.set(transform.kind, transform)
+  }
+  assertDomain(
+    COLOR_TRANSFORM_ORDER.every((kind) => selected.has(kind)),
+    'INVALID_ARGUMENT',
+    'ColorPlan must resolve every color stage explicitly',
+  )
+  const transforms = Object.freeze(
+    COLOR_TRANSFORM_ORDER.map((kind) => selected.get(kind)!),
+  )
+  let current = sourceMetadata
+  for (const transform of transforms) {
+    assertDomain(
+      sameMetadata(current, transform.input),
+      'INVALID_ARGUMENT',
+      `Color stage ${transform.kind} input does not match prior output`,
+    )
+    current = transform.output
+  }
+  assertDomain(
+    sameMetadata(current, outputMetadata),
+    'INVALID_ARGUMENT',
+    'Color pipeline output does not match ColorPlan output metadata',
+  )
+  const content = Object.freeze({
+    schemaVersion: 'resolved-color-pipeline/v1' as const,
+    sourceMetadata,
+    outputMetadata,
+    stages: transforms,
+    target: Object.freeze({
+      ...(ref.sourceId ? { sourceId: normalizedToken(ref.sourceId, 'sourceId') } : {}),
+      ...(ref.cameraId ? { cameraId: normalizedToken(ref.cameraId, 'cameraId') } : {}),
+      ...(ref.segmentId ? { segmentId: normalizedToken(ref.segmentId, 'segmentId') } : {}),
+    }),
+  })
+  return Object.freeze({
+    ...content,
+    manifestKey: transforms
+      .map((item) =>
+        `${item.kind}:${item.id}@${item.version}:${item.implementation.parametersHash}`)
+      .join('>'),
+    pipelineHash: calculateCanonicalHash(content),
+  })
 }
 
 export type LutRecord = { id: string; name: string; owner: string; license: string; tags: string[]; version: number; active: boolean; cube: string };
