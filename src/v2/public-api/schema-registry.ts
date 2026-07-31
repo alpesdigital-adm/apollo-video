@@ -5295,6 +5295,30 @@ const commandImpactSchema = {
     impactHash: sha256Schema,
   },
 }
+const commandArtifactInvalidationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'status', 'commandId', 'baseVersionId', 'resultVersionId',
+    'artifactId', 'kind', 'variantId', 'dependencyTypes', 'affectedRanges',
+    'impactHash', 'createdAt',
+  ],
+  properties: {
+    schemaVersion: { const: 'command-artifact-invalidation/v1' },
+    id: sha256Schema,
+    status: { const: 'stale' },
+    commandId: idSchema,
+    baseVersionId: idSchema,
+    resultVersionId: idSchema,
+    artifactId: idSchema,
+    kind: { enum: ['proxy', 'final'] },
+    variantId: idSchema,
+    dependencyTypes: commandImpactSchema.properties.dependencyTypes,
+    affectedRanges: commandImpactSchema.properties.affectedRanges,
+    impactHash: sha256Schema,
+    createdAt: dateTimeSchema,
+  },
+}
 const versionComparisonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -16422,6 +16446,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     }),
   ),
   defineSchema('command-impact', 1, 'Content-addressed dependency impact persisted with a V2 Command', commandImpactSchema),
+  defineSchema('command-artifact-invalidation', 1, 'Version-scoped stale relationship between a V2 Command and an affected historical output', commandArtifactInvalidationSchema),
   defineSchema('apply-project-manual-edit-request', 1, 'Apply, undo, redo or restore a scoped manual edit', {
     type: 'object',
     additionalProperties: false,
@@ -16505,6 +16530,20 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         },
         operation: publicOperationSchemaV3,
         replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-artifact-invalidations', 1, 'Version-scoped stale output relationships for one immutable project version',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['projectId', 'resultVersionId', 'invalidations'],
+      properties: {
+        projectId: idSchema,
+        resultVersionId: idSchema,
+        invalidations: {
+          type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema,
+        },
       },
     }),
   ),

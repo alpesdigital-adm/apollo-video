@@ -7,6 +7,7 @@ import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type {
+  CommandArtifactInvalidationV1,
   CommandImpactOutputReference,
   CommandImpactV1,
 } from '../../domain/command-impact.ts'
@@ -49,6 +50,7 @@ export interface ManualEditResult {
   }>
   replayed: boolean
   impact?: Readonly<CommandImpactV1>
+  invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
 }
 
 export interface ManualEditCommit {
@@ -59,6 +61,12 @@ export interface ManualEditCommit {
   event: Readonly<PublicEvent>
   comparison: ManualEditResult['comparison']
   impact: Readonly<CommandImpactV1>
+}
+
+export interface ManualEditInvalidationView {
+  projectId: string
+  resultVersionId: string
+  invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
 }
 
 export interface ManualEditRepository {
@@ -72,5 +80,10 @@ export interface ManualEditRepository {
     projectId: string
     targetVersionId?: string
   }): Promise<Readonly<ManualEditContext> | null>
+  readArtifactInvalidations(input: {
+    workspaceId: string
+    projectId: string
+    resultVersionId?: string
+  }): Promise<Readonly<ManualEditInvalidationView> | null>
   commitOrReplay(bundle: ManualEditCommit): Promise<ManualEditResult>
 }

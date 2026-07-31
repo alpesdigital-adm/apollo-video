@@ -20,7 +20,9 @@ import {
 import { createProjectVersion } from '../../domain/project-version.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import {
+  createCommandArtifactInvalidations,
   normalizeCommandImpactOutputReferences,
+  parseCommandArtifactInvalidation,
   parseCommandImpact,
 } from '../../domain/command-impact.ts'
 
@@ -32,8 +34,11 @@ type StoredManualCommand = Prisma.V2EditCommandGetPayload<{
   include: {
     baseVersion: { include: { editPlanSnapshot: true } }
     resultVersion: { include: { editPlanSnapshot: true } }
+    artifactInvalidations: true
   }
 }>
+
+type StoredInvalidation = Prisma.V2CommandArtifactInvalidationGetPayload<{}>
 
 function parseRecord(value: string, field: string): Record<string, unknown> {
   try {
@@ -43,6 +48,34 @@ function parseRecord(value: string, field: string): Record<string, unknown> {
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
   }
+}
+
+function parseArray(value: string, field: string): readonly unknown[] {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!Array.isArray(parsed)) throw new Error('invalid')
+    return parsed
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
+  }
+}
+
+function hydrateInvalidation(item: StoredInvalidation) {
+  return parseCommandArtifactInvalidation({
+    schemaVersion: 'command-artifact-invalidation/v1',
+    id: item.id,
+    status: item.status,
+    commandId: item.commandId,
+    baseVersionId: item.baseVersionId,
+    resultVersionId: item.resultVersionId,
+    artifactId: item.artifactId,
+    kind: item.kind,
+    variantId: item.variantId,
+    dependencyTypes: parseArray(item.dependencyTypesJson, 'artifact invalidation dependencies'),
+    affectedRanges: parseArray(item.affectedRangesJson, 'artifact invalidation ranges'),
+    impactHash: item.impactHash,
+    createdAt: item.createdAt.toISOString(),
+  })
 }
 
 function hydrateVersion(row: VersionWithPlan): Readonly<ManualEditVersionRecord> {
@@ -124,6 +157,21 @@ function hydrateStoredCommand(
   ) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Command impact identity is inconsistent')
   }
+  const invalidations = impact
+    ? Object.freeze(createCommandArtifactInvalidations({
+        impact,
+        createdAt: row.createdAt.toISOString(),
+      }).toSorted((left, right) => left.id.localeCompare(right.id)))
+    : Object.freeze([])
+  const storedInvalidations = row.artifactInvalidations
+    .map(hydrateInvalidation)
+    .toSorted((left, right) => left.id.localeCompare(right.id))
+  if (stableSerialize(storedInvalidations) !== stableSerialize(invalidations)) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored Command artifact invalidations are inconsistent',
+    )
+  }
   return Object.freeze({
     command,
     version: resultVersion.version,
@@ -144,6 +192,7 @@ function hydrateStoredCommand(
     }),
     replayed,
     ...(impact ? { impact } : {}),
+    invalidations,
   })
 }
 
@@ -168,6 +217,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
       include: {
         baseVersion: { include: { editPlanSnapshot: true } },
         resultVersion: { include: { editPlanSnapshot: true } },
+        artifactInvalidations: true,
       },
     })
     if (!row) return null
@@ -214,7 +264,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
           projectVersionId: current.version.id,
-          operation: { status: 'completed' },
+          operation: { status: 'succeeded', phase: 'completed' },
         },
         select: { outputArtifactId: true },
       }),
@@ -223,7 +273,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
           projectVersionId: current.version.id,
-          operation: { status: 'completed' },
+          operation: { status: 'succeeded', phase: 'completed' },
         },
         select: { outputArtifactId: true, outputAspectRatio: true },
       }),
@@ -288,6 +338,43 @@ export class PrismaManualEditRepository implements ManualEditRepository {
     })
   }
 
+  async readArtifactInvalidations(input: {
+    workspaceId: string
+    projectId: string
+    resultVersionId?: string
+  }) {
+    const project = await this.client.v2Project.findFirst({
+      where: { id: input.projectId, workspaceId: input.workspaceId },
+      select: { currentVersionId: true },
+    })
+    if (!project?.currentVersionId) return null
+    const resultVersionId = input.resultVersionId ?? project.currentVersionId
+    if (input.resultVersionId) {
+      const version = await this.client.v2ProjectVersion.findFirst({
+        where: {
+          id: resultVersionId,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+        },
+        select: { id: true },
+      })
+      if (!version) return null
+    }
+    const rows = await this.client.v2CommandArtifactInvalidation.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        resultVersionId,
+      },
+      orderBy: { id: 'asc' },
+    })
+    return Object.freeze({
+      projectId: input.projectId,
+      resultVersionId,
+      invalidations: Object.freeze(rows.map(hydrateInvalidation)),
+    })
+  }
+
   async commitOrReplay(
     bundle: ManualEditCommit,
     serializationAttempt = 1,
@@ -306,6 +393,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
           include: {
             baseVersion: { include: { editPlanSnapshot: true } },
             resultVersion: { include: { editPlanSnapshot: true } },
+            artifactInvalidations: true,
           },
         })
         if (existing) {
@@ -361,7 +449,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
               workspaceId: bundle.command.workspaceId,
               projectId: bundle.command.projectId,
               projectVersionId: bundle.command.baseVersionId,
-              operation: { status: 'completed' },
+              operation: { status: 'succeeded', phase: 'completed' },
             },
             select: { outputArtifactId: true },
           }),
@@ -370,7 +458,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
               workspaceId: bundle.command.workspaceId,
               projectId: bundle.command.projectId,
               projectVersionId: bundle.command.baseVersionId,
-              operation: { status: 'completed' },
+              operation: { status: 'succeeded', phase: 'completed' },
             },
             select: { outputArtifactId: true, outputAspectRatio: true },
           }),
@@ -449,6 +537,30 @@ export class PrismaManualEditRepository implements ManualEditRepository {
             createdAt: new Date(bundle.version.createdAt),
           },
         })
+        const invalidations = createCommandArtifactInvalidations({
+          impact: bundle.impact,
+          createdAt: bundle.command.createdAt,
+        })
+        if (invalidations.length > 0) {
+          await transaction.v2CommandArtifactInvalidation.createMany({
+            data: invalidations.map((invalidation) => ({
+              id: invalidation.id,
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              commandId: invalidation.commandId,
+              baseVersionId: invalidation.baseVersionId,
+              resultVersionId: invalidation.resultVersionId,
+              artifactId: invalidation.artifactId,
+              kind: invalidation.kind,
+              variantId: invalidation.variantId,
+              status: invalidation.status,
+              dependencyTypesJson: stableSerialize(invalidation.dependencyTypes),
+              affectedRangesJson: stableSerialize(invalidation.affectedRanges),
+              impactHash: invalidation.impactHash,
+              createdAt: new Date(invalidation.createdAt),
+            })),
+          })
+        }
         const updated = await transaction.v2Project.updateMany({
           where: {
             id: bundle.command.projectId,
@@ -483,6 +595,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
           include: {
             baseVersion: { include: { editPlanSnapshot: true } },
             resultVersion: { include: { editPlanSnapshot: true } },
+            artifactInvalidations: true,
           },
         })
         const result = hydrateStoredCommand(stored, false)

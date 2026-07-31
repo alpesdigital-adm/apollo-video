@@ -42,6 +42,22 @@ export interface CommandImpactV1 {
   impactHash: string
 }
 
+export interface CommandArtifactInvalidationV1 {
+  schemaVersion: 'command-artifact-invalidation/v1'
+  id: string
+  status: 'stale'
+  commandId: string
+  baseVersionId: string
+  resultVersionId: string
+  artifactId: string
+  kind: 'proxy' | 'final'
+  variantId: string
+  dependencyTypes: readonly CommandImpactDependency[]
+  affectedRanges: readonly Readonly<CommandImpactRange>[]
+  impactHash: string
+  createdAt: string
+}
+
 function outputReferenceKey(value: CommandImpactOutputReference): string {
   return `${value.kind}:${value.artifactId}:${value.sourceVersionId}:${value.variantId}`
 }
@@ -269,6 +285,81 @@ export function createManualCommandImpact(input: {
     renderSemanticsChanged: classification.renderSemanticsChanged,
   }
   return Object.freeze({ ...body, impactHash: calculateCanonicalHash(body) })
+}
+
+export function createCommandArtifactInvalidations(input: {
+  impact: Readonly<CommandImpactV1>
+  createdAt: string
+}): readonly Readonly<CommandArtifactInvalidationV1>[] {
+  const impact = parseCommandImpact(input.impact)
+  assertDomain(
+    Number.isFinite(Date.parse(input.createdAt)) && new Date(input.createdAt).toISOString() === input.createdAt,
+    'INVALID_ARGUMENT',
+    'Command artifact invalidation createdAt is invalid',
+  )
+  return Object.freeze(impact.affectedArtifacts.map((artifact) => {
+    const identity = {
+      schemaVersion: 'command-artifact-invalidation/v1' as const,
+      status: 'stale' as const,
+      commandId: impact.commandId,
+      baseVersionId: impact.baseVersionId,
+      resultVersionId: impact.resultVersionId,
+      artifactId: artifact.artifactId,
+      kind: artifact.kind,
+      variantId: artifact.variantId,
+      dependencyTypes: impact.dependencyTypes,
+      affectedRanges: impact.affectedRanges,
+      impactHash: impact.impactHash,
+      createdAt: input.createdAt,
+    }
+    return deepFreeze({ ...identity, id: calculateCanonicalHash(identity) })
+  }))
+}
+
+export function parseCommandArtifactInvalidation(
+  value: unknown,
+): Readonly<CommandArtifactInvalidationV1> {
+  const stored = record(value, 'Command artifact invalidation')
+  exactKeys(stored, [
+    'schemaVersion', 'id', 'status', 'commandId', 'baseVersionId', 'resultVersionId',
+    'artifactId', 'kind', 'variantId', 'dependencyTypes', 'affectedRanges',
+    'impactHash', 'createdAt',
+  ], 'Command artifact invalidation')
+  const invalidation = stored as unknown as CommandArtifactInvalidationV1
+  assertDomain(
+    invalidation.schemaVersion === 'command-artifact-invalidation/v1' &&
+      /^[a-f0-9]{64}$/.test(invalidation.id) &&
+      invalidation.status === 'stale' &&
+      validId(invalidation.commandId) && validId(invalidation.baseVersionId) &&
+      validId(invalidation.resultVersionId) && validId(invalidation.artifactId) &&
+      ['proxy', 'final'].includes(invalidation.kind) && validId(invalidation.variantId) &&
+      Array.isArray(invalidation.dependencyTypes) &&
+      invalidation.dependencyTypes.every((item) => DEPENDENCIES.has(item)) &&
+      new Set(invalidation.dependencyTypes).size === invalidation.dependencyTypes.length &&
+      Array.isArray(invalidation.affectedRanges) && invalidation.affectedRanges.length > 0 &&
+      /^[a-f0-9]{64}$/.test(invalidation.impactHash) &&
+      Number.isFinite(Date.parse(invalidation.createdAt)) &&
+      new Date(invalidation.createdAt).toISOString() === invalidation.createdAt,
+    'PERSISTENCE_CONFLICT',
+    'Stored Command artifact invalidation is invalid',
+  )
+  for (const rangeValue of invalidation.affectedRanges) {
+    const range = record(rangeValue, 'Command artifact invalidation range')
+    exactKeys(range, ['startFrame', 'endFrame'], 'Command artifact invalidation range')
+    assertDomain(
+      Number.isSafeInteger(range.startFrame) && Number.isSafeInteger(range.endFrame) &&
+        Number(range.startFrame) >= 0 && Number(range.endFrame) > Number(range.startFrame),
+      'PERSISTENCE_CONFLICT',
+      'Stored Command artifact invalidation range is invalid',
+    )
+  }
+  const { id, ...identity } = invalidation
+  assertDomain(
+    calculateCanonicalHash(identity) === id,
+    'PERSISTENCE_CONFLICT',
+    'Stored Command artifact invalidation hash is invalid',
+  )
+  return deepFreeze(invalidation)
 }
 
 export function normalizeCommandImpactOutputReferences(

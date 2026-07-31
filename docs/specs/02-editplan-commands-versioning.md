@@ -573,6 +573,17 @@ O primeiro adapter integrado cobre `manual-edit`; expandir o mesmo contrato
 para Commands editoriais, Diretor, batch e transcript é obrigatório antes de
 considerar FR-233 concluído.
 
+Para `manual-edit`, cada output do mapa também cria atomicamente uma relação
+normalizada `command-artifact-invalidation/v1`, identificada por hash canônico
+e ligada por FK ao Command, à versão-base, à versão-resultado e ao artifact. A
+relação carrega `stale`, variant, dependências, ranges e `impactHash`. Nenhuma
+linha é criada para seleção sem mudança de render ou para outra variant. O
+status global de `V2MediaArtifact` não muda: o artifact continua válido para a
+versão que o produziu. A capability aditiva
+`apollo.projects.artifact-invalidations.read` devolve as mesmas relações sem
+alterar `manual-edits.apply/v1`; replay precisa rejeitar qualquer divergência
+entre payload e linhas.
+
 ## 24. Matriz de invalidação
 
 | Command | Invalida | Não invalida |

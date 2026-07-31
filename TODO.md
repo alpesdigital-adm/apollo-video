@@ -478,8 +478,8 @@ Este gate reabre honestamente o aceite da interface e da primeira edição real.
 
 ### F0.027 — Partial invalidation [FR-233]
 
-- [ ] Mapear cada command aos ranges, variants e artifacts afetados. Parcial F0-027: `manual-edit` agora persiste `command-impact/v1` content-addressed no payload v2 do mesmo `V2EditCommand`, com ranges frame-first, formato configurado, dependências, outputs proxy/final concluídos da versão-base e render mínimo esperado; o commit relê esses outputs na transação e falha se o conjunto mudar. Demais command types, stale normalizado e execução por range continuam abertos. Evidência: T-FR-233 e ADR-133.
-- [ ] Marcar somente dependentes como stale. Evidência: T-FR-233 e ADR-133.
+- [ ] Mapear cada command aos ranges, variants e artifacts afetados. Parcial F0-027: `manual-edit` agora persiste `command-impact/v1` content-addressed no payload v2 do mesmo `V2EditCommand`, com ranges frame-first, formato configurado, dependências, outputs proxy/final concluídos da versão-base e render mínimo esperado; o commit relê esses outputs na transação e falha se o conjunto mudar. Demais command types e execução por range continuam abertos. Evidência: T-FR-233 e ADR-133.
+- [ ] Marcar somente dependentes como stale. Parcial F0-027: o commit serializável de `manual-edit` grava `command-artifact-invalidation/v1` normalizado somente para os outputs exatos do mapa, ligado a Command, versão-base, versão-resultado e artifact; bytes históricos mantêm `V2MediaArtifact.status=available`. Replay e a capability aditiva `apollo.projects.artifact-invalidations.read` reidratam as relações e detectam divergência sem quebrar `manual-edits.apply/v1`. Faltam os demais Command types, resolução após rerender, E2E PostgreSQL executado, deploy e aceite. Evidência: T-FR-233 e ADR-133.
 - [ ] Enfileirar proxy/range render mínimo e manter outputs válidos. Evidência: T-FR-233 e ADR-133.
 - [ ] Testar alteração de legenda, crop, B-roll e source transcript. Evidência: T-FR-233 e ADR-133.
 

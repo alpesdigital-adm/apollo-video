@@ -51,6 +51,7 @@ model V2Workspace {
   webhookEndpointActivationLeases V2WebhookEndpointActivationLease[]
   webhookReplayReceipts           V2WebhookReplayReceipt[]
   editCommands                    V2EditCommand[]
+  commandArtifactInvalidations    V2CommandArtifactInvalidation[]
   directorRuns                    V2DirectorRun[]
   reviewAnnotations               V2ReviewAnnotation[]
   renderElementMaps               V2RenderElementMap[]
@@ -314,6 +315,7 @@ model V2Project {
   proxyRenderOperations         V2ProjectProxyRenderOperation[]
   finalExportOperations         V2ProjectFinalExportOperation[]
   editCommands                  V2EditCommand[]
+  commandArtifactInvalidations  V2CommandArtifactInvalidation[]
   directorRuns                  V2DirectorRun[]
   reviewAnnotations             V2ReviewAnnotation[]
   renderElementMaps             V2RenderElementMap[]
@@ -468,6 +470,8 @@ model V2ProjectVersion {
   mvpCoreGatesAsCompanion V2MvpCoreGate[]                 @relation("MvpCoreGateCompanionVersion")
   lutSelectionsAsBase     V2ProjectLutSelection[]          @relation("ProjectLutSelectionBase")
   lutSelectionAsResult    V2ProjectLutSelection?           @relation("ProjectLutSelectionResult")
+  artifactInvalidationsAsBase   V2CommandArtifactInvalidation[] @relation("ArtifactInvalidationBaseVersion")
+  artifactInvalidationsAsResult V2CommandArtifactInvalidation[] @relation("ArtifactInvalidationResultVersion")
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -500,12 +504,44 @@ model V2EditCommand {
   resultVersion V2ProjectVersion? @relation("CommandResultVersion")
   directorRun   V2DirectorRun?    @relation("DirectorRunCommand")
   lutSelection  V2ProjectLutSelection?
+  artifactInvalidations V2CommandArtifactInvalidation[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, baseVersionId])
   @@map("edit_commands")
+}
+
+model V2CommandArtifactInvalidation {
+  id                  String   @id @db.Char(64)
+  workspaceId         String   @db.VarChar(128)
+  projectId           String   @db.VarChar(128)
+  commandId           String   @db.VarChar(128)
+  baseVersionId       String   @db.VarChar(128)
+  resultVersionId     String   @db.VarChar(128)
+  artifactId          String   @db.VarChar(128)
+  kind                String   @db.VarChar(16)
+  variantId           String   @db.VarChar(128)
+  status              String   @default("stale") @db.VarChar(16)
+  dependencyTypesJson String   @db.Text
+  affectedRangesJson  String   @db.Text
+  impactHash          String   @db.Char(64)
+  createdAt           DateTime @db.Timestamptz(3)
+
+  workspace     V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project       V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  command       V2EditCommand    @relation(fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  baseVersion   V2ProjectVersion @relation("ArtifactInvalidationBaseVersion", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  resultVersion V2ProjectVersion @relation("ArtifactInvalidationResultVersion", fields: [resultVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  artifact      V2MediaArtifact  @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([commandId, artifactId])
+  @@index([workspaceId, projectId, resultVersionId, status])
+  @@index([workspaceId, artifactId, status])
+  @@index([workspaceId, impactHash])
+  @@map("command_artifact_invalidations")
 }
 
 model V2ReviewAnnotation {
@@ -793,6 +829,7 @@ model V2MediaArtifact {
   proofModeSourcePlans         V2ProofModePlan[]                @relation("ProofModeSourceArtifact")
   colorProbes                  V2MediaColorProbe[]
   colorPipelineCompilations    V2ColorPipelineCompilation[]
+  commandArtifactInvalidations V2CommandArtifactInvalidation[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])

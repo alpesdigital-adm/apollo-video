@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { applyManualEditService } from '../../src/v2/application/manual-edit.ts'
+import {
+  applyManualEditService,
+  readArtifactInvalidationsService,
+} from '../../src/v2/application/manual-edit.ts'
 import { timelineViewModelFromEditPlan } from '../../src/v2/domain/manual-editing.ts'
 import {
+  createCommandArtifactInvalidations,
   createManualCommandImpact,
+  parseCommandArtifactInvalidation,
   parseCommandImpact,
 } from '../../src/v2/domain/command-impact.ts'
 import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
@@ -79,6 +84,17 @@ test('T-FR-233 manual subtitle impact scopes exact range, variant and historical
     kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 90 }],
   }])
   assert.equal(value.impactHash.length, 64)
+  const invalidations = createCommandArtifactInvalidations({ impact: value, createdAt })
+  assert.equal(invalidations.length, 2)
+  assert.deepEqual(invalidations.map((item) => [item.artifactId, item.status]), [
+    ['artifact-final-9x16', 'stale'], ['artifact-proxy-9x16', 'stale'],
+  ])
+  assert.ok(invalidations.every((item) => item.resultVersionId === resultVersionId))
+  assert.ok(invalidations.every((item) => item.id.length === 64))
+  assert.throws(
+    () => parseCommandArtifactInvalidation({ ...invalidations[0], status: 'available' }),
+    (error) => error.code === 'PERSISTENCE_CONFLICT',
+  )
 })
 
 test('T-FR-233 timing impact extends through shifted downstream frames while selection avoids render', () => {
@@ -100,6 +116,7 @@ test('T-FR-233 timing impact extends through shifted downstream frames while sel
   assert.deepEqual(selection.affectedArtifacts, [])
   assert.deepEqual(selection.affectedVariantIds, [])
   assert.deepEqual(selection.minimalRenders, [])
+  assert.deepEqual(createCommandArtifactInvalidations({ impact: selection, createdAt }), [])
 })
 
 test('T-FR-233 persisted impact is content-addressed and rejects tampering', () => {
@@ -146,6 +163,10 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
           }),
           comparison: bundle.comparison,
           impact: bundle.impact,
+          invalidations: createCommandArtifactInvalidations({
+            impact: bundle.impact,
+            createdAt: bundle.command.createdAt,
+          }),
           replayed: false,
         }
       },
@@ -202,6 +223,92 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
     () => driftRepository.commitOrReplay(committed),
     (error) => error.code === 'VERSION_CONFLICT' && /outputs changed/.test(error.message),
   )
+
+  let persistedInvalidations = []
+  const baseVersionRow = {
+    id: baseVersionId, workspaceId, projectId, sequence: 1, parentVersionId: null,
+    briefSnapshotId: 'snapshot-brief-1', treatmentSnapshotId: null, storySnapshotId: null,
+    editPlanSnapshotId: 'snapshot-edit-1', policiesSnapshotId: 'snapshot-policy-1',
+    baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', commandId: null,
+    createdAt: new Date(createdAt),
+    editPlanSnapshot: { contentJson: JSON.stringify(basePlan), contentHash: 'b'.repeat(64) },
+  }
+  const resultPlan = JSON.parse(committed.snapshot.contentJson)
+  const resultVersionRow = {
+    id: committed.version.id, workspaceId, projectId, sequence: committed.version.sequence,
+    parentVersionId: committed.version.parentVersionId,
+    briefSnapshotId: committed.version.snapshotRefs.brief,
+    treatmentSnapshotId: null, storySnapshotId: null,
+    editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
+    policiesSnapshotId: committed.version.snapshotRefs.policies,
+    baseHash: committed.version.baseHash, createdBy: committed.version.createdBy,
+    commandId: committed.command.id, createdAt: new Date(committed.version.createdAt),
+    editPlanSnapshot: {
+      contentJson: JSON.stringify(resultPlan), contentHash: committed.snapshot.contentHash,
+    },
+  }
+  const persistedRepository = new PrismaManualEditRepository({
+    async $transaction(callback) {
+      const transaction = {
+        v2EditCommand: {
+          async findUnique() { return null },
+          async create() {},
+          async findUniqueOrThrow() {
+            return {
+              id: committed.command.id, workspaceId, projectId,
+              baseVersionId, baseHash: committed.command.baseHash,
+              type: 'manual-edit', scopeJson: JSON.stringify(committed.command.scope),
+              payloadJson: JSON.stringify(committed.command.payload), reason: null,
+              actorType: committed.command.author.type, actorId: committed.command.author.id,
+              delegatedUserId: null, idempotencyKey: committed.command.idempotencyKey,
+              requestFingerprint: committed.requestFingerprint,
+              createdAt: new Date(committed.command.createdAt),
+              baseVersion: baseVersionRow, resultVersion: resultVersionRow,
+              artifactInvalidations: persistedInvalidations,
+            }
+          },
+        },
+        v2Project: {
+          async findFirst() { return {
+            format: '9:16', currentVersion: { id: baseVersionId, baseHash: 'a'.repeat(64), sequence: 1 },
+          } },
+          async updateMany() { return { count: 1 } },
+        },
+        v2ProjectProxyRenderOperation: { async findMany() { return [{ outputArtifactId: 'artifact-proxy-9x16' }] } },
+        v2ProjectFinalExportOperation: { async findMany() { return [{ outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' }] } },
+        v2ProjectSnapshot: { async create() {} },
+        v2ProjectVersion: { async create() {} },
+        v2CommandArtifactInvalidation: { async createMany({ data }) { persistedInvalidations = data } },
+        v2PublicEventOutbox: { async create() {} },
+      }
+      return callback(transaction)
+    },
+  })
+  const persisted = await persistedRepository.commitOrReplay(committed)
+  assert.deepEqual(persisted.invalidations.map((item) => item.artifactId), [
+    'artifact-final-9x16', 'artifact-proxy-9x16',
+  ])
+  assert.equal(persistedInvalidations.length, 2)
+  assert.ok(persistedInvalidations.every((item) => item.status === 'stale'))
+  assert.ok(persistedInvalidations.every((item) => item.resultVersionId === resultVersionId))
+
+  let invalidationQuery
+  const queryRepository = new PrismaManualEditRepository({
+    v2Project: { async findFirst() { return { currentVersionId: resultVersionId } } },
+    v2ProjectVersion: { async findFirst() { return { id: resultVersionId } } },
+    v2CommandArtifactInvalidation: { async findMany(query) {
+      invalidationQuery = query
+      return persistedInvalidations
+    } },
+  })
+  const view = await readArtifactInvalidationsService({ repository: queryRepository })({
+    workspaceId, projectId, resultVersionId,
+  })
+  assert.equal(view.resultVersionId, resultVersionId)
+  assert.deepEqual(view.invalidations.map((item) => item.artifactId), [
+    'artifact-final-9x16', 'artifact-proxy-9x16',
+  ])
+  assert.deepEqual(invalidationQuery.where, { workspaceId, projectId, resultVersionId })
 })
 
 test('T-FR-233 Prisma context discovers only completed proxy/final outputs for the immutable base', async () => {
@@ -243,6 +350,6 @@ test('T-FR-233 Prisma context discovers only completed proxy/final outputs for t
     assert.equal(query.where.workspaceId, workspaceId)
     assert.equal(query.where.projectId, projectId)
     assert.equal(query.where.projectVersionId, baseVersionId)
-    assert.deepEqual(query.where.operation, { status: 'completed' })
+    assert.deepEqual(query.where.operation, { status: 'succeeded', phase: 'completed' })
   }
 })

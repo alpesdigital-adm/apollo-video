@@ -58,6 +58,34 @@ export function readManualTimelineService(dependencies: {
   }
 }
 
+export function readArtifactInvalidationsService(dependencies: {
+  repository: ManualEditRepository
+}) {
+  return async function read(input: {
+    workspaceId: string
+    projectId: string
+    resultVersionId?: string
+  }) {
+    const workspaceId = identity(input.workspaceId, 'workspaceId')
+    const projectId = identity(input.projectId, 'projectId')
+    const resultVersionId = input.resultVersionId
+      ? identity(input.resultVersionId, 'resultVersionId')
+      : undefined
+    const result = await dependencies.repository.readArtifactInvalidations({
+      workspaceId,
+      projectId,
+      ...(resultVersionId ? { resultVersionId } : {}),
+    })
+    if (!result) {
+      throw new DomainError(
+        'PROJECT_NOT_FOUND',
+        'Project version artifact invalidations were not found',
+      )
+    }
+    return result
+  }
+}
+
 export function applyManualEditService(dependencies: {
   repository: ManualEditRepository
   clock: () => Date

@@ -47,6 +47,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const projectId = `manual-project-${suffix}`
   const sourceA = `manual-artifact-a-${suffix}`
   const sourceB = `manual-artifact-b-${suffix}`
+  const completedProxyArtifactId = `manual-proxy-initial-${suffix}`
   const initialVersionId = `manual-version-${suffix}`
   const createdAt = new Date('2026-07-26T17:30:00.000Z')
   const uiUsername = `manual-user-${suffix}`
@@ -60,6 +61,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
+    await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
     await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
@@ -195,6 +197,46 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         role: 'source-master', originalFileName: `${artifactId}.mp4`, createdAt,
       } })
     }
+    const completedProxyManifestId = `manifest-${completedProxyArtifactId}`
+    const completedProxyOperationId = `manual-proxy-operation-${suffix}`
+    const completedProxyHash = calculateVersionHash({ completedProxyArtifactId })
+    await client.v2MediaArtifact.create({ data: {
+      id: completedProxyArtifactId, workspaceId,
+      artifactKey: `manual/${completedProxyArtifactId}.mp4`,
+      sha256: completedProxyHash, byteSize: 1n,
+      mediaType: 'video', container: 'mp4', status: 'available', createdAt,
+    } })
+    await client.v2MediaArtifactManifest.create({ data: {
+      id: completedProxyManifestId, workspaceId, artifactId: completedProxyArtifactId,
+      schemaVersion: 'media-artifact-manifest/v2',
+      manifestHash: calculateVersionHash({ completedProxyArtifactId, manifest: true }),
+      recipeId: 'manual-proxy', recipeVersion: '1.0.0',
+      parametersHash: calculateVersionHash({ completedProxyArtifactId, parameters: true }),
+      manifestJson: stableSerialize({ artifact: { artifactKey: `manual/${completedProxyArtifactId}.mp4` } }),
+      createdAt,
+    } })
+    await client.v2PublicOperation.create({ data: {
+      id: completedProxyOperationId, workspaceId, clientId: issued.client.id,
+      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
+      targetType: 'media-artifact', targetId: completedProxyArtifactId,
+      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
+      resultJson: stableSerialize({ resource: {
+        type: 'media-artifact', id: completedProxyArtifactId,
+        manifestId: completedProxyManifestId,
+      } }),
+      idempotencyKey: `manual-proxy-initial-${suffix}`,
+      requestFingerprint: completedProxyHash,
+      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
+    } })
+    await client.v2ProjectProxyRenderOperation.create({ data: {
+      operationId: completedProxyOperationId, workspaceId, projectId,
+      projectVersionId: initialVersionId, editPlanSnapshotId: editPlanId,
+      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+      colorPipelineBindingsJson: '[]', inputHash: calculateVersionHash({ completedProxyOperationId }),
+      outputArtifactId: completedProxyArtifactId,
+      outputManifestId: completedProxyManifestId,
+      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
+    } })
 
     const initial = await readManualTimelineService({ repository })({ workspaceId, projectId })
     assert.equal(initial.timeline.clips.length, 2)
@@ -223,6 +265,17 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(splitPayload.impact.resultVersionId, split.version.id)
     assert.deepEqual(splitPayload.impact.affectedRanges, [{ startFrame: 0, endFrame: 90 }])
     assert.equal(splitPayload.impact.impactHash.length, 64)
+    assert.deepEqual(split.invalidations.map((item) => item.artifactId), [completedProxyArtifactId])
+    const splitInvalidations = await client.v2CommandArtifactInvalidation.findMany({
+      where: { commandId: split.command.id },
+    })
+    assert.equal(splitInvalidations.length, 1)
+    assert.equal(splitInvalidations[0].artifactId, completedProxyArtifactId)
+    assert.equal(splitInvalidations[0].status, 'stale')
+    assert.equal(splitInvalidations[0].resultVersionId, split.version.id)
+    assert.equal((await client.v2MediaArtifact.findUnique({
+      where: { id: completedProxyArtifactId },
+    })).status, 'available')
 
     await assert.rejects(() => execute({
       baseVersionId: initialVersionId,
@@ -319,6 +372,17 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(timelineResponse.status, 200, JSON.stringify(timeline))
     assert.equal(timeline.data.timeline.revision, 5)
     assert.equal(timeline.data.history[0].action, 'redo')
+    const invalidationsResponse = await fetch(
+      `${baseUrl}/v1/projects/${projectId}/artifact-invalidations?resultVersionId=${split.version.id}`,
+      { headers: { authorization } },
+    )
+    const invalidationsView = await invalidationsResponse.json()
+    assert.equal(invalidationsResponse.status, 200, JSON.stringify(invalidationsView))
+    assert.equal(invalidationsView.data.resultVersionId, split.version.id)
+    assert.deepEqual(
+      invalidationsView.data.invalidations.map((item) => item.artifactId),
+      [completedProxyArtifactId],
+    )
 
     const apiResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
       method: 'POST',

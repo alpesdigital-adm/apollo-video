@@ -1639,6 +1639,12 @@ Estado persistente, idempotência, retry, cancelamento, heartbeat, timeout e res
 
 Renderizar somente o que ficou stale.
 
+Estado parcial auditado: `manual-edit` já materializa relações stale
+version-scoped somente para outputs proxy/final afetados, sem alterar a
+disponibilidade global dos bytes históricos. A entrega permanece aberta até a
+mesma semântica cobrir todos os Commands, o rerender mínimo resolver o estado e
+a jornada integrada ser executada, implantada e aceita.
+
 ### FR-234 — Props/manifest
 
 Salvar props e manifest reproduzíveis.
