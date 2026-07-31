@@ -596,6 +596,17 @@ artifact/manifest; consultas omitem a invalidação apenas após `succeeded`, de
 modo que queda ou retry não declare o stale resolvido antes da hora. O suporte
 atual é deliberadamente restrito a um range mesclado e clips em rate 1.
 
+Quando o impacto persistido declara somente `selection`, sem artifacts afetados
+e sem render mínimo, o enqueue não materializa um render vazio nem cria bytes.
+Ele exige um proxy `succeeded/completed` da versão-base, reutiliza exatamente o
+mesmo artifact/manifest e persiste uma `PublicOperation` já concluída com
+`reusedFromOperationId`, `reuseCommandId`, `reuseImpactHash` e
+`reuseBaseVersionId`. A transação relê a versão corrente, o Command e seu hash,
+o proxy-base, a fonte, o artifact e o manifest; também copia os bindings de cor
+imutáveis apenas como contexto histórico, sem executar resolução ou renderer.
+Ausência ou drift do proxy-base falha fechado. Replays convergem para a mesma
+operação e nenhum worker pode reivindicá-la porque ela já nasce terminal.
+
 ## 24. Matriz de invalidação
 
 | Command | Invalida | Não invalida |

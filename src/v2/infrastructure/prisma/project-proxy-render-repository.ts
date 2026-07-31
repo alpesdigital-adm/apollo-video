@@ -211,6 +211,52 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     return source ? this.attachRangeReuse(input.workspaceId, project!, source) : null
   }
 
+  private async readReusableProxy(input: {
+    workspaceId: string
+    projectId: string
+    baseVersionId: string
+    artifactIds?: readonly string[]
+  }) {
+    const previous = await this.client.v2ProjectProxyRenderOperation.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        projectVersionId: input.baseVersionId,
+        ...(input.artifactIds ? { outputArtifactId: { in: [...input.artifactIds] } } : {}),
+        operation: { status: 'succeeded', phase: 'completed' },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { operationId: true, outputArtifactId: true, outputManifestId: true },
+    })
+    if (!previous) return null
+    const artifact = await this.client.v2MediaArtifact.findFirst({
+      where: {
+        id: previous.outputArtifactId,
+        workspaceId: input.workspaceId,
+        status: 'available',
+      },
+      include: {
+        manifests: { where: { id: previous.outputManifestId }, take: 1 },
+      },
+    })
+    const manifest = artifact?.manifests[0]
+    if (!artifact || !manifest || !Number.isSafeInteger(Number(artifact.byteSize))) return null
+    const manifestBody = parseRecord(manifest.manifestJson, 'reusable project proxy manifest')
+    const artifactBody = manifestBody.artifact
+    if (
+      typeof artifactBody !== 'object' || artifactBody === null || Array.isArray(artifactBody) ||
+      typeof (artifactBody as Record<string, unknown>).artifactKey !== 'string'
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Reusable project proxy manifest is invalid')
+    return Object.freeze({
+      operationId: previous.operationId,
+      artifactId: artifact.id,
+      manifestId: manifest.id,
+      artifactKey: (artifactBody as Record<string, unknown>).artifactKey as string,
+      sha256: artifact.sha256,
+      byteSize: Number(artifact.byteSize),
+    })
+  }
+
   private async attachRangeReuse(
     workspaceId: string,
     project: NonNullable<Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>>,
@@ -228,6 +274,28 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       impact.resultVersionId !== version.id
     ) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy Command impact identity is inconsistent')
+    }
+    if (!impact.renderSemanticsChanged) {
+      if (
+        impact.changeKinds.length !== 1 || impact.changeKinds[0] !== 'selection' ||
+        impact.affectedArtifacts.length !== 0 || impact.minimalRenders.length !== 0
+      ) throw new DomainError('PERSISTENCE_CONFLICT', 'Render-free Command impact is inconsistent')
+      const reusable = await this.readReusableProxy({
+        workspaceId,
+        projectId: source.projectId,
+        baseVersionId: impact.baseVersionId,
+      })
+      return Object.freeze({
+        ...source,
+        unchangedReuseRequired: true as const,
+        ...(reusable ? { unchangedReuse: Object.freeze({
+          schemaVersion: 'project-proxy-unchanged-reuse/v1' as const,
+          commandId: command.id,
+          impactHash: impact.impactHash,
+          baseVersionId: impact.baseVersionId,
+          ...reusable,
+        }) } : {}),
+      })
     }
     const minimalRenders = impact.minimalRenders.filter((render) =>
       render.kind === 'proxy' && render.variantId === source.format)
@@ -265,36 +333,13 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         item.resultVersionId === impact.resultVersionId && item.impactHash === impact.impactHash)
       .map((item) => item.artifactId)
     if (proxyArtifactIds.length === 0) return source
-    const previous = await this.client.v2ProjectProxyRenderOperation.findFirst({
-      where: {
-        workspaceId,
-        projectId: source.projectId,
-        projectVersionId: impact.baseVersionId,
-        outputArtifactId: { in: proxyArtifactIds },
-        operation: { status: 'succeeded', phase: 'completed' },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: { outputArtifactId: true, outputManifestId: true },
+    const reusable = await this.readReusableProxy({
+      workspaceId,
+      projectId: source.projectId,
+      baseVersionId: impact.baseVersionId,
+      artifactIds: proxyArtifactIds,
     })
-    if (!previous) return source
-    const artifact = await this.client.v2MediaArtifact.findFirst({
-      where: {
-        id: previous.outputArtifactId,
-        workspaceId,
-        status: 'available',
-      },
-      include: {
-        manifests: { where: { id: previous.outputManifestId }, take: 1 },
-      },
-    })
-    const manifest = artifact?.manifests[0]
-    if (!artifact || !manifest || !Number.isSafeInteger(Number(artifact.byteSize))) return source
-    const manifestBody = parseRecord(manifest.manifestJson, 'reusable project proxy manifest')
-    const artifactBody = manifestBody.artifact
-    if (
-      typeof artifactBody !== 'object' || artifactBody === null || Array.isArray(artifactBody) ||
-      typeof (artifactBody as Record<string, unknown>).artifactKey !== 'string'
-    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Reusable project proxy manifest is invalid')
+    if (!reusable) return source
     return Object.freeze({
       ...source,
       rangeReuse: Object.freeze({
@@ -303,11 +348,11 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         impactHash: impact.impactHash,
         baseVersionId: impact.baseVersionId,
         ranges: Object.freeze([range]),
-        artifactId: artifact.id,
-        manifestId: manifest.id,
-        artifactKey: (artifactBody as Record<string, unknown>).artifactKey as string,
-        sha256: artifact.sha256,
-        byteSize: Number(artifact.byteSize),
+        artifactId: reusable.artifactId,
+        manifestId: reusable.manifestId,
+        artifactKey: reusable.artifactKey,
+        sha256: reusable.sha256,
+        byteSize: reusable.byteSize,
       }),
     })
   }

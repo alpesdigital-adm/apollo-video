@@ -11,6 +11,7 @@ import type {
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
+import { parseCommandImpact } from '../../domain/command-impact.ts'
 import type { RenderColorPipelineBinding } from '../../application/resolve-render-color-pipelines.ts'
 import {
   advancePublicOperationPhase,
@@ -97,6 +98,19 @@ function parseColorPipelineBindings(value: string): readonly Readonly<RenderColo
     return Object.freeze((parsed as RenderColorPipelineBinding[]).map((item) => Object.freeze(item)))
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored render color pipeline bindings are invalid')
+  }
+}
+
+function parseStoredCommandImpact(value: string) {
+  try {
+    const payload = JSON.parse(value) as unknown
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload) || !('impact' in payload)) {
+      throw new Error('invalid')
+    }
+    return parseCommandImpact((payload as { impact: unknown }).impact)
+  } catch (error) {
+    if (error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT') throw error
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy reuse Command impact is invalid')
   }
 }
 const OUTPUT_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,510}\.mp4$/
@@ -192,6 +206,14 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   const projectColorBindings = projectRenderDetail
     ? parseColorPipelineBindings(projectRenderDetail.colorPipelineBindingsJson)
     : undefined
+  const projectReuseFields = projectRenderDetail ? [
+    projectRenderDetail.reusedFromOperationId,
+    projectRenderDetail.reuseCommandId,
+    projectRenderDetail.reuseImpactHash,
+    projectRenderDetail.reuseBaseVersionId,
+  ] : []
+  const isProjectReuse = projectReuseFields.length > 0 && projectReuseFields.every((value) => value !== null)
+  const hasPartialProjectReuse = projectReuseFields.some((value) => value !== null) && !isProjectReuse
   const finalColorBindings = finalExportDetail
     ? parseColorPipelineBindings(finalExportDetail.colorPipelineBindingsJson)
     : undefined
@@ -240,7 +262,14 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     ![projectRenderDetail.projectId, projectRenderDetail.projectVersionId, projectRenderDetail.editPlanSnapshotId,
       projectRenderDetail.sourceArtifactId, projectRenderDetail.sourceManifestId, projectRenderDetail.outputArtifactId,
       projectRenderDetail.outputManifestId].every((value) => ID_PATTERN.test(value)) ||
-    !SHA256_PATTERN.test(projectRenderDetail.inputHash) ||
+    !SHA256_PATTERN.test(projectRenderDetail.inputHash) || hasPartialProjectReuse ||
+    (isProjectReuse && (
+      row.status !== 'succeeded' || row.phase !== 'completed' ||
+      !ID_PATTERN.test(projectRenderDetail.reusedFromOperationId as string) ||
+      !ID_PATTERN.test(projectRenderDetail.reuseCommandId as string) ||
+      !ID_PATTERN.test(projectRenderDetail.reuseBaseVersionId as string) ||
+      !SHA256_PATTERN.test(projectRenderDetail.reuseImpactHash as string)
+    )) ||
     projectRenderDetail.originalFileName.trim().length < 1
   )) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy render context is invalid', { operationId: row.id })
@@ -482,6 +511,21 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         originalFileName: ingestDetail!.originalFileName,
         sourceArtifactId: ingestDetail!.sourceArtifactId,
         sourceManifestId: ingestDetail!.sourceManifestId,
+      } : isProjectRender && isProjectReuse ? {
+        kind: 'project-proxy-reuse' as const,
+        projectId: projectRenderDetail!.projectId,
+        projectVersionId: projectRenderDetail!.projectVersionId,
+        editPlanSnapshotId: projectRenderDetail!.editPlanSnapshotId,
+        commandId: projectRenderDetail!.reuseCommandId!,
+        impactHash: projectRenderDetail!.reuseImpactHash!,
+        baseVersionId: projectRenderDetail!.reuseBaseVersionId!,
+        reusedFromOperationId: projectRenderDetail!.reusedFromOperationId!,
+        sourceArtifactId: projectRenderDetail!.sourceArtifactId,
+        sourceManifestId: projectRenderDetail!.sourceManifestId,
+        inputHash: projectRenderDetail!.inputHash,
+        outputArtifactId: projectRenderDetail!.outputArtifactId,
+        outputManifestId: projectRenderDetail!.outputManifestId,
+        originalFileName: projectRenderDetail!.originalFileName,
       } : isProjectRender ? {
         kind: 'project-proxy-render' as const,
         projectId: projectRenderDetail!.projectId,
@@ -827,12 +871,18 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     const projectRenderContext = input.operation.type === 'project-proxy-render' && input.context.kind === 'project-proxy-render'
       ? input.context
       : undefined
+    const projectReuseContext = input.operation.type === 'project-proxy-render' && input.context.kind === 'project-proxy-reuse'
+      ? input.context
+      : undefined
     const finalExportContext = input.operation.type === 'project-final-export' && input.context.kind === 'project-final-export'
       ? input.context
       : undefined
     if (
-      input.operation.status !== 'queued' || !SHA256_PATTERN.test(input.requestFingerprint) ||
-      (!renderContext && !ingestContext && !projectRenderContext && !finalExportContext) ||
+      !(
+        (input.operation.status === 'queued' && !projectReuseContext) ||
+        (input.operation.status === 'succeeded' && Boolean(projectReuseContext))
+      ) || !SHA256_PATTERN.test(input.requestFingerprint) ||
+      (!renderContext && !ingestContext && !projectRenderContext && !projectReuseContext && !finalExportContext) ||
       (renderContext && (!SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
       (ingestContext && (
         !/^[0-9a-f-]{36}$/.test(ingestContext.uploadId) ||
@@ -849,6 +899,21 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         projectRenderContext.outputArtifactId !== input.operation.target.id ||
         projectRenderContext.outputManifestId !== input.operation.target.manifestId ||
         projectRenderContext.originalFileName.trim().length < 1 || projectRenderContext.originalFileName.length > 240
+      )) ||
+      (projectReuseContext && (
+        ![
+          projectReuseContext.projectId, projectReuseContext.projectVersionId,
+          projectReuseContext.editPlanSnapshotId, projectReuseContext.commandId,
+          projectReuseContext.baseVersionId, projectReuseContext.reusedFromOperationId,
+          projectReuseContext.sourceArtifactId, projectReuseContext.sourceManifestId,
+          projectReuseContext.outputArtifactId, projectReuseContext.outputManifestId,
+        ].every((value) => ID_PATTERN.test(value)) ||
+        !SHA256_PATTERN.test(projectReuseContext.impactHash) ||
+        !SHA256_PATTERN.test(projectReuseContext.inputHash) ||
+        projectReuseContext.outputArtifactId !== input.operation.target.id ||
+        projectReuseContext.outputManifestId !== input.operation.target.manifestId ||
+        projectReuseContext.originalFileName.trim().length < 1 ||
+        projectReuseContext.originalFileName.length > 240
       )) ||
       (finalExportContext && (
         ![finalExportContext.projectId, finalExportContext.projectVersionId, finalExportContext.editPlanSnapshotId,
@@ -901,6 +966,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           return { ...hydrateRecord(existing), replayed: true }
         }
 
+        let reusedColorPipelineBindingsJson: string | undefined
         if (ingestContext) {
           const upload = await transaction.v2MediaUpload.findFirst({
             where: {
@@ -944,6 +1010,79 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               row.pipelineHash === binding.pipelineHash))) {
             throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy render source is not immutable and available')
           }
+        }
+        if (projectReuseContext) {
+          const [version, reusedOperation, artifact, manifest] = await Promise.all([
+            transaction.v2ProjectVersion.findFirst({
+              where: {
+                id: projectReuseContext.projectVersionId,
+                workspaceId: input.operation.workspaceId,
+                projectId: projectReuseContext.projectId,
+                editPlanSnapshotId: projectReuseContext.editPlanSnapshotId,
+                currentForProjects: {
+                  some: {
+                    id: projectReuseContext.projectId,
+                    workspaceId: input.operation.workspaceId,
+                  },
+                },
+              },
+              include: { command: true },
+            }),
+            transaction.v2ProjectProxyRenderOperation.findFirst({
+              where: {
+                operationId: projectReuseContext.reusedFromOperationId,
+                workspaceId: input.operation.workspaceId,
+                projectId: projectReuseContext.projectId,
+                projectVersionId: projectReuseContext.baseVersionId,
+                sourceArtifactId: projectReuseContext.sourceArtifactId,
+                sourceManifestId: projectReuseContext.sourceManifestId,
+                outputArtifactId: projectReuseContext.outputArtifactId,
+                outputManifestId: projectReuseContext.outputManifestId,
+                operation: { status: 'succeeded', phase: 'completed' },
+              },
+              select: { colorPipelineBindingsJson: true },
+            }),
+            transaction.v2MediaArtifact.findFirst({
+              where: {
+                id: projectReuseContext.outputArtifactId,
+                workspaceId: input.operation.workspaceId,
+                status: 'available',
+              },
+              select: { id: true },
+            }),
+            transaction.v2MediaArtifactManifest.findFirst({
+              where: {
+                id: projectReuseContext.outputManifestId,
+                workspaceId: input.operation.workspaceId,
+                artifactId: projectReuseContext.outputArtifactId,
+              },
+              select: { id: true },
+            }),
+          ])
+          const impact = version?.command
+            ? parseStoredCommandImpact(version.command.payloadJson)
+            : undefined
+          if (
+            !version || !version.command || !reusedOperation || !artifact || !manifest || !impact ||
+            version.parentVersionId !== projectReuseContext.baseVersionId ||
+            version.command.id !== projectReuseContext.commandId ||
+            version.command.type !== 'manual-edit' ||
+            version.command.baseVersionId !== projectReuseContext.baseVersionId ||
+            impact.commandId !== projectReuseContext.commandId ||
+            impact.baseVersionId !== projectReuseContext.baseVersionId ||
+            impact.resultVersionId !== projectReuseContext.projectVersionId ||
+            impact.impactHash !== projectReuseContext.impactHash ||
+            impact.renderSemanticsChanged || impact.changeKinds.length !== 1 ||
+            impact.changeKinds[0] !== 'selection' || impact.affectedArtifacts.length !== 0 ||
+            impact.minimalRenders.length !== 0
+          ) {
+            throw new DomainError(
+              'PERSISTENCE_CONFLICT',
+              'Project proxy reuse is not bound to an unchanged immutable Command and completed base proxy',
+            )
+          }
+          parseColorPipelineBindings(reusedOperation.colorPipelineBindingsJson)
+          reusedColorPipelineBindingsJson = reusedOperation.colorPipelineBindingsJson
         }
         if (finalExportContext) {
           const [source, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
@@ -1029,6 +1168,9 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             requestFingerprint: input.requestFingerprint,
             createdAt: new Date(input.operation.createdAt),
             updatedAt: new Date(input.operation.updatedAt),
+            ...(input.operation.result ? { resultJson: stableSerialize(input.operation.result) } : {}),
+            ...(input.operation.startedAt ? { startedAt: new Date(input.operation.startedAt) } : {}),
+            ...(input.operation.completedAt ? { completedAt: new Date(input.operation.completedAt) } : {}),
           },
         })
         if (renderContext) {
@@ -1058,21 +1200,30 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             where: { id: ingestContext!.projectId, workspaceId: input.operation.workspaceId, status: { in: ['draft', 'failed'] } },
             data: { status: 'ingesting' },
           })
-        } else if (projectRenderContext) {
+        } else if (projectRenderContext || projectReuseContext) {
+          const context = projectRenderContext ?? projectReuseContext!
           await transaction.v2ProjectProxyRenderOperation.create({
             data: {
               operationId: input.operation.id,
               workspaceId: input.operation.workspaceId,
-              projectId: projectRenderContext!.projectId,
-              projectVersionId: projectRenderContext!.projectVersionId,
-              editPlanSnapshotId: projectRenderContext!.editPlanSnapshotId,
-              sourceArtifactId: projectRenderContext!.sourceArtifactId,
-              sourceManifestId: projectRenderContext!.sourceManifestId,
-              colorPipelineBindingsJson: stableSerialize(projectRenderContext!.colorPipelineBindings),
-              inputHash: projectRenderContext!.inputHash,
-              outputArtifactId: projectRenderContext!.outputArtifactId,
-              outputManifestId: projectRenderContext!.outputManifestId,
-              originalFileName: projectRenderContext!.originalFileName,
+              projectId: context.projectId,
+              projectVersionId: context.projectVersionId,
+              editPlanSnapshotId: context.editPlanSnapshotId,
+              sourceArtifactId: context.sourceArtifactId,
+              sourceManifestId: context.sourceManifestId,
+              colorPipelineBindingsJson: projectRenderContext
+                ? stableSerialize(projectRenderContext.colorPipelineBindings)
+                : reusedColorPipelineBindingsJson!,
+              inputHash: context.inputHash,
+              outputArtifactId: context.outputArtifactId,
+              outputManifestId: context.outputManifestId,
+              originalFileName: context.originalFileName,
+              ...(projectReuseContext ? {
+                reusedFromOperationId: projectReuseContext.reusedFromOperationId,
+                reuseCommandId: projectReuseContext.commandId,
+                reuseImpactHash: projectReuseContext.impactHash,
+                reuseBaseVersionId: projectReuseContext.baseVersionId,
+              } : {}),
             },
           })
         } else {

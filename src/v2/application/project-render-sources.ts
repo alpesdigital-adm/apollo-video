@@ -57,8 +57,13 @@ export function projectProxyRenderInputHash(input: {
     colorPipelineBindings: input.colorPipelineBindings,
     format: source.format,
   }
-  return calculateVersionHash(source.rangeReuse
+  return calculateVersionHash(source.unchangedReuse
     ? {
+        kind: 'project-proxy-render/v3',
+        ...base,
+        unchangedReuse: source.unchangedReuse,
+      }
+    : source.rangeReuse ? {
         kind: 'project-proxy-render/v2',
         ...base,
         rangeReuse: source.rangeReuse,

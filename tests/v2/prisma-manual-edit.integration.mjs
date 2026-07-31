@@ -59,6 +59,9 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
 
   const cleanup = async () => {
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectProxyRenderOperation.deleteMany({
+      where: { workspaceId, reusedFromOperationId: { not: null } },
+    })
     await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
     await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
@@ -605,6 +608,86 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       where: { id: persistedVersions.at(-1).commandId },
     })
     assert.match(restoredCommand.payloadJson, /"action":"restore"/)
+
+    const selectionBaseVersion = persistedVersions.at(-1)
+    const selectionBaseOperationId = `manual-selection-base-proxy-${suffix}`
+    const selectionBaseFingerprint = calculateVersionHash({ selectionBaseOperationId })
+    const selectionColorBindings = stableSerialize([{
+      sourceArtifactId: sourceA,
+      sourceManifestId: `manifest-${sourceA}`,
+      compilationId: `manual-color-compilation-${suffix}`,
+      compilationHash: calculateVersionHash({ selectionBaseOperationId, compilation: true }),
+      pipelineHash: calculateVersionHash({ selectionBaseOperationId, pipeline: true }),
+    }])
+    await client.v2PublicOperation.create({ data: {
+      id: selectionBaseOperationId, workspaceId, clientId: issued.client.id,
+      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
+      targetType: 'media-artifact', targetId: completedProxyArtifactId,
+      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
+      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
+      resultJson: stableSerialize({ resource: {
+        type: 'media-artifact', id: completedProxyArtifactId,
+        manifestId: completedProxyManifestId,
+      } }),
+      idempotencyKey: `manual-selection-base-proxy-${suffix}`,
+      requestFingerprint: selectionBaseFingerprint,
+      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
+    } })
+    await client.v2ProjectProxyRenderOperation.create({ data: {
+      operationId: selectionBaseOperationId, workspaceId, projectId,
+      projectVersionId: selectionBaseVersion.id,
+      editPlanSnapshotId: selectionBaseVersion.editPlanSnapshotId,
+      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+      colorPipelineBindingsJson: selectionColorBindings,
+      inputHash: selectionBaseFingerprint,
+      outputArtifactId: completedProxyArtifactId,
+      outputManifestId: completedProxyManifestId,
+      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
+    } })
+    const artifactCountBeforeSelection = await client.v2MediaArtifact.count({ where: { workspaceId } })
+    const selectionKey = `manual-selection-reuse-${suffix}`
+    const select = () => fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': selectionKey,
+      },
+      body: JSON.stringify({
+        action: 'apply',
+        baseVersionId: selectionBaseVersion.id,
+        baseHash: selectionBaseVersion.baseHash,
+        expectedRevision: 10,
+        variantId: '9:16',
+        targetId: 'clip-1',
+        operation: { kind: 'select', clipId: 'clip-1' },
+      }),
+    })
+    const selectedResponse = await select()
+    const selected = await selectedResponse.json()
+    assert.equal(selectedResponse.status, 201, JSON.stringify(selected))
+    assert.equal(selected.data.version.sequence, 11)
+    assert.equal(selected.data.operation.status, 'succeeded')
+    assert.equal(selected.data.operation.phase, 'completed')
+    assert.equal(selected.data.operation.target.id, completedProxyArtifactId)
+    const selectionOperation = await client.v2ProjectProxyRenderOperation.findUnique({
+      where: { operationId: selected.data.operation.id },
+    })
+    assert.equal(selectionOperation.projectVersionId, selected.data.version.id)
+    assert.equal(selectionOperation.reusedFromOperationId, selectionBaseOperationId)
+    assert.equal(selectionOperation.reuseCommandId, selected.data.command.id)
+    assert.equal(selectionOperation.reuseImpactHash, selected.data.command.payload.impact.impactHash)
+    assert.equal(selectionOperation.reuseBaseVersionId, selectionBaseVersion.id)
+    assert.equal(selectionOperation.outputArtifactId, completedProxyArtifactId)
+    assert.equal(await client.v2MediaArtifact.count({ where: { workspaceId } }), artifactCountBeforeSelection)
+    assert.equal(await client.v2CommandArtifactInvalidation.count({
+      where: { commandId: selected.data.command.id },
+    }), 0)
+    const selectedReplayResponse = await select()
+    const selectedReplay = await selectedReplayResponse.json()
+    assert.equal(selectedReplayResponse.status, 200)
+    assert.equal(selectedReplay.data.replayed, true)
+    assert.equal(selectedReplay.data.operation.id, selected.data.operation.id)
     await context.close()
     await browser.close()
     browser = undefined

@@ -35,6 +35,23 @@ export interface ProjectProxyRenderOperationContext {
   originalFileName: string
 }
 
+export interface ProjectProxyReuseOperationContext {
+  kind: 'project-proxy-reuse'
+  projectId: string
+  projectVersionId: string
+  editPlanSnapshotId: string
+  commandId: string
+  impactHash: string
+  baseVersionId: string
+  reusedFromOperationId: string
+  sourceArtifactId: string
+  sourceManifestId: string
+  inputHash: string
+  outputArtifactId: string
+  outputManifestId: string
+  originalFileName: string
+}
+
 export interface ProjectFinalExportOperationContext {
   kind: 'project-final-export'
   projectId: string
@@ -97,6 +114,7 @@ export type PublicOperationContext =
   | ArtifactRenderOperationContext
   | MediaIngestOperationContext
   | ProjectProxyRenderOperationContext
+  | ProjectProxyReuseOperationContext
   | ProjectFinalExportOperationContext
   | SourceCleanupOperationContext
   | LongFormIndexOperationContext

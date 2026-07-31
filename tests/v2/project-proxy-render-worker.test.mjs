@@ -11,6 +11,10 @@ import {
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
+import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
+import { createManualCommandImpact } from '../../src/v2/domain/command-impact.ts'
+import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
+import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 
 const colorCompilation = Object.freeze({
@@ -302,4 +306,206 @@ test('T-FR-233 project proxy worker materializes only the persisted stale range 
   )
   assert.equal(manifestSources.at(-1).role, 'reused-proxy-range')
   assert.equal(manifestSources.at(-1).sha256, immutableSource.rangeReuse.sha256)
+})
+
+test('T-FR-233 render-free selection completes by exact proxy reuse without color resolution or worker', async () => {
+  const unchangedReuse = Object.freeze({
+    schemaVersion: 'project-proxy-unchanged-reuse/v1',
+    commandId: 'command-selection-proxy-test',
+    impactHash: '4'.repeat(64),
+    baseVersionId: 'project-version-proxy-base',
+    operationId: 'operation-project-proxy-base',
+    artifactId: 'artifact-project-proxy-base',
+    manifestId: 'manifest-project-proxy-base',
+    artifactKey: 'editorial-proxies/base-selection.mp4',
+    sha256: '5'.repeat(64),
+    byteSize: 8192,
+  })
+  const immutableSource = Object.freeze({
+    ...source(),
+    projectVersionId: 'project-version-proxy-selection',
+    editPlanSnapshotId: 'snapshot-proxy-selection',
+    unchangedReuseRequired: true,
+    unchangedReuse,
+  })
+  let persisted
+  let createdArtifactId = false
+  let createdManifestId = false
+  const result = await enqueueProjectProxyRenderService({
+    projects: { async readCurrentSource() { return immutableSource } },
+    colorPipelines: { async readForSources() { throw new Error('color lookup must not run') } },
+    operations: {
+      async findReplay() { return null },
+      async createOrReplay(input) {
+        persisted = input
+        return { operation: input.operation, context: input.context, replayed: false }
+      },
+    },
+    clock: () => new Date('2026-07-31T22:40:00.000Z'),
+    createId(kind) {
+      if (kind === 'artifact') createdArtifactId = true
+      if (kind === 'manifest') createdManifestId = true
+      return `created-${kind}-selection`
+    },
+  })({
+    workspaceId: 'workspace-project-proxy-test',
+    projectId: 'project-proxy-test',
+    actor: { type: 'api-client', id: 'client-project-proxy-test' },
+    idempotencyKey: 'selection-proxy-reuse-test',
+  })
+  assert.equal(result.operation.status, 'succeeded')
+  assert.equal(result.operation.phase, 'completed')
+  assert.equal(result.operation.attempt, 1)
+  assert.equal(result.operation.target.id, unchangedReuse.artifactId)
+  assert.equal(result.operation.target.manifestId, unchangedReuse.manifestId)
+  assert.equal(persisted.context.kind, 'project-proxy-reuse')
+  assert.equal(persisted.context.reusedFromOperationId, unchangedReuse.operationId)
+  assert.equal(persisted.context.impactHash, unchangedReuse.impactHash)
+  assert.deepEqual(persisted.operation.result.resource, persisted.operation.target)
+  assert.equal(createdArtifactId, false)
+  assert.equal(createdManifestId, false)
+})
+
+test('T-FR-233 render-free selection fails closed when its base proxy is unavailable', async () => {
+  await assert.rejects(
+    enqueueProjectProxyRenderService({
+      projects: { async readCurrentSource() { return {
+        ...source(),
+        unchangedReuseRequired: true,
+      } } },
+      colorPipelines: { async readForSources() { throw new Error('must not run') } },
+      operations: { async findReplay() { throw new Error('must not run') } },
+      clock: () => new Date('2026-07-31T22:40:00.000Z'),
+      createId: (kind) => `created-${kind}-selection`,
+    })({
+      workspaceId: 'workspace-project-proxy-test',
+      projectId: 'project-proxy-test',
+      actor: { type: 'api-client', id: 'client-project-proxy-test' },
+      idempotencyKey: 'selection-proxy-missing-test',
+    }),
+    (error) => error.code === 'PRECONDITION_REQUIRED' && /completed proxy/.test(error.message),
+  )
+})
+
+test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache hit', async () => {
+  const baseVersionId = 'project-version-proxy-base'
+  const resultVersionId = 'project-version-proxy-selection'
+  const commandId = 'command-selection-proxy-test'
+  const editPlan = source().editPlan
+  const impact = createManualCommandImpact({
+    commandId,
+    baseVersionId,
+    resultVersionId,
+    variantId: '9:16',
+    targetId: 'clip-1',
+    action: 'apply',
+    operation: { kind: 'select', clipId: 'clip-1' },
+    beforeEditPlan: editPlan,
+    afterEditPlan: editPlan,
+    outputReferences: [],
+  })
+  const now = '2026-07-31T22:45:00.000Z'
+  let operation = createQueuedPublicOperation({
+    id: 'operation-project-proxy-selection',
+    workspaceId: 'workspace-project-proxy-test',
+    clientId: 'client-project-proxy-test',
+    type: 'project-proxy-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-project-proxy-base',
+      manifestId: 'manifest-project-proxy-base',
+    },
+    createdAt: now,
+  })
+  operation = startPublicOperationAttempt(operation, now)
+  operation = advancePublicOperationPhase(operation, 'persisting', now)
+  operation = succeedPublicOperation(operation, now)
+  const context = {
+    kind: 'project-proxy-reuse',
+    projectId: 'project-proxy-test',
+    projectVersionId: resultVersionId,
+    editPlanSnapshotId: 'snapshot-proxy-selection',
+    commandId,
+    impactHash: impact.impactHash,
+    baseVersionId,
+    reusedFromOperationId: 'operation-project-proxy-base',
+    sourceArtifactId: 'artifact-project-proxy-source',
+    sourceManifestId: 'manifest-project-proxy-source',
+    inputHash: '6'.repeat(64),
+    outputArtifactId: 'artifact-project-proxy-base',
+    outputManifestId: 'manifest-project-proxy-base',
+    originalFileName: 'source-editorial.mp4',
+  }
+  let publicReadCount = 0
+  let operationData
+  let detailData
+  const bindingsJson = stableSerialize(colorPipelineBindings)
+  const repository = new PrismaPublicOperationRepository({
+    async $transaction(callback) {
+      return callback({
+        v2PublicOperation: {
+          async findUnique() {
+            publicReadCount += 1
+            if (publicReadCount === 1) return null
+            return {
+              ...operationData,
+              resultJson: operationData.resultJson ?? null,
+              errorCode: null, errorMessage: null, errorRetryable: null,
+              leaseOwner: null, leaseExpiresAt: null, heartbeatAt: null,
+              nextAttemptAt: null, deadLetteredAt: null,
+              artifactRender: null, mediaIngest: null,
+              projectProxyRender: { ...detailData, createdAt: new Date(now) },
+              projectFinalExport: null, sourceCleanupPlan: null,
+              longFormIndexWorkflow: null,
+            }
+          },
+          async create({ data }) { operationData = data },
+        },
+        v2ProjectVersion: { async findFirst() { return {
+          id: resultVersionId,
+          parentVersionId: baseVersionId,
+          command: {
+            id: commandId,
+            type: 'manual-edit',
+            baseVersionId,
+            payloadJson: JSON.stringify({ impact }),
+          },
+        } } },
+        v2ProjectProxyRenderOperation: {
+          async findFirst() { return { colorPipelineBindingsJson: bindingsJson } },
+          async create({ data }) { detailData = data },
+        },
+        v2MediaArtifact: { async findFirst() { return { id: context.outputArtifactId } } },
+        v2MediaArtifactManifest: { async findFirst() { return { id: context.outputManifestId } } },
+      })
+    },
+  })
+  const persisted = await repository.createOrReplay({
+    operation,
+    context,
+    idempotencyKey: 'selection-proxy-persistence-test',
+    requestFingerprint: '7'.repeat(64),
+  })
+  assert.equal(persisted.operation.status, 'succeeded')
+  assert.equal(persisted.context.kind, 'project-proxy-reuse')
+  assert.equal(persisted.context.reusedFromOperationId, context.reusedFromOperationId)
+  assert.equal(detailData.outputArtifactId, context.outputArtifactId)
+  assert.equal(detailData.colorPipelineBindingsJson, bindingsJson)
+  assert.equal(detailData.reuseCommandId, commandId)
+  assert.equal(detailData.reuseImpactHash, impact.impactHash)
+  assert.equal(detailData.reuseBaseVersionId, baseVersionId)
+  assert.equal(operationData.resultJson, stableSerialize(operation.result))
+
+  publicReadCount = 0
+  operationData = undefined
+  detailData = undefined
+  await assert.rejects(
+    repository.createOrReplay({
+      operation,
+      context: { ...context, impactHash: '8'.repeat(64) },
+      idempotencyKey: 'selection-proxy-tamper-test',
+      requestFingerprint: '9'.repeat(64),
+    }),
+    (error) => error.code === 'PERSISTENCE_CONFLICT' && /unchanged immutable Command/.test(error.message),
+  )
 })

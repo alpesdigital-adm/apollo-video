@@ -1644,9 +1644,11 @@ version-scoped somente para outputs proxy/final afetados, sem alterar a
 disponibilidade global dos bytes históricos. O worker de proxy deriva um range
 persistido, recompõe esse trecho e reutiliza as partes válidas do proxy-base; a
 conclusão registra uma resolução imutável, e a relação deixa de ser stale ativa
-somente quando a operação substituta chega a `succeeded`. A entrega permanece
-aberta até a mesma semântica cobrir todos os Commands e ranges, a seleção sem
-render evitar trabalho e a jornada integrada ser executada, implantada e aceita.
+somente quando a operação substituta chega a `succeeded`. Seleção sem mudança
+de render reutiliza o proxy concluído da versão-base como cache hit observável,
+sem renderer nem novo artifact, e registra a operação de origem no Postgres. A
+entrega permanece aberta até a mesma semântica cobrir todos os Commands e
+ranges e a jornada integrada ser executada, implantada e aceita.
 
 ### FR-234 — Props/manifest
 

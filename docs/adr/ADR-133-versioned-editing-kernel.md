@@ -25,6 +25,12 @@ and immutable hashes, never persistence access. Missing reusable bytes or a
 full-timeline impact deliberately selects the new V2 full render. Completion
 records an immutable invalidation resolution linked to the replacement
 operation/artifact/manifest; active-stale reads hide it only after that
-operation is `succeeded`. The current adapter is intentionally limited to one
-merged range and unit-rate clips. Other Commands, multiple ranges/rates and
-selection-without-render remain open and prevent claiming FR-233 complete.
+operation is `succeeded`. A selection-only Command has zero render semantics:
+the proxy request completes as an exact cache hit over the succeeded base
+operation, creates no artifact, performs no color resolution and is never
+claimed by a worker. The transaction revalidates Command/impact, current/base
+versions, source, proxy operation, artifact and manifest, then records the
+self-referential `reusedFromOperationId` plus Command/base-version FKs. Missing
+base proxy fails closed instead of silently rendering. The current adapter is
+intentionally limited to one merged range and unit-rate clips. Other Commands
+and multiple ranges/rates remain open and prevent claiming FR-233 complete.

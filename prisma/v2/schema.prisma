@@ -474,6 +474,7 @@ model V2ProjectVersion {
   lutSelectionAsResult    V2ProjectLutSelection?           @relation("ProjectLutSelectionResult")
   artifactInvalidationsAsBase   V2CommandArtifactInvalidation[] @relation("ArtifactInvalidationBaseVersion")
   artifactInvalidationsAsResult V2CommandArtifactInvalidation[] @relation("ArtifactInvalidationResultVersion")
+  proxyReusesAsBase             V2ProjectProxyRenderOperation[]  @relation("ProjectProxyReuseBaseVersion")
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -507,6 +508,7 @@ model V2EditCommand {
   directorRun   V2DirectorRun?    @relation("DirectorRunCommand")
   lutSelection  V2ProjectLutSelection?
   artifactInvalidations V2CommandArtifactInvalidation[]
+  proxyReuseOperations  V2ProjectProxyRenderOperation[] @relation("ProjectProxyReuseCommand")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -1588,6 +1590,10 @@ model V2ProjectProxyRenderOperation {
   outputArtifactId   String   @db.VarChar(128)
   outputManifestId   String   @db.VarChar(128)
   originalFileName   String   @db.VarChar(240)
+  reusedFromOperationId String? @db.VarChar(128)
+  reuseCommandId     String?  @db.VarChar(128)
+  reuseImpactHash    String?  @db.Char(64)
+  reuseBaseVersionId String?  @db.VarChar(128)
   createdAt          DateTime @default(now()) @db.Timestamptz(3)
 
   workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -1595,12 +1601,17 @@ model V2ProjectProxyRenderOperation {
   project   V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   version   V2ProjectVersion  @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   review    V2ProxyReview?
+  reusedFrom V2ProjectProxyRenderOperation? @relation("ProjectProxyOperationReuse", fields: [reusedFromOperationId, workspaceId], references: [operationId, workspaceId], onDelete: Restrict)
+  reuses     V2ProjectProxyRenderOperation[] @relation("ProjectProxyOperationReuse")
+  reuseCommand V2EditCommand? @relation("ProjectProxyReuseCommand", fields: [reuseCommandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  reuseBaseVersion V2ProjectVersion? @relation("ProjectProxyReuseBaseVersion", fields: [reuseBaseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@unique([operationId, workspaceId])
   @@unique([workspaceId, projectVersionId, inputHash])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId])
   @@index([workspaceId, outputArtifactId])
+  @@index([workspaceId, reusedFromOperationId])
   @@map("project_proxy_render_operations")
 }
 

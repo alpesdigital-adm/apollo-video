@@ -15,6 +15,19 @@ export interface ProjectProxyRangeReuse {
   byteSize: number
 }
 
+export interface ProjectProxyUnchangedReuse {
+  schemaVersion: 'project-proxy-unchanged-reuse/v1'
+  commandId: string
+  impactHash: string
+  baseVersionId: string
+  operationId: string
+  artifactId: string
+  manifestId: string
+  artifactKey: string
+  sha256: string
+  byteSize: number
+}
+
 export interface ProjectRenderSourceAsset {
   artifactId: string
   manifestId: string
@@ -42,6 +55,8 @@ export interface ProjectProxyRenderSource {
   uploadReceivedAt: string
   criticIssues: readonly Readonly<ProxyQualityIssue>[]
   rangeReuse?: Readonly<ProjectProxyRangeReuse>
+  unchangedReuse?: Readonly<ProjectProxyUnchangedReuse>
+  unchangedReuseRequired?: true
 }
 
 export interface ProjectProxyRenderRepository {

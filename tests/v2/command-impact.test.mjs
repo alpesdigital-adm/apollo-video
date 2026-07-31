@@ -350,6 +350,7 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
     v2ProjectProxyRenderOperation: { async findFirst(query) {
       proxyLookup = query
       return {
+        operationId: 'operation-proxy-9x16',
         outputArtifactId: 'artifact-proxy-9x16',
         outputManifestId: 'manifest-proxy-9x16',
       }
@@ -367,6 +368,57 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
   assert.deepEqual(reusableSource.rangeReuse.ranges, [{ startFrame: 0, endFrame: 90 }])
   assert.equal(reusableSource.rangeReuse.artifactId, 'artifact-proxy-9x16')
   assert.deepEqual(proxyLookup.where.operation, { status: 'succeeded', phase: 'completed' })
+
+  const selectionImpact = impact({
+    operation: { kind: 'select', clipId: 'clip-1' },
+  })
+  const selectionRepository = new PrismaProjectProxyRenderRepository({
+    v2Project: { async findFirst() { return {
+      id: projectId, format: '9:16', currentVersionId: resultVersionId,
+      versions: [{
+        id: resultVersionId, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
+        editPlanSnapshot: {
+          contentJson: committed.snapshot.contentJson,
+          contentHash: committed.snapshot.contentHash,
+        },
+        directorRunAsResult: null,
+        command: {
+          id: commandId, type: 'manual-edit', baseVersionId,
+          payloadJson: JSON.stringify({ impact: selectionImpact }),
+          artifactInvalidations: [],
+        },
+      }],
+      mediaAssets: [{
+        role: 'source-master', artifactId: 'source-1', originalFileName: 'source.mp4',
+        createdAt: new Date(createdAt), upload: null,
+        artifact: {
+          id: 'source-1', status: 'available', mediaType: 'video', container: 'mp4',
+          sha256: 'c'.repeat(64), byteSize: 4_096n,
+          manifests: [{
+            id: 'manifest-source-1',
+            manifestJson: JSON.stringify({ artifact: { artifactKey: 'masters/source.mp4' } }),
+          }],
+        },
+      }],
+    } } },
+    v2ProjectProxyRenderOperation: { async findFirst() { return {
+      operationId: 'operation-proxy-9x16',
+      outputArtifactId: 'artifact-proxy-9x16',
+      outputManifestId: 'manifest-proxy-9x16',
+    } } },
+    v2MediaArtifact: { async findFirst() { return {
+      id: 'artifact-proxy-9x16', sha256: 'd'.repeat(64), byteSize: 8_192n,
+      manifests: [{
+        id: 'manifest-proxy-9x16',
+        manifestJson: JSON.stringify({ artifact: { artifactKey: 'editorial-proxies/base.mp4' } }),
+      }],
+    } } },
+  })
+  const selectionSource = await selectionRepository.readCurrentSource({ workspaceId, projectId })
+  assert.equal(selectionSource.unchangedReuseRequired, true)
+  assert.equal(selectionSource.unchangedReuse.operationId, 'operation-proxy-9x16')
+  assert.equal(selectionSource.unchangedReuse.artifactId, 'artifact-proxy-9x16')
+  assert.equal(selectionSource.unchangedReuse.impactHash, selectionImpact.impactHash)
 })
 
 test('T-FR-233 completed proxy atomically records scoped invalidation resolutions', async () => {
