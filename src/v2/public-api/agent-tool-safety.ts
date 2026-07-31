@@ -191,6 +191,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Runs at most fifty bounded retrieval queries and persists one immutable metrics report without changing sources or project versions.',
     },
+    'apollo.projects.semantic-search.reuse-runs.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Re-executes one bounded query and persists an immutable audit only after exact query and result-set hashes plus a complete reuse/rejection partition are verified.',
+    },
     'apollo.projects.hierarchical-processing.runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Processes one exact existing artifact and transcript within explicit cost, memory and elapsed-time budgets; it persists only virtual chunks, evidence mappings and measurements.',

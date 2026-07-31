@@ -1530,6 +1530,55 @@ const retrievalEvaluationExample = {
   createdAt,
   reportHash: '7'.repeat(64),
 }
+const semanticReuseRunExample = {
+  schemaVersion: 'semantic-reuse-run/v1',
+  id: 'semantic-reuse-run-example-1',
+  workspaceId,
+  projectId,
+  queryHash: '8'.repeat(64),
+  resultSetHash: 'a'.repeat(64),
+  query: hybridSearchQueryExample,
+  semantic: {
+    state: 'ready',
+    provider: 'openai',
+    model: 'text-embedding-3-small',
+    version: '2024-01-25',
+    dimensions: 256,
+    degraded: false,
+  },
+  rerankPolicyVersion: 'hybrid-rerank/v1',
+  candidateAudit: [
+    {
+      documentId: semanticSearchDocumentExample.id,
+      identityKey: semanticSearchDocumentExample.identityKey,
+      rank: 1,
+      score: 0.97,
+      disposition: 'returned',
+      rejectionReasons: [],
+    },
+    {
+      documentId: 'semantic-document-rights-blocked',
+      identityKey: 'artifact:artifact-rights-blocked',
+      disposition: 'rejected',
+      rejectionReasons: ['RIGHTS_RESTRICTED'],
+    },
+  ],
+  returnedIdentityKeys: [
+    semanticSearchDocumentExample.identityKey,
+  ],
+  reusedIdentityKeys: [
+    semanticSearchDocumentExample.identityKey,
+  ],
+  directorRejections: [],
+  candidateCount: 2,
+  returnedCount: 1,
+  reusedCount: 1,
+  searchEvaluatedAt: createdAt,
+  searchLatencyMs: 42,
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  runHash: '9'.repeat(64),
+}
 const hierarchicalTierVersionsExample = {
   'cheap-signals': {
     provider: 'apollo',
@@ -6355,6 +6404,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           schemaVersion: 'hybrid-search-results/v1',
           query: hybridSearchQueryExample,
           queryHash: '8'.repeat(64),
+          resultSetHash: 'a'.repeat(64),
           semantic: {
             state: 'ready',
             provider: 'openai',
@@ -6417,6 +6467,26 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       {
         data: {
           evaluation: retrievalEvaluationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/record-semantic-reuse-request/v1': [
+      {
+        query: hybridSearchQueryExample,
+        expectedQueryHash: semanticReuseRunExample.queryHash,
+        expectedResultSetHash:
+          semanticReuseRunExample.resultSetHash,
+        reusedIdentityKeys:
+          semanticReuseRunExample.reusedIdentityKeys,
+        directorRejections: [],
+      },
+    ],
+    'apollo://schemas/semantic-reuse-recorded/v1': [
+      {
+        data: {
+          run: semanticReuseRunExample,
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

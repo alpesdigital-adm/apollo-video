@@ -8,6 +8,7 @@ import { DomainError } from '../domain/errors.ts'
 import type {
   PersistedRetrievalEvaluation,
   PersistedSemanticSearchDocument,
+  PersistedSemanticReuseRun,
   SemanticSearchSourceRef,
 } from '../application/ports/semantic-search-repository.ts'
 
@@ -72,6 +73,17 @@ const EVALUATION_CASE_FIELDS = new Set([
   'id',
   'query',
   'relevantIdentityKeys',
+])
+const REUSE_RUN_FIELDS = new Set([
+  'query',
+  'expectedQueryHash',
+  'expectedResultSetHash',
+  'reusedIdentityKeys',
+  'directorRejections',
+])
+const DIRECTOR_REJECTION_FIELDS = new Set([
+  'identityKey',
+  'reason',
 ])
 
 function record(
@@ -496,6 +508,58 @@ export function parseRetrievalEvaluationBody(value: unknown) {
   }
 }
 
+export function parseSemanticReuseRunBody(value: unknown) {
+  const body = record(value, 'Request body')
+  exactFields(body, REUSE_RUN_FIELDS, 'Request body')
+  if (
+    !Array.isArray(body.reusedIdentityKeys) ||
+    !Array.isArray(body.directorRejections)
+  ) {
+    throw new DomainError(
+      'INVALID_ARGUMENT',
+      'Semantic reuse decisions must be arrays',
+    )
+  }
+  return {
+    query: parseHybridSearchQueryBody(body.query),
+    expectedQueryHash: stringValue(
+      body.expectedQueryHash,
+      'Request body.expectedQueryHash',
+    ),
+    expectedResultSetHash: stringValue(
+      body.expectedResultSetHash,
+      'Request body.expectedResultSetHash',
+    ),
+    reusedIdentityKeys: stringArray(
+      body.reusedIdentityKeys,
+      'Request body.reusedIdentityKeys',
+    ),
+    directorRejections: body.directorRejections.map(
+      (value, index) => {
+        const field = `directorRejections[${index}]`
+        const input = record(value, field)
+        exactFields(input, DIRECTOR_REJECTION_FIELDS, field)
+        return {
+          identityKey: stringValue(
+            input.identityKey,
+            `${field}.identityKey`,
+          ),
+          reason: stringValue(
+            input.reason,
+            `${field}.reason`,
+          ) as
+            | 'narrative-mismatch'
+            | 'duplicate'
+            | 'quality-lower'
+            | 'duration-mismatch'
+            | 'continuity-risk'
+            | 'not-needed',
+        }
+      },
+    ),
+  }
+}
+
 export function presentSemanticSearchDocument(
   document: Readonly<
     CatalogedSemanticSearchDocument |
@@ -518,4 +582,15 @@ export function presentRetrievalEvaluation(
     ...publicEvaluation
   } = evaluation
   return publicEvaluation
+}
+
+export function presentSemanticReuseRun(
+  run: Readonly<PersistedSemanticReuseRun>,
+) {
+  const {
+    requestFingerprint: _requestFingerprint,
+    idempotencyKey: _idempotencyKey,
+    ...publicRun
+  } = run
+  return publicRun
 }

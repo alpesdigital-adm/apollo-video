@@ -150,6 +150,10 @@ const coverage = Object.freeze({
   'apollo.projects.semantic-search.evaluations.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds k, all query cases, relevance judgments and actor; every case executes the same public search service and one immutable report is persisted transactionally',
   },
+  'apollo.projects.semantic-search.reuse-runs.create': {
+    mode: 'idempotent-create',
+    evidence: 'request fingerprint binds the exact query, queryHash, resultSetHash, complete reuse/rejection partition and actor; the server re-executes retrieval and rejects result drift before serializable immutable persistence',
+  },
   'apollo.projects.hierarchical-processing.runs.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds exact artifact, manifest, transcript, chunk policy, tier versions, prior run hash, budget and actor; serializable persistence rechecks every source and rights identity before replacing the active run',
   },
@@ -462,7 +466,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 43,
+    'idempotent-create': 44,
     'state-machine-action': 13,
     'single-flight-action': 1,
     'revision-bound-action': 4,

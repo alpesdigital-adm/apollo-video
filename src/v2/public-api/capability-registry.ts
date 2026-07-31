@@ -2186,6 +2186,33 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.semantic-search.reuse-runs.create',
+    version: '1.0.0',
+    title: 'Record semantic reuse decisions',
+    description: 'Re-executes an exact semantic query, verifies its hash, records trusted policy rejections and requires the Director to partition every eligible result into reused or explicitly rejected candidates.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef:
+      'apollo://schemas/record-semantic-reuse-request/v1',
+    outputSchemaRef:
+      'apollo://schemas/semantic-reuse-recorded/v1',
+    endpoint: {
+      method: 'POST',
+      path:
+        '/v1/projects/{projectId}/semantic-search/reuse-runs',
+    },
+    toolName:
+      'apollo.projects.semantic-search.reuse-runs.create',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'required',
+    requestBodyRequired: true,
+  },
+  {
     id: 'apollo.projects.hierarchical-processing.runs.create',
     version: '1.0.0',
     title: 'Execute hierarchical long-form processing',

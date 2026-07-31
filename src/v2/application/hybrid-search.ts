@@ -25,6 +25,7 @@ import type {
 import type {
   PersistedRetrievalEvaluation,
   PersistedSemanticSearchDocument,
+  PersistedSemanticReuseRun,
   SemanticSearchRepository,
   SemanticSearchSourceRef,
 } from './ports/semantic-search-repository.ts'
@@ -34,6 +35,17 @@ const SHA_256 = /^[a-f0-9]{64}$/
 const IDEMPOTENCY = /^[\x21-\x7E]{8,128}$/
 const TOKEN = /^[a-z0-9][a-z0-9._/-]{0,127}$/
 const LOCALE = /^[a-z]{2,3}(?:-[A-Z]{2})?$/
+
+export const SEMANTIC_DIRECTOR_REJECTION_REASONS = [
+  'narrative-mismatch',
+  'duplicate',
+  'quality-lower',
+  'duration-mismatch',
+  'continuity-risk',
+  'not-needed',
+] as const
+export type SemanticDirectorRejectionReason =
+  (typeof SEMANTIC_DIRECTOR_REJECTION_REASONS)[number]
 
 function identity(value: unknown, field: string): string {
   assertDomain(
@@ -537,7 +549,8 @@ export function hybridSearchService(dependencies: {
       dependencies.clock(),
       'hybrid search clock',
     )
-    const candidates = await dependencies.repository.searchCandidates({
+    const candidateBatch =
+      await dependencies.repository.searchCandidates({
       workspaceId,
       projectId,
       evaluatedAt,
@@ -553,10 +566,86 @@ export function hybridSearchService(dependencies: {
         : {}),
       candidateLimit: Math.min(500, Math.max(100, query.limit * 10)),
     })
+    const results = rerankHybridSearch({
+      candidates: candidateBatch.candidates,
+      query,
+      now: evaluatedAt,
+    })
+    const auditedRanked = rerankHybridSearch({
+      candidates: candidateBatch.candidates,
+      query: Object.freeze({
+        ...query,
+        includeBlocked: true,
+        limit: 100,
+        explain: true,
+      }),
+      now: evaluatedAt,
+    })
+    const rankedByDocumentId = new Map(
+      auditedRanked.map((result, index) => [
+        result.document.id,
+        { result, rank: index + 1 },
+      ]),
+    )
+    const rankedByIdentityKey = new Set(
+      auditedRanked.map((result) => result.document.identityKey),
+    )
+    const returnedDocumentIds = new Set(
+      results.map((result) => result.document.id),
+    )
+    const candidateAudit = Object.freeze([
+      ...candidateBatch.candidates.map((candidate) => {
+        const ranked = rankedByDocumentId.get(candidate.document.id)
+        const rejectionReasons = ranked
+          ? ranked.result.eligibleForReuse
+            ? returnedDocumentIds.has(candidate.document.id)
+              ? []
+              : ['RANK_BELOW_LIMIT']
+            : ranked.result.blockedReasons
+          : rankedByIdentityKey.has(candidate.document.identityKey)
+            ? ['DUPLICATE_IDENTITY']
+            : ['NO_RETRIEVAL_SIGNAL']
+        return Object.freeze({
+          documentId: candidate.document.id,
+          identityKey: candidate.document.identityKey,
+          ...(ranked
+            ? {
+                rank: ranked.rank,
+                score: ranked.result.score,
+              }
+            : {}),
+          disposition: rejectionReasons.length === 0
+            ? 'returned' as const
+            : 'rejected' as const,
+          rejectionReasons: Object.freeze([...rejectionReasons]),
+        })
+      }),
+      ...candidateBatch.prefilterRejected.map((rejected) =>
+        Object.freeze({
+          documentId: rejected.documentId,
+          identityKey: rejected.identityKey,
+          disposition: 'rejected' as const,
+          rejectionReasons: Object.freeze([...rejected.reasons]),
+        })),
+    ])
+    const queryHash = calculateCanonicalHash(query)
+    const resultSetHash = calculateCanonicalHash({
+      schemaVersion: 'hybrid-search-result-set/v1',
+      queryHash,
+      rerankPolicyVersion: HYBRID_RERANK_POLICY_VERSION,
+      results: results.map((result) => ({
+        documentId: result.document.id,
+        documentHash: result.document.documentHash,
+        identityKey: result.document.identityKey,
+        eligibleForReuse: result.eligibleForReuse,
+        blockedReasons: result.blockedReasons,
+      })),
+    })
     return Object.freeze({
       schemaVersion: 'hybrid-search-results/v1' as const,
       query,
-      queryHash: calculateCanonicalHash(query),
+      queryHash,
+      resultSetHash,
       semantic: Object.freeze({
         state: embedded?.vector
           ? 'ready' as const
@@ -564,13 +653,243 @@ export function hybridSearchService(dependencies: {
         ...dependencies.embeddingProvider.descriptor,
       }),
       rerankPolicyVersion: HYBRID_RERANK_POLICY_VERSION,
-      results: rerankHybridSearch({
-        candidates,
-        query,
-        now: evaluatedAt,
-      }),
+      results,
+      candidateAudit,
       evaluatedAt,
     })
+  }
+}
+
+export function recordSemanticReuseRunService(dependencies: {
+  repository: SemanticSearchRepository
+  search: ReturnType<typeof hybridSearchService>
+  clock: () => Date
+  monotonicClock: () => number
+  createId: () => string
+}) {
+  return async function record(request: {
+    workspaceId: string
+    projectId: string
+    query: {
+      scope?: HybridSearchScope
+      text?: string
+      intention?: string
+      atmosphere?: string
+      personIds?: readonly string[]
+      speech?: string
+      visual?: string
+      rightsUse: string
+      filters?: HybridSearchFilters
+      includeBlocked?: boolean
+      limit?: number
+      explain?: boolean
+    }
+    expectedQueryHash: string
+    expectedResultSetHash: string
+    reusedIdentityKeys: readonly string[]
+    directorRejections: readonly {
+      identityKey: string
+      reason: SemanticDirectorRejectionReason
+    }[]
+    actor: Readonly<{ type: 'api-client'; id: string }>
+    idempotencyKey: string
+  }) {
+    const workspaceId = identity(request.workspaceId, 'workspaceId')
+    const projectId = identity(request.projectId, 'projectId')
+    const expectedQueryHash = hash(
+      request.expectedQueryHash,
+      'expectedQueryHash',
+    )
+    const expectedResultSetHash = hash(
+      request.expectedResultSetHash,
+      'expectedResultSetHash',
+    )
+    assertDomain(
+      request.actor?.type === 'api-client',
+      'AUTH_INVALID',
+      'Semantic reuse audit requires an authenticated API client',
+    )
+    const actorId = identity(request.actor.id, 'actor.id')
+    const key = idempotencyKey(request.idempotencyKey)
+    assertDomain(
+      Array.isArray(request.reusedIdentityKeys) &&
+        request.reusedIdentityKeys.length <= 100,
+      'INVALID_ARGUMENT',
+      'reusedIdentityKeys is invalid',
+    )
+    const reusedIdentityKeys = request.reusedIdentityKeys
+      .map((value, index) =>
+        identity(value, `reusedIdentityKeys[${index}]`))
+      .sort((left, right) => left.localeCompare(right))
+    assertDomain(
+      new Set(reusedIdentityKeys).size ===
+        reusedIdentityKeys.length,
+      'INVALID_ARGUMENT',
+      'reusedIdentityKeys has duplicates',
+    )
+    assertDomain(
+      Array.isArray(request.directorRejections) &&
+        request.directorRejections.length <= 100,
+      'INVALID_ARGUMENT',
+      'directorRejections is invalid',
+    )
+    const directorRejections = request.directorRejections
+      .map((item, index) => {
+        const identityKey = identity(
+          item?.identityKey,
+          `directorRejections[${index}].identityKey`,
+        )
+        assertDomain(
+          SEMANTIC_DIRECTOR_REJECTION_REASONS.includes(
+            item?.reason,
+          ),
+          'INVALID_ARGUMENT',
+          `directorRejections[${index}].reason is invalid`,
+        )
+        return Object.freeze({
+          identityKey,
+          reason: item.reason,
+        })
+      })
+      .sort((left, right) =>
+        left.identityKey.localeCompare(right.identityKey))
+    assertDomain(
+      new Set(
+        directorRejections.map((item) => item.identityKey),
+      ).size === directorRejections.length,
+      'INVALID_ARGUMENT',
+      'directorRejections has duplicate identities',
+    )
+    const requestFingerprint = calculateCanonicalHash({
+      schemaVersion: 'record-semantic-reuse-request/v1',
+      workspaceId,
+      projectId,
+      query: request.query,
+      expectedQueryHash,
+      expectedResultSetHash,
+      reusedIdentityKeys,
+      directorRejections,
+      actor: { type: 'api-client', id: actorId },
+    })
+    const replay = await dependencies.repository
+      .findIdempotentReuseRun({
+        workspaceId,
+        projectId,
+        idempotencyKey: key,
+      })
+    if (replay) {
+      if (replay.requestFingerprint !== requestFingerprint) {
+        throw new DomainError(
+          'IDEMPOTENCY_PAYLOAD_MISMATCH',
+          'Idempotency key was used with a different semantic reuse request',
+        )
+      }
+      return Object.freeze({ run: replay, replayed: true })
+    }
+    const startedAt = dependencies.monotonicClock()
+    assertDomain(
+      Number.isFinite(startedAt),
+      'INVALID_ARGUMENT',
+      'Semantic reuse monotonic clock is invalid',
+    )
+    const search = await dependencies.search({
+      workspaceId,
+      projectId,
+      ...request.query,
+    })
+    const finishedAt = dependencies.monotonicClock()
+    assertDomain(
+      Number.isFinite(finishedAt) && finishedAt >= startedAt,
+      'INVALID_ARGUMENT',
+      'Semantic reuse monotonic clock moved backwards',
+    )
+    const searchLatencyMs = Math.round(finishedAt - startedAt)
+    assertDomain(
+      searchLatencyMs >= 0 && searchLatencyMs <= 3_600_000,
+      'INVALID_ARGUMENT',
+      'Semantic reuse search latency exceeded the audit bound',
+    )
+    assertDomain(
+      search.queryHash === expectedQueryHash,
+      'VERSION_CONFLICT',
+      'Semantic search query changed before reuse was recorded',
+    )
+    assertDomain(
+      search.resultSetHash === expectedResultSetHash,
+      'VERSION_CONFLICT',
+      'Semantic search results changed before reuse was recorded',
+    )
+    const eligibleResults = search.results.filter(
+      (result) => result.eligibleForReuse,
+    )
+    const returnedIdentityKeys = eligibleResults.map(
+      (result) => result.document.identityKey,
+    )
+    const returnedSet = new Set(returnedIdentityKeys)
+    const reusedSet = new Set(reusedIdentityKeys)
+    const rejectedSet = new Set(
+      directorRejections.map((item) => item.identityKey),
+    )
+    assertDomain(
+      reusedIdentityKeys.every((value) => returnedSet.has(value)) &&
+        directorRejections.every((item) =>
+          returnedSet.has(item.identityKey)) &&
+        reusedIdentityKeys.every((value) => !rejectedSet.has(value)) &&
+        returnedIdentityKeys.every((value) =>
+          reusedSet.has(value) || rejectedSet.has(value)) &&
+        returnedIdentityKeys.length ===
+          reusedIdentityKeys.length + directorRejections.length,
+      'INVALID_ARGUMENT',
+      'Reuse decisions must partition every eligible returned candidate',
+    )
+    const candidateAudit = Object.freeze(
+      [...search.candidateAudit]
+        .sort((left, right) =>
+          left.identityKey.localeCompare(right.identityKey) ||
+          left.documentId.localeCompare(right.documentId))
+        .map((item) => Object.freeze({
+          ...item,
+          rejectionReasons:
+            Object.freeze([...item.rejectionReasons]),
+        })),
+    )
+    const createdAt = canonicalNow(
+      dependencies.clock(),
+      'semantic reuse clock',
+    )
+    const content = Object.freeze({
+      schemaVersion: 'semantic-reuse-run/v1' as const,
+      id: identity(dependencies.createId(), 'semantic reuse run id'),
+      workspaceId,
+      projectId,
+      queryHash: search.queryHash,
+      resultSetHash: search.resultSetHash,
+      query: search.query,
+      semantic: search.semantic,
+      rerankPolicyVersion: HYBRID_RERANK_POLICY_VERSION,
+      candidateAudit,
+      returnedIdentityKeys: Object.freeze([...returnedIdentityKeys]),
+      reusedIdentityKeys: Object.freeze([...reusedIdentityKeys]),
+      directorRejections: Object.freeze([...directorRejections]),
+      candidateCount: candidateAudit.length,
+      returnedCount: returnedIdentityKeys.length,
+      reusedCount: reusedIdentityKeys.length,
+      searchEvaluatedAt: search.evaluatedAt,
+      searchLatencyMs,
+      requestFingerprint,
+      idempotencyKey: key,
+      createdBy: Object.freeze({
+        type: 'api-client' as const,
+        id: actorId,
+      }),
+      createdAt,
+    })
+    const run: Readonly<PersistedSemanticReuseRun> =
+      Object.freeze({
+        ...content,
+        runHash: calculateCanonicalHash(content),
+      })
+    return dependencies.repository.persistReuseRun(run)
   }
 }
 

@@ -11,9 +11,11 @@ import {
 } from '../../src/v2/domain/hybrid-search.ts'
 import {
   hybridSearchService,
+  recordSemanticReuseRunService,
 } from '../../src/v2/application/hybrid-search.ts'
 import {
   parseHybridSearchQueryBody,
+  parseSemanticReuseRunBody,
 } from '../../src/v2/public-api/hybrid-search-contract.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import {
@@ -21,6 +23,9 @@ import {
   OpenAISemanticEmbeddingProvider,
   createSemanticEmbeddingProvider,
 } from '../../src/v2/infrastructure/semantic-embedding-provider.ts'
+import {
+  PrismaSemanticSearchRepository,
+} from '../../src/v2/infrastructure/prisma/semantic-search-repository.ts'
 
 const createdAt = '2026-07-27T17:00:00.000Z'
 
@@ -359,12 +364,15 @@ test('T-FR-136 preserves workspace scope in the public contract and forwards one
     repository: {
       async searchCandidates(query) {
         captured = query
-        return [{
-          document: crossProject,
-          currentRights: context().rights,
-          fullTextScore: 0.9,
-          vectorScore: 0.9,
-        }]
+        return {
+          candidates: [{
+            document: crossProject,
+            currentRights: context().rights,
+            fullTextScore: 0.9,
+            vectorScore: 0.9,
+          }],
+          prefilterRejected: [],
+        }
       },
     },
     embeddingProvider:
@@ -389,7 +397,7 @@ test('T-FR-136 defaults to project scope and forbids exposing rights-blocked wor
     repository: {
       async searchCandidates() {
         calls += 1
-        return []
+        return { candidates: [], prefilterRejected: [] }
       },
     },
     embeddingProvider:
@@ -492,12 +500,15 @@ test('T-FR-136 keeps Director intention, atmosphere, person, speech and visual r
     repository: {
       async searchCandidates(query) {
         captured = query
-        return [matching, misleading].map((item) => ({
-          document: item,
-          currentRights: context().rights,
-          fullTextScore: 0.9,
-          vectorScore: 0.9,
-        }))
+        return {
+          candidates: [matching, misleading].map((item) => ({
+            document: item,
+            currentRights: context().rights,
+            fullTextScore: 0.9,
+            vectorScore: 0.9,
+          })),
+          prefilterRejected: [],
+        }
       },
     },
     embeddingProvider:
@@ -538,6 +549,340 @@ test('T-FR-136 keeps Director intention, atmosphere, person, speech and visual r
       'structured:metadata',
     ),
   )
+})
+
+test('T-FR-136 persists a bounded audit that separates reused, Director-rejected and policy-rejected candidates', async () => {
+  const first = document()
+  const alternative = document({
+    id: 'semantic-document-alternative',
+    source: context({
+      source: {
+        type: 'speech-segment',
+        id: 'speech-campaign-alternative',
+        hash: 'e'.repeat(64),
+        artifactId: 'artifact-campaign-alternative',
+        artifactSha256: 'e'.repeat(64),
+      },
+    }),
+  })
+  let persisted
+  const repository = {
+    async searchCandidates() {
+      return {
+        candidates: [first, alternative].map((item, index) => ({
+          document: item,
+          currentRights: context().rights,
+          fullTextScore: 0.95 - index * 0.05,
+          vectorScore: 0.95 - index * 0.05,
+        })),
+        prefilterRejected: [{
+          documentId: 'semantic-document-rights-blocked',
+          identityKey: 'artifact:artifact-rights-blocked',
+          reasons: ['RIGHTS_RESTRICTED'],
+        }],
+      }
+    },
+    async findIdempotentReuseRun() {
+      return null
+    },
+    async persistReuseRun(run) {
+      persisted = run
+      return { run, replayed: false }
+    },
+  }
+  const search = hybridSearchService({
+    repository,
+    embeddingProvider:
+      new DeterministicSemanticEmbeddingProvider(),
+    clock: () => new Date(createdAt),
+  })
+  const query = {
+    scope: 'workspace',
+    intention: 'proof',
+    speech: 'resultado campanha reduziu custo',
+    rightsUse: 'editorial-reuse',
+  }
+  const diagnostic = await search({
+    workspaceId: 'workspace-semantic',
+    projectId: 'project-semantic',
+    ...query,
+  })
+  const monotonic = [10, 17]
+  const result = await recordSemanticReuseRunService({
+    repository,
+    search,
+    clock: () => new Date('2026-07-27T17:00:01.000Z'),
+    monotonicClock: () => monotonic.shift(),
+    createId: () => 'semantic-reuse-run-1',
+  })({
+    workspaceId: 'workspace-semantic',
+    projectId: 'project-semantic',
+    query,
+    expectedQueryHash: diagnostic.queryHash,
+    expectedResultSetHash: diagnostic.resultSetHash,
+    reusedIdentityKeys: [first.identityKey],
+    directorRejections: [{
+      identityKey: alternative.identityKey,
+      reason: 'quality-lower',
+    }],
+    actor: { type: 'api-client', id: 'client-semantic' },
+    idempotencyKey: 'semantic-reuse-key-1',
+  })
+  assert.equal(result.replayed, false)
+  assert.equal(result.run, persisted)
+  assert.equal(result.run.candidateCount, 3)
+  assert.equal(result.run.returnedCount, 2)
+  assert.equal(result.run.reusedCount, 1)
+  assert.equal(result.run.searchLatencyMs, 7)
+  assert.deepEqual(result.run.reusedIdentityKeys, [first.identityKey])
+  assert.deepEqual(result.run.directorRejections, [{
+    identityKey: alternative.identityKey,
+    reason: 'quality-lower',
+  }])
+  assert.deepEqual(
+    result.run.candidateAudit.find((item) =>
+      item.documentId === 'semantic-document-rights-blocked')
+      .rejectionReasons,
+    ['RIGHTS_RESTRICTED'],
+  )
+  assert.match(result.run.runHash, /^[a-f0-9]{64}$/)
+})
+
+test('T-FR-136 refuses reuse audit unless decisions partition every eligible result', async () => {
+  const item = document()
+  const repository = {
+    async searchCandidates() {
+      return {
+        candidates: [{
+          document: item,
+          currentRights: context().rights,
+          fullTextScore: 0.9,
+          vectorScore: 0.9,
+        }],
+        prefilterRejected: [],
+      }
+    },
+    async findIdempotentReuseRun() {
+      return null
+    },
+    async persistReuseRun() {
+      assert.fail('invalid partition must not persist')
+    },
+  }
+  const search = hybridSearchService({
+    repository,
+    embeddingProvider:
+      new DeterministicSemanticEmbeddingProvider(),
+    clock: () => new Date(createdAt),
+  })
+  const query = {
+    text: 'resultado campanha',
+    rightsUse: 'editorial-reuse',
+  }
+  const diagnostic = await search({
+    workspaceId: 'workspace-semantic',
+    projectId: 'project-semantic',
+    ...query,
+  })
+  await assert.rejects(
+    recordSemanticReuseRunService({
+      repository,
+      search,
+      clock: () => new Date(createdAt),
+      monotonicClock: (() => {
+        let value = 0
+        return () => value++
+      })(),
+      createId: () => 'semantic-reuse-run-invalid',
+    })({
+      workspaceId: 'workspace-semantic',
+      projectId: 'project-semantic',
+      query,
+      expectedQueryHash: diagnostic.queryHash,
+      expectedResultSetHash: diagnostic.resultSetHash,
+      reusedIdentityKeys: [],
+      directorRejections: [],
+      actor: { type: 'api-client', id: 'client-semantic' },
+      idempotencyKey: 'semantic-reuse-key-invalid',
+    }),
+    /partition every eligible returned candidate/,
+  )
+})
+
+test('T-FR-136 refuses reuse decisions after the ranked result set changes', async () => {
+  const item = document()
+  const repository = {
+    async searchCandidates() {
+      return {
+        candidates: [{
+          document: item,
+          currentRights: context().rights,
+          fullTextScore: 0.9,
+          vectorScore: 0.9,
+        }],
+        prefilterRejected: [],
+      }
+    },
+    async findIdempotentReuseRun() {
+      return null
+    },
+    async persistReuseRun() {
+      assert.fail('stale result set must not persist')
+    },
+  }
+  const search = hybridSearchService({
+    repository,
+    embeddingProvider:
+      new DeterministicSemanticEmbeddingProvider(),
+    clock: () => new Date(createdAt),
+  })
+  const query = {
+    text: 'resultado campanha',
+    rightsUse: 'editorial-reuse',
+  }
+  const diagnostic = await search({
+    workspaceId: 'workspace-semantic',
+    projectId: 'project-semantic',
+    ...query,
+  })
+  await assert.rejects(
+    recordSemanticReuseRunService({
+      repository,
+      search,
+      clock: () => new Date(createdAt),
+      monotonicClock: (() => {
+        let value = 0
+        return () => value++
+      })(),
+      createId: () => 'semantic-reuse-run-stale',
+    })({
+      workspaceId: 'workspace-semantic',
+      projectId: 'project-semantic',
+      query,
+      expectedQueryHash: diagnostic.queryHash,
+      expectedResultSetHash: 'f'.repeat(64),
+      reusedIdentityKeys: [item.identityKey],
+      directorRejections: [],
+      actor: { type: 'api-client', id: 'client-semantic' },
+      idempotencyKey: 'semantic-reuse-key-stale',
+    }),
+    /results changed before reuse was recorded/,
+  )
+})
+
+test('T-FR-136 public reuse contract accepts only an exact query hash and bounded decision reasons', () => {
+  const body = parseSemanticReuseRunBody({
+    query: {
+      scope: 'workspace',
+      intention: 'proof',
+      rightsUse: 'editorial-reuse',
+    },
+    expectedQueryHash: 'a'.repeat(64),
+    expectedResultSetHash: 'b'.repeat(64),
+    reusedIdentityKeys: ['artifact:proof'],
+    directorRejections: [{
+      identityKey: 'artifact:alternative',
+      reason: 'quality-lower',
+    }],
+  })
+  assert.equal(body.query.scope, 'workspace')
+  assert.equal(body.directorRejections[0].reason, 'quality-lower')
+  assert.throws(
+    () => parseSemanticReuseRunBody({
+      ...body,
+      trustedCandidates: [],
+    }),
+    /unsupported field/,
+  )
+})
+
+test('T-FR-136 Prisma adapter persists and rehydrates the immutable semantic reuse audit', async () => {
+  const query = {
+    scope: 'workspace',
+    intention: 'proof',
+    rightsUse: 'editorial-reuse',
+    includeBlocked: false,
+    limit: 20,
+    explain: true,
+  }
+  const content = {
+    schemaVersion: 'semantic-reuse-run/v1',
+    id: 'semantic-reuse-run-prisma',
+    workspaceId: 'workspace-semantic',
+    projectId: 'project-semantic',
+    queryHash: calculateCanonicalHash(query),
+    resultSetHash: 'f'.repeat(64),
+    query,
+    semantic: {
+      state: 'ready',
+      provider: 'controlled',
+      model: 'semantic-vector',
+      version: '1.0.0',
+      dimensions: 256,
+      degraded: false,
+    },
+    rerankPolicyVersion: 'hybrid-rerank/v1',
+    candidateAudit: [{
+      documentId: 'semantic-document-campaign-result',
+      identityKey: 'speech-segment:speech-campaign-result',
+      rank: 1,
+      score: 0.95,
+      disposition: 'returned',
+      rejectionReasons: [],
+    }],
+    returnedIdentityKeys: [
+      'speech-segment:speech-campaign-result',
+    ],
+    reusedIdentityKeys: [
+      'speech-segment:speech-campaign-result',
+    ],
+    directorRejections: [],
+    candidateCount: 1,
+    returnedCount: 1,
+    reusedCount: 1,
+    searchEvaluatedAt: createdAt,
+    searchLatencyMs: 12,
+    requestFingerprint: 'a'.repeat(64),
+    idempotencyKey: 'semantic-reuse-prisma-key',
+    createdBy: {
+      type: 'api-client',
+      id: 'client-semantic',
+    },
+    createdAt,
+  }
+  const run = {
+    ...content,
+    runHash: calculateCanonicalHash(content),
+  }
+  const transaction = {
+    v2SemanticReuseRun: {
+      async findUnique() {
+        return null
+      },
+      async create({ data }) {
+        return data
+      },
+    },
+    v2Project: {
+      async findFirst() {
+        return { id: 'project-semantic' }
+      },
+    },
+    v2ApiClient: {
+      async findFirst() {
+        return { id: 'client-semantic' }
+      },
+    },
+  }
+  const repository = new PrismaSemanticSearchRepository({
+    async $transaction(callback) {
+      return callback(transaction)
+    },
+  })
+  const result = await repository.persistReuseRun(run)
+  assert.equal(result.replayed, false)
+  assert.deepEqual(result.run, run)
+  assert.ok(Object.isFrozen(result.run))
 })
 
 test('T-FR-048 OpenAI adapter sends a bounded 256-dimensional request and validates the vector', async () => {

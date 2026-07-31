@@ -314,6 +314,8 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       `${baseUrl}/v1/projects/${projectId}/semantic-search/query`
     const crossCatalogEndpoint =
       `${baseUrl}/v1/projects/${crossProjectId}/semantic-search/documents`
+    const reuseRunEndpoint =
+      `${baseUrl}/v1/projects/${projectId}/semantic-search/reuse-runs`
     const evaluationEndpoint =
       `${baseUrl}/v1/projects/${projectId}/semantic-search/evaluations`
     const producer = {
@@ -697,6 +699,81 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
           result.document.identityKey !==
           `artifact:${artifacts.blocked.id}`,
       ),
+    )
+
+    const eligibleCrossIdentities =
+      workspaceCrossPayload.data.results
+        .filter((result) => result.eligibleForReuse)
+        .map((result) => result.document.identityKey)
+    const reuseBody = {
+      query: {
+        ...crossQuery,
+        scope: 'workspace',
+      },
+      expectedQueryHash: workspaceCrossPayload.data.queryHash,
+      expectedResultSetHash:
+        workspaceCrossPayload.data.resultSetHash,
+      reusedIdentityKeys: [`artifact:${artifacts.cross.id}`],
+      directorRejections: eligibleCrossIdentities
+        .filter((identityKey) =>
+          identityKey !== `artifact:${artifacts.cross.id}`)
+        .map((identityKey) => ({
+          identityKey,
+          reason: 'not-needed',
+        })),
+    }
+    const reuseKey = `hybrid-reuse-${suffix}`
+    const reuseResponse = await fetch(reuseRunEndpoint, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': reuseKey,
+      },
+      body: JSON.stringify(reuseBody),
+    })
+    const reusePayload = await reuseResponse.json()
+    assert.equal(
+      reuseResponse.status,
+      201,
+      JSON.stringify(reusePayload),
+    )
+    assert.equal(reusePayload.data.replayed, false)
+    assert.deepEqual(
+      reusePayload.data.run.reusedIdentityKeys,
+      [`artifact:${artifacts.cross.id}`],
+    )
+    assert.ok(
+      reusePayload.data.run.candidateAudit.some(
+        (candidate) =>
+          candidate.identityKey ===
+            `artifact:${artifacts.blocked.id}` &&
+          candidate.rejectionReasons.includes(
+            'RIGHTS_RESTRICTED',
+          ),
+      ),
+    )
+    assert.equal(
+      await client.v2SemanticReuseRun.count({
+        where: { workspaceId, projectId },
+      }),
+      1,
+    )
+    const reuseReplay = await fetch(reuseRunEndpoint, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': reuseKey,
+      },
+      body: JSON.stringify(reuseBody),
+    })
+    const reuseReplayPayload = await reuseReplay.json()
+    assert.equal(reuseReplay.status, 200)
+    assert.equal(reuseReplayPayload.data.replayed, true)
+    assert.equal(
+      reuseReplayPayload.data.run.id,
+      reusePayload.data.run.id,
     )
 
     const blockedQuery = {

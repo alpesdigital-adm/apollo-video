@@ -1,7 +1,12 @@
+import { randomUUID } from 'node:crypto'
+import { performance } from 'node:perf_hooks'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
-import { hybridSearchService } from '@/v2/application/hybrid-search'
+import {
+  hybridSearchService,
+  recordSemanticReuseRunService,
+} from '@/v2/application/hybrid-search'
 import { DomainError } from '@/v2/domain/errors'
 import {
   createSemanticEmbeddingProvider,
@@ -18,8 +23,8 @@ import {
   respondPublicError,
 } from '@/v2/public-api/errors'
 import {
-  parseHybridSearchQueryBody,
-  presentSemanticSearchDocument,
+  parseSemanticReuseRunBody,
+  presentSemanticReuseRun,
 } from '@/v2/public-api/hybrid-search-contract'
 import { presentSuccess } from '@/v2/public-api/presenters'
 
@@ -32,7 +37,9 @@ export async function POST(
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)
-    requireScope(actor, 'projects:read')
+    requireScope(actor, 'projects:write')
+    const idempotencyKey =
+      request.headers.get('idempotency-key')?.trim() ?? ''
     let rawBody: unknown
     try {
       rawBody = await request.json()
@@ -42,39 +49,37 @@ export async function POST(
         'Request body must be valid JSON',
       )
     }
-    const body = parseHybridSearchQueryBody(rawBody)
+    const body = parseSemanticReuseRunBody(rawBody)
     const { projectId } = await context.params
-    const result = await hybridSearchService({
-      repository: createSemanticSearchRepository(),
+    const repository = createSemanticSearchRepository()
+    const clock = () => new Date()
+    const search = hybridSearchService({
+      repository,
       embeddingProvider: createSemanticEmbeddingProvider(),
-      clock: () => new Date(),
+      clock,
+    })
+    const result = await recordSemanticReuseRunService({
+      repository,
+      search,
+      clock,
+      monotonicClock: () => performance.now(),
+      createId: () => `semantic-reuse-run-${randomUUID()}`,
     })({
       workspaceId: actor.workspaceId,
       projectId,
       ...body,
+      actor: { type: 'api-client', id: actor.clientId },
+      idempotencyKey,
     })
     return NextResponse.json(
       presentSuccess({
-        schemaVersion: result.schemaVersion,
-        query: result.query,
-        queryHash: result.queryHash,
-        resultSetHash: result.resultSetHash,
-        semantic: result.semantic,
-        rerankPolicyVersion: result.rerankPolicyVersion,
-        results: result.results.map((entry) => ({
-          document: presentSemanticSearchDocument(
-            entry.document,
-          ),
-          score: entry.score,
-          scoreBreakdown: entry.scoreBreakdown,
-          matchedBy: entry.matchedBy,
-          blockedReasons: entry.blockedReasons,
-          eligibleForReuse: entry.eligibleForReuse,
-          rerankPolicyVersion: entry.rerankPolicyVersion,
-        })),
-        evaluatedAt: result.evaluatedAt,
+        run: presentSemanticReuseRun(result.run),
+        replayed: result.replayed,
       }),
-      { headers: publicApiHeaders(requestId) },
+      {
+        status: result.replayed ? 200 : 201,
+        headers: publicApiHeaders(requestId),
+      },
     )
   } catch (error) {
     return respondPublicError(error, requestId)

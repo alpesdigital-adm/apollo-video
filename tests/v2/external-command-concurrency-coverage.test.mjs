@@ -148,6 +148,10 @@ const coverage = Object.freeze({
   'apollo.projects.semantic-search.evaluations.create': {
     mode: 'durable-covered', evidence: 'F2-005 immutable evaluation report, workspace-scoped idempotency and concurrent duplicate collapse in PostgreSQL E2E',
   },
+  'apollo.projects.semantic-search.reuse-runs.create': {
+    mode: 'durable-covered',
+    evidence: 'FR-136 exact query/result-set hashes, complete reuse partition, workspace-scoped idempotency, immutable content hash and serializable duplicate collapse',
+  },
   'apollo.projects.hierarchical-processing.runs.create': {
     mode: 'durable-covered', evidence: 'F2-006 exact artifact/manifest/transcript/rights binding, tier-level transitive invalidation, serializable active-run replacement and idempotent public API E2E',
   },
@@ -274,7 +278,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    76,
+    77,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

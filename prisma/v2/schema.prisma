@@ -73,6 +73,7 @@ model V2Workspace {
   validatedSegments               V2ValidatedSegment[]
   semanticSearchDocuments         V2SemanticSearchDocument[]
   retrievalEvaluations            V2RetrievalEvaluation[]
+  semanticReuseRuns               V2SemanticReuseRun[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks    V2HierarchicalProcessingChunk[]
   hierarchicalTierExecutions      V2HierarchicalTierExecution[]
@@ -158,6 +159,7 @@ model V2ApiClient {
   validatedSegments               V2ValidatedSegment[]
   semanticSearchDocuments         V2SemanticSearchDocument[]
   retrievalEvaluations            V2RetrievalEvaluation[]
+  semanticReuseRuns               V2SemanticReuseRun[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   contiguousEvidenceRuns          V2ContiguousEvidenceRun[]
   contiguousEvaluationRuns        V2ContiguousEvaluationRun[]
@@ -320,6 +322,7 @@ model V2Project {
   validatedSegments             V2ValidatedSegment[]
   semanticSearchDocuments       V2SemanticSearchDocument[]
   retrievalEvaluations          V2RetrievalEvaluation[]
+  semanticReuseRuns             V2SemanticReuseRun[]
   hierarchicalProcessingRuns    V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks  V2HierarchicalProcessingChunk[]
   hierarchicalTierExecutions    V2HierarchicalTierExecution[]
@@ -2720,6 +2723,43 @@ model V2RetrievalEvaluation {
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, policyVersion, rerankPolicyVersion])
   @@map("retrieval_evaluations")
+}
+
+model V2SemanticReuseRun {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  queryHash                String   @db.Char(64)
+  resultSetHash            String   @db.Char(64)
+  queryJson                String   @db.Text
+  semanticJson             String   @db.Text
+  rerankPolicyVersion      String   @db.VarChar(64)
+  candidateAuditJson       String   @db.Text
+  returnedIdentityKeysJson String   @db.Text
+  reusedIdentityKeysJson   String   @db.Text
+  directorRejectionsJson   String   @db.Text
+  candidateCount           Int
+  returnedCount            Int
+  reusedCount              Int
+  searchEvaluatedAt        DateTime @db.Timestamptz(3)
+  searchLatencyMs          Int
+  requestFingerprint       String   @db.Char(64)
+  idempotencyKey           String   @db.VarChar(128)
+  createdByClientId        String   @db.VarChar(80)
+  createdAt                DateTime @default(now()) @db.Timestamptz(3)
+  runHash                  String   @db.Char(64)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy V2ApiClient @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@unique([workspaceId, runHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, queryHash, createdAt(sort: Desc)])
+  @@index([workspaceId, createdByClientId, createdAt(sort: Desc)])
+  @@map("semantic_reuse_runs")
 }
 
 model V2HierarchicalProcessingRun {

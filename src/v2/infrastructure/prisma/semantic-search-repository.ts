@@ -4,11 +4,13 @@ import {
   type V2AssetRightsSnapshot,
   type V2RetrievalEvaluation,
   type V2SemanticSearchDocument,
+  type V2SemanticReuseRun,
 } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   PersistedRetrievalEvaluation,
   PersistedSemanticSearchDocument,
+  PersistedSemanticReuseRun,
   SemanticSearchCandidateQuery,
   SemanticSearchRepository,
   SemanticSearchSourceRef,
@@ -467,6 +469,125 @@ function evaluationData(
   }
 }
 
+function hydrateReuseRun(
+  row: V2SemanticReuseRun,
+): Readonly<PersistedSemanticReuseRun> {
+  const query = parseJson(
+    row.queryJson,
+    'semantic reuse query',
+  ) as PersistedSemanticReuseRun['query']
+  const semantic = parseJson(
+    row.semanticJson,
+    'semantic reuse embedding state',
+  ) as PersistedSemanticReuseRun['semantic']
+  const candidateAudit = parseJson(
+    row.candidateAuditJson,
+    'semantic reuse candidate audit',
+  ) as PersistedSemanticReuseRun['candidateAudit']
+  const returnedIdentityKeys = stringArray(
+    row.returnedIdentityKeysJson,
+    'semantic reuse returned identities',
+  )
+  const reusedIdentityKeys = stringArray(
+    row.reusedIdentityKeysJson,
+    'semantic reuse identities',
+  )
+  const directorRejections = parseJson(
+    row.directorRejectionsJson,
+    'semantic reuse director rejections',
+  ) as PersistedSemanticReuseRun['directorRejections']
+  if (
+    !Array.isArray(candidateAudit) ||
+    !Array.isArray(directorRejections)
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `Stored semantic reuse run ${row.id} has invalid audit data`,
+    )
+  }
+  const content = Object.freeze({
+    schemaVersion: 'semantic-reuse-run/v1' as const,
+    id: row.id,
+    workspaceId: row.workspaceId,
+    projectId: row.projectId,
+    queryHash: row.queryHash,
+    resultSetHash: row.resultSetHash,
+    query: Object.freeze({ ...query }),
+    semantic: Object.freeze({ ...semantic }),
+    rerankPolicyVersion: HYBRID_RERANK_POLICY_VERSION,
+    candidateAudit: Object.freeze([...candidateAudit]),
+    returnedIdentityKeys,
+    reusedIdentityKeys,
+    directorRejections: Object.freeze([...directorRejections]),
+    candidateCount: row.candidateCount,
+    returnedCount: row.returnedCount,
+    reusedCount: row.reusedCount,
+    searchEvaluatedAt: row.searchEvaluatedAt.toISOString(),
+    searchLatencyMs: row.searchLatencyMs,
+    requestFingerprint: row.requestFingerprint,
+    idempotencyKey: row.idempotencyKey,
+    createdBy: Object.freeze({
+      type: 'api-client' as const,
+      id: row.createdByClientId,
+    }),
+    createdAt: row.createdAt.toISOString(),
+  })
+  if (
+    stableSerialize(query) !== row.queryJson ||
+    stableSerialize(semantic) !== row.semanticJson ||
+    stableSerialize(candidateAudit) !== row.candidateAuditJson ||
+    stableSerialize(returnedIdentityKeys) !==
+      row.returnedIdentityKeysJson ||
+    stableSerialize(reusedIdentityKeys) !==
+      row.reusedIdentityKeysJson ||
+    stableSerialize(directorRejections) !==
+      row.directorRejectionsJson ||
+    row.rerankPolicyVersion !== HYBRID_RERANK_POLICY_VERSION ||
+    row.candidateCount !== candidateAudit.length ||
+    row.returnedCount !== returnedIdentityKeys.length ||
+    row.reusedCount !== reusedIdentityKeys.length ||
+    calculateCanonicalHash(query) !== row.queryHash ||
+    calculateCanonicalHash(content) !== row.runHash
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `Stored semantic reuse run ${row.id} failed integrity validation`,
+    )
+  }
+  return Object.freeze({ ...content, runHash: row.runHash })
+}
+
+function reuseRunData(
+  run: Readonly<PersistedSemanticReuseRun>,
+) {
+  return {
+    id: run.id,
+    workspaceId: run.workspaceId,
+    projectId: run.projectId,
+    queryHash: run.queryHash,
+    resultSetHash: run.resultSetHash,
+    queryJson: stableSerialize(run.query),
+    semanticJson: stableSerialize(run.semantic),
+    rerankPolicyVersion: run.rerankPolicyVersion,
+    candidateAuditJson: stableSerialize(run.candidateAudit),
+    returnedIdentityKeysJson:
+      stableSerialize(run.returnedIdentityKeys),
+    reusedIdentityKeysJson: stableSerialize(run.reusedIdentityKeys),
+    directorRejectionsJson:
+      stableSerialize(run.directorRejections),
+    candidateCount: run.candidateCount,
+    returnedCount: run.returnedCount,
+    reusedCount: run.reusedCount,
+    searchEvaluatedAt: new Date(run.searchEvaluatedAt),
+    searchLatencyMs: run.searchLatencyMs,
+    requestFingerprint: run.requestFingerprint,
+    idempotencyKey: run.idempotencyKey,
+    createdByClientId: run.createdBy.id,
+    createdAt: new Date(run.createdAt),
+    runHash: run.runHash,
+  }
+}
+
 type DbClient = PrismaClient | Prisma.TransactionClient
 
 async function sourceHashExists(
@@ -561,9 +682,13 @@ function projectLocale(locale: string | null): string {
 
 export class PrismaSemanticSearchRepository
 implements SemanticSearchRepository {
+  private readonly client: PrismaClient
+
   constructor(
-    private readonly client: PrismaClient = getV2PostgresClient(),
-  ) {}
+    client: PrismaClient = getV2PostgresClient(),
+  ) {
+    this.client = client
+  }
 
   async readSourceContext(input: {
     workspaceId: string
@@ -1167,7 +1292,9 @@ implements SemanticSearchRepository {
     const vectorScores = new Map(
       vectorRows.map((row) => [row.id, row.score]),
     )
-    const candidates = [...byId.values()].map((row) => ({
+    const candidates = [...byId.values()]
+      .slice(0, query.candidateLimit)
+      .map((row) => ({
       document: hydrateDocument(row),
       currentRights: row.sourceArtifact.currentRightsSnapshot
         ? currentRights(row.sourceArtifact.currentRightsSnapshot)
@@ -1180,18 +1307,35 @@ implements SemanticSearchRepository {
         0,
         Math.min(1, vectorScores.get(row.id) ?? 0),
       ),
+      }))
+    const evaluated = candidates.map((candidate) => ({
+      candidate,
+      rightsReasons: semanticRightsRejectionReasons({
+        document: candidate.document,
+        current: candidate.currentRights,
+        rightsUse: query.query.rightsUse,
+        now: query.evaluatedAt,
+      }),
     }))
-    return Object.freeze(
-      query.query.scope === 'workspace'
-        ? candidates.filter((candidate) =>
-            semanticRightsRejectionReasons({
-              document: candidate.document,
-              current: candidate.currentRights,
-              rightsUse: query.query.rightsUse,
-              now: query.evaluatedAt,
-            }).length === 0)
-        : candidates,
-    )
+    const prefilterRejected = query.query.scope === 'workspace'
+      ? evaluated
+          .filter((item) => item.rightsReasons.length > 0)
+          .map((item) => Object.freeze({
+            documentId: item.candidate.document.id,
+            identityKey: item.candidate.document.identityKey,
+            reasons: item.rightsReasons,
+          }))
+      : []
+    return Object.freeze({
+      candidates: Object.freeze(
+        evaluated
+          .filter((item) =>
+            query.query.scope !== 'workspace' ||
+            item.rightsReasons.length === 0)
+          .map((item) => item.candidate),
+      ),
+      prefilterRejected: Object.freeze(prefilterRejected),
+    })
   }
 
   async findIdempotentEvaluation(input: {
@@ -1299,6 +1443,110 @@ implements SemanticSearchRepository {
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
           'Retrieval evaluation conflicted with another transaction',
+        )
+      }
+      throw error
+    }
+  }
+
+  async findIdempotentReuseRun(input: {
+    workspaceId: string
+    projectId: string
+    idempotencyKey: string
+  }) {
+    const row = await this.client.v2SemanticReuseRun.findUnique({
+      where: {
+        workspaceId_projectId_idempotencyKey: input,
+      },
+    })
+    return row ? hydrateReuseRun(row) : null
+  }
+
+  async persistReuseRun(
+    run: Readonly<PersistedSemanticReuseRun>,
+    attempt = 1,
+  ): ReturnType<SemanticSearchRepository['persistReuseRun']> {
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const existing =
+          await transaction.v2SemanticReuseRun.findUnique({
+            where: {
+              workspaceId_projectId_idempotencyKey: {
+                workspaceId: run.workspaceId,
+                projectId: run.projectId,
+                idempotencyKey: run.idempotencyKey,
+              },
+            },
+          })
+        if (existing) {
+          if (existing.requestFingerprint !== run.requestFingerprint) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Idempotency key was used with a different semantic reuse request',
+            )
+          }
+          return Object.freeze({
+            run: hydrateReuseRun(existing),
+            replayed: true,
+          })
+        }
+        const [project, actor] = await Promise.all([
+          transaction.v2Project.findFirst({
+            where: {
+              id: run.projectId,
+              workspaceId: run.workspaceId,
+            },
+            select: { id: true },
+          }),
+          transaction.v2ApiClient.findFirst({
+            where: {
+              id: run.createdBy.id,
+              workspaceId: run.workspaceId,
+              status: 'active',
+            },
+            select: { id: true },
+          }),
+        ])
+        if (!project || !actor) {
+          throw new DomainError(
+            'PERSISTENCE_CONFLICT',
+            'Semantic reuse context is no longer available',
+          )
+        }
+        const created = await transaction.v2SemanticReuseRun.create({
+          data: reuseRunData(run),
+        })
+        return Object.freeze({
+          run: hydrateReuseRun(created),
+          replayed: false,
+        })
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      })
+    } catch (error) {
+      if (isPrismaCode(error, 'P2034') && attempt < 3) {
+        return this.persistReuseRun(run, attempt + 1)
+      }
+      if (isPrismaCode(error, 'P2002')) {
+        const replay = await this.findIdempotentReuseRun({
+          workspaceId: run.workspaceId,
+          projectId: run.projectId,
+          idempotencyKey: run.idempotencyKey,
+        })
+        if (replay) {
+          if (replay.requestFingerprint !== run.requestFingerprint) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Idempotency key was used with a different semantic reuse request',
+            )
+          }
+          return Object.freeze({ run: replay, replayed: true })
+        }
+      }
+      if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Semantic reuse run conflicted with another transaction',
         )
       }
       throw error

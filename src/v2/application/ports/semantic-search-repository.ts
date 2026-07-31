@@ -36,6 +36,15 @@ export interface SemanticSearchCandidateQuery {
   candidateLimit: number
 }
 
+export interface SemanticSearchCandidateBatch {
+  candidates: readonly Readonly<HybridSearchCandidate>[]
+  prefilterRejected: readonly Readonly<{
+    documentId: string
+    identityKey: string
+    reasons: readonly string[]
+  }>[]
+}
+
 export interface PersistedRetrievalEvaluation {
   schemaVersion: 'retrieval-evaluation/v1'
   id: string
@@ -58,6 +67,55 @@ export interface PersistedRetrievalEvaluation {
   createdBy: Readonly<{ type: 'api-client'; id: string }>
   createdAt: string
   reportHash: string
+}
+
+export interface PersistedSemanticReuseRun {
+  schemaVersion: 'semantic-reuse-run/v1'
+  id: string
+  workspaceId: string
+  projectId: string
+  queryHash: string
+  resultSetHash: string
+  query: Readonly<HybridSearchRequest>
+  semantic: Readonly<{
+    state: 'ready' | 'unavailable'
+    provider: string
+    model: string
+    version: string
+    dimensions: number
+    degraded: boolean
+  }>
+  rerankPolicyVersion: 'hybrid-rerank/v1'
+  candidateAudit: readonly Readonly<{
+    documentId: string
+    identityKey: string
+    rank?: number
+    score?: number
+    disposition: 'returned' | 'rejected'
+    rejectionReasons: readonly string[]
+  }>[]
+  returnedIdentityKeys: readonly string[]
+  reusedIdentityKeys: readonly string[]
+  directorRejections: readonly Readonly<{
+    identityKey: string
+    reason:
+      | 'narrative-mismatch'
+      | 'duplicate'
+      | 'quality-lower'
+      | 'duration-mismatch'
+      | 'continuity-risk'
+      | 'not-needed'
+  }>[]
+  candidateCount: number
+  returnedCount: number
+  reusedCount: number
+  searchEvaluatedAt: string
+  searchLatencyMs: number
+  requestFingerprint: string
+  idempotencyKey: string
+  createdBy: Readonly<{ type: 'api-client'; id: string }>
+  createdAt: string
+  runHash: string
 }
 
 export interface SemanticSearchRepository {
@@ -83,7 +141,7 @@ export interface SemanticSearchRepository {
 
   searchCandidates(
     query: Readonly<SemanticSearchCandidateQuery>,
-  ): Promise<readonly Readonly<HybridSearchCandidate>[]>
+  ): Promise<Readonly<SemanticSearchCandidateBatch>>
 
   findIdempotentEvaluation(input: {
     workspaceId: string
@@ -95,6 +153,19 @@ export interface SemanticSearchRepository {
     evaluation: Readonly<PersistedRetrievalEvaluation>,
   ): Promise<Readonly<{
     evaluation: Readonly<PersistedRetrievalEvaluation>
+    replayed: boolean
+  }>>
+
+  findIdempotentReuseRun(input: {
+    workspaceId: string
+    projectId: string
+    idempotencyKey: string
+  }): Promise<Readonly<PersistedSemanticReuseRun> | null>
+
+  persistReuseRun(
+    run: Readonly<PersistedSemanticReuseRun>,
+  ): Promise<Readonly<{
+    run: Readonly<PersistedSemanticReuseRun>
     replayed: boolean
   }>>
 }
