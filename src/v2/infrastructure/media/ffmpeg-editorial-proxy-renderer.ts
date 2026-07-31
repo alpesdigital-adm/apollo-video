@@ -98,6 +98,72 @@ function escapeSubtitleFilterPath(value: string): string {
   return value.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
 }
 
+type EditorialRenderInput = Parameters<EditorialProxyRenderer['render']>[0]
+
+function sliceRenderRange(input: EditorialRenderInput, range: {
+  startFrame: number
+  endFrame: number
+}) {
+  const clips = input.clips.flatMap((clip) => {
+    if (clip.rate !== 1) {
+      throw new DomainError(
+        'INVALID_RENDER_INPUT',
+        'Partial proxy reuse requires unit-rate timeline clips',
+      )
+    }
+    const overlapStart = Math.max(range.startFrame, clip.timelineInFrame)
+    const overlapEnd = Math.min(range.endFrame, clip.timelineOutFrame)
+    if (overlapEnd <= overlapStart) return []
+    const leadingFrames = overlapStart - clip.timelineInFrame
+    const trailingFrames = clip.timelineOutFrame - overlapEnd
+    const audioSourceInFrame = (clip.audioSourceInFrame ?? clip.sourceInFrame) + leadingFrames
+    const audioSourceOutFrame = (clip.audioSourceOutFrame ?? clip.sourceOutFrame) - trailingFrames
+    return [Object.freeze({
+      ...clip,
+      sourceInFrame: clip.sourceInFrame + leadingFrames,
+      sourceOutFrame: clip.sourceOutFrame - trailingFrames,
+      ...(clip.audioSourceArtifactId ? { audioSourceArtifactId: clip.audioSourceArtifactId } : {}),
+      audioSourceInFrame,
+      audioSourceOutFrame,
+      timelineInFrame: overlapStart - range.startFrame,
+      timelineOutFrame: overlapEnd - range.startFrame,
+    })]
+  })
+  const subtitleCues = input.subtitleCues?.flatMap((cue) => {
+    const overlapStart = Math.max(range.startFrame, cue.startFrame)
+    const overlapEnd = Math.min(range.endFrame, cue.endFrame)
+    return overlapEnd > overlapStart
+      ? [Object.freeze({
+          ...cue,
+          startFrame: overlapStart - range.startFrame,
+          endFrame: overlapEnd - range.startFrame,
+        })]
+      : []
+  })
+  const transitions = input.transitions
+    ?.filter((transition) =>
+      transition.atFrame > range.startFrame && transition.atFrame < range.endFrame)
+    .map((transition) => Object.freeze({
+      ...transition,
+      atFrame: transition.atFrame - range.startFrame,
+    }))
+  const coveredFrames = clips.reduce(
+    (total, clip) => total + clip.timelineOutFrame - clip.timelineInFrame,
+    0,
+  )
+  if (clips.length < 1 || coveredFrames !== range.endFrame - range.startFrame) {
+    throw new DomainError(
+      'INVALID_RENDER_INPUT',
+      'Partial proxy range is not fully covered by the compiled timeline',
+    )
+  }
+  return Object.freeze({
+    clips: Object.freeze(clips),
+    ...(subtitleCues ? { subtitleCues: Object.freeze(subtitleCues) } : {}),
+    ...(transitions ? { transitions: Object.freeze(transitions) } : {}),
+  })
+}
+
 export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
   private readonly workRoot: string
   private readonly ffmpegPath: string
@@ -129,6 +195,30 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         !['video', 'audio'].includes(source.mediaType) ||
         (source.mediaType === 'video') !== Boolean(source.colorPipelineCompilation))
     ) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial proxy render input is invalid')
+    const fullExpectedFrames = input.clips.reduce(
+      (total, clip) => total + clip.sourceOutFrame - clip.sourceInFrame,
+      0,
+    )
+    const rangeReuse = input.rangeReuse
+    if (rangeReuse && (
+      input.renderKind !== 'proxy' ||
+      rangeReuse.schemaVersion !== 'project-proxy-range-reuse/v1' ||
+      rangeReuse.ranges.length !== 1 ||
+      !isAbsolute(rangeReuse.path) ||
+      !/^[a-f0-9]{64}$/.test(rangeReuse.sha256) ||
+      !Number.isSafeInteger(rangeReuse.byteSize) || rangeReuse.byteSize <= 0
+    )) throw new DomainError('INVALID_RENDER_INPUT', 'Partial proxy reuse input is invalid')
+    const range = rangeReuse?.ranges[0]
+    if (range && (
+      !Number.isSafeInteger(range.startFrame) || !Number.isSafeInteger(range.endFrame) ||
+      range.startFrame < 0 || range.endFrame <= range.startFrame ||
+      range.endFrame > fullExpectedFrames ||
+      (range.startFrame === 0 && range.endFrame === fullExpectedFrames)
+    )) throw new DomainError('INVALID_RENDER_INPUT', 'Partial proxy range is invalid')
+    const sliced = range ? sliceRenderRange(input, range) : undefined
+    const renderClips = sliced?.clips ?? input.clips
+    const renderSubtitleCues = sliced?.subtitleCues ?? input.subtitleCues
+    const renderTransitions = sliced?.transitions ?? input.transitions
     const directory = this.directory(input.operationId)
     await mkdir(directory, { recursive: true })
     const renderSources = await Promise.all(input.sources.map(async (source, index) => {
@@ -147,7 +237,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     const sourceIndex = new Map(
       renderSources.map((source, index) => [source.artifactId, index]),
     )
-    for (const clip of input.clips) {
+    for (const clip of renderClips) {
       const video = renderSources[sourceIndex.get(clip.sourceArtifactId) ?? -1]
       const audioArtifactId = clip.audioSourceArtifactId ?? clip.sourceArtifactId
       const audio = renderSources[sourceIndex.get(audioArtifactId) ?? -1]
@@ -214,10 +304,14 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     const stagingWidth = stagingProbe.width
     const stagingHeight = stagingProbe.height
     const outputPath = join(directory, input.renderKind === 'final' ? 'editorial-final.mp4' : 'editorial-proxy.mp4')
+    const compositionOutputPath = rangeReuse
+      ? join(directory, 'editorial-proxy-range.mp4')
+      : outputPath
     const subtitlePath = join(directory, 'captions.ass')
     await rm(outputPath, { force: true })
+    if (compositionOutputPath !== outputPath) await rm(compositionOutputPath, { force: true })
     const filters: string[] = []
-    input.clips.forEach((clip, index) => {
+    renderClips.forEach((clip, index) => {
       const videoIndex = sourceIndex.get(clip.sourceArtifactId)!
       const audioIndex = sourceIndex.get(
         clip.audioSourceArtifactId ?? clip.sourceArtifactId,
@@ -233,8 +327,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         `fps=${outputFps},setsar=1,format=yuv420p[v${index}]`,
       )
       const duration = audioEnd - audioStart
-      const before = input.transitions?.find((transition) => transition.toClipId === clip.id)
-      const after = input.transitions?.find((transition) => transition.fromClipId === clip.id)
+      const before = renderTransitions?.find((transition) => transition.toClipId === clip.id)
+      const after = renderTransitions?.find((transition) => transition.fromClipId === clip.id)
       const fadeIn = before ? Math.min(duration / 4, before.audioFadeMs / 1000) : 0
       const fadeOut = after ? Math.min(duration / 4, after.audioFadeMs / 1000) : 0
       const audioFilters = [`atrim=start=${audioStart.toFixed(6)}:end=${audioEnd.toFixed(6)}`, 'asetpts=PTS-STARTPTS']
@@ -242,8 +336,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       if (fadeOut > 0) audioFilters.push(`afade=t=out:st=${Math.max(0, duration - fadeOut).toFixed(6)}:d=${fadeOut.toFixed(6)}`)
       filters.push(`[${audioIndex}:a:0]${audioFilters.join(',')}[a${index}]`)
     })
-    const concatInputs = input.clips.map((_, index) => `[v${index}][a${index}]`).join('')
-    filters.push(`${concatInputs}concat=n=${input.clips.length}:v=1:a=1[joinedv][joineda]`)
+    const concatInputs = renderClips.map((_, index) => `[v${index}][a${index}]`).join('')
+    filters.push(`${concatInputs}concat=n=${renderClips.length}:v=1:a=1[joinedv][joineda]`)
     filters.push(
       '[joineda]alimiter=limit=0.794328:attack=5:release=50:level=false:latency=true[outa]',
     )
@@ -254,14 +348,14 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     const verticalPosition = input.composition?.verticalPosition ?? 0.5
     filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground]`)
     filters.push(`[background][foreground]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[composed]`)
-    if (input.subtitleCues?.length) {
+    if (renderSubtitleCues?.length) {
       await writeFile(
         subtitlePath,
         buildAssSubtitles({
           width,
           height,
           fps: outputFps,
-          cues: input.subtitleCues,
+          cues: renderSubtitleCues,
         }),
         'utf8',
       )
@@ -273,8 +367,70 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         ...renderSources.flatMap((source) => ['-i', source.path]),
         '-filter_complex', filters.join(';'), '-map', '[outv]', '-map', '[outa]',
         '-r', String(outputFps), '-c:v', 'libx264', '-preset', input.renderKind === 'final' ? 'medium' : 'veryfast', '-crf', input.renderKind === 'final' ? '18' : '23',
-        '-c:a', 'aac', '-b:a', input.renderKind === 'final' ? '192k' : '160k', '-ar', '48000', '-movflags', '+faststart', outputPath,
+        '-c:a', 'aac', '-b:a', input.renderKind === 'final' ? '192k' : '160k', '-ar', '48000', '-movflags', '+faststart', compositionOutputPath,
       ], { windowsHide: true, timeout: 30 * 60_000, maxBuffer: 2 * 1024 * 1024, signal: input.signal })
+      if (rangeReuse && range) {
+        const [reuseMetadata, reuseHash, reuseProbe, rangeProbe] = await Promise.all([
+          stat(rangeReuse.path),
+          calculateFileSha256(rangeReuse.path),
+          probeVideo(rangeReuse.path, { signal: input.signal }),
+          probeVideo(compositionOutputPath, { signal: input.signal }),
+        ])
+        const reuseFrames = Math.round(reuseProbe.duration * outputFps)
+        const rangeFrames = range.endFrame - range.startFrame
+        const suffixRequired = range.endFrame < fullExpectedFrames
+        if (
+          !reuseMetadata.isFile() || reuseMetadata.size !== rangeReuse.byteSize ||
+          reuseHash !== rangeReuse.sha256 || reuseProbe.width !== width ||
+          reuseProbe.height !== height || Math.abs(reuseProbe.fps - outputFps) > 0.01 ||
+          (suffixRequired
+            ? Math.abs(reuseFrames - fullExpectedFrames) > 3
+            : reuseFrames + 3 < range.startFrame) ||
+          rangeProbe.width !== width || rangeProbe.height !== height ||
+          Math.abs(rangeProbe.fps - outputFps) > 0.01 ||
+          Math.abs(rangeProbe.duration * outputFps - rangeFrames) > 3
+        ) {
+          throw new DomainError(
+            'INVALID_RENDER_INPUT',
+            'Reusable proxy or rendered range identity is invalid',
+          )
+        }
+        const stitchFilters: string[] = []
+        const pieces: string[] = []
+        if (range.startFrame > 0) {
+          const prefixEnd = range.startFrame / outputFps
+          stitchFilters.push(
+            `[0:v:0]trim=start_frame=0:end_frame=${range.startFrame},setpts=PTS-STARTPTS[prefixv]`,
+            `[0:a:0]atrim=start=0:end=${prefixEnd.toFixed(6)},asetpts=PTS-STARTPTS[prefixa]`,
+          )
+          pieces.push('[prefixv][prefixa]')
+        }
+        stitchFilters.push(
+          '[1:v:0]setpts=PTS-STARTPTS[rangev]',
+          '[1:a:0]asetpts=PTS-STARTPTS[rangea]',
+        )
+        pieces.push('[rangev][rangea]')
+        if (suffixRequired) {
+          const suffixStart = range.endFrame / outputFps
+          stitchFilters.push(
+            `[0:v:0]trim=start_frame=${range.endFrame}:end_frame=${fullExpectedFrames},setpts=PTS-STARTPTS[suffixv]`,
+            `[0:a:0]atrim=start=${suffixStart.toFixed(6)}:end=${(fullExpectedFrames / outputFps).toFixed(6)},asetpts=PTS-STARTPTS[suffixa]`,
+          )
+          pieces.push('[suffixv][suffixa]')
+        }
+        stitchFilters.push(
+          `${pieces.join('')}concat=n=${pieces.length}:v=1:a=1[stitchedv][stitcheda]`,
+        )
+        await execFileAsync(this.ffmpegPath, [
+          '-hide_banner', '-loglevel', 'error', '-y',
+          '-i', rangeReuse.path, '-i', compositionOutputPath,
+          '-filter_complex', stitchFilters.join(';'),
+          '-map', '[stitchedv]', '-map', '[stitcheda]',
+          '-r', String(outputFps), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+          '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-movflags', '+faststart',
+          outputPath,
+        ], { windowsHide: true, timeout: 30 * 60_000, maxBuffer: 2 * 1024 * 1024, signal: input.signal })
+      }
     } catch (error) {
       const processError = error as NodeJS.ErrnoException & {
         stderr?: string | Buffer
@@ -307,14 +463,13 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       calculateFileSha256(outputPath),
       probeVideo(outputPath, { signal: input.signal }),
     ])
-    const expectedFrames = input.clips.reduce((total, clip) => total + clip.sourceOutFrame - clip.sourceInFrame, 0)
-    if (!metadata.isFile() || metadata.size <= 0 || Math.abs(probe.duration * input.fps - expectedFrames) > 3 || probe.width !== width || probe.height !== height) {
+    if (!metadata.isFile() || metadata.size <= 0 || Math.abs(probe.duration * input.fps - fullExpectedFrames) > 3 || probe.width !== width || probe.height !== height) {
       throw new DomainError('RENDER_OUTPUT_INVALID', 'Editorial proxy failed timing or dimension verification')
     }
     const renderElementMap = buildRenderElementMap({
       proxyHash: sha256,
       fps: outputFps,
-      durationFrames: expectedFrames,
+      durationFrames: fullExpectedFrames,
       canvas: { width, height },
       source: { width: stagingProbe.width, height: stagingProbe.height },
       clips: input.clips,

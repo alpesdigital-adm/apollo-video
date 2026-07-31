@@ -29,6 +29,18 @@ export interface EditorialProxyRenderer {
     subtitleCues?: readonly Readonly<DirectedSubtitleCue>[]
     transitions?: readonly Readonly<DirectedTransition>[]
     composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
+    rangeReuse?: Readonly<{
+      schemaVersion: 'project-proxy-range-reuse/v1'
+      commandId: string
+      impactHash: string
+      baseVersionId: string
+      ranges: readonly Readonly<{ startFrame: number; endFrame: number }>[]
+      artifactId: string
+      manifestId: string
+      path: string
+      sha256: string
+      byteSize: number
+    }>
     signal?: AbortSignal
   }): Promise<Readonly<EditorialProxyRenderResult>>
   cleanup(operationId: string): Promise<void>

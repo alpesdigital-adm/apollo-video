@@ -10,6 +10,7 @@ import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
+import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -156,6 +157,83 @@ test('T-FR-221 renderer materializes B-roll video while preserving source-master
     assert.equal(final.probe.height, 1080)
     assert.ok(Math.abs(final.probe.fps - 30) <= 0.01)
     await renderer.cleanup('multisource-render-test')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('T-FR-233 renderer recomposes only the stale range and reuses valid proxy prefix and suffix', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-range-reuse-render-'))
+  const masterPath = join(root, 'master.mp4')
+  const replacementPath = join(root, 'replacement.mp4')
+  try {
+    execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=red:s=640x360:r=30:d=3',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=3',
+      '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-ar', '48000', masterPath,
+    ], { windowsHide: true })
+    execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=blue:s=640x360:r=30:d=1',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', replacementPath,
+    ], { windowsHide: true })
+    const renderer = new FfmpegEditorialProxyRenderer({
+      workRoot: join(root, 'work'),
+      ffmpegPath,
+    })
+    const masterSource = {
+      artifactId: 'artifact-range-master', path: masterPath, mediaType: 'video',
+      colorPipelineCompilation: colorCompilation('artifact-range-master'),
+    }
+    const base = await renderer.render({
+      operationId: 'range-reuse-base', renderKind: 'proxy',
+      sources: [masterSource],
+      clips: [{
+        id: 'clip-base', sourceArtifactId: masterSource.artifactId,
+        sourceInFrame: 0, sourceOutFrame: 90,
+        timelineInFrame: 0, timelineOutFrame: 90, rate: 1,
+      }],
+      fps: 30, format: '16:9',
+    })
+    const partial = await renderer.render({
+      operationId: 'range-reuse-partial', renderKind: 'proxy',
+      sources: [masterSource, {
+        artifactId: 'artifact-range-replacement', path: replacementPath, mediaType: 'video',
+        colorPipelineCompilation: colorCompilation('artifact-range-replacement'),
+      }],
+      clips: [
+        { id: 'clip-prefix', sourceArtifactId: masterSource.artifactId, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+        { id: 'clip-replacement', sourceArtifactId: 'artifact-range-replacement', audioSourceArtifactId: masterSource.artifactId, audioSourceInFrame: 30, audioSourceOutFrame: 60, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 30, timelineOutFrame: 60, rate: 1 },
+        { id: 'clip-suffix', sourceArtifactId: masterSource.artifactId, sourceInFrame: 60, sourceOutFrame: 90, timelineInFrame: 60, timelineOutFrame: 90, rate: 1 },
+      ],
+      fps: 30, format: '16:9',
+      rangeReuse: {
+        schemaVersion: 'project-proxy-range-reuse/v1',
+        commandId: 'manual-command-range-golden', impactHash: '1'.repeat(64),
+        baseVersionId: 'project-version-range-base',
+        ranges: [{ startFrame: 30, endFrame: 60 }],
+        artifactId: 'artifact-range-base-proxy', manifestId: 'manifest-range-base-proxy',
+        path: base.outputPath, sha256: base.sha256, byteSize: base.byteSize,
+      },
+    })
+    const rangeProbe = await probeVideo(
+      join(root, 'work', 'range-reuse-partial', 'editorial-proxy-range.mp4'),
+    )
+    assert.ok(Math.abs(rangeProbe.duration - 1) <= 0.1)
+    assert.ok(Math.abs(partial.probe.duration - 3) <= 0.1)
+    for (const [second, dominantChannel] of [[0.5, 0], [1.5, 2], [2.5, 0]]) {
+      const pixel = execFileSync(ffmpegPath, [
+        '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', partial.outputPath,
+        '-frames:v', '1', '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+      ], { windowsHide: true })
+      assert.equal(pixel.byteLength, 3)
+      const other = dominantChannel === 0 ? 2 : 0
+      assert.ok(pixel[dominantChannel] > pixel[other] * 2)
+    }
+    await renderer.cleanup('range-reuse-partial')
+    await renderer.cleanup('range-reuse-base')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -10,9 +10,8 @@ import {
   startPublicOperationAttempt,
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
-import { projectRenderSourcesFingerprint } from '../../src/v2/application/project-render-sources.ts'
+import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
-import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 
 const colorCompilation = Object.freeze({
   id: 'color-pipeline-proxy-test', sourceArtifactId: 'artifact-project-proxy-source',
@@ -30,8 +29,7 @@ function createClock() {
   return () => new Date((current += 100))
 }
 
-function createOperations() {
-  const immutableSource = source()
+function createOperations(immutableSource = source()) {
   let operation = createQueuedPublicOperation({
     id: 'operation-project-proxy-test',
     workspaceId: 'workspace-project-proxy-test',
@@ -55,18 +53,9 @@ function createOperations() {
     sourceArtifactId: 'artifact-project-proxy-source',
     sourceManifestId: 'manifest-project-proxy-source',
     colorPipelineBindings,
-    inputHash: calculateVersionHash({
-      kind: 'project-proxy-render/v1',
-      projectId: immutableSource.projectId,
-      projectVersionId: immutableSource.projectVersionId,
-      editPlanSnapshotId: immutableSource.editPlanSnapshotId,
-      editPlanHash: immutableSource.editPlanHash,
-      sourceArtifactId: immutableSource.sourceArtifactId,
-      sourceManifestId: immutableSource.sourceManifestId,
-      sourceSha256: immutableSource.sourceSha256,
-      renderSourcesFingerprint: projectRenderSourcesFingerprint(immutableSource.renderSources),
+    inputHash: projectProxyRenderInputHash({
+      source: immutableSource,
       colorPipelineBindings,
-      format: immutableSource.format,
     }),
     outputArtifactId: 'artifact-project-proxy-output',
     outputManifestId: 'manifest-project-proxy-output',
@@ -168,6 +157,7 @@ function dependencies(operations, overrides = {}) {
       async readImmutableSource() { return source() },
       async attachCompletedOutput(input) {
         calls.attached += 1
+        assert.equal(input.variantId, '9:16')
         assert.equal(input.outputArtifactId, 'artifact-project-proxy-output')
       },
     },
@@ -254,4 +244,62 @@ test('project proxy worker does not attach an output after losing its lease', as
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'lease-lost' })
   assert.equal(operations.operation.status, 'running')
   assert.deepEqual(base.calls, { attached: 0, cleaned: 1, lutCleaned: 1, persisted: 0, mapped: 0, reviewed: 0 })
+})
+
+test('T-FR-233 project proxy worker materializes only the persisted stale range over the reusable proxy', async () => {
+  const immutableSource = Object.freeze({
+    ...source(),
+    rangeReuse: Object.freeze({
+      schemaVersion: 'project-proxy-range-reuse/v1',
+      commandId: 'manual-command-range-test',
+      impactHash: '1'.repeat(64),
+      baseVersionId: 'project-version-proxy-base',
+      ranges: Object.freeze([Object.freeze({ startFrame: 60, endFrame: 120 })]),
+      artifactId: 'artifact-project-proxy-base',
+      manifestId: 'manifest-project-proxy-base',
+      artifactKey: 'workspaces/project-proxy-test/editorial-proxies/base.mp4',
+      sha256: '2'.repeat(64),
+      byteSize: 8_192,
+    }),
+  })
+  const operations = createOperations(immutableSource)
+  let renderedRange
+  let manifestSources
+  const base = dependencies(operations, {
+    projects: {
+      async readImmutableSource() { return immutableSource },
+      async attachCompletedOutput() { base.calls.attached += 1 },
+    },
+    renderer: {
+      async render(input) {
+        renderedRange = input.rangeReuse
+        return {
+          outputPath: join(tmpdir(), 'project-proxy-range-output.mp4'),
+          sha256: 'd'.repeat(64), byteSize: 4_096,
+          probe: { width: 540, height: 960, duration: 10, fps: 30, codec: 'h264', container: 'mp4' },
+          renderElementMap: { schemaVersion: 'render-element-map/v1', proxyHash: 'd'.repeat(64), fps: 30, durationFrames: 300, canvas: { width: 540, height: 960 }, elements: [] },
+        }
+      },
+      async cleanup() { base.calls.cleaned += 1 },
+    },
+    artifacts: {
+      async persistOrReplay(input) {
+        base.calls.persisted += 1
+        manifestSources = input.manifest.sources
+        return { artifactId: input.artifactId, manifestId: input.manifestId, replayed: false }
+      },
+    },
+  })
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)(
+    'worker-project-proxy-range',
+  )
+
+  assert.equal(outcome.status, 'succeeded')
+  assert.deepEqual(renderedRange.ranges, [{ startFrame: 60, endFrame: 120 }])
+  assert.equal(
+    renderedRange.path,
+    join(base.deps.artifactRoot, immutableSource.rangeReuse.artifactKey),
+  )
+  assert.equal(manifestSources.at(-1).role, 'reused-proxy-range')
+  assert.equal(manifestSources.at(-1).sha256, immutableSource.rangeReuse.sha256)
 })

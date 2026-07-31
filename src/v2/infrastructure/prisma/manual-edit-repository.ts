@@ -365,6 +365,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
         workspaceId: input.workspaceId,
         projectId: input.projectId,
         resultVersionId,
+        resolutions: { none: { operation: { status: 'succeeded' } } },
       },
       orderBy: { id: 'asc' },
     })

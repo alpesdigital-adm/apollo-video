@@ -16,8 +16,15 @@ dependency state; it never changes the global availability of historical
 bytes. Replay rehydrates and compares the normalized rows against the immutable
 impact payload, while the additive public
 `apollo.projects.artifact-invalidations.read` capability returns those same
-relationships without changing `manual-edits.apply/v1`. The initial runtime
-adapter still covers `manual-edit` only.
-Until range rendering and stale resolution are implemented, the endpoint
-continues to enqueue its compatible full proxy; normalized stale state must not
-be reported as partial rendering already delivered.
+relationships without changing `manual-edits.apply/v1`.
+
+The initial `manual-edit` runtime derives one persisted proxy range, validates a
+completed base proxy, recomposes only that range and assembles a complete MP4
+from the valid prefix/range/suffix. The renderer receives a materialized path
+and immutable hashes, never persistence access. Missing reusable bytes or a
+full-timeline impact deliberately selects the new V2 full render. Completion
+records an immutable invalidation resolution linked to the replacement
+operation/artifact/manifest; active-stale reads hide it only after that
+operation is `succeeded`. The current adapter is intentionally limited to one
+merged range and unit-rate clips. Other Commands, multiple ranges/rates and
+selection-without-render remain open and prevent claiming FR-233 complete.

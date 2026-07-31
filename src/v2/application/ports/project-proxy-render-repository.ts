@@ -2,6 +2,19 @@ import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { ProxyQualityIssue } from '../render-workflow.ts'
 
+export interface ProjectProxyRangeReuse {
+  schemaVersion: 'project-proxy-range-reuse/v1'
+  commandId: string
+  impactHash: string
+  baseVersionId: string
+  ranges: readonly Readonly<{ startFrame: number; endFrame: number }>[]
+  artifactId: string
+  manifestId: string
+  artifactKey: string
+  sha256: string
+  byteSize: number
+}
+
 export interface ProjectRenderSourceAsset {
   artifactId: string
   manifestId: string
@@ -28,6 +41,7 @@ export interface ProjectProxyRenderSource {
   originalFileName: string
   uploadReceivedAt: string
   criticIssues: readonly Readonly<ProxyQualityIssue>[]
+  rangeReuse?: Readonly<ProjectProxyRangeReuse>
 }
 
 export interface ProjectProxyRenderRepository {
@@ -45,6 +59,7 @@ export interface ProjectProxyRenderRepository {
     operationId: string
     projectId: string
     projectVersionId: string
+    variantId: string
     outputArtifactId: string
     outputManifestId: string
     originalFileName: string

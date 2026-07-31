@@ -6,6 +6,10 @@ import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { ProjectProxyRenderRepository, ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
 import type { ProxyQualityIssue } from '../../application/render-workflow.ts'
 import { DomainError } from '../../domain/errors.ts'
+import {
+  parseCommandArtifactInvalidation,
+  parseCommandImpact,
+} from '../../domain/command-impact.ts'
 
 function parseRecord(value: string, field: string): Record<string, unknown> {
   try {
@@ -45,6 +49,16 @@ function parseCriticIssues(value: string | undefined): readonly Readonly<ProxyQu
       correctable: candidate.correctable,
     })
   }))
+}
+
+function parseArray(value: string, field: string): readonly unknown[] {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!Array.isArray(parsed)) throw new Error('invalid')
+    return parsed
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
+  }
 }
 
 function hydrateSource(
@@ -132,7 +146,11 @@ function hydrateSource(
 }
 
 export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRepository {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) {
+    this.client = client
+  }
 
   queryProject(input: {
     workspaceId: string
@@ -157,6 +175,13 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
           include: {
             editPlanSnapshot: true,
             directorRunAsResult: { include: { qualitySnapshot: true } },
+            command: {
+              include: {
+                artifactInvalidations: {
+                  include: { resolutions: { include: { operation: { select: { status: true } } } } },
+                },
+              },
+            },
           },
         },
         mediaAssets: {
@@ -175,11 +200,116 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   }
 
   async readCurrentSource(input: { workspaceId: string; projectId: string }) {
-    return hydrateSource(await this.queryProject(input))
+    const project = await this.queryProject(input)
+    const source = hydrateSource(project)
+    return source ? this.attachRangeReuse(input.workspaceId, project!, source) : null
   }
 
   async readImmutableSource(input: { workspaceId: string; projectId: string; projectVersionId: string; editPlanSnapshotId: string; sourceArtifactId: string; sourceManifestId: string }) {
-    return hydrateSource(await this.queryProject(input), input)
+    const project = await this.queryProject(input)
+    const source = hydrateSource(project, input)
+    return source ? this.attachRangeReuse(input.workspaceId, project!, source) : null
+  }
+
+  private async attachRangeReuse(
+    workspaceId: string,
+    project: NonNullable<Awaited<ReturnType<PrismaProjectProxyRenderRepository['queryProject']>>>,
+    source: Readonly<ProjectProxyRenderSource>,
+  ): Promise<Readonly<ProjectProxyRenderSource>> {
+    const version = project.versions[0]
+    const command = version?.command
+    if (!version || !command || command.type !== 'manual-edit') return source
+    const payload = parseRecord(command.payloadJson, 'project proxy manual Command payload')
+    if (!payload.impact) return source
+    const impact = parseCommandImpact(payload.impact)
+    if (
+      impact.commandId !== command.id ||
+      impact.baseVersionId !== command.baseVersionId ||
+      impact.resultVersionId !== version.id
+    ) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy Command impact identity is inconsistent')
+    }
+    const minimalRenders = impact.minimalRenders.filter((render) =>
+      render.kind === 'proxy' && render.variantId === source.format)
+    if (minimalRenders.length !== 1 || minimalRenders[0]!.ranges.length !== 1) return source
+    const requestedRange = minimalRenders[0]!.ranges[0]!
+    const range = Object.freeze({
+      startFrame: requestedRange.startFrame,
+      endFrame: Math.min(requestedRange.endFrame, source.editPlan.durationFrames),
+    })
+    if (
+      range.startFrame < 0 || range.endFrame <= range.startFrame ||
+      (range.startFrame === 0 && range.endFrame === source.editPlan.durationFrames)
+    ) return source
+    const invalidations = command.artifactInvalidations
+      .filter((row) => !row.resolutions.some((resolution) => resolution.operation.status === 'succeeded'))
+      .map((row) => parseCommandArtifactInvalidation({
+        schemaVersion: 'command-artifact-invalidation/v1',
+        id: row.id,
+        status: row.status,
+        commandId: row.commandId,
+        baseVersionId: row.baseVersionId,
+        resultVersionId: row.resultVersionId,
+        artifactId: row.artifactId,
+        kind: row.kind,
+        variantId: row.variantId,
+        dependencyTypes: parseArray(row.dependencyTypesJson, 'proxy invalidation dependencies'),
+        affectedRanges: parseArray(row.affectedRangesJson, 'proxy invalidation ranges'),
+        impactHash: row.impactHash,
+        createdAt: row.createdAt.toISOString(),
+      }))
+    const proxyArtifactIds = invalidations
+      .filter((item) =>
+        item.kind === 'proxy' && item.variantId === source.format &&
+        item.commandId === command.id && item.baseVersionId === impact.baseVersionId &&
+        item.resultVersionId === impact.resultVersionId && item.impactHash === impact.impactHash)
+      .map((item) => item.artifactId)
+    if (proxyArtifactIds.length === 0) return source
+    const previous = await this.client.v2ProjectProxyRenderOperation.findFirst({
+      where: {
+        workspaceId,
+        projectId: source.projectId,
+        projectVersionId: impact.baseVersionId,
+        outputArtifactId: { in: proxyArtifactIds },
+        operation: { status: 'succeeded', phase: 'completed' },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { outputArtifactId: true, outputManifestId: true },
+    })
+    if (!previous) return source
+    const artifact = await this.client.v2MediaArtifact.findFirst({
+      where: {
+        id: previous.outputArtifactId,
+        workspaceId,
+        status: 'available',
+      },
+      include: {
+        manifests: { where: { id: previous.outputManifestId }, take: 1 },
+      },
+    })
+    const manifest = artifact?.manifests[0]
+    if (!artifact || !manifest || !Number.isSafeInteger(Number(artifact.byteSize))) return source
+    const manifestBody = parseRecord(manifest.manifestJson, 'reusable project proxy manifest')
+    const artifactBody = manifestBody.artifact
+    if (
+      typeof artifactBody !== 'object' || artifactBody === null || Array.isArray(artifactBody) ||
+      typeof (artifactBody as Record<string, unknown>).artifactKey !== 'string'
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Reusable project proxy manifest is invalid')
+    return Object.freeze({
+      ...source,
+      rangeReuse: Object.freeze({
+        schemaVersion: 'project-proxy-range-reuse/v1' as const,
+        commandId: command.id,
+        impactHash: impact.impactHash,
+        baseVersionId: impact.baseVersionId,
+        ranges: Object.freeze([range]),
+        artifactId: artifact.id,
+        manifestId: manifest.id,
+        artifactKey: (artifactBody as Record<string, unknown>).artifactKey as string,
+        sha256: artifact.sha256,
+        byteSize: Number(artifact.byteSize),
+      }),
+    })
   }
 
   async attachCompletedOutput(input: Parameters<ProjectProxyRenderRepository['attachCompletedOutput']>[0]): Promise<void> {
@@ -201,6 +331,32 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         },
         update: {},
       })
+      const unresolvedInvalidations = await transaction.v2CommandArtifactInvalidation.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          resultVersionId: input.projectVersionId,
+          kind: 'proxy',
+          variantId: input.variantId,
+          resolutions: { none: { operation: { status: 'succeeded' } } },
+        },
+        select: { id: true },
+      })
+      if (unresolvedInvalidations.length > 0) {
+        await transaction.v2CommandArtifactInvalidationResolution.createMany({
+          data: unresolvedInvalidations.map((invalidation) => ({
+            id: randomUUID(),
+            invalidationId: invalidation.id,
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            operationId: input.operationId,
+            replacementArtifactId: input.outputArtifactId,
+            replacementManifestId: input.outputManifestId,
+            createdAt: new Date(input.createdAt),
+          })),
+          skipDuplicates: true,
+        })
+      }
       await transaction.v2DirectorRun.updateMany({
         where: {
           workspaceId: input.workspaceId,

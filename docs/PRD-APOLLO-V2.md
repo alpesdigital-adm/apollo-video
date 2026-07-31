@@ -1641,9 +1641,12 @@ Renderizar somente o que ficou stale.
 
 Estado parcial auditado: `manual-edit` já materializa relações stale
 version-scoped somente para outputs proxy/final afetados, sem alterar a
-disponibilidade global dos bytes históricos. A entrega permanece aberta até a
-mesma semântica cobrir todos os Commands, o rerender mínimo resolver o estado e
-a jornada integrada ser executada, implantada e aceita.
+disponibilidade global dos bytes históricos. O worker de proxy deriva um range
+persistido, recompõe esse trecho e reutiliza as partes válidas do proxy-base; a
+conclusão registra uma resolução imutável, e a relação deixa de ser stale ativa
+somente quando a operação substituta chega a `succeeded`. A entrega permanece
+aberta até a mesma semântica cobrir todos os Commands e ranges, a seleção sem
+render evitar trabalho e a jornada integrada ser executada, implantada e aceita.
 
 ### FR-234 — Props/manifest
 

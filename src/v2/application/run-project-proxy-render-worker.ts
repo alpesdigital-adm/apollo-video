@@ -13,9 +13,8 @@ import type { RenderElementMapRepository } from './ports/render-element-map-repo
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-materializer.ts'
 import { evaluateRenderedProxy } from './render-workflow.ts'
-import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { projectProxyRenderInputHash } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
-import { calculateVersionHash } from './version-hash.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 
 const NON_RETRYABLE_CODES = new Set(['INVALID_RENDER_INPUT', 'RENDER_OUTPUT_INVALID', 'PERSISTENCE_CONFLICT', 'PERSISTENCE_NOT_CONFIGURED'])
@@ -137,18 +136,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
         operationId: operation.id, compilations: [...colorPipelines.values()],
       })
-      const immutableInputHash = calculateVersionHash({
-        kind: 'project-proxy-render/v1',
-        projectId: context.projectId,
-        projectVersionId: source.projectVersionId,
-        editPlanSnapshotId: source.editPlanSnapshotId,
-        editPlanHash: source.editPlanHash,
-        sourceArtifactId: source.sourceArtifactId,
-        sourceManifestId: source.sourceManifestId,
-        sourceSha256: source.sourceSha256,
-        renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+      const immutableInputHash = projectProxyRenderInputHash({
+        source,
         colorPipelineBindings: context.colorPipelineBindings,
-        format: source.format,
       })
       if (
         immutableInputHash !== context.inputHash ||
@@ -170,27 +160,41 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         })),
         lutPaths: materializedLut.lutPaths,
         clips, fps: source.editPlan.fps, format: source.format, subtitleCues, transitions, ...(composition ? { composition } : {}),
+        ...(source.rangeReuse ? {
+          rangeReuse: {
+            ...source.rangeReuse,
+            path: resolveArtifactPath(dependencies.artifactRoot, source.rangeReuse.artifactKey),
+          },
+        } : {}),
         signal: abortController.signal,
       })
       await enter('verifying')
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
       await enter('persisting')
       const stored = await dependencies.storage.promoteDerived({ workspaceId: operation.workspaceId, sourcePath: rendered.outputPath, sha256: rendered.sha256, extension: 'mp4', prefix: 'editorial-proxies' })
-      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-proxy/1.1.0').digest('hex')
+      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-proxy/1.2.0').digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: '1.1.0', parameters: { inputHash: context.inputHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null } },
-        sources: source.renderSources.map((asset) => ({
-          artifactKey: asset.artifactKey,
-          sha256: asset.sha256,
-          role: asset.role,
-          execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
-        })),
+        recipe: { id: 'editorial-proxy', version: '1.2.0', parameters: { inputHash: context.inputHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null } },
+        sources: [
+          ...source.renderSources.map((asset) => ({
+            artifactKey: asset.artifactKey,
+            sha256: asset.sha256,
+            role: asset.role,
+            execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
+          })),
+          ...(source.rangeReuse ? [{
+            artifactKey: source.rangeReuse.artifactKey,
+            sha256: source.rangeReuse.sha256,
+            role: 'reused-proxy-range',
+            execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
+          }] : []),
+        ],
         probe: { width: rendered.probe.width, height: rendered.probe.height, duration: rendered.probe.duration, fps: rendered.probe.fps },
       })
       const persisted = await dependencies.artifacts.persistOrReplay({
         workspaceId: operation.workspaceId, artifactId: context.outputArtifactId, manifestId: context.outputManifestId,
-        lineageIds: source.renderSources.map((asset, index) =>
+        lineageIds: [...source.renderSources, ...(source.rangeReuse ? [source.rangeReuse] : [])].map((asset, index) =>
           `lineage-${createHash('sha256')
             .update(`${operation.workspaceId}:${context.inputHash}:${asset.artifactId}:${index}`)
             .digest('hex')}`),
@@ -208,7 +212,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
       await dependencies.projects.attachCompletedOutput({
         workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
-        projectVersionId: context.projectVersionId, outputArtifactId: context.outputArtifactId, outputManifestId: context.outputManifestId,
+        projectVersionId: context.projectVersionId, variantId: source.format,
+        outputArtifactId: context.outputArtifactId, outputManifestId: context.outputManifestId,
         originalFileName: context.originalFileName, createdAt: clock().toISOString(),
       })
       const reviewedAt = clock().toISOString()

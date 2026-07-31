@@ -3,7 +3,7 @@ import { createQueuedPublicOperation } from '../domain/public-operation.ts'
 import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
-import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { projectProxyRenderInputHash } from './project-render-sources.ts'
 import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
 
@@ -36,15 +36,7 @@ export function enqueueProjectProxyRenderService(dependencies: {
     const colorPipelineBindings = await resolveRenderColorPipelineBindings({
       repository: dependencies.colorPipelines, workspaceId, projectId, sources: source.renderSources,
     })
-    const inputHash = calculateVersionHash({
-      kind: 'project-proxy-render/v1', projectId, projectVersionId: source.projectVersionId,
-      editPlanSnapshotId: source.editPlanSnapshotId, editPlanHash: source.editPlanHash,
-      sourceArtifactId: source.sourceArtifactId, sourceManifestId: source.sourceManifestId,
-      sourceSha256: source.sourceSha256,
-      renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
-      colorPipelineBindings,
-      format: source.format,
-    })
+    const inputHash = projectProxyRenderInputHash({ source, colorPipelineBindings })
     const requestFingerprint = calculateVersionHash({ type: 'project-proxy-render', projectId, inputHash })
     const replay = await dependencies.operations.findReplay({ workspaceId, clientId, idempotencyKey, requestFingerprint })
     if (replay) return replay

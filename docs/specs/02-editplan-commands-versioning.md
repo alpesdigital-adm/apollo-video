@@ -584,6 +584,18 @@ versão que o produziu. A capability aditiva
 alterar `manual-edits.apply/v1`; replay precisa rejeitar qualquer divergência
 entre payload e linhas.
 
+O primeiro executor parcial usa o `command-impact/v1` persistido como única
+fonte do range: para um `manual-edit` com exatamente um range proxy, ele exige
+um proxy concluído da versão-base, valida identidade/hash/tamanho, recompõe só o
+trecho e monta a saída completa com prefixo e sufixo ainda válidos. O renderer
+recebe paths já materializados e não consulta persistência. Se não houver base
+reutilizável ou o range cobrir todo o timeline, o mesmo worker faz render V2
+completo. A conclusão cria uma
+`V2CommandArtifactInvalidationResolution` imutável ligada à operação e ao novo
+artifact/manifest; consultas omitem a invalidação apenas após `succeeded`, de
+modo que queda ou retry não declare o stale resolvido antes da hora. O suporte
+atual é deliberadamente restrito a um range mesclado e clips em rate 1.
+
 ## 24. Matriz de invalidação
 
 | Command | Invalida | Não invalida |

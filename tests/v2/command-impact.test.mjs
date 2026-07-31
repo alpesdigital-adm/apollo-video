@@ -13,6 +13,7 @@ import {
   parseCommandImpact,
 } from '../../src/v2/domain/command-impact.ts'
 import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
+import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
 
 const workspaceId = 'workspace-impact-1'
 const projectId = 'project-impact-1'
@@ -308,7 +309,106 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
   assert.deepEqual(view.invalidations.map((item) => item.artifactId), [
     'artifact-final-9x16', 'artifact-proxy-9x16',
   ])
-  assert.deepEqual(invalidationQuery.where, { workspaceId, projectId, resultVersionId })
+  assert.deepEqual(invalidationQuery.where, {
+    workspaceId, projectId, resultVersionId,
+    resolutions: { none: { operation: { status: 'succeeded' } } },
+  })
+
+  let proxyLookup
+  const reusableProxyRepository = new PrismaProjectProxyRenderRepository({
+    v2Project: { async findFirst() { return {
+      id: projectId, format: '9:16', currentVersionId: resultVersionId,
+      versions: [{
+        id: resultVersionId, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
+        editPlanSnapshot: {
+          contentJson: committed.snapshot.contentJson,
+          contentHash: committed.snapshot.contentHash,
+        },
+        directorRunAsResult: null,
+        command: {
+          id: commandId, type: 'manual-edit', baseVersionId,
+          payloadJson: JSON.stringify(committed.command.payload),
+          artifactInvalidations: persistedInvalidations.map((invalidation) => ({
+            ...invalidation,
+            resolutions: [],
+          })),
+        },
+      }],
+      mediaAssets: [{
+        role: 'source-master', artifactId: 'source-1', originalFileName: 'source.mp4',
+        createdAt: new Date(createdAt), upload: null,
+        artifact: {
+          id: 'source-1', status: 'available', mediaType: 'video', container: 'mp4',
+          sha256: 'c'.repeat(64), byteSize: 4_096n,
+          manifests: [{
+            id: 'manifest-source-1',
+            manifestJson: JSON.stringify({ artifact: { artifactKey: 'masters/source.mp4' } }),
+          }],
+        },
+      }],
+    } } },
+    v2ProjectProxyRenderOperation: { async findFirst(query) {
+      proxyLookup = query
+      return {
+        outputArtifactId: 'artifact-proxy-9x16',
+        outputManifestId: 'manifest-proxy-9x16',
+      }
+    } },
+    v2MediaArtifact: { async findFirst() { return {
+      id: 'artifact-proxy-9x16', sha256: 'd'.repeat(64), byteSize: 8_192n,
+      manifests: [{
+        id: 'manifest-proxy-9x16',
+        manifestJson: JSON.stringify({ artifact: { artifactKey: 'editorial-proxies/base.mp4' } }),
+      }],
+    } } },
+  })
+  const reusableSource = await reusableProxyRepository.readCurrentSource({ workspaceId, projectId })
+  assert.equal(reusableSource.rangeReuse.commandId, commandId)
+  assert.deepEqual(reusableSource.rangeReuse.ranges, [{ startFrame: 0, endFrame: 90 }])
+  assert.equal(reusableSource.rangeReuse.artifactId, 'artifact-proxy-9x16')
+  assert.deepEqual(proxyLookup.where.operation, { status: 'succeeded', phase: 'completed' })
+})
+
+test('T-FR-233 completed proxy atomically records scoped invalidation resolutions', async () => {
+  let invalidationQuery
+  let resolutionRows
+  const repository = new PrismaProjectProxyRenderRepository({
+    async $transaction(callback) {
+      return callback({
+        v2ProjectProxyRenderOperation: { async findFirst() { return { operationId: 'operation-proxy-2' } } },
+        v2MediaArtifact: { async findFirst() { return { id: 'artifact-proxy-replacement' } } },
+        v2MediaArtifactManifest: { async findFirst() { return { id: 'manifest-proxy-replacement' } } },
+        v2ProjectMediaAsset: { async upsert() {} },
+        v2CommandArtifactInvalidation: { async findMany(query) {
+          invalidationQuery = query
+          return [{ id: '1'.repeat(64) }, { id: '2'.repeat(64) }]
+        } },
+        v2CommandArtifactInvalidationResolution: { async createMany({ data }) { resolutionRows = data } },
+        v2DirectorRun: { async updateMany() {} },
+      })
+    },
+  })
+  await repository.attachCompletedOutput({
+    workspaceId, operationId: 'operation-proxy-2', projectId,
+    projectVersionId: resultVersionId, variantId: '9:16',
+    outputArtifactId: 'artifact-proxy-replacement',
+    outputManifestId: 'manifest-proxy-replacement',
+    originalFileName: 'replacement.mp4', createdAt,
+  })
+  assert.deepEqual(invalidationQuery.where, {
+    workspaceId, projectId, resultVersionId,
+    kind: 'proxy', variantId: '9:16',
+    resolutions: { none: { operation: { status: 'succeeded' } } },
+  })
+  assert.deepEqual(resolutionRows.map((row) => ({
+    invalidationId: row.invalidationId,
+    operationId: row.operationId,
+    replacementArtifactId: row.replacementArtifactId,
+    replacementManifestId: row.replacementManifestId,
+  })), [
+    { invalidationId: '1'.repeat(64), operationId: 'operation-proxy-2', replacementArtifactId: 'artifact-proxy-replacement', replacementManifestId: 'manifest-proxy-replacement' },
+    { invalidationId: '2'.repeat(64), operationId: 'operation-proxy-2', replacementArtifactId: 'artifact-proxy-replacement', replacementManifestId: 'manifest-proxy-replacement' },
+  ])
 })
 
 test('T-FR-233 Prisma context discovers only completed proxy/final outputs for the immutable base', async () => {

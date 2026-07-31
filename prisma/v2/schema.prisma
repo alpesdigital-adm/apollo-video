@@ -52,6 +52,7 @@ model V2Workspace {
   webhookReplayReceipts           V2WebhookReplayReceipt[]
   editCommands                    V2EditCommand[]
   commandArtifactInvalidations    V2CommandArtifactInvalidation[]
+  commandArtifactInvalidationResolutions V2CommandArtifactInvalidationResolution[]
   directorRuns                    V2DirectorRun[]
   reviewAnnotations               V2ReviewAnnotation[]
   renderElementMaps               V2RenderElementMap[]
@@ -316,6 +317,7 @@ model V2Project {
   finalExportOperations         V2ProjectFinalExportOperation[]
   editCommands                  V2EditCommand[]
   commandArtifactInvalidations  V2CommandArtifactInvalidation[]
+  commandArtifactInvalidationResolutions V2CommandArtifactInvalidationResolution[]
   directorRuns                  V2DirectorRun[]
   reviewAnnotations             V2ReviewAnnotation[]
   renderElementMaps             V2RenderElementMap[]
@@ -535,6 +537,7 @@ model V2CommandArtifactInvalidation {
   baseVersion   V2ProjectVersion @relation("ArtifactInvalidationBaseVersion", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   resultVersion V2ProjectVersion @relation("ArtifactInvalidationResultVersion", fields: [resultVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   artifact      V2MediaArtifact  @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  resolutions   V2CommandArtifactInvalidationResolution[]
 
   @@unique([id, workspaceId])
   @@unique([commandId, artifactId])
@@ -542,6 +545,30 @@ model V2CommandArtifactInvalidation {
   @@index([workspaceId, artifactId, status])
   @@index([workspaceId, impactHash])
   @@map("command_artifact_invalidations")
+}
+
+model V2CommandArtifactInvalidationResolution {
+  id                    String   @id @db.Uuid
+  invalidationId        String   @db.Char(64)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  operationId           String   @db.VarChar(128)
+  replacementArtifactId String   @db.VarChar(128)
+  replacementManifestId String   @db.VarChar(128)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  workspace           V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project             V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  invalidation        V2CommandArtifactInvalidation @relation(fields: [invalidationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  operation           V2PublicOperation             @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  replacementArtifact V2MediaArtifact               @relation(fields: [replacementArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  replacementManifest V2MediaArtifactManifest       @relation(fields: [replacementManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([invalidationId, operationId])
+  @@index([invalidationId, workspaceId])
+  @@index([workspaceId, projectId, operationId])
+  @@index([workspaceId, replacementArtifactId])
+  @@map("command_artifact_invalidation_resolutions")
 }
 
 model V2ReviewAnnotation {
@@ -830,6 +857,7 @@ model V2MediaArtifact {
   colorProbes                  V2MediaColorProbe[]
   colorPipelineCompilations    V2ColorPipelineCompilation[]
   commandArtifactInvalidations V2CommandArtifactInvalidation[]
+  invalidationResolutions      V2CommandArtifactInvalidationResolution[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -895,6 +923,7 @@ model V2MediaArtifactManifest {
   sourceCleanupPlans         V2SourceCleanupPlan[]            @relation("SourceCleanupSourceManifest")
   colorProbes                V2MediaColorProbe[]
   colorPipelineCompilations  V2ColorPipelineCompilation[]
+  invalidationResolutions    V2CommandArtifactInvalidationResolution[]
 
   @@unique([id, workspaceId])
   @@unique([id, artifactId, workspaceId])
@@ -1510,6 +1539,7 @@ model V2PublicOperation {
   longFormIndexWorkflow V2LongFormIndexWorkflow?
   reviewPatchProposal   V2ReviewPatchProposal?
   reviewPatchBatch      V2ReviewPatchBatch?
+  artifactInvalidationResolutions V2CommandArtifactInvalidationResolution[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
