@@ -1658,6 +1658,14 @@ EditPlan completo a partir do transcript alinhado, `remove-spoken-content`
 invalida full-timeline somente nos outputs concluídos da base, declara um proxy
 integral do formato corrente e o enfileira pelo application service durável
 usado pela API. Sem output-base não existe relação stale fabricada. A
+execução do Diretor segue o mesmo modelo: `director-run-impact/v1` vincula o
+Command ao transcript, às versões de planner/critic e às snapshots persistidas,
+declara dependências de áudio/conteúdo/policy/timing/visual, invalida somente os
+outputs concluídos da versão-base e solicita um proxy integral da nova direção.
+O conjunto é relido no commit serializável; replay reidrata e compara payload e
+linhas normalizadas. Sem output-base o proxy ainda é necessário, mas nenhuma
+relação stale é inventada. A capability pública devolve impacto, invalidations
+e a operação durável resultante. A
 operação manual `crop` persiste um retângulo normalizado dentro do clip e do
 formato declarados, produz dependência somente visual e um único range mínimo;
 o FFmpeg aplica esse crop antes da composição e o `RenderElementMap` reflete os

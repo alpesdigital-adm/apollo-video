@@ -4,6 +4,7 @@ import test from 'node:test'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 
 const baseHash = 'a'.repeat(64)
 
@@ -76,6 +77,10 @@ function compiledEditorialPlan(selectedInsert = false) {
 class InMemoryDirectorRepository {
   constructor(options = {}) {
     this.selectedInsert = options.selectedInsert ?? false
+    this.outputReferences = options.outputReferences ?? [
+      { artifactId: 'artifact-proxy-4', kind: 'proxy', sourceVersionId: 'project-version-4', variantId: '9:16' },
+      { artifactId: 'artifact-final-4', kind: 'final', sourceVersionId: 'project-version-4', variantId: '9:16' },
+    ]
     this.currentVersion = createProjectVersion({
       id: 'project-version-4', workspaceId: 'workspace-1', projectId: 'project-1', sequence: 4,
       parentVersionId: 'project-version-3',
@@ -98,6 +103,9 @@ class InMemoryDirectorRepository {
       brief: { productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } } },
       policies: { automaticZoom: false, faceProtection: true },
       editPlan: compiledEditorialPlan(this.selectedInsert),
+      currentDurationFrames: 300,
+      proxyVariantId: '9:16',
+      outputReferences: this.outputReferences,
       transcript: {
         id: 'transcript-1', sourceArtifactId: 'artifact-master-1', language: 'pt-BR',
         provider: 'groq', model: 'whisper-large-v3', transcriptHash: 'b'.repeat(64),
@@ -107,7 +115,9 @@ class InMemoryDirectorRepository {
 
   async commitOrReplay(bundle) {
     this.lastBundle = bundle
-    const result = Object.freeze({ run: bundle.run, command: bundle.command, version: bundle.version, replayed: false })
+    const impact = parseDirectorRunImpact(bundle.command.payload.impact)
+    const invalidations = createDirectorRunInvalidations({ impact, createdAt: bundle.command.createdAt })
+    const result = Object.freeze({ run: bundle.run, command: bundle.command, version: bundle.version, impact, invalidations, replayed: false })
     this.records.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
       requestFingerprint: bundle.requestFingerprint,
       result,
@@ -150,6 +160,7 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
 
   assert.equal(result.replayed, false)
   assert.equal(result.command.type, 'run-director')
+  assert.equal(result.command.payload.schemaVersion, 2)
   assert.equal(result.version.sequence, 5)
   assert.equal(result.version.parentVersionId, 'project-version-4')
   assert.equal(result.run.status, 'planned')
@@ -176,6 +187,19 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.run.qualityReport.status, 'approved-with-warnings')
   assert.equal(Object.values(result.run.qualityReport.hardChecks).every(Boolean), true)
   assert.equal(repository.lastBundle.event.type, 'project.version.created')
+  assert.deepEqual(result.impact.changeKinds, ['director-replan'])
+  assert.deepEqual(result.impact.dependencyTypes, ['audio', 'content', 'policy', 'timing', 'visual'])
+  assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 0, endFrame: 300 }])
+  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 300 }] }])
+  assert.deepEqual(result.impact.affectedArtifacts.map((item) => item.artifactId), ['artifact-final-4', 'artifact-proxy-4'])
+  assert.equal(result.invalidations.length, 2)
+  assert.equal(result.invalidations.every((item) => item.status === 'stale' && item.impactHash === result.impact.impactHash), true)
+  assert.equal(repository.lastBundle.event.data.commandImpactHash, result.impact.impactHash)
+  assert.equal(repository.lastBundle.event.data.artifactInvalidationCount, 2)
+  assert.throws(
+    () => parseDirectorRunImpact({ ...result.impact, impactHash: 'f'.repeat(64) }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
 })
 
 test('Director V2 replays exactly and rejects payload or version drift', async () => {
@@ -210,4 +234,14 @@ test('Director V2 preserves a selected B-roll insert with bound source audio and
     decision.category === 'insert' && decision.choice === 'use_selected_insert'), true)
   assert.equal(result.run.assumptions.some((assumption) =>
     assumption.includes('asset-selection') && assumption.includes('rights')), true)
+})
+
+test('Director V2 still requests one full proxy without fabricating stale artifacts when the base has no completed outputs', async () => {
+  const { service } = fixture({ outputReferences: [] })
+  const result = await service(request())
+
+  assert.deepEqual(result.impact.affectedArtifacts, [])
+  assert.deepEqual(result.impact.affectedVariantIds, [])
+  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 300 }] }])
+  assert.deepEqual(result.invalidations, [])
 })

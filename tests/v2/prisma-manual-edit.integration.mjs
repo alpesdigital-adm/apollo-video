@@ -916,6 +916,64 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const directorContext = await new PrismaDirectorRunRepository(client).readContext({ workspaceId, projectId })
     assert.equal(directorContext.transcript.id, replacementTranscriptId)
     assert.equal(directorContext.transcript.transcriptHash, replacementTranscript.transcriptHash)
+    assert.equal(directorContext.currentDurationFrames, replacementPlan.durationFrames)
+    assert.equal(directorContext.proxyVariantId, '9:16')
+    assert.deepEqual(directorContext.outputReferences, [])
+    const directorBaseProxyOperationId = `manual-director-base-proxy-${suffix}`
+    await client.v2PublicOperation.create({ data: {
+      id: directorBaseProxyOperationId, workspaceId, clientId: issued.client.id,
+      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
+      targetType: 'media-artifact', targetId: completedProxyArtifactId,
+      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
+      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
+      idempotencyKey: `manual-director-base-proxy-${suffix}`,
+      requestFingerprint: calculateVersionHash({ directorBaseProxyOperationId }),
+      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
+    } })
+    await client.v2ProjectProxyRenderOperation.create({ data: {
+      operationId: directorBaseProxyOperationId, workspaceId, projectId,
+      projectVersionId: transcriptApplied.data.version.id,
+      editPlanSnapshotId: replacementVersion.editPlanSnapshotId,
+      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+      colorPipelineBindingsJson: '[]', inputHash: calculateVersionHash({ directorBaseProxyOperationId, input: true }),
+      outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId,
+      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
+    } })
+    const directorKey = `run-director-impact-${suffix}`
+    const runDirector = () => fetch(`${baseUrl}/v1/projects/${projectId}/commands`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': directorKey },
+      body: JSON.stringify({
+        type: 'run-director',
+        baseVersionId: transcriptApplied.data.version.id,
+        baseHash: transcriptApplied.data.version.baseHash,
+        reason: 'Recalcular a direção e invalidar somente os outputs concluídos da versão-base.',
+      }),
+    })
+    const directorResponse = await runDirector()
+    const directorApplied = await directorResponse.json()
+    assert.equal(directorResponse.status, 201, JSON.stringify(directorApplied))
+    assert.equal(directorApplied.data.version.sequence, 15)
+    assert.equal(directorApplied.data.directorRun.impact.schemaVersion, 'director-run-impact/v1')
+    assert.equal(directorApplied.data.directorRun.impact.sourceTranscriptId, replacementTranscriptId)
+    assert.deepEqual(directorApplied.data.directorRun.impact.affectedArtifacts, [{
+      artifactId: completedProxyArtifactId, kind: 'proxy',
+      sourceVersionId: transcriptApplied.data.version.id, variantId: '9:16',
+    }])
+    assert.equal(directorApplied.data.directorRun.invalidations.length, 1)
+    assert.equal(directorApplied.data.directorRun.invalidations[0].artifactId, completedProxyArtifactId)
+    assert.equal(directorApplied.data.operation.status, 'queued')
+    const storedDirectorCommand = await client.v2EditCommand.findUniqueOrThrow({
+      where: { id: directorApplied.data.command.id }, include: { artifactInvalidations: true },
+    })
+    assert.equal(JSON.parse(storedDirectorCommand.payloadJson).schemaVersion, 2)
+    assert.equal(storedDirectorCommand.artifactInvalidations.length, 1)
+    assert.deepEqual(JSON.parse(storedDirectorCommand.artifactInvalidations[0].dependencyTypesJson), ['audio', 'content', 'policy', 'timing', 'visual'])
+    const directorReplayResponse = await runDirector()
+    const directorReplay = await directorReplayResponse.json()
+    assert.equal(directorReplayResponse.status, 200, JSON.stringify(directorReplay))
+    assert.equal(directorReplay.data.replayed, true)
+    assert.equal(directorReplay.data.operation.id, directorApplied.data.operation.id)
     await context.close()
     await browser.close()
     browser = undefined

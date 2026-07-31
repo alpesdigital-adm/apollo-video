@@ -50,6 +50,14 @@ retorna `nextRequiredCapability=apollo.projects.commands.apply:run-director`.
 Ela não dispara render: execute um novo Command `run-director` sobre a versão
 resultante antes de solicitar proxy ou final.
 
+`run-director` recebe apenas `baseVersionId`, `baseHash` e `reason` opcional. A
+resposta inclui `directorRun.impact`, `directorRun.invalidations` e `operation`.
+O impacto vincula transcript/planner/critic, declara full-timeline e contém
+somente outputs proxy/final concluídos da versão-base. O servidor relê esse
+conjunto na transação do Command; drift causa conflito. Mesmo sem output-base,
+o resultado declara um proxy integral mínimo, mas retorna `invalidations: []`
+em vez de fabricar estado stale.
+
 Os contratos completos e exemplos são descobertos em `GET /v1/capabilities`, `GET /v1/openapi.json` e nos schemas versionados correntes informados pelo registry.
 
 ## Revisão do proxy antes da alta

@@ -18,6 +18,7 @@ import { createPublicEvent } from '../domain/public-event.ts'
 import { resolveStrategicObjective } from '../domain/strategic-objective.ts'
 import { validateStoryPlan, type StoryBlock, type StoryPlan } from '../domain/story-plan.ts'
 import { createTreatmentPlan } from '../domain/treatment-plan.ts'
+import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 
@@ -455,14 +456,28 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       editPlan: editPlanSnapshotId,
       quality: qualitySnapshotId,
     })
+    const impact = createDirectorRunImpact({
+      commandId,
+      baseVersionId,
+      resultVersionId: versionId,
+      sourceTranscriptId: context.transcript.id,
+      sourceTranscriptHash: context.transcript.transcriptHash,
+      plannerVersion: PLANNER_VERSION,
+      criticVersion: CRITIC_VERSION,
+      affectedEndFrame: Math.max(context.currentDurationFrames, editPlan.durationFrames),
+      renderEndFrame: editPlan.durationFrames,
+      proxyVariantId: context.proxyVariantId,
+      outputReferences: context.outputReferences,
+    })
     const commandPayload: RunDirectorCommandPayload = Object.freeze({
-      schemaVersion: 1 as const,
+      schemaVersion: 2 as const,
       directorRunId,
       plannerVersion: PLANNER_VERSION,
       criticVersion: CRITIC_VERSION,
       sourceTranscriptId: context.transcript.id,
       sourceArtifactId: context.transcript.sourceArtifactId,
       snapshotRefs,
+      impact,
     })
     const command = createEditCommand<RunDirectorCommandPayload>({
       id: commandId, workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
@@ -502,6 +517,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         projectId, sequence: version.sequence, parentVersionId: version.parentVersionId,
         baseHash: version.baseHash, commandId, commandType: command.type, directorRunId,
         snapshotRefs: version.snapshotRefs, qualityStatus: qualityReport.status, createdAt,
+        commandImpactHash: impact.impactHash,
+        artifactInvalidationCount: impact.affectedArtifacts.length,
       },
     })
     return dependencies.repository.commitOrReplay({

@@ -4,6 +4,7 @@ import type { StoryPlan } from './story-plan.ts'
 import type { SubtitleAnchor, SubtitlePresetId } from './subtitle-system.ts'
 import type { TreatmentPlan } from './treatment-plan.ts'
 import type { ManualCropRegion } from './manual-editing.ts'
+import type { DirectorRunImpactV1 } from './director-run-impact.ts'
 
 interface RetimedTranscriptWord {
   text: string
@@ -202,7 +203,7 @@ export interface DirectorRun {
 }
 
 export interface RunDirectorCommandPayload {
-  schemaVersion: 1
+  schemaVersion: 2
   directorRunId: string
   plannerVersion: string
   criticVersion: string
@@ -215,6 +216,7 @@ export interface RunDirectorCommandPayload {
     editPlan: string
     quality: string
   }>
+  impact: Readonly<DirectorRunImpactV1>
 }
 
 function validId(value: string): boolean {

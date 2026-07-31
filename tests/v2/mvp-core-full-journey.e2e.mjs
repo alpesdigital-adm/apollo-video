@@ -815,6 +815,15 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       },
     })).payload
     assert.equal(preliminaryDirector.directorRun.editPlan.automaticZoom, false)
+    assert.equal(preliminaryDirector.directorRun.impact.schemaVersion, 'director-run-impact/v1')
+    assert.equal(preliminaryDirector.directorRun.impact.commandId, preliminaryDirector.command.id)
+    assert.equal(preliminaryDirector.directorRun.impact.resultVersionId, preliminaryDirector.version.id)
+    assert.deepEqual(preliminaryDirector.directorRun.impact.dependencyTypes, ['audio', 'content', 'policy', 'timing', 'visual'])
+    assert.deepEqual(preliminaryDirector.directorRun.impact.minimalRenders, [{
+      kind: 'proxy', variantId: '9:16',
+      ranges: [{ startFrame: 0, endFrame: preliminaryDirector.directorRun.editPlan.durationFrames }],
+    }])
+    assert.deepEqual(preliminaryDirector.directorRun.invalidations, [])
     await cancelOperation(preliminaryDirector.operation.id)
 
     async function timeline(projectId) {
@@ -950,6 +959,10 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       },
     })).payload
     assert.equal(primaryDirector.directorRun.editPlan.automaticZoom, false)
+    assert.equal(primaryDirector.directorRun.impact.commandType, 'run-director')
+    assert.equal(primaryDirector.directorRun.impact.sourceTranscriptId, transcriptIds.primary)
+    assert.equal(primaryDirector.directorRun.impact.renderSemanticsChanged, true)
+    assert.equal(primaryDirector.operation.type, 'project-proxy-render')
     assert.equal(
       primaryDirector.directorRun.decisions.some((decision) =>
         decision.category === 'insert' &&
@@ -970,6 +983,7 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
       },
     })).payload
     assert.equal(companionDirector.directorRun.treatmentPlan.plan.mode, 'visual-montage')
+    assert.equal(companionDirector.directorRun.impact.minimalRenders[0].variantId, '16:9')
 
     async function runProxyUntilTerminal(expectedOperationId) {
       for (let attempt = 0; attempt < 3; attempt += 1) {

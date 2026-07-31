@@ -585,7 +585,7 @@ concluídos da base. Como percepção, TreatmentPlan, StoryPlan e EditPlan preci
 ser recalculados, ele não enfileira render e declara `run-director` como próxima
 capability obrigatória. O Diretor consulta o transcript ID gravado no EditPlan,
 em vez de inferir a seleção pela data de criação. Expandir o mesmo contrato para
-os Commands editoriais restantes, Diretor e batch ainda é obrigatório antes de
+os Commands editoriais restantes e batch ainda é obrigatório antes de
 considerar FR-233 concluído.
 
 `remove-spoken-content` também usa esse modelo sem fingir uma otimização local.
@@ -599,7 +599,19 @@ output concluído, nenhuma relação stale é fabricada. Após o commit, a rota
 pública enfileira o proxy pelo application service durável comum e devolve a
 operação; Command e enqueue convergem por chaves idempotentes relacionadas.
 
-Para `manual-edit` e `remove-spoken-content`, cada output do mapa também cria atomicamente uma relação
+`run-director` também persiste seu próprio mapa content-addressed no payload v2
+do Command. O `director-run-impact/v1` cobre o maior timeline entre base e
+resultado, vincula o transcript escolhido e as versões de planner/critic,
+declara áudio/conteúdo/policy/timing/visual e referencia somente outputs
+proxy/final `succeeded/completed` da versão-base. A transação serializável relê
+o conjunto, grava as relações normalizadas e falha se houver drift. O resultado
+sempre declara exatamente um proxy integral do formato corrente: uma nova
+direção muda composição, legendas, transições e decisões de policy como unidade.
+Sem output concluído não há linha stale, mas o render mínimo permanece. Payload,
+linhas e hash são reidratados e comparados no replay antes de a API devolver
+impacto, invalidations e operação.
+
+Para `manual-edit`, `remove-spoken-content` e `run-director`, cada output do mapa também cria atomicamente uma relação
 normalizada `command-artifact-invalidation/v1`, identificada por hash canônico
 e ligada por FK ao Command, à versão-base, à versão-resultado e ao artifact. A
 relação carrega `stale`, variant, dependências, ranges e `impactHash`. Nenhuma

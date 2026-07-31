@@ -4588,6 +4588,39 @@ const editorialCutInvalidationExample = {
   impactHash: editorialCutImpactExample.impactHash,
   createdAt,
 }
+const directorRunImpactExample = {
+  schemaVersion: 'director-run-impact/v1',
+  commandId: 'edit-command-director-example-1',
+  commandType: 'run-director',
+  baseVersionId: 'project-version-example-3',
+  resultVersionId: 'project-version-example-4',
+  sourceTranscriptId: 'transcript-example-1',
+  sourceTranscriptHash: '4'.repeat(64),
+  plannerVersion: 'apollo-director-policy/v1',
+  criticVersion: 'apollo-director-critic/v1',
+  changeKinds: ['director-replan'],
+  dependencyTypes: ['audio', 'content', 'policy', 'timing', 'visual'],
+  affectedRanges: [{ startFrame: 0, endFrame: 3065 }],
+  affectedVariantIds: ['9:16'],
+  affectedArtifacts: [{
+    artifactId: 'artifact-proxy-example-3', kind: 'proxy',
+    sourceVersionId: 'project-version-example-3', variantId: '9:16',
+  }],
+  minimalRenders: [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 2380 }] }],
+  renderSemanticsChanged: true,
+  impactHash: '5'.repeat(64),
+}
+const directorRunInvalidationExample = {
+  schemaVersion: 'command-artifact-invalidation/v1', id: '6'.repeat(64), status: 'stale',
+  commandId: directorRunImpactExample.commandId,
+  baseVersionId: directorRunImpactExample.baseVersionId,
+  resultVersionId: directorRunImpactExample.resultVersionId,
+  artifactId: 'artifact-proxy-example-3', kind: 'proxy', variantId: '9:16',
+  dependencyTypes: directorRunImpactExample.dependencyTypes,
+  affectedRanges: directorRunImpactExample.affectedRanges,
+  impactHash: directorRunImpactExample.impactHash,
+  createdAt,
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -7575,6 +7608,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
     ],
     'apollo://schemas/editorial-cut-impact/v1': [editorialCutImpactExample],
+    'apollo://schemas/director-run-impact/v1': [directorRunImpactExample],
     'apollo://schemas/project-edit-command-applied/v3': [
       {
         data: {
@@ -7656,6 +7690,57 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             protectedOpeningFrames: 120, subtitleFaceProtection: true,
             impact: editorialCutImpactExample,
             invalidations: [editorialCutInvalidationExample],
+          },
+          operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-edit-command-applied/v5': [
+      {
+        data: {
+          command: {
+            id: directorRunImpactExample.commandId, type: 'run-director',
+            baseVersionId: directorRunImpactExample.baseVersionId,
+            resultVersionId: directorRunImpactExample.resultVersionId,
+            createdAt,
+          },
+          version: {
+            id: directorRunImpactExample.resultVersionId, sequence: 4,
+            parentVersionId: directorRunImpactExample.baseVersionId,
+            baseHash: 'd'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', perception: 'project-snapshot-perception-1',
+              treatment: 'project-snapshot-treatment-1', story: 'project-snapshot-story-1',
+              editPlan: 'project-snapshot-edit-plan-4', quality: 'project-snapshot-quality-1',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          directorRun: {
+            id: 'director-run-example-1', status: 'planned',
+            plannerVersion: directorRunImpactExample.plannerVersion,
+            criticVersion: directorRunImpactExample.criticVersion,
+            baseVersionId: directorRunImpactExample.baseVersionId,
+            resultVersionId: directorRunImpactExample.resultVersionId,
+            perception: { snapshotId: 'project-snapshot-perception-1', summary: { speechCoverage: 0.78 } },
+            treatmentPlan: { snapshotId: 'project-snapshot-treatment-1', plan: { mode: 'talking-head' } },
+            storyPlan: { snapshotId: 'project-snapshot-story-1', plan: { blockCount: 3 } },
+            editPlan: {
+              snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4',
+              durationFrames: 2380, fps: 30, subtitleCueCount: 28,
+              transitionCount: 2, automaticZoom: false,
+            },
+            qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
+            decisions: [
+              { id: 'decision-narrative-linear' }, { id: 'decision-motion-none' },
+              { id: 'decision-layout-inset' }, { id: 'decision-subtitle-bottom' },
+            ],
+            assumptions: ['Face detector indisponivel; aplicar safe area conservadora.'],
+            impact: directorRunImpactExample,
+            invalidations: [directorRunInvalidationExample],
+            createdAt,
           },
           operation: queuedProjectProxyRenderOperationExample,
           replayed: false,

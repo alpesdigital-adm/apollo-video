@@ -5422,6 +5422,35 @@ const editorialCutImpactSchema = {
     impactHash: sha256Schema,
   },
 }
+const directorRunImpactSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId',
+    'sourceTranscriptId', 'sourceTranscriptHash', 'plannerVersion', 'criticVersion',
+    'changeKinds', 'dependencyTypes', 'affectedRanges', 'affectedVariantIds',
+    'affectedArtifacts', 'minimalRenders', 'renderSemanticsChanged', 'impactHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'director-run-impact/v1' },
+    commandId: idSchema,
+    commandType: { const: 'run-director' },
+    baseVersionId: idSchema,
+    resultVersionId: idSchema,
+    sourceTranscriptId: idSchema,
+    sourceTranscriptHash: sha256Schema,
+    plannerVersion: { type: 'string', minLength: 3, maxLength: 128 },
+    criticVersion: { type: 'string', minLength: 3, maxLength: 128 },
+    changeKinds: { type: 'array', minItems: 1, maxItems: 1, prefixItems: [{ const: 'director-replan' }], items: false },
+    dependencyTypes: commandImpactSchema.properties.dependencyTypes,
+    affectedRanges: commandImpactSchema.properties.affectedRanges,
+    affectedVariantIds: commandImpactSchema.properties.affectedVariantIds,
+    affectedArtifacts: commandImpactSchema.properties.affectedArtifacts,
+    minimalRenders: commandImpactSchema.properties.minimalRenders,
+    renderSemanticsChanged: { const: true },
+    impactHash: sha256Schema,
+  },
+}
 const versionComparisonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -16765,6 +16794,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ),
   defineSchema('source-transcript-replacement-impact', 1, 'Content-addressed invalidation impact of selecting a new immutable source transcript', sourceTranscriptReplacementImpactSchema),
   defineSchema('editorial-cut-impact', 1, 'Content-addressed full-timeline impact of removing aligned spoken content', editorialCutImpactSchema),
+  defineSchema('director-run-impact', 1, 'Content-addressed full-timeline impact of a persisted Director replan', directorRunImpactSchema),
   defineSchema('project-edit-command-applied', 3, 'Applied edit command response including source transcript replacement and required Director recomputation',
     successSchema({
       oneOf: [
@@ -16856,6 +16886,75 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         {
           type: 'object', required: ['command', 'version', 'directorRun', 'operation', 'replayed'],
           properties: { command: { type: 'object' }, version: { type: 'object' }, directorRun: { type: 'object' }, operation: publicOperationSchemaV3, replayed: { type: 'boolean' } },
+        },
+        {
+          type: 'object', required: ['command', 'version', 'sourceTranscript', 'replayed'],
+          properties: { command: { type: 'object' }, version: { type: 'object' }, sourceTranscript: { type: 'object' }, replayed: { type: 'boolean' } },
+        },
+      ],
+    }),
+  ),
+  defineSchema('project-edit-command-applied', 5, 'Applied edit command response including persisted Director impact and stale output relationships',
+    successSchema({
+      oneOf: [
+        {
+          type: 'object', required: ['command', 'version', 'editorial', 'operation', 'replayed'],
+          properties: { command: { type: 'object' }, version: { type: 'object' }, editorial: { type: 'object' }, operation: publicOperationSchemaV3, replayed: { type: 'boolean' } },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'directorRun', 'operation', 'replayed'],
+          properties: {
+            command: {
+              type: 'object', additionalProperties: false,
+              required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'],
+              properties: { id: idSchema, type: { const: 'run-director' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema },
+            },
+            version: {
+              type: 'object', additionalProperties: false,
+              required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'],
+              properties: {
+                id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema,
+                baseHash: sha256Schema, createdAt: dateTimeSchema,
+                snapshotRefs: {
+                  type: 'object', additionalProperties: false,
+                  required: ['brief', 'perception', 'treatment', 'story', 'editPlan', 'quality', 'policies'],
+                  properties: { brief: idSchema, perception: idSchema, treatment: idSchema, story: idSchema, editPlan: idSchema, quality: idSchema, policies: idSchema },
+                },
+              },
+            },
+            directorRun: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'id', 'status', 'plannerVersion', 'criticVersion', 'baseVersionId', 'resultVersionId',
+                'perception', 'treatmentPlan', 'storyPlan', 'editPlan', 'qualityReport', 'decisions',
+                'assumptions', 'impact', 'invalidations', 'createdAt',
+              ],
+              properties: {
+                id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
+                plannerVersion: { type: 'string' }, criticVersion: { type: 'string' }, baseVersionId: idSchema, resultVersionId: idSchema,
+                perception: { type: 'object', additionalProperties: false, required: ['snapshotId', 'summary'], properties: { snapshotId: idSchema, summary: { type: 'object' } } },
+                treatmentPlan: { type: 'object', additionalProperties: false, required: ['snapshotId', 'plan'], properties: { snapshotId: idSchema, plan: { type: 'object' } } },
+                storyPlan: { type: 'object', additionalProperties: false, required: ['snapshotId', 'plan'], properties: { snapshotId: idSchema, plan: { type: 'object' } } },
+                editPlan: {
+                  type: 'object', additionalProperties: false,
+                  required: ['snapshotId', 'id', 'durationFrames', 'fps', 'subtitleCueCount', 'transitionCount', 'automaticZoom'],
+                  properties: {
+                    snapshotId: idSchema, id: idSchema, durationFrames: { type: 'integer', minimum: 1 }, fps: { type: 'number', exclusiveMinimum: 0 },
+                    subtitleCueCount: { type: 'integer', minimum: 1 }, transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: { const: false },
+                  },
+                },
+                qualityReport: { type: 'object', additionalProperties: false, required: ['snapshotId', 'report'], properties: { snapshotId: idSchema, report: { type: 'object' } } },
+                decisions: { type: 'array', minItems: 4, maxItems: 64, items: { type: 'object' } },
+                assumptions: { type: 'array', maxItems: 64, items: { type: 'string' } },
+                impact: directorRunImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+                createdAt: dateTimeSchema,
+              },
+            },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
         },
         {
           type: 'object', required: ['command', 'version', 'sourceTranscript', 'replayed'],

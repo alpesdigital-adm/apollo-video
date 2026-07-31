@@ -4,6 +4,8 @@ import type { EditCommand } from '../../domain/edit-command.ts'
 import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
+import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
+import type { DirectorRunImpactV1 } from '../../domain/director-run-impact.ts'
 
 export interface DirectorRunContext {
   workspaceId: string
@@ -17,6 +19,9 @@ export interface DirectorRunContext {
   brief: Readonly<Record<string, unknown>>
   policies: Readonly<Record<string, unknown>>
   editPlan: Readonly<EditorialCutEditPlan>
+  currentDurationFrames: number
+  proxyVariantId: string
+  outputReferences: readonly Readonly<CommandImpactOutputReference>[]
   transcript: Readonly<{
     id: string
     sourceArtifactId: string
@@ -45,6 +50,8 @@ export interface DirectorRunResult {
   run: Readonly<DirectorRun>
   command: Readonly<EditCommand<RunDirectorCommandPayload>>
   version: Readonly<ProjectVersion>
+  impact: Readonly<DirectorRunImpactV1>
+  invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
   replayed: boolean
 }
 

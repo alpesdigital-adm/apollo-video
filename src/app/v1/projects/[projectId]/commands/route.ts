@@ -158,6 +158,8 @@ export async function POST(
           qualityReport: { snapshotId: refs.quality, report: result.run.qualityReport },
           decisions: result.run.decisions,
           assumptions: result.run.assumptions,
+          impact: result.impact,
+          invalidations: result.invalidations,
           createdAt: result.run.createdAt,
         },
         operation: presentPublicOperation(proxy.operation),

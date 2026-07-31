@@ -90,3 +90,16 @@ means no fabricated stale row. The public route then enqueues exactly one full
 proxy through the shared durable V2 application service and returns its
 operation. Domain/API evidence is green and PostgreSQL scenarios are prepared,
 but remain unexecuted on this host; deploy and acceptance remain open.
+
+`run-director` now follows the same atomic model with a distinct
+`director-run-impact/v1`. A Director replan is conservatively full-timeline
+because it can change composition, subtitles, transitions and policy decisions
+together. Its content-addressed payload binds the selected transcript plus
+planner/critic versions, declares audio/content/policy/timing/visual, lists only
+completed base outputs and requests exactly one full proxy for the current
+format. The serializable commit re-reads that output set, writes the normalized
+stale relationships and rejects drift. Hydration compares payload, rows and
+hash; no completed base output means no fabricated invalidation while the proxy
+request remains. The public response exposes impact, invalidations and the
+durable operation. PostgreSQL/API execution, deployment and acceptance remain
+open, so this does not complete FR-233.

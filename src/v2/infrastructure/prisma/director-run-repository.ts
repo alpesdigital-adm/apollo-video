@@ -23,9 +23,11 @@ import type { StoryPlan } from '../../domain/story-plan.ts'
 import type { TreatmentPlan } from '../../domain/treatment-plan.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../domain/director-run-impact.ts'
+import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 
 const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
-  command: true,
+  command: { include: { artifactInvalidations: true } },
   resultVersion: true,
   perceptionSnapshot: true,
   treatmentSnapshot: true,
@@ -58,6 +60,7 @@ function parseArray(value: string, field: string): unknown[] {
 
 function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<DirectorRunResult> {
   const payload = parseRecord(row.command.payloadJson, 'Director command payload') as unknown as RunDirectorCommandPayload
+  const impact = parseDirectorRunImpact(payload.impact)
   const scope = parseRecord(row.command.scopeJson, 'Director command scope') as EditScope
   const command = createEditCommand<RunDirectorCommandPayload>({
     id: row.command.id,
@@ -104,8 +107,11 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
   const assumptions = Object.freeze(parseArray(row.assumptionsJson, 'Director assumptions').map((item) => String(item)))
   validateDirectedEditPlan(editPlan)
   if (
-    row.command.type !== 'run-director' || payload.schemaVersion !== 1 || payload.directorRunId !== row.id ||
+    row.command.type !== 'run-director' || payload.schemaVersion !== 2 || payload.directorRunId !== row.id ||
     row.baseVersionId !== row.command.baseVersionId || row.resultVersionId !== version.id ||
+    impact.commandId !== row.command.id || impact.baseVersionId !== row.baseVersionId ||
+    impact.resultVersionId !== row.resultVersionId || impact.sourceTranscriptId !== payload.sourceTranscriptId ||
+    impact.plannerVersion !== payload.plannerVersion || impact.criticVersion !== payload.criticVersion ||
     payload.snapshotRefs.perception !== row.perceptionSnapshotId ||
     payload.snapshotRefs.treatment !== row.treatmentSnapshotId ||
     payload.snapshotRefs.story !== row.storySnapshotId ||
@@ -136,7 +142,21 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     initiatedBy: Object.freeze({ type: 'api-client' as const, id: row.initiatedById }),
     createdAt: row.createdAt.toISOString(),
   })
-  return Object.freeze({ run, command, version, replayed })
+  const expectedInvalidations = createDirectorRunInvalidations({ impact, createdAt: row.command.createdAt.toISOString() })
+    .toSorted((left, right) => left.id.localeCompare(right.id))
+  const invalidations = row.command.artifactInvalidations.map((item) => parseCommandArtifactInvalidation({
+    schemaVersion: 'command-artifact-invalidation/v1', id: item.id, status: item.status,
+    commandId: item.commandId, baseVersionId: item.baseVersionId,
+    resultVersionId: item.resultVersionId, artifactId: item.artifactId,
+    kind: item.kind, variantId: item.variantId,
+    dependencyTypes: parseArray(item.dependencyTypesJson, 'Director invalidation dependencies'),
+    affectedRanges: parseArray(item.affectedRangesJson, 'Director invalidation ranges'),
+    impactHash: item.impactHash, createdAt: item.createdAt.toISOString(),
+  })).toSorted((left, right) => left.id.localeCompare(right.id))
+  if (stableSerialize(expectedInvalidations) !== stableSerialize(invalidations)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director invalidations are inconsistent')
+  }
+  return Object.freeze({ run, command, version, impact, invalidations: Object.freeze(invalidations), replayed })
 }
 
 function isPrismaCode(error: unknown, code: string): boolean {
@@ -191,6 +211,20 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       retimedTranscript.sourceTranscriptId !== transcriptRow.id ||
       (planTranscriptHash !== undefined && planTranscriptHash !== transcriptRow.transcriptHash)
     ) throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan is not aligned to the current transcript')
+    const [proxyOutputs, finalOutputs] = await Promise.all([
+      this.client.v2ProjectProxyRenderOperation.findMany({
+        where: { workspaceId: project.workspaceId, projectId: project.id, projectVersionId: versionRow.id, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true },
+      }),
+      this.client.v2ProjectFinalExportOperation.findMany({
+        where: { workspaceId: project.workspaceId, projectId: project.id, projectVersionId: versionRow.id, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true, outputAspectRatio: true },
+      }),
+    ])
+    const currentDurationFrames = Number(editPlan.durationFrames)
+    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames <= 0) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan duration is invalid')
+    }
     return Object.freeze({
       workspaceId: project.workspaceId,
       project: Object.freeze({ id: project.id, objective: project.objective, format: project.format, locale: project.locale }),
@@ -215,6 +249,12 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       brief: Object.freeze(parseRecord(versionRow.briefSnapshot.contentJson, 'project brief')),
       policies: Object.freeze(parseRecord(versionRow.policiesSnapshot.contentJson, 'project policies')),
       editPlan: Object.freeze(editPlan),
+      currentDurationFrames,
+      proxyVariantId: project.format,
+      outputReferences: Object.freeze([
+        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: versionRow.id, variantId: project.format! })),
+        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: versionRow.id, variantId: output.outputAspectRatio })),
+      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
       transcript: Object.freeze({
         id: transcriptRow.id,
         sourceArtifactId: transcriptRow.sourceArtifactId,
@@ -268,6 +308,23 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           bundle.version.parentVersionId !== project.currentVersion.id ||
           bundle.version.sequence !== project.currentVersion.sequence + 1
         ) throw new DomainError('VERSION_CONFLICT', 'Project version changed before Director commit', { currentVersionId: project.currentVersion.id, currentBaseHash: project.currentVersion.baseHash })
+        const [proxyOutputs, finalOutputs] = await Promise.all([
+          transaction.v2ProjectProxyRenderOperation.findMany({
+            where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+            select: { outputArtifactId: true },
+          }),
+          transaction.v2ProjectFinalExportOperation.findMany({
+            where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+            select: { outputArtifactId: true, outputAspectRatio: true },
+          }),
+        ])
+        const currentOutputs = [
+          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16' })),
+          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
+        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+        if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {
+          throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before Director impact commit')
+        }
         await transaction.v2EditCommand.create({
           data: {
             id: bundle.command.id,
@@ -333,6 +390,16 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           initiatedById: bundle.run.initiatedBy.id,
           createdAt: new Date(bundle.run.createdAt),
         } })
+        const invalidations = createDirectorRunInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt })
+        if (invalidations.length > 0) {
+          await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((item) => ({
+            id: item.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
+            commandId: item.commandId, baseVersionId: item.baseVersionId, resultVersionId: item.resultVersionId,
+            artifactId: item.artifactId, kind: item.kind, variantId: item.variantId, status: item.status,
+            dependencyTypesJson: stableSerialize(item.dependencyTypes), affectedRangesJson: stableSerialize(item.affectedRanges),
+            impactHash: item.impactHash, createdAt: new Date(item.createdAt),
+          })) })
+        }
         const updated = await transaction.v2Project.updateMany({
           where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId, currentVersionId: bundle.command.baseVersionId },
           data: { currentVersionId: bundle.version.id },
