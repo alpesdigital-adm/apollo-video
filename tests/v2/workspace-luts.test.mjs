@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
 
-import { createWorkspaceLutVersionService, importWorkspaceLutService, setWorkspaceLutStatusService } from '../../src/v2/application/workspace-luts.ts'
+import { createWorkspaceLutVersionService, importWorkspaceLutService, setWorkspaceLutDefaultService, setWorkspaceLutStatusService } from '../../src/v2/application/workspace-luts.ts'
 import { createWorkspaceLutVersion, parseCube3d } from '../../src/v2/domain/workspace-lut.ts'
-import { parseCreateWorkspaceLutVersionBody, parseImportWorkspaceLutBody, parseSetWorkspaceLutStatusBody, presentWorkspaceLut } from '../../src/v2/public-api/workspace-lut-contract.ts'
+import { parseCreateWorkspaceLutVersionBody, parseImportWorkspaceLutBody, parseSetWorkspaceLutDefaultBody, parseSetWorkspaceLutStatusBody, presentWorkspaceLut } from '../../src/v2/public-api/workspace-lut-contract.ts'
 import { PrismaWorkspaceLutRepository } from '../../src/v2/infrastructure/prisma/workspace-lut-repository.ts'
 
 const identityCube = `# unicode comment
@@ -150,10 +150,45 @@ test('T-FR-181 lifecycle command is revision-bound, replayable and preserves his
   assert.throws(() => parseSetWorkspaceLutStatusBody({ baseRevision: 1, status: 'deleted' }), /status/)
 })
 
+test('T-FR-181 workspace default versions active current LUT or explicit none with CAS', async () => {
+  const version = createWorkspaceLutVersion({
+    id: 'lut-version-default-1', workspaceId: 'workspace-lut-test', lutId: 'lut-cinema-test', version: 1,
+    name: 'Default', owner: 'Apollo Studio', license: { policy: 'owned', name: 'Workspace' }, tags: [],
+    compatibility: { inputColorSpace: 'rec709', outputColorSpace: 'rec709' }, cubeContent: identityCube,
+    preview: { byteSize: 10, sha256: 'c'.repeat(64) }, createdByClientId: 'client-lut-test', createdAt: '2026-07-31T12:20:00.000Z',
+  })
+  const lut = { lutId: version.lutId, workspaceId: version.workspaceId, status: 'active', revision: 1, currentVersion: version }
+  let current = { workspaceId: version.workspaceId, revision: 0, current: null }
+  const history = []
+  const repository = {
+    async readDefault() { return current }, async read() { return lut },
+    async findDefaultIdempotent({ idempotencyKey }) { return history.find((item) => item.idempotencyKey === idempotencyKey) ?? null },
+    async setDefault({ value, expectedRevision }) {
+      if (current.revision !== expectedRevision) throw new Error('default revision changed')
+      history.push(value); current = { workspaceId: value.workspaceId, revision: value.revision, current: value }; return { value, replayed: false }
+    },
+  }
+  let ids = 0
+  const service = setWorkspaceLutDefaultService({ repository, createVersionId: () => `lut-default-test-${++ids}`, clock: () => new Date('2026-07-31T12:21:00.000Z') })
+  const select = { workspaceId: version.workspaceId, baseRevision: 0, selection: { mode: 'lut-version', lutId: version.lutId, version: 1 }, actor: { type: 'api-client', id: 'client-lut-test' }, idempotencyKey: 'workspace-lut-default-1' }
+  const selected = await service(select)
+  assert.equal(selected.value.mode, 'lut-version')
+  assert.equal(selected.value.lutVersion.id, version.id)
+  assert.equal((await service(select)).replayed, true)
+  await assert.rejects(service({ ...select, idempotencyKey: 'workspace-lut-default-stale', selection: { mode: 'none' } }), /revision changed/)
+  const none = await service({ ...select, baseRevision: 1, selection: { mode: 'none' }, idempotencyKey: 'workspace-lut-default-none' })
+  assert.equal(none.value.mode, 'none')
+  assert.equal(none.value.revision, 2)
+  assert.deepEqual(parseSetWorkspaceLutDefaultBody({ baseRevision: 2, selection: { mode: 'none' } }).selection, { mode: 'none' })
+  assert.throws(() => parseSetWorkspaceLutDefaultBody({ baseRevision: 2, selection: { mode: 'none', lutId: 'hidden' } }), /cannot identify/)
+})
+
 test('T-FR-181 Prisma adapter commits head/version/preview atomically and detects preview tamper', async () => {
   let head
   const versions = []
   const statusCommands = []
+  let defaultHead
+  const defaultVersions = []
   const client = {
     v2WorkspaceLutVersion: {
       async findUnique({ where }) {
@@ -166,6 +201,8 @@ test('T-FR-181 Prisma adapter commits head/version/preview atomically and detect
     },
     v2WorkspaceLut: { async findUnique() { return head ?? null }, async findMany() { return head ? [head] : [] } },
     v2WorkspaceLutStatusCommand: { async findUnique({ where }) { return statusCommands.find((item) => item.workspaceId === where.workspaceId_createdByClientId_idempotencyKey.workspaceId && item.createdByClientId === where.workspaceId_createdByClientId_idempotencyKey.createdByClientId && item.idempotencyKey === where.workspaceId_createdByClientId_idempotencyKey.idempotencyKey) ?? null } },
+    v2WorkspaceLutDefault: { async findUnique() { return defaultHead ?? null } },
+    v2WorkspaceLutDefaultVersion: { async findUnique({ where }) { if (where.id) return defaultVersions.find((item) => item.id === where.id) ?? null; return defaultVersions.find((item) => item.workspaceId === where.workspaceId_createdByClientId_idempotencyKey.workspaceId && item.createdByClientId === where.workspaceId_createdByClientId_idempotencyKey.createdByClientId && item.idempotencyKey === where.workspaceId_createdByClientId_idempotencyKey.idempotencyKey) ?? null } },
     async $transaction(action) {
       return action({
         v2Workspace: { async findFirst() { return { id: 'workspace-lut-test' } } },
@@ -180,6 +217,12 @@ test('T-FR-181 Prisma adapter commits head/version/preview atomically and detect
           async findUnique({ where }) { return versions.find((item) => item.id === where.id) ?? null },
         },
         v2WorkspaceLutStatusCommand: { async create({ data }) { const command = { ...data }; statusCommands.push(command); return command } },
+        v2WorkspaceLutDefault: {
+          async findUnique() { return defaultHead ?? null },
+          async create({ data }) { defaultHead = { ...data }; return defaultHead },
+          async update({ data }) { defaultHead = { ...defaultHead, ...data }; return defaultHead },
+        },
+        v2WorkspaceLutDefaultVersion: { async create({ data }) { const value = { ...data }; defaultVersions.push(value); return value } },
       })
     },
   }
@@ -212,6 +255,11 @@ test('T-FR-181 Prisma adapter commits head/version/preview atomically and detect
   assert.equal(exactReplay.record.status, 'inactive')
   assert.equal(exactReplay.record.revision, 2)
   assert.equal(exactReplay.record.currentVersion.id, 'lut-version-prisma-2')
+  const defaultResult = await setWorkspaceLutDefaultService({ repository, createVersionId: () => 'lut-default-prisma-1', clock: () => new Date('2026-07-31T11:05:00.000Z') })({
+    workspaceId: 'workspace-lut-test', baseRevision: 0, selection: { mode: 'lut-version', lutId: 'lut-cinema-test', version: 2 }, actor: { type: 'api-client', id: 'client-lut-test' }, idempotencyKey: 'workspace-lut-default-prisma-1',
+  })
+  assert.equal(defaultResult.value.lutVersion.id, 'lut-version-prisma-2')
+  assert.equal((await repository.readDefault({ workspaceId: 'workspace-lut-test' })).revision, 1)
   assert.equal((await repository.readVersion({ workspaceId: 'workspace-lut-test', lutId: 'lut-cinema-test', version: 1 })).version, 1)
   versions[0].previewPng = Buffer.from([0])
   await assert.rejects(repository.readPreview({ workspaceId: 'workspace-lut-test', lutId: 'lut-cinema-test', version: 1 }), /integrity/)

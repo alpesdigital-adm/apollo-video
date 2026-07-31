@@ -48,6 +48,14 @@ const workspaceLutStatusCommandSchema = {
   type: 'object', additionalProperties: false, required: ['id', 'lutId', 'baseRevision', 'resultRevision', 'status', 'createdByClientId', 'createdAt'],
   properties: { id: idSchema, lutId: idSchema, baseRevision: { type: 'integer', minimum: 1 }, resultRevision: { type: 'integer', minimum: 2 }, status: { enum: ['active', 'inactive'] }, createdByClientId: idSchema, createdAt: dateTimeSchema },
 } as const
+const workspaceLutDefaultVersionSchema = {
+  type: 'object', additionalProperties: false, required: ['id', 'revision', 'mode', 'selectionHash', 'createdByClientId', 'createdAt'],
+  properties: {
+    id: idSchema, revision: { type: 'integer', minimum: 1 }, mode: { enum: ['none', 'lut-version'] }, selectionHash: sha256Schema,
+    lut: { type: 'object', additionalProperties: false, required: ['id', 'versionId', 'version', 'name', 'recordHash'], properties: { id: idSchema, versionId: idSchema, version: { type: 'integer', minimum: 1 }, name: { type: 'string', minLength: 1, maxLength: 160 }, recordHash: sha256Schema } },
+    createdByClientId: idSchema, createdAt: dateTimeSchema,
+  },
+} as const
 const mvpCoreCheckCodes = Object.values(MVP_CORE_CRITERION_CHECKS).flat()
 const mvpCoreEvidenceReferenceSchema = {
   type: 'object',
@@ -16724,6 +16732,26 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('workspace-lut-status-applied', 1, 'Applied immutable workspace LUT lifecycle command', successSchema({
     type: 'object', additionalProperties: false, required: ['lifecycle', 'command', 'replayed'],
     properties: { lifecycle: workspaceLutLifecycleSchema, command: workspaceLutStatusCommandSchema, replayed: { type: 'boolean' } },
+  })),
+  defineSchema('workspace-lut-default-set-request', 1, 'Set an explicit revisioned workspace LUT default', {
+    type: 'object', additionalProperties: false, required: ['baseRevision', 'selection'],
+    properties: {
+      baseRevision: { type: 'integer', minimum: 0 },
+      selection: {
+        oneOf: [
+          { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { const: 'none' } } },
+          { type: 'object', additionalProperties: false, required: ['mode', 'lutId', 'version'], properties: { mode: { const: 'lut-version' }, lutId: idSchema, version: { type: 'integer', minimum: 1 } } },
+        ],
+      },
+    },
+  }),
+  defineSchema('workspace-lut-default-response', 1, 'Current versioned workspace LUT default', successSchema({
+    type: 'object', additionalProperties: false, required: ['default'], properties: {
+      default: { type: 'object', additionalProperties: false, required: ['workspaceId', 'revision', 'current'], properties: { workspaceId: idSchema, revision: { type: 'integer', minimum: 0 }, current: { anyOf: [{ type: 'null' }, workspaceLutDefaultVersionSchema] } } },
+    },
+  })),
+  defineSchema('workspace-lut-default-set', 1, 'Applied immutable workspace LUT default version', successSchema({
+    type: 'object', additionalProperties: false, required: ['defaultVersion', 'replayed'], properties: { defaultVersion: workspaceLutDefaultVersionSchema, replayed: { type: 'boolean' } },
   })),
   defineSchema('project-final-export-request', 1, 'Approve and export the current project version', {
     type: 'object', additionalProperties: false,

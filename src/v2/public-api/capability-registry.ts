@@ -4429,6 +4429,21 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'required', requestBodyRequired: true,
   },
   {
+    id: 'apollo.workspace-luts.default.read', version: '1.0.0', title: 'Read workspace LUT default',
+    description: 'Reads the exact revisioned workspace default; an unconfigured workspace is explicitly revision zero with no current version.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/workspace-lut-default-response/v1', endpoint: { method: 'GET', path: '/v1/workspaces/{workspaceId}/lut-default' }, toolName: 'apollo.workspace-luts.default.read',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.workspace-luts.default.set', version: '1.0.0', title: 'Set workspace LUT default',
+    description: 'Creates one immutable revision after validating an active current LUT version or an explicit none selection.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/workspace-lut-default-set-request/v1', outputSchemaRef: 'apollo://schemas/workspace-lut-default-set/v1',
+    endpoint: { method: 'POST', path: '/v1/workspaces/{workspaceId}/lut-default' }, toolName: 'apollo.workspace-luts.default.set',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [201], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.clients.list',
     version: '1.0.0',
     title: 'List API clients',

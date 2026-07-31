@@ -2,7 +2,7 @@ import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createWorkspaceLutVersion, parseCube3d, type LutColorSpace, type LutLicensePolicy } from '../domain/workspace-lut.ts'
 import type { LutPreviewGenerator } from './ports/lut-preview-generator.ts'
-import type { WorkspaceLutRepository } from './ports/workspace-lut-repository.ts'
+import type { WorkspaceLutDefaultVersion, WorkspaceLutRepository } from './ports/workspace-lut-repository.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 function id(value: string, field: string) {
@@ -170,5 +170,54 @@ export function readWorkspaceLutVersionService(dependencies: { repository: Works
     const value = await dependencies.repository.readVersion({ workspaceId: id(input.workspaceId, 'workspaceId'), lutId: id(input.lutId, 'lutId'), version: input.version })
     if (!value) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Workspace LUT version was not found')
     return value
+  }
+}
+
+export function readWorkspaceLutDefaultService(dependencies: { repository: WorkspaceLutRepository }) {
+  return async (input: { workspaceId: string }) => dependencies.repository.readDefault({ workspaceId: id(input.workspaceId, 'workspaceId') })
+}
+
+export function setWorkspaceLutDefaultService(dependencies: {
+  repository: WorkspaceLutRepository; createVersionId: () => string; clock?: () => Date
+}) {
+  const clock = dependencies.clock ?? (() => new Date())
+  return async (request: {
+    workspaceId: string; baseRevision: number
+    selection: { mode: 'none' } | { mode: 'lut-version'; lutId: string; version: number }
+    actor: { type: 'api-client'; id: string }; idempotencyKey: string
+  }) => {
+    const workspaceId = id(request.workspaceId, 'workspaceId')
+    const createdByClientId = request.actor?.type === 'api-client' ? id(request.actor.id, 'actor.id') : ''
+    if (!createdByClientId) throw new DomainError('INVALID_ARGUMENT', 'actor is invalid')
+    if (!Number.isSafeInteger(request.baseRevision) || request.baseRevision < 0) throw new DomainError('INVALID_ARGUMENT', 'baseRevision is invalid')
+    if (!request.selection || !['none', 'lut-version'].includes(request.selection.mode)) throw new DomainError('INVALID_ARGUMENT', 'selection.mode is invalid')
+    const idempotencyKey = (request.idempotencyKey ?? '').trim()
+    if (idempotencyKey.length < 8 || idempotencyKey.length > 128) throw new DomainError('INVALID_ARGUMENT', 'Idempotency-Key is invalid')
+    const normalizedSelection = request.selection.mode === 'none'
+      ? Object.freeze({ mode: 'none' as const })
+      : Object.freeze({ mode: 'lut-version' as const, lutId: id(request.selection.lutId, 'selection.lutId'), version: request.selection.version })
+    if (normalizedSelection.mode === 'lut-version' && (!Number.isSafeInteger(normalizedSelection.version) || normalizedSelection.version < 1)) throw new DomainError('INVALID_ARGUMENT', 'selection.version is invalid')
+    const requestFingerprint = calculateCanonicalHash({ schemaVersion: 'workspace-lut-default-set-request/v1', workspaceId, baseRevision: request.baseRevision, selection: normalizedSelection, createdByClientId })
+    const replay = await dependencies.repository.findDefaultIdempotent({ workspaceId, createdByClientId, idempotencyKey })
+    if (replay) {
+      if (replay.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another workspace LUT default')
+      return Object.freeze({ value: replay, replayed: true })
+    }
+    const current = await dependencies.repository.readDefault({ workspaceId })
+    if (current.revision !== request.baseRevision) throw new DomainError('VERSION_CONFLICT', 'Workspace LUT default revision changed')
+    let lutVersion
+    if (normalizedSelection.mode === 'lut-version') {
+      const lut = await dependencies.repository.read({ workspaceId, lutId: normalizedSelection.lutId })
+      if (!lut || lut.status !== 'active') throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Active workspace LUT was not found')
+      if (lut.currentVersion.version !== normalizedSelection.version) throw new DomainError('VERSION_CONFLICT', 'Workspace LUT default must select the current immutable version')
+      lutVersion = lut.currentVersion
+    }
+    const revision = request.baseRevision + 1
+    const selectionHash = calculateCanonicalHash({ schemaVersion: 'workspace-lut-default-version/v1', workspaceId, revision, mode: normalizedSelection.mode, lutVersionId: lutVersion?.id ?? null, lutRecordHash: lutVersion?.recordHash ?? null })
+    const value: Readonly<WorkspaceLutDefaultVersion> = Object.freeze({
+      id: id(dependencies.createVersionId(), 'defaultVersionId'), workspaceId, revision, mode: normalizedSelection.mode,
+      ...(lutVersion ? { lutVersion } : {}), selectionHash, requestFingerprint, idempotencyKey, createdByClientId, createdAt: clock().toISOString(),
+    })
+    return dependencies.repository.setDefault({ value, expectedRevision: request.baseRevision })
   }
 }

@@ -247,6 +247,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Applies one revision-guarded active/inactive lifecycle command without deleting LUT versions, previews, projects or media.',
     },
+    'apollo.workspace-luts.default.set': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one revision-guarded immutable workspace default from an active current LUT version or explicit none without mutating projects or media.',
+    },
     'apollo.projects.proof-integrity-runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Evaluates existing ProofNeed, recipe, evidence and current authorization hashes, persists an immutable fail-closed decision and starts no provider, render or media materialization work.',

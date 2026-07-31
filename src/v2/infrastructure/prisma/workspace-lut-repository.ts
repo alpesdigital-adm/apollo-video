@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
-import { Prisma, type PrismaClient, type V2WorkspaceLut, type V2WorkspaceLutStatusCommand, type V2WorkspaceLutVersion } from '../../../../generated/prisma-v2/index.js'
+import { Prisma, type PrismaClient, type V2WorkspaceLut, type V2WorkspaceLutDefaultVersion, type V2WorkspaceLutStatusCommand, type V2WorkspaceLutVersion } from '../../../../generated/prisma-v2/index.js'
 
-import type { PersistedWorkspaceLutImport, WorkspaceLutRecord, WorkspaceLutRepository, WorkspaceLutStatusCommand } from '../../application/ports/workspace-lut-repository.ts'
-import { stableSerialize } from '../../domain/canonical-hash.ts'
+import type { PersistedWorkspaceLutImport, WorkspaceLutDefaultVersion, WorkspaceLutRecord, WorkspaceLutRepository, WorkspaceLutStatusCommand } from '../../application/ports/workspace-lut-repository.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createWorkspaceLutVersion, type LutColorSpace, type LutLicensePolicy } from '../../domain/workspace-lut.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
@@ -54,6 +54,21 @@ function statusCommand(row: V2WorkspaceLutStatusCommand): Readonly<WorkspaceLutS
     id: row.id, workspaceId: row.workspaceId, lutId: row.lutId, baseRevision: row.baseRevision, resultRevision: row.resultRevision,
     status: row.status as 'active' | 'inactive', resultVersionId: row.resultVersionId, requestFingerprint: row.requestFingerprint, idempotencyKey: row.idempotencyKey,
     createdByClientId: row.createdByClientId, createdAt: row.createdAt.toISOString(),
+  })
+}
+
+function defaultVersion(row: V2WorkspaceLutDefaultVersion, lutRow: V2WorkspaceLutVersion | null): Readonly<WorkspaceLutDefaultVersion> {
+  if (!Number.isSafeInteger(row.revision) || row.revision < 1 || !['none', 'lut-version'].includes(row.mode) ||
+    (row.mode === 'none' && (row.lutVersionId || lutRow)) || (row.mode === 'lut-version' && (!row.lutVersionId || !lutRow || lutRow.id !== row.lutVersionId))) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored workspace LUT default is invalid')
+  }
+  const lutVersion = lutRow ? hydrateVersion(lutRow) : undefined
+  const expectedHash = calculateCanonicalHash({ schemaVersion: 'workspace-lut-default-version/v1', workspaceId: row.workspaceId, revision: row.revision, mode: row.mode, lutVersionId: lutVersion?.id ?? null, lutRecordHash: lutVersion?.recordHash ?? null })
+  if (expectedHash !== row.selectionHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored workspace LUT default hash is invalid')
+  return Object.freeze({
+    id: row.id, workspaceId: row.workspaceId, revision: row.revision, mode: row.mode as 'none' | 'lut-version',
+    ...(lutVersion ? { lutVersion } : {}), selectionHash: row.selectionHash, requestFingerprint: row.requestFingerprint,
+    idempotencyKey: row.idempotencyKey, createdByClientId: row.createdByClientId, createdAt: row.createdAt.toISOString(),
   })
 }
 
@@ -227,6 +242,70 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
         throw new DomainError('VERSION_CONFLICT', 'Workspace LUT status was concurrently changed')
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.setStatus(input, serializationAttempt + 1)
+      throw error
+    }
+  }
+
+  async readDefault(input: { workspaceId: string }) {
+    const head = await this.client.v2WorkspaceLutDefault.findUnique({ where: { workspaceId: input.workspaceId } })
+    if (!head) return Object.freeze({ workspaceId: input.workspaceId, revision: 0, current: null })
+    const row = await this.client.v2WorkspaceLutDefaultVersion.findUnique({ where: { id: head.currentVersionId } })
+    if (!row || row.workspaceId !== input.workspaceId || row.revision !== head.revision) throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace LUT default head is invalid')
+    const lutRow = row.lutVersionId ? await this.client.v2WorkspaceLutVersion.findUnique({ where: { id: row.lutVersionId } }) : null
+    return Object.freeze({ workspaceId: input.workspaceId, revision: head.revision, current: defaultVersion(row, lutRow) })
+  }
+
+  async findDefaultIdempotent(input: { workspaceId: string; createdByClientId: string; idempotencyKey: string }) {
+    const row = await this.client.v2WorkspaceLutDefaultVersion.findUnique({ where: { workspaceId_createdByClientId_idempotencyKey: input } })
+    if (!row) return null
+    const lutRow = row.lutVersionId ? await this.client.v2WorkspaceLutVersion.findUnique({ where: { id: row.lutVersionId } }) : null
+    return defaultVersion(row, lutRow)
+  }
+
+  async setDefault(input: { value: Readonly<WorkspaceLutDefaultVersion>; expectedRevision: number }, serializationAttempt = 1): Promise<Readonly<{ value: Readonly<WorkspaceLutDefaultVersion>; replayed: boolean }>> {
+    const value = input.value
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const [workspace, client, head] = await Promise.all([
+          transaction.v2Workspace.findFirst({ where: { id: value.workspaceId, status: 'active' }, select: { id: true } }),
+          transaction.v2ApiClient.findFirst({ where: { id: value.createdByClientId, workspaceId: value.workspaceId, status: 'active' }, select: { id: true } }),
+          transaction.v2WorkspaceLutDefault.findUnique({ where: { workspaceId: value.workspaceId } }),
+        ])
+        if (!workspace || !client) throw new DomainError('WORKSPACE_NOT_FOUND', 'Active workspace and API client are required')
+        const revision = head?.revision ?? 0
+        if (revision !== input.expectedRevision || value.revision !== revision + 1) throw new DomainError('VERSION_CONFLICT', 'Workspace LUT default revision changed')
+        let lutRow: V2WorkspaceLutVersion | null = null
+        if (value.mode === 'lut-version') {
+          if (!value.lutVersion) throw new DomainError('INVALID_ARGUMENT', 'Workspace LUT default version is missing')
+          const [candidate, lutHead] = await Promise.all([
+            transaction.v2WorkspaceLutVersion.findUnique({ where: { id: value.lutVersion.id } }),
+            transaction.v2WorkspaceLut.findUnique({ where: { id_workspaceId: { id: value.lutVersion.lutId, workspaceId: value.workspaceId } } }),
+          ])
+          if (!candidate || candidate.workspaceId !== value.workspaceId || candidate.recordHash !== value.lutVersion.recordHash || lutHead?.status !== 'active' || lutHead.currentVersionId !== candidate.id) {
+            throw new DomainError('VERSION_CONFLICT', 'Workspace LUT default candidate changed or is inactive')
+          }
+          lutRow = candidate
+        }
+        const row = await transaction.v2WorkspaceLutDefaultVersion.create({ data: {
+          id: value.id, workspaceId: value.workspaceId, revision: value.revision, mode: value.mode,
+          lutVersionId: value.lutVersion?.id, selectionHash: value.selectionHash, requestFingerprint: value.requestFingerprint,
+          idempotencyKey: value.idempotencyKey, createdByClientId: value.createdByClientId, createdAt: new Date(value.createdAt),
+        } })
+        if (head) {
+          await transaction.v2WorkspaceLutDefault.update({ where: { workspaceId: value.workspaceId }, data: { revision: value.revision, currentVersionId: value.id, updatedAt: new Date(value.createdAt) } })
+        } else {
+          await transaction.v2WorkspaceLutDefault.create({ data: { workspaceId: value.workspaceId, revision: value.revision, currentVersionId: value.id, createdAt: new Date(value.createdAt), updatedAt: new Date(value.createdAt) } })
+        }
+        return Object.freeze({ value: defaultVersion(row, lutRow), replayed: false })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const replay = await this.findDefaultIdempotent({ workspaceId: value.workspaceId, createdByClientId: value.createdByClientId, idempotencyKey: value.idempotencyKey })
+        if (replay?.requestFingerprint === value.requestFingerprint) return Object.freeze({ value: replay, replayed: true })
+        if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another workspace LUT default')
+        throw new DomainError('VERSION_CONFLICT', 'Workspace LUT default was concurrently changed')
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.setDefault(input, serializationAttempt + 1)
       throw error
     }
   }

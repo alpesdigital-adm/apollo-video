@@ -25,6 +25,23 @@ export interface WorkspaceLutStatusCommand {
   createdByClientId: string
   createdAt: string
 }
+export interface WorkspaceLutDefaultVersion {
+  id: string
+  workspaceId: string
+  revision: number
+  mode: 'none' | 'lut-version'
+  lutVersion?: Readonly<WorkspaceLutVersion>
+  selectionHash: string
+  requestFingerprint: string
+  idempotencyKey: string
+  createdByClientId: string
+  createdAt: string
+}
+export interface WorkspaceLutDefault {
+  workspaceId: string
+  revision: number
+  current: Readonly<WorkspaceLutDefaultVersion> | null
+}
 export interface WorkspaceLutRepository {
   findIdempotent(input: { workspaceId: string; createdByClientId: string; idempotencyKey: string }): Promise<Readonly<PersistedWorkspaceLutImport> | null>
   import(input: { value: Readonly<PersistedWorkspaceLutImport>; previewPng: Uint8Array }): Promise<Readonly<{ value: Readonly<PersistedWorkspaceLutImport>; replayed: boolean }>>
@@ -35,4 +52,7 @@ export interface WorkspaceLutRepository {
   readPreview(input: { workspaceId: string; lutId: string; version: number }): Promise<Readonly<{ png: Uint8Array; sha256: string }> | null>
   findStatusIdempotent(input: { workspaceId: string; createdByClientId: string; idempotencyKey: string }): Promise<Readonly<{ command: Readonly<WorkspaceLutStatusCommand>; record: Readonly<WorkspaceLutRecord> }> | null>
   setStatus(input: { command: Readonly<WorkspaceLutStatusCommand> }): Promise<Readonly<{ command: Readonly<WorkspaceLutStatusCommand>; record: Readonly<WorkspaceLutRecord>; replayed: boolean }>>
+  readDefault(input: { workspaceId: string }): Promise<Readonly<WorkspaceLutDefault>>
+  findDefaultIdempotent(input: { workspaceId: string; createdByClientId: string; idempotencyKey: string }): Promise<Readonly<WorkspaceLutDefaultVersion> | null>
+  setDefault(input: { value: Readonly<WorkspaceLutDefaultVersion>; expectedRevision: number }): Promise<Readonly<{ value: Readonly<WorkspaceLutDefaultVersion>; replayed: boolean }>>
 }

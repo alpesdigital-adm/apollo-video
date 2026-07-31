@@ -7712,6 +7712,20 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/workspace-lut-default-set-request/v1': [
+      { baseRevision: 0, selection: { mode: 'lut-version', lutId: workspaceLutExample.id, version: 1 } },
+      { baseRevision: 1, selection: { mode: 'none' } },
+    ],
+    'apollo://schemas/workspace-lut-default-response/v1': [
+      { data: { default: { workspaceId, revision: 0, current: null } }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/workspace-lut-default-set/v1': [{
+      data: {
+        defaultVersion: { id: 'lut-default-example-1', revision: 1, mode: 'lut-version', selectionHash: 'c'.repeat(64), lut: { id: workspaceLutExample.id, versionId: workspaceLutExample.currentVersion.id, version: 1, name: workspaceLutExample.currentVersion.name, recordHash: workspaceLutExample.currentVersion.recordHash }, createdByClientId: clientId, createdAt },
+        replayed: false,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
         data: { review: proxyReviewExample },

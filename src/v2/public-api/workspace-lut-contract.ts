@@ -1,4 +1,4 @@
-import type { WorkspaceLutRecord, WorkspaceLutStatusCommand } from '../application/ports/workspace-lut-repository.ts'
+import type { WorkspaceLutDefault, WorkspaceLutDefaultVersion, WorkspaceLutRecord, WorkspaceLutStatusCommand } from '../application/ports/workspace-lut-repository.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { LutColorSpace, LutLicensePolicy } from '../domain/workspace-lut.ts'
 
@@ -79,4 +79,29 @@ export function presentWorkspaceLutStatusCommand(command: Readonly<WorkspaceLutS
     id: command.id, lutId: command.lutId, baseRevision: command.baseRevision, resultRevision: command.resultRevision,
     status: command.status, createdByClientId: command.createdByClientId, createdAt: command.createdAt,
   })
+}
+
+export function parseSetWorkspaceLutDefaultBody(raw: unknown) {
+  const body = object(raw, 'body'); exact(body, ['baseRevision', 'selection'], 'body')
+  if (!Number.isSafeInteger(body.baseRevision) || (body.baseRevision as number) < 0) throw new DomainError('INVALID_ARGUMENT', 'baseRevision is invalid')
+  const selection = object(body.selection, 'selection'); exact(selection, ['mode', 'lutId', 'version'], 'selection')
+  if (selection.mode === 'none') {
+    if (selection.lutId !== undefined || selection.version !== undefined) throw new DomainError('INVALID_ARGUMENT', 'none selection cannot identify a LUT')
+    return Object.freeze({ baseRevision: body.baseRevision as number, selection: Object.freeze({ mode: 'none' as const }) })
+  }
+  if (selection.mode !== 'lut-version') throw new DomainError('INVALID_ARGUMENT', 'selection.mode is invalid')
+  if (!Number.isSafeInteger(selection.version) || (selection.version as number) < 1) throw new DomainError('INVALID_ARGUMENT', 'selection.version is invalid')
+  return Object.freeze({ baseRevision: body.baseRevision as number, selection: Object.freeze({ mode: 'lut-version' as const, lutId: string(selection.lutId, 'selection.lutId').trim(), version: selection.version as number }) })
+}
+
+export function presentWorkspaceLutDefaultVersion(value: Readonly<WorkspaceLutDefaultVersion>) {
+  return Object.freeze({
+    id: value.id, revision: value.revision, mode: value.mode, selectionHash: value.selectionHash,
+    ...(value.lutVersion ? { lut: Object.freeze({ id: value.lutVersion.lutId, versionId: value.lutVersion.id, version: value.lutVersion.version, name: value.lutVersion.name, recordHash: value.lutVersion.recordHash }) } : {}),
+    createdByClientId: value.createdByClientId, createdAt: value.createdAt,
+  })
+}
+
+export function presentWorkspaceLutDefault(value: Readonly<WorkspaceLutDefault>) {
+  return Object.freeze({ workspaceId: value.workspaceId, revision: value.revision, current: value.current ? presentWorkspaceLutDefaultVersion(value.current) : null })
 }

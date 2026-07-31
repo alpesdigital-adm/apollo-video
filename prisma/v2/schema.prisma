@@ -79,6 +79,8 @@ model V2Workspace {
   workspaceLuts                   V2WorkspaceLut[]
   workspaceLutVersions            V2WorkspaceLutVersion[]
   workspaceLutStatusCommands      V2WorkspaceLutStatusCommand[]
+  workspaceLutDefault             V2WorkspaceLutDefault?
+  workspaceLutDefaultVersions     V2WorkspaceLutDefaultVersion[]
   semanticReuseRuns               V2SemanticReuseRun[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks    V2HierarchicalProcessingChunk[]
@@ -174,6 +176,7 @@ model V2ApiClient {
   colorPipelineCompilations         V2ColorPipelineCompilation[]
   workspaceLutVersions              V2WorkspaceLutVersion[]
   workspaceLutStatusCommands        V2WorkspaceLutStatusCommand[]
+  workspaceLutDefaultVersions       V2WorkspaceLutDefaultVersion[]
   productionBatches               V2ProductionBatch[]              @relation("ProductionBatchCreator")
   productionBatchActions          V2ProductionBatchAction[]        @relation("ProductionBatchActionActor")
   scriptAlignmentRuns             V2ScriptAlignmentRun[]           @relation("ScriptAlignmentRunCreator")
@@ -1038,6 +1041,7 @@ model V2WorkspaceLutVersion {
   workspace V2Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   lut       V2WorkspaceLut @relation(fields: [lutId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   createdBy V2ApiClient    @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspaceDefaults V2WorkspaceLutDefaultVersion[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, lutId, version])
@@ -1046,6 +1050,42 @@ model V2WorkspaceLutVersion {
   @@index([workspaceId, lutId, createdAt(sort: Desc)])
   @@index([workspaceId, cubeContentHash])
   @@map("workspace_lut_versions")
+}
+
+model V2WorkspaceLutDefault {
+  workspaceId      String   @id @db.VarChar(128)
+  revision         Int
+  currentVersionId String   @db.VarChar(128)
+  createdAt        DateTime @db.Timestamptz(3)
+  updatedAt        DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("workspace_lut_defaults")
+}
+
+model V2WorkspaceLutDefaultVersion {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  revision             Int
+  mode                 String   @db.VarChar(16)
+  lutVersionId         String?  @db.VarChar(128)
+  selectionHash        String   @db.Char(64)
+  requestFingerprint   String   @db.Char(64)
+  idempotencyKey       String   @db.VarChar(128)
+  createdByClientId    String   @db.VarChar(80)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lutVersion V2WorkspaceLutVersion? @relation(fields: [lutVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy V2ApiClient @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, revision])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([workspaceId, lutVersionId])
+  @@map("workspace_lut_default_versions")
 }
 
 model V2MediaArtifactLineage {
