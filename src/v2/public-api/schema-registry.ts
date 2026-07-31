@@ -4943,6 +4943,10 @@ const semanticSearchFilterSchema = {
   },
 }
 const hybridSearchQueryProperties = {
+  scope: {
+    enum: ['project', 'workspace'],
+    default: 'project',
+  },
   text: { type: 'string', minLength: 1, maxLength: 2000 },
   intention: { type: 'string', minLength: 1, maxLength: 2000 },
   rightsUse: {

@@ -26,6 +26,7 @@ export interface SemanticSearchSourceRef {
 export interface SemanticSearchCandidateQuery {
   workspaceId: string
   projectId: string
+  evaluatedAt: string
   query: Readonly<HybridSearchRequest>
   normalizedQueryText: string
   embedding?: Readonly<{

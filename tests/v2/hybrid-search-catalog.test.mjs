@@ -6,8 +6,15 @@ import {
   calculateRetrievalMetrics,
   catalogSemanticSearchDocument,
   rerankHybridSearch,
+  semanticRightsRejectionReasons,
   semanticEmbeddingInput,
 } from '../../src/v2/domain/hybrid-search.ts'
+import {
+  hybridSearchService,
+} from '../../src/v2/application/hybrid-search.ts'
+import {
+  parseHybridSearchQueryBody,
+} from '../../src/v2/public-api/hybrid-search-contract.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import {
   DeterministicSemanticEmbeddingProvider,
@@ -332,6 +339,125 @@ test('T-FR-048 keeps full-text available when embedding is unavailable', () => {
     !results[0].matchedBy.includes(
       'vector:intention-description',
     ),
+  )
+})
+
+test('T-FR-136 preserves workspace scope in the public contract and forwards one evaluation instant to candidate selection', async () => {
+  const parsed = parseHybridSearchQueryBody({
+    scope: 'workspace',
+    text: 'resultado campanha',
+    rightsUse: 'editorial-reuse',
+  })
+  let captured
+  const crossProject = {
+    ...document(),
+    id: 'semantic-document-cross-project',
+    projectId: 'project-other',
+    identityKey: 'speech-segment:speech-cross-project',
+  }
+  const search = hybridSearchService({
+    repository: {
+      async searchCandidates(query) {
+        captured = query
+        return [{
+          document: crossProject,
+          currentRights: context().rights,
+          fullTextScore: 0.9,
+          vectorScore: 0.9,
+        }]
+      },
+    },
+    embeddingProvider:
+      new DeterministicSemanticEmbeddingProvider(),
+    clock: () => new Date(createdAt),
+  })
+  const response = await search({
+    workspaceId: 'workspace-semantic',
+    projectId: 'project-semantic',
+    ...parsed,
+  })
+  assert.equal(captured.query.scope, 'workspace')
+  assert.equal(captured.evaluatedAt, createdAt)
+  assert.equal(captured.workspaceId, 'workspace-semantic')
+  assert.equal(response.query.scope, 'workspace')
+  assert.equal(response.results[0].document.projectId, 'project-other')
+})
+
+test('T-FR-136 defaults to project scope and forbids exposing rights-blocked workspace candidates', async () => {
+  let calls = 0
+  const search = hybridSearchService({
+    repository: {
+      async searchCandidates() {
+        calls += 1
+        return []
+      },
+    },
+    embeddingProvider:
+      new DeterministicSemanticEmbeddingProvider(),
+    clock: () => new Date(createdAt),
+  })
+  const projectResponse = await search({
+    workspaceId: 'workspace-semantic',
+    projectId: 'project-semantic',
+    text: 'resultado',
+    rightsUse: 'editorial-reuse',
+  })
+  assert.equal(projectResponse.query.scope, 'project')
+  await assert.rejects(
+    search({
+      workspaceId: 'workspace-semantic',
+      projectId: 'project-semantic',
+      scope: 'workspace',
+      text: 'resultado',
+      rightsUse: 'editorial-reuse',
+      includeBlocked: true,
+    }),
+    /Workspace search cannot include rights-blocked candidates/,
+  )
+  await assert.rejects(
+    search({
+      workspaceId: 'workspace-semantic',
+      projectId: 'project-semantic',
+      scope: 'workspace',
+      filters: { rights: 'blocked' },
+      rightsUse: 'editorial-reuse',
+    }),
+    /Workspace search cannot request rights-blocked candidates/,
+  )
+  await assert.rejects(
+    search({
+      workspaceId: 'workspace-semantic',
+      projectId: 'project-semantic',
+      scope: 'organization',
+      text: 'resultado',
+      rightsUse: 'editorial-reuse',
+    }),
+    /scope must be project or workspace/,
+  )
+  assert.equal(calls, 1)
+})
+
+test('T-FR-136 applies current rights, consent, use and expiry before workspace rerank', () => {
+  const item = document()
+  assert.deepEqual(
+    semanticRightsRejectionReasons({
+      document: item,
+      current: {
+        ...context().rights,
+        consentStatus: 'revoked',
+        allowedUses: [],
+        prohibitedUses: ['editorial-reuse'],
+        expiresAt: createdAt,
+      },
+      rightsUse: 'editorial-reuse',
+      now: createdAt,
+    }),
+    [
+      'RIGHTS_EXPIRED',
+      'CONSENT_REVOKED',
+      'RIGHTS_USE_PROHIBITED',
+      'RIGHTS_USE_NOT_ALLOWED',
+    ],
   )
 })
 

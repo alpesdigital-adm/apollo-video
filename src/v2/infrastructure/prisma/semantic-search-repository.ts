@@ -23,6 +23,7 @@ import {
   RETRIEVAL_EVAL_POLICY_VERSION,
   SEMANTIC_SEARCH_INDEX_VERSION,
   semanticEmbeddingInput,
+  semanticRightsRejectionReasons,
   type CatalogedSemanticSearchDocument,
   type RetrievalMetrics,
   type SemanticSearchSourceContext,
@@ -1051,6 +1052,9 @@ implements SemanticSearchRepository {
     if (!project) {
       throw new DomainError('PROJECT_NOT_FOUND', 'Project was not found')
     }
+    const projectScope = query.query.scope === 'project'
+      ? Prisma.sql`AND "projectId" = ${query.projectId}`
+      : Prisma.empty
     const fullTextRows = query.normalizedQueryText
       ? await this.client.$queryRaw<
           { id: string; score: number }[]
@@ -1075,7 +1079,7 @@ implements SemanticSearchRepository {
             )::double precision AS "score"
           FROM "semantic_search_documents"
           WHERE "workspaceId" = ${query.workspaceId}
-            AND "projectId" = ${query.projectId}
+            ${projectScope}
             AND "active" = TRUE
           ORDER BY "score" DESC, "id" ASC
           LIMIT ${query.candidateLimit}
@@ -1099,7 +1103,7 @@ implements SemanticSearchRepository {
             )::double precision AS "score"
           FROM "semantic_search_documents"
           WHERE "workspaceId" = ${query.workspaceId}
-            AND "projectId" = ${query.projectId}
+            ${projectScope}
             AND "active" = TRUE
             AND "embeddingState" = 'ready'
             AND "embeddingProvider" =
@@ -1131,7 +1135,9 @@ implements SemanticSearchRepository {
         ? this.client.v2SemanticSearchDocument.findMany({
             where: {
               workspaceId: query.workspaceId,
-              projectId: query.projectId,
+              ...(query.query.scope === 'project'
+                ? { projectId: query.projectId }
+                : {}),
               active: true,
               id: { in: scoredIds },
             },
@@ -1141,7 +1147,9 @@ implements SemanticSearchRepository {
       this.client.v2SemanticSearchDocument.findMany({
         where: {
           workspaceId: query.workspaceId,
-          projectId: query.projectId,
+          ...(query.query.scope === 'project'
+            ? { projectId: query.projectId }
+            : {}),
           active: true,
         },
         include,
@@ -1159,7 +1167,7 @@ implements SemanticSearchRepository {
     const vectorScores = new Map(
       vectorRows.map((row) => [row.id, row.score]),
     )
-    return Object.freeze([...byId.values()].map((row) => ({
+    const candidates = [...byId.values()].map((row) => ({
       document: hydrateDocument(row),
       currentRights: row.sourceArtifact.currentRightsSnapshot
         ? currentRights(row.sourceArtifact.currentRightsSnapshot)
@@ -1172,7 +1180,18 @@ implements SemanticSearchRepository {
         0,
         Math.min(1, vectorScores.get(row.id) ?? 0),
       ),
-    })))
+    }))
+    return Object.freeze(
+      query.query.scope === 'workspace'
+        ? candidates.filter((candidate) =>
+            semanticRightsRejectionReasons({
+              document: candidate.document,
+              current: candidate.currentRights,
+              rightsUse: query.query.rightsUse,
+              now: query.evaluatedAt,
+            }).length === 0)
+        : candidates,
+    )
   }
 
   async findIdempotentEvaluation(input: {

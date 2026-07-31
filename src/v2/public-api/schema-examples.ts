@@ -1475,6 +1475,7 @@ const semanticSearchDocumentExample = {
   documentHash: '5'.repeat(64),
 }
 const hybridSearchQueryExample = {
+  scope: 'workspace',
   text: 'custo por lead',
   intention: 'proof',
   rightsUse: 'social-ad',

@@ -8,12 +8,14 @@ import {
   catalogSemanticSearchDocument,
   HYBRID_RERANK_POLICY_VERSION,
   HYBRID_SEARCH_KINDS,
+  HYBRID_SEARCH_SCOPES,
   HYBRID_SEARCH_SOURCE_TYPES,
   rerankHybridSearch,
   RETRIEVAL_EVAL_POLICY_VERSION,
   SEMANTIC_SEARCH_INDEX_VERSION,
   type HybridSearchFilters,
   type HybridSearchRequest,
+  type HybridSearchScope,
   type SemanticSearchObservationInput,
 } from '../domain/hybrid-search.ts'
 import { normalizeSpeechText } from '../domain/speech-segment-catalog.ts'
@@ -417,6 +419,7 @@ export function hybridSearchService(dependencies: {
   return async function search(request: {
     workspaceId: string
     projectId: string
+    scope?: HybridSearchScope
     text?: string
     intention?: string
     rightsUse: string
@@ -427,6 +430,12 @@ export function hybridSearchService(dependencies: {
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
+    const scope = request.scope ?? 'project'
+    assertDomain(
+      HYBRID_SEARCH_SCOPES.includes(scope),
+      'INVALID_ARGUMENT',
+      'scope must be project or workspace',
+    )
     const text = normalizedOptionalText(request.text, 'text')
     const intention = normalizedOptionalText(
       request.intention,
@@ -453,12 +462,23 @@ export function hybridSearchService(dependencies: {
       'includeBlocked must be boolean',
     )
     assertDomain(
+      scope !== 'workspace' || request.includeBlocked !== true,
+      'INVALID_ARGUMENT',
+      'Workspace search cannot include rights-blocked candidates',
+    )
+    assertDomain(
+      scope !== 'workspace' || filters?.rights !== 'blocked',
+      'INVALID_ARGUMENT',
+      'Workspace search cannot request rights-blocked candidates',
+    )
+    assertDomain(
       request.explain === undefined ||
         typeof request.explain === 'boolean',
       'INVALID_ARGUMENT',
       'explain must be boolean',
     )
     const query: Readonly<HybridSearchRequest> = Object.freeze({
+      scope,
       ...(text ? { text } : {}),
       ...(intention ? { intention } : {}),
       rightsUse: request.rightsUse,
@@ -476,9 +496,14 @@ export function hybridSearchService(dependencies: {
           normalizedQueryText,
         )
       : null
+    const evaluatedAt = canonicalNow(
+      dependencies.clock(),
+      'hybrid search clock',
+    )
     const candidates = await dependencies.repository.searchCandidates({
       workspaceId,
       projectId,
+      evaluatedAt,
       query,
       normalizedQueryText,
       ...(embedded?.vector
@@ -491,10 +516,6 @@ export function hybridSearchService(dependencies: {
         : {}),
       candidateLimit: Math.min(500, Math.max(100, query.limit * 10)),
     })
-    const evaluatedAt = canonicalNow(
-      dependencies.clock(),
-      'hybrid search clock',
-    )
     return Object.freeze({
       schemaVersion: 'hybrid-search-results/v1' as const,
       query,
@@ -529,6 +550,7 @@ export function evaluateHybridRetrievalService(dependencies: {
     cases: readonly {
       id: string
       query: {
+        scope?: HybridSearchScope
         text?: string
         intention?: string
         rightsUse: string

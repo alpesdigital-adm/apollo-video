@@ -31,6 +31,13 @@ export const HYBRID_SEARCH_KINDS = [
 export type HybridSearchKind =
   (typeof HYBRID_SEARCH_KINDS)[number]
 
+export const HYBRID_SEARCH_SCOPES = [
+  'project',
+  'workspace',
+] as const
+export type HybridSearchScope =
+  (typeof HYBRID_SEARCH_SCOPES)[number]
+
 export const HYBRID_MATCH_REASONS = [
   'full-text:transcript',
   'full-text:ocr',
@@ -155,6 +162,7 @@ export interface HybridSearchFilters {
 }
 
 export interface HybridSearchRequest {
+  scope: HybridSearchScope
   text?: string
   intention?: string
   rightsUse: string
@@ -627,7 +635,7 @@ function effectiveStatus(
     : value
 }
 
-function rightsReasons(input: {
+export function semanticRightsRejectionReasons(input: {
   document: Readonly<CatalogedSemanticSearchDocument>
   current: SemanticSearchSourceContext['rights'] | null
   rightsUse: string
@@ -795,7 +803,7 @@ export function rerankHybridSearch(input: {
       candidate.document,
       filters,
     )
-    const rightsBlocked = rightsReasons({
+    const rightsBlocked = semanticRightsRejectionReasons({
       document: candidate.document,
       current: candidate.currentRights,
       rightsUse: input.query.rightsUse,

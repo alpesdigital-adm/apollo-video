@@ -86,6 +86,7 @@ test('T-FR-048 catalogs, deduplicates, reranks and evaluates hybrid retrieval th
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `hybrid-e2e-workspace-${suffix}`
   const projectId = `hybrid-e2e-project-${suffix}`
+  const crossProjectId = `hybrid-e2e-cross-project-${suffix}`
   const createdAt = new Date('2026-07-27T17:30:00.000Z')
   const artifacts = {
     proof: {
@@ -105,6 +106,12 @@ test('T-FR-048 catalogs, deduplicates, reranks and evaluates hybrid retrieval th
       sha256: 'c'.repeat(64),
       mediaType: 'image',
       container: 'jpg',
+    },
+    cross: {
+      id: `hybrid-cross-image-${suffix}`,
+      sha256: 'd'.repeat(64),
+      mediaType: 'image',
+      container: 'png',
     },
   }
   let server
@@ -150,6 +157,21 @@ test('T-FR-048 catalogs, deduplicates, reranks and evaluates hybrid retrieval th
         updatedAt: createdAt,
       },
     })
+    await client.v2Project.create({
+      data: {
+        id: crossProjectId,
+        workspaceId,
+        name: 'Cross-project retrieval fixture',
+        status: 'draft',
+        objective: 'lead-generation',
+        format: '9:16',
+        locale: 'pt-BR',
+        createdByType: 'api-client',
+        createdById: issued.client.id,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    })
 
     for (const [role, artifact] of Object.entries(artifacts)) {
       await client.v2MediaArtifact.create({
@@ -170,7 +192,9 @@ test('T-FR-048 catalogs, deduplicates, reranks and evaluates hybrid retrieval th
         data: {
           id: randomUUID(),
           workspaceId,
-          projectId,
+          projectId: role === 'cross'
+            ? crossProjectId
+            : projectId,
           artifactId: artifact.id,
           role: 'source-master',
           originalFileName: `${role}.${artifact.container}`,
@@ -288,6 +312,8 @@ test('T-FR-048 catalogs, deduplicates, reranks and evaluates hybrid retrieval th
       `${baseUrl}/v1/projects/${projectId}/semantic-search/documents`
     const queryEndpoint =
       `${baseUrl}/v1/projects/${projectId}/semantic-search/query`
+    const crossCatalogEndpoint =
+      `${baseUrl}/v1/projects/${crossProjectId}/semantic-search/documents`
     const evaluationEndpoint =
       `${baseUrl}/v1/projects/${projectId}/semantic-search/evaluations`
     const producer = {
@@ -461,6 +487,37 @@ test('T-FR-048 catalogs, deduplicates, reranks and evaluates hybrid retrieval th
     })
     assert.equal(blockedResponse.status, 201)
 
+    const crossResponse = await fetch(crossCatalogEndpoint, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': `hybrid-cross-${suffix}`,
+      },
+      body: JSON.stringify({
+        source: {
+          type: 'artifact',
+          id: artifacts.cross.id,
+        },
+        expectedSourceHash: artifacts.cross.sha256,
+        indexVersion: 'semantic-search-index/v1',
+        observations: {
+          ocrText: 'Receita recorrente cresceu no projeto vizinho',
+          description:
+            'Gráfico autorizado de receita recorrente cross-project.',
+          intentions: ['proof', 'workspace-reuse'],
+          metadata: { campaign: 'cross-project' },
+          producer,
+        },
+      }),
+    })
+    const crossPayload = await crossResponse.json()
+    assert.equal(
+      crossResponse.status,
+      201,
+      JSON.stringify(crossPayload),
+    )
+
     const reindexResponse = await fetch(catalogEndpoint, {
       method: 'POST',
       headers: {
@@ -565,6 +622,76 @@ test('T-FR-048 catalogs, deduplicates, reranks and evaluates hybrid retrieval th
     assert.ok(proofResult.matchedBy.includes('rights:allowed'))
     assert.equal('searchTextNormalized' in proofResult.document, false)
     assert.equal('requestFingerprint' in proofResult.document, false)
+
+    const crossQuery = {
+      text: 'receita recorrente projeto vizinho',
+      intention: 'workspace-reuse',
+      rightsUse: 'editorial-reuse',
+      includeBlocked: false,
+      limit: 20,
+      explain: true,
+    }
+    const projectOnlyCrossResponse = await fetch(queryEndpoint, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(crossQuery),
+    })
+    const projectOnlyCrossPayload =
+      await projectOnlyCrossResponse.json()
+    assert.equal(projectOnlyCrossResponse.status, 200)
+    assert.equal(
+      projectOnlyCrossPayload.data.query.scope,
+      'project',
+    )
+    assert.equal(projectOnlyCrossPayload.data.results.length, 0)
+
+    const workspaceCrossResponse = await fetch(queryEndpoint, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...crossQuery,
+        scope: 'workspace',
+      }),
+    })
+    const workspaceCrossPayload =
+      await workspaceCrossResponse.json()
+    assert.equal(
+      workspaceCrossResponse.status,
+      200,
+      JSON.stringify(workspaceCrossPayload),
+    )
+    assert.equal(
+      workspaceCrossPayload.data.query.scope,
+      'workspace',
+    )
+    const crossResult = workspaceCrossPayload.data.results.find(
+      (result) =>
+        result.document.identityKey ===
+        `artifact:${artifacts.cross.id}`,
+    )
+    assert.ok(crossResult)
+    assert.equal(
+      crossResult.document.projectId,
+      crossProjectId,
+    )
+    assert.ok(
+      workspaceCrossPayload.data.results.every(
+        (result) => result.eligibleForReuse,
+      ),
+    )
+    assert.ok(
+      workspaceCrossPayload.data.results.every(
+        (result) =>
+          result.document.identityKey !==
+          `artifact:${artifacts.blocked.id}`,
+      ),
+    )
 
     const blockedQuery = {
       text: 'material bloqueado',

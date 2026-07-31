@@ -1,6 +1,7 @@
 import type {
   CatalogedSemanticSearchDocument,
   HybridSearchFilters,
+  HybridSearchScope,
   SemanticSearchObservationInput,
 } from '../domain/hybrid-search.ts'
 import { DomainError } from '../domain/errors.ts'
@@ -32,6 +33,7 @@ const PRODUCER_FIELDS = new Set([
   'confidence',
 ])
 const QUERY_FIELDS = new Set([
+  'scope',
   'text',
   'intention',
   'rightsUse',
@@ -41,6 +43,7 @@ const QUERY_FIELDS = new Set([
   'explain',
 ])
 const EVALUATION_QUERY_FIELDS = new Set([
+  'scope',
   'text',
   'intention',
   'rightsUse',
@@ -370,6 +373,14 @@ export function parseHybridSearchQueryBody(
     field,
   )
   return {
+    ...(body.scope !== undefined
+      ? {
+          scope: optionalString(
+            body.scope,
+            `${field}.scope`,
+          ) as HybridSearchScope,
+        }
+      : {}),
     ...(body.text !== undefined
       ? { text: optionalString(body.text, `${field}.text`) }
       : {}),
