@@ -472,7 +472,7 @@ export function renderExportCell(cells: ExportCell[], id: string, success: boole
 }
 
 export const SDR_COLOR_FIXTURES = [
-  { source: 'rec709-camera-a', expected: 'no-clipping' },
-  { source: 'log-camera-b', expected: 'technical-before-creative' },
-  { source: 'phone-hlg', expected: 'output-sdr-within-range' },
+  { source: 'rec709-camera-a', generator: 'testsrc2', expected: 'distinct-output-with-rec709-metadata' },
+  { source: 'rec709-camera-b', generator: 'smptebars', expected: 'distinct-output-with-rec709-metadata' },
+  { source: 'rec709-clipping-ramp', generator: 'limited-range-gradient', expected: 'at-least-40-preserved-levels' },
 ];

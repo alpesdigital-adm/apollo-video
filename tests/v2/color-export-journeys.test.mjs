@@ -82,6 +82,10 @@ test('T-FR-180 compiles the color pipeline in fixed order without duplicate tran
   assert.equal(output.outputMetadata.transfer, 'bt709');
   assert.match(output.pipelineHash, /^[a-f0-9]{64}$/);
   assert.equal(SDR_COLOR_FIXTURES.length, 3);
+  assert.deepEqual(
+    SDR_COLOR_FIXTURES.map((fixture) => fixture.source),
+    ['rec709-camera-a', 'rec709-camera-b', 'rec709-clipping-ramp'],
+  );
 });
 
 test('T-FR-182 applies deterministic local overrides without changing sibling segments', () => {
