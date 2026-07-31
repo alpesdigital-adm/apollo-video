@@ -140,6 +140,8 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2ColorPipelineCompilation.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2WorkspaceLut.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2WorkspaceLutVersion.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2ProjectMediaAsset.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
@@ -637,6 +639,10 @@ test('authenticated public API manages projects, clients and artifact inspection
       ],
       'apollo.projects.color-pipeline-compilations.read',
     )
+    assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts'].post['x-apollo-capability-id'], 'apollo.workspace-luts.import')
+    assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts'].get['x-apollo-capability-id'], 'apollo.workspace-luts.list')
+    assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts/{lutId}'].get['x-apollo-capability-id'], 'apollo.workspace-luts.read')
+    assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts/{lutId}/versions/{version}/preview'].get['x-apollo-capability-id'], 'apollo.workspace-luts.preview.read')
     assert.equal(
       openApi.paths['/v1/artifacts/{artifactId}/lineage-diagnostics/{manifestId}'].get[
         'x-apollo-capability-id'
@@ -1083,6 +1089,10 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.projects.commands.apply',
         'apollo.projects.proxy-renders.enqueue',
         'apollo.projects.final-exports.enqueue',
+        'apollo.workspace-luts.import',
+        'apollo.workspace-luts.list',
+        'apollo.workspace-luts.read',
+        'apollo.workspace-luts.preview.read',
         'apollo.clients.list',
         'apollo.clients.create',
         'apollo.clients.credentials.rotate',
@@ -1093,6 +1103,39 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.governance.usage-audit.list',
       ],
     )
+
+    const lutCube = 'TITLE "Coração 🎞️"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n0 0 1\n0 1 0\n0 1 1\n1 0 0\n1 0 1\n1 1 0\n1 1 1\n'
+    const lutBody = {
+      lutId: 'public-api-lut-cinema', name: 'Coração 🎞️', owner: 'Apollo E2E',
+      license: { policy: 'owned', name: 'Workspace E2E' }, tags: ['cinema', 'coração'],
+      compatibility: { inputColorSpace: 'rec709', outputColorSpace: 'rec709' }, intensity: 0.75,
+      cubeContent: lutCube,
+    }
+    const importLut = () => fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-import-1' }, body: JSON.stringify(lutBody),
+    })
+    const importedLutResponse = await importLut()
+    const importedLut = await importedLutResponse.json()
+    assert.equal(importedLutResponse.status, 201)
+    assert.equal(importedLut.data.lut.currentVersion.name, 'Coração 🎞️')
+    assert.equal(importedLut.data.lut.currentVersion.cube.size, 2)
+    assert.equal(importedLut.data.replayed, false)
+    assert.equal((await importLut()).status, 201)
+    assert.equal(await client.v2WorkspaceLutVersion.count({ where: { workspaceId, lutId: lutBody.lutId } }), 1)
+    const invalidLutResponse = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-invalid-1' }, body: JSON.stringify({ ...lutBody, lutId: 'public-api-lut-invalid', cubeContent: 'LUT_3D_SIZE 33' }),
+    })
+    assert.equal(invalidLutResponse.status, 400)
+    const lutListResponse = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts?status=active`, { headers: { authorization } })
+    assert.equal(lutListResponse.status, 200)
+    assert.equal((await lutListResponse.json()).data.items.length, 1)
+    const lutReadResponse = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}`, { headers: { authorization } })
+    assert.equal(lutReadResponse.status, 200)
+    const lutPreviewResponse = await fetch(`${baseUrl}${importedLut.data.lut.currentVersion.preview.path}`, { headers: { authorization } })
+    assert.equal(lutPreviewResponse.status, 200)
+    assert.equal(lutPreviewResponse.headers.get('content-type'), 'image/png')
+    assert.deepEqual([...new Uint8Array(await lutPreviewResponse.arrayBuffer()).slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+    assert.equal((await fetch(`${baseUrl}/v1/workspaces/${otherWorkspaceId}/luts`, { headers: { authorization } })).status, 404)
 
     const webhookEndpointListResponse = await fetch(
       `${baseUrl}/v1/webhooks/endpoints?status=active`,

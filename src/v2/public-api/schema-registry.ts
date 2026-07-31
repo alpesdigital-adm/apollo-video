@@ -19,6 +19,26 @@ export interface PublicSchemaDefinition {
 const idSchema = { type: 'string', minLength: 3, maxLength: 128 }
 const dateTimeSchema = { type: 'string', format: 'date-time' }
 const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
+const workspaceLutSchema = {
+  type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'status', 'currentVersion'],
+  properties: {
+    id: idSchema, workspaceId: idSchema, status: { enum: ['active', 'inactive'] },
+    currentVersion: {
+      type: 'object', additionalProperties: false,
+      required: ['id', 'version', 'name', 'owner', 'license', 'tags', 'compatibility', 'intensity', 'cube', 'preview', 'createdByClientId', 'createdAt', 'recordHash'],
+      properties: {
+        id: idSchema, version: { type: 'integer', minimum: 1 }, name: { type: 'string', minLength: 1, maxLength: 160 }, owner: { type: 'string', minLength: 1, maxLength: 240 },
+        license: { type: 'object', additionalProperties: false, required: ['policy', 'name'], properties: { policy: { enum: ['owned', 'licensed', 'restricted'] }, name: { type: 'string', minLength: 1, maxLength: 240 }, usageNotes: { type: 'string', minLength: 1, maxLength: 2000 } } },
+        tags: { type: 'array', maxItems: 20, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 48 } },
+        compatibility: { type: 'object', additionalProperties: false, required: ['inputColorSpace', 'outputColorSpace'], properties: { inputColorSpace: { enum: ['rec709', 'display-p3', 'rec2020'] }, outputColorSpace: { enum: ['rec709', 'display-p3', 'rec2020'] } } },
+        intensity: { type: 'object', additionalProperties: false, required: ['default', 'min', 'max'], properties: { default: { type: 'number', minimum: 0, maximum: 1 }, min: { const: 0 }, max: { const: 1 } } },
+        cube: { type: 'object', additionalProperties: false, required: ['size', 'domainMin', 'domainMax', 'rows', 'contentHash'], properties: { title: { type: 'string', minLength: 1, maxLength: 240 }, size: { type: 'integer', minimum: 2, maximum: 65 }, domainMin: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, domainMax: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, rows: { type: 'integer', minimum: 8 }, contentHash: sha256Schema } },
+        preview: { type: 'object', additionalProperties: false, required: ['mediaType', 'width', 'height', 'byteSize', 'sha256', 'path'], properties: { mediaType: { const: 'image/png' }, width: { const: 512 }, height: { const: 288 }, byteSize: { type: 'integer', minimum: 1 }, sha256: sha256Schema, path: { type: 'string', pattern: '^/v1/workspaces/[^/]+/luts/[^/]+/versions/[1-9][0-9]*/preview$' } } },
+        createdByClientId: idSchema, createdAt: dateTimeSchema, recordHash: sha256Schema,
+      },
+    },
+  },
+} as const
 const mvpCoreCheckCodes = Object.values(MVP_CORE_CRITERION_CHECKS).flat()
 const mvpCoreEvidenceReferenceSchema = {
   type: 'object',
@@ -16660,6 +16680,21 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV3, replayed: { type: 'boolean' } },
     }),
   ),
+  defineSchema('workspace-lut-import-request', 1, 'Import and validate one immutable workspace .cube LUT', {
+    type: 'object', additionalProperties: false,
+    required: ['lutId', 'name', 'owner', 'license', 'compatibility', 'cubeContent'],
+    properties: {
+      lutId: idSchema, name: { type: 'string', minLength: 1, maxLength: 160 }, owner: { type: 'string', minLength: 1, maxLength: 240 },
+      license: { type: 'object', additionalProperties: false, required: ['policy', 'name'], properties: { policy: { enum: ['owned', 'licensed', 'restricted'] }, name: { type: 'string', minLength: 1, maxLength: 240 }, usageNotes: { type: 'string', minLength: 1, maxLength: 2000 } } },
+      tags: { type: 'array', maxItems: 20, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 48 } },
+      compatibility: { type: 'object', additionalProperties: false, required: ['inputColorSpace', 'outputColorSpace'], properties: { inputColorSpace: { enum: ['rec709', 'display-p3', 'rec2020'] }, outputColorSpace: { enum: ['rec709', 'display-p3', 'rec2020'] } } },
+      intensity: { type: 'number', minimum: 0, maximum: 1, default: 1 },
+      cubeContent: { type: 'string', minLength: 1, maxLength: 8388608 },
+    },
+  }),
+  defineSchema('workspace-lut-imported', 1, 'Imported immutable workspace LUT', successSchema({ type: 'object', additionalProperties: false, required: ['lut', 'replayed'], properties: { lut: workspaceLutSchema, replayed: { type: 'boolean' } } })),
+  defineSchema('workspace-lut-response', 1, 'Current immutable workspace LUT', successSchema({ type: 'object', additionalProperties: false, required: ['lut'], properties: { lut: workspaceLutSchema } })),
+  defineSchema('workspace-lut-list', 1, 'Current workspace LUT library', successSchema({ type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', maxItems: 100, items: workspaceLutSchema } } })),
   defineSchema('project-final-export-request', 1, 'Approve and export the current project version', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId', 'projectVersionHash', 'format', 'approval'],

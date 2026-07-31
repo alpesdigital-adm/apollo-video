@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -14,6 +15,7 @@ import {
   buildFfmpegColorPipelineFilter,
   FfmpegColorPipelineProcessor,
 } from '../../src/v2/infrastructure/media/ffmpeg-color-pipeline-processor.ts'
+import { FfmpegLutPreviewGenerator } from '../../src/v2/infrastructure/media/ffmpeg-lut-preview-generator.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpeg = require('ffmpeg-static')
@@ -122,4 +124,14 @@ test('T-FR-180 applies technical, match, creative and output stages to real SDR 
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('T-FR-181 generates a real immutable PNG preview from a valid unicode .cube', async () => {
+  const cube = `TITLE "Coração 🎞️"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n0 0 1\n0 1 0\n0 1 1\n1 0 0\n1 0 1\n1 1 0\n1 1 1\n`
+  const preview = await new FfmpegLutPreviewGenerator({ ffmpegPath: ffmpeg }).generate({ canonicalCube: cube })
+  assert.equal(preview.width, 512)
+  assert.equal(preview.height, 288)
+  assert.ok(preview.png.byteLength > 1000)
+  assert.deepEqual([...preview.png.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+  assert.equal(createHash('sha256').update(preview.png).digest('hex'), preview.sha256)
 })

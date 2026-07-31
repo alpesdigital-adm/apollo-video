@@ -235,6 +235,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Compiles one immutable metadata-only pipeline from a trusted project source probe; it changes no media bytes and starts no provider or render work.',
     },
+    'apollo.workspace-luts.import': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Imports one size-bounded .cube into an immutable workspace-scoped version, generates one deterministic local preview and performs no provider or project mutation.',
+    },
     'apollo.projects.proof-integrity-runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Evaluates existing ProofNeed, recipe, evidence and current authorization hashes, persists an immutable fail-closed decision and starts no provider, render or media materialization work.',

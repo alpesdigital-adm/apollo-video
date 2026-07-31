@@ -76,6 +76,8 @@ model V2Workspace {
   retrievalScaleEvaluations       V2RetrievalScaleEvaluation[]
   mediaColorProbes                V2MediaColorProbe[]
   colorPipelineCompilations       V2ColorPipelineCompilation[]
+  workspaceLuts                   V2WorkspaceLut[]
+  workspaceLutVersions            V2WorkspaceLutVersion[]
   semanticReuseRuns               V2SemanticReuseRun[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks    V2HierarchicalProcessingChunk[]
@@ -169,6 +171,7 @@ model V2ApiClient {
   contiguousEvaluationRuns        V2ContiguousEvaluationRun[]
   contiguousExtractions            V2ContiguousExtraction[]
   colorPipelineCompilations         V2ColorPipelineCompilation[]
+  workspaceLutVersions              V2WorkspaceLutVersion[]
   productionBatches               V2ProductionBatch[]              @relation("ProductionBatchCreator")
   productionBatchActions          V2ProductionBatchAction[]        @relation("ProductionBatchActionActor")
   scriptAlignmentRuns             V2ScriptAlignmentRun[]           @relation("ScriptAlignmentRunCreator")
@@ -957,6 +960,64 @@ model V2ColorPipelineCompilation {
   @@index([workspaceId, sourceArtifactId, sourceManifestId])
   @@index([workspaceId, colorProbeId])
   @@map("color_pipeline_compilations")
+}
+
+model V2WorkspaceLut {
+  id               String   @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  status           String   @default("active") @db.VarChar(16)
+  currentVersionId String?  @db.VarChar(128)
+  createdAt        DateTime @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions  V2WorkspaceLutVersion[]
+
+  @@id([id, workspaceId])
+  @@index([workspaceId, status, updatedAt(sort: Desc)])
+  @@map("workspace_luts")
+}
+
+model V2WorkspaceLutVersion {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  lutId                String   @db.VarChar(128)
+  version              Int
+  schemaVersion        String   @db.VarChar(64)
+  name                 String   @db.VarChar(160)
+  owner                String   @db.VarChar(240)
+  licensePolicy        String   @db.VarChar(32)
+  licenseName          String   @db.VarChar(240)
+  licenseUsageNotes    String?  @db.Text
+  tagsJson             String   @db.Text
+  inputColorSpace      String   @db.VarChar(32)
+  outputColorSpace     String   @db.VarChar(32)
+  intensityDefault     Float
+  cubeSize             Int
+  cubeDomainMinJson    String   @db.Text
+  cubeDomainMaxJson    String   @db.Text
+  cubeContent          String   @db.Text
+  cubeContentHash      String   @db.Char(64)
+  previewPng           Bytes
+  previewSha256        String   @db.Char(64)
+  previewByteSize      Int
+  recordHash           String   @db.Char(64)
+  requestFingerprint   String   @db.Char(64)
+  idempotencyKey       String   @db.VarChar(128)
+  createdByClientId    String   @db.VarChar(80)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lut       V2WorkspaceLut @relation(fields: [lutId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy V2ApiClient    @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, lutId, version])
+  @@unique([workspaceId, recordHash])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, lutId, createdAt(sort: Desc)])
+  @@index([workspaceId, cubeContentHash])
+  @@map("workspace_lut_versions")
 }
 
 model V2MediaArtifactLineage {

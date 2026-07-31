@@ -50,6 +50,7 @@ import type { EvidenceSegmentRepository } from '../application/ports/evidence-se
 import type { LongFormIndexRepository } from '../application/ports/long-form-index-repository.ts'
 import type { ContiguousExtractionRepository } from '../application/ports/contiguous-extraction-repository.ts'
 import type { ColorPipelineCompilationRepository } from '../application/ports/color-pipeline-compilation-repository.ts'
+import type { WorkspaceLutRepository } from '../application/ports/workspace-lut-repository.ts'
 import type { ContiguousEvidenceRepository } from '../application/ports/contiguous-evidence-repository.ts'
 import type { ContiguousEvaluationRepository } from '../application/ports/contiguous-evaluation-provider.ts'
 import type { LongFormIndexWorkflowRepository } from '../application/ports/long-form-index-workflow-repository.ts'
@@ -142,6 +143,7 @@ import { PrismaEvidenceSegmentRepository } from './prisma/evidence-segment-repos
 import { PrismaLongFormIndexRepository } from './prisma/long-form-index-repository.ts'
 import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
 import { PrismaColorPipelineCompilationRepository } from './prisma/color-pipeline-compilation-repository.ts'
+import { PrismaWorkspaceLutRepository } from './prisma/workspace-lut-repository.ts'
 import { PrismaContiguousEvidenceRepository } from './prisma/contiguous-evidence-repository.ts'
 import { PrismaContiguousEvaluationRepository } from './prisma/contiguous-evaluation-repository.ts'
 import {
@@ -296,6 +298,10 @@ ContiguousExtractionRepository {
 export function createColorPipelineCompilationRepository():
 ColorPipelineCompilationRepository {
   return new PrismaColorPipelineCompilationRepository(resolveV2Client())
+}
+
+export function createWorkspaceLutRepository(): WorkspaceLutRepository {
+  return new PrismaWorkspaceLutRepository(resolveV2Client())
 }
 
 export function createContiguousEvidenceRepository():

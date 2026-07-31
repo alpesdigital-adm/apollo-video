@@ -180,7 +180,7 @@ test('T-FR-181 parses valid unicode LUT, rejects malformed LUT and supports expl
   const lut = parseCube({ id: 'cinema', name: 'Coração 🎞️', owner: 'workspace', license: 'owned', cube: identityCube });
   assert.equal(lut.active, true);
   assert.equal(selectWorkspaceLut({ projectChoice: 'none', workspaceDefault: 'cinema', library: [lut] }), undefined);
-  assert.throws(() => parseCube({ id: 'bad', name: 'bad', owner: 'w', license: 'x', cube: 'LUT_3D_SIZE 33' }), /invalid-cube/);
+  assert.throws(() => parseCube({ id: 'bad', name: 'bad', owner: 'w', license: 'x', cube: 'LUT_3D_SIZE 33' }), /row count/);
 });
 
 test('T-FR-235 creates deterministic five-format matrix with independent partial retry', () => {

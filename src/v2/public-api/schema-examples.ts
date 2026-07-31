@@ -11,6 +11,19 @@ const workspaceId = 'workspace-example-1'
 const clientId = 'client-example-1'
 const credentialId = 'credential-example-1'
 const artifactId = 'artifact-example-1'
+const workspaceLutCubeExample = 'TITLE "Coração 🎞️"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n0 0 1\n0 1 0\n0 1 1\n1 0 0\n1 0 1\n1 1 0\n1 1 1\n'
+const workspaceLutExample = {
+  id: 'lut-cinema-example', workspaceId, status: 'active',
+  currentVersion: {
+    id: 'lut-version-example-1', version: 1, name: 'Coração 🎞️', owner: 'Apollo Studio',
+    license: { policy: 'owned', name: 'Propriedade do workspace' }, tags: ['cinema', 'coração'],
+    compatibility: { inputColorSpace: 'rec709', outputColorSpace: 'rec709' },
+    intensity: { default: 0.75, min: 0, max: 1 },
+    cube: { title: 'Coração 🎞️', size: 2, domainMin: [0, 0, 0], domainMax: [1, 1, 1], rows: 8, contentHash: '8'.repeat(64) },
+    preview: { mediaType: 'image/png', width: 512, height: 288, byteSize: 2048, sha256: '9'.repeat(64), path: `/v1/workspaces/${workspaceId}/luts/lut-cinema-example/versions/1/preview` },
+    createdByClientId: clientId, createdAt, recordHash: 'a'.repeat(64),
+  },
+}
 const colorSourceMetadataExample = {
   colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709',
   matrix: 'bt709', range: 'limited', bitDepth: 10,
@@ -7674,6 +7687,15 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/workspace-lut-import-request/v1': [{
+      lutId: 'lut-cinema-example', name: 'Coração 🎞️', owner: 'Apollo Studio',
+      license: { policy: 'owned', name: 'Propriedade do workspace' }, tags: ['cinema', 'coração'],
+      compatibility: { inputColorSpace: 'rec709', outputColorSpace: 'rec709' }, intensity: 0.75,
+      cubeContent: workspaceLutCubeExample,
+    }],
+    'apollo://schemas/workspace-lut-imported/v1': [{ data: { lut: workspaceLutExample, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/workspace-lut-response/v1': [{ data: { lut: workspaceLutExample }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/workspace-lut-list/v1': [{ data: { items: [workspaceLutExample] }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
         data: { review: proxyReviewExample },

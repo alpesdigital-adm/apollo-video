@@ -1,5 +1,6 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
+import { parseCube3d } from './workspace-lut.ts'
 
 export const OUTPUT_FORMATS = ['9:16', '16:9', '4:5', '1:1', '21:9'] as const;
 export type OutputFormat = typeof OUTPUT_FORMATS[number];
@@ -439,18 +440,15 @@ export function resolveColorPlan(
   })
 }
 
-export type LutRecord = { id: string; name: string; owner: string; license: string; tags: string[]; version: number; active: boolean; cube: string };
+export type LutRecord = { id: string; name: string; owner: string; license: string; tags: string[]; version: number; active: boolean; cube: string }
 export function parseCube(input: { id: string; name: string; owner: string; license: string; tags?: string[]; cube: string }): LutRecord {
-  const size = Number(input.cube.match(/LUT_3D_SIZE\s+(\d+)/)?.[1]);
-  const rows = input.cube.split(/\r?\n/).filter(line => /^\s*-?\d/.test(line));
-  if (!Number.isInteger(size) || size < 2 || rows.length !== size ** 3 || rows.some(row => row.trim().split(/\s+/).length !== 3)) throw new Error('invalid-cube');
-  return { ...input, name: input.name.normalize('NFC'), tags: input.tags ?? [], version: 1, active: true };
+  const parsed = parseCube3d(input.cube)
+  return { id: input.id, name: input.name.normalize('NFC'), owner: input.owner, license: input.license, tags: input.tags ?? [], version: 1, active: true, cube: parsed.canonicalContent }
 }
-
 export function selectWorkspaceLut(input: { projectChoice?: string | 'none'; workspaceDefault?: string; library: LutRecord[] }) {
-  if (input.projectChoice === 'none') return undefined;
-  const id = input.projectChoice ?? input.workspaceDefault;
-  return input.library.find(item => item.id === id && item.active);
+  if (input.projectChoice === 'none') return undefined
+  const id = input.projectChoice ?? input.workspaceDefault
+  return input.library.find((item) => item.id === id && item.active)
 }
 
 export type ExportCell = { id: string; recipeId: string; format: OutputFormat; locale: string; status: 'queued' | 'rendering' | 'ready' | 'failed'; artifact?: string; attempts: number };

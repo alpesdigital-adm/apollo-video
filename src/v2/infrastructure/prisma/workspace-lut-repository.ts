@@ -1,0 +1,130 @@
+import { createHash } from 'node:crypto'
+import { Prisma, type PrismaClient, type V2WorkspaceLut, type V2WorkspaceLutVersion } from '../../../../generated/prisma-v2/index.js'
+
+import type { PersistedWorkspaceLutImport, WorkspaceLutRecord, WorkspaceLutRepository } from '../../application/ports/workspace-lut-repository.ts'
+import { stableSerialize } from '../../domain/canonical-hash.ts'
+import { DomainError } from '../../domain/errors.ts'
+import { createWorkspaceLutVersion, type LutColorSpace, type LutLicensePolicy } from '../../domain/workspace-lut.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+
+function json<T>(value: string, field: string): T {
+  try {
+    const parsed = JSON.parse(value) as T
+    if (stableSerialize(parsed) !== value) throw new Error('non-canonical')
+    return parsed
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
+  }
+}
+
+function hydrateVersion(row: V2WorkspaceLutVersion) {
+  const preview = Buffer.from(row.previewPng)
+  if (preview.length !== row.previewByteSize || createHash('sha256').update(preview).digest('hex') !== row.previewSha256) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored LUT preview failed integrity validation')
+  }
+  const value = createWorkspaceLutVersion({
+    id: row.id, workspaceId: row.workspaceId, lutId: row.lutId, version: row.version,
+    name: row.name, owner: row.owner,
+    license: { policy: row.licensePolicy as LutLicensePolicy, name: row.licenseName, ...(row.licenseUsageNotes ? { usageNotes: row.licenseUsageNotes } : {}) },
+    tags: json<readonly string[]>(row.tagsJson, 'LUT tags'),
+    compatibility: { inputColorSpace: row.inputColorSpace as LutColorSpace, outputColorSpace: row.outputColorSpace as LutColorSpace },
+    intensity: row.intensityDefault, cubeContent: row.cubeContent,
+    preview: { byteSize: row.previewByteSize, sha256: row.previewSha256 },
+    createdByClientId: row.createdByClientId, createdAt: row.createdAt.toISOString(),
+  })
+  if (row.schemaVersion !== value.schemaVersion || row.cubeSize !== value.cube.size ||
+    row.cubeContentHash !== value.cube.contentHash || row.recordHash !== value.recordHash ||
+    stableSerialize(value.cube.domainMin) !== row.cubeDomainMinJson || stableSerialize(value.cube.domainMax) !== row.cubeDomainMaxJson) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored LUT version failed integrity validation')
+  }
+  return value
+}
+
+function record(head: V2WorkspaceLut, version: V2WorkspaceLutVersion): Readonly<WorkspaceLutRecord> {
+  if (!head.currentVersionId || head.currentVersionId !== version.id || head.id !== version.lutId || head.workspaceId !== version.workspaceId || !['active', 'inactive'].includes(head.status)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored LUT head is invalid')
+  }
+  return Object.freeze({ lutId: head.id, workspaceId: head.workspaceId, status: head.status as 'active' | 'inactive', currentVersion: hydrateVersion(version) })
+}
+
+export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
+  private readonly client: PrismaClient
+  constructor(client: PrismaClient = getV2PostgresClient()) { this.client = client }
+
+  async findIdempotent(input: { workspaceId: string; createdByClientId: string; idempotencyKey: string }) {
+    const version = await this.client.v2WorkspaceLutVersion.findUnique({
+      where: { workspaceId_createdByClientId_idempotencyKey: input },
+    })
+    if (!version) return null
+    const head = await this.client.v2WorkspaceLut.findUnique({ where: { id_workspaceId: { id: version.lutId, workspaceId: input.workspaceId } } })
+    if (!head) throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotent LUT head disappeared')
+    return Object.freeze({ record: record(head, version), idempotencyKey: version.idempotencyKey, requestFingerprint: version.requestFingerprint })
+  }
+
+  async import(
+    input: { value: Readonly<PersistedWorkspaceLutImport>; previewPng: Uint8Array },
+    serializationAttempt = 1,
+  ): Promise<Readonly<{ value: Readonly<PersistedWorkspaceLutImport>; replayed: boolean }>> {
+    const item = input.value.record.currentVersion
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const [workspace, client, existingHead] = await Promise.all([
+          transaction.v2Workspace.findFirst({ where: { id: item.workspaceId, status: 'active' }, select: { id: true } }),
+          transaction.v2ApiClient.findFirst({ where: { id: item.createdByClientId, workspaceId: item.workspaceId, status: 'active' }, select: { id: true } }),
+          transaction.v2WorkspaceLut.findUnique({ where: { id_workspaceId: { id: item.lutId, workspaceId: item.workspaceId } }, select: { id: true } }),
+        ])
+        if (!workspace || !client) throw new DomainError('WORKSPACE_NOT_FOUND', 'Active workspace and API client are required')
+        if (existingHead) throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace LUT already exists; create a new immutable version instead')
+        const head = await transaction.v2WorkspaceLut.create({ data: { id: item.lutId, workspaceId: item.workspaceId, status: 'active', createdAt: new Date(item.createdAt), updatedAt: new Date(item.createdAt) } })
+        const version = await transaction.v2WorkspaceLutVersion.create({ data: {
+          id: item.id, workspaceId: item.workspaceId, lutId: item.lutId, version: item.version,
+          schemaVersion: item.schemaVersion, name: item.name, owner: item.owner,
+          licensePolicy: item.license.policy, licenseName: item.license.name, licenseUsageNotes: item.license.usageNotes,
+          tagsJson: stableSerialize(item.tags), inputColorSpace: item.compatibility.inputColorSpace,
+          outputColorSpace: item.compatibility.outputColorSpace, intensityDefault: item.intensity.default,
+          cubeSize: item.cube.size, cubeDomainMinJson: stableSerialize(item.cube.domainMin), cubeDomainMaxJson: stableSerialize(item.cube.domainMax),
+          cubeContent: item.cube.canonicalContent, cubeContentHash: item.cube.contentHash,
+          previewPng: Buffer.from(input.previewPng), previewSha256: item.preview.sha256, previewByteSize: item.preview.byteSize,
+          recordHash: item.recordHash, requestFingerprint: input.value.requestFingerprint, idempotencyKey: input.value.idempotencyKey,
+          createdByClientId: item.createdByClientId, createdAt: new Date(item.createdAt),
+        } })
+        const updated = await transaction.v2WorkspaceLut.update({ where: { id_workspaceId: { id: item.lutId, workspaceId: item.workspaceId } }, data: { currentVersionId: item.id, updatedAt: new Date(item.createdAt) } })
+        return Object.freeze({ value: Object.freeze({ record: record(updated, version), idempotencyKey: input.value.idempotencyKey, requestFingerprint: input.value.requestFingerprint }), replayed: false })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const replay = await this.findIdempotent({ workspaceId: item.workspaceId, createdByClientId: item.createdByClientId, idempotencyKey: input.value.idempotencyKey })
+        if (replay && replay.requestFingerprint === input.value.requestFingerprint) return Object.freeze({ value: replay, replayed: true })
+        if (replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another LUT import')
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && serializationAttempt < 3) return this.import(input, serializationAttempt + 1)
+      throw error
+    }
+  }
+
+  async read(input: { workspaceId: string; lutId: string }) {
+    const head = await this.client.v2WorkspaceLut.findUnique({ where: { id_workspaceId: { id: input.lutId, workspaceId: input.workspaceId } } })
+    if (!head?.currentVersionId) return null
+    const version = await this.client.v2WorkspaceLutVersion.findFirst({ where: { id: head.currentVersionId, workspaceId: input.workspaceId, lutId: input.lutId } })
+    return version ? record(head, version) : null
+  }
+
+  async list(input: { workspaceId: string; status?: 'active' | 'inactive'; limit: number }) {
+    const heads = await this.client.v2WorkspaceLut.findMany({ where: { workspaceId: input.workspaceId, ...(input.status ? { status: input.status } : {}) }, orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }], take: input.limit })
+    const ids = heads.flatMap((head) => head.currentVersionId ? [head.currentVersionId] : [])
+    const versions = await this.client.v2WorkspaceLutVersion.findMany({ where: { workspaceId: input.workspaceId, id: { in: ids } } })
+    return Object.freeze(heads.map((head) => {
+      const version = versions.find((item) => item.id === head.currentVersionId)
+      if (!version) throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace LUT current version disappeared')
+      return record(head, version)
+    }))
+  }
+
+  async readPreview(input: { workspaceId: string; lutId: string; version: number }) {
+    const row = await this.client.v2WorkspaceLutVersion.findUnique({ where: { workspaceId_lutId_version: input }, select: { previewPng: true, previewSha256: true } })
+    if (!row) return null
+    const png = new Uint8Array(row.previewPng)
+    if (createHash('sha256').update(png).digest('hex') !== row.previewSha256) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored LUT preview failed integrity validation')
+    return Object.freeze({ png, sha256: row.previewSha256 })
+  }
+}
