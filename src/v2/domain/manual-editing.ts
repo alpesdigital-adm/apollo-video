@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { stableSerialize } from './canonical-hash.ts'
 import { assertDomain, DomainError } from './errors.ts'
+import type { CommandImpactV1 } from './command-impact.ts'
 
 export interface ManualInspectorPatch {
   layout?: string
@@ -49,13 +50,14 @@ export interface ManualEditCommand {
 export type ManualVersionAction = 'apply' | 'undo' | 'redo' | 'restore'
 
 export interface PersistedManualEditPayload {
-  schemaVersion: 1
+  schemaVersion: 1 | 2
   action: ManualVersionAction
   expectedRevision: number
   variantId: string
   targetId: string
   operation?: ManualGesture
   restoresVersionId?: string
+  impact?: Readonly<CommandImpactV1>
 }
 
 type MutableRecord = Record<string, unknown>

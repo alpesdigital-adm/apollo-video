@@ -552,6 +552,27 @@ interface DependencyEdge {
 5. Deduplicar jobs por content hash.
 6. Estimar custo e apresentar quando necessário.
 
+### 23.4 Contrato persistido de impacto
+
+Cada handler integrado deve persistir com o próprio `Command` um
+`command-impact/v1` content-addressed. O contrato liga `commandId`, versão-base
+e versão-resultado e declara, sem paths de storage:
+
+- tipos de mudança e dependência (`content`, `timing`, `visual`, `audio`,
+  `policy`, `rights`);
+- ranges frame-first afetados;
+- variants/formats afetados;
+- artifacts proxy/final concluídos da versão-base que ficam stale;
+- render proxy mínimo esperado, separado do enqueue efetivo.
+
+O conjunto de outputs deve ser relido dentro da mesma transação serializável
+que grava `V2EditCommand` e `ProjectVersion`; drift aborta o commit. Artifacts
+históricos continuam imutáveis e disponíveis para leitura da versão antiga:
+"stale" é relação com a nova versão, não corrupção nem remoção dos bytes.
+O primeiro adapter integrado cobre `manual-edit`; expandir o mesmo contrato
+para Commands editoriais, Diretor, batch e transcript é obrigatório antes de
+considerar FR-233 concluído.
+
 ## 24. Matriz de invalidação
 
 | Command | Invalida | Não invalida |

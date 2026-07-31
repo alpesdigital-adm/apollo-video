@@ -213,7 +213,16 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(split.version.sequence, 2)
     assert.deepEqual(split.timeline.clips.map((clip) => clip.id), ['clip-1:a', 'clip-1:b', 'clip-2'])
     assert.equal(split.timeline.clips[0].endMs, 1500)
-    assert.equal((await client.v2EditCommand.findUnique({ where: { id: split.command.id } })).type, 'manual-edit')
+    const splitStoredCommand = await client.v2EditCommand.findUnique({ where: { id: split.command.id } })
+    assert.equal(splitStoredCommand.type, 'manual-edit')
+    const splitPayload = JSON.parse(splitStoredCommand.payloadJson)
+    assert.equal(splitPayload.schemaVersion, 2)
+    assert.equal(splitPayload.impact.schemaVersion, 'command-impact/v1')
+    assert.equal(splitPayload.impact.commandId, split.command.id)
+    assert.equal(splitPayload.impact.baseVersionId, initialVersionId)
+    assert.equal(splitPayload.impact.resultVersionId, split.version.id)
+    assert.deepEqual(splitPayload.impact.affectedRanges, [{ startFrame: 0, endFrame: 90 }])
+    assert.equal(splitPayload.impact.impactHash.length, 64)
 
     await assert.rejects(() => execute({
       baseVersionId: initialVersionId,
@@ -332,6 +341,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(apiResponse.status, 201, `${JSON.stringify(publicApplied)}\n${serverLogs.slice(-4_000)}`)
     assert.equal(publicApplied.data.version.sequence, 6)
     assert.equal(publicApplied.data.operation.status, 'queued')
+    assert.equal(publicApplied.data.command.payload.schemaVersion, 2)
+    assert.equal(publicApplied.data.command.payload.impact.schemaVersion, 'command-impact/v1')
     assert.equal(publicApplied.data.timeline.clips.find((clip) => clip.id === 'clip-2').sourceId, sourceB)
 
     const executablePath = [

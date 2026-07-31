@@ -6,6 +6,10 @@ import type {
 import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
+import type {
+  CommandImpactOutputReference,
+  CommandImpactV1,
+} from '../../domain/command-impact.ts'
 
 export interface ManualEditVersionRecord {
   version: Readonly<ProjectVersion>
@@ -15,6 +19,8 @@ export interface ManualEditVersionRecord {
 
 export interface ManualEditContext extends ManualEditVersionRecord {
   availableAssetIds: readonly string[]
+  renderVariantIds: readonly string[]
+  outputReferences: readonly Readonly<CommandImpactOutputReference>[]
   targetVersion?: Readonly<ManualEditVersionRecord>
   history: readonly Readonly<{
     id: string
@@ -42,6 +48,7 @@ export interface ManualEditResult {
     targetId: string
   }>
   replayed: boolean
+  impact?: Readonly<CommandImpactV1>
 }
 
 export interface ManualEditCommit {
@@ -51,6 +58,7 @@ export interface ManualEditCommit {
   version: Readonly<ProjectVersion>
   event: Readonly<PublicEvent>
   comparison: ManualEditResult['comparison']
+  impact: Readonly<CommandImpactV1>
 }
 
 export interface ManualEditRepository {

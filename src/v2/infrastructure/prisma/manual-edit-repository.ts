@@ -19,6 +19,10 @@ import {
 } from '../../domain/manual-editing.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import {
+  normalizeCommandImpactOutputReferences,
+  parseCommandImpact,
+} from '../../domain/command-impact.ts'
 
 type VersionWithPlan = Prisma.V2ProjectVersionGetPayload<{
   include: { editPlanSnapshot: true }
@@ -85,7 +89,7 @@ function hydrateStoredCommand(
     'manual command payload',
   ) as unknown as PersistedManualEditPayload
   if (
-    payload.schemaVersion !== 1 ||
+    ![1, 2].includes(payload.schemaVersion) ||
     !['apply', 'undo', 'redo', 'restore'].includes(payload.action) ||
     !Number.isInteger(payload.expectedRevision)
   ) {
@@ -111,6 +115,15 @@ function hydrateStoredCommand(
   })
   const resultVersion = hydrateVersion(row.resultVersion)
   const editPlanHash = resultVersion.editPlanHash
+  const impact = payload.impact ? parseCommandImpact(payload.impact) : undefined
+  if (
+    impact &&
+    (impact.commandId !== row.id ||
+      impact.baseVersionId !== row.baseVersionId ||
+      impact.resultVersionId !== resultVersion.version.id)
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Command impact identity is inconsistent')
+  }
   return Object.freeze({
     command,
     version: resultVersion.version,
@@ -130,6 +143,7 @@ function hydrateStoredCommand(
       targetId: payload.targetId,
     }),
     replayed,
+    ...(impact ? { impact } : {}),
   })
 }
 
@@ -194,6 +208,26 @@ export class PrismaManualEditRepository implements ManualEditRepository {
     })
     if (!project?.currentVersion) return null
     const current = hydrateVersion(project.currentVersion)
+    const [proxyOutputs, finalOutputs] = await Promise.all([
+      this.client.v2ProjectProxyRenderOperation.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          projectVersionId: current.version.id,
+          operation: { status: 'completed' },
+        },
+        select: { outputArtifactId: true },
+      }),
+      this.client.v2ProjectFinalExportOperation.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          projectVersionId: current.version.id,
+          operation: { status: 'completed' },
+        },
+        select: { outputArtifactId: true, outputAspectRatio: true },
+      }),
+    ])
     const targetRow = input.targetVersionId
       ? project.versions.find((version) => version.id === input.targetVersionId)
         ?? await this.client.v2ProjectVersion.findFirst({
@@ -234,6 +268,21 @@ export class PrismaManualEditRepository implements ManualEditRepository {
       availableAssetIds: Object.freeze([
         ...new Set(project.mediaAssets.map((item) => item.artifactId)),
       ]),
+      renderVariantIds: Object.freeze([project.format ?? '9:16']),
+      outputReferences: Object.freeze([
+        ...proxyOutputs.map((output) => Object.freeze({
+          artifactId: output.outputArtifactId,
+          kind: 'proxy' as const,
+          sourceVersionId: current.version.id,
+          variantId: project.format ?? '9:16',
+        })),
+        ...finalOutputs.map((output) => Object.freeze({
+          artifactId: output.outputArtifactId,
+          kind: 'final' as const,
+          sourceVersionId: current.version.id,
+          variantId: output.outputAspectRatio,
+        })),
+      ].toSorted((left, right) => left.artifactId.localeCompare(right.artifactId))),
       ...(targetRow ? { targetVersion: hydrateVersion(targetRow) } : {}),
       history: Object.freeze(history),
     })
@@ -295,6 +344,62 @@ export class PrismaManualEditRepository implements ManualEditRepository {
                   currentRevision: project.currentVersion.sequence,
                 }
               : undefined,
+          )
+        }
+        const persistedImpact = bundle.command.payload.impact
+          ? parseCommandImpact(bundle.command.payload.impact)
+          : null
+        if (!persistedImpact || persistedImpact.impactHash !== bundle.impact.impactHash) {
+          throw new DomainError(
+            'PERSISTENCE_CONFLICT',
+            'Manual command and impact payload are inconsistent',
+          )
+        }
+        const [proxyOutputs, finalOutputs] = await Promise.all([
+          transaction.v2ProjectProxyRenderOperation.findMany({
+            where: {
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              projectVersionId: bundle.command.baseVersionId,
+              operation: { status: 'completed' },
+            },
+            select: { outputArtifactId: true },
+          }),
+          transaction.v2ProjectFinalExportOperation.findMany({
+            where: {
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              projectVersionId: bundle.command.baseVersionId,
+              operation: { status: 'completed' },
+            },
+            select: { outputArtifactId: true, outputAspectRatio: true },
+          }),
+        ])
+        const variantId = bundle.command.payload.variantId
+        const currentAffectedArtifacts = bundle.impact.renderSemanticsChanged
+          ? normalizeCommandImpactOutputReferences([
+              ...(project.format === variantId
+                ? proxyOutputs.map((output) => ({
+                    artifactId: output.outputArtifactId,
+                    kind: 'proxy' as const,
+                    sourceVersionId: bundle.command.baseVersionId,
+                    variantId,
+                  }))
+                : []),
+              ...finalOutputs
+                .filter((output) => output.outputAspectRatio === variantId)
+                .map((output) => ({
+                  artifactId: output.outputArtifactId,
+                  kind: 'final' as const,
+                  sourceVersionId: bundle.command.baseVersionId,
+                  variantId,
+                })),
+            ])
+          : []
+        if (stableSerialize(currentAffectedArtifacts) !== stableSerialize(bundle.impact.affectedArtifacts)) {
+          throw new DomainError(
+            'VERSION_CONFLICT',
+            'Project render outputs changed before Command impact commit',
           )
         }
         await transaction.v2EditCommand.create({

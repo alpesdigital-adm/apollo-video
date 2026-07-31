@@ -20,6 +20,7 @@ import {
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
+import { createManualCommandImpact } from '../domain/command-impact.ts'
 
 function identity(value: string, field: string): string {
   const normalized = value.trim()
@@ -157,6 +158,11 @@ export function applyManualEditService(dependencies: {
       ...(targetVersionId ? { targetVersionId } : {}),
     })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Project or restore target was not found')
+    assertDomain(
+      context.renderVariantIds.includes(variantId),
+      'INVALID_ARGUMENT',
+      'Manual edit variant is not configured for this project',
+    )
     if (
       context.version.id !== baseVersionId ||
       context.version.baseHash !== request.baseHash ||
@@ -212,14 +218,27 @@ export function applyManualEditService(dependencies: {
         })
     const editPlanJson = stableSerialize(editPlan)
     const editPlanHash = calculateVersionHash(editPlan)
+    const impact = createManualCommandImpact({
+      commandId,
+      baseVersionId,
+      resultVersionId: versionId,
+      variantId,
+      targetId,
+      action: request.action,
+      ...(operation ? { operation } : {}),
+      beforeEditPlan: context.editPlan,
+      afterEditPlan: editPlan,
+      outputReferences: context.outputReferences,
+    })
     const payload: Readonly<PersistedManualEditPayload> = Object.freeze({
-      schemaVersion: 1,
+      schemaVersion: 2,
       action: request.action,
       expectedRevision: request.expectedRevision,
       variantId,
       targetId,
       ...(operation ? { operation } : {}),
       ...(targetVersionId ? { restoresVersionId: targetVersionId } : {}),
+      impact,
     })
     const command = createEditCommand<PersistedManualEditPayload>({
       id: commandId,
@@ -302,6 +321,9 @@ export function applyManualEditService(dependencies: {
         commandType: command.type,
         manualAction: request.action,
         targetId,
+        commandImpactHash: impact.impactHash,
+        invalidatedArtifactCount: impact.affectedArtifacts.length,
+        minimalRenderCount: impact.minimalRenders.length,
         restoresVersionId: targetVersionId ?? null,
         snapshotRefs: version.snapshotRefs,
         createdAt,
@@ -314,6 +336,7 @@ export function applyManualEditService(dependencies: {
       version,
       event,
       comparison,
+      impact,
     })
   }
 }

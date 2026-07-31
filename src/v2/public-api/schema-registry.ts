@@ -5221,6 +5221,80 @@ const manualTimelineSchema = {
     },
   },
 }
+const commandImpactSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId',
+    'changeKinds', 'dependencyTypes', 'affectedRanges', 'affectedVariantIds',
+    'affectedArtifacts', 'minimalRenders', 'renderSemanticsChanged', 'impactHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'command-impact/v1' },
+    commandId: idSchema,
+    commandType: { const: 'manual-edit' },
+    baseVersionId: idSchema,
+    resultVersionId: idSchema,
+    changeKinds: {
+      type: 'array', minItems: 1, maxItems: 16, uniqueItems: true,
+      items: { type: 'string', minLength: 1, maxLength: 64 },
+    },
+    dependencyTypes: {
+      type: 'array', maxItems: 6, uniqueItems: true,
+      items: { enum: ['content', 'timing', 'visual', 'audio', 'policy', 'rights'] },
+    },
+    affectedRanges: {
+      type: 'array', minItems: 1, maxItems: 1000,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['startFrame', 'endFrame'],
+        properties: {
+          startFrame: { type: 'integer', minimum: 0 },
+          endFrame: { type: 'integer', minimum: 1 },
+        },
+      },
+    },
+    affectedVariantIds: {
+      type: 'array', maxItems: 100, uniqueItems: true, items: idSchema,
+    },
+    affectedArtifacts: {
+      type: 'array', maxItems: 1000,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['artifactId', 'kind', 'sourceVersionId', 'variantId'],
+        properties: {
+          artifactId: idSchema,
+          kind: { enum: ['proxy', 'final'] },
+          sourceVersionId: idSchema,
+          variantId: idSchema,
+        },
+      },
+    },
+    minimalRenders: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['kind', 'variantId', 'ranges'],
+        properties: {
+          kind: { const: 'proxy' }, variantId: idSchema,
+          ranges: {
+            type: 'array', minItems: 1, maxItems: 1000,
+            items: {
+              type: 'object', additionalProperties: false,
+              required: ['startFrame', 'endFrame'],
+              properties: {
+                startFrame: { type: 'integer', minimum: 0 },
+                endFrame: { type: 'integer', minimum: 1 },
+              },
+            },
+          },
+        },
+      },
+    },
+    renderSemanticsChanged: { type: 'boolean' },
+    impactHash: sha256Schema,
+  },
+}
 const versionComparisonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -16347,6 +16421,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('command-impact', 1, 'Content-addressed dependency impact persisted with a V2 Command', commandImpactSchema),
   defineSchema('apply-project-manual-edit-request', 1, 'Apply, undo, redo or restore a scoped manual edit', {
     type: 'object',
     additionalProperties: false,

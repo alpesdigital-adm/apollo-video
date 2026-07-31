@@ -7583,6 +7583,30 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/command-impact/v1': [{
+      schemaVersion: 'command-impact/v1',
+      commandId: 'manual-edit-command-example-2',
+      commandType: 'manual-edit',
+      baseVersionId: 'project-version-example-5',
+      resultVersionId: 'project-version-example-6',
+      changeKinds: ['inspect:subtitle'],
+      dependencyTypes: ['visual'],
+      affectedRanges: [{ startFrame: 0, endFrame: 150 }],
+      affectedVariantIds: ['output-spec-9x16'],
+      affectedArtifacts: [{
+        artifactId: 'artifact-proxy-example-5',
+        kind: 'proxy',
+        sourceVersionId: 'project-version-example-5',
+        variantId: 'output-spec-9x16',
+      }],
+      minimalRenders: [{
+        kind: 'proxy',
+        variantId: 'output-spec-9x16',
+        ranges: [{ startFrame: 0, endFrame: 150 }],
+      }],
+      renderSemanticsChanged: true,
+      impactHash: '585da7627612690643c46d0aefef96462ed50dbd9c81c0fbcd399a355ef1f550',
+    }],
     'apollo://schemas/project-version-comparison/v1': [
       {
         data: {
