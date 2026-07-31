@@ -10,11 +10,13 @@ import {
   semanticEmbeddingInput,
 } from '../../src/v2/domain/hybrid-search.ts'
 import {
+  evaluateRetrievalScaleService,
   hybridSearchService,
   recordSemanticReuseRunService,
 } from '../../src/v2/application/hybrid-search.ts'
 import {
   parseHybridSearchQueryBody,
+  parseRetrievalScaleEvaluationBody,
   parseSemanticReuseRunBody,
 } from '../../src/v2/public-api/hybrid-search-contract.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
@@ -709,6 +711,209 @@ test('T-FR-136 refuses reuse audit unless decisions partition every eligible res
   )
 })
 
+test('T-FR-136 measures quality and latency across immutable growing-library snapshots', async () => {
+  const item = document()
+  const librarySizes = [10, 100, 1_000]
+  const reports = []
+  let activeDocuments = [item]
+  let persisted
+  const repository = {
+    async countActiveDocuments() {
+      return activeDocuments.length
+    },
+    async searchCandidates(query) {
+      return {
+        candidates: activeDocuments
+          .slice(0, query.candidateLimit)
+          .map((candidate, index) => ({
+            document: candidate,
+            currentRights: context().rights,
+            fullTextScore: index === 0 ? 0.95 : 0,
+            vectorScore: index === 0 ? 0.95 : 0,
+          })),
+        prefilterRejected: [],
+      }
+    },
+    async findIdempotentScaleEvaluation() {
+      return null
+    },
+    async persistScaleEvaluation(evaluation) {
+      persisted = evaluation
+      return { evaluation, replayed: false }
+    },
+  }
+  const search = hybridSearchService({
+    repository,
+    embeddingProvider:
+      new DeterministicSemanticEmbeddingProvider(),
+    clock: () => new Date(createdAt),
+  })
+  const cases = ['intention', 'speech', 'visual'].map((channel) => ({
+    id: `scale-${channel}`,
+    query: {
+      [channel]: channel === 'speech'
+        ? 'resultado campanha'
+        : channel === 'visual'
+          ? 'dashboard evolucao'
+          : 'proof',
+      rightsUse: 'editorial-reuse',
+    },
+    relevantIdentityKeys: [item.identityKey],
+  }))
+  for (const [index, librarySize] of librarySizes.entries()) {
+    activeDocuments = [
+      item,
+      ...Array.from({ length: librarySize - 1 }, (_, distractorIndex) => ({
+        ...item,
+        id: `semantic-document-distractor-${librarySize}-${distractorIndex}`,
+        identityKey:
+          `artifact:artifact-distractor-${librarySize}-${distractorIndex}`,
+        transcriptText: 'conteudo irrelevante',
+        ocrText: '',
+        description: 'material de arquivo sem relacao',
+        intentions: ['archive'],
+        personIds: [],
+        metadata: {},
+      })),
+    ]
+    const monotonic = [0, 2 + index, 10, 15 + index, 20, 29 + index]
+    const result = await evaluateRetrievalScaleService({
+      repository,
+      search,
+      clock: () => new Date(
+        Date.parse(createdAt) + index * 1_000,
+      ),
+      monotonicClock: () => monotonic.shift(),
+      createId: () => `retrieval-scale-evaluation-${librarySize}`,
+    })({
+      workspaceId: 'workspace-semantic',
+      projectId: 'project-semantic',
+      scope: 'workspace',
+      k: 1,
+      cases,
+      actor: { type: 'api-client', id: 'client-semantic' },
+      idempotencyKey: `retrieval-scale-${librarySize}`,
+    })
+    assert.equal(result.evaluation, persisted)
+    reports.push(result.evaluation)
+  }
+  assert.deepEqual(
+    reports.map((report) => report.librarySize),
+    librarySizes,
+  )
+  assert.ok(
+    reports.every((report) =>
+      report.aggregateQuality.precisionAtK === 1 &&
+      report.aggregateQuality.recallAtK === 1 &&
+      report.aggregateQuality.ndcgAtK === 1 &&
+      report.aggregateQuality.reciprocalRank === 1),
+  )
+  assert.deepEqual(reports[0].aggregateLatency, {
+    sampleCount: 3,
+    minMs: 2,
+    p50Ms: 5,
+    p95Ms: 9,
+    maxMs: 9,
+    meanMs: 5,
+  })
+  assert.ok(reports.every((report) =>
+    /^[a-f0-9]{64}$/.test(report.reportHash)))
+})
+
+test('T-FR-136 scale evaluation rejects a library that changes during measurement', async () => {
+  const item = document()
+  let countCall = 0
+  const repository = {
+    async countActiveDocuments() {
+      countCall += 1
+      return countCall === 1 ? 10 : 11
+    },
+    async searchCandidates() {
+      return {
+        candidates: [{
+          document: item,
+          currentRights: context().rights,
+          fullTextScore: 0.95,
+          vectorScore: 0.95,
+        }],
+        prefilterRejected: [],
+      }
+    },
+    async findIdempotentScaleEvaluation() {
+      return null
+    },
+    async persistScaleEvaluation() {
+      assert.fail('changing library must not persist')
+    },
+  }
+  const search = hybridSearchService({
+    repository,
+    embeddingProvider:
+      new DeterministicSemanticEmbeddingProvider(),
+    clock: () => new Date(createdAt),
+  })
+  let tick = 0
+  await assert.rejects(
+    evaluateRetrievalScaleService({
+      repository,
+      search,
+      clock: () => new Date(createdAt),
+      monotonicClock: () => tick++,
+      createId: () => 'retrieval-scale-evaluation-drift',
+    })({
+      workspaceId: 'workspace-semantic',
+      projectId: 'project-semantic',
+      scope: 'project',
+      k: 1,
+      cases: ['a', 'b', 'c'].map((id) => ({
+        id: `scale-case-${id}`,
+        query: {
+          text: 'resultado campanha',
+          rightsUse: 'editorial-reuse',
+        },
+        relevantIdentityKeys: [item.identityKey],
+      })),
+      actor: { type: 'api-client', id: 'client-semantic' },
+      idempotencyKey: 'retrieval-scale-drift',
+    }),
+    /library changed during/,
+  )
+})
+
+test('T-FR-136 scale contract centralizes scope outside fixed queries', () => {
+  const parsed = parseRetrievalScaleEvaluationBody({
+    scope: 'workspace',
+    k: 5,
+    cases: ['a', 'b', 'c'].map((id) => ({
+      id: `scale-case-${id}`,
+      query: {
+        intention: 'proof',
+        rightsUse: 'editorial-reuse',
+      },
+      relevantIdentityKeys: ['artifact:artifact-proof'],
+    })),
+  })
+  assert.equal(parsed.scope, 'workspace')
+  assert.equal(parsed.cases.length, 3)
+  assert.equal(parsed.cases[0].query.scope, undefined)
+  assert.throws(
+    () => parseRetrievalScaleEvaluationBody({
+      scope: 'workspace',
+      k: 5,
+      cases: ['a', 'b', 'c'].map((id) => ({
+        id: `scale-case-${id}`,
+        query: {
+          scope: 'project',
+          intention: 'proof',
+          rightsUse: 'editorial-reuse',
+        },
+        relevantIdentityKeys: ['artifact:artifact-proof'],
+      })),
+    }),
+    /scope must be declared once/,
+  )
+})
+
 test('T-FR-136 refuses reuse decisions after the ranked result set changes', async () => {
   const item = document()
   const repository = {
@@ -883,6 +1088,94 @@ test('T-FR-136 Prisma adapter persists and rehydrates the immutable semantic reu
   assert.equal(result.replayed, false)
   assert.deepEqual(result.run, run)
   assert.ok(Object.isFrozen(result.run))
+})
+
+test('T-FR-136 Prisma adapter rechecks corpus size and rehydrates the immutable scale report', async () => {
+  const metrics = {
+    precisionAtK: 1,
+    recallAtK: 1,
+    ndcgAtK: 1,
+    reciprocalRank: 1,
+    hitsAtK: 1,
+    relevantCount: 1,
+    returnedCount: 1,
+    k: 1,
+  }
+  const cases = ['intention', 'speech', 'visual'].map((id, index) => ({
+    id: `scale-${id}`,
+    queryHash: String(index + 1).repeat(64),
+    relevantIdentityKeys: ['artifact:proof'],
+    rankedIdentityKeys: ['artifact:proof'],
+    metrics,
+    semanticState: 'ready',
+    latencyMs: 10 + index,
+  }))
+  const content = {
+    schemaVersion: 'retrieval-scale-evaluation/v1',
+    id: 'retrieval-scale-evaluation-prisma',
+    workspaceId: 'workspace-semantic',
+    projectId: 'project-semantic',
+    policyVersion: 'retrieval-scale-eval/v1',
+    rerankPolicyVersion: 'hybrid-rerank/v1',
+    scope: 'workspace',
+    librarySize: 1_000,
+    k: 1,
+    cases,
+    aggregateQuality: metrics,
+    aggregateLatency: {
+      sampleCount: 3,
+      minMs: 10,
+      p50Ms: 11,
+      p95Ms: 12,
+      maxMs: 12,
+      meanMs: 11,
+    },
+    requestFingerprint: 'c'.repeat(64),
+    idempotencyKey: 'retrieval-scale-prisma-key',
+    createdBy: {
+      type: 'api-client',
+      id: 'client-semantic',
+    },
+    createdAt,
+  }
+  const evaluation = {
+    ...content,
+    reportHash: calculateCanonicalHash(content),
+  }
+  const transaction = {
+    v2RetrievalScaleEvaluation: {
+      async findUnique() {
+        return null
+      },
+      async create({ data }) {
+        return data
+      },
+    },
+    v2Project: {
+      async findFirst() {
+        return { id: 'project-semantic' }
+      },
+    },
+    v2ApiClient: {
+      async findFirst() {
+        return { id: 'client-semantic' }
+      },
+    },
+    v2SemanticSearchDocument: {
+      async count() {
+        return 1_000
+      },
+    },
+  }
+  const repository = new PrismaSemanticSearchRepository({
+    async $transaction(callback) {
+      return callback(transaction)
+    },
+  })
+  const result = await repository.persistScaleEvaluation(evaluation)
+  assert.equal(result.replayed, false)
+  assert.deepEqual(result.evaluation, evaluation)
+  assert.ok(Object.isFrozen(result.evaluation))
 })
 
 test('T-FR-048 OpenAI adapter sends a bounded 256-dimensional request and validates the vector', async () => {

@@ -1530,6 +1530,42 @@ const retrievalEvaluationExample = {
   createdAt,
   reportHash: '7'.repeat(64),
 }
+const retrievalScaleEvaluationExample = {
+  schemaVersion: 'retrieval-scale-evaluation/v1',
+  id: 'retrieval-scale-evaluation-example-1',
+  workspaceId,
+  projectId,
+  policyVersion: 'retrieval-scale-eval/v1',
+  rerankPolicyVersion: 'hybrid-rerank/v1',
+  scope: 'workspace',
+  librarySize: 1_000,
+  k: 5,
+  cases: ['intention', 'speech', 'visual'].map((channel, index) => ({
+    id: `scale-${channel}`,
+    queryHash: String(index + 1).repeat(64),
+    relevantIdentityKeys: [
+      semanticSearchDocumentExample.identityKey,
+    ],
+    rankedIdentityKeys: [
+      semanticSearchDocumentExample.identityKey,
+    ],
+    metrics: retrievalMetricsExample,
+    semanticState: 'ready',
+    latencyMs: 40 + index * 10,
+  })),
+  aggregateQuality: retrievalMetricsExample,
+  aggregateLatency: {
+    sampleCount: 3,
+    minMs: 40,
+    p50Ms: 50,
+    p95Ms: 60,
+    maxMs: 60,
+    meanMs: 50,
+  },
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  reportHash: 'b'.repeat(64),
+}
 const semanticReuseRunExample = {
   schemaVersion: 'semantic-reuse-run/v1',
   id: 'semantic-reuse-run-example-1',
@@ -6467,6 +6503,53 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       {
         data: {
           evaluation: retrievalEvaluationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/evaluate-retrieval-scale-request/v1': [
+      {
+        scope: 'workspace',
+        k: 5,
+        cases: [
+          {
+            id: 'scale-intention',
+            query: {
+              intention: hybridSearchQueryExample.intention,
+              rightsUse: hybridSearchQueryExample.rightsUse,
+            },
+            relevantIdentityKeys: [
+              semanticSearchDocumentExample.identityKey,
+            ],
+          },
+          {
+            id: 'scale-speech',
+            query: {
+              speech: hybridSearchQueryExample.speech,
+              rightsUse: hybridSearchQueryExample.rightsUse,
+            },
+            relevantIdentityKeys: [
+              semanticSearchDocumentExample.identityKey,
+            ],
+          },
+          {
+            id: 'scale-visual',
+            query: {
+              visual: hybridSearchQueryExample.visual,
+              rightsUse: hybridSearchQueryExample.rightsUse,
+            },
+            relevantIdentityKeys: [
+              semanticSearchDocumentExample.identityKey,
+            ],
+          },
+        ],
+      },
+    ],
+    'apollo://schemas/retrieval-scale-evaluated/v1': [
+      {
+        data: {
+          evaluation: retrievalScaleEvaluationExample,
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

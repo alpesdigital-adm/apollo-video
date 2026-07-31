@@ -318,6 +318,8 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       `${baseUrl}/v1/projects/${projectId}/semantic-search/reuse-runs`
     const evaluationEndpoint =
       `${baseUrl}/v1/projects/${projectId}/semantic-search/evaluations`
+    const scaleEvaluationEndpoint =
+      `${baseUrl}/v1/projects/${projectId}/semantic-search/scale-evaluations`
     const producer = {
       provider: 'apollo',
       model: 'hybrid-search-e2e',
@@ -937,6 +939,92 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     })
     assert.equal(evaluationMismatch.status, 409)
 
+    const scaleEvaluationBody = {
+      scope: 'workspace',
+      k: 1,
+      cases: [
+        ...evaluationBody.cases,
+        {
+          id: 'case-cross-project-proof',
+          query: {
+            intention: 'workspace-reuse',
+            atmosphere: 'confiante',
+            personIds: ['person-cross-project'],
+            visual: 'grÃ¡fico autorizado',
+            rightsUse: 'editorial-reuse',
+            includeBlocked: false,
+          },
+          relevantIdentityKeys: [
+            `artifact:${artifacts.cross.id}`,
+          ],
+        },
+      ],
+    }
+    const scaleEvaluationKey = `hybrid-scale-${suffix}`
+    const scaleEvaluationResponse = await fetch(
+      scaleEvaluationEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': scaleEvaluationKey,
+        },
+        body: JSON.stringify(scaleEvaluationBody),
+      },
+    )
+    const scaleEvaluationPayload =
+      await scaleEvaluationResponse.json()
+    assert.equal(
+      scaleEvaluationResponse.status,
+      201,
+      JSON.stringify(scaleEvaluationPayload),
+    )
+    const scaleEvaluation =
+      scaleEvaluationPayload.data.evaluation
+    assert.equal(
+      scaleEvaluation.schemaVersion,
+      'retrieval-scale-evaluation/v1',
+    )
+    assert.equal(scaleEvaluation.scope, 'workspace')
+    assert.equal(
+      scaleEvaluation.librarySize,
+      await client.v2SemanticSearchDocument.count({
+        where: { workspaceId, active: true },
+      }),
+    )
+    assert.equal(scaleEvaluation.cases.length, 3)
+    assert.equal(scaleEvaluation.aggregateQuality.precisionAtK, 1)
+    assert.equal(scaleEvaluation.aggregateQuality.recallAtK, 1)
+    assert.equal(scaleEvaluation.aggregateQuality.ndcgAtK, 1)
+    assert.equal(
+      scaleEvaluation.aggregateLatency.sampleCount,
+      3,
+    )
+    assert.ok(
+      scaleEvaluation.cases.every((item) =>
+        Number.isInteger(item.latencyMs) && item.latencyMs >= 0),
+    )
+    const scaleReplayResponse = await fetch(
+      scaleEvaluationEndpoint,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': scaleEvaluationKey,
+        },
+        body: JSON.stringify(scaleEvaluationBody),
+      },
+    )
+    const scaleReplayPayload = await scaleReplayResponse.json()
+    assert.equal(scaleReplayResponse.status, 200)
+    assert.equal(scaleReplayPayload.data.replayed, true)
+    assert.equal(
+      scaleReplayPayload.data.evaluation.id,
+      scaleEvaluation.id,
+    )
+
     const unsupportedQuery = await fetch(queryEndpoint, {
       method: 'POST',
       headers: {
@@ -959,6 +1047,10 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     )
     assert.equal(
       (await fetch(evaluationEndpoint, { method: 'POST' })).status,
+      401,
+    )
+    assert.equal(
+      (await fetch(scaleEvaluationEndpoint, { method: 'POST' })).status,
       401,
     )
 
@@ -985,6 +1077,12 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     )
     assert.equal(
       await client.v2RetrievalEvaluation.count({
+        where: { workspaceId, projectId },
+      }),
+      1,
+    )
+    assert.equal(
+      await client.v2RetrievalScaleEvaluation.count({
         where: { workspaceId, projectId },
       }),
       1,

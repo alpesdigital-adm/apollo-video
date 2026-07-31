@@ -3,12 +3,14 @@ import {
   type PrismaClient,
   type V2AssetRightsSnapshot,
   type V2RetrievalEvaluation,
+  type V2RetrievalScaleEvaluation,
   type V2SemanticSearchDocument,
   type V2SemanticReuseRun,
 } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   PersistedRetrievalEvaluation,
+  PersistedRetrievalScaleEvaluation,
   PersistedSemanticSearchDocument,
   PersistedSemanticReuseRun,
   SemanticSearchCandidateQuery,
@@ -469,6 +471,90 @@ function evaluationData(
   }
 }
 
+function hydrateScaleEvaluation(
+  row: V2RetrievalScaleEvaluation,
+): Readonly<PersistedRetrievalScaleEvaluation> {
+  const cases = parseJson(
+    row.casesJson,
+    'retrieval scale evaluation cases',
+  ) as PersistedRetrievalScaleEvaluation['cases']
+  const aggregateQuality = parseJson(
+    row.aggregateQualityJson,
+    'retrieval scale aggregate quality',
+  ) as PersistedRetrievalScaleEvaluation['aggregateQuality']
+  const aggregateLatency = parseJson(
+    row.aggregateLatencyJson,
+    'retrieval scale aggregate latency',
+  ) as PersistedRetrievalScaleEvaluation['aggregateLatency']
+  if (!Array.isArray(cases)) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `Stored retrieval scale evaluation ${row.id} has invalid cases`,
+    )
+  }
+  const content = Object.freeze({
+    schemaVersion: 'retrieval-scale-evaluation/v1' as const,
+    id: row.id,
+    workspaceId: row.workspaceId,
+    projectId: row.projectId,
+    policyVersion: 'retrieval-scale-eval/v1' as const,
+    rerankPolicyVersion: HYBRID_RERANK_POLICY_VERSION,
+    scope: row.scope as 'project' | 'workspace',
+    librarySize: row.librarySize,
+    k: row.k,
+    cases: Object.freeze([...cases]),
+    aggregateQuality: Object.freeze({ ...aggregateQuality }),
+    aggregateLatency: Object.freeze({ ...aggregateLatency }),
+    requestFingerprint: row.requestFingerprint,
+    idempotencyKey: row.idempotencyKey,
+    createdBy: Object.freeze({
+      type: 'api-client' as const,
+      id: row.createdByClientId,
+    }),
+    createdAt: row.createdAt.toISOString(),
+  })
+  if (
+    row.policyVersion !== 'retrieval-scale-eval/v1' ||
+    row.rerankPolicyVersion !== HYBRID_RERANK_POLICY_VERSION ||
+    !['project', 'workspace'].includes(row.scope) ||
+    row.caseCount !== cases.length ||
+    stableSerialize(cases) !== row.casesJson ||
+    stableSerialize(aggregateQuality) !== row.aggregateQualityJson ||
+    stableSerialize(aggregateLatency) !== row.aggregateLatencyJson ||
+    calculateCanonicalHash(content) !== row.reportHash
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `Stored retrieval scale evaluation ${row.id} failed integrity validation`,
+    )
+  }
+  return Object.freeze({ ...content, reportHash: row.reportHash })
+}
+
+function scaleEvaluationData(
+  evaluation: Readonly<PersistedRetrievalScaleEvaluation>,
+) {
+  return {
+    id: evaluation.id,
+    workspaceId: evaluation.workspaceId,
+    projectId: evaluation.projectId,
+    policyVersion: evaluation.policyVersion,
+    rerankPolicyVersion: evaluation.rerankPolicyVersion,
+    scope: evaluation.scope,
+    librarySize: evaluation.librarySize,
+    k: evaluation.k,
+    caseCount: evaluation.cases.length,
+    casesJson: stableSerialize(evaluation.cases),
+    aggregateQualityJson: stableSerialize(evaluation.aggregateQuality),
+    aggregateLatencyJson: stableSerialize(evaluation.aggregateLatency),
+    requestFingerprint: evaluation.requestFingerprint,
+    idempotencyKey: evaluation.idempotencyKey,
+    createdByClientId: evaluation.createdBy.id,
+    createdAt: new Date(evaluation.createdAt),
+    reportHash: evaluation.reportHash,
+  }
+}
+
 function hydrateReuseRun(
   row: V2SemanticReuseRun,
 ): Readonly<PersistedSemanticReuseRun> {
@@ -688,6 +774,32 @@ implements SemanticSearchRepository {
     client: PrismaClient = getV2PostgresClient(),
   ) {
     this.client = client
+  }
+
+  async countActiveDocuments(input: {
+    workspaceId: string
+    projectId: string
+    scope: 'project' | 'workspace'
+  }) {
+    const project = await this.client.v2Project.findFirst({
+      where: {
+        id: input.projectId,
+        workspaceId: input.workspaceId,
+      },
+      select: { id: true },
+    })
+    if (!project) {
+      throw new DomainError('PROJECT_NOT_FOUND', 'Project was not found')
+    }
+    return this.client.v2SemanticSearchDocument.count({
+      where: {
+        workspaceId: input.workspaceId,
+        ...(input.scope === 'project'
+          ? { projectId: input.projectId }
+          : {}),
+        active: true,
+      },
+    })
   }
 
   async readSourceContext(input: {
@@ -1443,6 +1555,132 @@ implements SemanticSearchRepository {
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
           'Retrieval evaluation conflicted with another transaction',
+        )
+      }
+      throw error
+    }
+  }
+
+  async findIdempotentScaleEvaluation(input: {
+    workspaceId: string
+    projectId: string
+    idempotencyKey: string
+  }) {
+    const row = await this.client.v2RetrievalScaleEvaluation.findUnique({
+      where: {
+        workspaceId_projectId_idempotencyKey: input,
+      },
+    })
+    return row ? hydrateScaleEvaluation(row) : null
+  }
+
+  async persistScaleEvaluation(
+    evaluation: Readonly<PersistedRetrievalScaleEvaluation>,
+    attempt = 1,
+  ): ReturnType<SemanticSearchRepository['persistScaleEvaluation']> {
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const existing =
+          await transaction.v2RetrievalScaleEvaluation.findUnique({
+            where: {
+              workspaceId_projectId_idempotencyKey: {
+                workspaceId: evaluation.workspaceId,
+                projectId: evaluation.projectId,
+                idempotencyKey: evaluation.idempotencyKey,
+              },
+            },
+          })
+        if (existing) {
+          if (
+            existing.requestFingerprint !==
+            evaluation.requestFingerprint
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Idempotency key was used with a different retrieval scale evaluation',
+            )
+          }
+          return Object.freeze({
+            evaluation: hydrateScaleEvaluation(existing),
+            replayed: true,
+          })
+        }
+        const [project, actor, librarySize] = await Promise.all([
+          transaction.v2Project.findFirst({
+            where: {
+              id: evaluation.projectId,
+              workspaceId: evaluation.workspaceId,
+            },
+            select: { id: true },
+          }),
+          transaction.v2ApiClient.findFirst({
+            where: {
+              id: evaluation.createdBy.id,
+              workspaceId: evaluation.workspaceId,
+              status: 'active',
+            },
+            select: { id: true },
+          }),
+          transaction.v2SemanticSearchDocument.count({
+            where: {
+              workspaceId: evaluation.workspaceId,
+              ...(evaluation.scope === 'project'
+                ? { projectId: evaluation.projectId }
+                : {}),
+              active: true,
+            },
+          }),
+        ])
+        if (!project || !actor) {
+          throw new DomainError(
+            'PERSISTENCE_CONFLICT',
+            'Retrieval scale evaluation context is no longer available',
+          )
+        }
+        if (librarySize !== evaluation.librarySize) {
+          throw new DomainError(
+            'VERSION_CONFLICT',
+            'Semantic library changed before scale evaluation commit',
+          )
+        }
+        const created =
+          await transaction.v2RetrievalScaleEvaluation.create({
+            data: scaleEvaluationData(evaluation),
+          })
+        return Object.freeze({
+          evaluation: hydrateScaleEvaluation(created),
+          replayed: false,
+        })
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      })
+    } catch (error) {
+      if (isPrismaCode(error, 'P2034') && attempt < 3) {
+        return this.persistScaleEvaluation(evaluation, attempt + 1)
+      }
+      if (isPrismaCode(error, 'P2002')) {
+        const replay = await this.findIdempotentScaleEvaluation({
+          workspaceId: evaluation.workspaceId,
+          projectId: evaluation.projectId,
+          idempotencyKey: evaluation.idempotencyKey,
+        })
+        if (replay) {
+          if (
+            replay.requestFingerprint !==
+            evaluation.requestFingerprint
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Idempotency key was used with a different retrieval scale evaluation',
+            )
+          }
+          return Object.freeze({ evaluation: replay, replayed: true })
+        }
+      }
+      if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2002')) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Retrieval scale evaluation conflicted with another transaction',
         )
       }
       throw error

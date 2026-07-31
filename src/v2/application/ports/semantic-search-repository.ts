@@ -69,6 +69,41 @@ export interface PersistedRetrievalEvaluation {
   reportHash: string
 }
 
+export interface PersistedRetrievalScaleEvaluation {
+  schemaVersion: 'retrieval-scale-evaluation/v1'
+  id: string
+  workspaceId: string
+  projectId: string
+  policyVersion: 'retrieval-scale-eval/v1'
+  rerankPolicyVersion: 'hybrid-rerank/v1'
+  scope: 'project' | 'workspace'
+  librarySize: number
+  k: number
+  cases: readonly Readonly<{
+    id: string
+    queryHash: string
+    relevantIdentityKeys: readonly string[]
+    rankedIdentityKeys: readonly string[]
+    metrics: Readonly<RetrievalMetrics>
+    semanticState: 'ready' | 'unavailable'
+    latencyMs: number
+  }>[]
+  aggregateQuality: Readonly<RetrievalMetrics>
+  aggregateLatency: Readonly<{
+    sampleCount: number
+    minMs: number
+    p50Ms: number
+    p95Ms: number
+    maxMs: number
+    meanMs: number
+  }>
+  requestFingerprint: string
+  idempotencyKey: string
+  createdBy: Readonly<{ type: 'api-client'; id: string }>
+  createdAt: string
+  reportHash: string
+}
+
 export interface PersistedSemanticReuseRun {
   schemaVersion: 'semantic-reuse-run/v1'
   id: string
@@ -119,6 +154,12 @@ export interface PersistedSemanticReuseRun {
 }
 
 export interface SemanticSearchRepository {
+  countActiveDocuments(input: {
+    workspaceId: string
+    projectId: string
+    scope: 'project' | 'workspace'
+  }): Promise<number>
+
   readSourceContext(input: {
     workspaceId: string
     projectId: string
@@ -153,6 +194,19 @@ export interface SemanticSearchRepository {
     evaluation: Readonly<PersistedRetrievalEvaluation>,
   ): Promise<Readonly<{
     evaluation: Readonly<PersistedRetrievalEvaluation>
+    replayed: boolean
+  }>>
+
+  findIdempotentScaleEvaluation(input: {
+    workspaceId: string
+    projectId: string
+    idempotencyKey: string
+  }): Promise<Readonly<PersistedRetrievalScaleEvaluation> | null>
+
+  persistScaleEvaluation(
+    evaluation: Readonly<PersistedRetrievalScaleEvaluation>,
+  ): Promise<Readonly<{
+    evaluation: Readonly<PersistedRetrievalScaleEvaluation>
     replayed: boolean
   }>>
 

@@ -24,6 +24,7 @@ import type {
 } from './ports/semantic-embedding-provider.ts'
 import type {
   PersistedRetrievalEvaluation,
+  PersistedRetrievalScaleEvaluation,
   PersistedSemanticSearchDocument,
   PersistedSemanticReuseRun,
   SemanticSearchRepository,
@@ -35,6 +36,8 @@ const SHA_256 = /^[a-f0-9]{64}$/
 const IDEMPOTENCY = /^[\x21-\x7E]{8,128}$/
 const TOKEN = /^[a-z0-9][a-z0-9._/-]{0,127}$/
 const LOCALE = /^[a-z]{2,3}(?:-[A-Z]{2})?$/
+const RETRIEVAL_SCALE_EVAL_POLICY_VERSION =
+  'retrieval-scale-eval/v1' as const
 
 export const SEMANTIC_DIRECTOR_REJECTION_REASONS = [
   'narrative-mismatch',
@@ -1053,5 +1056,236 @@ export function evaluateHybridRetrievalService(dependencies: {
         reportHash: calculateCanonicalHash(content),
       })
     return dependencies.repository.persistEvaluation(evaluation)
+  }
+}
+
+function aggregateLatency(values: readonly number[]) {
+  assertDomain(
+    values.length > 0 &&
+      values.every((value) =>
+        Number.isSafeInteger(value) && value >= 0 &&
+        value <= 3_600_000),
+    'INVALID_ARGUMENT',
+    'retrieval scale latencies are invalid',
+  )
+  const sorted = [...values].sort((left, right) => left - right)
+  const percentile = (ratio: number) =>
+    sorted[Math.max(0, Math.ceil(sorted.length * ratio) - 1)]!
+  return Object.freeze({
+    sampleCount: sorted.length,
+    minMs: sorted[0]!,
+    p50Ms: percentile(0.5),
+    p95Ms: percentile(0.95),
+    maxMs: sorted.at(-1)!,
+    meanMs: Math.round(
+      sorted.reduce((sum, value) => sum + value, 0) / sorted.length,
+    ),
+  })
+}
+
+export function evaluateRetrievalScaleService(dependencies: {
+  repository: SemanticSearchRepository
+  search: ReturnType<typeof hybridSearchService>
+  clock: () => Date
+  monotonicClock: () => number
+  createId: () => string
+}) {
+  return async function evaluate(request: {
+    workspaceId: string
+    projectId: string
+    scope: HybridSearchScope
+    k: number
+    cases: readonly {
+      id: string
+      query: {
+        text?: string
+        intention?: string
+        atmosphere?: string
+        personIds?: readonly string[]
+        speech?: string
+        visual?: string
+        rightsUse: string
+        filters?: HybridSearchFilters
+        includeBlocked?: boolean
+      }
+      relevantIdentityKeys: readonly string[]
+    }[]
+    actor: Readonly<{ type: 'api-client'; id: string }>
+    idempotencyKey: string
+  }) {
+    const workspaceId = identity(request.workspaceId, 'workspaceId')
+    const projectId = identity(request.projectId, 'projectId')
+    assertDomain(
+      HYBRID_SEARCH_SCOPES.includes(request.scope),
+      'INVALID_ARGUMENT',
+      'scope is invalid',
+    )
+    const scope = request.scope
+    const k = boundedInteger(request.k, 'k', 1, 100)
+    assertDomain(
+      Array.isArray(request.cases) &&
+        request.cases.length >= 3 &&
+        request.cases.length <= 50,
+      'INVALID_ARGUMENT',
+      'retrieval scale cases must contain 3 to 50 items',
+    )
+    assertDomain(
+      request.actor?.type === 'api-client',
+      'AUTH_INVALID',
+      'Retrieval scale evaluation requires an authenticated API client',
+    )
+    const actorId = identity(request.actor.id, 'actor.id')
+    const key = idempotencyKey(request.idempotencyKey)
+    const normalizedCases = request.cases.map((item, index) => {
+      const id = identity(item.id, `cases[${index}].id`)
+      assertDomain(
+        Array.isArray(item.relevantIdentityKeys) &&
+          item.relevantIdentityKeys.length >= 1 &&
+          item.relevantIdentityKeys.length <= 500,
+        'INVALID_ARGUMENT',
+        `cases[${index}].relevantIdentityKeys is invalid`,
+      )
+      const relevantIdentityKeys = item.relevantIdentityKeys.map(
+        (value: string, relevantIndex: number) =>
+          identity(
+            value,
+            `cases[${index}].relevantIdentityKeys[${relevantIndex}]`,
+          ),
+      )
+      assertDomain(
+        new Set(relevantIdentityKeys).size ===
+          relevantIdentityKeys.length,
+        'INVALID_ARGUMENT',
+        `cases[${index}].relevantIdentityKeys has duplicates`,
+      )
+      return Object.freeze({
+        id,
+        query: Object.freeze({ ...item.query, scope }),
+        relevantIdentityKeys: Object.freeze(relevantIdentityKeys),
+      })
+    })
+    assertDomain(
+      new Set(normalizedCases.map((item) => item.id)).size ===
+        normalizedCases.length,
+      'INVALID_ARGUMENT',
+      'retrieval scale case IDs must be unique',
+    )
+    const requestFingerprint = calculateCanonicalHash({
+      schemaVersion: 'evaluate-retrieval-scale-request/v1',
+      workspaceId,
+      projectId,
+      scope,
+      k,
+      cases: normalizedCases,
+      actor: { type: 'api-client', id: actorId },
+    })
+    const replay = await dependencies.repository
+      .findIdempotentScaleEvaluation({
+        workspaceId,
+        projectId,
+        idempotencyKey: key,
+      })
+    if (replay) {
+      if (replay.requestFingerprint !== requestFingerprint) {
+        throw new DomainError(
+          'IDEMPOTENCY_PAYLOAD_MISMATCH',
+          'Idempotency key was used with a different retrieval scale evaluation',
+        )
+      }
+      return Object.freeze({ evaluation: replay, replayed: true })
+    }
+    const librarySize = await dependencies.repository
+      .countActiveDocuments({ workspaceId, projectId, scope })
+    assertDomain(
+      Number.isSafeInteger(librarySize) && librarySize >= 1,
+      'INVALID_ARGUMENT',
+      'Retrieval scale evaluation requires a non-empty library',
+    )
+    const evaluatedCases = []
+    for (const item of normalizedCases) {
+      const startedAt = dependencies.monotonicClock()
+      assertDomain(
+        Number.isFinite(startedAt),
+        'INVALID_ARGUMENT',
+        'Retrieval scale monotonic clock is invalid',
+      )
+      const result = await dependencies.search({
+        workspaceId,
+        projectId,
+        ...item.query,
+        limit: Math.max(k, 20),
+        explain: true,
+      })
+      const finishedAt = dependencies.monotonicClock()
+      assertDomain(
+        Number.isFinite(finishedAt) && finishedAt >= startedAt,
+        'INVALID_ARGUMENT',
+        'Retrieval scale monotonic clock moved backwards',
+      )
+      const latencyMs = Math.round(finishedAt - startedAt)
+      assertDomain(
+        latencyMs <= 3_600_000,
+        'INVALID_ARGUMENT',
+        'Retrieval scale query exceeded the latency audit bound',
+      )
+      const rankedIdentityKeys = result.results.map(
+        (entry) => entry.document.identityKey,
+      )
+      evaluatedCases.push(Object.freeze({
+        id: item.id,
+        queryHash: result.queryHash,
+        relevantIdentityKeys: item.relevantIdentityKeys,
+        rankedIdentityKeys: Object.freeze(rankedIdentityKeys),
+        metrics: calculateRetrievalMetrics({
+          rankedIdentityKeys,
+          relevantIdentityKeys: item.relevantIdentityKeys,
+          k,
+        }),
+        semanticState: result.semantic.state,
+        latencyMs,
+      }))
+    }
+    const finalLibrarySize = await dependencies.repository
+      .countActiveDocuments({ workspaceId, projectId, scope })
+    assertDomain(
+      finalLibrarySize === librarySize,
+      'VERSION_CONFLICT',
+      'Semantic library changed during retrieval scale evaluation',
+    )
+    const createdAt = canonicalNow(
+      dependencies.clock(),
+      'retrieval scale evaluation clock',
+    )
+    const content = Object.freeze({
+      schemaVersion: 'retrieval-scale-evaluation/v1' as const,
+      id: identity(dependencies.createId(), 'retrievalScaleEvaluationId'),
+      workspaceId,
+      projectId,
+      policyVersion: RETRIEVAL_SCALE_EVAL_POLICY_VERSION,
+      rerankPolicyVersion: HYBRID_RERANK_POLICY_VERSION,
+      scope,
+      librarySize,
+      k,
+      cases: Object.freeze(evaluatedCases),
+      aggregateQuality: aggregateRetrievalMetrics(
+        evaluatedCases.map((item) => item.metrics),
+      ),
+      aggregateLatency: aggregateLatency(
+        evaluatedCases.map((item) => item.latencyMs),
+      ),
+      requestFingerprint,
+      idempotencyKey: key,
+      createdBy: Object.freeze({
+        type: 'api-client' as const,
+        id: actorId,
+      }),
+      createdAt,
+    })
+    const evaluation: Readonly<PersistedRetrievalScaleEvaluation> =
+      Object.freeze({
+        ...content,
+        reportHash: calculateCanonicalHash(content),
+      })
+    return dependencies.repository.persistScaleEvaluation(evaluation)
   }
 }

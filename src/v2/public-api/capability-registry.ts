@@ -2213,6 +2213,33 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.semantic-search.scale-evaluations.create',
+    version: '1.0.0',
+    title: 'Measure semantic retrieval at library scale',
+    description: 'Runs at least three fixed relevance judgments against one stable project or workspace library snapshot, persists its active-document count, precision, recall, nDCG, reciprocal rank and per-query plus aggregate latency.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef:
+      'apollo://schemas/evaluate-retrieval-scale-request/v1',
+    outputSchemaRef:
+      'apollo://schemas/retrieval-scale-evaluated/v1',
+    endpoint: {
+      method: 'POST',
+      path:
+        '/v1/projects/{projectId}/semantic-search/scale-evaluations',
+    },
+    toolName:
+      'apollo.projects.semantic-search.scale-evaluations.create',
+    supportsDryRun: false,
+    costClass: 'medium',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'required',
+    requestBodyRequired: true,
+  },
+  {
     id: 'apollo.projects.hierarchical-processing.runs.create',
     version: '1.0.0',
     title: 'Execute hierarchical long-form processing',

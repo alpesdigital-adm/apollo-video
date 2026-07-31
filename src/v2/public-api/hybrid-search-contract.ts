@@ -7,6 +7,7 @@ import type {
 import { DomainError } from '../domain/errors.ts'
 import type {
   PersistedRetrievalEvaluation,
+  PersistedRetrievalScaleEvaluation,
   PersistedSemanticSearchDocument,
   PersistedSemanticReuseRun,
   SemanticSearchSourceRef,
@@ -69,6 +70,7 @@ const FILTER_FIELDS = new Set([
   'rights',
 ])
 const EVALUATION_FIELDS = new Set(['k', 'cases'])
+const SCALE_EVALUATION_FIELDS = new Set(['scope', 'k', 'cases'])
 const EVALUATION_CASE_FIELDS = new Set([
   'id',
   'query',
@@ -508,6 +510,48 @@ export function parseRetrievalEvaluationBody(value: unknown) {
   }
 }
 
+export function parseRetrievalScaleEvaluationBody(value: unknown) {
+  const body = record(value, 'Request body')
+  exactFields(body, SCALE_EVALUATION_FIELDS, 'Request body')
+  if (
+    typeof body.scope !== 'string' ||
+    typeof body.k !== 'number' ||
+    !Array.isArray(body.cases)
+  ) {
+    throw new DomainError(
+      'INVALID_ARGUMENT',
+      'Retrieval scale evaluation request is invalid',
+    )
+  }
+  return {
+    scope: body.scope as HybridSearchScope,
+    k: body.k,
+    cases: body.cases.map((value, index) => {
+      const field = `cases[${index}]`
+      const input = record(value, field)
+      exactFields(input, EVALUATION_CASE_FIELDS, field)
+      const query = parseHybridSearchQueryBody(
+        input.query,
+        { evaluationCase: true },
+      )
+      if (query.scope !== undefined) {
+        throw new DomainError(
+          'INVALID_ARGUMENT',
+          `${field}.query.scope must be declared once at request scope`,
+        )
+      }
+      return {
+        id: stringValue(input.id, `${field}.id`),
+        query,
+        relevantIdentityKeys: stringArray(
+          input.relevantIdentityKeys,
+          `${field}.relevantIdentityKeys`,
+        ),
+      }
+    }),
+  }
+}
+
 export function parseSemanticReuseRunBody(value: unknown) {
   const body = record(value, 'Request body')
   exactFields(body, REUSE_RUN_FIELDS, 'Request body')
@@ -575,6 +619,17 @@ export function presentSemanticSearchDocument(
 
 export function presentRetrievalEvaluation(
   evaluation: Readonly<PersistedRetrievalEvaluation>,
+) {
+  const {
+    requestFingerprint: _requestFingerprint,
+    idempotencyKey: _idempotencyKey,
+    ...publicEvaluation
+  } = evaluation
+  return publicEvaluation
+}
+
+export function presentRetrievalScaleEvaluation(
+  evaluation: Readonly<PersistedRetrievalScaleEvaluation>,
 ) {
   const {
     requestFingerprint: _requestFingerprint,

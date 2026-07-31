@@ -5003,6 +5003,43 @@ const hybridSearchQuerySchema = {
     explain: { type: 'boolean', default: true },
   },
 }
+const {
+  scope: _hybridSearchScope,
+  ...retrievalScaleQueryProperties
+} = hybridSearchQueryProperties
+const retrievalScaleQuerySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['rightsUse'],
+  anyOf: [
+    {
+      properties: { text: retrievalScaleQueryProperties.text },
+      required: ['text'],
+    },
+    {
+      properties: {
+        intention: retrievalScaleQueryProperties.intention,
+      },
+      required: ['intention'],
+    },
+    {
+      properties: { filters: retrievalScaleQueryProperties.filters },
+      required: ['filters'],
+    },
+    ...['atmosphere', 'personIds', 'speech', 'visual'].map(
+      (field) => ({
+        properties: {
+          [field]:
+            retrievalScaleQueryProperties[
+              field as keyof typeof retrievalScaleQueryProperties
+            ],
+        },
+        required: [field],
+      }),
+    ),
+  ],
+  properties: retrievalScaleQueryProperties,
+}
 const hybridMatchReasonsSchema = {
   type: 'array',
   maxItems: 11,
@@ -13738,6 +13775,172 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               },
             },
             aggregate: retrievalMetricsSchema,
+            createdBy: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['type', 'id'],
+              properties: {
+                type: { const: 'api-client' },
+                id: idSchema,
+              },
+            },
+            createdAt: dateTimeSchema,
+            reportHash: sha256Schema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('evaluate-retrieval-scale-request', 1, 'Measure fixed relevance judgments and latency against one stable project or workspace library snapshot', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['scope', 'k', 'cases'],
+    properties: {
+      scope: { enum: ['project', 'workspace'] },
+      k: { type: 'integer', minimum: 1, maximum: 100 },
+      cases: {
+        type: 'array',
+        minItems: 3,
+        maxItems: 50,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'query', 'relevantIdentityKeys'],
+          properties: {
+            id: idSchema,
+            query: retrievalScaleQuerySchema,
+            relevantIdentityKeys: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 500,
+              uniqueItems: true,
+              items: {
+                type: 'string',
+                minLength: 3,
+                maxLength: 260,
+              },
+            },
+          },
+        },
+      },
+    },
+  }),
+  defineSchema('retrieval-scale-evaluated', 1, 'Immutable quality and latency report bound to a stable semantic library size',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['evaluation', 'replayed'],
+      properties: {
+        evaluation: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'schemaVersion',
+            'id',
+            'workspaceId',
+            'projectId',
+            'policyVersion',
+            'rerankPolicyVersion',
+            'scope',
+            'librarySize',
+            'k',
+            'cases',
+            'aggregateQuality',
+            'aggregateLatency',
+            'createdBy',
+            'createdAt',
+            'reportHash',
+          ],
+          properties: {
+            schemaVersion: {
+              const: 'retrieval-scale-evaluation/v1',
+            },
+            id: idSchema,
+            workspaceId: idSchema,
+            projectId: idSchema,
+            policyVersion: { const: 'retrieval-scale-eval/v1' },
+            rerankPolicyVersion: { const: 'hybrid-rerank/v1' },
+            scope: { enum: ['project', 'workspace'] },
+            librarySize: { type: 'integer', minimum: 1 },
+            k: { type: 'integer', minimum: 1, maximum: 100 },
+            cases: {
+              type: 'array',
+              minItems: 3,
+              maxItems: 50,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: [
+                  'id',
+                  'queryHash',
+                  'relevantIdentityKeys',
+                  'rankedIdentityKeys',
+                  'metrics',
+                  'semanticState',
+                  'latencyMs',
+                ],
+                properties: {
+                  id: idSchema,
+                  queryHash: sha256Schema,
+                  relevantIdentityKeys: {
+                    type: 'array',
+                    minItems: 1,
+                    maxItems: 500,
+                    uniqueItems: true,
+                    items: {
+                      type: 'string',
+                      minLength: 3,
+                      maxLength: 260,
+                    },
+                  },
+                  rankedIdentityKeys: {
+                    type: 'array',
+                    maxItems: 100,
+                    uniqueItems: true,
+                    items: {
+                      type: 'string',
+                      minLength: 3,
+                      maxLength: 260,
+                    },
+                  },
+                  metrics: retrievalMetricsSchema,
+                  semanticState: {
+                    enum: ['ready', 'unavailable'],
+                  },
+                  latencyMs: {
+                    type: 'integer',
+                    minimum: 0,
+                    maximum: 3600000,
+                  },
+                },
+              },
+            },
+            aggregateQuality: retrievalMetricsSchema,
+            aggregateLatency: {
+              type: 'object',
+              additionalProperties: false,
+              required: [
+                'sampleCount',
+                'minMs',
+                'p50Ms',
+                'p95Ms',
+                'maxMs',
+                'meanMs',
+              ],
+              properties: {
+                sampleCount: {
+                  type: 'integer',
+                  minimum: 3,
+                  maximum: 50,
+                },
+                minMs: { type: 'integer', minimum: 0 },
+                p50Ms: { type: 'integer', minimum: 0 },
+                p95Ms: { type: 'integer', minimum: 0 },
+                maxMs: { type: 'integer', minimum: 0 },
+                meanMs: { type: 'integer', minimum: 0 },
+              },
+            },
             createdBy: {
               type: 'object',
               additionalProperties: false,

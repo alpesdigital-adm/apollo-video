@@ -195,6 +195,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Re-executes one bounded query and persists an immutable audit only after exact query and result-set hashes plus a complete reuse/rejection partition are verified.',
     },
+    'apollo.projects.semantic-search.scale-evaluations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Runs three to fifty bounded retrieval queries against one stable library snapshot and persists only immutable quality and latency evidence.',
+    },
     'apollo.projects.hierarchical-processing.runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Processes one exact existing artifact and transcript within explicit cost, memory and elapsed-time budgets; it persists only virtual chunks, evidence mappings and measurements.',

@@ -73,6 +73,7 @@ model V2Workspace {
   validatedSegments               V2ValidatedSegment[]
   semanticSearchDocuments         V2SemanticSearchDocument[]
   retrievalEvaluations            V2RetrievalEvaluation[]
+  retrievalScaleEvaluations       V2RetrievalScaleEvaluation[]
   semanticReuseRuns               V2SemanticReuseRun[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks    V2HierarchicalProcessingChunk[]
@@ -159,6 +160,7 @@ model V2ApiClient {
   validatedSegments               V2ValidatedSegment[]
   semanticSearchDocuments         V2SemanticSearchDocument[]
   retrievalEvaluations            V2RetrievalEvaluation[]
+  retrievalScaleEvaluations       V2RetrievalScaleEvaluation[]
   semanticReuseRuns               V2SemanticReuseRun[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   contiguousEvidenceRuns          V2ContiguousEvidenceRun[]
@@ -322,6 +324,7 @@ model V2Project {
   validatedSegments             V2ValidatedSegment[]
   semanticSearchDocuments       V2SemanticSearchDocument[]
   retrievalEvaluations          V2RetrievalEvaluation[]
+  retrievalScaleEvaluations     V2RetrievalScaleEvaluation[]
   semanticReuseRuns             V2SemanticReuseRun[]
   hierarchicalProcessingRuns    V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks  V2HierarchicalProcessingChunk[]
@@ -2723,6 +2726,37 @@ model V2RetrievalEvaluation {
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, policyVersion, rerankPolicyVersion])
   @@map("retrieval_evaluations")
+}
+
+model V2RetrievalScaleEvaluation {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  policyVersion         String   @db.VarChar(64)
+  rerankPolicyVersion   String   @db.VarChar(64)
+  scope                 String   @db.VarChar(16)
+  librarySize           Int
+  k                     Int
+  caseCount             Int
+  casesJson             String   @db.Text
+  aggregateQualityJson  String   @db.Text
+  aggregateLatencyJson  String   @db.Text
+  requestFingerprint    String   @db.Char(64)
+  idempotencyKey        String   @db.VarChar(128)
+  createdByClientId     String   @db.VarChar(80)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  reportHash            String   @db.Char(64)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy V2ApiClient @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@unique([workspaceId, reportHash])
+  @@index([workspaceId, projectId, scope, librarySize, createdAt(sort: Desc)])
+  @@index([workspaceId, policyVersion, rerankPolicyVersion])
+  @@map("retrieval_scale_evaluations")
 }
 
 model V2SemanticReuseRun {
