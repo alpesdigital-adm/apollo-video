@@ -1654,6 +1654,9 @@ bounds resultantes. Prefixo e sufixo permanecem vindos do proxy-base. A
 edição manual de texto de legenda materializa o cue no `EditPlan`, calcula o
 range stale pelos frames do cue realmente alterado e recompõe apenas esse
 intervalo; o renderer recebe o texto novo no mesmo input materializado. A
+troca manual por B-roll também passa pelo `replace` comum: o clip novo mantém
+os frames de áudio do master, o impacto limita o range do clip e o proxy
+reutiliza os trechos vizinhos válidos. A
 entrega permanece aberta até a mesma semântica cobrir todos os Commands e
 ranges e a jornada integrada ser executada, implantada e aceita.
 

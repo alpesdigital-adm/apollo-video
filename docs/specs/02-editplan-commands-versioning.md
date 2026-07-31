@@ -638,6 +638,13 @@ Se o mesmo patch também carregar layout, estilo, cor, movimento ou áudio, o
 impacto volta deliberadamente ao range do clip para não subinvalidar a mudança
 combinada.
 
+O golden de B-roll não monta clips substitutos manualmente. Ele materializa
+`replace` sobre um EditPlan de três clips, verifica que o clip central passa a
+usar a fonte visual nova mantendo `audioSourceArtifactId` e os frames 30–60 do
+master, deriva o `command-impact/v1` real e entrega seu range/hash ao renderer.
+O MP4 mantém prefixo/sufixo vermelhos, mostra a fonte azul somente no centro,
+preserva áudio AAC e a duração integral.
+
 ## 24. Matriz de invalidação
 
 | Command | Invalida | Não invalida |

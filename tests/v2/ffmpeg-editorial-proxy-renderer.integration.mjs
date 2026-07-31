@@ -8,8 +8,10 @@ import test from 'node:test'
 
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
+import { createManualCommandImpact } from '../../src/v2/domain/command-impact.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
+import { materializeManualEditPlan } from '../../src/v2/domain/manual-editing.ts'
 import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 
 const require = createRequire(import.meta.url)
@@ -311,7 +313,7 @@ test('T-FR-233 renderer changes subtitle pixels only inside the stale cue range'
   }
 })
 
-test('T-FR-233 renderer recomposes only the stale range and reuses valid proxy prefix and suffix', async () => {
+test('T-FR-233 materialized B-roll replacement recomposes only its stale range', async () => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-range-reuse-render-'))
   const masterPath = join(root, 'master.mp4')
   const replacementPath = join(root, 'replacement.mp4')
@@ -346,23 +348,59 @@ test('T-FR-233 renderer recomposes only the stale range and reuses valid proxy p
       }],
       fps: 30, format: '16:9',
     })
+    const beforePlan = {
+      schemaVersion: 2, state: 'compiled', id: 'edit-plan-broll-base',
+      projectVersionId: 'project-version-range-base', fps: 30, durationFrames: 90,
+      videoTracks: [{ id: 'base-video', kind: 'base-video', clips: [
+        { id: 'clip-prefix', sourceArtifactId: masterSource.artifactId, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+        { id: 'clip-middle', sourceArtifactId: masterSource.artifactId, sourceInFrame: 30, sourceOutFrame: 60, timelineInFrame: 30, timelineOutFrame: 60, rate: 1 },
+        { id: 'clip-suffix', sourceArtifactId: masterSource.artifactId, sourceInFrame: 60, sourceOutFrame: 90, timelineInFrame: 60, timelineOutFrame: 90, rate: 1 },
+      ] }],
+      subtitleTracks: [],
+      createdAt: '2026-07-31T08:00:00.000Z',
+    }
+    const operation = {
+      kind: 'replace', clipId: 'clip-middle', sourceId: 'artifact-range-replacement',
+    }
+    const afterPlan = materializeManualEditPlan({
+      editPlan: beforePlan, operation,
+      newVersionId: 'project-version-range-result',
+      createdAt: '2026-07-31T08:01:00.000Z',
+      availableAssetIds: [masterSource.artifactId, operation.sourceId],
+      variantId: '16:9',
+    })
+    const impact = createManualCommandImpact({
+      commandId: 'manual-command-range-golden',
+      baseVersionId: beforePlan.projectVersionId,
+      resultVersionId: afterPlan.projectVersionId,
+      variantId: '16:9', targetId: operation.clipId, action: 'apply', operation,
+      beforeEditPlan: beforePlan, afterEditPlan: afterPlan,
+      outputReferences: [{
+        artifactId: 'artifact-range-base-proxy', kind: 'proxy',
+        sourceVersionId: beforePlan.projectVersionId, variantId: '16:9',
+      }],
+    })
+    assert.deepEqual(impact.changeKinds, ['replace-source'])
+    assert.deepEqual(impact.affectedRanges, [{ startFrame: 30, endFrame: 60 }])
+    const replacementClip = afterPlan.videoTracks[0].clips.find((clip) => clip.id === operation.clipId)
+    assert.equal(replacementClip.audioSourceArtifactId, masterSource.artifactId)
+    assert.deepEqual(
+      [replacementClip.audioSourceInFrame, replacementClip.audioSourceOutFrame],
+      [30, 60],
+    )
     const partial = await renderer.render({
       operationId: 'range-reuse-partial', renderKind: 'proxy',
       sources: [masterSource, {
         artifactId: 'artifact-range-replacement', path: replacementPath, mediaType: 'video',
         colorPipelineCompilation: colorCompilation('artifact-range-replacement'),
       }],
-      clips: [
-        { id: 'clip-prefix', sourceArtifactId: masterSource.artifactId, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
-        { id: 'clip-replacement', sourceArtifactId: 'artifact-range-replacement', audioSourceArtifactId: masterSource.artifactId, audioSourceInFrame: 30, audioSourceOutFrame: 60, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 30, timelineOutFrame: 60, rate: 1 },
-        { id: 'clip-suffix', sourceArtifactId: masterSource.artifactId, sourceInFrame: 60, sourceOutFrame: 90, timelineInFrame: 60, timelineOutFrame: 90, rate: 1 },
-      ],
+      clips: afterPlan.videoTracks[0].clips,
       fps: 30, format: '16:9',
       rangeReuse: {
         schemaVersion: 'project-proxy-range-reuse/v1',
-        commandId: 'manual-command-range-golden', impactHash: '1'.repeat(64),
-        baseVersionId: 'project-version-range-base',
-        ranges: [{ startFrame: 30, endFrame: 60 }],
+        commandId: impact.commandId, impactHash: impact.impactHash,
+        baseVersionId: impact.baseVersionId,
+        ranges: impact.minimalRenders[0].ranges,
         artifactId: 'artifact-range-base-proxy', manifestId: 'manifest-range-base-proxy',
         path: base.outputPath, sha256: base.sha256, byteSize: base.byteSize,
       },
@@ -372,6 +410,7 @@ test('T-FR-233 renderer recomposes only the stale range and reuses valid proxy p
     )
     assert.ok(Math.abs(rangeProbe.duration - 1) <= 0.1)
     assert.ok(Math.abs(partial.probe.duration - 3) <= 0.1)
+    assert.equal(partial.probe.audioCodec, 'aac')
     for (const [second, dominantChannel] of [[0.5, 0], [1.5, 2], [2.5, 0]]) {
       const pixel = execFileSync(ffmpegPath, [
         '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', partial.outputPath,

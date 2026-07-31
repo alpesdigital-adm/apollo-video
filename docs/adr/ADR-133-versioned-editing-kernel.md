@@ -57,3 +57,11 @@ identical at sampled frames. This is local evidence only: B-roll/source
 transcript cases, PostgreSQL execution, deploy and acceptance remain open.
 Combined inspector patches retain the clip range so another visual or audio
 field cannot be under-invalidated.
+
+B-roll replacement evidence now begins with the production `replace`
+materializer instead of hand-built renderer clips. The resulting EditPlan
+retains the master audio artifact and exact source frames, while
+`command-impact/v1` supplies the central range and hash to partial rendering.
+The real MP4 shows only the replacement source in that range, keeps neighboring
+base pixels, AAC audio and total duration. Remote PostgreSQL execution and
+acceptance are still required.
