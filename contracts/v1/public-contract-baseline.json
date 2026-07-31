@@ -2234,6 +2234,55 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.color-pipeline-compilations.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-color-pipeline-compilation-request/v1",
+      "outputSchemaRef": "apollo://schemas/color-pipeline-compilation-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/color-pipeline-compilations"
+      },
+      "toolName": "apollo.projects.color-pipeline-compilations.create",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.color-pipeline-compilations.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/color-pipeline-compilation-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/color-pipeline-compilations/{compilationId}"
+      },
+      "toolName": "apollo.projects.color-pipeline-compilations.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.commands.apply": {
       "version": "3.0.0",
       "exposure": "public",
@@ -16249,6 +16298,852 @@
         }
       }
     },
+    "apollo://schemas/color-pipeline-compilation-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "compilation",
+            "replayed"
+          ],
+          "properties": {
+            "compilation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "sourceArtifactId",
+                "sourceManifestId",
+                "colorProbeId",
+                "colorProbeHash",
+                "pipeline",
+                "createdBy",
+                "createdAt",
+                "compilationHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "color-pipeline-compilation/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceManifestId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "colorProbeId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "colorProbeHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "pipeline": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "sourceMetadata",
+                    "outputMetadata",
+                    "stages",
+                    "target",
+                    "manifestKey",
+                    "pipelineHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "resolved-color-pipeline/v1"
+                    },
+                    "sourceMetadata": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "colorSpace",
+                        "transfer",
+                        "primaries",
+                        "matrix",
+                        "range",
+                        "bitDepth"
+                      ],
+                      "properties": {
+                        "colorSpace": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "transfer": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "primaries": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "matrix": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "range": {
+                          "enum": [
+                            "full",
+                            "limited"
+                          ]
+                        },
+                        "bitDepth": {
+                          "type": "integer",
+                          "minimum": 8,
+                          "maximum": 32
+                        }
+                      }
+                    },
+                    "outputMetadata": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "colorSpace",
+                        "transfer",
+                        "primaries",
+                        "matrix",
+                        "range",
+                        "bitDepth"
+                      ],
+                      "properties": {
+                        "colorSpace": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "transfer": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "primaries": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "matrix": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "range": {
+                          "enum": [
+                            "full",
+                            "limited"
+                          ]
+                        },
+                        "bitDepth": {
+                          "type": "integer",
+                          "minimum": 8,
+                          "maximum": 32
+                        }
+                      }
+                    },
+                    "stages": {
+                      "type": "array",
+                      "minItems": 4,
+                      "maxItems": 4,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "kind",
+                          "version",
+                          "enabled",
+                          "input",
+                          "output",
+                          "implementation"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "kind": {
+                            "enum": [
+                              "technical",
+                              "match",
+                              "creative-lut",
+                              "output"
+                            ]
+                          },
+                          "version": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "input": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "colorSpace",
+                              "transfer",
+                              "primaries",
+                              "matrix",
+                              "range",
+                              "bitDepth"
+                            ],
+                            "properties": {
+                              "colorSpace": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "transfer": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "primaries": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "matrix": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "range": {
+                                "enum": [
+                                  "full",
+                                  "limited"
+                                ]
+                              },
+                              "bitDepth": {
+                                "type": "integer",
+                                "minimum": 8,
+                                "maximum": 32
+                              }
+                            }
+                          },
+                          "output": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "colorSpace",
+                              "transfer",
+                              "primaries",
+                              "matrix",
+                              "range",
+                              "bitDepth"
+                            ],
+                            "properties": {
+                              "colorSpace": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "transfer": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "primaries": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "matrix": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "range": {
+                                "enum": [
+                                  "full",
+                                  "limited"
+                                ]
+                              },
+                              "bitDepth": {
+                                "type": "integer",
+                                "minimum": 8,
+                                "maximum": 32
+                              }
+                            }
+                          },
+                          "implementation": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "provider",
+                              "version",
+                              "parameters",
+                              "parametersHash"
+                            ],
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "version": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "parameters": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                                },
+                                "additionalProperties": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    }
+                                  ]
+                                }
+                              },
+                              "parametersHash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            }
+                          },
+                          "lut": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "artifactId",
+                              "sha256"
+                            ],
+                            "properties": {
+                              "artifactId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "sha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "target": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "sourceId"
+                      ],
+                      "properties": {
+                        "sourceId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    },
+                    "manifestKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024
+                    },
+                    "pipelineHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "api-client"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "compilationHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/color-pipeline-compilation-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "compilation"
+          ],
+          "properties": {
+            "compilation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "sourceArtifactId",
+                "sourceManifestId",
+                "colorProbeId",
+                "colorProbeHash",
+                "pipeline",
+                "createdBy",
+                "createdAt",
+                "compilationHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "color-pipeline-compilation/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceManifestId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "colorProbeId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "colorProbeHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "pipeline": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "sourceMetadata",
+                    "outputMetadata",
+                    "stages",
+                    "target",
+                    "manifestKey",
+                    "pipelineHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "resolved-color-pipeline/v1"
+                    },
+                    "sourceMetadata": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "colorSpace",
+                        "transfer",
+                        "primaries",
+                        "matrix",
+                        "range",
+                        "bitDepth"
+                      ],
+                      "properties": {
+                        "colorSpace": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "transfer": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "primaries": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "matrix": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "range": {
+                          "enum": [
+                            "full",
+                            "limited"
+                          ]
+                        },
+                        "bitDepth": {
+                          "type": "integer",
+                          "minimum": 8,
+                          "maximum": 32
+                        }
+                      }
+                    },
+                    "outputMetadata": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "colorSpace",
+                        "transfer",
+                        "primaries",
+                        "matrix",
+                        "range",
+                        "bitDepth"
+                      ],
+                      "properties": {
+                        "colorSpace": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "transfer": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "primaries": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "matrix": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                        },
+                        "range": {
+                          "enum": [
+                            "full",
+                            "limited"
+                          ]
+                        },
+                        "bitDepth": {
+                          "type": "integer",
+                          "minimum": 8,
+                          "maximum": 32
+                        }
+                      }
+                    },
+                    "stages": {
+                      "type": "array",
+                      "minItems": 4,
+                      "maxItems": 4,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "kind",
+                          "version",
+                          "enabled",
+                          "input",
+                          "output",
+                          "implementation"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "kind": {
+                            "enum": [
+                              "technical",
+                              "match",
+                              "creative-lut",
+                              "output"
+                            ]
+                          },
+                          "version": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "input": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "colorSpace",
+                              "transfer",
+                              "primaries",
+                              "matrix",
+                              "range",
+                              "bitDepth"
+                            ],
+                            "properties": {
+                              "colorSpace": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "transfer": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "primaries": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "matrix": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "range": {
+                                "enum": [
+                                  "full",
+                                  "limited"
+                                ]
+                              },
+                              "bitDepth": {
+                                "type": "integer",
+                                "minimum": 8,
+                                "maximum": 32
+                              }
+                            }
+                          },
+                          "output": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "colorSpace",
+                              "transfer",
+                              "primaries",
+                              "matrix",
+                              "range",
+                              "bitDepth"
+                            ],
+                            "properties": {
+                              "colorSpace": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "transfer": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "primaries": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "matrix": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "range": {
+                                "enum": [
+                                  "full",
+                                  "limited"
+                                ]
+                              },
+                              "bitDepth": {
+                                "type": "integer",
+                                "minimum": 8,
+                                "maximum": 32
+                              }
+                            }
+                          },
+                          "implementation": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "provider",
+                              "version",
+                              "parameters",
+                              "parametersHash"
+                            ],
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "version": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                              },
+                              "parameters": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                                },
+                                "additionalProperties": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    }
+                                  ]
+                                }
+                              },
+                              "parametersHash": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            }
+                          },
+                          "lut": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "artifactId",
+                              "sha256"
+                            ],
+                            "properties": {
+                              "artifactId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "sha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "target": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "sourceId"
+                      ],
+                      "properties": {
+                        "sourceId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    },
+                    "manifestKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024
+                    },
+                    "pipelineHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "api-client"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "compilationHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/commit-batch-edit-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -23812,6 +24707,211 @@
               "expectedStepHash": {
                 "type": "string",
                 "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/create-color-pipeline-compilation-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceArtifactId",
+        "sourceManifestId",
+        "outputMetadata",
+        "stages"
+      ],
+      "properties": {
+        "sourceArtifactId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "sourceManifestId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "outputMetadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "colorSpace",
+            "transfer",
+            "primaries",
+            "matrix",
+            "range",
+            "bitDepth"
+          ],
+          "properties": {
+            "colorSpace": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+            },
+            "transfer": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+            },
+            "primaries": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+            },
+            "matrix": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+            },
+            "range": {
+              "enum": [
+                "full",
+                "limited"
+              ]
+            },
+            "bitDepth": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 32
+            }
+          }
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "version",
+              "enabled",
+              "output",
+              "implementation"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "kind": {
+                "enum": [
+                  "technical",
+                  "match",
+                  "creative-lut",
+                  "output"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "output": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "colorSpace",
+                  "transfer",
+                  "primaries",
+                  "matrix",
+                  "range",
+                  "bitDepth"
+                ],
+                "properties": {
+                  "colorSpace": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                  },
+                  "transfer": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                  },
+                  "primaries": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                  },
+                  "matrix": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                  },
+                  "range": {
+                    "enum": [
+                      "full",
+                      "limited"
+                    ]
+                  },
+                  "bitDepth": {
+                    "type": "integer",
+                    "minimum": 8,
+                    "maximum": 32
+                  }
+                }
+              },
+              "implementation": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider",
+                  "version",
+                  "parameters",
+                  "parametersHash"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                  },
+                  "version": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                  },
+                  "parameters": {
+                    "type": "object",
+                    "propertyNames": {
+                      "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+                    },
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ]
+                    }
+                  },
+                  "parametersHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              },
+              "lut": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "artifactId",
+                  "sha256"
+                ],
+                "properties": {
+                  "artifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
               }
             }
           }

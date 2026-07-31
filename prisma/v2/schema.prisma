@@ -75,6 +75,7 @@ model V2Workspace {
   retrievalEvaluations            V2RetrievalEvaluation[]
   retrievalScaleEvaluations       V2RetrievalScaleEvaluation[]
   mediaColorProbes                V2MediaColorProbe[]
+  colorPipelineCompilations       V2ColorPipelineCompilation[]
   semanticReuseRuns               V2SemanticReuseRun[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks    V2HierarchicalProcessingChunk[]
@@ -167,6 +168,7 @@ model V2ApiClient {
   contiguousEvidenceRuns          V2ContiguousEvidenceRun[]
   contiguousEvaluationRuns        V2ContiguousEvaluationRun[]
   contiguousExtractions            V2ContiguousExtraction[]
+  colorPipelineCompilations         V2ColorPipelineCompilation[]
   productionBatches               V2ProductionBatch[]              @relation("ProductionBatchCreator")
   productionBatchActions          V2ProductionBatchAction[]        @relation("ProductionBatchActionActor")
   scriptAlignmentRuns             V2ScriptAlignmentRun[]           @relation("ScriptAlignmentRunCreator")
@@ -363,6 +365,7 @@ model V2Project {
   contiguousEvaluationEvidence V2ContiguousEvaluationEvidence[]
   contiguousMomentEvaluations   V2ContiguousMomentEvaluation[]
   contiguousExtractions         V2ContiguousExtraction[]
+  colorPipelineCompilations      V2ColorPipelineCompilation[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -774,6 +777,7 @@ model V2MediaArtifact {
   sourceCleanupResults         V2SourceCleanupResult[]          @relation("SourceCleanupOutputArtifact")
   proofModeSourcePlans         V2ProofModePlan[]                @relation("ProofModeSourceArtifact")
   colorProbes                  V2MediaColorProbe[]
+  colorPipelineCompilations    V2ColorPipelineCompilation[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -838,8 +842,10 @@ model V2MediaArtifactManifest {
   sourceCleanupResults       V2SourceCleanupResult[]
   sourceCleanupPlans         V2SourceCleanupPlan[]            @relation("SourceCleanupSourceManifest")
   colorProbes                V2MediaColorProbe[]
+  colorPipelineCompilations  V2ColorPipelineCompilation[]
 
   @@unique([id, workspaceId])
+  @@unique([id, artifactId, workspaceId])
   @@unique([artifactId, manifestHash])
   @@index([workspaceId, recipeId, recipeVersion])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -909,7 +915,8 @@ model V2MediaColorProbe {
 
   workspace V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   artifact  V2MediaArtifact         @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  manifest  V2MediaArtifactManifest @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  manifest  V2MediaArtifactManifest @relation(fields: [manifestId, artifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
+  colorPipelineCompilations V2ColorPipelineCompilation[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactId, manifestId])
@@ -917,6 +924,39 @@ model V2MediaColorProbe {
   @@index([workspaceId, artifactId, state, createdAt(sort: Desc)])
   @@index([workspaceId, state, hdrMode])
   @@map("media_color_probes")
+}
+
+model V2ColorPipelineCompilation {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  sourceArtifactId      String   @db.VarChar(128)
+  sourceManifestId      String   @db.VarChar(128)
+  colorProbeId          String   @db.VarChar(128)
+  schemaVersion         String   @db.VarChar(64)
+  pipelineHash          String   @db.Char(64)
+  transformVersionsJson String   @db.Text
+  compilationJson       String   @db.Text
+  compilationHash       String   @db.Char(64)
+  requestFingerprint    String   @db.Char(64)
+  idempotencyKey        String   @db.VarChar(128)
+  createdByClientId     String   @db.VarChar(80)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  workspace      V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  sourceArtifact V2MediaArtifact         @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceManifest V2MediaArtifactManifest @relation(fields: [sourceManifestId, sourceArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
+  colorProbe     V2MediaColorProbe       @relation(fields: [colorProbeId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy      V2ApiClient             @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey])
+  @@unique([workspaceId, compilationHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId, sourceManifestId])
+  @@index([workspaceId, colorProbeId])
+  @@map("color_pipeline_compilations")
 }
 
 model V2MediaArtifactLineage {

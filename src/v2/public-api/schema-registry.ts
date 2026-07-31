@@ -10191,6 +10191,113 @@ function defineSchemaRegistry(definitions: readonly PublicSchemaDefinition[]) {
   return Object.freeze([...definitions])
 }
 
+const colorMetadataSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['colorSpace', 'transfer', 'primaries', 'matrix', 'range', 'bitDepth'],
+  properties: {
+    colorSpace: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+    transfer: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+    primaries: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+    matrix: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+    range: { enum: ['full', 'limited'] },
+    bitDepth: { type: 'integer', minimum: 8, maximum: 32 },
+  },
+} as const
+const colorTransformSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'kind', 'version', 'enabled', 'input', 'output', 'implementation'],
+  properties: {
+    id: idSchema,
+    kind: { enum: ['technical', 'match', 'creative-lut', 'output'] },
+    version: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+    enabled: { type: 'boolean' },
+    input: colorMetadataSchema,
+    output: colorMetadataSchema,
+    implementation: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['provider', 'version', 'parameters', 'parametersHash'],
+      properties: {
+        provider: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+        version: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+        parameters: {
+          type: 'object',
+          propertyNames: { pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+          additionalProperties: {
+            anyOf: [
+              { type: 'string' },
+              { type: 'number' },
+              { type: 'boolean' },
+            ],
+          },
+        },
+        parametersHash: sha256Schema,
+      },
+    },
+    lut: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['artifactId', 'sha256'],
+      properties: { artifactId: idSchema, sha256: sha256Schema },
+    },
+  },
+} as const
+const colorTransformRequestSchema = {
+  ...colorTransformSchema,
+  required: ['id', 'kind', 'version', 'enabled', 'output', 'implementation'],
+  properties: Object.fromEntries(
+    Object.entries(colorTransformSchema.properties).filter(([key]) => key !== 'input'),
+  ),
+} as const
+const resolvedColorPipelineSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schemaVersion', 'sourceMetadata', 'outputMetadata', 'stages', 'target', 'manifestKey', 'pipelineHash'],
+  properties: {
+    schemaVersion: { const: 'resolved-color-pipeline/v1' },
+    sourceMetadata: colorMetadataSchema,
+    outputMetadata: colorMetadataSchema,
+    stages: {
+      type: 'array', minItems: 4, maxItems: 4,
+      items: colorTransformSchema,
+    },
+    target: {
+      type: 'object', additionalProperties: false, required: ['sourceId'],
+      properties: { sourceId: idSchema },
+    },
+    manifestKey: { type: 'string', minLength: 1, maxLength: 1024 },
+    pipelineHash: sha256Schema,
+  },
+} as const
+const colorPipelineCompilationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'sourceArtifactId',
+    'sourceManifestId', 'colorProbeId', 'colorProbeHash', 'pipeline',
+    'createdBy', 'createdAt', 'compilationHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'color-pipeline-compilation/v1' },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    sourceArtifactId: idSchema,
+    sourceManifestId: idSchema,
+    colorProbeId: idSchema,
+    colorProbeHash: sha256Schema,
+    pipeline: resolvedColorPipelineSchema,
+    createdBy: {
+      type: 'object', additionalProperties: false, required: ['type', 'id'],
+      properties: { type: { const: 'api-client' }, id: idSchema },
+    },
+    createdAt: dateTimeSchema,
+    compilationHash: sha256Schema,
+  },
+} as const
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('health-response', 1, 'Health response',
     successSchema({
@@ -11229,6 +11336,50 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           },
         },
       },
+    }),
+  ),
+  defineSchema(
+    'create-color-pipeline-compilation-request',
+    1,
+    'Compile four explicit color transforms from trusted server-side source colorimetry',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['sourceArtifactId', 'sourceManifestId', 'outputMetadata', 'stages'],
+      properties: {
+        sourceArtifactId: idSchema,
+        sourceManifestId: idSchema,
+        outputMetadata: colorMetadataSchema,
+        stages: {
+          type: 'array', minItems: 4, maxItems: 4,
+          items: colorTransformRequestSchema,
+        },
+      },
+    },
+  ),
+  defineSchema(
+    'color-pipeline-compilation-mutated',
+    1,
+    'Created or replayed immutable color pipeline compilation',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['compilation', 'replayed'],
+      properties: {
+        compilation: colorPipelineCompilationSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'color-pipeline-compilation-read',
+    1,
+    'Immutable trusted color pipeline compilation',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['compilation'],
+      properties: { compilation: colorPipelineCompilationSchema },
     }),
   ),
   defineSchema('public-operation-detail', 2, 'Public operation detail response for render and media ingest',

@@ -231,6 +231,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Selects one immutable virtual range from trusted persisted evaluations, preserves the source artifact, forbids synthesized ranges and automatic zoom, and starts no provider, render or media materialization work.',
     },
+    'apollo.projects.color-pipeline-compilations.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Compiles one immutable metadata-only pipeline from a trusted project source probe; it changes no media bytes and starts no provider or render work.',
+    },
     'apollo.projects.proof-integrity-runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Evaluates existing ProofNeed, recipe, evidence and current authorization hashes, persists an immutable fail-closed decision and starts no provider, render or media materialization work.',

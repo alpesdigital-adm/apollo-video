@@ -11,6 +11,58 @@ const workspaceId = 'workspace-example-1'
 const clientId = 'client-example-1'
 const credentialId = 'credential-example-1'
 const artifactId = 'artifact-example-1'
+const colorSourceMetadataExample = {
+  colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709',
+  matrix: 'bt709', range: 'limited', bitDepth: 10,
+}
+const colorOutputMetadataExample = {
+  ...colorSourceMetadataExample,
+  bitDepth: 8,
+}
+const colorPipelineStagesExample = [
+  {
+    id: 'technical-rec709', kind: 'technical', version: 'v1', enabled: true,
+    input: colorSourceMetadataExample, output: colorSourceMetadataExample,
+    implementation: { provider: 'ffmpeg-zscale', version: '7.1.1', parameters: { mode: 'identity' }, parametersHash: '1'.repeat(64) },
+  },
+  {
+    id: 'match-source', kind: 'match', version: 'v1', enabled: false,
+    input: colorSourceMetadataExample, output: colorSourceMetadataExample,
+    implementation: { provider: 'apollo-match', version: 'v1', parameters: { mode: 'bypass' }, parametersHash: '2'.repeat(64) },
+  },
+  {
+    id: 'creative-none', kind: 'creative-lut', version: 'v1', enabled: false,
+    input: colorSourceMetadataExample, output: colorSourceMetadataExample,
+    implementation: { provider: 'apollo-lut', version: 'v1', parameters: { mode: 'none' }, parametersHash: '3'.repeat(64) },
+  },
+  {
+    id: 'output-rec709', kind: 'output', version: 'v1', enabled: true,
+    input: colorSourceMetadataExample, output: colorOutputMetadataExample,
+    implementation: { provider: 'ffmpeg-zscale', version: '7.1.1', parameters: { dither: true }, parametersHash: '4'.repeat(64) },
+  },
+]
+const colorPipelineCompilationExample = {
+  schemaVersion: 'color-pipeline-compilation/v1',
+  id: 'color-pipeline-example-1',
+  workspaceId,
+  projectId,
+  sourceArtifactId: artifactId,
+  sourceManifestId: 'manifest-example-1',
+  colorProbeId: 'color-probe-example-1',
+  colorProbeHash: '8'.repeat(64),
+  pipeline: {
+    schemaVersion: 'resolved-color-pipeline/v1',
+    sourceMetadata: colorSourceMetadataExample,
+    outputMetadata: colorOutputMetadataExample,
+    stages: colorPipelineStagesExample,
+    target: { sourceId: artifactId },
+    manifestKey: 'technical:technical-rec709@v1:1>match:match-source@v1:2>creative-lut:creative-none@v1:3>output:output-rec709@v1:4',
+    pipelineHash: '5'.repeat(64),
+  },
+  createdBy: { type: 'api-client', id: clientId },
+  createdAt,
+  compilationHash: '6'.repeat(64),
+}
 const rightsSnapshotId = 'rights-example-1'
 const assetRightsRequestExample = {
   owner: 'Alpes Digital',
@@ -4993,6 +5045,29 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             probeHash: '8'.repeat(64),
           },
         },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-color-pipeline-compilation-request/v1': [
+      {
+        sourceArtifactId: artifactId,
+        sourceManifestId: 'manifest-example-1',
+        outputMetadata: colorOutputMetadataExample,
+        stages: colorPipelineStagesExample.map(({ input: _input, ...stage }) => stage),
+      },
+    ],
+    'apollo://schemas/color-pipeline-compilation-mutated/v1': [
+      {
+        data: {
+          compilation: colorPipelineCompilationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/color-pipeline-compilation-read/v1': [
+      {
+        data: { compilation: colorPipelineCompilationExample },
         meta: { apiVersion: 'v1' },
       },
     ],

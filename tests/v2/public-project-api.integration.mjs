@@ -137,6 +137,12 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2MaterializationAuthorization.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2ColorPipelineCompilation.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2ProjectMediaAsset.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2MediaArtifactLineage.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
@@ -618,6 +624,18 @@ test('authenticated public API manages projects, clients and artifact inspection
         'x-apollo-capability-id'
       ],
       'apollo.artifacts.color-probe.read',
+    )
+    assert.equal(
+      openApi.paths['/v1/projects/{projectId}/color-pipeline-compilations'].post[
+        'x-apollo-capability-id'
+      ],
+      'apollo.projects.color-pipeline-compilations.create',
+    )
+    assert.equal(
+      openApi.paths['/v1/projects/{projectId}/color-pipeline-compilations/{compilationId}'].get[
+        'x-apollo-capability-id'
+      ],
+      'apollo.projects.color-pipeline-compilations.read',
     )
     assert.equal(
       openApi.paths['/v1/artifacts/{artifactId}/lineage-diagnostics/{manifestId}'].get[
@@ -3748,6 +3766,79 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(replayResponse.status, 200)
     assert.equal(replay.data.replayed, true)
     assert.equal(replay.data.project.id, created.data.project.id)
+    await client.v2ProjectMediaAsset.create({
+      data: {
+        id: '00000000-0000-4000-8000-000000000970',
+        workspaceId,
+        projectId: created.data.project.id,
+        artifactId: sourceArtifactId,
+        role: 'source-master',
+        originalFileName: 'source.mov',
+      },
+    })
+    const pipelineSource = {
+      colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709',
+      matrix: 'bt709', range: 'limited', bitDepth: 10,
+    }
+    const pipelineOutput = { ...pipelineSource, bitDepth: 8 }
+    const transform = (id, kind, enabled, output, provider, parameters) => ({
+      id, kind, version: 'v1', enabled, output,
+      implementation: {
+        provider,
+        version: 'v1',
+        parameters,
+        parametersHash: createHash('sha256')
+          .update(JSON.stringify(parameters))
+          .digest('hex'),
+      },
+    })
+    const pipelineRequest = {
+      sourceArtifactId,
+      sourceManifestId: 'public-api-source-manifest-v2',
+      outputMetadata: pipelineOutput,
+      stages: [
+        transform('technical-rec709', 'technical', true, pipelineSource, 'ffmpeg-zscale', { mode: 'identity' }),
+        transform('match-source', 'match', false, pipelineSource, 'apollo-match', { mode: 'bypass' }),
+        transform('creative-none', 'creative-lut', false, pipelineSource, 'apollo-lut', { mode: 'none' }),
+        transform('output-rec709', 'output', true, pipelineOutput, 'ffmpeg-zscale', { dither: true }),
+      ],
+    }
+    const createPipeline = () => fetch(
+      `${baseUrl}/v1/projects/${created.data.project.id}/color-pipeline-compilations`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'public-color-pipeline-1',
+        },
+        body: JSON.stringify(pipelineRequest),
+      },
+    )
+    const pipelineResponse = await createPipeline()
+    const pipeline = await pipelineResponse.json()
+    assert.equal(pipelineResponse.status, 201)
+    assert.equal(pipeline.data.replayed, false)
+    assert.equal(pipeline.data.compilation.colorProbeHash, sourceColorProbe.probeHash)
+    assert.deepEqual(pipeline.data.compilation.pipeline.sourceMetadata, pipelineSource)
+    assert.deepEqual(
+      pipeline.data.compilation.pipeline.stages.map((stage) => stage.kind),
+      ['technical', 'match', 'creative-lut', 'output'],
+    )
+    assert.equal((await createPipeline()).status, 200)
+    const readPipelineResponse = await fetch(
+      `${baseUrl}/v1/projects/${created.data.project.id}/color-pipeline-compilations/${pipeline.data.compilation.id}`,
+      { headers: { authorization } },
+    )
+    const readPipeline = await readPipelineResponse.json()
+    assert.equal(readPipelineResponse.status, 200)
+    assert.deepEqual(readPipeline.data.compilation, pipeline.data.compilation)
+    assert.equal(
+      await client.v2ColorPipelineCompilation.count({
+        where: { workspaceId, projectId: created.data.project.id },
+      }),
+      1,
+    )
     const projectEvents = await client.v2PublicEventOutbox.findMany({
       where: {
         workspaceId,
