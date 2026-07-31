@@ -131,6 +131,44 @@ function clipRanges(
     })
 }
 
+function changedSubtitleTextRange(input: {
+  before: Readonly<Record<string, unknown>>
+  after: Readonly<Record<string, unknown>>
+}): readonly Readonly<CommandImpactRange>[] {
+  const cues = (planValue: Readonly<Record<string, unknown>>, field: string) => {
+    const plan = record(planValue, field)
+    assertDomain(Array.isArray(plan.subtitleTracks), 'INVALID_ARGUMENT', `${field} subtitle tracks are invalid`)
+    return new Map(plan.subtitleTracks.flatMap((trackValue, trackIndex) => {
+      const track = record(trackValue, `${field} subtitle track`)
+      assertDomain(Array.isArray(track.cues), 'INVALID_ARGUMENT', `${field} subtitle cues are invalid`)
+      return track.cues.map((cueValue, cueIndex) => {
+        const cue = record(cueValue, `${field} subtitle cue`)
+        const id = String(cue.id)
+        const startFrame = Number(cue.startFrame)
+        const endFrame = Number(cue.endFrame)
+        assertDomain(
+          validId(id) && Number.isSafeInteger(startFrame) && Number.isSafeInteger(endFrame) &&
+            startFrame >= 0 && endFrame > startFrame && typeof cue.text === 'string',
+          'INVALID_ARGUMENT',
+          `${field} subtitle cue ${trackIndex}:${cueIndex} is invalid`,
+        )
+        return [id, { startFrame, endFrame, text: cue.text }] as const
+      })
+    }))
+  }
+  const before = cues(input.before, 'Before EditPlan')
+  const after = cues(input.after, 'After EditPlan')
+  const changed = [...new Set([...before.keys(), ...after.keys()])]
+    .filter((id) => before.get(id)?.text !== after.get(id)?.text)
+  assertDomain(changed.length === 1, 'INVALID_ARGUMENT', 'Manual subtitle text edit must change exactly one cue')
+  const ranges = [before.get(changed[0]!), after.get(changed[0]!)]
+    .filter((cue): cue is { startFrame: number; endFrame: number; text: string } => Boolean(cue))
+  return Object.freeze([Object.freeze({
+    startFrame: Math.min(...ranges.map((range) => range.startFrame)),
+    endFrame: Math.max(...ranges.map((range) => range.endFrame)),
+  })])
+}
+
 function planDuration(plan: Readonly<Record<string, unknown>>): number {
   const value = Number(plan.durationFrames)
   assertDomain(
@@ -261,7 +299,11 @@ export function createManualCommandImpact(input: {
   }
   const classification = classify(input.action, input.operation)
   const affectedRanges = input.action === 'apply'
-    ? mergedRange({
+    ? input.operation?.kind === 'inspect' &&
+        Object.keys(input.operation.patch).length === 1 &&
+        input.operation.patch.text !== undefined
+      ? changedSubtitleTextRange({ before: input.beforeEditPlan, after: input.afterEditPlan })
+      : mergedRange({
         before: input.beforeEditPlan,
         after: input.afterEditPlan,
         targetId: input.targetId,

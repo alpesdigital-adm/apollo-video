@@ -1651,6 +1651,9 @@ operação manual `crop` persiste um retângulo normalizado dentro do clip e do
 formato declarados, produz dependência somente visual e um único range mínimo;
 o FFmpeg aplica esse crop antes da composição e o `RenderElementMap` reflete os
 bounds resultantes. Prefixo e sufixo permanecem vindos do proxy-base. A
+edição manual de texto de legenda materializa o cue no `EditPlan`, calcula o
+range stale pelos frames do cue realmente alterado e recompõe apenas esse
+intervalo; o renderer recebe o texto novo no mesmo input materializado. A
 entrega permanece aberta até a mesma semântica cobrir todos os Commands e
 ranges e a jornada integrada ser executada, implantada e aceita.
 

@@ -42,7 +42,11 @@ function plan(versionId = baseVersionId) {
         { id: 'clip-2', sourceArtifactId: 'source-1', sourceInFrame: 90, sourceOutFrame: 180, timelineInFrame: 90, timelineOutFrame: 180, rate: 1 },
       ],
     }],
-    overlayTracks: [], subtitleTracks: [], audioTracks: [], effectTracks: [], markers: [], transitions: [],
+    overlayTracks: [], subtitleTracks: [{
+      id: 'captions', kind: 'captions', presetId: 'clean-color', anchor: 'bottom',
+      faceProtection: true, maxLines: 2, maxCharactersPerBlock: 32,
+      cues: [{ id: 'cue-1', startFrame: 15, endFrame: 45, text: 'Texto original', anchor: 'bottom' }],
+    }], audioTracks: [], effectTracks: [], markers: [], transitions: [],
     protectedElements: [], localeVariantRefs: [], formatVariantRefs: [], lineageRefs: ['source-1'],
     movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
     subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 32 },
@@ -59,6 +63,16 @@ const outputs = [
 ]
 
 function impact(overrides = {}) {
+  const beforeEditPlan = plan()
+  const operation = { kind: 'inspect', clipId: 'clip-1', patch: { text: 'Texto revisado' } }
+  const afterEditPlan = materializeManualEditPlan({
+    editPlan: beforeEditPlan,
+    operation,
+    newVersionId: resultVersionId,
+    createdAt,
+    availableAssetIds: ['source-1'],
+    variantId: '9:16',
+  })
   return createManualCommandImpact({
     commandId,
     baseVersionId,
@@ -66,9 +80,9 @@ function impact(overrides = {}) {
     variantId: '9:16',
     targetId: 'clip-1',
     action: 'apply',
-    operation: { kind: 'inspect', clipId: 'clip-1', patch: { subtitle: 'clean-bold' } },
-    beforeEditPlan: plan(),
-    afterEditPlan: plan(resultVersionId),
+    operation,
+    beforeEditPlan,
+    afterEditPlan,
     outputReferences: outputs,
     ...overrides,
   })
@@ -77,15 +91,15 @@ function impact(overrides = {}) {
 test('T-FR-233 manual subtitle impact scopes exact range, variant and historical outputs', () => {
   const value = impact()
   assert.equal(value.schemaVersion, 'command-impact/v1')
-  assert.deepEqual(value.changeKinds, ['inspect:subtitle'])
+  assert.deepEqual(value.changeKinds, ['inspect:text'])
   assert.deepEqual(value.dependencyTypes, ['visual'])
-  assert.deepEqual(value.affectedRanges, [{ startFrame: 0, endFrame: 90 }])
+  assert.deepEqual(value.affectedRanges, [{ startFrame: 15, endFrame: 45 }])
   assert.deepEqual(value.affectedVariantIds, ['9:16'])
   assert.deepEqual(value.affectedArtifacts.map((item) => item.artifactId), [
     'artifact-final-9x16', 'artifact-proxy-9x16',
   ])
   assert.deepEqual(value.minimalRenders, [{
-    kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 90 }],
+    kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 15, endFrame: 45 }],
   }])
   assert.equal(value.impactHash.length, 64)
   const invalidations = createCommandArtifactInvalidations({ impact: value, createdAt })
@@ -99,6 +113,10 @@ test('T-FR-233 manual subtitle impact scopes exact range, variant and historical
     () => parseCommandArtifactInvalidation({ ...invalidations[0], status: 'available' }),
     (error) => error.code === 'PERSISTENCE_CONFLICT',
   )
+  const combinedInspector = impact({
+    operation: { kind: 'inspect', clipId: 'clip-1', patch: { text: 'Texto revisado', layout: 'portrait-safe' } },
+  })
+  assert.deepEqual(combinedInspector.affectedRanges, [{ startFrame: 0, endFrame: 90 }])
 })
 
 test('T-FR-233 timing impact extends through shifted downstream frames while selection avoids render', () => {

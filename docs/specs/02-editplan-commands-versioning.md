@@ -625,6 +625,19 @@ das receitas proxy/final muda junto com essa semântica de pixels. Os contratos
 de manual edit, timeline e compare avançam para major 2 com novos schema refs;
 os refs v1 permanecem imutáveis no catálogo.
 
+Para uma operação contendo somente `inspect.text`, o impacto não usa o range
+inteiro do clip por conveniência. A materialização altera exatamente o
+primeiro cue sobreposto e o
+impacto compara os snapshots antes/depois, exige um único cue modificado e usa
+seus `startFrame/endFrame` como range stale. O golden FFmpeg renderiza texto
+anterior e revisado em um cue central, confirma pixels diferentes somente no
+range recomposto, prefixo/sufixo byte-equivalentes nos frames amostrados,
+duração integral e presença do subtitle no `RenderElementMap` apenas durante o
+cue.
+Se o mesmo patch também carregar layout, estilo, cor, movimento ou áudio, o
+impacto volta deliberadamente ao range do clip para não subinvalidar a mudança
+combinada.
+
 ## 24. Matriz de invalidação
 
 | Command | Invalida | Não invalida |

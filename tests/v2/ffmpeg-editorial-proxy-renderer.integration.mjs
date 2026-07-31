@@ -245,6 +245,72 @@ test('T-FR-233 renderer applies a scoped normalized crop only inside the stale p
   }
 })
 
+test('T-FR-233 renderer changes subtitle pixels only inside the stale cue range', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-subtitle-range-render-'))
+  const masterPath = join(root, 'subtitle-master.mp4')
+  try {
+    execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=gray:s=640x360:r=30:d=3',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=3',
+      '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-ar', '48000', masterPath,
+    ], { windowsHide: true })
+    const renderer = new FfmpegEditorialProxyRenderer({
+      workRoot: join(root, 'work'),
+      ffmpegPath,
+    })
+    const source = {
+      artifactId: 'artifact-subtitle-master', path: masterPath, mediaType: 'video',
+      colorPipelineCompilation: colorCompilation('artifact-subtitle-master'),
+    }
+    const clips = [{
+      id: 'clip-subtitle', sourceArtifactId: source.artifactId,
+      sourceInFrame: 0, sourceOutFrame: 90,
+      timelineInFrame: 0, timelineOutFrame: 90, rate: 1,
+    }]
+    const base = await renderer.render({
+      operationId: 'subtitle-range-base', renderKind: 'proxy', sources: [source], clips,
+      fps: 30, format: '16:9',
+      subtitleCues: [{ id: 'cue-manual', startFrame: 30, endFrame: 60, text: 'ANTES', anchor: 'bottom' }],
+    })
+    const revised = await renderer.render({
+      operationId: 'subtitle-range-partial', renderKind: 'proxy', sources: [source], clips,
+      fps: 30, format: '16:9',
+      subtitleCues: [{ id: 'cue-manual', startFrame: 30, endFrame: 60, text: 'DEPOIS REVISADO', anchor: 'bottom' }],
+      rangeReuse: {
+        schemaVersion: 'project-proxy-range-reuse/v1',
+        commandId: 'manual-command-subtitle-golden', impactHash: '3'.repeat(64),
+        baseVersionId: 'project-version-subtitle-base',
+        ranges: [{ startFrame: 30, endFrame: 60 }],
+        artifactId: 'artifact-subtitle-base-proxy', manifestId: 'manifest-subtitle-base-proxy',
+        path: base.outputPath, sha256: base.sha256, byteSize: base.byteSize,
+      },
+    })
+    const sample = (path, second) => execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', path,
+      '-frames:v', '1', '-vf', 'scale=240:135',
+      '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+    ], { windowsHide: true })
+    assert.deepEqual(sample(revised.outputPath, 0.5), sample(base.outputPath, 0.5))
+    assert.notDeepEqual(sample(revised.outputPath, 1.5), sample(base.outputPath, 1.5))
+    assert.deepEqual(sample(revised.outputPath, 2.5), sample(base.outputPath, 2.5))
+    const rangeProbe = await probeVideo(
+      join(root, 'work', 'subtitle-range-partial', 'editorial-proxy-range.mp4'),
+    )
+    assert.ok(Math.abs(rangeProbe.duration - 1) <= 0.1)
+    assert.ok(Math.abs(revised.probe.duration - 3) <= 0.1)
+    assert.equal(revised.renderElementMap.elements.some((item) =>
+      item.type === 'subtitle' && item.frame === 15), false)
+    assert.equal(revised.renderElementMap.elements.some((item) =>
+      item.type === 'subtitle' && item.frame === 45), true)
+    await renderer.cleanup('subtitle-range-partial')
+    await renderer.cleanup('subtitle-range-base')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('T-FR-233 renderer recomposes only the stale range and reuses valid proxy prefix and suffix', async () => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-range-reuse-render-'))
   const masterPath = join(root, 'master.mp4')

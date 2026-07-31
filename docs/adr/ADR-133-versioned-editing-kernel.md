@@ -47,3 +47,13 @@ this pixel behavior changes. A real red/blue FFmpeg golden proves that only the
 stale middle range is cropped while the base proxy prefix and suffix remain
 valid. PostgreSQL/API E2E coverage is prepared but not executed locally, so
 crop and FR-233 remain unaccepted.
+
+Manual subtitle text follows the same path without treating the whole clip as
+stale. A text-only `inspect.text` materializes the overlapping cue in the immutable
+EditPlan; impact derivation compares before/after subtitle cues, requires
+exactly one changed cue and uses its frame range. A real FFmpeg golden proves
+that only this interval changes pixels and that proxy-base prefix/suffix remain
+identical at sampled frames. This is local evidence only: B-roll/source
+transcript cases, PostgreSQL execution, deploy and acceptance remain open.
+Combined inspector patches retain the clip range so another visual or audio
+field cannot be under-invalidated.
