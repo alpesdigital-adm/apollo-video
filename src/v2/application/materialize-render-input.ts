@@ -31,6 +31,8 @@ export function materializeRenderInputService(dependencies: {
       }
       const supportedLocation =
         uri.protocol === 'https:' ||
+        (uri.protocol === 'http:' &&
+          ['localhost', '127.0.0.1', '[::1]'].includes(uri.hostname)) ||
         (uri.protocol === 'file:' &&
           (uri.hostname === '' || uri.hostname === 'localhost') &&
           uri.search.length === 0 &&

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import { createReadStream } from 'node:fs'
 import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -12,6 +14,7 @@ import { createRenderInputSpec } from '../../src/v2/domain/render-input.ts'
 import { materializeAuthorizedRenderInputService } from '../../src/v2/application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../../src/v2/application/render-authorized-input.ts'
 import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
+import { S3ArtifactRenderInputResolver } from '../../src/v2/infrastructure/s3-artifact-render-input-resolver.ts'
 import { RemotionRenderInputRenderer } from '../../src/v2/infrastructure/remotion-render-input-renderer.ts'
 import { calculateFileSha256 } from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
 import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
@@ -49,6 +52,42 @@ async function createSource(outputPath) {
     '-y',
     outputPath,
   ])
+}
+
+async function serveVersionedSource(filePath) {
+  const metadata = await stat(filePath)
+  let getCount = 0
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+    if (url.pathname !== '/source.mp4' || url.searchParams.get('versionId') !== 'render-version-1') {
+      response.writeHead(404).end(); return
+    }
+    const common = { 'accept-ranges': 'bytes', 'content-type': 'video/mp4' }
+    if (request.method === 'HEAD') {
+      response.writeHead(200, { ...common, 'content-length': metadata.size }).end(); return
+    }
+    if (request.method !== 'GET') { response.writeHead(405).end(); return }
+    getCount += 1
+    const match = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? '')
+    const start = match ? Number(match[1]) : 0
+    const end = match?.[2] ? Math.min(Number(match[2]), metadata.size - 1) : metadata.size - 1
+    response.writeHead(match ? 206 : 200, {
+      ...common,
+      'content-length': end - start + 1,
+      ...(match ? { 'content-range': `bytes ${start}-${end}/${metadata.size}` } : {}),
+    })
+    createReadStream(filePath, { start, end }).pipe(response)
+  })
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  return {
+    uri: `http://127.0.0.1:${address.port}/source.mp4?versionId=render-version-1&X-Amz-Expires=120&X-Amz-Signature=${'a'.repeat(64)}`,
+    getCount: () => getCount,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  }
 }
 
 test('authorized materialized lease produces and promotes a real Remotion smoke render', { timeout: 180_000 }, async (context) => {
@@ -245,4 +284,38 @@ test('authorized materialized lease produces and promotes a real Remotion smoke 
   assert.equal(JSON.stringify(recovered).includes(outputKey), false)
   const outputEntries = await readdir(path.dirname(outputPath))
   assert.deepEqual(outputEntries, ['smoke.mp4'])
+
+  const objectServer = await serveVersionedSource(sourcePath)
+  context.after(() => objectServer.close())
+  const s3Resolver = new S3ArtifactRenderInputResolver(
+    { v2MediaArtifact: { async findFirst() { return {
+      id: 'golden-source-artifact', workspaceId: 'golden-workspace', artifactKey,
+      sha256: sourceSha256, byteSize: BigInt(sourceMetadata.size), mediaType: 'video', status: 'available',
+    } } } },
+    'golden-workspace',
+    { async resolve(asset) { return { uri: objectServer.uri, sha256: asset.sha256, byteSize: asset.byteSize } } },
+    resolver,
+    '2026-07-14T12:06:00.000Z',
+  )
+  const s3Materialize = materializeAuthorizedRenderInputService({
+    artifacts: { async findById() { return { id: 'golden-output-artifact', manifests: [{ id: 'golden-output-manifest', renderInput: { ref: `render-input/sha256/${input.inputHash}`, inputHash: input.inputHash } }] } } },
+    protectedRenderInputs: { async read() { return input } },
+    assetAvailability: { async inspect() { return { available: true } } },
+    targets: { supportsRenderer() { return true }, supportsComposition() { return true } },
+    rights: { async findCurrentForArtifacts() { return new Map([['golden-source-artifact', rights]]) } },
+    authorizations: { async findById() { return authorization } },
+    resolverForWorkspace: () => s3Resolver,
+    clock: () => new Date('2026-07-14T12:01:00.000Z'),
+  })
+  const s3OutputKey = 'workspaces/golden/renders/smoke-s3.mp4'
+  const s3Receipt = await renderAuthorizedInputService({
+    materialize: s3Materialize,
+    renderer: new RemotionRenderInputRenderer({ projectRoot: process.cwd(), outputRoot, timeoutMs: 120_000, createId: () => 'golden-s3-stage', clock: () => new Date('2026-07-14T12:02:00.000Z') }),
+    outputKeyFor: () => s3OutputKey,
+  })({ workspaceId: 'golden-workspace', authorizationId: 'golden-authorization' })
+  const s3OutputPath = path.join(outputRoot, ...s3OutputKey.split('/'))
+  assert.equal(s3Receipt.output.outputSha256, await calculateFileSha256(s3OutputPath))
+  assert.ok(objectServer.getCount() > 0)
+  assert.equal(JSON.stringify(s3Receipt).includes('X-Amz-'), false)
+  assert.deepEqual((await readdir(path.dirname(outputPath))).sort(), ['smoke-s3.mp4', 'smoke.mp4'])
 })

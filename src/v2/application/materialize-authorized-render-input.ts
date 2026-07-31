@@ -110,7 +110,10 @@ export function materializeAuthorizedRenderInputService(dependencies: {
   rights: AssetRightsRepository
   luts: WorkspaceLutRepository
   authorizations: MaterializationAuthorizationRepository
-  resolverForWorkspace: (workspaceId: string) => RenderInputAssetResolver
+  resolverForWorkspace: (
+    workspaceId: string,
+    authorization: Readonly<{ validUntil: string }>,
+  ) => RenderInputAssetResolver
   clock: () => Date
 }) {
   return async function materializeAuthorizedRenderInput(request: {
@@ -218,7 +221,9 @@ export function materializeAuthorizedRenderInputService(dependencies: {
     }
 
     const renderInput = await materializeRenderInputService({
-      resolver: dependencies.resolverForWorkspace(workspaceId),
+      resolver: dependencies.resolverForWorkspace(workspaceId, {
+        validUntil: authorization.validUntil,
+      }),
     })(input)
     const completedAt = dependencies.clock()
     assertDomain(

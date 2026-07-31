@@ -233,6 +233,11 @@ import { SafeWebhookChallengeTransport } from './webhook/safe-webhook-challenge-
 import { SafeWebhookDeliveryTransport } from './webhook/safe-webhook-delivery-transport.ts'
 import { getV2PostgresClient } from './prisma-postgres/client.ts'
 import { LocalArtifactRenderInputResolver } from './local-artifact-render-input-resolver.ts'
+import { S3ArtifactRenderInputResolver } from './s3-artifact-render-input-resolver.ts'
+import {
+  AwsS3RenderInputObjectClient,
+  type S3RenderInputObjectClient,
+} from './s3-render-input-object-client.ts'
 import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts'
 import { createLocalMediaUploadStorageFromEnvironment } from './media/local-media-upload-storage.ts'
 import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
@@ -994,7 +999,59 @@ export function createRenderInputAssetAvailability(): RenderInputAssetAvailabili
 export function createRenderInputAssetResolver(
   workspaceId: string,
   environment: NodeJS.ProcessEnv = process.env,
+  options: Readonly<{
+    validUntil?: string
+    s3Objects?: S3RenderInputObjectClient
+  }> = {},
 ): RenderInputAssetResolver {
+  const driver = environment.APOLLO_V2_ARTIFACT_STORAGE_DRIVER?.trim().toLowerCase() || 'local'
+  if (driver === 's3') {
+    const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
+    if (!workRoot) {
+      throw new DomainError(
+        'PERSISTENCE_NOT_CONFIGURED',
+        'Render work root is required for S3-backed LUT materialization',
+      )
+    }
+    const client = resolveV2Client()
+    const luts = createWorkspaceLutRepository()
+    const nonMediaResolver = new LocalArtifactRenderInputResolver(client, {
+      root: workRoot,
+      workspaceId,
+      luts,
+    })
+    const forcePathStyle = environment.APOLLO_V2_S3_FORCE_PATH_STYLE?.trim().toLowerCase()
+    if (forcePathStyle && !['true', 'false'].includes(forcePathStyle)) {
+      throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'S3 path-style setting is invalid')
+    }
+    if (!options.validUntil) {
+      throw new DomainError(
+        'PERSISTENCE_NOT_CONFIGURED',
+        'Materialization authorization expiry is required for S3 render assets',
+      )
+    }
+    return new S3ArtifactRenderInputResolver(
+      client,
+      workspaceId,
+      options.s3Objects ?? new AwsS3RenderInputObjectClient({
+        endpoint: environment.APOLLO_V2_S3_ENDPOINT ?? '',
+        region: environment.APOLLO_V2_S3_REGION ?? '',
+        bucket: environment.APOLLO_V2_S3_BUCKET ?? '',
+        accessKeyId: environment.APOLLO_V2_S3_ACCESS_KEY_ID ?? '',
+        secretAccessKey: environment.APOLLO_V2_S3_SECRET_ACCESS_KEY ?? '',
+        ...(environment.APOLLO_V2_S3_SESSION_TOKEN?.trim()
+          ? { sessionToken: environment.APOLLO_V2_S3_SESSION_TOKEN }
+          : {}),
+        forcePathStyle: forcePathStyle !== 'false',
+        signedUrlTtlSeconds: Number(environment.APOLLO_V2_S3_SIGNED_URL_TTL_SECONDS || 120),
+      }),
+      nonMediaResolver,
+      options.validUntil,
+    )
+  }
+  if (driver !== 'local') {
+    throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact storage driver is invalid')
+  }
   const root = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
   if (!root) {
     throw new DomainError(
@@ -1013,6 +1070,22 @@ export function createAuthorizedRenderInputMaterializer(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  const driver = environment.APOLLO_V2_ARTIFACT_STORAGE_DRIVER?.trim().toLowerCase() || 'local'
+  const s3Objects = driver === 's3'
+    ? new AwsS3RenderInputObjectClient({
+        endpoint: environment.APOLLO_V2_S3_ENDPOINT ?? '',
+        region: environment.APOLLO_V2_S3_REGION ?? '',
+        bucket: environment.APOLLO_V2_S3_BUCKET ?? '',
+        accessKeyId: environment.APOLLO_V2_S3_ACCESS_KEY_ID ?? '',
+        secretAccessKey: environment.APOLLO_V2_S3_SECRET_ACCESS_KEY ?? '',
+        ...(environment.APOLLO_V2_S3_SESSION_TOKEN?.trim()
+          ? { sessionToken: environment.APOLLO_V2_S3_SESSION_TOKEN }
+          : {}),
+        forcePathStyle: environment.APOLLO_V2_S3_FORCE_PATH_STYLE?.trim().toLowerCase() !== 'false',
+        signedUrlTtlSeconds: Number(environment.APOLLO_V2_S3_SIGNED_URL_TTL_SECONDS || 120),
+        clock,
+      })
+    : undefined
   return materializeAuthorizedRenderInputService({
     artifacts: createMediaArtifactQueryRepository(),
     protectedRenderInputs: createProtectedRenderInputStore(),
@@ -1021,8 +1094,11 @@ export function createAuthorizedRenderInputMaterializer(
     rights: createAssetRightsRepository(),
     luts: createWorkspaceLutRepository(),
     authorizations: createMaterializationAuthorizationRepository(),
-    resolverForWorkspace: (workspaceId) =>
-      createRenderInputAssetResolver(workspaceId, environment),
+    resolverForWorkspace: (workspaceId, authorization) =>
+      createRenderInputAssetResolver(workspaceId, environment, {
+        validUntil: authorization.validUntil,
+        ...(s3Objects ? { s3Objects } : {}),
+      }),
     clock,
   })
 }

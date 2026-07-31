@@ -1422,6 +1422,7 @@ test('authorized worker materialization revalidates rights and keeps locations i
   let currentRights = rights
   let workerNow = new Date('2026-07-14T12:02:00.000Z')
   let resolverCalls = 0
+  let resolverAuthorization
   const materialize = materializeAuthorizedRenderInputService({
     artifacts: {
       async findById() {
@@ -1448,7 +1449,8 @@ test('authorized worker materialization revalidates rights and keeps locations i
       },
     },
     authorizations: { async findById() { return authorization } },
-    resolverForWorkspace() {
+    resolverForWorkspace(_workspaceId, currentAuthorization) {
+      resolverAuthorization = currentAuthorization
       return {
         async resolve(asset) {
           resolverCalls += 1
@@ -1468,6 +1470,7 @@ test('authorized worker materialization revalidates rights and keeps locations i
     authorizationId: 'materialization-worker-1',
   })
   assert.equal(resolverCalls, 1)
+  assert.deepEqual(resolverAuthorization, { validUntil: authorization.validUntil })
   assert.equal(lease.receipt.assetCount, 1)
   assert.equal(lease.receipt.revalidationHash.length, 64)
   assert.equal(
