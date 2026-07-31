@@ -115,6 +115,7 @@ export async function POST(
       })({
         workspaceId: actor.workspaceId,
         projectId,
+        expectedProjectVersionId: result.version.id,
         actor: { type: 'api-client', id: actor.clientId },
         idempotencyKey: `${idempotencyKey}:proxy`,
       })
@@ -234,6 +235,19 @@ export async function POST(
       actor: { type: 'api-client', id: actor.clientId },
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
     })
+    const proxy = await enqueueProjectProxyRenderService({
+      projects: createProjectProxyRenderRepository(),
+      operations: createPublicOperationRepository(),
+      colorPipelines: createColorPipelineCompilationRepository(),
+      clock: () => new Date(),
+      createId: (kind) => `${kind}-${randomUUID()}`,
+    })({
+      workspaceId: actor.workspaceId,
+      projectId,
+      expectedProjectVersionId: result.version.id,
+      actor: { type: 'api-client', id: actor.clientId },
+      idempotencyKey: `${idempotencyKey}:proxy`,
+    })
     return NextResponse.json(
       presentSuccess({
         command: {
@@ -261,8 +275,11 @@ export async function POST(
           automaticZoom: result.editPlan.movementPolicy.automaticZoom,
           protectedOpeningFrames: result.editPlan.movementPolicy.protectedOpeningFrames,
           subtitleFaceProtection: result.editPlan.subtitlePolicy.faceProtection,
+          impact: result.impact,
+          invalidations: result.invalidations,
         },
-        replayed: result.replayed,
+        operation: presentPublicOperation(proxy.operation),
+        replayed: result.replayed && proxy.replayed,
       }),
       { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) },
     )

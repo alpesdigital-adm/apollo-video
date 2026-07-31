@@ -78,3 +78,15 @@ therefore resolves the transcript selected by the current EditPlan and verifies
 its optional hash, even when a newer unselected transcript exists. Domain tests
 pass and PostgreSQL/API coverage is prepared, but not executable on this host;
 the case remains unaccepted until that E2E, deploy and visual acceptance run.
+
+`remove-spoken-content` is the next Command integrated into persisted
+invalidation. It intentionally does not claim partial reuse: the handler
+recompiles the complete EditPlan from aligned transcript evidence, so its
+content-addressed `editorial-cut-impact/v1` covers the full base/result timeline,
+all completed base proxy/final variants and audio/content/timing/visual
+dependencies. The serializable commit re-reads that exact output set and writes
+normal `command-artifact-invalidation/v1` relationships; no completed output
+means no fabricated stale row. The public route then enqueues exactly one full
+proxy through the shared durable V2 application service and returns its
+operation. Domain/API evidence is green and PostgreSQL scenarios are prepared,
+but remain unexecuted on this host; deploy and acceptance remain open.

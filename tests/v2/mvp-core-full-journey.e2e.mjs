@@ -685,6 +685,17 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
     )
     assert.equal(primaryCut.editorial.automaticZoom, false)
     assert.equal(primaryCut.editorial.subtitleFaceProtection, true)
+    assert.equal(primaryCut.editorial.impact.schemaVersion, 'editorial-cut-impact/v1')
+    assert.equal(primaryCut.editorial.impact.commandId, primaryCut.command.id)
+    assert.equal(primaryCut.editorial.impact.renderSemanticsChanged, true)
+    assert.equal(primaryCut.editorial.impact.affectedRanges[0].startFrame, 0)
+    assert.equal(primaryCut.editorial.impact.affectedRanges[0].endFrame >= primaryCut.editorial.outputDurationFrames, true)
+    assert.deepEqual(primaryCut.editorial.impact.dependencyTypes, ['audio', 'content', 'timing', 'visual'])
+    assert.equal(primaryCut.editorial.impact.minimalRenders.length, 1)
+    assert.equal(primaryCut.editorial.impact.minimalRenders[0].ranges[0].endFrame, primaryCut.editorial.outputDurationFrames)
+    assert.equal(primaryCut.editorial.invalidations.length, 0)
+    assert.equal(primaryCut.operation.type, 'project-proxy-render')
+    assert.equal(primaryCut.operation.status, 'queued')
 
     const companionCut = (await api({
       method: 'POST',

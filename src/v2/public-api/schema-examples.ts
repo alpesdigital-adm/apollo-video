@@ -4557,6 +4557,38 @@ const contiguousExtractionExample = {
   createdAt,
 }
 
+const editorialCutImpactExample = {
+  schemaVersion: 'editorial-cut-impact/v1',
+  commandId: 'edit-command-editorial-example-1',
+  commandType: 'remove-spoken-content',
+  baseVersionId: 'project-version-example-1',
+  resultVersionId: 'project-version-example-2',
+  sourceTranscriptId: 'transcript-example-1',
+  sourceTranscriptHash: '1'.repeat(64),
+  changeKinds: ['spoken-content-removal'],
+  dependencyTypes: ['audio', 'content', 'timing', 'visual'],
+  affectedRanges: [{ startFrame: 0, endFrame: 3065 }],
+  affectedVariantIds: ['9:16'],
+  affectedArtifacts: [{
+    artifactId: 'artifact-proxy-example-1', kind: 'proxy',
+    sourceVersionId: 'project-version-example-1', variantId: '9:16',
+  }],
+  minimalRenders: [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 2955 }] }],
+  renderSemanticsChanged: true,
+  impactHash: '2'.repeat(64),
+}
+const editorialCutInvalidationExample = {
+  schemaVersion: 'command-artifact-invalidation/v1', id: '3'.repeat(64), status: 'stale',
+  commandId: editorialCutImpactExample.commandId,
+  baseVersionId: editorialCutImpactExample.baseVersionId,
+  resultVersionId: editorialCutImpactExample.resultVersionId,
+  artifactId: 'artifact-proxy-example-1', kind: 'proxy', variantId: '9:16',
+  dependencyTypes: editorialCutImpactExample.dependencyTypes,
+  affectedRanges: editorialCutImpactExample.affectedRanges,
+  impactHash: editorialCutImpactExample.impactHash,
+  createdAt,
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/health-response/v1': [
@@ -7542,6 +7574,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         impactHash: '3'.repeat(64),
       },
     ],
+    'apollo://schemas/editorial-cut-impact/v1': [editorialCutImpactExample],
     'apollo://schemas/project-edit-command-applied/v3': [
       {
         data: {
@@ -7582,6 +7615,49 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             }],
             nextRequiredCapability: 'apollo.projects.commands.apply:run-director',
           },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-edit-command-applied/v4': [
+      {
+        data: {
+          command: {
+            id: editorialCutImpactExample.commandId, type: 'remove-spoken-content',
+            baseVersionId: editorialCutImpactExample.baseVersionId,
+            resultVersionId: editorialCutImpactExample.resultVersionId,
+            createdAt,
+          },
+          version: {
+            id: editorialCutImpactExample.resultVersionId, sequence: 2,
+            parentVersionId: editorialCutImpactExample.baseVersionId,
+            baseHash: 'b'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', editPlan: 'project-snapshot-edit-plan-2',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          editorial: {
+            sourceTranscriptId: editorialCutImpactExample.sourceTranscriptId,
+            sourceArtifactId: artifactId,
+            exclusions: [{
+              sourceStartSeconds: 39.02, sourceEndSeconds: 42.68,
+              ruleIds: ['date-january-31', 'date-february-1'],
+              labels: ['31 de janeiro', '1 de fevereiro'],
+              matchedText: '31 de janeiro | 1 de fevereiro',
+            }],
+            retainedSourceRanges: [
+              { sourceStartSeconds: 0, sourceEndSeconds: 39.02 },
+              { sourceStartSeconds: 42.68, sourceEndSeconds: 102.166 },
+            ],
+            outputDurationFrames: 2955, fps: 30, automaticZoom: false,
+            protectedOpeningFrames: 120, subtitleFaceProtection: true,
+            impact: editorialCutImpactExample,
+            invalidations: [editorialCutInvalidationExample],
+          },
+          operation: queuedProjectProxyRenderOperationExample,
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

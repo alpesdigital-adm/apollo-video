@@ -1653,6 +1653,11 @@ seleciona uma transcrição imutável por ID/hash, retima o alinhamento sobre o
 evidência, todos os outputs concluídos da base ficam stale e render permanece
 bloqueado até um novo `run-director`; o Diretor resolve o transcript escolhido
 pelo EditPlan, não o registro mais recente por data. A
+remoção de conteúdo falado também possui impacto persistido: como recompila o
+EditPlan completo a partir do transcript alinhado, `remove-spoken-content`
+invalida full-timeline somente nos outputs concluídos da base, declara um proxy
+integral do formato corrente e o enfileira pelo application service durável
+usado pela API. Sem output-base não existe relação stale fabricada. A
 operação manual `crop` persiste um retângulo normalizado dentro do clip e do
 formato declarados, produz dependência somente visual e um único range mínimo;
 o FFmpeg aplica esse crop antes da composição e o `RenderElementMap` reflete os

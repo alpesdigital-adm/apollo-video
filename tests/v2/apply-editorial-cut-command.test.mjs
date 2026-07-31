@@ -5,6 +5,7 @@ import { applyEditorialCutCommandService } from '../../src/v2/application/apply-
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { createEditorialCutInvalidations, parseEditorialCutImpact } from '../../src/v2/domain/editorial-cut-impact.ts'
 
 const baseHash = 'a'.repeat(64)
 
@@ -46,6 +47,10 @@ class InMemoryEditorialCommandRepository {
     this.transcript = alignedTranscript()
     this.records = new Map()
     this.lastBundle = undefined
+    this.outputReferences = [
+      { artifactId: 'artifact-proxy-1', kind: 'proxy', sourceVersionId: 'project-version-1', variantId: '9:16' },
+      { artifactId: 'artifact-final-1', kind: 'final', sourceVersionId: 'project-version-1', variantId: '16:9' },
+    ]
   }
 
   async findIdempotentResult({ workspaceId, projectId, idempotencyKey }) {
@@ -58,6 +63,9 @@ class InMemoryEditorialCommandRepository {
       projectId, workspaceId, currentVersion: this.currentVersion, transcriptId,
       transcript: this.transcript, sourceArtifactId: 'artifact-master-1',
       sourceDurationSeconds: 102.166, sourceFps: 30.000000097,
+      currentDurationFrames: 3065,
+      proxyVariantId: '9:16',
+      outputReferences: this.outputReferences,
     }
   }
 
@@ -70,6 +78,8 @@ class InMemoryEditorialCommandRepository {
       editPlan,
       exclusions: editPlan.editorial.exclusions,
       retainedSourceRanges: editPlan.editorial.retainedSourceRanges,
+      impact: bundle.command.payload.impact,
+      invalidations: createEditorialCutInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt }),
       replayed: false,
     }
     this.records.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
@@ -143,6 +153,33 @@ test('typed editorial Command creates an immutable retimed EditPlan without auto
   assert.equal(retimedText.includes('dois dias'), false)
   assert.equal(repository.lastBundle.snapshot.kind, 'edit-plan')
   assert.equal(repository.lastBundle.event.type, 'project.version.created')
+  assert.equal(result.command.payload.schemaVersion, 2)
+  assert.equal(result.impact.schemaVersion, 'editorial-cut-impact/v1')
+  assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 0, endFrame: 3065 }])
+  assert.deepEqual(result.impact.affectedVariantIds, ['16:9', '9:16'])
+  assert.deepEqual(result.impact.dependencyTypes, ['audio', 'content', 'timing', 'visual'])
+  assert.equal(result.impact.minimalRenders.length, 1)
+  assert.equal(result.invalidations.length, 2)
+  assert.equal(result.invalidations.every((item) => item.status === 'stale'), true)
+  assert.equal(repository.lastBundle.event.data.commandImpactHash, result.impact.impactHash)
+  const tampered = structuredClone(result.impact)
+  tampered.affectedRanges[0].endFrame -= 1
+  assert.throws(
+    () => parseEditorialCutImpact(tampered),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+})
+
+test('editorial Command still declares the required full proxy when the base has no completed output', async () => {
+  const { repository, service } = fixture()
+  repository.outputReferences = []
+  const result = await service(request())
+  assert.deepEqual(result.impact.affectedArtifacts, [])
+  assert.deepEqual(result.impact.affectedVariantIds, [])
+  assert.deepEqual(result.impact.minimalRenders, [{
+    kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 2662 }],
+  }])
+  assert.deepEqual(result.invalidations, [])
 })
 
 test('editorial Command replays exactly and rejects reuse with a different payload', async () => {

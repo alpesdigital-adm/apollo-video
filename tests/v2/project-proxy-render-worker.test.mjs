@@ -387,6 +387,25 @@ test('T-FR-233 render-free selection fails closed when its base proxy is unavail
   )
 })
 
+test('proxy enqueue fails closed when a committed Command result is no longer current', async () => {
+  await assert.rejects(
+    enqueueProjectProxyRenderService({
+      projects: { async readCurrentSource() { return source() } },
+      colorPipelines: { async readForSources() { throw new Error('must not run') } },
+      operations: { async findReplay() { throw new Error('must not run') } },
+      clock: () => new Date('2026-07-31T22:40:00.000Z'),
+      createId: (kind) => `created-${kind}-version-fence`,
+    })({
+      workspaceId: 'workspace-project-proxy-test',
+      projectId: 'project-proxy-test',
+      expectedProjectVersionId: 'project-version-command-result',
+      actor: { type: 'api-client', id: 'client-project-proxy-test' },
+      idempotencyKey: 'proxy-version-fence-test',
+    }),
+    (error) => error.code === 'VERSION_CONFLICT' && error.details.currentProjectVersionId === 'project-version-proxy-test',
+  )
+})
+
 test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache hit', async () => {
   const baseVersionId = 'project-version-proxy-base'
   const resultVersionId = 'project-version-proxy-selection'

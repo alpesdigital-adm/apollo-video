@@ -18,10 +18,12 @@ import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createMediaTranscript } from '../../domain/media-transcript.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
+import { createEditorialCutInvalidations, parseEditorialCutImpact } from '../../domain/editorial-cut-impact.ts'
+import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 
 type StoredCommand = Prisma.V2EditCommandGetPayload<{
-  include: { resultVersion: { include: { editPlanSnapshot: true } } }
+  include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true }
 }>
 
 function parseRecord(value: string, field: string): Record<string, unknown> {
@@ -34,10 +36,27 @@ function parseRecord(value: string, field: string): Record<string, unknown> {
   }
 }
 
+function parseArray(value: string, field: string): readonly unknown[] {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!Array.isArray(parsed)) throw new Error('invalid')
+    return parsed
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
+  }
+}
+
 function hydrateStoredCommand(row: StoredCommand, replayed: boolean): EditorialCommandResult {
   if (!row.resultVersion) throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial command result version is missing')
   const scope = parseRecord(row.scopeJson, 'editorial command scope') as EditScope
   const payload = parseRecord(row.payloadJson, 'editorial command payload') as unknown as RemoveSpokenContentPayload
+  const impact = parseEditorialCutImpact(payload.impact)
+  if (
+    row.type !== 'remove-spoken-content' || payload.schemaVersion !== 2 ||
+    impact.commandId !== row.id || impact.baseVersionId !== row.baseVersionId ||
+    impact.resultVersionId !== row.resultVersion.id ||
+    impact.sourceTranscriptId !== payload.sourceTranscriptId
+  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored editorial command impact is inconsistent')
   const command = createEditCommand<RemoveSpokenContentPayload>({
     id: row.id,
     workspaceId: row.workspaceId,
@@ -83,12 +102,28 @@ function hydrateStoredCommand(row: StoredCommand, replayed: boolean): EditorialC
   ) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored editorial EditPlan is inconsistent')
   }
+  const expectedInvalidations = createEditorialCutInvalidations({ impact, createdAt: row.createdAt.toISOString() })
+    .toSorted((left, right) => left.id.localeCompare(right.id))
+  const invalidations = row.artifactInvalidations.map((item) => parseCommandArtifactInvalidation({
+    schemaVersion: 'command-artifact-invalidation/v1', id: item.id, status: item.status,
+    commandId: item.commandId, baseVersionId: item.baseVersionId,
+    resultVersionId: item.resultVersionId, artifactId: item.artifactId,
+    kind: item.kind, variantId: item.variantId,
+    dependencyTypes: parseArray(item.dependencyTypesJson, 'editorial invalidation dependencies'),
+    affectedRanges: parseArray(item.affectedRangesJson, 'editorial invalidation ranges'),
+    impactHash: item.impactHash, createdAt: item.createdAt.toISOString(),
+  })).toSorted((left, right) => left.id.localeCompare(right.id))
+  if (stableSerialize(expectedInvalidations) !== stableSerialize(invalidations)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored editorial invalidations are inconsistent')
+  }
   return Object.freeze({
     command,
     version,
     editPlan: Object.freeze(editPlan),
     exclusions: Object.freeze(editPlan.editorial.exclusions),
     retainedSourceRanges: Object.freeze(editPlan.editorial.retainedSourceRanges),
+    impact,
+    invalidations: Object.freeze(invalidations),
     replayed,
   })
 }
@@ -109,7 +144,7 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
       where: {
         workspaceId_projectId_idempotencyKey: input,
       },
-      include: { resultVersion: { include: { editPlanSnapshot: true } } },
+      include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
     })
     if (!row) return null
     return Object.freeze({
@@ -126,14 +161,14 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
     const [project, transcriptRow] = await Promise.all([
       this.client.v2Project.findFirst({
         where: { id: input.projectId, workspaceId: input.workspaceId },
-        include: { currentVersion: true },
+        include: { currentVersion: { include: { editPlanSnapshot: true } } },
       }),
       this.client.v2MediaTranscript.findFirst({
         where: { id: input.transcriptId, projectId: input.projectId, workspaceId: input.workspaceId },
       }),
     ])
     if (!project?.currentVersion || !transcriptRow) return null
-    const [artifact, manifests] = await Promise.all([
+    const [artifact, manifests, proxyOutputs, finalOutputs] = await Promise.all([
       this.client.v2MediaArtifact.findFirst({
         where: { id: transcriptRow.sourceArtifactId, workspaceId: input.workspaceId, status: 'available' },
       }),
@@ -144,6 +179,14 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 32,
+      }),
+      this.client.v2ProjectProxyRenderOperation.findMany({
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true },
+      }),
+      this.client.v2ProjectFinalExportOperation.findMany({
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true, outputAspectRatio: true },
       }),
     ])
     if (!artifact || manifests.length === 0) throw new DomainError('PERSISTENCE_CONFLICT', 'Transcript source artifact or manifest is missing')
@@ -180,6 +223,11 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
       throw new DomainError('PERSISTENCE_CONFLICT', 'Source media duration or frame rate is invalid')
     }
     const versionRow = project.currentVersion
+    const currentEditPlan = parseRecord(versionRow.editPlanSnapshot.contentJson, 'current editorial base EditPlan')
+    const currentDurationFrames = Number(currentEditPlan.durationFrames)
+    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames <= 0) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan duration is invalid')
+    }
     return Object.freeze({
       projectId: project.id,
       workspaceId: project.workspaceId,
@@ -204,6 +252,12 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
       sourceArtifactId: transcriptRow.sourceArtifactId,
       sourceDurationSeconds,
       sourceFps,
+      currentDurationFrames,
+      proxyVariantId: project.format ?? '9:16',
+      outputReferences: Object.freeze([
+        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: versionRow.id, variantId: project.format ?? '9:16' })),
+        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: versionRow.id, variantId: output.outputAspectRatio })),
+      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
     })
   }
 
@@ -219,7 +273,7 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
         }
         const existing = await transaction.v2EditCommand.findUnique({
           where: key,
-          include: { resultVersion: { include: { editPlanSnapshot: true } } },
+          include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
         })
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) {
@@ -255,6 +309,23 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
             currentVersionId: project.currentVersion.id,
             currentBaseHash: project.currentVersion.baseHash,
           })
+        }
+        const [proxyOutputs, finalOutputs] = await Promise.all([
+          transaction.v2ProjectProxyRenderOperation.findMany({
+            where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+            select: { outputArtifactId: true },
+          }),
+          transaction.v2ProjectFinalExportOperation.findMany({
+            where: { workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, projectVersionId: bundle.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+            select: { outputArtifactId: true, outputAspectRatio: true },
+          }),
+        ])
+        const currentOutputs = [
+          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: project.format ?? '9:16' })),
+          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
+        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+        if (stableSerialize(currentOutputs) !== stableSerialize(bundle.command.payload.impact.affectedArtifacts)) {
+          throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before editorial impact commit')
         }
         await transaction.v2EditCommand.create({
           data: {
@@ -303,6 +374,16 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
             createdAt: new Date(bundle.version.createdAt),
           },
         })
+        const invalidations = createEditorialCutInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt })
+        if (invalidations.length > 0) {
+          await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((item) => ({
+            id: item.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
+            commandId: item.commandId, baseVersionId: item.baseVersionId, resultVersionId: item.resultVersionId,
+            artifactId: item.artifactId, kind: item.kind, variantId: item.variantId, status: item.status,
+            dependencyTypesJson: stableSerialize(item.dependencyTypes), affectedRangesJson: stableSerialize(item.affectedRanges),
+            impactHash: item.impactHash, createdAt: new Date(item.createdAt),
+          })) })
+        }
         const updated = await transaction.v2Project.updateMany({
           where: {
             id: bundle.command.projectId,
@@ -329,7 +410,7 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
         })
         const stored = await transaction.v2EditCommand.findUniqueOrThrow({
           where: { id: bundle.command.id },
-          include: { resultVersion: { include: { editPlanSnapshot: true } } },
+          include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
         })
         return hydrateStoredCommand(stored, false)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })

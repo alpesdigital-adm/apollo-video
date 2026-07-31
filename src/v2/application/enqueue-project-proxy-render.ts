@@ -28,16 +28,26 @@ export function enqueueProjectProxyRenderService(dependencies: {
   return async function enqueue(request: {
     workspaceId: string
     projectId: string
+    expectedProjectVersionId?: string
     actor: { type: 'api-client'; id: string }
     idempotencyKey: string
   }) {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const projectId = validateId(request.projectId, 'projectId')
+    const expectedProjectVersionId = request.expectedProjectVersionId
+      ? validateId(request.expectedProjectVersionId, 'expectedProjectVersionId')
+      : undefined
     const clientId = validateId(request.actor.id, 'actor.id')
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(idempotencyKey.length > 0 && idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key must contain 1 to 128 characters')
     const source = await dependencies.projects.readCurrentSource({ workspaceId, projectId })
     if (!source) throw new DomainError('PROJECT_NOT_FOUND', 'Project with a compiled EditPlan and source master was not found')
+    if (expectedProjectVersionId && source.projectVersionId !== expectedProjectVersionId) {
+      throw new DomainError('VERSION_CONFLICT', 'Project changed before proxy enqueue', {
+        expectedProjectVersionId,
+        currentProjectVersionId: source.projectVersionId,
+      })
+    }
     if (source.unchangedReuseRequired && !source.unchangedReuse) {
       throw new DomainError(
         'PRECONDITION_REQUIRED',

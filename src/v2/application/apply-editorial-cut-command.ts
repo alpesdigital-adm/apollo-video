@@ -22,6 +22,7 @@ import {
 } from './recovery-project-acceptance.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import type { ManualCropRegion } from '../domain/manual-editing.ts'
+import { createEditorialCutImpact, type EditorialCutImpactV1 } from '../domain/editorial-cut-impact.ts'
 
 export interface RemoveSpokenContentRuleInput {
   id: string
@@ -30,11 +31,13 @@ export interface RemoveSpokenContentRuleInput {
 }
 
 export interface RemoveSpokenContentPayload {
+  schemaVersion: 2
   sourceTranscriptId: string
   sourceArtifactId: string
   rules: readonly Readonly<RemoveSpokenContentRuleInput>[]
   exclusions: readonly Readonly<EditorialExclusionRange>[]
   exclusionOverrides?: readonly Readonly<EditorialExclusionOverrideInput>[]
+  impact: Readonly<EditorialCutImpactV1>
 }
 
 export interface EditorialExclusionOverrideInput extends SourceTimeRange {
@@ -438,6 +441,17 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
     })
     const editPlanJson = stableSerialize(editPlan)
     const editPlanHash = calculateVersionHash(editPlan)
+    const impact = createEditorialCutImpact({
+      commandId,
+      baseVersionId,
+      resultVersionId: versionId,
+      sourceTranscriptId: context.transcriptId,
+      sourceTranscriptHash: context.transcript.transcriptHash,
+      affectedEndFrame: Math.max(context.currentDurationFrames, editPlan.durationFrames),
+      renderEndFrame: editPlan.durationFrames,
+      proxyVariantId: context.proxyVariantId,
+      outputReferences: context.outputReferences,
+    })
     const command = createEditCommand<RemoveSpokenContentPayload>({
       id: commandId,
       workspaceId,
@@ -448,11 +462,13 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       type: 'remove-spoken-content',
       scope: { project: true },
       payload: Object.freeze({
+        schemaVersion: 2,
         sourceTranscriptId: context.transcriptId,
         sourceArtifactId: context.sourceArtifactId,
         rules: Object.freeze(normalizedRules.map((rule) => Object.freeze(rule))),
         exclusions,
         ...(request.exclusionOverrides ? { exclusionOverrides: Object.freeze(request.exclusionOverrides.map((override) => Object.freeze({ ...override, ruleIds: Object.freeze([...override.ruleIds]) }))) } : {}),
+        impact,
       }),
       ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}),
       idempotencyKey,
@@ -509,6 +525,8 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
         baseHash: version.baseHash,
         commandId,
         commandType: command.type,
+        commandImpactHash: impact.impactHash,
+        invalidatedArtifactCount: impact.affectedArtifacts.length,
         snapshotRefs: version.snapshotRefs,
         createdAt,
       },

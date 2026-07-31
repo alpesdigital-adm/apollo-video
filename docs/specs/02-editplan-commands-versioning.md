@@ -588,7 +588,18 @@ em vez de inferir a seleção pela data de criação. Expandir o mesmo contrato 
 os Commands editoriais restantes, Diretor e batch ainda é obrigatório antes de
 considerar FR-233 concluído.
 
-Para `manual-edit`, cada output do mapa também cria atomicamente uma relação
+`remove-spoken-content` também usa esse modelo sem fingir uma otimização local.
+O handler recompila o EditPlan a partir do transcript alinhado; por isso seu
+`editorial-cut-impact/v1` cobre o maior timeline entre base e resultado,
+declara dependências de áudio/conteúdo/timing/visual, referencia somente
+outputs proxy/final `succeeded/completed` da base e exige um proxy integral do
+formato corrente. O conjunto de outputs é relido no commit serializável. Cada
+referência cria a mesma relação normalizada de invalidation; se não houver
+output concluído, nenhuma relação stale é fabricada. Após o commit, a rota
+pública enfileira o proxy pelo application service durável comum e devolve a
+operação; Command e enqueue convergem por chaves idempotentes relacionadas.
+
+Para `manual-edit` e `remove-spoken-content`, cada output do mapa também cria atomicamente uma relação
 normalizada `command-artifact-invalidation/v1`, identificada por hash canônico
 e ligada por FK ao Command, à versão-base, à versão-resultado e ao artifact. A
 relação carrega `stale`, variant, dependências, ranges e `impactHash`. Nenhuma

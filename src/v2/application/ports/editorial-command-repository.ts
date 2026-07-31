@@ -5,6 +5,8 @@ import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { EditorialCutEditPlan, RemoveSpokenContentPayload } from '../apply-editorial-cut-command.ts'
 import type { EditorialExclusionRange, SourceTimeRange } from '../recovery-project-acceptance.ts'
+import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
+import type { EditorialCutImpactV1 } from '../../domain/editorial-cut-impact.ts'
 
 export interface EditorialCommandContext {
   projectId: string
@@ -15,6 +17,9 @@ export interface EditorialCommandContext {
   sourceArtifactId: string
   sourceDurationSeconds: number
   sourceFps: number
+  currentDurationFrames: number
+  proxyVariantId: string
+  outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }
 
 export interface EditorialCommandResult {
@@ -23,6 +28,8 @@ export interface EditorialCommandResult {
   editPlan: Readonly<EditorialCutEditPlan>
   exclusions: readonly Readonly<EditorialExclusionRange>[]
   retainedSourceRanges: readonly Readonly<SourceTimeRange>[]
+  impact: Readonly<EditorialCutImpactV1>
+  invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
   replayed: boolean
 }
 

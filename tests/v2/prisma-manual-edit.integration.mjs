@@ -814,14 +814,62 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId,
       originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
     } })
+    const editorialKey = `remove-spoken-content-${suffix}`
+    const applyEditorialCut = () => fetch(`${baseUrl}/v1/projects/${projectId}/commands`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': editorialKey },
+      body: JSON.stringify({
+        type: 'remove-spoken-content',
+        baseVersionId: cropped.data.version.id,
+        baseHash: cropped.data.version.baseHash,
+        sourceTranscriptId: currentTranscriptId,
+        rules: [{ id: 'remove-phrase', label: 'frase', alternatives: ['frase'] }],
+        exclusionOverrides: [{
+          sourceStartSeconds: 1.1, sourceEndSeconds: 1.7,
+          ruleIds: ['remove-phrase'], reason: 'Reviewed boundary removes only the selected source word.',
+        }],
+        reason: 'Comprovar impacto editorial full-timeline e invalidação persistida.',
+      }),
+    })
+    const editorialResponse = await applyEditorialCut()
+    const editorialApplied = await editorialResponse.json()
+    assert.equal(editorialResponse.status, 201, JSON.stringify(editorialApplied))
+    assert.equal(editorialApplied.data.version.sequence, 13)
+    assert.equal(editorialApplied.data.editorial.impact.schemaVersion, 'editorial-cut-impact/v1')
+    assert.deepEqual(editorialApplied.data.editorial.impact.affectedRanges, [{ startFrame: 0, endFrame: cropPlan.durationFrames }])
+    assert.equal(editorialApplied.data.editorial.impact.minimalRenders.length, 1)
+    assert.equal(editorialApplied.data.editorial.impact.minimalRenders[0].ranges[0].endFrame, editorialApplied.data.editorial.outputDurationFrames)
+    assert.equal(editorialApplied.data.editorial.invalidations.length, 1)
+    assert.equal(editorialApplied.data.operation.type, 'project-proxy-render')
+    const editorialInvalidations = await client.v2CommandArtifactInvalidation.findMany({
+      where: { commandId: editorialApplied.data.command.id },
+    })
+    assert.equal(editorialInvalidations.length, 1)
+    assert.equal(editorialInvalidations[0].artifactId, completedProxyArtifactId)
+    assert.deepEqual(JSON.parse(editorialInvalidations[0].dependencyTypesJson), ['audio', 'content', 'timing', 'visual'])
+    const editorialReplayResponse = await applyEditorialCut()
+    assert.equal(editorialReplayResponse.status, 200)
+    assert.equal((await editorialReplayResponse.json()).data.replayed, true)
+    await client.v2PublicOperation.update({
+      where: { id: editorialApplied.data.operation.id },
+      data: {
+        status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
+        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
+        startedAt: createdAt, completedAt: createdAt, updatedAt: createdAt,
+      },
+    })
+    await client.v2ProjectProxyRenderOperation.update({
+      where: { operationId: editorialApplied.data.operation.id },
+      data: { outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId },
+    })
     const transcriptKey = `replace-source-transcript-${suffix}`
     const replaceTranscript = () => fetch(`${baseUrl}/v1/projects/${projectId}/commands`, {
       method: 'POST',
       headers: { authorization, 'content-type': 'application/json', 'idempotency-key': transcriptKey },
       body: JSON.stringify({
         type: 'replace-source-transcript',
-        baseVersionId: cropped.data.version.id,
-        baseHash: cropped.data.version.baseHash,
+        baseVersionId: editorialApplied.data.version.id,
+        baseHash: editorialApplied.data.version.baseHash,
         sourceTranscriptId: replacementTranscriptId,
         expectedTranscriptHash: replacementTranscript.transcriptHash,
         reason: 'Selecionar a retranscrição corrigida antes de executar novamente o Diretor.',
@@ -830,7 +878,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const transcriptResponse = await replaceTranscript()
     const transcriptApplied = await transcriptResponse.json()
     assert.equal(transcriptResponse.status, 201, JSON.stringify(transcriptApplied))
-    assert.equal(transcriptApplied.data.version.sequence, 13)
+    assert.equal(transcriptApplied.data.version.sequence, 14)
     assert.equal(transcriptApplied.data.command.type, 'replace-source-transcript')
     assert.equal(transcriptApplied.data.sourceTranscript.replacementTranscriptId, replacementTranscriptId)
     assert.equal(transcriptApplied.data.sourceTranscript.impact.renderBlockedUntilDirectorRun, true)

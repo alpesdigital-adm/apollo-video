@@ -5395,6 +5395,33 @@ const sourceTranscriptReplacementImpactSchema = {
     impactHash: sha256Schema,
   },
 }
+const editorialCutImpactSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId',
+    'sourceTranscriptId', 'sourceTranscriptHash', 'changeKinds', 'dependencyTypes',
+    'affectedRanges', 'affectedVariantIds', 'affectedArtifacts', 'minimalRenders',
+    'renderSemanticsChanged', 'impactHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'editorial-cut-impact/v1' },
+    commandId: idSchema,
+    commandType: { const: 'remove-spoken-content' },
+    baseVersionId: idSchema,
+    resultVersionId: idSchema,
+    sourceTranscriptId: idSchema,
+    sourceTranscriptHash: sha256Schema,
+    changeKinds: { type: 'array', minItems: 1, maxItems: 1, prefixItems: [{ const: 'spoken-content-removal' }], items: false },
+    dependencyTypes: commandImpactSchema.properties.dependencyTypes,
+    affectedRanges: commandImpactSchema.properties.affectedRanges,
+    affectedVariantIds: commandImpactSchema.properties.affectedVariantIds,
+    affectedArtifacts: commandImpactSchema.properties.affectedArtifacts,
+    minimalRenders: commandImpactSchema.properties.minimalRenders,
+    renderSemanticsChanged: { const: true },
+    impactHash: sha256Schema,
+  },
+}
 const versionComparisonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -16737,6 +16764,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     }),
   ),
   defineSchema('source-transcript-replacement-impact', 1, 'Content-addressed invalidation impact of selecting a new immutable source transcript', sourceTranscriptReplacementImpactSchema),
+  defineSchema('editorial-cut-impact', 1, 'Content-addressed full-timeline impact of removing aligned spoken content', editorialCutImpactSchema),
   defineSchema('project-edit-command-applied', 3, 'Applied edit command response including source transcript replacement and required Director recomputation',
     successSchema({
       oneOf: [
@@ -16786,6 +16814,52 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             },
             replayed: { type: 'boolean' },
           },
+        },
+      ],
+    }),
+  ),
+  defineSchema('project-edit-command-applied', 4, 'Applied edit command response including persisted editorial impact and stale output relationships',
+    successSchema({
+      oneOf: [
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'editorial', 'operation', 'replayed'],
+          properties: {
+            command: {
+              type: 'object', additionalProperties: false,
+              required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'],
+              properties: { id: idSchema, type: { const: 'remove-spoken-content' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema },
+            },
+            version: { type: 'object' },
+            editorial: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'sourceTranscriptId', 'sourceArtifactId', 'exclusions', 'retainedSourceRanges',
+                'outputDurationFrames', 'fps', 'automaticZoom', 'protectedOpeningFrames',
+                'subtitleFaceProtection', 'impact', 'invalidations',
+              ],
+              properties: {
+                sourceTranscriptId: idSchema, sourceArtifactId: idSchema,
+                exclusions: { type: 'array', minItems: 1, maxItems: 128 },
+                retainedSourceRanges: { type: 'array', minItems: 1, maxItems: 129 },
+                outputDurationFrames: { type: 'integer', minimum: 1 },
+                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: { const: false },
+                protectedOpeningFrames: { type: 'integer', minimum: 1 }, subtitleFaceProtection: { const: true },
+                impact: editorialCutImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+              },
+            },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+        {
+          type: 'object', required: ['command', 'version', 'directorRun', 'operation', 'replayed'],
+          properties: { command: { type: 'object' }, version: { type: 'object' }, directorRun: { type: 'object' }, operation: publicOperationSchemaV3, replayed: { type: 'boolean' } },
+        },
+        {
+          type: 'object', required: ['command', 'version', 'sourceTranscript', 'replayed'],
+          properties: { command: { type: 'object' }, version: { type: 'object' }, sourceTranscript: { type: 'object' }, replayed: { type: 'boolean' } },
         },
       ],
     }),
