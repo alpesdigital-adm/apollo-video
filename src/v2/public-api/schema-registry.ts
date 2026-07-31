@@ -56,6 +56,30 @@ const workspaceLutDefaultVersionSchema = {
     createdByClientId: idSchema, createdAt: dateTimeSchema,
   },
 } as const
+const projectLutSelectionResultSchema = {
+  type: 'object', additionalProperties: false, required: ['command', 'version', 'selection', 'replayed'],
+  properties: {
+    command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'author', 'createdAt'], properties: { id: idSchema, type: { const: 'set-project-lut-selection' }, baseVersionId: idSchema, author: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { enum: ['user', 'director', 'system', 'api-client'] }, id: idSchema, delegatedUserId: idSchema } }, reason: { type: 'string', minLength: 1, maxLength: 1000 }, createdAt: dateTimeSchema } },
+    version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'createdAt'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema, baseHash: sha256Schema, createdAt: dateTimeSchema } },
+    selection: {
+      type: 'object', additionalProperties: false, required: ['id', 'requested', 'resolved', 'intensity', 'selectionHash', 'createdAt'],
+      properties: {
+        id: idSchema,
+        requested: { oneOf: [
+          { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { const: 'workspace-default' } } },
+          { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { const: 'none' } } },
+          { type: 'object', additionalProperties: false, required: ['mode', 'lutId', 'version'], properties: { mode: { const: 'lut-version' }, lutId: idSchema, version: { type: 'integer', minimum: 1 } } },
+        ] },
+        resolved: { oneOf: [
+          { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { const: 'none' } } },
+          { type: 'object', additionalProperties: false, required: ['mode', 'lut'], properties: { mode: { const: 'lut-version' }, lut: { type: 'object', additionalProperties: false, required: ['lutId', 'versionId', 'version', 'name', 'recordHash', 'cubeContentHash'], properties: { lutId: idSchema, versionId: idSchema, version: { type: 'integer', minimum: 1 }, name: { type: 'string', minLength: 1, maxLength: 160 }, recordHash: sha256Schema, cubeContentHash: sha256Schema } } } },
+        ] },
+        workspaceDefaultRevision: { type: 'integer', minimum: 0 }, intensity: { type: 'number', minimum: 0, maximum: 1 }, selectionHash: sha256Schema, createdAt: dateTimeSchema,
+      },
+    },
+    replayed: { type: 'boolean' },
+  },
+} as const
 const mvpCoreCheckCodes = Object.values(MVP_CORE_CRITERION_CHECKS).flat()
 const mvpCoreEvidenceReferenceSchema = {
   type: 'object',
@@ -16753,6 +16777,20 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('workspace-lut-default-set', 1, 'Applied immutable workspace LUT default version', successSchema({
     type: 'object', additionalProperties: false, required: ['defaultVersion', 'replayed'], properties: { defaultVersion: workspaceLutDefaultVersionSchema, replayed: { type: 'boolean' } },
   })),
+  defineSchema('project-lut-selection-set-request', 1, 'Apply an explicit project LUT selection through EditCommand and ProjectVersion', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'selection'],
+    properties: {
+      baseVersionId: idSchema, baseHash: sha256Schema,
+      selection: { oneOf: [
+        { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { const: 'workspace-default' } } },
+        { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { const: 'none' } } },
+        { type: 'object', additionalProperties: false, required: ['mode', 'lutId', 'version'], properties: { mode: { const: 'lut-version' }, lutId: idSchema, version: { type: 'integer', minimum: 1 } } },
+      ] },
+      intensity: { type: 'number', minimum: 0, maximum: 1 }, reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  }),
+  defineSchema('project-lut-selection-applied', 1, 'Applied project LUT EditCommand and immutable result version', successSchema(projectLutSelectionResultSchema)),
+  defineSchema('project-lut-selection-response', 1, 'Current explicit project LUT selection', successSchema({ type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectLutSelectionResultSchema] } } })),
   defineSchema('project-final-export-request', 1, 'Approve and export the current project version', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId', 'projectVersionHash', 'format', 'approval'],

@@ -4444,6 +4444,21 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [201], idempotency: 'required', requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.lut-selection.read', version: '1.0.0', title: 'Read project LUT selection',
+    description: 'Reads the latest explicit project selection and its exact resolved immutable LUT identity or none.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/project-lut-selection-response/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/lut-selection' }, toolName: 'apollo.projects.lut-selection.read',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.lut-selection.set', version: '1.0.0', title: 'Set project LUT selection',
+    description: 'Creates a typed EditCommand and ProjectVersion that resolve workspace-default, an explicit immutable LUT version or none without changing media.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/project-lut-selection-set-request/v1', outputSchemaRef: 'apollo://schemas/project-lut-selection-applied/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/lut-selection' }, toolName: 'apollo.projects.lut-selection.set',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.clients.list',
     version: '1.0.0',
     title: 'List API clients',

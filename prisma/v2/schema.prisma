@@ -81,6 +81,8 @@ model V2Workspace {
   workspaceLutStatusCommands      V2WorkspaceLutStatusCommand[]
   workspaceLutDefault             V2WorkspaceLutDefault?
   workspaceLutDefaultVersions     V2WorkspaceLutDefaultVersion[]
+  projectLutSelections            V2ProjectLutSelection[]
+  projectLutSelectionHeads        V2ProjectLutSelectionHead[]
   semanticReuseRuns               V2SemanticReuseRun[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks    V2HierarchicalProcessingChunk[]
@@ -374,6 +376,8 @@ model V2Project {
   contiguousMomentEvaluations   V2ContiguousMomentEvaluation[]
   contiguousExtractions         V2ContiguousExtraction[]
   colorPipelineCompilations      V2ColorPipelineCompilation[]
+  lutSelections                  V2ProjectLutSelection[]
+  lutSelectionHead               V2ProjectLutSelectionHead?
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -462,6 +466,8 @@ model V2ProjectVersion {
   qualityIterations       V2QualityIteration[]
   mvpCoreGatesAsPrimary   V2MvpCoreGate[]                 @relation("MvpCoreGatePrimaryVersion")
   mvpCoreGatesAsCompanion V2MvpCoreGate[]                 @relation("MvpCoreGateCompanionVersion")
+  lutSelectionsAsBase     V2ProjectLutSelection[]          @relation("ProjectLutSelectionBase")
+  lutSelectionAsResult    V2ProjectLutSelection?           @relation("ProjectLutSelectionResult")
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -493,6 +499,7 @@ model V2EditCommand {
   baseVersion   V2ProjectVersion  @relation("CommandBaseVersion", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   resultVersion V2ProjectVersion? @relation("CommandResultVersion")
   directorRun   V2DirectorRun?    @relation("DirectorRunCommand")
+  lutSelection  V2ProjectLutSelection?
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -1042,6 +1049,7 @@ model V2WorkspaceLutVersion {
   lut       V2WorkspaceLut @relation(fields: [lutId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   createdBy V2ApiClient    @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   workspaceDefaults V2WorkspaceLutDefaultVersion[]
+  projectSelections V2ProjectLutSelection[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, lutId, version])
@@ -1086,6 +1094,55 @@ model V2WorkspaceLutDefaultVersion {
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([workspaceId, lutVersionId])
   @@map("workspace_lut_default_versions")
+}
+
+model V2ProjectLutSelectionHead {
+  workspaceId String   @db.VarChar(128)
+  projectId   String   @db.VarChar(128)
+  selectionId String   @db.VarChar(128)
+  updatedAt   DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   V2Project   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  selection V2ProjectLutSelection @relation(fields: [selectionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@id([projectId, workspaceId])
+  @@unique([selectionId, workspaceId])
+  @@map("project_lut_selection_heads")
+}
+
+model V2ProjectLutSelection {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  commandId                String   @db.VarChar(128)
+  baseVersionId            String   @db.VarChar(128)
+  resultVersionId          String   @db.VarChar(128)
+  requestedMode            String   @db.VarChar(32)
+  requestedLutId           String?  @db.VarChar(128)
+  requestedLutVersion      Int?
+  resolvedMode             String   @db.VarChar(16)
+  resolvedLutVersionId     String?  @db.VarChar(128)
+  workspaceDefaultRevision Int?
+  intensity                Float
+  selectionJson            String   @db.Text
+  selectionHash            String   @db.Char(64)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace          V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project            V2Project              @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  command            V2EditCommand          @relation(fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  baseVersion        V2ProjectVersion       @relation("ProjectLutSelectionBase", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  resultVersion      V2ProjectVersion       @relation("ProjectLutSelectionResult", fields: [resultVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  resolvedLutVersion V2WorkspaceLutVersion? @relation(fields: [resolvedLutVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  currentForProjects V2ProjectLutSelectionHead[]
+
+  @@unique([id, workspaceId])
+  @@unique([commandId, workspaceId])
+  @@unique([resultVersionId, workspaceId])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, resolvedLutVersionId])
+  @@map("project_lut_selections")
 }
 
 model V2MediaArtifactLineage {

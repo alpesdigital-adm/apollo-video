@@ -24,6 +24,16 @@ const workspaceLutExample = {
     createdByClientId: clientId, createdAt, recordHash: 'a'.repeat(64),
   },
 }
+const projectLutSelectionExample = {
+  command: { id: 'project-lut-command-example-1', type: 'set-project-lut-selection', baseVersionId: 'project-version-example-1', author: { type: 'api-client', id: clientId }, reason: 'Usar o look aprovado.', createdAt },
+  version: { id: 'project-version-example-lut-2', sequence: 2, parentVersionId: 'project-version-example-1', baseHash: 'd'.repeat(64), createdAt },
+  selection: {
+    id: 'project-lut-selection-example-1', requested: { mode: 'workspace-default' },
+    resolved: { mode: 'lut-version', lut: { lutId: workspaceLutExample.id, versionId: workspaceLutExample.currentVersion.id, version: 1, name: workspaceLutExample.currentVersion.name, recordHash: workspaceLutExample.currentVersion.recordHash, cubeContentHash: workspaceLutExample.currentVersion.cube.contentHash } },
+    workspaceDefaultRevision: 1, intensity: 0.75, selectionHash: 'e'.repeat(64), createdAt,
+  },
+  replayed: false,
+}
 const colorSourceMetadataExample = {
   colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709',
   matrix: 'bt709', range: 'limited', bitDepth: 10,
@@ -7726,6 +7736,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       },
       meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/project-lut-selection-set-request/v1': [
+      { baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), selection: { mode: 'workspace-default' }, reason: 'Usar o default aprovado.' },
+      { baseVersionId: 'project-version-example-lut-2', baseHash: 'd'.repeat(64), selection: { mode: 'none' } },
+    ],
+    'apollo://schemas/project-lut-selection-applied/v1': [{ data: projectLutSelectionExample, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/project-lut-selection-response/v1': [{ data: { result: projectLutSelectionExample }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
         data: { review: proxyReviewExample },

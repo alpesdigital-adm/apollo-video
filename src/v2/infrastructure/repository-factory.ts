@@ -51,6 +51,7 @@ import type { LongFormIndexRepository } from '../application/ports/long-form-ind
 import type { ContiguousExtractionRepository } from '../application/ports/contiguous-extraction-repository.ts'
 import type { ColorPipelineCompilationRepository } from '../application/ports/color-pipeline-compilation-repository.ts'
 import type { WorkspaceLutRepository } from '../application/ports/workspace-lut-repository.ts'
+import type { ProjectLutSelectionRepository } from '../application/ports/project-lut-selection-repository.ts'
 import type { ContiguousEvidenceRepository } from '../application/ports/contiguous-evidence-repository.ts'
 import type { ContiguousEvaluationRepository } from '../application/ports/contiguous-evaluation-provider.ts'
 import type { LongFormIndexWorkflowRepository } from '../application/ports/long-form-index-workflow-repository.ts'
@@ -144,6 +145,7 @@ import { PrismaLongFormIndexRepository } from './prisma/long-form-index-reposito
 import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
 import { PrismaColorPipelineCompilationRepository } from './prisma/color-pipeline-compilation-repository.ts'
 import { PrismaWorkspaceLutRepository } from './prisma/workspace-lut-repository.ts'
+import { PrismaProjectLutSelectionRepository } from './prisma/project-lut-selection-repository.ts'
 import { PrismaContiguousEvidenceRepository } from './prisma/contiguous-evidence-repository.ts'
 import { PrismaContiguousEvaluationRepository } from './prisma/contiguous-evaluation-repository.ts'
 import {
@@ -302,6 +304,10 @@ ColorPipelineCompilationRepository {
 
 export function createWorkspaceLutRepository(): WorkspaceLutRepository {
   return new PrismaWorkspaceLutRepository(resolveV2Client())
+}
+
+export function createProjectLutSelectionRepository(): ProjectLutSelectionRepository {
+  return new PrismaProjectLutSelectionRepository(resolveV2Client())
 }
 
 export function createContiguousEvidenceRepository():

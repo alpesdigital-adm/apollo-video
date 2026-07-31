@@ -140,6 +140,8 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2ColorPipelineCompilation.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2ProjectLutSelectionHead.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2ProjectLutSelection.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceLutDefault.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceLutDefaultVersion.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceLutStatusCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
@@ -652,6 +654,8 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts/{lutId}/status'].post['x-apollo-capability-id'], 'apollo.workspace-luts.lifecycle.set')
     assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/lut-default'].get['x-apollo-capability-id'], 'apollo.workspace-luts.default.read')
     assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/lut-default'].post['x-apollo-capability-id'], 'apollo.workspace-luts.default.set')
+    assert.equal(openApi.paths['/v1/projects/{projectId}/lut-selection'].get['x-apollo-capability-id'], 'apollo.projects.lut-selection.read')
+    assert.equal(openApi.paths['/v1/projects/{projectId}/lut-selection'].post['x-apollo-capability-id'], 'apollo.projects.lut-selection.set')
     assert.equal(
       openApi.paths['/v1/artifacts/{artifactId}/lineage-diagnostics/{manifestId}'].get[
         'x-apollo-capability-id'
@@ -1108,6 +1112,8 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.workspace-luts.lifecycle.set',
         'apollo.workspace-luts.default.read',
         'apollo.workspace-luts.default.set',
+        'apollo.projects.lut-selection.read',
+        'apollo.projects.lut-selection.set',
         'apollo.clients.list',
         'apollo.clients.create',
         'apollo.clients.credentials.rotate',
@@ -3872,6 +3878,51 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(replayResponse.status, 200)
     assert.equal(replay.data.replayed, true)
     assert.equal(replay.data.project.id, created.data.project.id)
+
+    const reactivateLutResponse = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}/status`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-status-reactivate' }, body: JSON.stringify({ baseRevision: 2, status: 'active' }),
+    })
+    assert.equal(reactivateLutResponse.status, 200)
+    const restoreDefaultResponse = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/lut-default`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-default-restore' }, body: JSON.stringify({ baseRevision: 2, selection: { mode: 'lut-version', lutId: lutBody.lutId, version: 2 } }),
+    })
+    assert.equal(restoreDefaultResponse.status, 201)
+    const setProjectLut = () => fetch(`${baseUrl}/v1/projects/${created.data.project.id}/lut-selection`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-project-lut-default-1' },
+      body: JSON.stringify({ baseVersionId: created.data.version.id, baseHash: created.data.version.baseHash, selection: { mode: 'workspace-default' }, reason: 'Use approved workspace look.' }),
+    })
+    const projectLutResponse = await setProjectLut(); const projectLut = await projectLutResponse.json()
+    assert.equal(projectLutResponse.status, 201)
+    assert.equal(projectLut.data.selection.requested.mode, 'workspace-default')
+    assert.equal(projectLut.data.selection.resolved.lut.version, 2)
+    assert.equal(projectLut.data.selection.workspaceDefaultRevision, 3)
+    assert.equal(projectLut.data.selection.intensity, 0.8)
+    assert.equal(projectLut.data.version.sequence, 2)
+    const projectLutReplay = await setProjectLut()
+    assert.equal(projectLutReplay.status, 200)
+    assert.equal((await projectLutReplay.json()).data.replayed, true)
+    const storedProjectLut = await client.v2ProjectLutSelection.findUnique({ where: { id: projectLut.data.selection.id }, include: { command: true, resultVersion: true, resolvedLutVersion: true } })
+    assert.equal(storedProjectLut.command.type, 'set-project-lut-selection')
+    assert.equal(storedProjectLut.resultVersion.sequence, 2)
+    assert.equal(storedProjectLut.resolvedLutVersion.version, 2)
+    assert.equal((await client.v2Project.findUnique({ where: { id: created.data.project.id } })).currentVersionId, projectLut.data.version.id)
+    const readProjectLutResponse = await fetch(`${baseUrl}/v1/projects/${created.data.project.id}/lut-selection`, { headers: { authorization } })
+    assert.equal(readProjectLutResponse.status, 200)
+    assert.equal((await readProjectLutResponse.json()).data.result.selection.selectionHash, projectLut.data.selection.selectionHash)
+    const noneProjectLutResponse = await fetch(`${baseUrl}/v1/projects/${created.data.project.id}/lut-selection`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-project-lut-none-2' },
+      body: JSON.stringify({ baseVersionId: projectLut.data.version.id, baseHash: projectLut.data.version.baseHash, selection: { mode: 'none' } }),
+    })
+    const noneProjectLut = await noneProjectLutResponse.json()
+    assert.equal(noneProjectLutResponse.status, 201)
+    assert.equal(noneProjectLut.data.selection.resolved.mode, 'none')
+    assert.equal(noneProjectLut.data.version.sequence, 3)
+    const staleProjectLutResponse = await fetch(`${baseUrl}/v1/projects/${created.data.project.id}/lut-selection`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-project-lut-stale' },
+      body: JSON.stringify({ baseVersionId: created.data.version.id, baseHash: created.data.version.baseHash, selection: { mode: 'none' } }),
+    })
+    assert.equal(staleProjectLutResponse.status, 409)
+    assert.equal(await client.v2ProjectLutSelection.count({ where: { workspaceId, projectId: created.data.project.id } }), 2)
     await client.v2ProjectMediaAsset.create({
       data: {
         id: '00000000-0000-4000-8000-000000000970',

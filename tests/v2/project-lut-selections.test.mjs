@@ -1,0 +1,121 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
+import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { createWorkspaceLutVersion } from '../../src/v2/domain/workspace-lut.ts'
+import { parseSetProjectLutSelectionBody, presentProjectLutSelectionResult } from '../../src/v2/public-api/project-lut-selection-contract.ts'
+
+const cube = `LUT_3D_SIZE 2
+0 0 0
+0 0 1
+0 1 0
+0 1 1
+1 0 0
+1 0 1
+1 1 0
+1 1 1
+`
+
+function baseVersion(overrides = {}) {
+  return createProjectVersion({
+    id: 'project-version-lut-base-1', workspaceId: 'workspace-project-lut', projectId: 'project-lut-test', sequence: 1,
+    snapshotRefs: { brief: 'brief-snapshot-1', editPlan: 'edit-plan-snapshot-1', policies: 'policies-snapshot-1' },
+    baseHash: 'a'.repeat(64), createdBy: 'client-project-lut', createdAt: '2026-07-31T17:00:00.000Z', ...overrides,
+  })
+}
+
+function lutVersion() {
+  return createWorkspaceLutVersion({
+    id: 'workspace-lut-version-project-2', workspaceId: 'workspace-project-lut', lutId: 'workspace-lut-project', version: 2,
+    name: 'Approved project look', owner: 'Apollo Studio', license: { policy: 'owned', name: 'Workspace' }, tags: ['approved'],
+    compatibility: { inputColorSpace: 'rec709', outputColorSpace: 'rec709' }, intensity: 0.65, cubeContent: cube,
+    preview: { byteSize: 128, sha256: 'b'.repeat(64) }, createdByClientId: 'client-project-lut', createdAt: '2026-07-31T16:59:00.000Z',
+  })
+}
+
+function memoryRepository(context) {
+  const replays = new Map()
+  let current = null
+  return {
+    commits: [],
+    async findIdempotent({ idempotencyKey }) { return replays.get(idempotencyKey) ?? null },
+    async readContext() { return context },
+    async commitOrReplay(input) {
+      const result = Object.freeze({ command: input.command, version: input.version, selection: input.selection, replayed: false })
+      this.commits.push(input); current = result
+      replays.set(input.command.idempotencyKey, Object.freeze({ requestFingerprint: input.requestFingerprint, result: Object.freeze({ ...result, replayed: true }) }))
+      return result
+    },
+    async readCurrent() { return current },
+  }
+}
+
+function service(repository) {
+  const ids = { command: 0, version: 0, selection: 0 }
+  return setProjectLutSelectionService({
+    repository, createId: (kind) => `project-lut-${kind}-test-${++ids[kind]}`, createEventId: () => '00000000-0000-4000-8000-000000000181',
+    clock: () => new Date('2026-07-31T17:01:00.000Z'),
+  })
+}
+
+test('T-FR-181 workspace default resolves to an exact immutable LUT in a Command and new ProjectVersion', async () => {
+  const base = baseVersion(); const lut = lutVersion()
+  const repository = memoryRepository({ currentVersion: base, workspaceDefaultRevision: 3, resolvedLutVersion: lut })
+  const apply = service(repository)
+  const request = {
+    workspaceId: base.workspaceId, projectId: base.projectId, baseVersionId: base.id, baseHash: base.baseHash,
+    selection: { mode: 'workspace-default' }, reason: 'Use the approved look.', actor: { type: 'api-client', id: 'client-project-lut' },
+    idempotencyKey: 'project-lut-selection-default-1',
+  }
+  const result = await apply(request)
+
+  assert.equal(result.command.type, 'set-project-lut-selection')
+  assert.deepEqual(result.command.payload, { mode: 'workspace-default', intensity: 0.65 })
+  assert.equal(result.version.sequence, 2)
+  assert.equal(result.version.parentVersionId, base.id)
+  assert.deepEqual(result.version.snapshotRefs, base.snapshotRefs)
+  assert.equal(result.version.commandId, result.command.id)
+  assert.equal(result.selection.workspaceDefaultRevision, 3)
+  assert.equal(result.selection.resolved.mode, 'lut-version')
+  assert.deepEqual(result.selection.resolved.lut, {
+    lutId: lut.lutId, versionId: lut.id, version: 2, name: lut.name, recordHash: lut.recordHash, cubeContentHash: lut.cube.contentHash,
+  })
+  assert.match(result.selection.selectionHash, /^[a-f0-9]{64}$/)
+  assert.equal(repository.commits[0].event.type, 'project.version.created')
+  assert.equal((await apply(request)).replayed, true)
+  await assert.rejects(apply({ ...request, selection: { mode: 'none' } }), /another project LUT selection/)
+})
+
+test('T-FR-181 explicit none is version-bound and stale project bases are rejected before commit', async () => {
+  const base = baseVersion(); const repository = memoryRepository({ currentVersion: base })
+  const apply = service(repository)
+  const common = {
+    workspaceId: base.workspaceId, projectId: base.projectId, baseVersionId: base.id, selection: { mode: 'none' }, intensity: 0.4,
+    actor: { type: 'director', id: 'director-project-lut' }, idempotencyKey: 'project-lut-selection-none-1',
+  }
+  await assert.rejects(apply({ ...common, baseHash: 'c'.repeat(64) }), /stale/)
+  assert.equal(repository.commits.length, 0)
+  const result = await apply({ ...common, baseHash: base.baseHash })
+  assert.deepEqual(result.selection.resolved, { mode: 'none' })
+  assert.equal(result.selection.workspaceDefaultRevision, undefined)
+  assert.equal(result.selection.intensity, 0.4)
+})
+
+test('T-FR-181 public project LUT selection contract is exact and hides persistence fields', () => {
+  assert.deepEqual(parseSetProjectLutSelectionBody({
+    baseVersionId: 'project-version-lut-base-1', baseHash: 'a'.repeat(64), selection: { mode: 'lut-version', lutId: 'workspace-lut-project', version: 2 }, intensity: 0.5,
+  }).selection, { mode: 'lut-version', lutId: 'workspace-lut-project', version: 2 })
+  assert.throws(() => parseSetProjectLutSelectionBody({ baseVersionId: 'base', baseHash: 'a'.repeat(64), selection: { mode: 'none', lutId: 'hidden' } }), /cannot identify/)
+  assert.throws(() => parseSetProjectLutSelectionBody({ baseVersionId: 'base', baseHash: 'a'.repeat(64), selection: { mode: 'none' }, hidden: true }), /unknown fields/)
+
+  const base = baseVersion(); const selection = {
+    id: 'selection', requested: { mode: 'none' }, resolved: { mode: 'none' }, intensity: 1, selectionHash: 'd'.repeat(64), createdAt: '2026-07-31T17:01:00.000Z',
+  }
+  const presented = presentProjectLutSelectionResult({
+    command: { id: 'command', type: 'set-project-lut-selection', baseVersionId: base.id, author: { type: 'api-client', id: 'client' }, createdAt: selection.createdAt },
+    version: { ...base, id: 'result', sequence: 2, parentVersionId: base.id, commandId: 'command' }, selection, replayed: false,
+  })
+  assert.equal('workspaceId' in presented.selection, false)
+  assert.equal('payload' in presented.command, false)
+})
