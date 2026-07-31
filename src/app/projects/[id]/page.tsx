@@ -447,6 +447,84 @@ interface PublicOperation {
   id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export' | 'source-cleanup'; status: string; phase: string;
   progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string
 }
+type ContiguousQualityDimension =
+  | 'selfContained'
+  | 'density'
+  | 'integrity'
+  | 'audio'
+  | 'visual'
+interface LongFormMomentSearchResultData {
+  moment: {
+    id: string
+    sourceArtifactId: string
+    topic: { value: string; normalized: string }
+    summary: { value: string }
+    recommendedRangeMs: [number, number]
+    salience: number
+    standaloneScore: number
+    insightDensity: number
+  }
+  matchedBy: string[]
+  preview: {
+    masterDurationMs: number
+    primary: {
+      sourceRangeMs: [number, number]
+      previewRangeMs: [number, number]
+    }
+  }
+  eligibleForReuse: boolean
+  blockedReasons: string[]
+}
+interface ContiguousExtractionData {
+  id: string
+  policyVersion: 'contiguous-extraction/v1'
+  objective: string
+  topic: string
+  targetDurationMs: number
+  toleranceMs: number
+  candidates: {
+    sourceMomentId: string
+    sourceRangeMs: [number, number]
+    durationMs: number
+    durationDeltaMs: number
+    score: number
+    scoreBreakdown: Record<
+      ContiguousQualityDimension | 'duration',
+      number
+    >
+    evidenceRefs: string[]
+    sourceEvaluationProducer: {
+      provider: string
+      model: string
+      version: string
+    }
+    candidateHash: string
+  }[]
+  selectedCandidateHash: string
+  storyPlan: {
+    mode: 'contiguous'
+    sourceRangeId: string
+  }
+  editPlan: {
+    mode: 'contiguous'
+    fps: number
+    durationFrames: number
+    sources: { artifactId: string }[]
+    videoTracks: {
+      clips: {
+        sourceInFrame: number
+        sourceOutFrame: number
+      }[]
+    }[]
+    synthesizedRanges: false
+    movementPolicy: {
+      automaticZoom: false
+      reason: 'contiguous-source-preservation'
+    }
+  }
+  resultHash: string
+  createdAt: string
+}
 interface DirectorRunSummary {
   id: string; status: 'planned' | 'rendering' | 'succeeded' | 'failed'; plannerVersion: string; criticVersion: string;
   baseVersionId: string; resultVersionId: string; treatmentSnapshotId: string; storySnapshotId: string; qualitySnapshotId: string;
@@ -718,6 +796,25 @@ const PROOF_MODE_LABELS = Object.freeze({
   'proof-card': 'Card de prova',
 } satisfies Record<ProofMode, string>)
 
+const CONTIGUOUS_OBJECTIVES = Object.freeze([
+  ['discovery', 'Descoberta'],
+  ['awareness', 'Consciência'],
+  ['warming', 'Aquecimento'],
+  ['lead-generation', 'Captação'],
+  ['sale', 'Venda'],
+  ['whatsapp', 'WhatsApp'],
+  ['booking', 'Agendamento'],
+  ['download', 'Download'],
+] as const)
+
+const CONTIGUOUS_DIMENSION_LABELS = Object.freeze({
+  selfContained: 'Autocontenção',
+  density: 'Densidade',
+  integrity: 'Integridade',
+  audio: 'Áudio',
+  visual: 'Visual',
+} satisfies Record<ContiguousQualityDimension, string>)
+
 function proofModeRegionStyle(
   region: { x: number; y: number; width: number; height: number },
   canvas: { width: number; height: number },
@@ -831,6 +928,10 @@ export default function ProjectWorkspacePage() {
   const sourceCleanupIdempotencyKeys = useRef(new Map<string, string>())
   const validationDecisionIdempotencyKeys =
     useRef(new Map<string, string>())
+  const contiguousExtractionKey = useRef<{
+    fingerprint: string
+    key: string
+  } | null>(null)
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
@@ -913,6 +1014,27 @@ export default function ProjectWorkspacePage() {
   const [proofModesLoading, setProofModesLoading] = useState(true)
   const [proofModeMutationId, setProofModeMutationId] =
     useState<string | null>(null)
+  const [contiguousSearchText, setContiguousSearchText] =
+    useState('')
+  const [contiguousMoments, setContiguousMoments] =
+    useState<LongFormMomentSearchResultData[]>([])
+  const [selectedContiguousMomentId, setSelectedContiguousMomentId] =
+    useState<string | null>(null)
+  const [contiguousObjective, setContiguousObjective] =
+    useState<(typeof CONTIGUOUS_OBJECTIVES)[number][0]>('discovery')
+  const [contiguousDurationSeconds, setContiguousDurationSeconds] =
+    useState(120)
+  const [contiguousToleranceSeconds, setContiguousToleranceSeconds] =
+    useState(15)
+  const [contiguousFps, setContiguousFps] = useState(30)
+  const [contiguousSearching, setContiguousSearching] =
+    useState(false)
+  const [contiguousCreating, setContiguousCreating] =
+    useState(false)
+  const [contiguousError, setContiguousError] =
+    useState<string | null>(null)
+  const [contiguousExtraction, setContiguousExtraction] =
+    useState<ContiguousExtractionData | null>(null)
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
@@ -1417,6 +1539,33 @@ export default function ProjectWorkspacePage() {
       ?? [...media].reverse().find((item) => item.role === 'editing-proxy')
   }, [finalOutput, review?.session.proxyArtifactId, workspace])
   const sourceMasters = useMemo(() => (workspace?.media ?? []).filter((item) => item.role === 'source-master'), [workspace])
+  const selectedContiguousMoment = useMemo(
+    () => contiguousMoments.find((result) =>
+      result.moment.id === selectedContiguousMomentId)
+      ?? contiguousMoments[0]
+      ?? null,
+    [contiguousMoments, selectedContiguousMomentId],
+  )
+  const selectedContiguousCandidate = useMemo(
+    () => contiguousExtraction?.candidates.find((candidate) =>
+      candidate.candidateHash ===
+        contiguousExtraction.selectedCandidateHash)
+      ?? null,
+    [contiguousExtraction],
+  )
+  const contiguousMasterDurationMs = useMemo(() => {
+    const sourceArtifactId =
+      contiguousExtraction?.editPlan.sources[0]?.artifactId
+    const source = sourceMasters.find((media) =>
+      media.artifactId === sourceArtifactId)
+    return source?.probe?.duration
+      ? Math.round(source.probe.duration * 1_000)
+      : selectedContiguousMoment?.preview.masterDurationMs ?? 0
+  }, [
+    contiguousExtraction?.editPlan.sources,
+    selectedContiguousMoment?.preview.masterDurationMs,
+    sourceMasters,
+  ])
   const selectedSourceDeconstruction = useMemo(
     () => sourceDeconstructions.find((report) =>
       report.id === selectedSourceDeconstructionId)
@@ -1525,6 +1674,128 @@ export default function ProjectWorkspacePage() {
     const payload = await response.json() as ApiEnvelope<T>
     if (!response.ok || !payload.data) throw new Error(apiError(payload, 'A API recusou a operação.'))
     return payload.data
+  }
+
+  async function searchContiguousMoments(): Promise<void> {
+    const query = contiguousSearchText.trim()
+    if (query.length < 2 || contiguousSearching) {
+      setContiguousError(
+        query.length < 2
+          ? 'Digite ao menos dois caracteres para buscar no índice.'
+          : null,
+      )
+      return
+    }
+    setContiguousSearching(true)
+    setContiguousError(null)
+    try {
+      const search = new URLSearchParams({
+        q: query,
+        limit: '12',
+        contextBeforeMs: '5000',
+        contextAfterMs: '5000',
+      })
+      const result = await requestJson<{
+        results: LongFormMomentSearchResultData[]
+      }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/long-form-moments?${search.toString()}`,
+        { cache: 'no-store' },
+      )
+      setContiguousMoments(result.results)
+      setSelectedContiguousMomentId(
+        result.results.find((item) => item.eligibleForReuse)
+          ?.moment.id ?? null,
+      )
+      setContiguousExtraction(null)
+      contiguousExtractionKey.current = null
+      if (result.results.length === 0) {
+        setContiguousError(
+          'Nenhum momento indexado corresponde a essa busca.',
+        )
+      } else if (
+        !result.results.some((item) => item.eligibleForReuse)
+      ) {
+        setContiguousError(
+          'Os momentos encontrados estão bloqueados por direitos ou consentimento.',
+        )
+      }
+    } catch (error) {
+      setContiguousError(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível buscar no índice do master.',
+      )
+    } finally {
+      setContiguousSearching(false)
+    }
+  }
+
+  async function createContiguousExtraction(): Promise<void> {
+    if (!selectedContiguousMoment || contiguousCreating) return
+    const targetDurationMs =
+      Math.round(contiguousDurationSeconds * 1_000)
+    const toleranceMs =
+      Math.round(contiguousToleranceSeconds * 1_000)
+    if (
+      !Number.isSafeInteger(targetDurationMs) ||
+      targetDurationMs < 1_000 ||
+      targetDurationMs > 3_600_000 ||
+      !Number.isSafeInteger(toleranceMs) ||
+      toleranceMs < 0 ||
+      toleranceMs > targetDurationMs ||
+      !Number.isSafeInteger(contiguousFps) ||
+      contiguousFps < 1 ||
+      contiguousFps > 120
+    ) {
+      setContiguousError(
+        'Revise duração, tolerância e quadros por segundo.',
+      )
+      return
+    }
+    const body = {
+      objective: contiguousObjective,
+      topic: selectedContiguousMoment.moment.topic.normalized,
+      targetDurationMs,
+      toleranceMs,
+      fps: contiguousFps,
+    }
+    const fingerprint = JSON.stringify(body)
+    if (
+      contiguousExtractionKey.current?.fingerprint !== fingerprint
+    ) {
+      contiguousExtractionKey.current = {
+        fingerprint,
+        key: `contiguous-ui-${crypto.randomUUID()}`,
+      }
+    }
+    setContiguousCreating(true)
+    setContiguousError(null)
+    try {
+      const result = await requestJson<{
+        extraction: ContiguousExtractionData
+        replayed: boolean
+      }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/contiguous-extractions`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key':
+              contiguousExtractionKey.current.key,
+          },
+          body: JSON.stringify(body),
+        },
+      )
+      setContiguousExtraction(result.extraction)
+    } catch (error) {
+      setContiguousError(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível selecionar uma janela contínua.',
+      )
+    } finally {
+      setContiguousCreating(false)
+    }
   }
 
   async function submitManualEdit(input: {
@@ -3423,6 +3694,411 @@ export default function ProjectWorkspacePage() {
           ) : null}
 
           {transcript ? <div className="mt-5 rounded-2xl border border-white/[0.07] bg-[#0a0a0a] p-5"><div className="flex items-center justify-between"><p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#79746c]">Transcrição do master</p><span className="text-[10px] text-[#5e9f74]">{transcript.wordCount} palavras · {transcript.language}</span></div><p className="mt-2 text-[10px] text-[#666159]">Fonte indexada; o preview acima já aplica os cortes da versão {workspace.version?.sequence ?? 1}.</p><p className="mt-3 line-clamp-4 text-sm leading-6 text-[#aaa59c]">{transcript.text}</p></div> : null}
+
+          <section
+            aria-label="Selecionar uma janela contínua do master"
+            className="mt-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090909]"
+            data-testid="contiguous-extraction-panel"
+          >
+            <div className="grid border-b border-white/[0.07] lg:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="px-5 py-5">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#b58d31]">
+                  Corte contínuo
+                </p>
+                <h2 className="mt-1.5 text-base font-semibold tracking-[-0.02em] text-[#e8e3da]">
+                  Uma faixa. Cinco provas. Nenhum efeito gratuito.
+                </h2>
+                <p className="mt-1 max-w-2xl text-[10px] leading-5 text-[#6e6961]">
+                  Busque o assunto no índice de duas horas, escolha o momento exato e deixe o Apollo comparar autocontenção, densidade, integridade, áudio e visual.
+                </p>
+              </div>
+              <div className="border-t border-white/[0.07] bg-[#0b0a08] px-5 py-4 lg:border-l lg:border-t-0">
+                <p className="font-mono text-[8px] uppercase tracking-[0.14em] text-[#716957]">
+                  contrato de saída
+                </p>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div className="border border-white/[0.07] bg-[#070707] px-2 py-2">
+                    <strong className="block font-mono text-xs font-medium text-[#d8b45a]">01</strong>
+                    <span className="mt-1 block text-[7px] uppercase tracking-[0.1em] text-[#5f5a52]">faixa</span>
+                  </div>
+                  <div className="border border-white/[0.07] bg-[#070707] px-2 py-2">
+                    <strong className="block font-mono text-xs font-medium text-[#70b887]">05</strong>
+                    <span className="mt-1 block text-[7px] uppercase tracking-[0.1em] text-[#5f5a52]">evidências</span>
+                  </div>
+                  <div className="border border-white/[0.07] bg-[#070707] px-2 py-2">
+                    <strong className="block font-mono text-xs font-medium text-[#8d88ce]">0×</strong>
+                    <span className="mt-1 block text-[7px] uppercase tracking-[0.1em] text-[#5f5a52]">zoom auto</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid lg:grid-cols-[340px_minmax(0,1fr)]">
+              <div className="border-b border-white/[0.07] px-5 py-5 lg:border-b-0 lg:border-r">
+                <form
+                  className="grid gap-3"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    void searchContiguousMoments()
+                  }}
+                >
+                  <label>
+                    <span className="mb-1.5 block text-[8px] font-semibold uppercase tracking-[0.14em] text-[#777168]">
+                      Assunto no master
+                    </span>
+                    <div className="flex">
+                      <input
+                        className="min-w-0 flex-1 border border-white/[0.09] bg-[#050505] px-3 py-2.5 text-xs text-[#d0c9bf] outline-none placeholder:text-[#4e4a45] focus:border-[#d9aa3d]/50"
+                        data-testid="contiguous-topic-search"
+                        onChange={(event) => {
+                          setContiguousSearchText(event.target.value)
+                          setContiguousError(null)
+                        }}
+                        placeholder="Ex.: oferta, tráfego, boas-vindas"
+                        value={contiguousSearchText}
+                      />
+                      <button
+                        className="border-y border-r border-[#d9aa3d]/35 bg-[#d9aa3d]/[0.08] px-3 text-[9px] font-semibold text-[#d8b253] transition hover:bg-[#d9aa3d]/[0.13] disabled:cursor-not-allowed disabled:opacity-35"
+                        disabled={contiguousSearching}
+                        type="submit"
+                      >
+                        {contiguousSearching ? 'Buscando…' : 'Buscar'}
+                      </button>
+                    </div>
+                  </label>
+                </form>
+
+                <div className="mt-4 space-y-2" data-testid="contiguous-moment-results">
+                  {contiguousMoments.slice(0, 6).map((result) => {
+                    const selected =
+                      result.moment.id === selectedContiguousMoment?.moment.id
+                    return (
+                      <button
+                        aria-pressed={selected}
+                        className={`w-full border px-3 py-3 text-left transition ${
+                          selected
+                            ? 'border-[#d9aa3d]/55 bg-[#d9aa3d]/[0.08]'
+                            : result.eligibleForReuse
+                              ? 'border-white/[0.07] bg-[#070707] hover:border-white/[0.16]'
+                              : 'cursor-not-allowed border-[#9b4d4d]/15 bg-[#130b0b] opacity-55'
+                        }`}
+                        disabled={!result.eligibleForReuse}
+                        key={result.moment.id}
+                        onClick={() => {
+                          setSelectedContiguousMomentId(result.moment.id)
+                          setContiguousExtraction(null)
+                          setContiguousError(null)
+                          contiguousExtractionKey.current = null
+                        }}
+                        type="button"
+                      >
+                        <span className="flex items-start justify-between gap-3">
+                          <span className="min-w-0">
+                            <strong className="block truncate text-[10px] font-medium text-[#cfc8be]">
+                              {result.moment.topic.value}
+                            </strong>
+                            <span className="mt-1 line-clamp-2 block text-[8px] leading-4 text-[#68635c]">
+                              {result.moment.summary.value}
+                            </span>
+                          </span>
+                          <span className={`shrink-0 font-mono text-[8px] ${
+                            result.eligibleForReuse
+                              ? 'text-[#70b887]'
+                              : 'text-[#b56560]'
+                          }`}>
+                            {result.eligibleForReuse
+                              ? `${Math.round(result.moment.standaloneScore * 100)}%`
+                              : 'bloqueado'}
+                          </span>
+                        </span>
+                        <span className="mt-2 flex items-center justify-between font-mono text-[7px] text-[#57524c]">
+                          <span>
+                            {readableTimestamp(result.moment.recommendedRangeMs[0])}
+                          </span>
+                          <span>
+                            {readableDuration(
+                              result.moment.recommendedRangeMs[1] -
+                                result.moment.recommendedRangeMs[0],
+                            )}
+                          </span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                  {contiguousMoments.length === 0 ? (
+                    <div className="border border-dashed border-white/[0.08] px-3 py-5 text-center text-[9px] leading-4 text-[#5f5a53]">
+                      A busca revela momentos do índice; nenhum score é enviado pelo navegador.
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <label className="col-span-2">
+                    <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#5e5952]">
+                      Objetivo
+                    </span>
+                    <select
+                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 text-[10px] text-[#bdb6ac] outline-none focus:border-[#d9aa3d]/45"
+                      data-testid="contiguous-objective"
+                      onChange={(event) => {
+                        setContiguousObjective(
+                          event.target.value as typeof contiguousObjective,
+                        )
+                        setContiguousExtraction(null)
+                        contiguousExtractionKey.current = null
+                      }}
+                      value={contiguousObjective}
+                    >
+                      {CONTIGUOUS_OBJECTIVES.map(([value, label]) => (
+                        <option className="bg-[#111]" key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#5e5952]">
+                      Duração · s
+                    </span>
+                    <input
+                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 font-mono text-[10px] text-[#bdb6ac] outline-none focus:border-[#d9aa3d]/45"
+                      data-testid="contiguous-duration"
+                      max="3600"
+                      min="1"
+                      onChange={(event) => {
+                        setContiguousDurationSeconds(
+                          Number(event.target.value),
+                        )
+                        setContiguousExtraction(null)
+                        contiguousExtractionKey.current = null
+                      }}
+                      step="1"
+                      type="number"
+                      value={contiguousDurationSeconds}
+                    />
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#5e5952]">
+                      Tolerância · s
+                    </span>
+                    <input
+                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 font-mono text-[10px] text-[#bdb6ac] outline-none focus:border-[#d9aa3d]/45"
+                      data-testid="contiguous-tolerance"
+                      max={Math.max(0, contiguousDurationSeconds)}
+                      min="0"
+                      onChange={(event) => {
+                        setContiguousToleranceSeconds(
+                          Number(event.target.value),
+                        )
+                        setContiguousExtraction(null)
+                        contiguousExtractionKey.current = null
+                      }}
+                      step="1"
+                      type="number"
+                      value={contiguousToleranceSeconds}
+                    />
+                  </label>
+                  <label className="col-span-2">
+                    <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#5e5952]">
+                      Saída
+                    </span>
+                    <select
+                      className="w-full border border-white/[0.08] bg-[#050505] px-2.5 py-2 text-[10px] text-[#bdb6ac] outline-none focus:border-[#d9aa3d]/45"
+                      onChange={(event) => {
+                        setContiguousFps(Number(event.target.value))
+                        setContiguousExtraction(null)
+                        contiguousExtractionKey.current = null
+                      }}
+                      value={contiguousFps}
+                    >
+                      {[24, 25, 30, 60].map((fps) => (
+                        <option className="bg-[#111]" key={fps} value={fps}>
+                          {fps} fps
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <button
+                  className="mt-4 w-full bg-[#dbae3f] px-4 py-3 text-[10px] font-bold text-[#171207] transition hover:bg-[#e3b94d] disabled:cursor-not-allowed disabled:opacity-35"
+                  data-testid="contiguous-create"
+                  disabled={
+                    contiguousCreating ||
+                    !selectedContiguousMoment?.eligibleForReuse
+                  }
+                  onClick={() => void createContiguousExtraction()}
+                  type="button"
+                >
+                  {contiguousCreating
+                    ? 'Comparando evidências…'
+                    : 'Selecionar melhor faixa'}
+                </button>
+                {contiguousError ? (
+                  <p
+                    className="mt-3 border-l-2 border-[#b35e58] bg-[#b35e58]/[0.05] px-3 py-2 text-[9px] leading-4 text-[#c47d76]"
+                    role="alert"
+                  >
+                    {contiguousError}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="min-w-0 px-5 py-5">
+                {contiguousExtraction && selectedContiguousCandidate ? (
+                  <div data-testid="contiguous-extraction-result">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <p className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#6fac82]">
+                          Faixa selecionada
+                        </p>
+                        <p className="mt-2 font-mono text-xl tracking-[-0.04em] text-[#e3ddd3]">
+                          {readableTimestamp(
+                            selectedContiguousCandidate.sourceRangeMs[0],
+                          )}
+                          <span className="mx-2 text-[#5b5650]">→</span>
+                          {readableTimestamp(
+                            selectedContiguousCandidate.sourceRangeMs[1],
+                          )}
+                        </p>
+                        <p className="mt-1 text-[9px] text-[#6e6961]">
+                          {readableDuration(
+                            selectedContiguousCandidate.durationMs,
+                          )} · score{' '}
+                          {Math.round(
+                            selectedContiguousCandidate.score * 100,
+                          )}%
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <span className="border border-[#65a97a]/25 bg-[#65a97a]/[0.06] px-2.5 py-1.5 text-[8px] text-[#78bc8e]">
+                          1 faixa
+                        </span>
+                        <span className="border border-[#7770c0]/25 bg-[#7770c0]/[0.06] px-2.5 py-1.5 text-[8px] text-[#9a94d9]">
+                          zoom desligado
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-6">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[7px] uppercase tracking-[0.14em] text-[#625d56]">
+                          master
+                        </span>
+                        <span className="font-mono text-[7px] text-[#625d56]">
+                          {readableDuration(contiguousMasterDurationMs)}
+                        </span>
+                      </div>
+                      <div
+                        className="relative mt-2 h-16 overflow-hidden border border-white/[0.08] bg-[#050505]"
+                        data-testid="contiguous-source-strip"
+                      >
+                        <span className="absolute inset-0 bg-[repeating-linear-gradient(90deg,transparent_0,transparent_7.8%,rgba(255,255,255,.035)_8%,transparent_8.2%)]" />
+                        {contiguousMasterDurationMs > 0 ? (
+                          <span
+                            className="absolute inset-y-2 border border-[#dfb03e]/65 bg-[#b88726]/45 shadow-[0_0_22px_rgba(220,170,54,.22)]"
+                            style={rangePosition(
+                              selectedContiguousCandidate.sourceRangeMs,
+                              contiguousMasterDurationMs,
+                            )}
+                          >
+                            <i className="absolute inset-x-0 top-0 h-px bg-[#f0c456]" />
+                          </span>
+                        ) : null}
+                        <span className="absolute bottom-1 left-2 font-mono text-[7px] text-[#44413c]">
+                          00:00
+                        </span>
+                        <span className="absolute bottom-1 right-2 font-mono text-[7px] text-[#44413c]">
+                          fim
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-5">
+                      {(Object.entries(
+                        CONTIGUOUS_DIMENSION_LABELS,
+                      ) as [
+                        ContiguousQualityDimension,
+                        string,
+                      ][]).map(([dimension, label]) => {
+                        const value =
+                          selectedContiguousCandidate
+                            .scoreBreakdown[dimension]
+                        return (
+                          <div key={dimension}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate text-[7px] uppercase tracking-[0.1em] text-[#625d56]">
+                                {label}
+                              </span>
+                              <span className="font-mono text-[7px] text-[#9e978d]">
+                                {Math.round(value * 100)}
+                              </span>
+                            </div>
+                            <div className="mt-1.5 h-1 overflow-hidden bg-white/[0.06]">
+                              <div
+                                className="h-full bg-[linear-gradient(90deg,#80611e,#ddb13f)]"
+                                style={{ width: `${clamp01(value) * 100}%` }}
+                              />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    <div className="mt-6 grid border-y border-white/[0.07] sm:grid-cols-3 sm:divide-x sm:divide-white/[0.07]">
+                      <div className="py-3 sm:pr-4">
+                        <p className="text-[7px] uppercase tracking-[0.13em] text-[#5f5a53]">
+                          Evidência
+                        </p>
+                        <p className="mt-1 font-mono text-[10px] text-[#c0b9af]">
+                          {selectedContiguousCandidate.evidenceRefs.length} refs
+                        </p>
+                      </div>
+                      <div className="border-t border-white/[0.07] py-3 sm:border-t-0 sm:px-4">
+                        <p className="text-[7px] uppercase tracking-[0.13em] text-[#5f5a53]">
+                          Plano
+                        </p>
+                        <p className="mt-1 font-mono text-[10px] text-[#c0b9af]">
+                          {contiguousExtraction.editPlan.videoTracks[0]
+                            ?.clips.length ?? 0} clip ·{' '}
+                          {contiguousExtraction.editPlan.fps} fps
+                        </p>
+                      </div>
+                      <div className="border-t border-white/[0.07] py-3 sm:border-t-0 sm:pl-4">
+                        <p className="text-[7px] uppercase tracking-[0.13em] text-[#5f5a53]">
+                          Avaliador
+                        </p>
+                        <p className="mt-1 truncate font-mono text-[9px] text-[#c0b9af]">
+                          {selectedContiguousCandidate
+                            .sourceEvaluationProducer.model}
+                        </p>
+                      </div>
+                    </div>
+                    <p
+                      className="mt-3 truncate font-mono text-[7px] text-[#4f4b45]"
+                      title={contiguousExtraction.resultHash}
+                    >
+                      result {contiguousExtraction.resultHash}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid min-h-[420px] place-items-center">
+                    <div className="max-w-sm text-center">
+                      <div className="mx-auto grid h-16 w-16 place-items-center rounded-full border border-dashed border-[#8c6b27]/35 font-mono text-sm text-[#9f7c30]">
+                        02:00
+                      </div>
+                      <p className="mt-5 text-sm font-medium text-[#aaa39a]">
+                        A faixa aparece aqui com sua prova.
+                      </p>
+                      <p className="mt-2 text-[10px] leading-5 text-[#625e57]">
+                        Primeiro escolha um momento indexado. O navegador envia apenas objetivo, tópico e duração; a decisão permanece no servidor.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
 
           <section
             aria-label="Comparação entre a fonte publicada e os trechos limpos"

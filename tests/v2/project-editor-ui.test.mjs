@@ -142,6 +142,63 @@ test('T-FR-217 project editor compares immutable previews and exposes explicit p
   assert.match(projectEditorSource, /sem apagar o histórico/)
 })
 
+test('T-FR-134 project editor searches moments and creates an evidence-bound contiguous extraction through v1', () => {
+  assert.match(
+    projectEditorSource,
+    /\/long-form-moments\?\$\{search\.toString\(\)\}/,
+  )
+  assert.match(projectEditorSource, /\/contiguous-extractions/)
+  for (const testId of [
+    'contiguous-extraction-panel',
+    'contiguous-topic-search',
+    'contiguous-moment-results',
+    'contiguous-create',
+    'contiguous-source-strip',
+    'contiguous-extraction-result',
+  ]) {
+    assert.match(
+      projectEditorSource,
+      new RegExp(`data-testid="${testId}"`),
+    )
+  }
+  assert.match(
+    projectEditorSource,
+    /topic: selectedContiguousMoment\.moment\.topic\.normalized/,
+  )
+  assert.match(projectEditorSource, /objective: contiguousObjective/)
+  assert.match(
+    projectEditorSource,
+    /targetDurationMs,\s+toleranceMs,\s+fps: contiguousFps/,
+  )
+  assert.match(
+    projectEditorSource,
+    /contiguousExtractionKey\.current\?\.fingerprint !== fingerprint/,
+  )
+  assert.match(
+    projectEditorSource,
+    /sourceEvaluationProducer\s*\.model/,
+  )
+  for (const label of [
+    'Autocontenção',
+    'Densidade',
+    'Integridade',
+    'Áudio',
+    'Visual',
+  ]) {
+    assert.match(projectEditorSource, new RegExp(label))
+  }
+  assert.match(projectEditorSource, /Nenhum efeito gratuito/)
+  assert.match(projectEditorSource, /zoom desligado/)
+  assert.doesNotMatch(
+    projectEditorSource,
+    /body:\s*JSON\.stringify\(\{[^}]*candidates/s,
+  )
+  assert.doesNotMatch(
+    projectEditorSource,
+    /body:\s*JSON\.stringify\(\{[^}]*scores/s,
+  )
+})
+
 test('T-FR-120 project editor exposes API-backed source versus clean evidence', () => {
   assert.match(
     projectEditorSource,

@@ -153,6 +153,8 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-182 | ColorPlan | S2 | D3,D5 | global/source/segment override | integration |
 | FR-235 | Export matrix | S2,S4 | D3,D4,D5 | variants×formats preflight/render | e2e |
 
+Atualização local de FR-134 — a superfície do editor possui 1 contrato estático adicional: busca momentos exclusivamente por `GET /v1/projects/{projectId}/long-form-moments`, envia a `POST /v1/projects/{projectId}/contiguous-extractions` somente objetivo, tópico normalizado, duração, tolerância e FPS com chave de idempotência estável, e apresenta uma faixa, cinco dimensões de evidência, o avaliador, um clip e zoom automático desligado. O fluxo foi inspecionado em desktop e mobile com respostas `/v1` controladas; essa inspeção comprova composição e responsividade da UI, não integração com backend/PostgreSQL. O E2E com PostgreSQL descartável, o golden real de duas horas, o deploy e o aceite continuam pendentes; FR-134 permanece parcial e nenhuma caixa de produto foi concluída por esta atualização.
+
 ## F3 — Sintético e transformação
 
 | Req | Título | Spec | Dep. | Evidência de aceite | Teste |
