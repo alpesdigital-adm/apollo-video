@@ -118,6 +118,11 @@ test('T-FR-216 project editor exposes the API-backed timeline, inspector and key
   assert.match(projectEditorSource, /event\.key\.toLowerCase\(\) === 's'/)
   assert.match(projectEditorSource, /event\.key === 'Delete'/)
   assert.match(projectEditorSource, /data-testid="manual-inspector"/)
+  assert.match(projectEditorSource, /data-testid="manual-crop-editor"/)
+  assert.match(projectEditorSource, /data-testid="manual-crop-apply"/)
+  assert.match(projectEditorSource, /kind: 'crop'/)
+  assert.match(projectEditorSource, /\['x', 'X'\], \['y', 'Y'\], \['width', 'L'\], \['height', 'A'\]/)
+  assert.match(projectEditorSource, /manual-crop-\$\{field\}/)
   for (const field of ['layout', 'text', 'subtitle', 'color', 'motion', 'audioGain']) {
     assert.match(projectEditorSource, new RegExp(field))
   }

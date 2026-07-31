@@ -53,3 +53,13 @@ test('T-FR-214 proposes impact through ambiguity, protected, policy and budget g
   assert.equal(budget.status,'budget-blocked');assert.equal(budget.gates.find((gate)=>gate.gate==='budget').code,'BUDGET_EXCEEDED')
 })
 test('T-FR-215 batches compatible annotations atomically and reports conflict/rollback or explicit partial retry',()=>{const a=annotation(),b=annotation({id:'a2'}),c=annotation({id:'a3'});const op={op:'update-text',targetId:'el1',value:{text:'A'}};const compatible=compileBatchReview({annotations:[a,b],proposals:[{annotationId:'a1',operation:op},{annotationId:'a2',operation:op}],baseVersionId:'v1'});assert.equal(compatible.status,'ready');assert.equal(compatible.patch.operations.length,1);assert.deepEqual(compatible.patch.annotationIds,['a1','a2']);const conflictInput={annotations:[a,b,c],proposals:[{annotationId:'a1',operation:op},{annotationId:'a2',operation:{...op,value:{text:'B'}}},{annotationId:'a3',operation:{op:'move',targetId:'clip:2',value:{beforeTargetId:'clip:3'}}}],baseVersionId:'v1'};const atomic=compileBatchReview(conflictInput);assert.equal(atomic.status,'conflict');assert.deepEqual(atomic.conflicts,['a1','a2']);assert.ok(atomic.results.every((item)=>item.status==='rolled-back'));const partial=compileBatchReview({...conflictInput,mode:'partial-retry'});assert.equal(partial.status,'partial');assert.deepEqual(partial.patch.annotationIds,['a3']);assert.equal(partial.results.find((item)=>item.annotationId==='a3').status,'included');assert.deepEqual(partial.results.find((item)=>item.annotationId==='a1').conflictIds,['a2'])})
+
+test('T-FR-216 derives cropped presenter bounds from each clip source dimensions',()=>{
+  const map=buildRenderElementMap({
+    proxyHash:'b'.repeat(64),fps:30,durationFrames:60,canvas:{width:1920,height:1080},source:{width:1920,height:1080},
+    sourceDimensions:{'source-portrait':{width:1080,height:1920}},
+    clips:[{id:'clip-portrait',sourceArtifactId:'source-portrait',timelineInFrame:0,timelineOutFrame:60,crop:{x:0,y:0,width:.5,height:1}}],
+  })
+  const presenter=map.elements.find((item)=>item.type==='presenter')
+  assert.deepEqual(presenter.bounds,{x:808,y:0,width:304,height:1080})
+})

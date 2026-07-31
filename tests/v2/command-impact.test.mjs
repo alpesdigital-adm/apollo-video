@@ -5,7 +5,10 @@ import {
   applyManualEditService,
   readArtifactInvalidationsService,
 } from '../../src/v2/application/manual-edit.ts'
-import { timelineViewModelFromEditPlan } from '../../src/v2/domain/manual-editing.ts'
+import {
+  materializeManualEditPlan,
+  timelineViewModelFromEditPlan,
+} from '../../src/v2/domain/manual-editing.ts'
 import {
   createCommandArtifactInvalidations,
   createManualCommandImpact,
@@ -120,6 +123,48 @@ test('T-FR-233 timing impact extends through shifted downstream frames while sel
   assert.deepEqual(createCommandArtifactInvalidations({ impact: selection, createdAt }), [])
 })
 
+test('T-FR-233 crop materializes a normalized clip region and invalidates only its range and variant', () => {
+  const crop = { x: 0.2, y: 0.1, width: 0.6, height: 0.8 }
+  const afterCrop = materializeManualEditPlan({
+    editPlan: plan(),
+    operation: { kind: 'crop', clipId: 'clip-1', crop },
+    newVersionId: resultVersionId,
+    createdAt,
+    availableAssetIds: ['source-1'],
+    variantId: '9:16',
+  })
+  assert.deepEqual(afterCrop.videoTracks[0].clips[0].crop, crop)
+  assert.equal(afterCrop.videoTracks[0].clips[1].crop, undefined)
+  const value = impact({
+    operation: { kind: 'crop', clipId: 'clip-1', crop },
+    afterEditPlan: afterCrop,
+  })
+  assert.deepEqual(value.changeKinds, ['crop'])
+  assert.deepEqual(value.dependencyTypes, ['visual'])
+  assert.deepEqual(value.affectedRanges, [{ startFrame: 0, endFrame: 90 }])
+  assert.deepEqual(value.affectedVariantIds, ['9:16'])
+  assert.deepEqual(value.affectedArtifacts.map((item) => item.artifactId), [
+    'artifact-final-9x16', 'artifact-proxy-9x16',
+  ])
+  assert.deepEqual(value.minimalRenders, [{
+    kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 90 }],
+  }])
+  assert.throws(
+    () => materializeManualEditPlan({
+      editPlan: plan(),
+      operation: {
+        kind: 'crop', clipId: 'clip-1',
+        crop: { x: 0.6, y: 0, width: 0.5, height: 1 },
+      },
+      newVersionId: resultVersionId,
+      createdAt,
+      availableAssetIds: ['source-1'],
+      variantId: '9:16',
+    }),
+    (error) => error.code === 'INVALID_ARGUMENT' && /Crop region/.test(error.message),
+  )
+})
+
 test('T-FR-233 persisted impact is content-addressed and rejects tampering', () => {
   const value = impact()
   assert.deepEqual(parseCommandImpact(value), value)
@@ -183,7 +228,10 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
   const result = await service({
     workspaceId, projectId, baseVersionId, baseHash: 'a'.repeat(64), expectedRevision: 1,
     action: 'apply', variantId: '9:16', targetId: 'clip-1',
-    operation: { kind: 'inspect', clipId: 'clip-1', patch: { layout: 'safe-close-up' } },
+    operation: {
+      kind: 'crop', clipId: 'clip-1',
+      crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
+    },
     actor: { type: 'api-client', id: 'client-impact-1' },
     idempotencyKey: 'command-impact-test-1',
   })
@@ -192,6 +240,10 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
   assert.equal(committed.event.data.commandImpactHash, result.impact.impactHash)
   assert.equal(committed.event.data.invalidatedArtifactCount, 2)
   assert.equal(committed.event.data.minimalRenderCount, 1)
+  assert.equal(committed.command.payload.impact.changeKinds[0], 'crop')
+  assert.deepEqual(JSON.parse(committed.snapshot.contentJson).videoTracks[0].clips[0].crop, {
+    x: 0.2, y: 0, width: 0.6, height: 1,
+  })
   await assert.rejects(
     () => service({
       workspaceId, projectId, baseVersionId, baseHash: 'a'.repeat(64), expectedRevision: 1,
@@ -286,7 +338,7 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
     },
   })
   const persisted = await persistedRepository.commitOrReplay(committed)
-  assert.deepEqual(persisted.invalidations.map((item) => item.artifactId), [
+  assert.deepEqual(persisted.invalidations.map((item) => item.artifactId).toSorted(), [
     'artifact-final-9x16', 'artifact-proxy-9x16',
   ])
   assert.equal(persistedInvalidations.length, 2)

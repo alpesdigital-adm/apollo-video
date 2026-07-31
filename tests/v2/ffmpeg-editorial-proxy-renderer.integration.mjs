@@ -162,6 +162,89 @@ test('T-FR-221 renderer materializes B-roll video while preserving source-master
   }
 })
 
+test('T-FR-233 renderer applies a scoped normalized crop only inside the stale proxy range', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-crop-range-render-'))
+  const masterPath = join(root, 'split-color-master.mp4')
+  try {
+    execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=red:s=320x360:r=30:d=3',
+      '-f', 'lavfi', '-i', 'color=c=blue:s=320x360:r=30:d=3',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=3',
+      '-filter_complex', '[0:v][1:v]hstack=inputs=2[v]',
+      '-map', '[v]', '-map', '2:a:0', '-shortest',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '48000',
+      masterPath,
+    ], { windowsHide: true })
+    const renderer = new FfmpegEditorialProxyRenderer({
+      workRoot: join(root, 'work'),
+      ffmpegPath,
+    })
+    const source = {
+      artifactId: 'artifact-crop-master', path: masterPath, mediaType: 'video',
+      colorPipelineCompilation: colorCompilation('artifact-crop-master'),
+    }
+    const base = await renderer.render({
+      operationId: 'crop-range-base', renderKind: 'proxy',
+      sources: [source],
+      clips: [{
+        id: 'clip-base', sourceArtifactId: source.artifactId,
+        sourceInFrame: 0, sourceOutFrame: 90,
+        timelineInFrame: 0, timelineOutFrame: 90, rate: 1,
+      }],
+      fps: 30, format: '16:9',
+    })
+    const cropped = await renderer.render({
+      operationId: 'crop-range-partial', renderKind: 'proxy',
+      sources: [source],
+      clips: [
+        { id: 'clip-before', sourceArtifactId: source.artifactId, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+        {
+          id: 'clip-cropped', sourceArtifactId: source.artifactId,
+          sourceInFrame: 30, sourceOutFrame: 60,
+          timelineInFrame: 30, timelineOutFrame: 60, rate: 1,
+          crop: { x: 0.5, y: 0, width: 0.5, height: 1 },
+        },
+        { id: 'clip-after', sourceArtifactId: source.artifactId, sourceInFrame: 60, sourceOutFrame: 90, timelineInFrame: 60, timelineOutFrame: 90, rate: 1 },
+      ],
+      fps: 30, format: '16:9',
+      rangeReuse: {
+        schemaVersion: 'project-proxy-range-reuse/v1',
+        commandId: 'manual-command-crop-golden', impactHash: '2'.repeat(64),
+        baseVersionId: 'project-version-crop-base',
+        ranges: [{ startFrame: 30, endFrame: 60 }],
+        artifactId: 'artifact-crop-base-proxy', manifestId: 'manifest-crop-base-proxy',
+        path: base.outputPath, sha256: base.sha256, byteSize: base.byteSize,
+      },
+    })
+    const rangeProbe = await probeVideo(
+      join(root, 'work', 'crop-range-partial', 'editorial-proxy-range.mp4'),
+    )
+    assert.ok(Math.abs(rangeProbe.duration - 1) <= 0.1)
+    assert.ok(Math.abs(cropped.probe.duration - 3) <= 0.1)
+    for (const [second, dominantChannel] of [[0.5, 0], [1.5, 2], [2.5, 0]]) {
+      const pixel = execFileSync(ffmpegPath, [
+        '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', cropped.outputPath,
+        '-frames:v', '1', '-vf', 'crop=2:2:240:270,scale=1:1',
+        '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+      ], { windowsHide: true })
+      assert.equal(pixel.byteLength, 3)
+      const other = dominantChannel === 0 ? 2 : 0
+      assert.ok(pixel[dominantChannel] > pixel[other] * 2)
+    }
+    const basePresenter = cropped.renderElementMap.elements.find((item) =>
+      item.type === 'presenter' && item.frame === 5)
+    const cropPresenter = cropped.renderElementMap.elements.find((item) =>
+      item.type === 'presenter' && item.frame === 45)
+    assert.deepEqual(basePresenter.bounds, { x: 0, y: 0, width: 960, height: 540 })
+    assert.deepEqual(cropPresenter.bounds, { x: 240, y: 0, width: 480, height: 540 })
+    await renderer.cleanup('crop-range-partial')
+    await renderer.cleanup('crop-range-base')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('T-FR-233 renderer recomposes only the stale range and reuses valid proxy prefix and suffix', async () => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-range-reuse-render-'))
   const masterPath = join(root, 'master.mp4')

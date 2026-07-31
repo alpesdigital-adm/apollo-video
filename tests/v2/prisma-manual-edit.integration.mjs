@@ -688,6 +688,72 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(selectedReplayResponse.status, 200)
     assert.equal(selectedReplay.data.replayed, true)
     assert.equal(selectedReplay.data.operation.id, selected.data.operation.id)
+
+    const cropKey = `manual-crop-range-${suffix}`
+    const cropResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/manual-edits`, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': cropKey,
+      },
+      body: JSON.stringify({
+        action: 'apply',
+        baseVersionId: selected.data.version.id,
+        baseHash: selected.data.version.baseHash,
+        expectedRevision: 11,
+        variantId: '9:16',
+        targetId: 'clip-1',
+        operation: {
+          kind: 'crop', clipId: 'clip-1',
+          crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
+        },
+        reason: 'Reenquadramento manual restrito ao clip e formato 9:16.',
+      }),
+    })
+    const cropped = await cropResponse.json()
+    assert.equal(cropResponse.status, 201, JSON.stringify(cropped))
+    assert.equal(cropped.data.version.sequence, 12)
+    assert.equal(cropped.data.command.payload.impact.changeKinds[0], 'crop')
+    assert.deepEqual(cropped.data.command.payload.impact.dependencyTypes, ['visual'])
+    assert.deepEqual(cropped.data.command.payload.impact.affectedVariantIds, ['9:16'])
+    assert.equal(cropped.data.command.payload.impact.minimalRenders.length, 1)
+    assert.equal(cropped.data.operation.status, 'queued')
+    const cropVersion = await client.v2ProjectVersion.findUnique({
+      where: { id: cropped.data.version.id },
+      include: { editPlanSnapshot: true },
+    })
+    const cropPlan = JSON.parse(cropVersion.editPlanSnapshot.contentJson)
+    assert.deepEqual(cropPlan.videoTracks[0].clips.find((clip) => clip.id === 'clip-1').crop, {
+      x: 0.2, y: 0, width: 0.6, height: 1,
+    })
+    const cropInvalidations = await client.v2CommandArtifactInvalidation.findMany({
+      where: { commandId: cropped.data.command.id },
+    })
+    assert.equal(cropInvalidations.length, 1)
+    assert.deepEqual(JSON.parse(cropInvalidations[0].dependencyTypesJson), ['visual'])
+    const cropOperation = await client.v2ProjectProxyRenderOperation.findUnique({
+      where: { operationId: cropped.data.operation.id },
+    })
+    const { PrismaProjectProxyRenderRepository } = await import(
+      '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
+    )
+    const cropSource = await new PrismaProjectProxyRenderRepository(client).readImmutableSource({
+      workspaceId,
+      projectId,
+      projectVersionId: cropped.data.version.id,
+      editPlanSnapshotId: cropOperation.editPlanSnapshotId,
+      sourceArtifactId: cropOperation.sourceArtifactId,
+      sourceManifestId: cropOperation.sourceManifestId,
+    })
+    assert.equal(cropSource.rangeReuse.commandId, cropped.data.command.id)
+    assert.equal(cropSource.rangeReuse.impactHash, cropped.data.command.payload.impact.impactHash)
+    assert.equal(cropSource.rangeReuse.baseVersionId, selected.data.version.id)
+    assert.equal(cropSource.rangeReuse.artifactId, completedProxyArtifactId)
+    assert.deepEqual(
+      cropSource.rangeReuse.ranges,
+      cropped.data.command.payload.impact.minimalRenders[0].ranges,
+    )
     await context.close()
     await browser.close()
     browser = undefined

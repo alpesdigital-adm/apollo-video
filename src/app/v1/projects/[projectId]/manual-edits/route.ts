@@ -7,6 +7,7 @@ import { applyManualEditService } from '@/v2/application/manual-edit'
 import { DomainError } from '@/v2/domain/errors'
 import type {
   ManualGesture,
+  ManualCropRegion,
   ManualInspectorPatch,
 } from '@/v2/domain/manual-editing'
 import {
@@ -106,6 +107,26 @@ function parseOperation(value: unknown): ManualGesture | undefined {
       throw new DomainError('INVALID_ARGUMENT', 'replace operation is invalid')
     }
     return { kind: 'replace', clipId: base.clipId, sourceId: base.sourceId }
+  }
+  if (base.kind === 'crop') {
+    strictRecord(value, 'operation', ['kind', 'clipId', 'crop'])
+    const crop = strictRecord(base.crop, 'operation.crop', [
+      'x', 'y', 'width', 'height',
+    ])
+    if (!['x', 'y', 'width', 'height'].every((field) =>
+      typeof crop[field] === 'number')) {
+      throw new DomainError('INVALID_ARGUMENT', 'crop operation is invalid')
+    }
+    return {
+      kind: 'crop',
+      clipId: base.clipId,
+      crop: {
+        x: crop.x as number,
+        y: crop.y as number,
+        width: crop.width as number,
+        height: crop.height as number,
+      } satisfies ManualCropRegion,
+    }
   }
   if (base.kind === 'inspect') {
     strictRecord(value, 'operation', ['kind', 'clipId', 'patch'])

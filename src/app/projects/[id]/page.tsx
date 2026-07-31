@@ -585,9 +585,13 @@ interface ReviewPatchBatchData {
   resultVersionId?: string; renderOperationId?: string; comparison?: ReviewPatchProposalData['comparison']; render?: ReviewPatchProposalData['render'];
   createdAt: string; updatedAt: string;
 }
+interface ManualCropRegionData {
+  x: number; y: number; width: number; height: number
+}
 interface ManualTimelineClipData {
   id: string; sourceId: string; startMs: number; endMs: number; track: number; selected: boolean;
   inspector: { layout?: string; text?: string; subtitle?: string; color?: string; motion?: string; audioGain?: number }
+  crop?: ManualCropRegionData
 }
 interface ManualTimelineData {
   timeline: { versionId: string; revision: number; clips: ManualTimelineClipData[]; snapPointsMs: number[] };
@@ -602,6 +606,7 @@ type ManualOperation =
   | { kind: 'split'; clipId: string; atMs: number }
   | { kind: 'move'; clipId: string; startMs: number; track: number }
   | { kind: 'replace'; clipId: string; sourceId: string }
+  | { kind: 'crop'; clipId: string; crop: ManualCropRegionData }
   | { kind: 'inspect'; clipId: string; patch: ManualTimelineClipData['inspector'] }
 interface ManualEditAppliedData {
   timeline: ManualTimelineData['timeline'];
@@ -975,6 +980,7 @@ export default function ProjectWorkspacePage() {
   const [manualSelectedClipId, setManualSelectedClipId] = useState<string | null>(null)
   const [manualBusy, setManualBusy] = useState(false)
   const [manualInspector, setManualInspector] = useState<ManualTimelineClipData['inspector']>({})
+  const [manualCrop, setManualCrop] = useState<ManualCropRegionData>({ x: 0, y: 0, width: 1, height: 1 })
   const compareBeforeVideo = useRef<HTMLVideoElement>(null)
   const compareAfterVideo = useRef<HTMLVideoElement>(null)
   const [compareBeforeVersionId, setCompareBeforeVersionId] = useState<string | null>(null)
@@ -1622,7 +1628,15 @@ export default function ProjectWorkspacePage() {
   )
   useEffect(() => {
     setManualInspector(manualSelectedClip ? { ...manualSelectedClip.inspector } : {})
+    setManualCrop(manualSelectedClip?.crop ?? { x: 0, y: 0, width: 1, height: 1 })
   }, [manualSelectedClip])
+  const manualCropValid = [manualCrop.x, manualCrop.y, manualCrop.width, manualCrop.height]
+    .every(Number.isFinite) &&
+    manualCrop.x >= 0 && manualCrop.y >= 0 &&
+    manualCrop.width > 0 && manualCrop.height > 0 &&
+    manualCrop.width <= 1 && manualCrop.height <= 1 &&
+    manualCrop.x + manualCrop.width <= 1 &&
+    manualCrop.y + manualCrop.height <= 1
   useEffect(() => {
     const timeline = manualTimeline?.timeline
     const history = manualTimeline?.history ?? []
@@ -1839,12 +1853,12 @@ export default function ProjectWorkspacePage() {
         baseHash: result.version.baseHash,
         editPlanHash: result.comparison.afterEditPlanHash,
       } : current)
-      setManualSelectedClipId(
-        result.timeline.clips.find((clip) => clip.id === selectedId)?.id
-          ?? result.timeline.clips.find((clip) => clip.id.startsWith(`${selectedId}:`))?.id
-          ?? result.timeline.clips[0]?.id
-          ?? null,
-      )
+      const nextSelectedClip = result.timeline.clips.find((clip) => clip.id === selectedId)
+        ?? result.timeline.clips.find((clip) => clip.id.startsWith(`${selectedId}:`))
+        ?? result.timeline.clips[0]
+      setManualSelectedClipId(nextSelectedClip?.id ?? null)
+      setManualInspector({ ...(nextSelectedClip?.inspector ?? {}) })
+      setManualCrop(nextSelectedClip?.crop ?? { x: 0, y: 0, width: 1, height: 1 })
       setNotice(
         input.action === 'apply'
           ? `Edição registrada na versão ${result.version.sequence}. O novo proxy entrou na fila.`
@@ -1865,6 +1879,7 @@ export default function ProjectWorkspacePage() {
   function selectManualClip(clip: ManualTimelineClipData): void {
     setManualSelectedClipId(clip.id)
     setManualInspector({ ...clip.inspector })
+    setManualCrop(clip.crop ?? { x: 0, y: 0, width: 1, height: 1 })
     const fps = review?.session.fps ?? editingProxy?.probe?.fps ?? 30
     seekPreviewToFrame(Math.round(clip.startMs / 1000 * fps))
   }
@@ -1953,6 +1968,26 @@ export default function ProjectWorkspacePage() {
     void submitManualEdit({
       action: 'apply',
       operation: { kind: 'inspect', clipId: manualSelectedClip.id, patch },
+    })
+  }
+
+  function submitManualCrop(): void {
+    if (!manualSelectedClip) return
+    const values = [manualCrop.x, manualCrop.y, manualCrop.width, manualCrop.height]
+    if (
+      values.some((value) => !Number.isFinite(value)) ||
+      manualCrop.x < 0 || manualCrop.y < 0 ||
+      manualCrop.width <= 0 || manualCrop.height <= 0 ||
+      manualCrop.width > 1 || manualCrop.height > 1 ||
+      manualCrop.x + manualCrop.width > 1 ||
+      manualCrop.y + manualCrop.height > 1
+    ) {
+      setNotice('O crop precisa ser um retÃ¢ngulo normalizado dentro do frame.')
+      return
+    }
+    void submitManualEdit({
+      action: 'apply',
+      operation: { kind: 'crop', clipId: manualSelectedClip.id, crop: manualCrop },
     })
   }
 
@@ -3205,6 +3240,44 @@ export default function ProjectWorkspacePage() {
                   </div>
 
                   <div className="p-4" data-testid="manual-inspector">
+                    <div data-testid="manual-crop-editor">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[8px] font-semibold uppercase tracking-[0.17em] text-[#827b70]">Crop do clip</p>
+                        <span className="text-[7px] uppercase tracking-[0.12em] text-[#4e4a45]">normalizado Â· formato atual</span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-4 gap-2">
+                        {([
+                          ['x', 'X'], ['y', 'Y'], ['width', 'L'], ['height', 'A'],
+                        ] as const).map(([field, label]) => (
+                          <label key={field}>
+                            <span className="mb-1 block text-[7px] uppercase tracking-[0.12em] text-[#55514c]">{label}</span>
+                            <input
+                              className="w-full border border-white/[0.08] bg-[#050505] px-2 py-2 text-[9px] text-[#b7b0a7] outline-none focus:border-[#d9aa3d]/45"
+                              data-testid={`manual-crop-${field}`}
+                              max="1"
+                              min="0"
+                              onChange={(event) => setManualCrop((current) => ({
+                                ...current,
+                                [field]: Number(event.target.value),
+                              }))}
+                              step="0.01"
+                              type="number"
+                              value={manualCrop[field]}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      <button
+                        className="mt-3 w-full border border-[#dbae3f]/45 bg-[#dbae3f]/10 px-3 py-2 text-[9px] font-bold text-[#ddb858] disabled:opacity-35"
+                        data-testid="manual-crop-apply"
+                        disabled={manualBusy || !manualCropValid}
+                        onClick={submitManualCrop}
+                        type="button"
+                      >
+                        {manualBusy ? 'Criando versÃ£oâ€¦' : 'Aplicar crop neste formato'}
+                      </button>
+                    </div>
+                    <div className="my-4 h-px bg-white/[0.07]" />
                     <div className="flex items-center justify-between">
                       <p className="text-[8px] font-semibold uppercase tracking-[0.17em] text-[#827b70]">Inspector</p>
                       <span className="text-[7px] uppercase tracking-[0.12em] text-[#4e4a45]">layout · texto · cor · motion · áudio</span>

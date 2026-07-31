@@ -13,6 +13,13 @@ export interface ManualInspectorPatch {
   audioGain?: number
 }
 
+export interface ManualCropRegion {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface TimelineClip {
   id: string
   sourceId: string
@@ -21,6 +28,7 @@ export interface TimelineClip {
   track: number
   selected: boolean
   inspector: ManualInspectorPatch
+  crop?: Readonly<ManualCropRegion>
 }
 
 export interface TimelineViewModel {
@@ -36,6 +44,7 @@ export type ManualGesture =
   | { kind: 'split'; clipId: string; atMs: number }
   | { kind: 'move'; clipId: string; startMs: number; track: number }
   | { kind: 'replace'; clipId: string; sourceId: string }
+  | { kind: 'crop'; clipId: string; crop: ManualCropRegion }
   | { kind: 'inspect'; clipId: string; patch: ManualInspectorPatch }
 
 export interface ManualEditCommand {
@@ -112,6 +121,34 @@ function validateInspectorPatch(patch: ManualInspectorPatch): void {
   }
 }
 
+export function validateManualCropRegion(
+  crop: ManualCropRegion,
+): Readonly<ManualCropRegion> {
+  assertDomain(
+    crop !== null && typeof crop === 'object' && !Array.isArray(crop) &&
+      Object.keys(crop).length === 4 &&
+      ['x', 'y', 'width', 'height'].every((key) => key in crop),
+    'INVALID_ARGUMENT',
+    'Crop region must contain only x, y, width and height',
+  )
+  const values = [crop.x, crop.y, crop.width, crop.height]
+  assertDomain(
+    values.every(Number.isFinite) &&
+      crop.x >= 0 && crop.y >= 0 &&
+      crop.width > 0 && crop.height > 0 &&
+      crop.width <= 1 && crop.height <= 1 &&
+      crop.x + crop.width <= 1 && crop.y + crop.height <= 1,
+    'INVALID_ARGUMENT',
+    'Crop region must be a positive normalized rectangle inside the source frame',
+  )
+  return Object.freeze({
+    x: crop.x,
+    y: crop.y,
+    width: crop.width,
+    height: crop.height,
+  })
+}
+
 export function validateManualGesture(gesture: ManualGesture): Readonly<ManualGesture> {
   assertDomain(
     /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(gesture.clipId),
@@ -136,6 +173,8 @@ export function validateManualGesture(gesture: ManualGesture): Readonly<ManualGe
       'INVALID_ARGUMENT',
       'Replacement sourceId is invalid',
     )
+  } else if (gesture.kind === 'crop') {
+    validateManualCropRegion(gesture.crop)
   } else if (gesture.kind === 'inspect') {
     validateInspectorPatch(gesture.patch)
   }
@@ -200,6 +239,7 @@ function freezeTimeline(model: TimelineViewModel): Readonly<TimelineViewModel> {
     clips: Object.freeze(model.clips.map((clip) => Object.freeze({
       ...clip,
       inspector: Object.freeze({ ...clip.inspector }),
+      ...(clip.crop ? { crop: validateManualCropRegion(clip.crop) } : {}),
     }))),
     snapPointsMs: Object.freeze([...model.snapPointsMs]),
   })
@@ -250,6 +290,8 @@ export function applyManualEdit(
     clip.track = operation.track
   } else if (operation.kind === 'replace') {
     clip.sourceId = operation.sourceId
+  } else if (operation.kind === 'crop') {
+    clip.crop = validateManualCropRegion(operation.crop)
   } else if (operation.kind === 'inspect') {
     clip.inspector = { ...clip.inspector, ...operation.patch }
   }
@@ -373,6 +415,9 @@ export function timelineViewModelFromEditPlan(input: {
         track: trackIndex,
         selected: clip.id === input.selectedClipId,
         inspector: Object.freeze({ ...inspector }),
+        ...(clip.crop !== undefined
+          ? { crop: validateManualCropRegion(clip.crop as ManualCropRegion) }
+          : {}),
       })
     }))
   return freezeTimeline({
@@ -454,6 +499,8 @@ export function materializeManualEditPlan(input: {
     located.clip.sourceArtifactId = operation.sourceId
     located.clip.sourceInFrame = 0
     located.clip.sourceOutFrame = durationFrames
+  } else if (operation.kind === 'crop') {
+    located.clip.crop = validateManualCropRegion(operation.crop)
   } else if (operation.kind === 'inspect') {
     applyInspectorToPlan(plan, located.clip, operation.patch)
   }
@@ -634,6 +681,9 @@ function semanticChangesBetweenPlans(
     }
     if (stableSerialize(left.manualInspector ?? null) !== stableSerialize(right.manualInspector ?? null)) {
       changes.push({ category: 'visual', target: id, summary: 'Inspector settings changed.' })
+    }
+    if (stableSerialize(left.crop ?? null) !== stableSerialize(right.crop ?? null)) {
+      changes.push({ category: 'visual', target: id, summary: 'Clip crop changed.' })
     }
   }
   if (stableSerialize(before.composition ?? null) !== stableSerialize(after.composition ?? null)) {

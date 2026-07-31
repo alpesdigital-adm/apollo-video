@@ -8,7 +8,11 @@ import { createRenderInputSpec } from '../domain/render-input.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { VerifiedMediaStorage } from './ports/media-ingest.ts'
-import type { EditorialProxyRenderer } from './ports/editorial-proxy-renderer.ts'
+import {
+  EDITORIAL_FINAL_RECIPE_VERSION,
+  FFMPEG_EDITORIAL_RENDERER_VERSION,
+  type EditorialProxyRenderer,
+} from './ports/editorial-proxy-renderer.ts'
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
@@ -321,7 +325,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         stored.sha256 !== rendered.sha256 ||
         stored.byteSize !== rendered.byteSize
       ) throw new DomainError('RENDER_OUTPUT_INVALID', 'Promoted final output checksum or byte size changed')
-      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-final/1.1.0').digest('hex')
+      const toolDigest = createHash('sha256')
+        .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`)
+        .digest('hex')
       const renderInput = createRenderInputSpec({
         schemaVersion: 'render-input/v1',
         renderer: {
@@ -385,7 +391,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         container: 'mp4',
         recipe: {
           id: 'editorial-final',
-          version: '1.0.0',
+          version: EDITORIAL_FINAL_RECIPE_VERSION,
           parameters: {
             inputHash: context.inputHash,
             projectVersionId: context.projectVersionId,

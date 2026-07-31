@@ -100,6 +100,37 @@ function escapeSubtitleFilterPath(value: string): string {
 
 type EditorialRenderInput = Parameters<EditorialProxyRenderer['render']>[0]
 
+function normalizedCropFilter(
+  crop: NonNullable<EditorialRenderInput['clips'][number]['crop']>,
+  source: { width: number; height: number },
+): string {
+  const values = [crop.x, crop.y, crop.width, crop.height]
+  if (
+    values.some((value) => !Number.isFinite(value)) ||
+    crop.x < 0 || crop.y < 0 || crop.width <= 0 || crop.height <= 0 ||
+    crop.width > 1 || crop.height > 1 ||
+    crop.x + crop.width > 1 || crop.y + crop.height > 1
+  ) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial clip crop is invalid')
+  const availableWidth = source.width - source.width % 2
+  const availableHeight = source.height - source.height % 2
+  const x = Math.floor(crop.x * source.width / 2) * 2
+  const y = Math.floor(crop.y * source.height / 2) * 2
+  const right = Math.min(
+    availableWidth,
+    Math.ceil((crop.x + crop.width) * source.width / 2) * 2,
+  )
+  const bottom = Math.min(
+    availableHeight,
+    Math.ceil((crop.y + crop.height) * source.height / 2) * 2,
+  )
+  const width = right - x
+  const height = bottom - y
+  if (width < 2 || height < 2) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Editorial clip crop has no encodable pixels')
+  }
+  return `crop=${width}:${height}:${x}:${y},`
+}
+
 function sliceRenderRange(input: EditorialRenderInput, range: {
   startFrame: number
   endFrame: number
@@ -290,6 +321,9 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         }),
       })),
     )
+    const videoProbeByArtifactId = new Map(
+      videoProbes.map((item) => [item.artifactId, item.probe]),
+    )
     const stagingProbe = videoProbes.toSorted(
       (left, right) =>
         right.probe.width * right.probe.height -
@@ -320,9 +354,12 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       const audioOutFrame = clip.audioSourceOutFrame ?? clip.sourceOutFrame
       const audioStart = audioInFrame / input.fps
       const audioEnd = audioOutFrame / input.fps
+      const cropFilter = clip.crop
+        ? normalizedCropFilter(clip.crop, videoProbeByArtifactId.get(clip.sourceArtifactId)!)
+        : ''
       filters.push(
         `[${videoIndex}:v:0]trim=start_frame=${clip.sourceInFrame}:end_frame=${clip.sourceOutFrame},` +
-        `setpts=PTS-STARTPTS,scale=${stagingWidth}:${stagingHeight}:force_original_aspect_ratio=decrease,` +
+        `setpts=PTS-STARTPTS,${cropFilter}scale=${stagingWidth}:${stagingHeight}:force_original_aspect_ratio=decrease,` +
         `pad=${stagingWidth}:${stagingHeight}:(ow-iw)/2:(oh-ih)/2:color=black,` +
         `fps=${outputFps},setsar=1,format=yuv420p[v${index}]`,
       )
@@ -472,6 +509,10 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       durationFrames: fullExpectedFrames,
       canvas: { width, height },
       source: { width: stagingProbe.width, height: stagingProbe.height },
+      sourceDimensions: Object.fromEntries(videoProbes.map(({ artifactId, probe: sourceProbe }) => [
+        artifactId,
+        { width: sourceProbe.width, height: sourceProbe.height },
+      ])),
       clips: input.clips,
       subtitleCues: input.subtitleCues,
       composition: input.composition,

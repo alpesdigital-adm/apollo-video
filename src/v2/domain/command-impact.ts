@@ -214,6 +214,16 @@ function classify(action: ManualVersionAction, operation?: ManualGesture): Reado
       throughEnd: false,
     })
   }
+  if (operation!.kind === 'crop') {
+    return Object.freeze({
+      changeKinds: Object.freeze(['crop']),
+      dependencies: Object.freeze(
+        ['visual'] satisfies CommandImpactDependency[],
+      ),
+      renderSemanticsChanged: true,
+      throughEnd: false,
+    })
+  }
   const keys = Object.keys(operation!.patch).sort()
   const dependencies = new Set<CommandImpactDependency>()
   if (keys.some((key) => ['layout', 'text', 'subtitle', 'color', 'motion'].includes(key))) {

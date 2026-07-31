@@ -16,7 +16,9 @@ dependency state; it never changes the global availability of historical
 bytes. Replay rehydrates and compares the normalized rows against the immutable
 impact payload, while the additive public
 `apollo.projects.artifact-invalidations.read` capability returns those same
-relationships without changing `manual-edits.apply/v1`.
+relationships. The crop addition deliberately evolves
+`apollo.projects.manual-edits.apply` to capability/schema major v2 while the
+v1 schema references remain immutable.
 
 The initial `manual-edit` runtime derives one persisted proxy range, validates a
 completed base proxy, recomposes only that range and assembles a complete MP4
@@ -34,3 +36,14 @@ self-referential `reusedFromOperationId` plus Command/base-version FKs. Missing
 base proxy fails closed instead of silently rendering. The current adapter is
 intentionally limited to one merged range and unit-rate clips. Other Commands
 and multiple ranges/rates remain open and prevent claiming FR-233 complete.
+
+Manual crop is not encoded as an inspector/layout string. It is a typed,
+normalized source rectangle on one clip, scoped by the Command to one format.
+The immutable impact records `crop`, visual dependency and the exact clip
+range; the renderer preserves the crop through partial slicing, converts it to
+encodable source pixels before composition and emits matching element bounds.
+The shared FFmpeg renderer and proxy/final recipe identities are versioned when
+this pixel behavior changes. A real red/blue FFmpeg golden proves that only the
+stale middle range is cropped while the base proxy prefix and suffix remain
+valid. PostgreSQL/API E2E coverage is prepared but not executed locally, so
+crop and FR-233 remain unaccepted.

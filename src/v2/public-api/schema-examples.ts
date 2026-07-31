@@ -7398,6 +7398,22 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         targetVersionId: 'project-version-example-4',
       },
     ],
+    'apollo://schemas/apply-project-manual-edit-request/v2': [
+      {
+        action: 'apply',
+        baseVersionId: 'project-version-example-5',
+        baseHash: 'e'.repeat(64),
+        expectedRevision: 5,
+        variantId: 'output-spec-9x16',
+        targetId: 'clip-example-1',
+        operation: {
+          kind: 'crop',
+          clipId: 'clip-example-1',
+          crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
+        },
+        reason: 'Reenquadrar manualmente apenas o clip e formato selecionados.',
+      },
+    ],
     'apollo://schemas/project-version-comparison-action-request/v1': [
       {
         action: 'accept',
@@ -7525,6 +7541,39 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-manual-timeline/v2': [
+      {
+        data: {
+          timeline: {
+            versionId: 'project-version-example-5',
+            revision: 5,
+            clips: [{
+              id: 'clip-example-1',
+              sourceId: 'artifact-example-1',
+              startMs: 0,
+              endMs: 5000,
+              track: 0,
+              selected: true,
+              inspector: {},
+              crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
+            }],
+            snapPointsMs: [0, 5000],
+          },
+          baseHash: 'e'.repeat(64),
+          editPlanHash: '5'.repeat(64),
+          history: [{
+            id: 'project-version-example-5',
+            sequence: 5,
+            parentVersionId: 'project-version-example-4',
+            commandId: 'manual-edit-command-example-crop',
+            commandType: 'manual-edit',
+            action: 'apply',
+            createdAt,
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-manual-edit-applied/v1': [
       {
         data: {
@@ -7568,6 +7617,68 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               { id: 'clip-example-1:b', sourceId: 'artifact-example-1', startMs: 3120, endMs: 5000, track: 0, selected: false, inspector: {} },
             ],
             snapPointsMs: [0, 3120, 5000],
+          },
+          comparison: {
+            beforeVersionId: 'project-version-example-4',
+            afterVersionId: 'project-version-example-5',
+            beforeEditPlanHash: '4'.repeat(64),
+            afterEditPlanHash: '5'.repeat(64),
+            action: 'apply',
+            targetId: 'clip-example-1',
+          },
+          operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-manual-edit-applied/v2': [
+      {
+        data: {
+          command: {
+            id: 'manual-edit-command-example-crop',
+            type: 'manual-edit',
+            action: 'apply',
+            baseVersionId: 'project-version-example-4',
+            resultVersionId: 'project-version-example-5',
+            scope: {
+              clipIds: ['clip-example-1'],
+              outputSpecIds: ['output-spec-9x16'],
+            },
+            payload: {
+              schemaVersion: 2,
+              action: 'apply',
+              expectedRevision: 4,
+              variantId: 'output-spec-9x16',
+              targetId: 'clip-example-1',
+              operation: {
+                kind: 'crop', clipId: 'clip-example-1',
+                crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
+              },
+            },
+            createdAt,
+          },
+          version: {
+            id: 'project-version-example-5',
+            sequence: 5,
+            parentVersionId: 'project-version-example-4',
+            baseHash: 'e'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1',
+              editPlan: 'project-snapshot-edit-plan-5',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          timeline: {
+            versionId: 'project-version-example-5',
+            revision: 5,
+            clips: [{
+              id: 'clip-example-1', sourceId: 'artifact-example-1',
+              startMs: 0, endMs: 5000, track: 0, selected: true, inspector: {},
+              crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
+            }],
+            snapPointsMs: [0, 5000],
           },
           comparison: {
             beforeVersionId: 'project-version-example-4',
@@ -7744,6 +7855,34 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           comparison: versionComparisonExample,
           versionsPreserved: true,
           operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-version-comparison-action-result/v2': [
+      {
+        data: {
+          action: 'accept',
+          command: {
+            id: 'compare-command-example-2',
+            type: 'compare-action',
+            baseVersionId: 'project-version-example-5',
+            scope: { project: true },
+            payload: {
+              schemaVersion: 1,
+              action: 'accept',
+              expectedRevision: 5,
+              beforeVersionId: 'project-version-example-4',
+              afterVersionId: 'project-version-example-5',
+              mode: 'split',
+              comparison: versionComparisonExample,
+            },
+            createdAt,
+          },
+          projectStatus: 'reviewing-proxy',
+          comparison: versionComparisonExample,
+          versionsPreserved: true,
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

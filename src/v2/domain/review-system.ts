@@ -252,11 +252,13 @@ export function buildRenderElementMap(input: {
   durationFrames: number
   canvas: { width: number; height: number }
   source: { width: number; height: number }
+  sourceDimensions?: Readonly<Record<string, Readonly<{ width: number; height: number }>>>
   clips: readonly Readonly<{
     id: string
     sourceArtifactId: string
     timelineInFrame: number
     timelineOutFrame: number
+    crop?: Readonly<{ x: number; y: number; width: number; height: number }>
   }>[]
   subtitleCues?: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[]
   composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
@@ -271,20 +273,35 @@ export function buildRenderElementMap(input: {
   // Probe rates can contain floating-point noise. Canonicalize before hashing
   // so a PostgreSQL double-precision round trip preserves immutable identity.
   const fps = Number(input.fps.toFixed(6))
-  const scale = Math.min(input.canvas.width / input.source.width, input.canvas.height / input.source.height)
   const foregroundScale = input.composition?.foregroundScale ?? 1
-  const foregroundWidth = Math.min(input.canvas.width, Math.round(input.source.width * scale * foregroundScale))
-  const foregroundHeight = Math.min(input.canvas.height, Math.round(input.source.height * scale * foregroundScale))
   const verticalPosition = input.composition?.verticalPosition ?? 0.5
-  const foregroundBounds = Object.freeze({
-    x: Math.floor((input.canvas.width - foregroundWidth) / 2),
-    y: Math.max(0, Math.min(input.canvas.height - foregroundHeight, Math.round(input.canvas.height * verticalPosition - foregroundHeight / 2))),
-    width: foregroundWidth,
-    height: foregroundHeight,
-  })
   const backgroundBounds = Object.freeze({ x: 0, y: 0, width: input.canvas.width, height: input.canvas.height })
   const elements: RenderElement[] = []
   for (const clip of input.clips) {
+    const source = input.sourceDimensions?.[clip.sourceArtifactId] ?? input.source
+    assertDomain(
+      Number.isSafeInteger(source.width) && source.width > 0 &&
+        Number.isSafeInteger(source.height) && source.height > 0,
+      'INVALID_ARGUMENT',
+      `RenderElementMap source dimensions are invalid for ${clip.sourceArtifactId}`,
+    )
+    const cropWidth = source.width * (clip.crop?.width ?? 1)
+    const cropHeight = source.height * (clip.crop?.height ?? 1)
+    const clipScale = Math.min(input.canvas.width / cropWidth, input.canvas.height / cropHeight)
+    const clipForegroundWidth = Math.min(
+      input.canvas.width,
+      Math.round(cropWidth * clipScale * foregroundScale),
+    )
+    const clipForegroundHeight = Math.min(
+      input.canvas.height,
+      Math.round(cropHeight * clipScale * foregroundScale),
+    )
+    const foregroundBounds = Object.freeze({
+      x: Math.floor((input.canvas.width - clipForegroundWidth) / 2),
+      y: Math.max(0, Math.min(input.canvas.height - clipForegroundHeight, Math.round(input.canvas.height * verticalPosition - clipForegroundHeight / 2))),
+      width: clipForegroundWidth,
+      height: clipForegroundHeight,
+    })
     const sceneId = `scene:${clip.id}`
     elements.push(...elementFrames(clip.timelineInFrame, clip.timelineOutFrame, (frame) => ({
       elementId: `background:${clip.id}`,

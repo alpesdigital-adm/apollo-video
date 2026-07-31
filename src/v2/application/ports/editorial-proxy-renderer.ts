@@ -3,6 +3,10 @@ import type { DirectedSubtitleCue, DirectedTransition } from '../../domain/direc
 import type { RenderElementMap } from '../../domain/review-system.ts'
 import type { ColorPipelineCompilation } from '../../domain/color-pipeline-compilation.ts'
 
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.3.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.3.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.1.0'
+
 export interface EditorialProxyRenderResult {
   outputPath: string
   sha256: string

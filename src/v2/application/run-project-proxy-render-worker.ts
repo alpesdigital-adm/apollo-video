@@ -5,7 +5,11 @@ import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { VerifiedMediaStorage } from './ports/media-ingest.ts'
-import type { EditorialProxyRenderer } from './ports/editorial-proxy-renderer.ts'
+import {
+  EDITORIAL_PROXY_RECIPE_VERSION,
+  FFMPEG_EDITORIAL_RENDERER_VERSION,
+  type EditorialProxyRenderer,
+} from './ports/editorial-proxy-renderer.ts'
 import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-repository.ts'
 import type { ProxyReviewRepository } from './ports/proxy-review-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
@@ -172,10 +176,12 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
       await enter('persisting')
       const stored = await dependencies.storage.promoteDerived({ workspaceId: operation.workspaceId, sourcePath: rendered.outputPath, sha256: rendered.sha256, extension: 'mp4', prefix: 'editorial-proxies' })
-      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-proxy/1.2.0').digest('hex')
+      const toolDigest = createHash('sha256')
+        .update(`apollo-v2-ffmpeg-editorial/${FFMPEG_EDITORIAL_RENDERER_VERSION}`)
+        .digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: '1.2.0', parameters: { inputHash: context.inputHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null } },
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null } },
         sources: [
           ...source.renderSources.map((asset) => ({
             artifactKey: asset.artifactKey,

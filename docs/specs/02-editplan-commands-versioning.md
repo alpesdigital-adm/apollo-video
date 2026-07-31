@@ -497,12 +497,20 @@ A aplicação exige `confirmed: true`, `Idempotency-Key` e aprovação humana pa
 
 `POST /v1/projects/{projectId}/manual-edits` aceita:
 
-- `action=apply` com uma operação fechada `trim`, `split`, `move`, `replace` ou `inspect`;
+- `action=apply` com uma operação fechada `trim`, `split`, `move`, `replace`, `crop` ou `inspect`;
 - `action=undo` com o pai direto como `targetVersionId`;
 - `action=redo` com uma versão compilada do mesmo projeto como `targetVersionId`;
 - `action=restore` quando o compare escolhe um snapshot histórico para criar uma nova versão corrente.
 
 O envelope exige `baseVersionId`, `baseHash`, `expectedRevision`, `variantId`, `targetId` e `Idempotency-Key`. `scope.clipIds` registra o target e `scope.outputSpecIds` registra a variante. Uma transação serializável cria Command `manual-edit`, novo snapshot, versão filha, compare e outbox; o `currentVersionId` avança por compare-and-swap. Falha ou corrida não deixa versão, snapshot, Command ou evento parcial.
+
+`crop` recebe exatamente `{x,y,width,height}` normalizados, positivos e
+inteiramente contidos no source frame. O handler grava o retângulo no clip do
+snapshot novo e classifica o impacto como `changeKinds=[crop]`, dependência
+`visual`, um range correspondente ao clip e somente o `variantId` do envelope.
+A timeline/API e a UI expõem esse estado persistido; o renderer converte o
+retângulo para pixels pares da fonte materializada antes de scale/composição.
+Não existe interpretação de string de layout como crop.
 
 Undo/redo clonam o conteúdo do snapshot escolhido, atribuem nova identidade de EditPlan/ProjectVersion e registram `restoresVersionId`. A versão restaurada nunca se torna mutável e nenhuma linha histórica é removida. Após commit, a mesma rota enfileira um proxy durável preso à nova versão.
 
@@ -581,7 +589,7 @@ linha é criada para seleção sem mudança de render ou para outra variant. O
 status global de `V2MediaArtifact` não muda: o artifact continua válido para a
 versão que o produziu. A capability aditiva
 `apollo.projects.artifact-invalidations.read` devolve as mesmas relações sem
-alterar `manual-edits.apply/v1`; replay precisa rejeitar qualquer divergência
+alterar o payload persistido; replay precisa rejeitar qualquer divergência
 entre payload e linhas.
 
 O primeiro executor parcial usa o `command-impact/v1` persistido como única
@@ -606,6 +614,16 @@ o proxy-base, a fonte, o artifact e o manifest; também copia os bindings de cor
 imutáveis apenas como contexto histórico, sem executar resolução ou renderer.
 Ausência ou drift do proxy-base falha fechado. Replays convergem para a mesma
 operação e nenhum worker pode reivindicá-la porque ela já nasce terminal.
+
+O caso integrado de crop usa o mesmo executor: o Command tipado materializa o
+retângulo no EditPlan, o impacto restringe a variante e o range do clip, e o
+renderer preserva crop ao fatiar o input parcial. O golden audiovisual cria
+uma fonte com metades vermelha/azul, aplica crop somente ao range central e
+confirma pixels azuis nesse trecho entre prefixo/sufixo vermelhos, duração
+integral e bounds atualizados no `RenderElementMap`. A identidade do renderer e
+das receitas proxy/final muda junto com essa semântica de pixels. Os contratos
+de manual edit, timeline e compare avançam para major 2 com novos schema refs;
+os refs v1 permanecem imutáveis no catálogo.
 
 ## 24. Matriz de invalidação
 

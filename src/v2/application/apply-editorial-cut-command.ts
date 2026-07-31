@@ -21,6 +21,7 @@ import {
   type SourceTimeRange,
 } from './recovery-project-acceptance.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
+import type { ManualCropRegion } from '../domain/manual-editing.ts'
 
 export interface RemoveSpokenContentRuleInput {
   id: string
@@ -52,6 +53,7 @@ export interface EditorialCutClip {
   timelineInFrame: number
   timelineOutFrame: number
   rate: 1
+  crop?: Readonly<ManualCropRegion>
 }
 
 export interface RetimedTranscriptWord {

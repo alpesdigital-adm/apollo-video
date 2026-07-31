@@ -2162,6 +2162,41 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.artifact-invalidations.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/project-artifact-invalidations/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/artifact-invalidations"
+      },
+      "toolName": "apollo.projects.artifact-invalidations.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "resultVersionId",
+          "description": "Optional immutable result version; defaults to the current project version.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.asset-selections.create": {
       "version": "1.0.0",
       "exposure": "public",
@@ -3185,7 +3220,30 @@
       ],
       "responseMediaType": "application/json"
     },
-    "apollo.projects.manual-edits.apply": {
+    "apollo.projects.lut-selection.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/project-lut-selection-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/lut-selection"
+      },
+      "toolName": "apollo.projects.lut-selection.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.lut-selection.set": {
       "version": "1.0.0",
       "exposure": "public",
       "operationKind": "command",
@@ -3193,8 +3251,34 @@
       "requiredScopes": [
         "projects:write"
       ],
-      "inputSchemaRef": "apollo://schemas/apply-project-manual-edit-request/v1",
-      "outputSchemaRef": "apollo://schemas/project-manual-edit-applied/v1",
+      "inputSchemaRef": "apollo://schemas/project-lut-selection-set-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-lut-selection-applied/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/lut-selection"
+      },
+      "toolName": "apollo.projects.lut-selection.set",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.manual-edits.apply": {
+      "version": "2.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/apply-project-manual-edit-request/v2",
+      "outputSchemaRef": "apollo://schemas/project-manual-edit-applied/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/projects/{projectId}/manual-edits"
@@ -4633,14 +4717,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.timeline.read": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "projects:read"
       ],
-      "outputSchemaRef": "apollo://schemas/project-manual-timeline/v1",
+      "outputSchemaRef": "apollo://schemas/project-manual-timeline/v2",
       "endpoint": {
         "method": "GET",
         "path": "/v1/projects/{projectId}/timeline"
@@ -4971,7 +5055,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.version-comparisons.act": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
@@ -4979,7 +5063,7 @@
         "projects:write"
       ],
       "inputSchemaRef": "apollo://schemas/project-version-comparison-action-request/v1",
-      "outputSchemaRef": "apollo://schemas/project-version-comparison-action-result/v1",
+      "outputSchemaRef": "apollo://schemas/project-version-comparison-action-result/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/projects/{projectId}/version-comparisons"
@@ -5866,6 +5950,268 @@
       ],
       "idempotency": "natural",
       "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.workspace-luts.default.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/workspace-lut-default-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/lut-default"
+      },
+      "toolName": "apollo.workspace-luts.default.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.workspace-luts.default.set": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/workspace-lut-default-set-request/v1",
+      "outputSchemaRef": "apollo://schemas/workspace-lut-default-set/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/lut-default"
+      },
+      "toolName": "apollo.workspace-luts.default.set",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.workspace-luts.import": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/workspace-lut-import-request/v1",
+      "outputSchemaRef": "apollo://schemas/workspace-lut-imported/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/luts"
+      },
+      "toolName": "apollo.workspace-luts.import",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.workspace-luts.lifecycle.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/workspace-lut-lifecycle-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/luts/{lutId}/status"
+      },
+      "toolName": "apollo.workspace-luts.lifecycle.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.workspace-luts.lifecycle.set": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/workspace-lut-status-request/v1",
+      "outputSchemaRef": "apollo://schemas/workspace-lut-status-applied/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/luts/{lutId}/status"
+      },
+      "toolName": "apollo.workspace-luts.lifecycle.set",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.workspace-luts.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/workspace-lut-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/luts"
+      },
+      "toolName": "apollo.workspace-luts.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "status",
+          "description": "Filter current LUT status.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "description": "Maximum LUT records to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.workspace-luts.preview.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/binary-media-content/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/luts/{lutId}/versions/{version}/preview"
+      },
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/octet-stream"
+    },
+    "apollo.workspace-luts.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/workspace-lut-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/luts/{lutId}"
+      },
+      "toolName": "apollo.workspace-luts.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.workspace-luts.versions.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/workspace-lut-version-create-request/v1",
+      "outputSchemaRef": "apollo://schemas/workspace-lut-imported/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/luts/{lutId}/versions"
+      },
+      "toolName": "apollo.workspace-luts.versions.create",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.workspace-luts.versions.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/workspace-lut-version-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/luts/{lutId}/versions/{version}"
+      },
+      "toolName": "apollo.workspace-luts.versions.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     }
   },
@@ -7269,6 +7615,326 @@
                   "type": "string",
                   "minLength": 3,
                   "maxLength": 128
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "clipId",
+                "patch"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "inspect"
+                },
+                "clipId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "patch": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "minProperties": 1,
+                  "properties": {
+                    "layout": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "subtitle": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "color": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "motion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "audioGain": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 4
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "targetVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "operation"
+          ],
+          "properties": {
+            "action": {
+              "const": "apply"
+            },
+            "operation": {},
+            "targetVersionId": false
+          }
+        },
+        {
+          "required": [
+            "targetVersionId"
+          ],
+          "properties": {
+            "action": {
+              "enum": [
+                "undo",
+                "redo",
+                "restore"
+              ]
+            },
+            "operation": false,
+            "targetVersionId": {}
+          }
+        }
+      ]
+    },
+    "apollo://schemas/apply-project-manual-edit-request/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "baseVersionId",
+        "baseHash",
+        "expectedRevision",
+        "variantId",
+        "targetId"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "apply",
+            "undo",
+            "redo",
+            "restore"
+          ]
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "variantId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "clipId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "select"
+                },
+                "clipId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "clipId",
+                "edge",
+                "atMs"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "trim"
+                },
+                "clipId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "edge": {
+                  "enum": [
+                    "start",
+                    "end"
+                  ]
+                },
+                "atMs": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "clipId",
+                "atMs"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "split"
+                },
+                "clipId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "atMs": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "clipId",
+                "startMs",
+                "track"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "move"
+                },
+                "clipId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "startMs": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "track": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 63
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "clipId",
+                "sourceId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "replace"
+                },
+                "clipId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sourceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "clipId",
+                "crop"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "crop"
+                },
+                "clipId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "crop": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMaximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMaximum": 1
+                    },
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    }
+                  }
                 }
               }
             },
@@ -17141,6 +17807,305 @@
               "const": "v1"
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/command-artifact-invalidation/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "id",
+        "status",
+        "commandId",
+        "baseVersionId",
+        "resultVersionId",
+        "artifactId",
+        "kind",
+        "variantId",
+        "dependencyTypes",
+        "affectedRanges",
+        "impactHash",
+        "createdAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "command-artifact-invalidation/v1"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "status": {
+          "const": "stale"
+        },
+        "commandId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "resultVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "artifactId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "kind": {
+          "enum": [
+            "proxy",
+            "final"
+          ]
+        },
+        "variantId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "dependencyTypes": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "content",
+              "timing",
+              "visual",
+              "audio",
+              "policy",
+              "rights"
+            ]
+          }
+        },
+        "affectedRanges": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "startFrame",
+              "endFrame"
+            ],
+            "properties": {
+              "startFrame": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "endFrame": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "impactHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "apollo://schemas/command-impact/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "commandId",
+        "commandType",
+        "baseVersionId",
+        "resultVersionId",
+        "changeKinds",
+        "dependencyTypes",
+        "affectedRanges",
+        "affectedVariantIds",
+        "affectedArtifacts",
+        "minimalRenders",
+        "renderSemanticsChanged",
+        "impactHash"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "command-impact/v1"
+        },
+        "commandId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "commandType": {
+          "const": "manual-edit"
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "resultVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "changeKinds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "dependencyTypes": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "content",
+              "timing",
+              "visual",
+              "audio",
+              "policy",
+              "rights"
+            ]
+          }
+        },
+        "affectedRanges": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "startFrame",
+              "endFrame"
+            ],
+            "properties": {
+              "startFrame": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "endFrame": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "affectedVariantIds": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        "affectedArtifacts": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "artifactId",
+              "kind",
+              "sourceVersionId",
+              "variantId"
+            ],
+            "properties": {
+              "artifactId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "kind": {
+                "enum": [
+                  "proxy",
+                  "final"
+                ]
+              },
+              "sourceVersionId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "variantId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              }
+            }
+          }
+        },
+        "minimalRenders": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "variantId",
+              "ranges"
+            ],
+            "properties": {
+              "kind": {
+                "const": "proxy"
+              },
+              "variantId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "ranges": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1000,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "startFrame",
+                    "endFrame"
+                  ],
+                  "properties": {
+                    "startFrame": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "endFrame": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "renderSemanticsChanged": {
+          "type": "boolean"
+        },
+        "impactHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
         }
       }
     },
@@ -44652,6 +45617,161 @@
         }
       }
     },
+    "apollo://schemas/project-artifact-invalidations/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projectId",
+            "resultVersionId",
+            "invalidations"
+          ],
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "resultVersionId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "invalidations": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "status",
+                  "commandId",
+                  "baseVersionId",
+                  "resultVersionId",
+                  "artifactId",
+                  "kind",
+                  "variantId",
+                  "dependencyTypes",
+                  "affectedRanges",
+                  "impactHash",
+                  "createdAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "command-artifact-invalidation/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "status": {
+                    "const": "stale"
+                  },
+                  "commandId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "baseVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "resultVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "artifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "kind": {
+                    "enum": [
+                      "proxy",
+                      "final"
+                    ]
+                  },
+                  "variantId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "dependencyTypes": {
+                    "type": "array",
+                    "maxItems": 6,
+                    "uniqueItems": true,
+                    "items": {
+                      "enum": [
+                        "content",
+                        "timing",
+                        "visual",
+                        "audio",
+                        "policy",
+                        "rights"
+                      ]
+                    }
+                  },
+                  "affectedRanges": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1000,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "startFrame",
+                        "endFrame"
+                      ],
+                      "properties": {
+                        "startFrame": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "endFrame": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  },
+                  "impactHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/project-asset-selection-created/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -47979,6 +49099,687 @@
         }
       }
     },
+    "apollo://schemas/project-lut-selection-applied/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "version",
+            "selection",
+            "replayed"
+          ],
+          "properties": {
+            "command": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "type",
+                "baseVersionId",
+                "author",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "type": {
+                  "const": "set-project-lut-selection"
+                },
+                "baseVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "author": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "user",
+                        "director",
+                        "system",
+                        "api-client"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "delegatedUserId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "version": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "sequence",
+                "parentVersionId",
+                "baseHash",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "parentVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "baseHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "selection": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "requested",
+                "resolved",
+                "intensity",
+                "selectionHash",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "requested": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "mode"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "const": "workspace-default"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "mode"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "const": "none"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "mode",
+                        "lutId",
+                        "version"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "const": "lut-version"
+                        },
+                        "lutId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  ]
+                },
+                "resolved": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "mode"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "const": "none"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "mode",
+                        "lut"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "const": "lut-version"
+                        },
+                        "lut": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "lutId",
+                            "versionId",
+                            "version",
+                            "name",
+                            "recordHash",
+                            "cubeContentHash"
+                          ],
+                          "properties": {
+                            "lutId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "versionId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 160
+                            },
+                            "recordHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "cubeContentHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                "workspaceDefaultRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "intensity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "selectionHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-lut-selection-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result"
+          ],
+          "properties": {
+            "result": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "command",
+                    "version",
+                    "selection",
+                    "replayed"
+                  ],
+                  "properties": {
+                    "command": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "type",
+                        "baseVersionId",
+                        "author",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "type": {
+                          "const": "set-project-lut-selection"
+                        },
+                        "baseVersionId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "author": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "id"
+                          ],
+                          "properties": {
+                            "type": {
+                              "enum": [
+                                "user",
+                                "director",
+                                "system",
+                                "api-client"
+                              ]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "delegatedUserId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          }
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "version": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "sequence",
+                        "parentVersionId",
+                        "baseHash",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "parentVersionId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "baseHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "selection": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "requested",
+                        "resolved",
+                        "intensity",
+                        "selectionHash",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "requested": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "mode"
+                              ],
+                              "properties": {
+                                "mode": {
+                                  "const": "workspace-default"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "mode"
+                              ],
+                              "properties": {
+                                "mode": {
+                                  "const": "none"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "mode",
+                                "lutId",
+                                "version"
+                              ],
+                              "properties": {
+                                "mode": {
+                                  "const": "lut-version"
+                                },
+                                "lutId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "version": {
+                                  "type": "integer",
+                                  "minimum": 1
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "resolved": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "mode"
+                              ],
+                              "properties": {
+                                "mode": {
+                                  "const": "none"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "mode",
+                                "lut"
+                              ],
+                              "properties": {
+                                "mode": {
+                                  "const": "lut-version"
+                                },
+                                "lut": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "lutId",
+                                    "versionId",
+                                    "version",
+                                    "name",
+                                    "recordHash",
+                                    "cubeContentHash"
+                                  ],
+                                  "properties": {
+                                    "lutId": {
+                                      "type": "string",
+                                      "minLength": 3,
+                                      "maxLength": 128
+                                    },
+                                    "versionId": {
+                                      "type": "string",
+                                      "minLength": 3,
+                                      "maxLength": 128
+                                    },
+                                    "version": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 160
+                                    },
+                                    "recordHash": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{64}$"
+                                    },
+                                    "cubeContentHash": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{64}$"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "workspaceDefaultRevision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "intensity": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "selectionHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-lut-selection-set-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "selection"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "selection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "workspace-default"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "none"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "lutId",
+                "version"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "lut-version"
+                },
+                "lutId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          ]
+        },
+        "intensity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
     "apollo://schemas/project-manual-edit-applied/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -48482,6 +50283,541 @@
         }
       }
     },
+    "apollo://schemas/project-manual-edit-applied/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "version",
+            "timeline",
+            "comparison",
+            "operation",
+            "replayed"
+          ],
+          "properties": {
+            "command": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "type",
+                "action",
+                "baseVersionId",
+                "resultVersionId",
+                "scope",
+                "payload",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "type": {
+                  "const": "manual-edit"
+                },
+                "action": {
+                  "enum": [
+                    "apply",
+                    "undo",
+                    "redo",
+                    "restore"
+                  ]
+                },
+                "baseVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "resultVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "scope": {
+                  "type": "object"
+                },
+                "payload": {
+                  "type": "object"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "version": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "sequence",
+                "parentVersionId",
+                "baseHash",
+                "snapshotRefs",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "parentVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "baseHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "snapshotRefs": {
+                  "type": "object",
+                  "required": [
+                    "brief",
+                    "editPlan",
+                    "policies"
+                  ],
+                  "properties": {
+                    "brief": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "editPlan": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "policies": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "timeline": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "versionId",
+                "revision",
+                "clips",
+                "snapPointsMs"
+              ],
+              "properties": {
+                "versionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "clips": {
+                  "type": "array",
+                  "maxItems": 10000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "sourceId",
+                      "startMs",
+                      "endMs",
+                      "track",
+                      "selected",
+                      "inspector"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "startMs": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "endMs": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "track": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 63
+                      },
+                      "selected": {
+                        "type": "boolean"
+                      },
+                      "inspector": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "layout": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "subtitle": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "color": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "motion": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "audioGain": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 4
+                          }
+                        }
+                      },
+                      "crop": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "x",
+                          "y",
+                          "width",
+                          "height"
+                        ],
+                        "properties": {
+                          "x": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMaximum": 1
+                          },
+                          "y": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMaximum": 1
+                          },
+                          "width": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 1
+                          },
+                          "height": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "snapPointsMs": {
+                  "type": "array",
+                  "maxItems": 50000,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "comparison": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "beforeVersionId",
+                "afterVersionId",
+                "beforeEditPlanHash",
+                "afterEditPlanHash",
+                "action",
+                "targetId"
+              ],
+              "properties": {
+                "beforeVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "afterVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "beforeEditPlanHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "afterEditPlanHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "action": {
+                  "enum": [
+                    "apply",
+                    "undo",
+                    "redo",
+                    "restore"
+                  ]
+                },
+                "targetId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            },
+            "operation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "type",
+                "status",
+                "phase",
+                "cancelable",
+                "retryable",
+                "target",
+                "attempt",
+                "maxAttempts",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "public-operation/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "type": {
+                  "enum": [
+                    "artifact-render",
+                    "media-ingest",
+                    "project-proxy-render"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "waiting",
+                    "retrying",
+                    "succeeded",
+                    "failed",
+                    "canceled"
+                  ]
+                },
+                "phase": {
+                  "enum": [
+                    "queued",
+                    "assembling",
+                    "probing",
+                    "normalizing",
+                    "transcribing",
+                    "materializing",
+                    "rendering",
+                    "verifying",
+                    "persisting",
+                    "waiting",
+                    "retrying",
+                    "completed",
+                    "failed",
+                    "canceled"
+                  ]
+                },
+                "progress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "completed"
+                  ],
+                  "properties": {
+                    "completed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "unit": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                    }
+                  }
+                },
+                "cancelable": {
+                  "type": "boolean"
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "target": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id",
+                    "manifestId"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "media-artifact"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "manifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "result": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "resource"
+                  ],
+                  "properties": {
+                    "resource": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "manifestId"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "media-artifact"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "manifestId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "error": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "maxAttempts": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "startedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/project-manual-timeline/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -48594,6 +50930,247 @@
                             "type": "number",
                             "minimum": 0,
                             "maximum": 4
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "snapPointsMs": {
+                  "type": "array",
+                  "maxItems": 50000,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "baseHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "editPlanHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "history": {
+              "type": "array",
+              "maxItems": 40,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "sequence",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sequence": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "parentVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "commandId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "commandType": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "action": {
+                    "enum": [
+                      "apply",
+                      "undo",
+                      "redo",
+                      "restore"
+                    ]
+                  },
+                  "restoresVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-manual-timeline/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "timeline",
+            "baseHash",
+            "editPlanHash",
+            "history"
+          ],
+          "properties": {
+            "timeline": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "versionId",
+                "revision",
+                "clips",
+                "snapPointsMs"
+              ],
+              "properties": {
+                "versionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "clips": {
+                  "type": "array",
+                  "maxItems": 10000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "sourceId",
+                      "startMs",
+                      "endMs",
+                      "track",
+                      "selected",
+                      "inspector"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "startMs": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "endMs": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "track": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 63
+                      },
+                      "selected": {
+                        "type": "boolean"
+                      },
+                      "inspector": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "layout": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "subtitle": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "color": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "motion": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "audioGain": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 4
+                          }
+                        }
+                      },
+                      "crop": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "x",
+                          "y",
+                          "width",
+                          "height"
+                        ],
+                        "properties": {
+                          "x": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMaximum": 1
+                          },
+                          "y": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMaximum": 1
+                          },
+                          "width": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 1
+                          },
+                          "height": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 1
                           }
                         }
                       }
@@ -52877,6 +55454,958 @@
                                 "type": "number",
                                 "minimum": 0,
                                 "maximum": 4
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "snapPointsMs": {
+                      "type": "array",
+                      "maxItems": 50000,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                },
+                "comparison": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "before",
+                    "after",
+                    "mode",
+                    "synchronized",
+                    "playheadMapping",
+                    "durationDeltaMs",
+                    "scoreDelta",
+                    "issuesAdded",
+                    "issuesResolved",
+                    "semanticChanges",
+                    "actions",
+                    "versionsPreserved"
+                  ],
+                  "properties": {
+                    "before": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "durationMs",
+                        "score",
+                        "issues"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "durationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "mappingId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "score": {
+                          "type": "number"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "maxItems": 1000,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "after": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "durationMs",
+                        "score",
+                        "issues"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "durationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "mappingId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "score": {
+                          "type": "number"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "maxItems": 1000,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "mode": {
+                      "enum": [
+                        "toggle",
+                        "split",
+                        "overlay"
+                      ]
+                    },
+                    "synchronized": {
+                      "type": "boolean"
+                    },
+                    "playheadMapping": {
+                      "enum": [
+                        "shared",
+                        "independent"
+                      ]
+                    },
+                    "durationDeltaMs": {
+                      "type": "integer"
+                    },
+                    "scoreDelta": {
+                      "type": "number"
+                    },
+                    "issuesAdded": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    },
+                    "issuesResolved": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    },
+                    "semanticChanges": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "category",
+                          "target",
+                          "summary"
+                        ],
+                        "properties": {
+                          "category": {
+                            "enum": [
+                              "timeline",
+                              "source",
+                              "visual",
+                              "composition",
+                              "subtitle",
+                              "duration"
+                            ]
+                          },
+                          "target": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "actions": {
+                      "type": "array",
+                      "minItems": 3,
+                      "maxItems": 3,
+                      "prefixItems": [
+                        {
+                          "const": "accept"
+                        },
+                        {
+                          "const": "reopen"
+                        },
+                        {
+                          "const": "restore"
+                        }
+                      ],
+                      "items": false
+                    },
+                    "versionsPreserved": {
+                      "const": true
+                    }
+                  }
+                },
+                "versionsPreserved": {
+                  "const": true
+                },
+                "operation": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "type",
+                    "status",
+                    "phase",
+                    "cancelable",
+                    "retryable",
+                    "target",
+                    "attempt",
+                    "maxAttempts",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "public-operation/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "type": {
+                      "enum": [
+                        "artifact-render",
+                        "media-ingest",
+                        "project-proxy-render"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "queued",
+                        "running",
+                        "waiting",
+                        "retrying",
+                        "succeeded",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "phase": {
+                      "enum": [
+                        "queued",
+                        "assembling",
+                        "probing",
+                        "normalizing",
+                        "transcribing",
+                        "materializing",
+                        "rendering",
+                        "verifying",
+                        "persisting",
+                        "waiting",
+                        "retrying",
+                        "completed",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "progress": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "completed"
+                      ],
+                      "properties": {
+                        "completed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "unit": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                        }
+                      }
+                    },
+                    "cancelable": {
+                      "type": "boolean"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "target": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "manifestId"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "media-artifact"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "manifestId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    },
+                    "result": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "resource"
+                      ],
+                      "properties": {
+                        "resource": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "id",
+                            "manifestId"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "media-artifact"
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "manifestId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message",
+                        "retryable"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxAttempts": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "startedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "replayed": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-version-comparison-action-result/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action",
+                "command",
+                "projectStatus",
+                "comparison",
+                "versionsPreserved",
+                "replayed"
+              ],
+              "properties": {
+                "action": {
+                  "enum": [
+                    "accept",
+                    "reopen"
+                  ]
+                },
+                "command": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "type",
+                    "baseVersionId",
+                    "scope",
+                    "payload",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "type": {
+                      "const": "compare-action"
+                    },
+                    "baseVersionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "scope": {
+                      "type": "object"
+                    },
+                    "payload": {
+                      "type": "object"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "projectStatus": {
+                  "enum": [
+                    "reviewing-proxy",
+                    "revising"
+                  ]
+                },
+                "comparison": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "before",
+                    "after",
+                    "mode",
+                    "synchronized",
+                    "playheadMapping",
+                    "durationDeltaMs",
+                    "scoreDelta",
+                    "issuesAdded",
+                    "issuesResolved",
+                    "semanticChanges",
+                    "actions",
+                    "versionsPreserved"
+                  ],
+                  "properties": {
+                    "before": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "durationMs",
+                        "score",
+                        "issues"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "durationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "mappingId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "score": {
+                          "type": "number"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "maxItems": 1000,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "after": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "durationMs",
+                        "score",
+                        "issues"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "durationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "mappingId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "score": {
+                          "type": "number"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "maxItems": 1000,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "mode": {
+                      "enum": [
+                        "toggle",
+                        "split",
+                        "overlay"
+                      ]
+                    },
+                    "synchronized": {
+                      "type": "boolean"
+                    },
+                    "playheadMapping": {
+                      "enum": [
+                        "shared",
+                        "independent"
+                      ]
+                    },
+                    "durationDeltaMs": {
+                      "type": "integer"
+                    },
+                    "scoreDelta": {
+                      "type": "number"
+                    },
+                    "issuesAdded": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    },
+                    "issuesResolved": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    },
+                    "semanticChanges": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "category",
+                          "target",
+                          "summary"
+                        ],
+                        "properties": {
+                          "category": {
+                            "enum": [
+                              "timeline",
+                              "source",
+                              "visual",
+                              "composition",
+                              "subtitle",
+                              "duration"
+                            ]
+                          },
+                          "target": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "actions": {
+                      "type": "array",
+                      "minItems": 3,
+                      "maxItems": 3,
+                      "prefixItems": [
+                        {
+                          "const": "accept"
+                        },
+                        {
+                          "const": "reopen"
+                        },
+                        {
+                          "const": "restore"
+                        }
+                      ],
+                      "items": false
+                    },
+                    "versionsPreserved": {
+                      "const": true
+                    }
+                  }
+                },
+                "versionsPreserved": {
+                  "const": true
+                },
+                "replayed": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action",
+                "command",
+                "version",
+                "timeline",
+                "comparison",
+                "versionsPreserved",
+                "operation",
+                "replayed"
+              ],
+              "properties": {
+                "action": {
+                  "const": "restore"
+                },
+                "command": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "type",
+                    "baseVersionId",
+                    "resultVersionId",
+                    "scope",
+                    "payload",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "type": {
+                      "const": "manual-edit"
+                    },
+                    "baseVersionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "resultVersionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "scope": {
+                      "type": "object"
+                    },
+                    "payload": {
+                      "type": "object"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "version": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "sequence",
+                    "parentVersionId",
+                    "baseHash",
+                    "snapshotRefs",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "parentVersionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "baseHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "snapshotRefs": {
+                      "type": "object",
+                      "required": [
+                        "brief",
+                        "editPlan",
+                        "policies"
+                      ],
+                      "properties": {
+                        "brief": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "editPlan": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "policies": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "timeline": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "versionId",
+                    "revision",
+                    "clips",
+                    "snapPointsMs"
+                  ],
+                  "properties": {
+                    "versionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "clips": {
+                      "type": "array",
+                      "maxItems": 10000,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "sourceId",
+                          "startMs",
+                          "endMs",
+                          "track",
+                          "selected",
+                          "inspector"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "sourceId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "startMs": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "endMs": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "track": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 63
+                          },
+                          "selected": {
+                            "type": "boolean"
+                          },
+                          "inspector": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "layout": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "subtitle": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "color": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "motion": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "audioGain": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 4
+                              }
+                            }
+                          },
+                          "crop": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "x",
+                              "y",
+                              "width",
+                              "height"
+                            ],
+                            "properties": {
+                              "x": {
+                                "type": "number",
+                                "minimum": 0,
+                                "exclusiveMaximum": 1
+                              },
+                              "y": {
+                                "type": "number",
+                                "minimum": 0,
+                                "exclusiveMaximum": 1
+                              },
+                              "width": {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "maximum": 1
+                              },
+                              "height": {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "maximum": 1
                               }
                             }
                           }
@@ -98159,6 +101688,1806 @@
               "minLength": 8,
               "maxLength": 1024,
               "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-default-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "default"
+          ],
+          "properties": {
+            "default": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "workspaceId",
+                "revision",
+                "current"
+              ],
+              "properties": {
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "current": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "revision",
+                        "mode",
+                        "selectionHash",
+                        "createdByClientId",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "mode": {
+                          "enum": [
+                            "none",
+                            "lut-version"
+                          ]
+                        },
+                        "selectionHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "lut": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "versionId",
+                            "version",
+                            "name",
+                            "recordHash"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "versionId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 160
+                            },
+                            "recordHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        "createdByClientId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-default-set-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision",
+        "selection"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "none"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "lutId",
+                "version"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "lut-version"
+                },
+                "lutId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-default-set/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "defaultVersion",
+            "replayed"
+          ],
+          "properties": {
+            "defaultVersion": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "revision",
+                "mode",
+                "selectionHash",
+                "createdByClientId",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "mode": {
+                  "enum": [
+                    "none",
+                    "lut-version"
+                  ]
+                },
+                "selectionHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "lut": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "versionId",
+                    "version",
+                    "name",
+                    "recordHash"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "versionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "recordHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-import-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lutId",
+        "name",
+        "owner",
+        "license",
+        "compatibility",
+        "cubeContent"
+      ],
+      "properties": {
+        "lutId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy",
+            "name"
+          ],
+          "properties": {
+            "policy": {
+              "enum": [
+                "owned",
+                "licensed",
+                "restricted"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "usageNotes": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            }
+          }
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          }
+        },
+        "compatibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "inputColorSpace",
+            "outputColorSpace"
+          ],
+          "properties": {
+            "inputColorSpace": {
+              "enum": [
+                "rec709",
+                "display-p3",
+                "rec2020"
+              ]
+            },
+            "outputColorSpace": {
+              "enum": [
+                "rec709",
+                "display-p3",
+                "rec2020"
+              ]
+            }
+          }
+        },
+        "intensity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        },
+        "cubeContent": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8388608
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-imported/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lut",
+            "replayed"
+          ],
+          "properties": {
+            "lut": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "status",
+                "currentVersion"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "inactive"
+                  ]
+                },
+                "currentVersion": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "version",
+                    "name",
+                    "owner",
+                    "license",
+                    "tags",
+                    "compatibility",
+                    "intensity",
+                    "cube",
+                    "preview",
+                    "createdByClientId",
+                    "createdAt",
+                    "recordHash"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "owner": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    },
+                    "license": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "policy",
+                        "name"
+                      ],
+                      "properties": {
+                        "policy": {
+                          "enum": [
+                            "owned",
+                            "licensed",
+                            "restricted"
+                          ]
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "usageNotes": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        }
+                      }
+                    },
+                    "tags": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 48
+                      }
+                    },
+                    "compatibility": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "inputColorSpace",
+                        "outputColorSpace"
+                      ],
+                      "properties": {
+                        "inputColorSpace": {
+                          "enum": [
+                            "rec709",
+                            "display-p3",
+                            "rec2020"
+                          ]
+                        },
+                        "outputColorSpace": {
+                          "enum": [
+                            "rec709",
+                            "display-p3",
+                            "rec2020"
+                          ]
+                        }
+                      }
+                    },
+                    "intensity": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "default",
+                        "min",
+                        "max"
+                      ],
+                      "properties": {
+                        "default": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "min": {
+                          "const": 0
+                        },
+                        "max": {
+                          "const": 1
+                        }
+                      }
+                    },
+                    "cube": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "size",
+                        "domainMin",
+                        "domainMax",
+                        "rows",
+                        "contentHash"
+                      ],
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "size": {
+                          "type": "integer",
+                          "minimum": 2,
+                          "maximum": 65
+                        },
+                        "domainMin": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 3,
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "domainMax": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 3,
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "rows": {
+                          "type": "integer",
+                          "minimum": 8
+                        },
+                        "contentHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "preview": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "mediaType",
+                        "width",
+                        "height",
+                        "byteSize",
+                        "sha256",
+                        "path"
+                      ],
+                      "properties": {
+                        "mediaType": {
+                          "const": "image/png"
+                        },
+                        "width": {
+                          "const": 512
+                        },
+                        "height": {
+                          "const": 288
+                        },
+                        "byteSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "path": {
+                          "type": "string",
+                          "pattern": "^/v1/workspaces/[^/]+/luts/[^/]+/versions/[1-9][0-9]*/preview$"
+                        }
+                      }
+                    },
+                    "createdByClientId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "recordHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-lifecycle-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lifecycle"
+          ],
+          "properties": {
+            "lifecycle": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "status",
+                "revision",
+                "currentVersion"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "inactive"
+                  ]
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "currentVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "items"
+          ],
+          "properties": {
+            "items": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "workspaceId",
+                  "status",
+                  "currentVersion"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "inactive"
+                    ]
+                  },
+                  "currentVersion": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "version",
+                      "name",
+                      "owner",
+                      "license",
+                      "tags",
+                      "compatibility",
+                      "intensity",
+                      "cube",
+                      "preview",
+                      "createdByClientId",
+                      "createdAt",
+                      "recordHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "owner": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 240
+                      },
+                      "license": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "policy",
+                          "name"
+                        ],
+                        "properties": {
+                          "policy": {
+                            "enum": [
+                              "owned",
+                              "licensed",
+                              "restricted"
+                            ]
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "usageNotes": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          }
+                        }
+                      },
+                      "tags": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 48
+                        }
+                      },
+                      "compatibility": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "inputColorSpace",
+                          "outputColorSpace"
+                        ],
+                        "properties": {
+                          "inputColorSpace": {
+                            "enum": [
+                              "rec709",
+                              "display-p3",
+                              "rec2020"
+                            ]
+                          },
+                          "outputColorSpace": {
+                            "enum": [
+                              "rec709",
+                              "display-p3",
+                              "rec2020"
+                            ]
+                          }
+                        }
+                      },
+                      "intensity": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "default",
+                          "min",
+                          "max"
+                        ],
+                        "properties": {
+                          "default": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "min": {
+                            "const": 0
+                          },
+                          "max": {
+                            "const": 1
+                          }
+                        }
+                      },
+                      "cube": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "size",
+                          "domainMin",
+                          "domainMax",
+                          "rows",
+                          "contentHash"
+                        ],
+                        "properties": {
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 2,
+                            "maximum": 65
+                          },
+                          "domainMin": {
+                            "type": "array",
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "items": {
+                              "type": "number"
+                            }
+                          },
+                          "domainMax": {
+                            "type": "array",
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "items": {
+                              "type": "number"
+                            }
+                          },
+                          "rows": {
+                            "type": "integer",
+                            "minimum": 8
+                          },
+                          "contentHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "preview": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "mediaType",
+                          "width",
+                          "height",
+                          "byteSize",
+                          "sha256",
+                          "path"
+                        ],
+                        "properties": {
+                          "mediaType": {
+                            "const": "image/png"
+                          },
+                          "width": {
+                            "const": 512
+                          },
+                          "height": {
+                            "const": 288
+                          },
+                          "byteSize": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "path": {
+                            "type": "string",
+                            "pattern": "^/v1/workspaces/[^/]+/luts/[^/]+/versions/[1-9][0-9]*/preview$"
+                          }
+                        }
+                      },
+                      "createdByClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "recordHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lut"
+          ],
+          "properties": {
+            "lut": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "status",
+                "currentVersion"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "inactive"
+                  ]
+                },
+                "currentVersion": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "version",
+                    "name",
+                    "owner",
+                    "license",
+                    "tags",
+                    "compatibility",
+                    "intensity",
+                    "cube",
+                    "preview",
+                    "createdByClientId",
+                    "createdAt",
+                    "recordHash"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "owner": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    },
+                    "license": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "policy",
+                        "name"
+                      ],
+                      "properties": {
+                        "policy": {
+                          "enum": [
+                            "owned",
+                            "licensed",
+                            "restricted"
+                          ]
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "usageNotes": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        }
+                      }
+                    },
+                    "tags": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 48
+                      }
+                    },
+                    "compatibility": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "inputColorSpace",
+                        "outputColorSpace"
+                      ],
+                      "properties": {
+                        "inputColorSpace": {
+                          "enum": [
+                            "rec709",
+                            "display-p3",
+                            "rec2020"
+                          ]
+                        },
+                        "outputColorSpace": {
+                          "enum": [
+                            "rec709",
+                            "display-p3",
+                            "rec2020"
+                          ]
+                        }
+                      }
+                    },
+                    "intensity": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "default",
+                        "min",
+                        "max"
+                      ],
+                      "properties": {
+                        "default": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "min": {
+                          "const": 0
+                        },
+                        "max": {
+                          "const": 1
+                        }
+                      }
+                    },
+                    "cube": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "size",
+                        "domainMin",
+                        "domainMax",
+                        "rows",
+                        "contentHash"
+                      ],
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "size": {
+                          "type": "integer",
+                          "minimum": 2,
+                          "maximum": 65
+                        },
+                        "domainMin": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 3,
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "domainMax": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 3,
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "rows": {
+                          "type": "integer",
+                          "minimum": 8
+                        },
+                        "contentHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "preview": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "mediaType",
+                        "width",
+                        "height",
+                        "byteSize",
+                        "sha256",
+                        "path"
+                      ],
+                      "properties": {
+                        "mediaType": {
+                          "const": "image/png"
+                        },
+                        "width": {
+                          "const": 512
+                        },
+                        "height": {
+                          "const": 288
+                        },
+                        "byteSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "path": {
+                          "type": "string",
+                          "pattern": "^/v1/workspaces/[^/]+/luts/[^/]+/versions/[1-9][0-9]*/preview$"
+                        }
+                      }
+                    },
+                    "createdByClientId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "recordHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-status-applied/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lifecycle",
+            "command",
+            "replayed"
+          ],
+          "properties": {
+            "lifecycle": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "status",
+                "revision",
+                "currentVersion"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "inactive"
+                  ]
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "currentVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "command": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "lutId",
+                "baseRevision",
+                "resultRevision",
+                "status",
+                "createdByClientId",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "lutId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "resultRevision": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "inactive"
+                  ]
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-status-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision",
+        "status"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "inactive"
+          ]
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-version-create-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersion",
+        "name",
+        "owner",
+        "license",
+        "compatibility",
+        "cubeContent"
+      ],
+      "properties": {
+        "baseVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy",
+            "name"
+          ],
+          "properties": {
+            "policy": {
+              "enum": [
+                "owned",
+                "licensed",
+                "restricted"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "usageNotes": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            }
+          }
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          }
+        },
+        "compatibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "inputColorSpace",
+            "outputColorSpace"
+          ],
+          "properties": {
+            "inputColorSpace": {
+              "enum": [
+                "rec709",
+                "display-p3",
+                "rec2020"
+              ]
+            },
+            "outputColorSpace": {
+              "enum": [
+                "rec709",
+                "display-p3",
+                "rec2020"
+              ]
+            }
+          }
+        },
+        "intensity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        },
+        "cubeContent": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8388608
+        }
+      }
+    },
+    "apollo://schemas/workspace-lut-version-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version"
+          ],
+          "properties": {
+            "version": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version",
+                "name",
+                "owner",
+                "license",
+                "tags",
+                "compatibility",
+                "intensity",
+                "cube",
+                "preview",
+                "createdByClientId",
+                "createdAt",
+                "recordHash"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "owner": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                },
+                "license": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "policy",
+                    "name"
+                  ],
+                  "properties": {
+                    "policy": {
+                      "enum": [
+                        "owned",
+                        "licensed",
+                        "restricted"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    },
+                    "usageNotes": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  }
+                },
+                "tags": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 48
+                  }
+                },
+                "compatibility": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "inputColorSpace",
+                    "outputColorSpace"
+                  ],
+                  "properties": {
+                    "inputColorSpace": {
+                      "enum": [
+                        "rec709",
+                        "display-p3",
+                        "rec2020"
+                      ]
+                    },
+                    "outputColorSpace": {
+                      "enum": [
+                        "rec709",
+                        "display-p3",
+                        "rec2020"
+                      ]
+                    }
+                  }
+                },
+                "intensity": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "default",
+                    "min",
+                    "max"
+                  ],
+                  "properties": {
+                    "default": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "min": {
+                      "const": 0
+                    },
+                    "max": {
+                      "const": 1
+                    }
+                  }
+                },
+                "cube": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "size",
+                    "domainMin",
+                    "domainMax",
+                    "rows",
+                    "contentHash"
+                  ],
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 2,
+                      "maximum": 65
+                    },
+                    "domainMin": {
+                      "type": "array",
+                      "minItems": 3,
+                      "maxItems": 3,
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "domainMax": {
+                      "type": "array",
+                      "minItems": 3,
+                      "maxItems": 3,
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "rows": {
+                      "type": "integer",
+                      "minimum": 8
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "preview": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "mediaType",
+                    "width",
+                    "height",
+                    "byteSize",
+                    "sha256",
+                    "path"
+                  ],
+                  "properties": {
+                    "mediaType": {
+                      "const": "image/png"
+                    },
+                    "width": {
+                      "const": 512
+                    },
+                    "height": {
+                      "const": 288
+                    },
+                    "byteSize": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "path": {
+                      "type": "string",
+                      "pattern": "^/v1/workspaces/[^/]+/luts/[^/]+/versions/[1-9][0-9]*/preview$"
+                    }
+                  }
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "recordHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
             }
           }
         },

@@ -3,6 +3,7 @@ import type { PerceptionTimeline } from './perception-timeline.ts'
 import type { StoryPlan } from './story-plan.ts'
 import type { SubtitleAnchor, SubtitlePresetId } from './subtitle-system.ts'
 import type { TreatmentPlan } from './treatment-plan.ts'
+import type { ManualCropRegion } from './manual-editing.ts'
 
 interface RetimedTranscriptWord {
   text: string
@@ -35,6 +36,7 @@ interface DirectorSourceEditPlan {
       timelineInFrame: number
       timelineOutFrame: number
       rate: 1
+      crop?: Readonly<ManualCropRegion>
     }>[]
   }>[]
   overlayTracks: readonly never[]
