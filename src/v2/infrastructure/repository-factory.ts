@@ -91,6 +91,7 @@ import type { ReviewAnnotationRepository } from '../application/ports/review-ann
 import type { RenderElementMapRepository } from '../application/ports/render-element-map-repository.ts'
 import type { EditorialCommandRepository } from '../application/ports/editorial-command-repository.ts'
 import type { ManualEditRepository } from '../application/ports/manual-edit-repository.ts'
+import type { SourceTranscriptReplacementRepository } from '../application/ports/source-transcript-replacement-repository.ts'
 import type { VersionCompareRepository } from '../application/ports/version-compare-repository.ts'
 import type { DirectorRunRepository } from '../application/ports/director-run-repository.ts'
 import type { ProjectProxyRenderRepository } from '../application/ports/project-proxy-render-repository.ts'
@@ -207,6 +208,7 @@ import { PrismaRenderElementMapRepository } from './prisma/render-element-map-re
 import { PrismaProjectMediaRepository } from './prisma/project-media-repository.ts'
 import { PrismaEditorialCommandRepository } from './prisma/editorial-command-repository.ts'
 import { PrismaManualEditRepository } from './prisma/manual-edit-repository.ts'
+import { PrismaSourceTranscriptReplacementRepository } from './prisma/source-transcript-replacement-repository.ts'
 import { PrismaVersionCompareRepository } from './prisma/version-compare-repository.ts'
 import { PrismaDirectorRunRepository } from './prisma/director-run-repository.ts'
 import { PrismaProjectProxyRenderRepository } from './prisma/project-proxy-render-repository.ts'
@@ -1380,6 +1382,10 @@ export function createEditorialCommandRepository(): EditorialCommandRepository {
 
 export function createManualEditRepository(): ManualEditRepository {
   return new PrismaManualEditRepository(resolveV2Client())
+}
+
+export function createSourceTranscriptReplacementRepository(): SourceTranscriptReplacementRepository {
+  return new PrismaSourceTranscriptReplacementRepository(resolveV2Client())
 }
 
 export function createVersionCompareRepository(): VersionCompareRepository {

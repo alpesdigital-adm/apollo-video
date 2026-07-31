@@ -1647,6 +1647,12 @@ conclusão registra uma resolução imutável, e a relação deixa de ser stale 
 somente quando a operação substituta chega a `succeeded`. Seleção sem mudança
 de render reutiliza o proxy concluído da versão-base como cache hit observável,
 sem renderer nem novo artifact, e registra a operação de origem no Postgres. A
+troca de transcript fonte também é explícita: `replace-source-transcript`
+seleciona uma transcrição imutável por ID/hash, retima o alinhamento sobre o
+áudio corrente e cria nova versão. Como toda a cadeia editorial depende dessa
+evidência, todos os outputs concluídos da base ficam stale e render permanece
+bloqueado até um novo `run-director`; o Diretor resolve o transcript escolhido
+pelo EditPlan, não o registro mais recente por data. A
 operação manual `crop` persiste um retângulo normalizado dentro do clip e do
 formato declarados, produz dependência somente visual e um único range mínimo;
 o FFmpeg aplica esse crop antes da composição e o `RenderElementMap` reflete os

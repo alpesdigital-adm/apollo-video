@@ -37,6 +37,13 @@ O bootstrap administrativo inicial é operacional. Depois dele, criação/rotaç
 
 Alterações editoriais usam o mesmo contrato para UI, IA e integrações. `POST /v1/projects/{projectId}/commands`, com scope `projects:write`, aplica atualmente o Command `remove-spoken-content`. A requisição deve informar `Idempotency-Key`, `baseVersionId`, `baseHash`, `sourceTranscriptId` e regras de frases. O servidor rejeita base obsoleta, confirma as frases na transcrição alinhada, cria uma nova `ProjectVersion` imutável e retima o plano sem sobrescrever a versão anterior.
 
+O mesmo endpoint aceita `replace-source-transcript` com `baseVersionId`,
+`baseHash`, `sourceTranscriptId` e `expectedTranscriptHash`. A troca seleciona
+evidência imutável explicitamente, invalida outputs derivados da versão-base e
+retorna `nextRequiredCapability=apollo.projects.commands.apply:run-director`.
+Ela não dispara render: execute um novo Command `run-director` sobre a versão
+resultante antes de solicitar proxy ou final.
+
 Os contratos completos e exemplos são descobertos em `GET /v1/capabilities`, `GET /v1/openapi.json` e nos schemas `apply-project-edit-command-request/v1`, `project-edit-command-applied/v1` e `project-workspace/v2`.
 
 ## Revisão do proxy antes da alta

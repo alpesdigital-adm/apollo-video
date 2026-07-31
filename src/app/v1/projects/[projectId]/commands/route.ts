@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { applyEditorialCutCommandService } from '@/v2/application/apply-editorial-cut-command'
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-project-proxy-render'
+import { replaceSourceTranscriptService } from '@/v2/application/replace-source-transcript'
 import { runProjectDirectorService } from '@/v2/application/run-project-director'
 import { DomainError } from '@/v2/domain/errors'
 import {
@@ -12,6 +13,7 @@ import {
   createEditorialCommandRepository,
   createProjectProxyRenderRepository,
   createPublicOperationRepository,
+  createSourceTranscriptReplacementRepository,
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
@@ -24,6 +26,7 @@ interface CommandBody {
   baseVersionId?: unknown
   baseHash?: unknown
   sourceTranscriptId?: unknown
+  expectedTranscriptHash?: unknown
   rules?: unknown
   reason?: unknown
   exclusionOverrides?: unknown
@@ -79,14 +82,14 @@ export async function POST(
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON')
     }
     if (typeof body !== 'object' || body === null) throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
-    if (Object.keys(body).some((key) => !['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'rules', 'reason', 'exclusionOverrides'].includes(key))) {
+    if (Object.keys(body).some((key) => !['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'expectedTranscriptHash', 'rules', 'reason', 'exclusionOverrides'].includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
     if (typeof body.baseVersionId !== 'string' || typeof body.baseHash !== 'string') throw new DomainError('INVALID_ARGUMENT', 'baseVersionId and baseHash must be strings')
     if (body.reason !== undefined && typeof body.reason !== 'string') throw new DomainError('INVALID_ARGUMENT', 'reason must be a string')
     const { projectId } = await context.params
     if (body.type === 'run-director') {
-      if (body.sourceTranscriptId !== undefined || body.rules !== undefined || body.exclusionOverrides !== undefined) {
+      if (body.sourceTranscriptId !== undefined || body.expectedTranscriptHash !== undefined || body.rules !== undefined || body.exclusionOverrides !== undefined) {
         throw new DomainError('INVALID_ARGUMENT', 'run-director does not accept cut-rule fields')
       }
       const result = await runProjectDirectorService({
@@ -160,8 +163,59 @@ export async function POST(
         replayed: result.replayed && proxy.replayed,
       }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
     }
-    if (body.type !== 'remove-spoken-content') throw new DomainError('INVALID_ARGUMENT', 'type must be remove-spoken-content or run-director')
+    if (body.type === 'replace-source-transcript') {
+      if (
+        typeof body.sourceTranscriptId !== 'string' ||
+        typeof body.expectedTranscriptHash !== 'string' ||
+        body.rules !== undefined || body.exclusionOverrides !== undefined
+      ) throw new DomainError('INVALID_ARGUMENT', 'replace-source-transcript requires only sourceTranscriptId and expectedTranscriptHash')
+      const result = await replaceSourceTranscriptService({
+        repository: createSourceTranscriptReplacementRepository(),
+        clock: () => new Date(),
+        createId: (kind) => `${kind}-${randomUUID()}`,
+        createEventId: randomUUID,
+      })({
+        workspaceId: actor.workspaceId,
+        projectId,
+        baseVersionId: body.baseVersionId,
+        baseHash: body.baseHash,
+        replacementTranscriptId: body.sourceTranscriptId,
+        expectedTranscriptHash: body.expectedTranscriptHash,
+        ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
+        actor: { type: 'api-client', id: actor.clientId },
+        idempotencyKey,
+      })
+      return NextResponse.json(presentSuccess({
+        command: {
+          id: result.command.id,
+          type: result.command.type,
+          baseVersionId: result.command.baseVersionId,
+          resultVersionId: result.version.id,
+          createdAt: result.command.createdAt,
+        },
+        version: {
+          id: result.version.id,
+          sequence: result.version.sequence,
+          parentVersionId: result.version.parentVersionId,
+          baseHash: result.version.baseHash,
+          snapshotRefs: result.version.snapshotRefs,
+          createdAt: result.version.createdAt,
+        },
+        sourceTranscript: {
+          previousTranscriptId: result.command.payload.previousTranscriptId,
+          previousTranscriptHash: result.command.payload.previousTranscriptHash,
+          replacementTranscriptId: result.command.payload.replacementTranscriptId,
+          replacementTranscriptHash: result.command.payload.replacementTranscriptHash,
+          impact: result.impact,
+          invalidations: result.invalidations,
+          nextRequiredCapability: result.command.payload.nextRequiredCapability,
+        },
+        replayed: result.replayed,
+      }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
+    }
+    if (body.type !== 'remove-spoken-content') throw new DomainError('INVALID_ARGUMENT', 'type must be remove-spoken-content, replace-source-transcript or run-director')
     if (typeof body.sourceTranscriptId !== 'string') throw new DomainError('INVALID_ARGUMENT', 'sourceTranscriptId must be a string')
+    if (body.expectedTranscriptHash !== undefined) throw new DomainError('INVALID_ARGUMENT', 'remove-spoken-content does not accept expectedTranscriptHash')
     const exclusionOverrides = parseExclusionOverrides(body.exclusionOverrides)
     const result = await applyEditorialCutCommandService({
       repository: createEditorialCommandRepository(),

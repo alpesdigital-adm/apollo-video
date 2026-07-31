@@ -7373,6 +7373,21 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         reason: 'Planejar, criticar e materializar a composicao completa.',
       },
     ],
+    'apollo://schemas/apply-project-edit-command-request/v4': [
+      {
+        type: 'remove-spoken-content', baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64),
+        sourceTranscriptId: 'transcript-example-1',
+        rules: [{ id: 'duration-two-days', label: 'dois dias', alternatives: ['dois dias', '2 dias'] }],
+      },
+      {
+        type: 'replace-source-transcript', baseVersionId: 'project-version-example-4', baseHash: 'd'.repeat(64),
+        sourceTranscriptId: 'transcript-example-corrected-2', expectedTranscriptHash: '2'.repeat(64),
+        reason: 'Selecionar a retranscrição revisada e recalcular todos os dependentes.',
+      },
+      {
+        type: 'run-director', baseVersionId: 'project-version-example-5', baseHash: 'e'.repeat(64),
+      },
+    ],
     'apollo://schemas/apply-project-manual-edit-request/v1': [
       {
         action: 'apply',
@@ -7505,6 +7520,68 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             createdAt,
           },
           operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/source-transcript-replacement-impact/v1': [
+      {
+        schemaVersion: 'source-transcript-replacement-impact/v1',
+        commandId: 'edit-command-transcript-example-1', commandType: 'replace-source-transcript',
+        baseVersionId: 'project-version-example-4', resultVersionId: 'project-version-example-5',
+        previousTranscriptId: 'transcript-example-1', previousTranscriptHash: '1'.repeat(64),
+        replacementTranscriptId: 'transcript-example-corrected-2', replacementTranscriptHash: '2'.repeat(64),
+        changeKinds: ['source-transcript'],
+        dependencyTypes: ['audio', 'content', 'policy', 'timing', 'visual'],
+        affectedRanges: [{ startFrame: 0, endFrame: 2380 }],
+        affectedVariantIds: ['9:16'],
+        affectedArtifacts: [{ artifactId: 'artifact-proxy-example-4', kind: 'proxy', sourceVersionId: 'project-version-example-4', variantId: '9:16' }],
+        requiredRecomputations: ['perception', 'treatment', 'story', 'edit-plan', 'proxy', 'final'],
+        renderBlockedUntilDirectorRun: true,
+        impactHash: '3'.repeat(64),
+      },
+    ],
+    'apollo://schemas/project-edit-command-applied/v3': [
+      {
+        data: {
+          command: {
+            id: 'edit-command-transcript-example-1', type: 'replace-source-transcript',
+            baseVersionId: 'project-version-example-4', resultVersionId: 'project-version-example-5', createdAt,
+          },
+          version: {
+            id: 'project-version-example-5', sequence: 5, parentVersionId: 'project-version-example-4',
+            baseHash: 'e'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', treatment: 'project-snapshot-treatment-1', story: 'project-snapshot-story-1',
+              editPlan: 'project-snapshot-edit-plan-5', policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          sourceTranscript: {
+            previousTranscriptId: 'transcript-example-1', previousTranscriptHash: '1'.repeat(64),
+            replacementTranscriptId: 'transcript-example-corrected-2', replacementTranscriptHash: '2'.repeat(64),
+            impact: {
+              schemaVersion: 'source-transcript-replacement-impact/v1',
+              commandId: 'edit-command-transcript-example-1', commandType: 'replace-source-transcript',
+              baseVersionId: 'project-version-example-4', resultVersionId: 'project-version-example-5',
+              previousTranscriptId: 'transcript-example-1', previousTranscriptHash: '1'.repeat(64),
+              replacementTranscriptId: 'transcript-example-corrected-2', replacementTranscriptHash: '2'.repeat(64),
+              changeKinds: ['source-transcript'], dependencyTypes: ['audio', 'content', 'policy', 'timing', 'visual'],
+              affectedRanges: [{ startFrame: 0, endFrame: 2380 }], affectedVariantIds: ['9:16'],
+              affectedArtifacts: [{ artifactId: 'artifact-proxy-example-4', kind: 'proxy', sourceVersionId: 'project-version-example-4', variantId: '9:16' }],
+              requiredRecomputations: ['perception', 'treatment', 'story', 'edit-plan', 'proxy', 'final'],
+              renderBlockedUntilDirectorRun: true, impactHash: '3'.repeat(64),
+            },
+            invalidations: [{
+              schemaVersion: 'command-artifact-invalidation/v1', id: '4'.repeat(64), status: 'stale',
+              commandId: 'edit-command-transcript-example-1', baseVersionId: 'project-version-example-4', resultVersionId: 'project-version-example-5',
+              artifactId: 'artifact-proxy-example-4', kind: 'proxy', variantId: '9:16',
+              dependencyTypes: ['audio', 'content', 'policy', 'timing', 'visual'], affectedRanges: [{ startFrame: 0, endFrame: 2380 }],
+              impactHash: '3'.repeat(64), createdAt,
+            }],
+            nextRequiredCapability: 'apollo.projects.commands.apply:run-director',
+          },
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

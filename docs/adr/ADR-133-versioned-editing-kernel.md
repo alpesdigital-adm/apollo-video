@@ -53,8 +53,8 @@ stale. A text-only `inspect.text` materializes the overlapping cue in the immuta
 EditPlan; impact derivation compares before/after subtitle cues, requires
 exactly one changed cue and uses its frame range. A real FFmpeg golden proves
 that only this interval changes pixels and that proxy-base prefix/suffix remain
-identical at sampled frames. This is local evidence only: B-roll/source
-transcript cases, PostgreSQL execution, deploy and acceptance remain open.
+identical at sampled frames. This is local evidence only: PostgreSQL execution,
+deploy and acceptance remain open.
 Combined inspector patches retain the clip range so another visual or audio
 field cannot be under-invalidated.
 
@@ -65,3 +65,16 @@ retains the master audio artifact and exact source frames, while
 The real MP4 shows only the replacement source in that range, keeps neighboring
 base pixels, AAC audio and total duration. Remote PostgreSQL execution and
 acceptance are still required.
+
+Source transcript replacement is an explicit API-first Command, not an implicit
+"latest row" lookup. `replace-source-transcript` binds the requested transcript
+ID and expected content hash to the same source master, retimes its words over
+the current audio timeline and creates a new immutable EditPlan/ProjectVersion.
+Its content-addressed impact covers the full timeline and every completed
+proxy/final variant from the base version. Render is deliberately blocked: the
+response requires a new `run-director`, because perception, treatment, story
+and edit decisions all depend on the replaced evidence. The Director repository
+therefore resolves the transcript selected by the current EditPlan and verifies
+its optional hash, even when a newer unselected transcript exists. Domain tests
+pass and PostgreSQL/API coverage is prepared, but not executable on this host;
+the case remains unaccepted until that E2E, deploy and visual acceptance run.

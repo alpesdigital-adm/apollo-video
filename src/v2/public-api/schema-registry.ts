@@ -5358,6 +5358,43 @@ const commandArtifactInvalidationSchema = {
     createdAt: dateTimeSchema,
   },
 }
+const sourceTranscriptReplacementImpactSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId',
+    'previousTranscriptId', 'previousTranscriptHash', 'replacementTranscriptId',
+    'replacementTranscriptHash', 'changeKinds', 'dependencyTypes', 'affectedRanges',
+    'affectedVariantIds', 'affectedArtifacts', 'requiredRecomputations',
+    'renderBlockedUntilDirectorRun', 'impactHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'source-transcript-replacement-impact/v1' },
+    commandId: idSchema,
+    commandType: { const: 'replace-source-transcript' },
+    baseVersionId: idSchema,
+    resultVersionId: idSchema,
+    previousTranscriptId: idSchema,
+    previousTranscriptHash: sha256Schema,
+    replacementTranscriptId: idSchema,
+    replacementTranscriptHash: sha256Schema,
+    changeKinds: { type: 'array', minItems: 1, maxItems: 1, prefixItems: [{ const: 'source-transcript' }], items: false },
+    dependencyTypes: commandImpactSchema.properties.dependencyTypes,
+    affectedRanges: commandImpactSchema.properties.affectedRanges,
+    affectedVariantIds: commandImpactSchema.properties.affectedVariantIds,
+    affectedArtifacts: commandImpactSchema.properties.affectedArtifacts,
+    requiredRecomputations: {
+      type: 'array', minItems: 6, maxItems: 6,
+      prefixItems: [
+        { const: 'perception' }, { const: 'treatment' }, { const: 'story' },
+        { const: 'edit-plan' }, { const: 'proxy' }, { const: 'final' },
+      ],
+      items: false,
+    },
+    renderBlockedUntilDirectorRun: { const: true },
+    impactHash: sha256Schema,
+  },
+}
 const versionComparisonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -16510,6 +16547,61 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     ],
   }),
+  defineSchema('apply-project-edit-command-request', 4, 'Typed project edit command, source transcript replacement or complete DirectorRun request', {
+    type: 'object', additionalProperties: false,
+    required: ['type', 'baseVersionId', 'baseHash'],
+    properties: {
+      type: { enum: ['remove-spoken-content', 'replace-source-transcript', 'run-director'] },
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      sourceTranscriptId: idSchema,
+      expectedTranscriptHash: sha256Schema,
+      rules: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['id', 'label', 'alternatives'],
+          properties: {
+            id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' }, label: { type: 'string', minLength: 1, maxLength: 160 },
+            alternatives: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 240 } },
+          },
+        },
+      },
+      exclusionOverrides: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['sourceStartSeconds', 'sourceEndSeconds', 'ruleIds', 'reason'],
+          properties: {
+            sourceStartSeconds: { type: 'number', minimum: 0 }, sourceEndSeconds: { type: 'number', exclusiveMinimum: 0 },
+            ruleIds: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' } },
+            reason: { type: 'string', minLength: 1, maxLength: 500 },
+          },
+        },
+      },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    oneOf: [
+      {
+        required: ['sourceTranscriptId', 'rules'],
+        properties: {
+          type: { const: 'remove-spoken-content' }, sourceTranscriptId: {}, rules: {},
+          expectedTranscriptHash: false,
+        },
+      },
+      {
+        required: ['sourceTranscriptId', 'expectedTranscriptHash'],
+        properties: {
+          type: { const: 'replace-source-transcript' }, sourceTranscriptId: {}, expectedTranscriptHash: {},
+          rules: false, exclusionOverrides: false,
+        },
+      },
+      {
+        properties: {
+          type: { const: 'run-director' }, sourceTranscriptId: false,
+          expectedTranscriptHash: false, rules: false, exclusionOverrides: false,
+        },
+      },
+    ],
+  }),
   defineSchema('project-edit-command-applied', 1, 'Applied project edit command response',
     successSchema({
       type: 'object', additionalProperties: false,
@@ -16638,6 +16730,60 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               },
             },
             operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+      ],
+    }),
+  ),
+  defineSchema('source-transcript-replacement-impact', 1, 'Content-addressed invalidation impact of selecting a new immutable source transcript', sourceTranscriptReplacementImpactSchema),
+  defineSchema('project-edit-command-applied', 3, 'Applied edit command response including source transcript replacement and required Director recomputation',
+    successSchema({
+      oneOf: [
+        {
+          type: 'object', required: ['command', 'version', 'editorial', 'replayed'],
+          properties: { command: { type: 'object' }, version: { type: 'object' }, editorial: { type: 'object' }, replayed: { type: 'boolean' } },
+        },
+        {
+          type: 'object', required: ['command', 'version', 'directorRun', 'operation', 'replayed'],
+          properties: { command: { type: 'object' }, version: { type: 'object' }, directorRun: { type: 'object' }, operation: publicOperationSchemaV3, replayed: { type: 'boolean' } },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'sourceTranscript', 'replayed'],
+          properties: {
+            command: {
+              type: 'object', additionalProperties: false,
+              required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'],
+              properties: { id: idSchema, type: { const: 'replace-source-transcript' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema },
+            },
+            version: {
+              type: 'object', additionalProperties: false,
+              required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'],
+              properties: {
+                id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema,
+                baseHash: sha256Schema, createdAt: dateTimeSchema,
+                snapshotRefs: {
+                  type: 'object', additionalProperties: false,
+                  required: ['brief', 'editPlan', 'policies'],
+                  properties: { brief: idSchema, treatment: idSchema, story: idSchema, editPlan: idSchema, policies: idSchema },
+                },
+              },
+            },
+            sourceTranscript: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'previousTranscriptId', 'previousTranscriptHash', 'replacementTranscriptId',
+                'replacementTranscriptHash', 'impact', 'invalidations', 'nextRequiredCapability',
+              ],
+              properties: {
+                previousTranscriptId: idSchema, previousTranscriptHash: sha256Schema,
+                replacementTranscriptId: idSchema, replacementTranscriptHash: sha256Schema,
+                impact: sourceTranscriptReplacementImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+                nextRequiredCapability: { const: 'apollo.projects.commands.apply:run-director' },
+              },
+            },
             replayed: { type: 'boolean' },
           },
         },

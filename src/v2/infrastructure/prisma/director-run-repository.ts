@@ -161,21 +161,35 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       where: { id: input.projectId, workspaceId: input.workspaceId },
       include: {
         currentVersion: { include: { briefSnapshot: true, editPlanSnapshot: true, policiesSnapshot: true } },
-        mediaTranscripts: { orderBy: { createdAt: 'desc' }, take: 1 },
         mediaAssets: { where: { role: 'source-master' }, orderBy: { createdAt: 'desc' }, take: 1 },
       },
     })
     const versionRow = project?.currentVersion
-    const transcriptRow = project?.mediaTranscripts[0]
     const master = project?.mediaAssets[0]
-    if (!project || !versionRow || !transcriptRow || !master) return null
-    if (master.artifactId !== transcriptRow.sourceArtifactId) throw new DomainError('PERSISTENCE_CONFLICT', 'Current transcript does not belong to the project source master')
+    if (!project || !versionRow || !master) return null
     if (!project.objective || !project.format || !project.locale) throw new DomainError('PERSISTENCE_CONFLICT', 'Project direction metadata is incomplete')
     const editPlan = parseRecord(versionRow.editPlanSnapshot.contentJson, 'current EditPlan') as unknown as EditorialCutEditPlan
+    const retimedTranscript = editPlan.retimedTranscript as unknown
+    if (typeof retimedTranscript !== 'object' || retimedTranscript === null || !('sourceTranscriptId' in retimedTranscript) || typeof retimedTranscript.sourceTranscriptId !== 'string') {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan has no valid transcript selection')
+    }
+    const transcriptRow = await this.client.v2MediaTranscript.findFirst({
+      where: {
+        id: retimedTranscript.sourceTranscriptId,
+        projectId: project.id,
+        workspaceId: project.workspaceId,
+      },
+    })
+    if (!transcriptRow) return null
+    if (master.artifactId !== transcriptRow.sourceArtifactId) throw new DomainError('PERSISTENCE_CONFLICT', 'Current transcript does not belong to the project source master')
+    const planTranscriptHash = 'sourceTranscriptHash' in retimedTranscript
+      ? String(retimedTranscript.sourceTranscriptHash)
+      : undefined
     if (
       editPlan.schemaVersion !== 2 || editPlan.state !== 'compiled' ||
       editPlan.projectVersionId !== versionRow.id ||
-      editPlan.retimedTranscript.sourceTranscriptId !== transcriptRow.id
+      retimedTranscript.sourceTranscriptId !== transcriptRow.id ||
+      (planTranscriptHash !== undefined && planTranscriptHash !== transcriptRow.transcriptHash)
     ) throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan is not aligned to the current transcript')
     return Object.freeze({
       workspaceId: project.workspaceId,

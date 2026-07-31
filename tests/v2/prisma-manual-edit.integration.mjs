@@ -47,6 +47,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const projectId = `manual-project-${suffix}`
   const sourceA = `manual-artifact-a-${suffix}`
   const sourceB = `manual-artifact-b-${suffix}`
+  const currentTranscriptId = `manual-transcript-current-${suffix}`
+  const replacementTranscriptId = `manual-transcript-replacement-${suffix}`
   const completedProxyArtifactId = `manual-proxy-initial-${suffix}`
   const initialVersionId = `manual-version-${suffix}`
   const createdAt = new Date('2026-07-26T17:30:00.000Z')
@@ -65,6 +67,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
     await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
+    await client.v2MediaTranscript.deleteMany({ where: { workspaceId } })
     await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
@@ -137,6 +140,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 32 },
       composition: { layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5 },
       director: { plannerVersion: 'manual-e2e', decisions: [], assumptions: [] },
+      retimedTranscript: {
+        sourceTranscriptId: currentTranscriptId,
+        words: [
+          { text: 'Primeira', sourceStartSeconds: 0.2, sourceEndSeconds: 0.5, timelineStartFrame: 6, timelineEndFrame: 15 },
+          { text: 'frase', sourceStartSeconds: 1.2, sourceEndSeconds: 1.6, timelineStartFrame: 36, timelineEndFrame: 48 },
+          { text: 'Segunda', sourceStartSeconds: 3.2, sourceEndSeconds: 3.6, timelineStartFrame: 96, timelineEndFrame: 108 },
+        ],
+      },
       createdAt: createdAt.toISOString(),
     }
     const briefId = `manual-brief-${suffix}`
@@ -197,7 +208,37 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       } })
       await client.v2ProjectMediaAsset.create({ data: {
         id: randomUUID(), workspaceId, projectId, artifactId,
-        role: 'source-master', originalFileName: `${artifactId}.mp4`, createdAt,
+        role: artifactId === sourceA ? 'source-master' : 'supporting',
+        originalFileName: `${artifactId}.mp4`, createdAt,
+      } })
+    }
+    const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
+    const currentTranscript = createMediaTranscript({
+      language: 'pt-BR', text: 'Primeira frase Segunda', provider: 'groq', model: 'whisper-large-v3',
+      words: [
+        { word: 'Primeira', start: 0.2, end: 0.5 }, { word: 'frase', start: 1.2, end: 1.6 },
+        { word: 'Segunda', start: 3.2, end: 3.6 },
+      ],
+      segments: [{ id: 0, start: 0.2, end: 3.6, text: 'Primeira frase Segunda' }],
+    })
+    const replacementTranscript = createMediaTranscript({
+      language: 'pt-BR', text: 'Primeira corrigida Segunda', provider: 'groq', model: 'whisper-large-v3',
+      words: [
+        { word: 'Primeira', start: 0.2, end: 0.5 }, { word: 'corrigida', start: 1.2, end: 1.6 },
+        { word: 'Segunda', start: 3.2, end: 3.6 },
+      ],
+      segments: [{ id: 0, start: 0.2, end: 3.6, text: 'Primeira corrigida Segunda' }],
+    })
+    for (const [id, transcript, offset] of [
+      [currentTranscriptId, currentTranscript, 0],
+      [replacementTranscriptId, replacementTranscript, 1],
+    ]) {
+      await client.v2MediaTranscript.create({ data: {
+        id, workspaceId, projectId, sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+        schemaVersion: transcript.schemaVersion, language: transcript.language,
+        provider: transcript.provider, model: transcript.model, providerVersion: 'test-v1',
+        transcriptHash: transcript.transcriptHash, transcriptJson: stableSerialize(transcript),
+        createdAt: new Date(createdAt.getTime() + offset * 1000),
       } })
     }
     const completedProxyManifestId = `manifest-${completedProxyArtifactId}`
@@ -754,6 +795,79 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       cropSource.rangeReuse.ranges,
       cropped.data.command.payload.impact.minimalRenders[0].ranges,
     )
+    const transcriptBaseProxyOperationId = `manual-transcript-base-proxy-${suffix}`
+    await client.v2PublicOperation.create({ data: {
+      id: transcriptBaseProxyOperationId, workspaceId, clientId: issued.client.id,
+      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
+      targetType: 'media-artifact', targetId: completedProxyArtifactId,
+      cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
+      resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
+      idempotencyKey: `manual-transcript-base-proxy-${suffix}`,
+      requestFingerprint: calculateVersionHash({ transcriptBaseProxyOperationId }),
+      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
+    } })
+    await client.v2ProjectProxyRenderOperation.create({ data: {
+      operationId: transcriptBaseProxyOperationId, workspaceId, projectId,
+      projectVersionId: cropped.data.version.id, editPlanSnapshotId: cropVersion.editPlanSnapshotId,
+      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+      colorPipelineBindingsJson: '[]', inputHash: calculateVersionHash({ transcriptBaseProxyOperationId, input: true }),
+      outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId,
+      originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
+    } })
+    const transcriptKey = `replace-source-transcript-${suffix}`
+    const replaceTranscript = () => fetch(`${baseUrl}/v1/projects/${projectId}/commands`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': transcriptKey },
+      body: JSON.stringify({
+        type: 'replace-source-transcript',
+        baseVersionId: cropped.data.version.id,
+        baseHash: cropped.data.version.baseHash,
+        sourceTranscriptId: replacementTranscriptId,
+        expectedTranscriptHash: replacementTranscript.transcriptHash,
+        reason: 'Selecionar a retranscrição corrigida antes de executar novamente o Diretor.',
+      }),
+    })
+    const transcriptResponse = await replaceTranscript()
+    const transcriptApplied = await transcriptResponse.json()
+    assert.equal(transcriptResponse.status, 201, JSON.stringify(transcriptApplied))
+    assert.equal(transcriptApplied.data.version.sequence, 13)
+    assert.equal(transcriptApplied.data.command.type, 'replace-source-transcript')
+    assert.equal(transcriptApplied.data.sourceTranscript.replacementTranscriptId, replacementTranscriptId)
+    assert.equal(transcriptApplied.data.sourceTranscript.impact.renderBlockedUntilDirectorRun, true)
+    assert.deepEqual(transcriptApplied.data.sourceTranscript.impact.affectedRanges, [{ startFrame: 0, endFrame: cropPlan.durationFrames }])
+    assert.equal(transcriptApplied.data.sourceTranscript.invalidations.length, 1)
+    assert.equal(transcriptApplied.data.sourceTranscript.nextRequiredCapability, 'apollo.projects.commands.apply:run-director')
+    const replacementVersion = await client.v2ProjectVersion.findUnique({
+      where: { id: transcriptApplied.data.version.id }, include: { editPlanSnapshot: true },
+    })
+    const replacementPlan = JSON.parse(replacementVersion.editPlanSnapshot.contentJson)
+    assert.equal(replacementPlan.retimedTranscript.sourceTranscriptId, replacementTranscriptId)
+    assert.equal(replacementPlan.retimedTranscript.sourceTranscriptHash, replacementTranscript.transcriptHash)
+    assert.match(replacementPlan.retimedTranscript.words.map((word) => word.text).join(' '), /corrigida/)
+    assert.equal(await client.v2ProjectProxyRenderOperation.count({
+      where: { projectVersionId: transcriptApplied.data.version.id },
+    }), 0)
+    const transcriptReplayResponse = await replaceTranscript()
+    assert.equal(transcriptReplayResponse.status, 200)
+    assert.equal((await transcriptReplayResponse.json()).data.replayed, true)
+    const newestUnselectedTranscript = createMediaTranscript({
+      language: 'pt-BR', text: 'transcrição posterior não selecionada', provider: 'groq', model: 'whisper-large-v3',
+      words: [{ word: 'posterior', start: 0.2, end: 0.6 }],
+      segments: [{ id: 0, start: 0.2, end: 0.6, text: 'posterior' }],
+    })
+    await client.v2MediaTranscript.create({ data: {
+      id: `manual-transcript-unselected-${suffix}`, workspaceId, projectId,
+      sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
+      schemaVersion: newestUnselectedTranscript.schemaVersion, language: newestUnselectedTranscript.language,
+      provider: newestUnselectedTranscript.provider, model: newestUnselectedTranscript.model, providerVersion: 'test-v1',
+      transcriptHash: newestUnselectedTranscript.transcriptHash,
+      transcriptJson: stableSerialize(newestUnselectedTranscript),
+      createdAt: new Date(createdAt.getTime() + 60_000),
+    } })
+    const { PrismaDirectorRunRepository } = await import('../../src/v2/infrastructure/prisma/director-run-repository.ts')
+    const directorContext = await new PrismaDirectorRunRepository(client).readContext({ workspaceId, projectId })
+    assert.equal(directorContext.transcript.id, replacementTranscriptId)
+    assert.equal(directorContext.transcript.transcriptHash, replacementTranscript.transcriptHash)
     await context.close()
     await browser.close()
     browser = undefined

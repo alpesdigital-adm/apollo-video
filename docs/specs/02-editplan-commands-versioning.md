@@ -577,8 +577,15 @@ O conjunto de outputs deve ser relido dentro da mesma transação serializável
 que grava `V2EditCommand` e `ProjectVersion`; drift aborta o commit. Artifacts
 históricos continuam imutáveis e disponíveis para leitura da versão antiga:
 "stale" é relação com a nova versão, não corrupção nem remoção dos bytes.
-O primeiro adapter integrado cobre `manual-edit`; expandir o mesmo contrato
-para Commands editoriais, Diretor, batch e transcript é obrigatório antes de
+O primeiro adapter integrado cobre `manual-edit`. O Command público
+`replace-source-transcript` cobre a troca explícita da evidência fonte: valida
+ID/hash e source artifact, retima as palavras sobre o áudio materializado no
+EditPlan, cria snapshot/ProjectVersion imutáveis e invalida todos os outputs
+concluídos da base. Como percepção, TreatmentPlan, StoryPlan e EditPlan precisam
+ser recalculados, ele não enfileira render e declara `run-director` como próxima
+capability obrigatória. O Diretor consulta o transcript ID gravado no EditPlan,
+em vez de inferir a seleção pela data de criação. Expandir o mesmo contrato para
+os Commands editoriais restantes, Diretor e batch ainda é obrigatório antes de
 considerar FR-233 concluído.
 
 Para `manual-edit`, cada output do mapa também cria atomicamente uma relação
