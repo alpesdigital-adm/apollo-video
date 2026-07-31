@@ -10,6 +10,7 @@ import type {
   ManualInspectorPatch,
 } from '@/v2/domain/manual-editing'
 import {
+  createColorPipelineCompilationRepository,
   createManualEditRepository,
   createProjectProxyRenderRepository,
   createPublicOperationRepository,
@@ -175,6 +176,7 @@ export async function POST(
     const proxy = await enqueueProjectProxyRenderService({
       projects: createProjectProxyRenderRepository(),
       operations: createPublicOperationRepository(),
+      colorPipelines: createColorPipelineCompilationRepository(),
       clock: () => new Date(),
       createId: (kind) => `${kind}-${randomUUID()}`,
     })({

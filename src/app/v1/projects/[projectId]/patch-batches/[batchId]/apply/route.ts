@@ -7,6 +7,7 @@ import { applyReviewPatchBatchService } from '@/v2/application/review-patch-batc
 import { calculateVersionHash } from '@/v2/application/version-hash'
 import { DomainError } from '@/v2/domain/errors'
 import {
+  createColorPipelineCompilationRepository,
   createProjectProxyRenderRepository,
   createPublicOperationRepository,
   createReviewPatchBatchRepository,
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const render = await enqueueProjectProxyRenderService({
       projects: createProjectProxyRenderRepository(),
       operations: createPublicOperationRepository(),
+      colorPipelines: createColorPipelineCompilationRepository(),
       clock: () => new Date(),
       createId: (kind) => `${kind}-${randomUUID()}`,
     })({

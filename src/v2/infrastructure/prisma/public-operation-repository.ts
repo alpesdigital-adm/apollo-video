@@ -10,6 +10,8 @@ import type {
   PublicOperationCreationContext,
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { stableSerialize } from '../../domain/canonical-hash.ts'
+import type { RenderColorPipelineBinding } from '../../application/resolve-render-color-pipelines.ts'
 import {
   advancePublicOperationPhase,
   assertPublicOperation,
@@ -77,6 +79,26 @@ const OPERATION_INCLUDE = {
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
+
+function validColorPipelineBindings(value: unknown): value is readonly RenderColorPipelineBinding[] {
+  return Array.isArray(value) && value.length >= 1 && value.length <= 128 &&
+    new Set(value.map((item) => item?.sourceArtifactId)).size === value.length &&
+    value.every((item) => item && typeof item === 'object' &&
+      Object.keys(item).sort().join(',') === 'compilationHash,compilationId,pipelineHash,sourceArtifactId,sourceManifestId' &&
+      ID_PATTERN.test(item.sourceArtifactId) && ID_PATTERN.test(item.sourceManifestId) &&
+      ID_PATTERN.test(item.compilationId) && SHA256_PATTERN.test(item.compilationHash) &&
+      SHA256_PATTERN.test(item.pipelineHash))
+}
+
+function parseColorPipelineBindings(value: string): readonly Readonly<RenderColorPipelineBinding>[] {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!validColorPipelineBindings(parsed) || stableSerialize(parsed) !== value) throw new Error('invalid')
+    return Object.freeze((parsed as RenderColorPipelineBinding[]).map((item) => Object.freeze(item)))
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored render color pipeline bindings are invalid')
+  }
+}
 const OUTPUT_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,510}\.mp4$/
 
 function checkpointFields(detail: StoredOperation['artifactRender']) {
@@ -167,6 +189,12 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   const isFinalExport = row.type === 'project-final-export'
   const isSourceCleanup = row.type === 'source-cleanup'
   const isLongFormIndex = row.type === 'long-form-index'
+  const projectColorBindings = projectRenderDetail
+    ? parseColorPipelineBindings(projectRenderDetail.colorPipelineBindingsJson)
+    : undefined
+  const finalColorBindings = finalExportDetail
+    ? parseColorPipelineBindings(finalExportDetail.colorPipelineBindingsJson)
+    : undefined
   if (
     row.targetType !== 'media-artifact' ||
     [
@@ -461,6 +489,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         editPlanSnapshotId: projectRenderDetail!.editPlanSnapshotId,
         sourceArtifactId: projectRenderDetail!.sourceArtifactId,
         sourceManifestId: projectRenderDetail!.sourceManifestId,
+        colorPipelineBindings: projectColorBindings!,
         inputHash: projectRenderDetail!.inputHash,
         outputArtifactId: projectRenderDetail!.outputArtifactId,
         outputManifestId: projectRenderDetail!.outputManifestId,
@@ -479,6 +508,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         proxyArtifactId: finalExportDetail!.proxyArtifactId,
         sourceArtifactId: finalExportDetail!.sourceArtifactId,
         sourceManifestId: finalExportDetail!.sourceManifestId,
+        colorPipelineBindings: finalColorBindings!,
         inputHash: finalExportDetail!.inputHash,
         outputArtifactId: finalExportDetail!.outputArtifactId,
         outputManifestId: finalExportDetail!.outputManifestId,
@@ -815,6 +845,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           projectRenderContext.sourceArtifactId, projectRenderContext.sourceManifestId,
           projectRenderContext.outputArtifactId, projectRenderContext.outputManifestId].every((value) => ID_PATTERN.test(value)) ||
         !SHA256_PATTERN.test(projectRenderContext.inputHash) ||
+        !validColorPipelineBindings(projectRenderContext.colorPipelineBindings) ||
         projectRenderContext.outputArtifactId !== input.operation.target.id ||
         projectRenderContext.outputManifestId !== input.operation.target.manifestId ||
         projectRenderContext.originalFileName.trim().length < 1 || projectRenderContext.originalFileName.length > 240
@@ -828,6 +859,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           finalExportContext.approval.actorId].every((value) => ID_PATTERN.test(value)) ||
         ![finalExportContext.projectVersionHash, finalExportContext.qualitySnapshotHash,
           finalExportContext.proxyReviewHash, finalExportContext.inputHash].every((value) => SHA256_PATTERN.test(value)) ||
+        !validColorPipelineBindings(finalExportContext.colorPipelineBindings) ||
         finalExportContext.outputArtifactId !== input.operation.target.id ||
         finalExportContext.outputManifestId !== input.operation.target.manifestId ||
         !['9:16', '16:9', '4:5', '1:1', '21:9'].includes(finalExportContext.outputSpec.aspectRatio) ||
@@ -886,7 +918,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         }
         if (projectRenderContext) {
-          const source = await transaction.v2Project.findFirst({
+          const [source, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
             where: { id: projectRenderContext.projectId, workspaceId: input.operation.workspaceId },
             include: {
               versions: {
@@ -899,13 +931,22 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                 take: 1,
               },
             },
-          })
-          if (!source || source.versions.length !== 1 || source.mediaAssets.length !== 1 || source.mediaAssets[0]!.artifact.manifests.length !== 1) {
+          }), transaction.v2ColorPipelineCompilation.findMany({
+            where: { workspaceId: input.operation.workspaceId, projectId: projectRenderContext.projectId,
+              id: { in: projectRenderContext.colorPipelineBindings.map((binding) => binding.compilationId) } },
+            select: { id: true, sourceArtifactId: true, sourceManifestId: true, compilationHash: true, pipelineHash: true },
+          })])
+          if (!source || source.versions.length !== 1 || source.mediaAssets.length !== 1 || source.mediaAssets[0]!.artifact.manifests.length !== 1 ||
+            colorPipelines.length !== projectRenderContext.colorPipelineBindings.length ||
+            projectRenderContext.colorPipelineBindings.some((binding) => !colorPipelines.some((row) =>
+              row.id === binding.compilationId && row.sourceArtifactId === binding.sourceArtifactId &&
+              row.sourceManifestId === binding.sourceManifestId && row.compilationHash === binding.compilationHash &&
+              row.pipelineHash === binding.pipelineHash))) {
             throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy render source is not immutable and available')
           }
         }
         if (finalExportContext) {
-          const source = await transaction.v2Project.findFirst({
+          const [source, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
             where: {
               id: finalExportContext.projectId,
               workspaceId: input.operation.workspaceId,
@@ -947,12 +988,21 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                 take: 1,
               },
             },
-          })
+          }), transaction.v2ColorPipelineCompilation.findMany({
+            where: { workspaceId: input.operation.workspaceId, projectId: finalExportContext.projectId,
+              id: { in: finalExportContext.colorPipelineBindings.map((binding) => binding.compilationId) } },
+            select: { id: true, sourceArtifactId: true, sourceManifestId: true, compilationHash: true, pipelineHash: true },
+          })])
           if (
             !source || source.versions.length !== 1 || source.directorRuns.length !== 1 ||
             source.proxyReviews.length !== 1 || source.mediaAssets.length !== 1 ||
             source.mediaAssets[0]!.artifact.manifests.length !== 1 ||
-            source.directorRuns[0]!.qualitySnapshot.contentHash !== finalExportContext.qualitySnapshotHash
+            source.directorRuns[0]!.qualitySnapshot.contentHash !== finalExportContext.qualitySnapshotHash ||
+            colorPipelines.length !== finalExportContext.colorPipelineBindings.length ||
+            finalExportContext.colorPipelineBindings.some((binding) => !colorPipelines.some((row) =>
+              row.id === binding.compilationId && row.sourceArtifactId === binding.sourceArtifactId &&
+              row.sourceManifestId === binding.sourceManifestId && row.compilationHash === binding.compilationHash &&
+              row.pipelineHash === binding.pipelineHash))
           ) {
             throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Final export source, DirectorRun or QualityReport is no longer current and approved')
           }
@@ -1018,6 +1068,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               editPlanSnapshotId: projectRenderContext!.editPlanSnapshotId,
               sourceArtifactId: projectRenderContext!.sourceArtifactId,
               sourceManifestId: projectRenderContext!.sourceManifestId,
+              colorPipelineBindingsJson: stableSerialize(projectRenderContext!.colorPipelineBindings),
               inputHash: projectRenderContext!.inputHash,
               outputArtifactId: projectRenderContext!.outputArtifactId,
               outputManifestId: projectRenderContext!.outputManifestId,
@@ -1041,6 +1092,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               proxyArtifactId: finalExportContext!.proxyArtifactId,
               sourceArtifactId: finalExportContext!.sourceArtifactId,
               sourceManifestId: finalExportContext!.sourceManifestId,
+              colorPipelineBindingsJson: stableSerialize(finalExportContext!.colorPipelineBindings),
               inputHash: finalExportContext!.inputHash,
               outputArtifactId: finalExportContext!.outputArtifactId,
               outputManifestId: finalExportContext!.outputManifestId,

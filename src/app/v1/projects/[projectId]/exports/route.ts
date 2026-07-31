@@ -6,6 +6,7 @@ import { enqueueProjectFinalExportService } from '@/v2/application/enqueue-proje
 import { DomainError } from '@/v2/domain/errors'
 import {
   createAssetRightsRepository,
+  createColorPipelineCompilationRepository,
   createProjectFinalExportRepository,
   createPublicOperationRepository,
 } from '@/v2/infrastructure/repository-factory'
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       projects: createProjectFinalExportRepository(),
       rights: createAssetRightsRepository(),
       operations: createPublicOperationRepository(),
+      colorPipelines: createColorPipelineCompilationRepository(),
       clock: () => new Date(),
       createId: (kind) => `${kind}-${randomUUID()}`,
     })({

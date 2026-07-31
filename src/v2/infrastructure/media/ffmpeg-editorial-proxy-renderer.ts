@@ -9,6 +9,7 @@ import { DomainError } from '../../domain/errors.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
+import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpegStatic = require('ffmpeg-static') as string | null
@@ -100,10 +101,12 @@ function escapeSubtitleFilterPath(value: string): string {
 export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
   private readonly workRoot: string
   private readonly ffmpegPath: string
+  private readonly colorProcessor: FfmpegColorPipelineProcessor
 
   constructor(options: { workRoot: string; ffmpegPath?: string }) {
     this.workRoot = resolve(options.workRoot)
     this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.colorProcessor = new FfmpegColorPipelineProcessor({ ffmpegPath: this.ffmpegPath })
   }
 
   private directory(operationId: string): string {
@@ -123,15 +126,30 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       new Set(input.sources.map((source) => source.artifactId)).size !== input.sources.length ||
       input.sources.some((source) =>
         !isAbsolute(source.path) ||
-        !['video', 'audio'].includes(source.mediaType))
+        !['video', 'audio'].includes(source.mediaType) ||
+        (source.mediaType === 'video') !== Boolean(source.colorPipelineCompilation))
     ) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial proxy render input is invalid')
+    const directory = this.directory(input.operationId)
+    await mkdir(directory, { recursive: true })
+    const renderSources = await Promise.all(input.sources.map(async (source, index) => {
+      if (source.mediaType !== 'video') return source
+      const outputPath = join(directory, `color-source-${String(index).padStart(3, '0')}.mp4`)
+      await rm(outputPath, { force: true })
+      await this.colorProcessor.process({
+        sourcePath: source.path,
+        outputPath,
+        compilation: source.colorPipelineCompilation!,
+        signal: input.signal,
+      })
+      return Object.freeze({ ...source, path: outputPath })
+    }))
     const sourceIndex = new Map(
-      input.sources.map((source, index) => [source.artifactId, index]),
+      renderSources.map((source, index) => [source.artifactId, index]),
     )
     for (const clip of input.clips) {
-      const video = input.sources[sourceIndex.get(clip.sourceArtifactId) ?? -1]
+      const video = renderSources[sourceIndex.get(clip.sourceArtifactId) ?? -1]
       const audioArtifactId = clip.audioSourceArtifactId ?? clip.sourceArtifactId
-      const audio = input.sources[sourceIndex.get(audioArtifactId) ?? -1]
+      const audio = renderSources[sourceIndex.get(audioArtifactId) ?? -1]
       const audioInFrame = clip.audioSourceInFrame ?? clip.sourceInFrame
       const audioOutFrame = clip.audioSourceOutFrame ?? clip.sourceOutFrame
       if (
@@ -169,7 +187,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     const outputFps = input.renderKind === 'final'
       ? input.outputSpec!.fps
       : input.fps
-    const videoSources = input.sources.filter(
+    const videoSources = renderSources.filter(
       (source) => source.mediaType === 'video',
     )
     const videoProbes = await Promise.all(
@@ -194,10 +212,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     }
     const stagingWidth = stagingProbe.width
     const stagingHeight = stagingProbe.height
-    const directory = this.directory(input.operationId)
     const outputPath = join(directory, input.renderKind === 'final' ? 'editorial-final.mp4' : 'editorial-proxy.mp4')
     const subtitlePath = join(directory, 'captions.ass')
-    await mkdir(directory, { recursive: true })
     await rm(outputPath, { force: true })
     const filters: string[] = []
     input.clips.forEach((clip, index) => {
@@ -253,7 +269,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     try {
       await execFileAsync(this.ffmpegPath, [
         '-hide_banner', '-loglevel', 'error', '-y',
-        ...input.sources.flatMap((source) => ['-i', source.path]),
+        ...renderSources.flatMap((source) => ['-i', source.path]),
         '-filter_complex', filters.join(';'), '-map', '[outv]', '-map', '[outa]',
         '-r', String(outputFps), '-c:v', 'libx264', '-preset', input.renderKind === 'final' ? 'medium' : 'veryfast', '-crf', input.renderKind === 'final' ? '18' : '23',
         '-c:a', 'aac', '-b:a', input.renderKind === 'final' ? '192k' : '160k', '-ar', '48000', '-movflags', '+faststart', outputPath,

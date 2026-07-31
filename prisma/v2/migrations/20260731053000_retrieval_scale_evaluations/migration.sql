@@ -40,13 +40,13 @@ CREATE TABLE "retrieval_scale_evaluations" (
 
 CREATE UNIQUE INDEX "retrieval_scale_evaluations_id_workspaceId_key"
   ON "retrieval_scale_evaluations"("id", "workspaceId");
-CREATE UNIQUE INDEX "retrieval_scale_evaluations_workspaceId_projectId_idempotencyKey_key"
+CREATE UNIQUE INDEX "retrieval_scale_evaluations_workspaceId_projectId_idempoten_key"
   ON "retrieval_scale_evaluations"("workspaceId", "projectId", "idempotencyKey");
 CREATE UNIQUE INDEX "retrieval_scale_evaluations_workspaceId_reportHash_key"
   ON "retrieval_scale_evaluations"("workspaceId", "reportHash");
-CREATE INDEX "retrieval_scale_evaluations_workspaceId_projectId_scope_librarySize_createdAt_idx"
+CREATE INDEX "retrieval_scale_evaluations_workspaceId_projectId_scope_lib_idx"
   ON "retrieval_scale_evaluations"("workspaceId", "projectId", "scope", "librarySize", "createdAt" DESC);
-CREATE INDEX "retrieval_scale_evaluations_workspaceId_policyVersion_rerankPolicyVersion_idx"
+CREATE INDEX "retrieval_scale_evaluations_workspaceId_policyVersion_reran_idx"
   ON "retrieval_scale_evaluations"("workspaceId", "policyVersion", "rerankPolicyVersion");
 
 ALTER TABLE "retrieval_scale_evaluations"

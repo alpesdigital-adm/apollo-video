@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-project-proxy-render'
-import { createProjectProxyRenderRepository, createPublicOperationRepository } from '@/v2/infrastructure/repository-factory'
+import { createColorPipelineCompilationRepository, createProjectProxyRenderRepository, createPublicOperationRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
@@ -18,6 +18,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const { projectId } = await context.params
     const result = await enqueueProjectProxyRenderService({
       projects: createProjectProxyRenderRepository(), operations: createPublicOperationRepository(),
+      colorPipelines: createColorPipelineCompilationRepository(),
       clock: () => new Date(), createId: (kind) => `${kind}-${randomUUID()}`,
     })({
       workspaceId: actor.workspaceId, projectId, actor: { type: 'api-client', id: actor.clientId },

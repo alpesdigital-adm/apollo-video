@@ -242,4 +242,19 @@ implements ColorPipelineCompilationRepository {
     })
     return row ? hydrate(row) : null
   }
+
+  async listForSource(input: {
+    workspaceId: string
+    projectId: string
+    sourceArtifactId: string
+    sourceManifestId: string
+  }) {
+    const rows = await this.client.v2ColorPipelineCompilation.findMany({
+      where: input,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      include: includeProbe(),
+      take: 2,
+    })
+    return Object.freeze(rows.map(hydrate))
+  }
 }

@@ -39,15 +39,15 @@ CREATE TABLE "color_pipeline_compilations" (
 
 CREATE UNIQUE INDEX "color_pipeline_compilations_id_workspaceId_key"
   ON "color_pipeline_compilations"("id", "workspaceId");
-CREATE UNIQUE INDEX "color_pipeline_compilations_workspace_project_actor_idempotency_key"
+CREATE UNIQUE INDEX "color_pipeline_compilations_workspaceId_projectId_createdBy_key"
   ON "color_pipeline_compilations"("workspaceId", "projectId", "createdByClientId", "idempotencyKey");
-CREATE UNIQUE INDEX "color_pipeline_compilations_workspace_compilationHash_key"
+CREATE UNIQUE INDEX "color_pipeline_compilations_workspaceId_compilationHash_key"
   ON "color_pipeline_compilations"("workspaceId", "compilationHash");
-CREATE INDEX "color_pipeline_compilations_workspace_project_createdAt_id_idx"
+CREATE INDEX "color_pipeline_compilations_workspaceId_projectId_createdAt_idx"
   ON "color_pipeline_compilations"("workspaceId", "projectId", "createdAt" DESC, "id" DESC);
-CREATE INDEX "color_pipeline_compilations_workspace_source_idx"
+CREATE INDEX "color_pipeline_compilations_workspaceId_sourceArtifactId_so_idx"
   ON "color_pipeline_compilations"("workspaceId", "sourceArtifactId", "sourceManifestId");
-CREATE INDEX "color_pipeline_compilations_workspace_colorProbeId_idx"
+CREATE INDEX "color_pipeline_compilations_workspaceId_colorProbeId_idx"
   ON "color_pipeline_compilations"("workspaceId", "colorProbeId");
 
 ALTER TABLE "color_pipeline_compilations" ADD CONSTRAINT "color_pipeline_compilations_workspaceId_fkey"
@@ -56,7 +56,7 @@ ALTER TABLE "color_pipeline_compilations" ADD CONSTRAINT "color_pipeline_compila
   FOREIGN KEY ("projectId", "workspaceId") REFERENCES "projects"("id", "workspaceId") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "color_pipeline_compilations" ADD CONSTRAINT "color_pipeline_compilations_sourceArtifactId_workspaceId_fkey"
   FOREIGN KEY ("sourceArtifactId", "workspaceId") REFERENCES "media_artifacts"("id", "workspaceId") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "color_pipeline_compilations" ADD CONSTRAINT "color_pipeline_compilations_sourceManifestId_sourceArtifactId_workspaceId_fkey"
+ALTER TABLE "color_pipeline_compilations" ADD CONSTRAINT "color_pipeline_compilations_sourceManifestId_sourceArtifac_fkey"
   FOREIGN KEY ("sourceManifestId", "sourceArtifactId", "workspaceId") REFERENCES "media_artifact_manifests"("id", "artifactId", "workspaceId") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "color_pipeline_compilations" ADD CONSTRAINT "color_pipeline_compilations_colorProbeId_workspaceId_fkey"
   FOREIGN KEY ("colorProbeId", "workspaceId") REFERENCES "media_color_probes"("id", "workspaceId") ON DELETE RESTRICT ON UPDATE CASCADE;

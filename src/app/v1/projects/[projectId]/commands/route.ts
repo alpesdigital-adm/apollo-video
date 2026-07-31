@@ -7,6 +7,7 @@ import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-proje
 import { runProjectDirectorService } from '@/v2/application/run-project-director'
 import { DomainError } from '@/v2/domain/errors'
 import {
+  createColorPipelineCompilationRepository,
   createDirectorRunRepository,
   createEditorialCommandRepository,
   createProjectProxyRenderRepository,
@@ -105,6 +106,7 @@ export async function POST(
       const proxy = await enqueueProjectProxyRenderService({
         projects: createProjectProxyRenderRepository(),
         operations: createPublicOperationRepository(),
+        colorPipelines: createColorPipelineCompilationRepository(),
         clock: () => new Date(),
         createId: (kind) => `${kind}-${randomUUID()}`,
       })({

@@ -1,6 +1,7 @@
 import type { EditorialCutClip } from '../apply-editorial-cut-command.ts'
 import type { DirectedSubtitleCue, DirectedTransition } from '../../domain/director-run.ts'
 import type { RenderElementMap } from '../../domain/review-system.ts'
+import type { ColorPipelineCompilation } from '../../domain/color-pipeline-compilation.ts'
 
 export interface EditorialProxyRenderResult {
   outputPath: string
@@ -18,6 +19,7 @@ export interface EditorialProxyRenderer {
       artifactId: string
       path: string
       mediaType: 'video' | 'audio'
+      colorPipelineCompilation?: Readonly<ColorPipelineCompilation>
     }>[]
     clips: readonly Readonly<EditorialCutClip>[]
     fps: number

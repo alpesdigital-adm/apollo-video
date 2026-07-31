@@ -10,10 +10,12 @@ import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-
 import type { ProxyReviewRepository } from './ports/proxy-review-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
+import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import { evaluateRenderedProxy } from './render-workflow.ts'
 import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 
 const NON_RETRYABLE_CODES = new Set(['INVALID_RENDER_INPUT', 'RENDER_OUTPUT_INVALID', 'PERSISTENCE_CONFLICT', 'PERSISTENCE_NOT_CONFIGURED'])
 
@@ -39,6 +41,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   renderer: EditorialProxyRenderer
   renderElementMaps: RenderElementMapRepository
   proxyReviews: ProxyReviewRepository
+  colorPipelines: ColorPipelineCompilationRepository
   artifactRoot: string
   clock?: () => Date
   leaseDurationMs?: number
@@ -120,6 +123,14 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       })
       if (!source) throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable project render source disappeared')
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+      const colorPipelines = await loadBoundRenderColorPipelines({
+        repository: dependencies.colorPipelines, workspaceId: operation.workspaceId,
+        projectId: context.projectId, bindings: context.colorPipelineBindings,
+      })
+      if (source.renderSources.some((asset) => asset.mediaType === 'video' &&
+        (!colorPipelines.has(asset.artifactId) || context.colorPipelineBindings.find((binding) => binding.sourceArtifactId === asset.artifactId)?.sourceManifestId !== asset.manifestId))) {
+        throw new DomainError('INVALID_RENDER_INPUT', 'Render video source is missing its bound color pipeline')
+      }
       const immutableInputHash = calculateVersionHash({
         kind: 'project-proxy-render/v1',
         projectId: context.projectId,
@@ -130,6 +141,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         sourceManifestId: source.sourceManifestId,
         sourceSha256: source.sourceSha256,
         renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+        colorPipelineBindings: context.colorPipelineBindings,
         format: source.format,
       })
       if (
@@ -148,6 +160,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           artifactId: asset.artifactId,
           path: resolveArtifactPath(dependencies.artifactRoot, asset.artifactKey),
           mediaType: asset.mediaType,
+          ...(asset.mediaType === 'video' ? { colorPipelineCompilation: colorPipelines.get(asset.artifactId)! } : {}),
         })),
         clips, fps: source.editPlan.fps, format: source.format, subtitleCues, transitions, ...(composition ? { composition } : {}),
         signal: abortController.signal,
@@ -156,10 +169,10 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
       await enter('persisting')
       const stored = await dependencies.storage.promoteDerived({ workspaceId: operation.workspaceId, sourcePath: rendered.outputPath, sha256: rendered.sha256, extension: 'mp4', prefix: 'editorial-proxies' })
-      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-proxy/1.0.0').digest('hex')
+      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-proxy/1.1.0').digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: '1.0.0', parameters: { inputHash: context.inputHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format } },
+        recipe: { id: 'editorial-proxy', version: '1.1.0', parameters: { inputHash: context.inputHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings } },
         sources: source.renderSources.map((asset) => ({
           artifactKey: asset.artifactKey,
           sha256: asset.sha256,

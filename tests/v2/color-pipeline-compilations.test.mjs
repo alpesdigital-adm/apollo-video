@@ -9,6 +9,7 @@ import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/can
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { PrismaColorPipelineCompilationRepository } from '../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts'
 import { parseCreateColorPipelineCompilationBody } from '../../src/v2/public-api/color-pipeline-compilation-contract.ts'
+import { resolveRenderColorPipelineBindings } from '../../src/v2/application/resolve-render-color-pipelines.ts'
 
 const source = Object.freeze({
   colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709',
@@ -126,6 +127,37 @@ test('T-FR-180 rejects unavailable probes before persistence', async () => {
     /colorimetry is unavailable/,
   )
   assert.equal(writes, 0)
+})
+
+test('T-FR-180 render binding requires exactly one immutable compilation per video source', async () => {
+  const compilation = (await createColorPipelineCompilationService({
+    repository: {
+      async findIdempotent() { return null }, async loadTrustedProbe() { return probe },
+      async persist(value) { return { value, replayed: false } },
+    },
+    createId: () => 'color-pipeline-render-binding',
+    clock: () => new Date('2026-07-31T03:02:00.000Z'),
+  })(request())).value.compilation
+  const sources = [{
+    artifactId: probe.artifactId, manifestId: probe.manifestId,
+    artifactKey: 'workspaces/color/source.mp4', sha256: '8'.repeat(64), byteSize: 100,
+    mediaType: 'video', container: 'mp4', role: 'source-master',
+  }]
+  const exact = await resolveRenderColorPipelineBindings({
+    repository: { async listForSource() { return [{ compilation }] } },
+    workspaceId: probe.workspaceId, projectId: 'project-color-1', sources,
+  })
+  assert.deepEqual(exact, [{
+    sourceArtifactId: probe.artifactId, sourceManifestId: probe.manifestId,
+    compilationId: compilation.id, compilationHash: compilation.compilationHash,
+    pipelineHash: compilation.pipeline.pipelineHash,
+  }])
+  for (const candidates of [[], [{ compilation }, { compilation }]]) {
+    await assert.rejects(resolveRenderColorPipelineBindings({
+      repository: { async listForSource() { return candidates } },
+      workspaceId: probe.workspaceId, projectId: 'project-color-1', sources,
+    }), /exact color pipeline|ambiguous color pipeline/)
+  }
 })
 
 test('T-FR-180 Prisma adapter persists transform versions and detects tampering', async () => {

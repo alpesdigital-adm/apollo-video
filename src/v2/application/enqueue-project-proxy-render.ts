@@ -2,7 +2,9 @@ import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createQueuedPublicOperation } from '../domain/public-operation.ts'
 import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
+import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
 
 function validateId(value: string, field: string): string {
@@ -14,6 +16,7 @@ function validateId(value: string, field: string): string {
 export function enqueueProjectProxyRenderService(dependencies: {
   projects: ProjectProxyRenderRepository
   operations: PublicOperationRepository
+  colorPipelines: ColorPipelineCompilationRepository
   clock: () => Date
   createId: (kind: 'operation' | 'artifact' | 'manifest') => string
 }) {
@@ -30,12 +33,16 @@ export function enqueueProjectProxyRenderService(dependencies: {
     assertDomain(idempotencyKey.length > 0 && idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key must contain 1 to 128 characters')
     const source = await dependencies.projects.readCurrentSource({ workspaceId, projectId })
     if (!source) throw new DomainError('PROJECT_NOT_FOUND', 'Project with a compiled EditPlan and source master was not found')
+    const colorPipelineBindings = await resolveRenderColorPipelineBindings({
+      repository: dependencies.colorPipelines, workspaceId, projectId, sources: source.renderSources,
+    })
     const inputHash = calculateVersionHash({
       kind: 'project-proxy-render/v1', projectId, projectVersionId: source.projectVersionId,
       editPlanSnapshotId: source.editPlanSnapshotId, editPlanHash: source.editPlanHash,
       sourceArtifactId: source.sourceArtifactId, sourceManifestId: source.sourceManifestId,
       sourceSha256: source.sourceSha256,
       renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+      colorPipelineBindings,
       format: source.format,
     })
     const requestFingerprint = calculateVersionHash({ type: 'project-proxy-render', projectId, inputHash })
@@ -55,6 +62,7 @@ export function enqueueProjectProxyRenderService(dependencies: {
         kind: 'project-proxy-render', projectId, projectVersionId: source.projectVersionId,
         editPlanSnapshotId: source.editPlanSnapshotId, sourceArtifactId: source.sourceArtifactId,
         sourceManifestId: source.sourceManifestId, inputHash, outputArtifactId, outputManifestId,
+        colorPipelineBindings,
         originalFileName: `${source.originalFileName.replace(/\.[^.]+$/, '').slice(0, 200)}-editorial.mp4`,
       },
       idempotencyKey,

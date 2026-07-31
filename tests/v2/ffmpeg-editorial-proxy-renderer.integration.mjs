@@ -7,9 +7,42 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
+import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
+import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
+import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
+const colorMetadata = Object.freeze({
+  colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709',
+  range: 'limited', bitDepth: 8,
+})
+
+function colorCompilation(artifactId) {
+  const manifestId = `manifest-${artifactId}`
+  const probe = createMediaColorProbe({
+    id: `probe-${artifactId}`, workspaceId: 'workspace-render-golden', artifactId, manifestId,
+    detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+    producer: { provider: 'ffprobe', version: 'json-v1', binaryDigest: '9'.repeat(64) },
+    createdAt: '2026-07-31T08:00:00.000Z',
+  })
+  const implementation = (provider, parameters) => ({
+    provider, version: 'v1', parameters,
+    parametersHash: calculateCanonicalHash(parameters),
+  })
+  return createColorPipelineCompilation({
+    id: `compilation-${artifactId}`, workspaceId: probe.workspaceId,
+    projectId: 'project-render-golden', sourceArtifactId: artifactId, sourceManifestId: manifestId,
+    probe, outputMetadata: colorMetadata, createdByClientId: 'client-render-golden',
+    createdAt: '2026-07-31T08:01:00.000Z',
+    stages: [
+      { id: 'technical-rec709', kind: 'technical', version: 'v1', enabled: true, input: colorMetadata, output: colorMetadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
+      { id: 'match-bypass', kind: 'match', version: 'v1', enabled: false, input: colorMetadata, output: colorMetadata, implementation: implementation('apollo-match', { mode: 'bypass' }) },
+      { id: 'creative-none', kind: 'creative-lut', version: 'v1', enabled: false, input: colorMetadata, output: colorMetadata, implementation: implementation('apollo-lut', { mode: 'none' }) },
+      { id: 'output-rec709', kind: 'output', version: 'v1', enabled: true, input: colorMetadata, output: colorMetadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
+    ],
+  })
+}
 
 test('T-FR-221 renderer materializes B-roll video while preserving source-master audio', async () => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-multisource-render-'))
@@ -37,8 +70,8 @@ test('T-FR-221 renderer materializes B-roll video while preserving source-master
       operationId: 'multisource-render-test',
       renderKind: 'proxy',
       sources: [
-        { artifactId: 'artifact-master', path: masterPath, mediaType: 'video' },
-        { artifactId: 'artifact-broll', path: brollPath, mediaType: 'video' },
+        { artifactId: 'artifact-master', path: masterPath, mediaType: 'video', colorPipelineCompilation: colorCompilation('artifact-master') },
+        { artifactId: 'artifact-broll', path: brollPath, mediaType: 'video', colorPipelineCompilation: colorCompilation('artifact-broll') },
       ],
       clips: [
         {
@@ -105,7 +138,7 @@ test('T-FR-221 renderer materializes B-roll video while preserving source-master
       renderKind: 'final',
       outputSpec: { width: 1920, height: 1080, fps: 30 },
       sources: [
-        { artifactId: 'artifact-master', path: masterPath, mediaType: 'video' },
+        { artifactId: 'artifact-master', path: masterPath, mediaType: 'video', colorPipelineCompilation: colorCompilation('artifact-master') },
       ],
       clips: [{
         id: 'clip-final',

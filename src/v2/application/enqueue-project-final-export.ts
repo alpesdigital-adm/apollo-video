@@ -10,7 +10,9 @@ import { createQueuedPublicOperation } from '../domain/public-operation.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
+import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
 
 function validateId(value: string, field: string): string {
@@ -36,6 +38,7 @@ export function enqueueProjectFinalExportService(dependencies: {
   projects: ProjectFinalExportRepository
   rights: AssetRightsRepository
   operations: PublicOperationRepository
+  colorPipelines: ColorPipelineCompilationRepository
   clock: () => Date
   createId: (kind: 'operation' | 'artifact' | 'manifest') => string
 }) {
@@ -96,6 +99,9 @@ export function enqueueProjectFinalExportService(dependencies: {
         )
       }
     }
+    const colorPipelineBindings = await resolveRenderColorPipelineBindings({
+      repository: dependencies.colorPipelines, workspaceId, projectId, sources: source.renderSources,
+    })
 
     const inputHash = calculateVersionHash({
       kind: 'project-final-export/v1',
@@ -114,6 +120,7 @@ export function enqueueProjectFinalExportService(dependencies: {
       sourceManifestId: source.sourceManifestId,
       sourceSha256: source.sourceSha256,
       renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+      colorPipelineBindings,
       outputSpec: finalOutputSpec,
     })
     const requestFingerprint = calculateVersionHash({
@@ -156,6 +163,7 @@ export function enqueueProjectFinalExportService(dependencies: {
         proxyArtifactId: source.proxyArtifactId,
         sourceArtifactId: source.sourceArtifactId,
         sourceManifestId: source.sourceManifestId,
+        colorPipelineBindings,
         inputHash,
         outputArtifactId,
         outputManifestId,

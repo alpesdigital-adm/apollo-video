@@ -1327,6 +1327,7 @@ model V2ProjectProxyRenderOperation {
   editPlanSnapshotId String   @db.VarChar(128)
   sourceArtifactId   String   @db.VarChar(128)
   sourceManifestId   String   @db.VarChar(128)
+  colorPipelineBindingsJson String @db.Text
   inputHash          String   @db.Char(64)
   outputArtifactId   String   @db.VarChar(128)
   outputManifestId   String   @db.VarChar(128)
@@ -1435,6 +1436,7 @@ model V2ProjectFinalExportOperation {
   proxyArtifactId     String   @db.VarChar(128)
   sourceArtifactId    String   @db.VarChar(128)
   sourceManifestId    String   @db.VarChar(128)
+  colorPipelineBindingsJson String @db.Text
   inputHash           String   @db.Char(64)
   outputArtifactId    String   @db.VarChar(128)
   outputManifestId    String   @db.VarChar(128)

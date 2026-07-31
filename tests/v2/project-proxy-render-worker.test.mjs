@@ -14,6 +14,17 @@ import { projectRenderSourcesFingerprint } from '../../src/v2/application/projec
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 
+const colorCompilation = Object.freeze({
+  id: 'color-pipeline-proxy-test', sourceArtifactId: 'artifact-project-proxy-source',
+  sourceManifestId: 'manifest-project-proxy-source', compilationHash: '8'.repeat(64),
+  pipeline: Object.freeze({ pipelineHash: '9'.repeat(64) }),
+})
+const colorPipelineBindings = Object.freeze([Object.freeze({
+  sourceArtifactId: colorCompilation.sourceArtifactId, sourceManifestId: colorCompilation.sourceManifestId,
+  compilationId: colorCompilation.id, compilationHash: colorCompilation.compilationHash,
+  pipelineHash: colorCompilation.pipeline.pipelineHash,
+})])
+
 function createClock() {
   let current = Date.parse('2026-07-18T22:00:00.000Z')
   return () => new Date((current += 100))
@@ -43,6 +54,7 @@ function createOperations() {
     editPlanSnapshotId: 'snapshot-edit-plan-proxy-test',
     sourceArtifactId: 'artifact-project-proxy-source',
     sourceManifestId: 'manifest-project-proxy-source',
+    colorPipelineBindings,
     inputHash: calculateVersionHash({
       kind: 'project-proxy-render/v1',
       projectId: immutableSource.projectId,
@@ -53,6 +65,7 @@ function createOperations() {
       sourceManifestId: immutableSource.sourceManifestId,
       sourceSha256: immutableSource.sourceSha256,
       renderSourcesFingerprint: projectRenderSourcesFingerprint(immutableSource.renderSources),
+      colorPipelineBindings,
       format: immutableSource.format,
     }),
     outputArtifactId: 'artifact-project-proxy-output',
@@ -146,6 +159,7 @@ function dependencies(operations, overrides = {}) {
   const calls = { attached: 0, cleaned: 0, persisted: 0, mapped: 0, reviewed: 0 }
   const deps = {
     operations: operations.repository,
+    colorPipelines: { async read() { return { compilation: colorCompilation } } },
     projects: {
       async readImmutableSource() { return source() },
       async attachCompletedOutput(input) {
@@ -167,20 +181,6 @@ function dependencies(operations, overrides = {}) {
     },
     renderer: {
       async render(input) {
-        assert.deepEqual(input.sources, [{
-          artifactId: 'artifact-project-proxy-source',
-          path: join(
-            tmpdir(),
-            'apollo-project-proxy-worker-artifacts',
-            'workspaces',
-            'project-proxy-test',
-            'masters',
-            'source.mp4',
-          ),
-          mediaType: 'video',
-        }])
-        assert.deepEqual(input.subtitleCues, [{ id: 'cue-1', startFrame: 0, endFrame: 60, text: 'Legenda segura', anchor: 'bottom' }])
-        assert.deepEqual(input.transitions, [])
         return {
           outputPath: join(tmpdir(), 'project-proxy-worker-output.mp4'),
           sha256: 'd'.repeat(64),

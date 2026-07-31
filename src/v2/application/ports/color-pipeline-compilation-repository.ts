@@ -35,6 +35,12 @@ export interface ColorPipelineCompilationRepository {
     projectId: string
     compilationId: string
   }): Promise<Readonly<PersistedColorPipelineCompilation> | null>
+  listForSource(input: {
+    workspaceId: string
+    projectId: string
+    sourceArtifactId: string
+    sourceManifestId: string
+  }): Promise<readonly Readonly<PersistedColorPipelineCompilation>[]>
 }
 
 export interface CreateColorPipelineCompilationInput {

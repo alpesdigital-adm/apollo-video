@@ -12,9 +12,11 @@ import type { EditorialProxyRenderer } from './ports/editorial-proxy-renderer.ts
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
+import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
 
 const NON_RETRYABLE_CODES = new Set([
   'INVALID_RENDER_INPUT',
@@ -53,6 +55,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   storage: VerifiedMediaStorage
   renderer: EditorialProxyRenderer
   renderElementMaps: RenderElementMapRepository
+  colorPipelines: ColorPipelineCompilationRepository
   artifactRoot: string
   clock?: () => Date
   leaseDurationMs?: number
@@ -176,6 +179,14 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       })
       if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Immutable approved final export source disappeared')
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+      const colorPipelines = await loadBoundRenderColorPipelines({
+        repository: dependencies.colorPipelines, workspaceId: operation.workspaceId,
+        projectId: context.projectId, bindings: context.colorPipelineBindings,
+      })
+      if (source.renderSources.some((asset) => asset.mediaType === 'video' &&
+        (!colorPipelines.has(asset.artifactId) || context.colorPipelineBindings.find((binding) => binding.sourceArtifactId === asset.artifactId)?.sourceManifestId !== asset.manifestId))) {
+        throw new DomainError('INVALID_RENDER_INPUT', 'Final render video source is missing its bound color pipeline')
+      }
       const immutableInputHash = calculateVersionHash({
         kind: 'project-final-export/v1',
         projectId: context.projectId,
@@ -193,6 +204,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         sourceManifestId: source.sourceManifestId,
         sourceSha256: source.sourceSha256,
         renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+        colorPipelineBindings: context.colorPipelineBindings,
         outputSpec: context.outputSpec,
       })
       if (
@@ -218,6 +230,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           artifactId: asset.artifactId,
           path: resolveArtifactPath(dependencies.artifactRoot, asset.artifactKey),
           mediaType: asset.mediaType,
+          ...(asset.mediaType === 'video' ? { colorPipelineCompilation: colorPipelines.get(asset.artifactId)! } : {}),
         })),
         clips,
         fps: context.outputSpec.fps,
@@ -301,7 +314,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         stored.sha256 !== rendered.sha256 ||
         stored.byteSize !== rendered.byteSize
       ) throw new DomainError('RENDER_OUTPUT_INVALID', 'Promoted final output checksum or byte size changed')
-      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-final/1.0.0').digest('hex')
+      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-final/1.1.0').digest('hex')
       const renderInput = createRenderInputSpec({
         schemaVersion: 'render-input/v1',
         renderer: {
@@ -343,6 +356,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           editPlan: source.editPlan,
           outputSpec: context.outputSpec,
           sourceArtifactIds: source.renderSources.map((asset) => asset.artifactId),
+          colorPipelineBindings: context.colorPipelineBindings,
         },
       })
       const reconstructableManifest = createReconstructableMediaArtifactManifest({
@@ -367,6 +381,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             proxyArtifactId: context.proxyArtifactId,
             outputSpec: context.outputSpec,
             approval: context.approval,
+            colorPipelineBindings: context.colorPipelineBindings,
           },
         },
         sources: source.renderSources.map((asset) => ({

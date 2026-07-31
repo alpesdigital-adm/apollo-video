@@ -23,6 +23,18 @@ const projectId = 'project-final-export-test'
 const projectVersionId = 'project-version-final-export-test'
 const sourceArtifactId = 'artifact-final-export-source'
 const sourceManifestId = 'manifest-final-export-source'
+const colorCompilation = Object.freeze({
+  id: 'color-pipeline-final-export', sourceArtifactId, sourceManifestId,
+  compilationHash: '8'.repeat(64), pipeline: Object.freeze({ pipelineHash: '9'.repeat(64) }),
+})
+const colorPipelineBindings = Object.freeze([Object.freeze({
+  sourceArtifactId, sourceManifestId, compilationId: colorCompilation.id,
+  compilationHash: colorCompilation.compilationHash, pipelineHash: colorCompilation.pipeline.pipelineHash,
+})])
+const colorPipelines = {
+  async listForSource() { return [{ compilation: colorCompilation }] },
+  async read() { return { compilation: colorCompilation } },
+}
 
 function rightsSnapshot() {
   return createAssetRightsSnapshot({
@@ -111,6 +123,7 @@ function finalInputHash() {
     sourceManifestId: source.sourceManifestId,
     sourceSha256: source.sourceSha256,
     renderSourcesFingerprint: projectRenderSourcesFingerprint(source.renderSources),
+    colorPipelineBindings,
     outputSpec: {
       aspectRatio: '9:16',
       width: 1080,
@@ -141,6 +154,7 @@ test('final export enqueue binds approval, exact Director evidence and 1080x1920
     projects: { async readApprovedCurrentSource() { return approvedSource() } },
     rights: { async findCurrent() { return { snapshot: rightsSnapshot(), revision: 'revision-1' } } },
     operations,
+    colorPipelines,
     clock: () => new Date('2026-07-19T01:05:00.000Z'),
     createId(kind) { ids[kind] += 1; return `${kind}-final-export-${ids[kind]}` },
   })
@@ -221,6 +235,7 @@ function createOperations() {
     proxyArtifactId: 'artifact-proxy-final-export-test',
     sourceArtifactId,
     sourceManifestId,
+    colorPipelineBindings,
     inputHash: finalInputHash(),
     outputArtifactId: 'artifact-final-output',
     outputManifestId: 'manifest-final-output',
@@ -280,6 +295,7 @@ function workerDependencies(
     calls,
     dependencies: {
       operations: operations.repository,
+      colorPipelines,
       projects: {
         async readImmutableApprovedSource() { return approvedSource() },
         async convergeOutputIdentity(input) {
@@ -370,6 +386,7 @@ function workerDependencies(
               'source.mp4',
             ),
             mediaType: 'video',
+            colorPipelineCompilation: colorCompilation,
           }])
           assert.deepEqual(input.outputSpec, {
             aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,

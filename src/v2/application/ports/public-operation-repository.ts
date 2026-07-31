@@ -4,6 +4,7 @@ import type {
   PublicOperationRunningPhase,
   PublicOperationStatus,
 } from '../../domain/public-operation.ts'
+import type { RenderColorPipelineBinding } from '../resolve-render-color-pipelines.ts'
 
 export interface ArtifactRenderOperationContext {
   kind: 'artifact-render'
@@ -27,6 +28,7 @@ export interface ProjectProxyRenderOperationContext {
   editPlanSnapshotId: string
   sourceArtifactId: string
   sourceManifestId: string
+  colorPipelineBindings: readonly Readonly<RenderColorPipelineBinding>[]
   inputHash: string
   outputArtifactId: string
   outputManifestId: string
@@ -47,6 +49,7 @@ export interface ProjectFinalExportOperationContext {
   proxyArtifactId: string
   sourceArtifactId: string
   sourceManifestId: string
+  colorPipelineBindings: readonly Readonly<RenderColorPipelineBinding>[]
   inputHash: string
   outputArtifactId: string
   outputManifestId: string
