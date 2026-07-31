@@ -36,6 +36,10 @@ const QUERY_FIELDS = new Set([
   'scope',
   'text',
   'intention',
+  'atmosphere',
+  'personIds',
+  'speech',
+  'visual',
   'rightsUse',
   'filters',
   'includeBlocked',
@@ -46,6 +50,10 @@ const EVALUATION_QUERY_FIELDS = new Set([
   'scope',
   'text',
   'intention',
+  'atmosphere',
+  'personIds',
+  'speech',
+  'visual',
   'rightsUse',
   'filters',
   'includeBlocked',
@@ -389,6 +397,38 @@ export function parseHybridSearchQueryBody(
           intention: optionalString(
             body.intention,
             `${field}.intention`,
+          ),
+        }
+      : {}),
+    ...(body.atmosphere !== undefined
+      ? {
+          atmosphere: optionalString(
+            body.atmosphere,
+            `${field}.atmosphere`,
+          ),
+        }
+      : {}),
+    ...(body.personIds !== undefined
+      ? {
+          personIds: optionalStringArray(
+            body.personIds,
+            `${field}.personIds`,
+          ),
+        }
+      : {}),
+    ...(body.speech !== undefined
+      ? {
+          speech: optionalString(
+            body.speech,
+            `${field}.speech`,
+          ),
+        }
+      : {}),
+    ...(body.visual !== undefined
+      ? {
+          visual: optionalString(
+            body.visual,
+            `${field}.visual`,
           ),
         }
       : {}),

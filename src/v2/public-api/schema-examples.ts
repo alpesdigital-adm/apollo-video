@@ -1478,6 +1478,10 @@ const hybridSearchQueryExample = {
   scope: 'workspace',
   text: 'custo por lead',
   intention: 'proof',
+  atmosphere: 'confiante',
+  personIds: ['person-specialist'],
+  speech: 'custo por lead caiu',
+  visual: 'dashboard com gráfico positivo',
   rightsUse: 'social-ad',
   filters: {
     kinds: ['image'],

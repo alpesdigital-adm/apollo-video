@@ -40,7 +40,7 @@ async function waitForServer(baseUrl, child) {
   throw new Error('Next server did not become ready')
 }
 
-test('T-FR-048 catalogs, deduplicates, reranks and evaluates hybrid retrieval through public API and PostgreSQL', {
+test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Director channels, reranks and evaluates through public API and PostgreSQL', {
   skip:
     process.env.APOLLO_HYBRID_SEARCH_E2E !== '1' &&
     'set APOLLO_HYBRID_SEARCH_E2E=1 and use an isolated V2 database',
@@ -506,7 +506,11 @@ test('T-FR-048 catalogs, deduplicates, reranks and evaluates hybrid retrieval th
           description:
             'Gráfico autorizado de receita recorrente cross-project.',
           intentions: ['proof', 'workspace-reuse'],
-          metadata: { campaign: 'cross-project' },
+          personIds: ['person-cross-project'],
+          metadata: {
+            atmosphere: 'confiante',
+            campaign: 'cross-project',
+          },
           producer,
         },
       }),
@@ -624,8 +628,10 @@ test('T-FR-048 catalogs, deduplicates, reranks and evaluates hybrid retrieval th
     assert.equal('requestFingerprint' in proofResult.document, false)
 
     const crossQuery = {
-      text: 'receita recorrente projeto vizinho',
       intention: 'workspace-reuse',
+      atmosphere: 'confiante',
+      personIds: ['person-cross-project'],
+      visual: 'gráfico autorizado',
       rightsUse: 'editorial-reuse',
       includeBlocked: false,
       limit: 20,

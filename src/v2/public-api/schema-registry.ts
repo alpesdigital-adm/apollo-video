@@ -4949,6 +4949,16 @@ const hybridSearchQueryProperties = {
   },
   text: { type: 'string', minLength: 1, maxLength: 2000 },
   intention: { type: 'string', minLength: 1, maxLength: 2000 },
+  atmosphere: { type: 'string', minLength: 1, maxLength: 500 },
+  personIds: {
+    type: 'array',
+    minItems: 1,
+    maxItems: 20,
+    uniqueItems: true,
+    items: idSchema,
+  },
+  speech: { type: 'string', minLength: 1, maxLength: 2000 },
+  visual: { type: 'string', minLength: 1, maxLength: 2000 },
   rightsUse: {
     type: 'string',
     pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
@@ -4975,6 +4985,17 @@ const hybridSearchQuerySchema = {
       properties: { filters: hybridSearchQueryProperties.filters },
       required: ['filters'],
     },
+    ...['atmosphere', 'personIds', 'speech', 'visual'].map(
+      (field) => ({
+        properties: {
+          [field]:
+            hybridSearchQueryProperties[
+              field as keyof typeof hybridSearchQueryProperties
+            ],
+        },
+        required: [field],
+      }),
+    ),
   ],
   properties: {
     ...hybridSearchQueryProperties,
@@ -13607,6 +13628,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
                   },
                   required: ['filters'],
                 },
+                ...['atmosphere', 'personIds', 'speech', 'visual'].map(
+                  (field) => ({
+                    properties: {
+                      [field]:
+                        hybridSearchQueryProperties[
+                          field as keyof typeof hybridSearchQueryProperties
+                        ],
+                    },
+                    required: [field],
+                  }),
+                ),
               ],
               properties: hybridSearchQueryProperties,
             },

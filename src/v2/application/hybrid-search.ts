@@ -422,6 +422,10 @@ export function hybridSearchService(dependencies: {
     scope?: HybridSearchScope
     text?: string
     intention?: string
+    atmosphere?: string
+    personIds?: readonly string[]
+    speech?: string
+    visual?: string
     rightsUse: string
     filters?: HybridSearchFilters
     includeBlocked?: boolean
@@ -441,13 +445,34 @@ export function hybridSearchService(dependencies: {
       request.intention,
       'intention',
     )
+    const atmosphere = normalizedOptionalText(
+      request.atmosphere,
+      'atmosphere',
+      500,
+    )
+    const speech = normalizedOptionalText(request.speech, 'speech')
+    const visual = normalizedOptionalText(request.visual, 'visual')
+    const personIds = request.personIds?.map((personId, index) =>
+      identity(personId, `personIds[${index}]`))
+    assertDomain(
+      !personIds ||
+        (personIds.length >= 1 &&
+          personIds.length <= 20 &&
+          new Set(personIds).size === personIds.length),
+      'INVALID_ARGUMENT',
+      'personIds is invalid',
+    )
     const filters = normalizedFilters(request.filters)
     assertDomain(
       text !== undefined ||
         intention !== undefined ||
+        atmosphere !== undefined ||
+        personIds !== undefined ||
+        speech !== undefined ||
+        visual !== undefined ||
         filters !== undefined,
       'INVALID_ARGUMENT',
-      'Hybrid search requires text, intention or filters',
+      'Hybrid search requires a semantic request or filters',
     )
     assertDomain(
       typeof request.rightsUse === 'string' &&
@@ -481,13 +506,25 @@ export function hybridSearchService(dependencies: {
       scope,
       ...(text ? { text } : {}),
       ...(intention ? { intention } : {}),
+      ...(atmosphere ? { atmosphere } : {}),
+      ...(personIds
+        ? { personIds: Object.freeze(personIds) }
+        : {}),
+      ...(speech ? { speech } : {}),
+      ...(visual ? { visual } : {}),
       rightsUse: request.rightsUse,
       ...(filters ? { filters } : {}),
       includeBlocked: request.includeBlocked ?? false,
       limit: boundedInteger(request.limit ?? 20, 'limit', 1, 100),
       explain: request.explain ?? true,
     })
-    const normalizedQueryText = [text, intention]
+    const normalizedQueryText = [
+      text,
+      intention,
+      atmosphere,
+      speech,
+      visual,
+    ]
       .filter(Boolean)
       .join('\n')
     const embedded = normalizedQueryText
@@ -553,6 +590,10 @@ export function evaluateHybridRetrievalService(dependencies: {
         scope?: HybridSearchScope
         text?: string
         intention?: string
+        atmosphere?: string
+        personIds?: readonly string[]
+        speech?: string
+        visual?: string
         rightsUse: string
         filters?: HybridSearchFilters
         includeBlocked?: boolean

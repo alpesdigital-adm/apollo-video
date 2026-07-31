@@ -165,6 +165,10 @@ export interface HybridSearchRequest {
   scope: HybridSearchScope
   text?: string
   intention?: string
+  atmosphere?: string
+  personIds?: readonly string[]
+  speech?: string
+  visual?: string
   rightsUse: string
   filters?: Readonly<HybridSearchFilters>
   includeBlocked: boolean
@@ -676,12 +680,18 @@ export function semanticRightsRejectionReasons(input: {
 
 function structuredReasons(
   document: Readonly<CatalogedSemanticSearchDocument>,
-  filters: Readonly<HybridSearchFilters>,
+  query: Readonly<HybridSearchRequest>,
 ): readonly string[] {
+  const filters = query.filters ?? {}
   const normalizedMetadata = metadata(
     filters.metadata ?? {},
     'filters.metadata',
   )
+  const visualCorpus = [
+    document.ocrText,
+    document.description,
+    ...Object.values(document.metadata),
+  ]
   return Object.freeze([
     ...(filters.kinds &&
     !filters.kinds.includes(document.kind)
@@ -691,6 +701,11 @@ function structuredReasons(
     !filters.personIds.every((personId) =>
       document.personIds.includes(personId))
       ? ['FILTER_PERSON_MISMATCH']
+      : []),
+    ...(query.personIds &&
+    !query.personIds.every((personId) =>
+      document.personIds.includes(personId))
+      ? ['DIRECTOR_PERSON_MISMATCH']
       : []),
     ...(filters.minDurationMs !== undefined &&
     document.durationMs < filters.minDurationMs
@@ -710,6 +725,21 @@ function structuredReasons(
     )
       ? ['FILTER_METADATA_MISMATCH']
       : []),
+    ...(query.atmosphere &&
+    normalizeSpeechText(document.metadata.atmosphere ?? '') !==
+      normalizeSpeechText(query.atmosphere)
+      ? ['DIRECTOR_ATMOSPHERE_MISMATCH']
+      : []),
+    ...(query.speech &&
+    termCoverage(normalizedTerms(query.speech), [
+      document.transcriptText,
+    ]) < 0.5
+      ? ['DIRECTOR_SPEECH_MISMATCH']
+      : []),
+    ...(query.visual &&
+    termCoverage(normalizedTerms(query.visual), visualCorpus) < 0.5
+      ? ['DIRECTOR_VISUAL_MISMATCH']
+      : []),
   ])
 }
 
@@ -717,20 +747,31 @@ function matchedFields(
   candidate: Readonly<HybridSearchCandidate>,
   query: Readonly<HybridSearchRequest>,
 ): readonly HybridMatchReason[] {
-  const terms = normalizedTerms(query.text, query.intention)
+  const generalTerms = normalizedTerms(query.text, query.intention)
+  const speechTerms = normalizedTerms(query.speech)
+  const visualTerms = normalizedTerms(query.visual)
   const document = candidate.document
   const filters = query.filters ?? {}
   return Object.freeze([
-    ...(termCoverage(terms, [document.transcriptText]) > 0
+    ...(termCoverage(
+      [...generalTerms, ...speechTerms],
+      [document.transcriptText],
+    ) > 0
       ? ['full-text:transcript' as const]
       : []),
-    ...(termCoverage(terms, [document.ocrText]) > 0
+    ...(termCoverage(
+      [...generalTerms, ...visualTerms],
+      [document.ocrText],
+    ) > 0
       ? ['full-text:ocr' as const]
       : []),
-    ...(termCoverage(terms, [document.description]) > 0
+    ...(termCoverage(
+      [...generalTerms, ...visualTerms],
+      [document.description],
+    ) > 0
       ? ['full-text:description' as const]
       : []),
-    ...(termCoverage(terms, document.intentions) > 0
+    ...(termCoverage(generalTerms, document.intentions) > 0
       ? ['full-text:intention' as const]
       : []),
     ...(candidate.vectorScore > 0
@@ -739,7 +780,7 @@ function matchedFields(
     ...(filters.kinds?.includes(document.kind)
       ? ['structured:kind' as const]
       : []),
-    ...(filters.personIds?.every((personId) =>
+    ...((query.personIds ?? filters.personIds)?.every((personId) =>
       document.personIds.includes(personId))
       ? ['structured:person' as const]
       : []),
@@ -750,8 +791,8 @@ function matchedFields(
     ...(filters.locale === document.locale
       ? ['structured:locale' as const]
       : []),
-    ...(filters.metadata &&
-    Object.keys(filters.metadata).length > 0
+    ...((query.atmosphere ||
+    (filters.metadata && Object.keys(filters.metadata).length > 0))
       ? ['structured:metadata' as const]
       : []),
   ])
@@ -801,7 +842,7 @@ export function rerankHybridSearch(input: {
     ])
     const structuredBlocked = structuredReasons(
       candidate.document,
-      filters,
+      input.query,
     )
     const rightsBlocked = semanticRightsRejectionReasons({
       document: candidate.document,
@@ -824,7 +865,8 @@ export function rerankHybridSearch(input: {
     const rights = rightsBlocked.length === 0 ? 1 : 0
     const hasText = Boolean(
       normalizeSpeechText(
-        `${input.query.text ?? ''} ${input.query.intention ?? ''}`,
+        `${input.query.text ?? ''} ${input.query.intention ?? ''} ` +
+        `${input.query.speech ?? ''} ${input.query.visual ?? ''}`,
       ),
     )
     const vectorAvailable =
@@ -872,12 +914,15 @@ export function rerankHybridSearch(input: {
   })
   const requiresRetrievalSignal = Boolean(
     normalizeSpeechText(
-      `${input.query.text ?? ''} ${input.query.intention ?? ''}`,
+      `${input.query.text ?? ''} ${input.query.intention ?? ''} ` +
+      `${input.query.speech ?? ''} ${input.query.visual ?? ''}`,
     ),
   )
   const retrievalTerms = normalizedTerms(
     input.query.text,
     input.query.intention,
+    input.query.speech,
+    input.query.visual,
   )
   const relevant = ranked.filter((result) =>
     !requiresRetrievalSignal ||

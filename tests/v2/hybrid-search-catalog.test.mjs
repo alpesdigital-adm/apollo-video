@@ -461,6 +461,85 @@ test('T-FR-136 applies current rights, consent, use and expiry before workspace 
   )
 })
 
+test('T-FR-136 keeps Director intention, atmosphere, person, speech and visual requests in trusted search channels', async () => {
+  const parsed = parseHybridSearchQueryBody({
+    scope: 'workspace',
+    intention: 'proof',
+    atmosphere: 'confiante',
+    personIds: ['person-specialist'],
+    speech: 'resultado campanha reduziu custo',
+    visual: 'dashboard evolucao positiva',
+    rightsUse: 'editorial-reuse',
+  })
+  const matching = document()
+  const misleading = document({
+    id: 'semantic-document-misleading-visual',
+    source: context({
+      source: {
+        type: 'artifact',
+        id: 'artifact-misleading-visual',
+        hash: 'd'.repeat(64),
+        artifactId: 'artifact-misleading-visual',
+        artifactSha256: 'd'.repeat(64),
+      },
+      transcriptText: 'Uma praia vazia ao entardecer.',
+    }),
+    ocrText: 'Dashboard evolucao positiva',
+    description: 'Dashboard evolucao positiva',
+  })
+  let captured
+  const search = hybridSearchService({
+    repository: {
+      async searchCandidates(query) {
+        captured = query
+        return [matching, misleading].map((item) => ({
+          document: item,
+          currentRights: context().rights,
+          fullTextScore: 0.9,
+          vectorScore: 0.9,
+        }))
+      },
+    },
+    embeddingProvider:
+      new DeterministicSemanticEmbeddingProvider(),
+    clock: () => new Date(createdAt),
+  })
+  const response = await search({
+    workspaceId: 'workspace-semantic',
+    projectId: 'project-semantic',
+    ...parsed,
+  })
+  assert.deepEqual(response.query.personIds, ['person-specialist'])
+  assert.equal(response.query.atmosphere, 'confiante')
+  assert.match(
+    captured.normalizedQueryText,
+    /resultado campanha reduziu custo/,
+  )
+  assert.match(
+    captured.normalizedQueryText,
+    /dashboard evolucao positiva/,
+  )
+  assert.deepEqual(
+    response.results.map((result) => result.document.id),
+    [matching.id],
+  )
+  assert.ok(
+    response.results[0].matchedBy.includes(
+      'full-text:transcript',
+    ),
+  )
+  assert.ok(
+    response.results[0].matchedBy.includes(
+      'structured:person',
+    ),
+  )
+  assert.ok(
+    response.results[0].matchedBy.includes(
+      'structured:metadata',
+    ),
+  )
+})
+
 test('T-FR-048 OpenAI adapter sends a bounded 256-dimensional request and validates the vector', async () => {
   let captured
   const vector = Array.from({ length: 256 }, (_, index) =>

@@ -2143,7 +2143,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     id: 'apollo.projects.semantic-search.query',
     version: '1.0.0',
     title: 'Run rights-aware hybrid search',
-    description: 'Unifies full-text, vector and structured candidates, deduplicates source identities, reranks with hybrid-rerank/v1 and explains every match or rights/filter block.',
+    description: 'Lets the Director request intention, atmosphere, people, exact speech and visual evidence across the project or authorized workspace; the service unifies full-text, vector and structured candidates, applies current rights and consent, deduplicates source identities and reranks with hybrid-rerank/v1.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
