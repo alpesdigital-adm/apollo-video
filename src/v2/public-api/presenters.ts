@@ -7,6 +7,7 @@ import {
 import type { ApiClient } from '../domain/api-client.ts'
 import type { ApiCredential } from '../domain/api-credential.ts'
 import type { MediaArtifactRecord } from '../application/ports/media-artifact-query-repository.ts'
+import type { MediaColorProbe } from '../domain/color-and-export.ts'
 import { publicArtifactReference } from './public-media-identity.ts'
 import type { PublicOperation } from '../domain/public-operation.ts'
 import type {
@@ -130,6 +131,12 @@ export function presentMediaArtifact(artifact: MediaArtifactRecord) {
       createdAt: manifest.createdAt,
     })),
   }
+}
+
+export function presentMediaColorProbe(
+  probe: Readonly<MediaColorProbe>,
+) {
+  return Object.freeze({ probe })
 }
 
 export function presentPublicOperation(operation: PublicOperation) {

@@ -2,11 +2,68 @@ import { randomUUID } from 'node:crypto'
 import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { ProjectMediaRepository } from '../../application/ports/media-ingest.ts'
-import { stableSerialize } from '../../domain/canonical-hash.ts'
+import {
+  calculateCanonicalHash,
+  stableSerialize,
+} from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import type { MediaColorProbe } from '../../domain/color-and-export.ts'
+
+function colorProbeData(probe: Readonly<MediaColorProbe>) {
+  const { probeHash, ...content } = probe
+  if (calculateCanonicalHash(content) !== probeHash) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Media color probe hash is invalid',
+    )
+  }
+  return {
+    id: probe.id,
+    workspaceId: probe.workspaceId,
+    artifactId: probe.artifactId,
+    manifestId: probe.manifestId,
+    schemaVersion: probe.schemaVersion,
+    state: probe.detection.state,
+    metadataJson: stableSerialize(
+      probe.detection.state === 'ready'
+        ? probe.detection.metadata
+        : null,
+    ),
+    pixelFormat: probe.detection.pixelFormat ?? null,
+    hdrMode: probe.detection.state === 'ready'
+      ? probe.detection.hdrMode
+      : null,
+    reasonsJson: stableSerialize(
+      probe.detection.state === 'unavailable'
+        ? probe.detection.reasons
+        : [],
+    ),
+    producerProvider: probe.producer.provider,
+    producerVersion: probe.producer.version,
+    producerBinaryDigest: probe.producer.binaryDigest,
+    createdAt: new Date(probe.createdAt),
+    probeHash,
+  }
+}
+
+function storedColorProbeMatches(
+  stored: object,
+  expected: ReturnType<typeof colorProbeData>,
+) {
+  return Object.entries(expected).every(([key, value]) => {
+    const actual = (stored as Record<string, unknown>)[key]
+    return value instanceof Date && actual instanceof Date
+      ? value.getTime() === actual.getTime()
+      : actual === value
+  })
+}
 
 export class PrismaProjectMediaRepository implements ProjectMediaRepository {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) {
+    this.client = client
+  }
 
   async readProject(input: { workspaceId: string; projectId: string }) {
     const project = await this.client.v2Project.findFirst({
@@ -18,6 +75,8 @@ export class PrismaProjectMediaRepository implements ProjectMediaRepository {
 
   async persistCompletedIngest(input: Parameters<ProjectMediaRepository['persistCompletedIngest']>[0]): Promise<void> {
     const transcriptJson = stableSerialize(input.transcript)
+    const sourceColorProbe = colorProbeData(input.sourceColorProbe)
+    const proxyColorProbe = colorProbeData(input.proxyColorProbe)
     await this.client.$transaction(async (transaction) => {
       const [project, source, proxy, sourceManifest, proxyManifest, upload] = await Promise.all([
         transaction.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { id: true } }),
@@ -29,6 +88,40 @@ export class PrismaProjectMediaRepository implements ProjectMediaRepository {
       ])
       if (!project || !source || !proxy || !sourceManifest || !proxyManifest || !upload || sourceManifest.manifestHash !== input.sourceManifest.manifestHash || proxyManifest.manifestHash !== input.proxyManifest.manifestHash) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Completed ingest references are not internally consistent')
+      }
+      if (
+        sourceColorProbe.workspaceId !== input.workspaceId ||
+        sourceColorProbe.artifactId !== input.sourceArtifactId ||
+        sourceColorProbe.manifestId !== input.sourceManifestId ||
+        proxyColorProbe.workspaceId !== input.workspaceId ||
+        proxyColorProbe.artifactId !== input.proxyArtifactId ||
+        proxyColorProbe.manifestId !== input.proxyManifestId
+      ) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Completed ingest color probe identity is invalid',
+        )
+      }
+      for (const probe of [sourceColorProbe, proxyColorProbe]) {
+        const existing = await transaction.v2MediaColorProbe.findUnique({
+          where: {
+            workspaceId_artifactId_manifestId: {
+              workspaceId: probe.workspaceId,
+              artifactId: probe.artifactId,
+              manifestId: probe.manifestId,
+            },
+          },
+        })
+        if (existing) {
+          if (!storedColorProbeMatches(existing, probe)) {
+            throw new DomainError(
+              'PERSISTENCE_CONFLICT',
+              'Media color probe identity collided with different evidence',
+            )
+          }
+        } else {
+          await transaction.v2MediaColorProbe.create({ data: probe })
+        }
       }
       for (const asset of [
         { artifactId: input.sourceArtifactId, role: 'source-master' },

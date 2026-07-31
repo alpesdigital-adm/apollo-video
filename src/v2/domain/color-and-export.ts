@@ -52,6 +52,36 @@ export type ColorPlan = {
 
 const TOKEN = /^[a-z0-9][a-z0-9._/-]{0,127}$/
 const SHA_256 = /^[a-f0-9]{64}$/
+const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
+
+export type DetectedMediaColor =
+  | Readonly<{
+      state: 'ready'
+      metadata: Readonly<ColorMetadata>
+      pixelFormat: string
+      hdrMode: 'sdr' | 'hlg' | 'pq'
+    }>
+  | Readonly<{
+      state: 'unavailable'
+      pixelFormat?: string
+      reasons: readonly string[]
+    }>
+
+export interface MediaColorProbe {
+  schemaVersion: 'media-color-probe/v1'
+  id: string
+  workspaceId: string
+  artifactId: string
+  manifestId: string
+  detection: DetectedMediaColor
+  producer: Readonly<{
+    provider: 'ffprobe'
+    version: string
+    binaryDigest: string
+  }>
+  createdAt: string
+  probeHash: string
+}
 
 function normalizedToken(value: unknown, field: string) {
   assertDomain(
@@ -90,6 +120,123 @@ function normalizedMetadata(
     matrix: normalizedToken(value.matrix, `${field}.matrix`),
     range: value.range,
     bitDepth: value.bitDepth,
+  })
+}
+
+function normalizedId(value: unknown, field: string) {
+  assertDomain(
+    typeof value === 'string' && ID.test(value.trim()),
+    'INVALID_ARGUMENT',
+    `${field} is invalid`,
+  )
+  return value.trim()
+}
+
+function normalizedDetection(
+  value: Readonly<DetectedMediaColor>,
+): DetectedMediaColor {
+  assertDomain(
+    value && typeof value === 'object' &&
+      (value.state === 'ready' || value.state === 'unavailable'),
+    'INVALID_ARGUMENT',
+    'color detection is invalid',
+  )
+  if (value.state === 'ready') {
+    assertDomain(
+      ['sdr', 'hlg', 'pq'].includes(value.hdrMode),
+      'INVALID_ARGUMENT',
+      'color detection HDR mode is invalid',
+    )
+    return Object.freeze({
+      state: 'ready' as const,
+      metadata: normalizedMetadata(
+        value.metadata,
+        'detection.metadata',
+      ),
+      pixelFormat: normalizedToken(
+        value.pixelFormat,
+        'detection.pixelFormat',
+      ),
+      hdrMode: value.hdrMode,
+    })
+  }
+  assertDomain(
+    Array.isArray(value.reasons) &&
+      value.reasons.length >= 1 &&
+      value.reasons.length <= 16,
+    'INVALID_ARGUMENT',
+    'unavailable color detection requires reasons',
+  )
+  const reasons = value.reasons.map((reason, index) =>
+    normalizedToken(reason, `detection.reasons[${index}]`))
+  assertDomain(
+    new Set(reasons).size === reasons.length,
+    'INVALID_ARGUMENT',
+    'color detection reasons must be unique',
+  )
+  return Object.freeze({
+    state: 'unavailable' as const,
+    ...(value.pixelFormat
+      ? {
+          pixelFormat: normalizedToken(
+            value.pixelFormat,
+            'detection.pixelFormat',
+          ),
+        }
+      : {}),
+    reasons: Object.freeze([...reasons].sort()),
+  })
+}
+
+export function createMediaColorProbe(input: {
+  id: string
+  workspaceId: string
+  artifactId: string
+  manifestId: string
+  detection: Readonly<DetectedMediaColor>
+  producer: Readonly<{
+    provider: 'ffprobe'
+    version: string
+    binaryDigest: string
+  }>
+  createdAt: string
+}): Readonly<MediaColorProbe> {
+  const binaryDigest = String(
+    input.producer?.binaryDigest ?? '',
+  ).trim().toLowerCase()
+  assertDomain(
+    input.producer?.provider === 'ffprobe' &&
+      SHA_256.test(binaryDigest),
+    'INVALID_ARGUMENT',
+    'color probe producer is invalid',
+  )
+  const createdAt = new Date(input.createdAt)
+  assertDomain(
+    !Number.isNaN(createdAt.getTime()) &&
+      createdAt.toISOString() === input.createdAt,
+    'INVALID_ARGUMENT',
+    'color probe createdAt is invalid',
+  )
+  const content = Object.freeze({
+    schemaVersion: 'media-color-probe/v1' as const,
+    id: normalizedId(input.id, 'id'),
+    workspaceId: normalizedId(input.workspaceId, 'workspaceId'),
+    artifactId: normalizedId(input.artifactId, 'artifactId'),
+    manifestId: normalizedId(input.manifestId, 'manifestId'),
+    detection: normalizedDetection(input.detection),
+    producer: Object.freeze({
+      provider: 'ffprobe' as const,
+      version: normalizedToken(
+        input.producer.version,
+        'producer.version',
+      ),
+      binaryDigest,
+    }),
+    createdAt: input.createdAt,
+  })
+  return Object.freeze({
+    ...content,
+    probeHash: calculateCanonicalHash(content),
   })
 }
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts';
-import { createExportMatrix, OUTPUT_FORMATS, parseCube, preflightExports, renderExportCell, resolveColorPlan, SDR_COLOR_FIXTURES, selectWorkspaceLut } from '../../src/v2/domain/color-and-export.ts';
+import { createExportMatrix, createMediaColorProbe, OUTPUT_FORMATS, parseCube, preflightExports, renderExportCell, resolveColorPlan, SDR_COLOR_FIXTURES, selectWorkspaceLut } from '../../src/v2/domain/color-and-export.ts';
 
 const sourceColor = {
   colorSpace: 'camera-log',
@@ -135,6 +135,40 @@ test('T-FR-180 rejects duplicate stages, broken color chains and LUT reuse outsi
   assert.throws(
     () => resolveColorPlan(invalidLut, {}),
     /allowed only for an enabled creative LUT/,
+  );
+});
+
+test('T-FR-180 binds trusted FFprobe colorimetry to an immutable artifact manifest', () => {
+  const probe = createMediaColorProbe({
+    id: 'color-probe-source-1',
+    workspaceId: 'workspace-color',
+    artifactId: 'artifact-source-color',
+    manifestId: 'manifest-source-color',
+    detection: {
+      state: 'ready',
+      metadata: sourceColor,
+      pixelFormat: 'yuv420p10le',
+      hdrMode: 'sdr',
+    },
+    producer: {
+      provider: 'ffprobe',
+      version: 'json-v1',
+      binaryDigest: 'd'.repeat(64),
+    },
+    createdAt: '2026-07-31T02:00:00.000Z',
+  });
+  assert.equal(probe.detection.state, 'ready');
+  assert.equal(probe.detection.metadata.bitDepth, 10);
+  assert.match(probe.probeHash, /^[a-f0-9]{64}$/);
+  assert.throws(
+    () => createMediaColorProbe({
+      ...probe,
+      producer: {
+        ...probe.producer,
+        binaryDigest: 'not-a-digest',
+      },
+    }),
+    /producer is invalid/,
   );
 });
 

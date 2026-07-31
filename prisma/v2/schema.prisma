@@ -74,6 +74,7 @@ model V2Workspace {
   semanticSearchDocuments         V2SemanticSearchDocument[]
   retrievalEvaluations            V2RetrievalEvaluation[]
   retrievalScaleEvaluations       V2RetrievalScaleEvaluation[]
+  mediaColorProbes                V2MediaColorProbe[]
   semanticReuseRuns               V2SemanticReuseRun[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks    V2HierarchicalProcessingChunk[]
@@ -772,6 +773,7 @@ model V2MediaArtifact {
   sourceCleanupSourcePlans     V2SourceCleanupPlan[]            @relation("SourceCleanupSourceArtifact")
   sourceCleanupResults         V2SourceCleanupResult[]          @relation("SourceCleanupOutputArtifact")
   proofModeSourcePlans         V2ProofModePlan[]                @relation("ProofModeSourceArtifact")
+  colorProbes                  V2MediaColorProbe[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -835,6 +837,7 @@ model V2MediaArtifactManifest {
   hierarchicalProcessingRuns V2HierarchicalProcessingRun[]
   sourceCleanupResults       V2SourceCleanupResult[]
   sourceCleanupPlans         V2SourceCleanupPlan[]            @relation("SourceCleanupSourceManifest")
+  colorProbes                V2MediaColorProbe[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, manifestHash])
@@ -885,6 +888,35 @@ model V2RenderInputPayload {
   @@unique([workspaceId, inputHash])
   @@index([workspaceId, createdAt(sort: Desc)])
   @@map("render_input_payloads")
+}
+
+model V2MediaColorProbe {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  artifactId           String   @db.VarChar(128)
+  manifestId           String   @db.VarChar(128)
+  schemaVersion        String   @db.VarChar(64)
+  state                String   @db.VarChar(16)
+  metadataJson         String   @db.Text
+  pixelFormat          String?  @db.VarChar(64)
+  hdrMode              String?  @db.VarChar(16)
+  reasonsJson          String   @db.Text
+  producerProvider     String   @db.VarChar(64)
+  producerVersion      String   @db.VarChar(128)
+  producerBinaryDigest String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+  probeHash            String   @db.Char(64)
+
+  workspace V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact  V2MediaArtifact         @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  manifest  V2MediaArtifactManifest @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, artifactId, manifestId])
+  @@unique([workspaceId, probeHash])
+  @@index([workspaceId, artifactId, state, createdAt(sort: Desc)])
+  @@index([workspaceId, state, hdrMode])
+  @@map("media_color_probes")
 }
 
 model V2MediaArtifactLineage {

@@ -4962,6 +4962,40 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/media-color-probe/v1': [
+      {
+        data: {
+          probe: {
+            schemaVersion: 'media-color-probe/v1',
+            id: 'color-probe-example-1',
+            workspaceId,
+            artifactId,
+            manifestId: 'manifest-example-1',
+            detection: {
+              state: 'ready',
+              metadata: {
+                colorSpace: 'rec709',
+                transfer: 'bt709',
+                primaries: 'bt709',
+                matrix: 'bt709',
+                range: 'limited',
+                bitDepth: 10,
+              },
+              pixelFormat: 'yuv420p10le',
+              hdrMode: 'sdr',
+            },
+            producer: {
+              provider: 'ffprobe',
+              version: 'json-v1',
+              binaryDigest: '9'.repeat(64),
+            },
+            createdAt,
+            probeHash: '8'.repeat(64),
+          },
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/public-operation-detail/v2': [
       { data: { operation: queuedMediaIngestOperationExample }, meta: { apiVersion: 'v1' } },
     ],

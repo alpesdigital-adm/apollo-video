@@ -7,11 +7,27 @@ import test from 'node:test'
 
 import { enqueueMediaIngestService } from '../../src/v2/application/enqueue-media-ingest.ts'
 import { readArtifactContentService } from '../../src/v2/application/read-artifact-content.ts'
+import {
+  readMediaColorProbeService,
+} from '../../src/v2/application/read-media-color-probe.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createMediaUpload } from '../../src/v2/domain/media-transfer.ts'
+import {
+  createMediaArtifactManifest,
+  createMediaArtifactManifestV2,
+} from '../../src/v2/domain/media-artifact.ts'
+import {
+  createMediaColorProbe,
+} from '../../src/v2/domain/color-and-export.ts'
 import { GroqMediaTranscriber } from '../../src/v2/infrastructure/media/groq-media-transcriber.ts'
 import { LocalArtifactContentStorage } from '../../src/v2/infrastructure/media/local-artifact-content-storage.ts'
 import { LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
+import {
+  PrismaProjectMediaRepository,
+} from '../../src/v2/infrastructure/prisma/project-media-repository.ts'
+import {
+  PrismaMediaArtifactRepository,
+} from '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
 
 const sha = (value) => createHash('sha256').update(value).digest('hex')
 const uploadId = '123e4567-e89b-42d3-a456-426614174901'
@@ -143,4 +159,284 @@ test('Groq adapter clamps regressive provider timestamps without changing spoken
     { word: 'preservada', start: 1 },
   ])
   assert.equal(transcript.segments[1].start, 1)
+})
+
+test('completed ingest persists immutable source and proxy color probes atomically and converges replay', async () => {
+  const workspaceId = 'workspace-ingest-1'
+  const projectId = 'project-ingest-1'
+  const sourceArtifactId = 'artifact-source-color'
+  const proxyArtifactId = 'artifact-proxy-color'
+  const sourceManifestId = 'manifest-source-color'
+  const proxyManifestId = 'manifest-proxy-color'
+  const createdAt = '2026-07-18T18:00:00.000Z'
+  const sourceManifest = createMediaArtifactManifest({
+    artifactKey: 'masters/source.mp4',
+    artifactSha256: '1'.repeat(64),
+    byteSize: 1_000,
+    mediaType: 'video',
+    container: 'mp4',
+    recipe: {
+      id: 'direct-upload',
+      version: '1.0.0',
+      parameters: { mimeType: 'video/mp4' },
+    },
+  })
+  const proxyManifest = createMediaArtifactManifestV2({
+    artifactKey: 'editing-proxies/proxy.mp4',
+    artifactSha256: '2'.repeat(64),
+    byteSize: 500,
+    mediaType: 'video',
+    container: 'mp4',
+    recipe: {
+      id: 'editing-proxy',
+      version: '1.0.0',
+      parameters: { maxWidth: 1280 },
+    },
+    sources: [{
+      artifactKey: sourceManifest.artifact.artifactKey,
+      sha256: sourceManifest.artifact.sha256,
+      role: 'source-master',
+      execution: {
+        tool: {
+          id: 'ffmpeg',
+          version: 'static',
+          digest: '3'.repeat(64),
+        },
+      },
+    }],
+    probe: { width: 640, height: 360, duration: 1, fps: 25 },
+  })
+  const detection = {
+    state: 'ready',
+    metadata: {
+      colorSpace: 'rec709',
+      transfer: 'bt709',
+      primaries: 'bt709',
+      matrix: 'bt709',
+      range: 'limited',
+      bitDepth: 8,
+    },
+    pixelFormat: 'yuv420p',
+    hdrMode: 'sdr',
+  }
+  const probe = (id, artifactId, manifestId) =>
+    createMediaColorProbe({
+      id,
+      workspaceId,
+      artifactId,
+      manifestId,
+      detection,
+      producer: {
+        provider: 'ffprobe',
+        version: 'json-v1',
+        binaryDigest: '4'.repeat(64),
+      },
+      createdAt,
+    })
+  const sourceColorProbe = probe(
+    'color-probe-source',
+    sourceArtifactId,
+    sourceManifestId,
+  )
+  const proxyColorProbe = probe(
+    'color-probe-proxy',
+    proxyArtifactId,
+    proxyManifestId,
+  )
+  const transcript = createMediaTranscript({
+    language: 'pt-BR',
+    text: 'teste',
+    provider: 'controlled',
+    model: 'transcriber-v1',
+    words: [{ word: 'teste', start: 0, end: 0.5 }],
+    segments: [{ id: 0, text: 'teste', start: 0, end: 0.5 }],
+  })
+  const colorRows = new Map()
+  const transaction = {
+    v2Project: {
+      async findFirst() { return { id: projectId } },
+      async updateMany() { return { count: 1 } },
+    },
+    v2MediaArtifact: {
+      async findFirst({ where }) {
+        return [sourceArtifactId, proxyArtifactId].includes(where.id)
+          ? { id: where.id }
+          : null
+      },
+    },
+    v2MediaArtifactManifest: {
+      async findFirst({ where }) {
+        if (where.id === sourceManifestId) {
+          return {
+            id: sourceManifestId,
+            manifestHash: sourceManifest.manifestHash,
+          }
+        }
+        if (where.id === proxyManifestId) {
+          return {
+            id: proxyManifestId,
+            manifestHash: proxyManifest.manifestHash,
+          }
+        }
+        return null
+      },
+    },
+    v2MediaUpload: {
+      async findFirst() { return { id: uploadId } },
+    },
+    v2MediaColorProbe: {
+      async findUnique({ where }) {
+        const key =
+          where.workspaceId_artifactId_manifestId.artifactId
+        return colorRows.get(key) ?? null
+      },
+      async create({ data }) {
+        colorRows.set(data.artifactId, data)
+        return data
+      },
+    },
+    v2ProjectMediaAsset: {
+      async upsert() { return {} },
+    },
+    v2MediaTranscript: {
+      async findUnique() { return null },
+      async create() { return {} },
+    },
+  }
+  const repository = new PrismaProjectMediaRepository({
+    async $transaction(callback) {
+      return callback(transaction)
+    },
+  })
+  const input = {
+    workspaceId,
+    projectId,
+    uploadId,
+    originalFileName: 'master.mp4',
+    sourceArtifactId,
+    sourceManifestId,
+    proxyArtifactId,
+    proxyManifestId,
+    transcriptId: 'transcript-color-probe',
+    transcript,
+    sourceManifest,
+    proxyManifest,
+    sourceColorProbe,
+    proxyColorProbe,
+    createdAt,
+  }
+  await repository.persistCompletedIngest(input)
+  await repository.persistCompletedIngest(input)
+  assert.equal(colorRows.size, 2)
+  assert.deepEqual(
+    JSON.parse(colorRows.get(sourceArtifactId).metadataJson),
+    detection.metadata,
+  )
+  assert.equal(colorRows.get(proxyArtifactId).state, 'ready')
+
+  const conflictingSourceProbe = createMediaColorProbe({
+    ...sourceColorProbe,
+    detection: {
+      state: 'unavailable',
+      pixelFormat: 'yuv420p',
+      reasons: ['missing-transfer'],
+    },
+  })
+  await assert.rejects(
+    repository.persistCompletedIngest({
+      ...input,
+      sourceColorProbe: conflictingSourceProbe,
+    }),
+    /collided with different evidence/,
+  )
+})
+
+test('trusted color probe query rehydrates canonical evidence and remains workspace scoped', async () => {
+  const probe = createMediaColorProbe({
+    id: 'color-probe-query',
+    workspaceId: 'workspace-ingest-1',
+    artifactId: 'artifact-color-query',
+    manifestId: 'manifest-color-query',
+    detection: {
+      state: 'ready',
+      metadata: {
+        colorSpace: 'rec2020',
+        transfer: 'smpte2084',
+        primaries: 'bt2020',
+        matrix: 'bt2020nc',
+        range: 'limited',
+        bitDepth: 10,
+      },
+      pixelFormat: 'yuv420p10le',
+      hdrMode: 'pq',
+    },
+    producer: {
+      provider: 'ffprobe',
+      version: 'json-v1',
+      binaryDigest: '5'.repeat(64),
+    },
+    createdAt: '2026-07-18T18:00:00.000Z',
+  })
+  const row = {
+    id: probe.id,
+    workspaceId: probe.workspaceId,
+    artifactId: probe.artifactId,
+    manifestId: probe.manifestId,
+    schemaVersion: probe.schemaVersion,
+    state: probe.detection.state,
+    metadataJson: JSON.stringify(probe.detection.metadata),
+    pixelFormat: probe.detection.pixelFormat,
+    hdrMode: probe.detection.hdrMode,
+    reasonsJson: '[]',
+    producerProvider: probe.producer.provider,
+    producerVersion: probe.producer.version,
+    producerBinaryDigest: probe.producer.binaryDigest,
+    createdAt: new Date(probe.createdAt),
+    probeHash: probe.probeHash,
+  }
+  const adapter = new PrismaMediaArtifactRepository({
+    v2MediaColorProbe: {
+      async findFirst({ where }) {
+        return where.workspaceId === probe.workspaceId &&
+          where.artifactId === probe.artifactId
+          ? row
+          : null
+      },
+    },
+  })
+  assert.deepEqual(
+    await adapter.findColorProbe(probe.workspaceId, probe.artifactId),
+    probe,
+  )
+  const read = readMediaColorProbeService({
+    repository: {
+      async findById(workspaceId, artifactId) {
+        return workspaceId === probe.workspaceId &&
+          artifactId === probe.artifactId
+          ? { id: artifactId }
+          : null
+      },
+      async findColorProbe(workspaceId, artifactId) {
+        return adapter.findColorProbe(workspaceId, artifactId)
+      },
+    },
+  })
+  assert.equal(
+    (await read(probe.workspaceId, probe.artifactId)).probeHash,
+    probe.probeHash,
+  )
+  await assert.rejects(
+    read('workspace-other', probe.artifactId),
+    (error) => error.code === 'MEDIA_ARTIFACT_NOT_FOUND',
+  )
+  await assert.rejects(
+    new PrismaMediaArtifactRepository({
+      v2MediaColorProbe: {
+        async findFirst() {
+          return { ...row, probeHash: '6'.repeat(64) }
+        },
+      },
+    }).findColorProbe(probe.workspaceId, probe.artifactId),
+    /integrity validation/,
+  )
 })

@@ -1,13 +1,33 @@
 import type { MediaArtifactManifest } from '../../domain/media-artifact.ts'
 import type { MediaTranscript } from '../../domain/media-transcript.ts'
 import type { MediaUpload, MediaUploadPart } from '../../domain/media-transfer.ts'
+import type {
+  DetectedMediaColor,
+  MediaColorProbe,
+} from '../../domain/color-and-export.ts'
+
+export interface MediaIngestProbe {
+  width: number
+  height: number
+  fps: number
+  duration: number
+  codec: string
+  audioCodec: string
+  container: string
+  color: DetectedMediaColor
+  producer: Readonly<{
+    provider: 'ffprobe'
+    version: 'json-v1'
+    binaryDigest: string
+  }>
+}
 
 export interface NormalizedIngestMedia {
   proxyPath: string
   audioPath: string
   proxySha256: string
   proxyByteSize: number
-  probe: { width: number; height: number; duration: number; fps: number; codec: string; container: string }
+  probe: MediaIngestProbe
 }
 
 export interface MediaIngestProcessor {
@@ -39,6 +59,8 @@ export interface ProjectMediaRepository {
     transcript: Readonly<MediaTranscript>
     sourceManifest: Readonly<MediaArtifactManifest>
     proxyManifest: Readonly<MediaArtifactManifest>
+    sourceColorProbe: Readonly<MediaColorProbe>
+    proxyColorProbe: Readonly<MediaColorProbe>
     createdAt: string
   }): Promise<void>
   markIngestFailed(input: { workspaceId: string; projectId: string }): Promise<void>

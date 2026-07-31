@@ -16,6 +16,7 @@ import {
   assertMediaArtifactManifest,
   type MediaArtifactManifest,
 } from '../../domain/media-artifact.ts'
+import { createMediaColorProbe } from '../../domain/color-and-export.ts'
 import {
   assertRecipeParameterPayload,
   type RecipeParameterPayload,
@@ -494,6 +495,78 @@ export class PrismaMediaArtifactRepository
       manifests,
       createdAt: row.createdAt.toISOString(),
     }
+  }
+
+  async findColorProbe(workspaceId: string, artifactId: string) {
+    const row = await this.client.v2MediaColorProbe.findFirst({
+      where: { workspaceId, artifactId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    })
+    if (!row) return null
+    let metadata: unknown
+    let reasons: unknown
+    try {
+      metadata = JSON.parse(row.metadataJson)
+      reasons = JSON.parse(row.reasonsJson)
+    } catch {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Stored media color probe JSON is invalid',
+      )
+    }
+    const detection = row.state === 'ready'
+      ? {
+          state: 'ready' as const,
+          metadata: metadata as {
+            colorSpace: string
+            transfer: string
+            primaries: string
+            matrix: string
+            range: 'full' | 'limited'
+            bitDepth: number
+          },
+          pixelFormat: row.pixelFormat ?? '',
+          hdrMode: row.hdrMode as 'sdr' | 'hlg' | 'pq',
+        }
+      : {
+          state: 'unavailable' as const,
+          ...(row.pixelFormat
+            ? { pixelFormat: row.pixelFormat }
+            : {}),
+          reasons: reasons as string[],
+        }
+    let probe
+    try {
+      probe = createMediaColorProbe({
+        id: row.id,
+        workspaceId: row.workspaceId,
+        artifactId: row.artifactId,
+        manifestId: row.manifestId,
+        detection,
+        producer: {
+          provider: 'ffprobe',
+          version: row.producerVersion,
+          binaryDigest: row.producerBinaryDigest,
+        },
+        createdAt: row.createdAt.toISOString(),
+      })
+    } catch {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Stored media color probe failed validation',
+      )
+    }
+    if (
+      row.schemaVersion !== probe.schemaVersion ||
+      row.producerProvider !== probe.producer.provider ||
+      row.probeHash !== probe.probeHash
+    ) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Stored media color probe failed integrity validation',
+      )
+    }
+    return probe
   }
 
   async persistOrReplay(

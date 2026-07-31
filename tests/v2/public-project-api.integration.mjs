@@ -42,6 +42,9 @@ test('authenticated public API manages projects, clients and artifact inspection
   } = await import(
     '../../src/v2/domain/media-artifact.ts'
   )
+  const { createMediaColorProbe } = await import(
+    '../../src/v2/domain/color-and-export.ts'
+  )
   const { createRenderInputSpec } = await import('../../src/v2/domain/render-input.ts')
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
@@ -135,6 +138,9 @@ test('authenticated public API manages projects, clients and artifact inspection
       where: { workspaceId: { in: workspaceIds } },
     })
     await client.v2MediaArtifactLineage.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
+    await client.v2MediaColorProbe.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
     await client.v2MediaArtifactManifest.deleteMany({
@@ -364,6 +370,50 @@ test('authenticated public API manages projects, clients and artifact inspection
       manifest: sourceManifest,
       createdAt: '2026-07-12T16:02:00.000Z',
     })
+    const sourceColorProbe = createMediaColorProbe({
+      id: 'public-api-source-color-probe-v2',
+      workspaceId,
+      artifactId: sourceArtifactId,
+      manifestId: 'public-api-source-manifest-v2',
+      detection: {
+        state: 'ready',
+        metadata: {
+          colorSpace: 'rec709',
+          transfer: 'bt709',
+          primaries: 'bt709',
+          matrix: 'bt709',
+          range: 'limited',
+          bitDepth: 10,
+        },
+        pixelFormat: 'yuv420p10le',
+        hdrMode: 'sdr',
+      },
+      producer: {
+        provider: 'ffprobe',
+        version: '7.1.1',
+        binaryDigest: sha('7'),
+      },
+      createdAt: '2026-07-12T16:02:00.000Z',
+    })
+    await client.v2MediaColorProbe.create({
+      data: {
+        id: sourceColorProbe.id,
+        workspaceId: sourceColorProbe.workspaceId,
+        artifactId: sourceColorProbe.artifactId,
+        manifestId: sourceColorProbe.manifestId,
+        schemaVersion: sourceColorProbe.schemaVersion,
+        state: sourceColorProbe.detection.state,
+        metadataJson: JSON.stringify(sourceColorProbe.detection.metadata),
+        pixelFormat: sourceColorProbe.detection.pixelFormat,
+        hdrMode: sourceColorProbe.detection.hdrMode,
+        reasonsJson: '[]',
+        producerProvider: sourceColorProbe.producer.provider,
+        producerVersion: sourceColorProbe.producer.version,
+        producerBinaryDigest: sourceColorProbe.producer.binaryDigest,
+        createdAt: new Date(sourceColorProbe.createdAt),
+        probeHash: sourceColorProbe.probeHash,
+      },
+    })
     const derivedRenderInput = createRenderInputSpec({
       schemaVersion: 'render-input/v1',
       renderer: { id: 'remotion', version: '4.0.489', digest: sha('8') },
@@ -562,6 +612,12 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(
       openApi.paths['/v1/artifacts/{artifactId}'].get['x-apollo-capability-id'],
       'apollo.artifacts.read',
+    )
+    assert.equal(
+      openApi.paths['/v1/artifacts/{artifactId}/color-probe'].get[
+        'x-apollo-capability-id'
+      ],
+      'apollo.artifacts.color-probe.read',
     )
     assert.equal(
       openApi.paths['/v1/artifacts/{artifactId}/lineage-diagnostics/{manifestId}'].get[
@@ -2422,6 +2478,11 @@ test('authenticated public API manages projects, clients and artifact inspection
       { headers: { authorization: childAuthorization } },
     )
     assert.equal(childArtifactResponse.status, 403)
+    const childColorProbeResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${sourceArtifactId}/color-probe`,
+      { headers: { authorization: childAuthorization } },
+    )
+    assert.equal(childColorProbeResponse.status, 403)
     const childDiagnosticResponse = await fetch(
       `${baseUrl}/v1/artifacts/${derivedArtifactId}/lineage-diagnostics/${derivedManifestId}`,
       { headers: { authorization: childAuthorization } },
@@ -2482,6 +2543,20 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(JSON.stringify(artifact).includes('manifestJson'), false)
     assert.equal(JSON.stringify(artifact).includes('"parameters":'), false)
     assert.equal(JSON.stringify(artifact).includes('renderInput'), false)
+
+    const colorProbeResponse = await fetch(
+      `${baseUrl}/v1/artifacts/${sourceArtifactId}/color-probe`,
+      { headers: { authorization } },
+    )
+    const colorProbe = await colorProbeResponse.json()
+    assert.equal(colorProbeResponse.status, 200)
+    assert.deepEqual(colorProbe.data.probe, sourceColorProbe)
+    assert.equal(
+      await client.v2MediaColorProbe.count({
+        where: { workspaceId, artifactId: sourceArtifactId },
+      }),
+      1,
+    )
 
     const diagnosticResponse = await fetch(
       `${baseUrl}/v1/artifacts/${derivedArtifactId}/lineage-diagnostics/${derivedManifestId}`,

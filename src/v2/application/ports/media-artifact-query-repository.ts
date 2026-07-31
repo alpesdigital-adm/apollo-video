@@ -3,6 +3,7 @@ import type {
   MediaArtifactProbe,
   MediaArtifactType,
 } from '../../domain/media-artifact.ts'
+import type { MediaColorProbe } from '../../domain/color-and-export.ts'
 
 export interface MediaArtifactLineageRecord {
   artifactId: string
@@ -55,4 +56,8 @@ export interface MediaArtifactRecord {
 
 export interface MediaArtifactQueryRepository {
   findById(workspaceId: string, artifactId: string): Promise<MediaArtifactRecord | null>
+  findColorProbe(
+    workspaceId: string,
+    artifactId: string,
+  ): Promise<Readonly<MediaColorProbe> | null>
 }

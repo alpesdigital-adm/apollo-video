@@ -6,6 +6,7 @@ import type { MediaIngestProcessor, MediaTranscriber, ProjectMediaRepository, Ve
 import type { MediaTransferRepository } from './ports/media-transfer-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import { assetRightsRevision } from '../domain/asset-rights.ts'
+import { createMediaColorProbe } from '../domain/color-and-export.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createMediaArtifactManifest, createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { probeVideo } from '../infrastructure/media/video-probe.ts'
@@ -167,6 +168,31 @@ export function runNextMediaIngestOperationService(dependencies: {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy artifact identity did not converge')
       }
       await writeRights(proxyArtifactId)
+      const colorProbeId = (artifactId: string, manifestId: string) =>
+        `color-probe-${createHash('sha256')
+          .update(`${operation.workspaceId}:${artifactId}:${manifestId}`)
+          .digest('hex')}`
+      const sourceColorProbe = createMediaColorProbe({
+        id: colorProbeId(
+          context.sourceArtifactId,
+          context.sourceManifestId,
+        ),
+        workspaceId: operation.workspaceId,
+        artifactId: context.sourceArtifactId,
+        manifestId: context.sourceManifestId,
+        detection: sourceProbe.color,
+        producer: sourceProbe.producer,
+        createdAt: operation.createdAt,
+      })
+      const proxyColorProbe = createMediaColorProbe({
+        id: colorProbeId(proxyArtifactId, proxyManifestId),
+        workspaceId: operation.workspaceId,
+        artifactId: proxyArtifactId,
+        manifestId: proxyManifestId,
+        detection: normalized.probe.color,
+        producer: normalized.probe.producer,
+        createdAt: operation.createdAt,
+      })
 
       await enter('transcribing')
       const project = await dependencies.projectMedia.readProject({ workspaceId: operation.workspaceId, projectId: context.projectId })
@@ -186,6 +212,7 @@ export function runNextMediaIngestOperationService(dependencies: {
         originalFileName: context.originalFileName, sourceArtifactId: context.sourceArtifactId,
         sourceManifestId: context.sourceManifestId, proxyArtifactId, proxyManifestId, transcriptId,
         transcript, sourceManifest, proxyManifest, createdAt: clock().toISOString(),
+        sourceColorProbe, proxyColorProbe,
       })
       stopHeartbeat()
       const succeeded = await dependencies.operations.succeed(command(clock()))

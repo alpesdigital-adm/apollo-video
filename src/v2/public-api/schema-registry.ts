@@ -11105,6 +11105,132 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchema },
     }),
   ),
+  defineSchema('media-color-probe', 1, 'Immutable trusted colorimetry evidence bound to an exact artifact manifest',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['probe'],
+      properties: {
+        probe: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'schemaVersion',
+            'id',
+            'workspaceId',
+            'artifactId',
+            'manifestId',
+            'detection',
+            'producer',
+            'createdAt',
+            'probeHash',
+          ],
+          properties: {
+            schemaVersion: { const: 'media-color-probe/v1' },
+            id: idSchema,
+            workspaceId: idSchema,
+            artifactId: idSchema,
+            manifestId: idSchema,
+            detection: {
+              oneOf: [
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: [
+                    'state',
+                    'metadata',
+                    'pixelFormat',
+                    'hdrMode',
+                  ],
+                  properties: {
+                    state: { const: 'ready' },
+                    metadata: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: [
+                        'colorSpace',
+                        'transfer',
+                        'primaries',
+                        'matrix',
+                        'range',
+                        'bitDepth',
+                      ],
+                      properties: {
+                        colorSpace: {
+                          type: 'string',
+                          pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+                        },
+                        transfer: {
+                          type: 'string',
+                          pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+                        },
+                        primaries: {
+                          type: 'string',
+                          pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+                        },
+                        matrix: {
+                          type: 'string',
+                          pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+                        },
+                        range: { enum: ['full', 'limited'] },
+                        bitDepth: {
+                          type: 'integer',
+                          minimum: 8,
+                          maximum: 32,
+                        },
+                      },
+                    },
+                    pixelFormat: {
+                      type: 'string',
+                      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+                    },
+                    hdrMode: { enum: ['sdr', 'hlg', 'pq'] },
+                  },
+                },
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['state', 'reasons'],
+                  properties: {
+                    state: { const: 'unavailable' },
+                    pixelFormat: {
+                      type: 'string',
+                      pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+                    },
+                    reasons: {
+                      type: 'array',
+                      minItems: 1,
+                      maxItems: 16,
+                      uniqueItems: true,
+                      items: {
+                        type: 'string',
+                        pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+            producer: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['provider', 'version', 'binaryDigest'],
+              properties: {
+                provider: { const: 'ffprobe' },
+                version: {
+                  type: 'string',
+                  pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$',
+                },
+                binaryDigest: sha256Schema,
+              },
+            },
+            createdAt: dateTimeSchema,
+            probeHash: sha256Schema,
+          },
+        },
+      },
+    }),
+  ),
   defineSchema('public-operation-detail', 2, 'Public operation detail response for render and media ingest',
     successSchema({
       type: 'object',

@@ -23,7 +23,10 @@ test('V2 FFmpeg ingest creates an inspectable proxy and speech derivative from a
     '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25:duration=1.2',
     '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=48000:duration=1.2',
-    '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', sourcePath,
+    '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+    '-colorspace', 'bt709', '-color_trc', 'bt709',
+    '-color_primaries', 'bt709', '-color_range', 'tv',
+    '-c:a', 'aac', sourcePath,
   ], { windowsHide: true, timeout: 60_000 })
 
   const processor = new FfmpegIngestProcessor({ workRoot: join(root, 'work'), ffmpegPath })
@@ -33,6 +36,19 @@ test('V2 FFmpeg ingest creates an inspectable proxy and speech derivative from a
   assert.equal(result.probe.height, 360)
   assert.ok(result.probe.duration >= 1 && result.probe.duration <= 2)
   assert.equal(result.probe.codec, 'h264')
+  assert.deepEqual(result.probe.color, {
+    state: 'ready',
+    metadata: {
+      colorSpace: 'rec709',
+      transfer: 'bt709',
+      primaries: 'bt709',
+      matrix: 'bt709',
+      range: 'limited',
+      bitDepth: 8,
+    },
+    pixelFormat: 'yuv420p',
+    hdrMode: 'sdr',
+  })
   assert.match(result.proxySha256, /^[a-f0-9]{64}$/)
   assert.ok(result.proxyByteSize > 0)
   assert.ok((await stat(result.audioPath)).size > 0)
@@ -58,7 +74,11 @@ test('V2 editorial renderer materializes exact retained clips as a format-aware 
   const result = await renderer.render({
     operationId: 'operation-editorial-render-1',
     renderKind: 'proxy',
-    sourcePath,
+    sources: [{
+      artifactId: 'artifact-1',
+      path: sourcePath,
+      mediaType: 'video',
+    }],
     fps: 25,
     format: '9:16',
     clips: [
@@ -109,7 +129,11 @@ test('V2 editorial renderer produces a verified 1080x1920 final MP4 from the app
   const result = await renderer.render({
     operationId: 'operation-editorial-final-1',
     renderKind: 'final',
-    sourcePath,
+    sources: [{
+      artifactId: 'artifact-1',
+      path: sourcePath,
+      mediaType: 'video',
+    }],
     fps: 30,
     format: '9:16',
     outputSpec: { width: 1080, height: 1920, fps: 30 },

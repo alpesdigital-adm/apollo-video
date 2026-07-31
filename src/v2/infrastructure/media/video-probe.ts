@@ -1,15 +1,25 @@
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
 
 import { DomainError } from '../../domain/errors.ts'
+import type {
+  DetectedMediaColor,
+} from '../../domain/color-and-export.ts'
+import { calculateFileSha256 } from './local-artifact-manifest.ts'
 
 const require = createRequire(import.meta.url)
 const ffprobeStatic = require('ffprobe-static') as { path?: string }
 const execFileAsync = promisify(execFile)
 const DEFAULT_TIMEOUT_MS = 60_000
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024
+const producerCache = new Map<string, Promise<Readonly<{
+  provider: 'ffprobe'
+  version: 'json-v1'
+  binaryDigest: string
+}>>>()
 
 export interface VideoProbeResult {
   width: number
@@ -19,6 +29,12 @@ export interface VideoProbeResult {
   codec: string
   audioCodec: string
   container: string
+  color: DetectedMediaColor
+  producer: Readonly<{
+    provider: 'ffprobe'
+    version: 'json-v1'
+    binaryDigest: string
+  }>
 }
 
 function parseRate(value: unknown): number {
@@ -35,11 +51,124 @@ function positiveNumber(value: unknown): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
 }
 
+function token(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim().toLowerCase()
+  return /^[a-z0-9][a-z0-9._/-]{0,127}$/.test(normalized)
+    ? normalized
+    : undefined
+}
+
+function bitDepth(stream: Record<string, unknown>): number | undefined {
+  const declared = Number(stream.bits_per_raw_sample)
+  if (
+    Number.isSafeInteger(declared) &&
+    declared >= 8 &&
+    declared <= 32
+  ) return declared
+  const pixelFormat = token(stream.pix_fmt)
+  const matched = pixelFormat?.match(/(?:p|le|be)(\d{2})(?:le|be)?$/)
+  if (matched) {
+    const parsed = Number(matched[1])
+    if (parsed >= 8 && parsed <= 32) return parsed
+  }
+  return pixelFormat ? 8 : undefined
+}
+
+function detectedColor(
+  video: Record<string, unknown>,
+): DetectedMediaColor {
+  const matrix = token(video.color_space)
+  const transfer = token(video.color_transfer)
+  const primaries = token(video.color_primaries)
+  const pixelFormat = token(video.pix_fmt)
+  const depth = bitDepth(video)
+  const rawRange = token(video.color_range)
+  const range = rawRange === 'pc' || rawRange === 'jpeg'
+    ? 'full' as const
+    : rawRange === 'tv' || rawRange === 'mpeg'
+      ? 'limited' as const
+      : undefined
+  const missing = [
+    ...(!matrix ? ['missing-matrix'] : []),
+    ...(!transfer ? ['missing-transfer'] : []),
+    ...(!primaries ? ['missing-primaries'] : []),
+    ...(!range ? ['missing-range'] : []),
+    ...(!depth ? ['missing-bit-depth'] : []),
+    ...(!pixelFormat ? ['missing-pixel-format'] : []),
+  ]
+  if (
+    missing.length ||
+    !matrix ||
+    !transfer ||
+    !primaries ||
+    !range ||
+    !depth ||
+    !pixelFormat
+  ) {
+    return Object.freeze({
+      state: 'unavailable' as const,
+      ...(pixelFormat ? { pixelFormat } : {}),
+      reasons: Object.freeze(missing),
+    })
+  }
+  const colorSpace = primaries === 'bt709'
+    ? 'rec709'
+    : primaries.startsWith('bt2020')
+      ? 'rec2020'
+      : primaries === 'smpte432'
+        ? 'display-p3'
+        : `primaries-${primaries}`
+  const hdrMode = transfer === 'smpte2084'
+    ? 'pq' as const
+    : transfer === 'arib-std-b67'
+      ? 'hlg' as const
+      : 'sdr' as const
+  return Object.freeze({
+    state: 'ready' as const,
+    metadata: Object.freeze({
+      colorSpace,
+      transfer,
+      primaries,
+      matrix,
+      range,
+      bitDepth: depth,
+    }),
+    pixelFormat,
+    hdrMode,
+  })
+}
+
 function resolveBinary(environment: NodeJS.ProcessEnv): string {
   const configured = environment.FFPROBE_PATH?.trim()
   if (configured) return configured
   const bundled = typeof ffprobeStatic?.path === 'string' ? ffprobeStatic.path.trim() : ''
   return bundled || 'ffprobe'
+}
+
+function describeProducer(binary: string) {
+  const cached = producerCache.get(binary)
+  if (cached) return cached
+  const pending = (async () => {
+    const binaryDigest = isAbsolute(binary)
+      ? await calculateFileSha256(binary)
+      : createHash('sha256')
+          .update((await execFileAsync(binary, ['-version'], {
+            windowsHide: true,
+            timeout: 30_000,
+            maxBuffer: MAX_OUTPUT_BYTES,
+            encoding: 'utf8',
+          })).stdout)
+          .digest('hex')
+    return Object.freeze({
+      provider: 'ffprobe' as const,
+      version: 'json-v1' as const,
+      binaryDigest,
+    })
+  })()
+  producerCache.set(binary, pending)
+  pending.catch(() => producerCache.delete(binary))
+  return pending
 }
 
 export async function probeVideo(
@@ -63,24 +192,26 @@ export async function probeVideo(
   }
 
   let stdout: string
+  let producer: Awaited<ReturnType<typeof describeProducer>>
+  const binary = resolveBinary(options.environment ?? process.env)
   try {
-    const result = await execFileAsync(
-      resolveBinary(options.environment ?? process.env),
-      [
+    const [result, descriptor] = await Promise.all([
+      execFileAsync(binary, [
         '-v', 'error',
-        '-show_entries', 'format=duration,format_name:stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,duration',
+        '-show_entries', 'format=duration,format_name:stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,duration,pix_fmt,bits_per_raw_sample,color_space,color_transfer,color_primaries,color_range',
         '-of', 'json',
         filePath,
-      ],
-      {
+      ], {
         windowsHide: true,
         timeout: timeoutMs,
         maxBuffer: MAX_OUTPUT_BYTES,
         signal: options.signal,
         encoding: 'utf8',
-      },
-    )
+      }),
+      describeProducer(binary),
+    ])
     stdout = result.stdout
+    producer = descriptor
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     const message = code === 'ABORT_ERR'
@@ -123,5 +254,15 @@ export async function probeVideo(
   ) {
     throw new DomainError('RENDER_OUTPUT_INVALID', 'Video probe metadata is incomplete')
   }
-  return Object.freeze({ width, height, fps, duration, codec, audioCodec, container: formatName })
+  return Object.freeze({
+    width,
+    height,
+    fps,
+    duration,
+    codec,
+    audioCodec,
+    container: formatName,
+    color: detectedColor(video!),
+    producer,
+  })
 }
