@@ -234,6 +234,12 @@ const coverage = Object.freeze({
   'apollo.workspace-luts.import': {
     mode: 'durable-covered', evidence: 'serializable workspace/client validation, actor-bound idempotency, immutable version and content-addressed preview',
   },
+  'apollo.workspace-luts.versions.create': {
+    mode: 'durable-covered', evidence: 'serializable current-version compare, contiguous immutable version sequence and actor-bound idempotency before pointer advance',
+  },
+  'apollo.workspace-luts.lifecycle.set': {
+    mode: 'durable-covered', evidence: 'serializable head revision compare-and-swap plus immutable actor-bound status command and idempotent replay',
+  },
   'apollo.projects.final-exports.enqueue': {
     mode: 'durable-covered', evidence: 'final export operation binds explicit approval, immutable ProjectVersion, DirectorRun and QualitySnapshot',
   },
@@ -289,7 +295,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    80,
+    82,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

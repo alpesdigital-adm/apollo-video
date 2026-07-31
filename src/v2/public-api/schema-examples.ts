@@ -7696,6 +7696,22 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/workspace-lut-imported/v1': [{ data: { lut: workspaceLutExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/workspace-lut-response/v1': [{ data: { lut: workspaceLutExample }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/workspace-lut-list/v1': [{ data: { items: [workspaceLutExample] }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/workspace-lut-version-create-request/v1': [{
+      baseVersion: 1, name: 'CoraÃ§Ã£o ðŸŽžï¸ v2', owner: 'Apollo Studio',
+      license: { policy: 'owned', name: 'Propriedade do workspace' }, tags: ['cinema', 'v2'],
+      compatibility: { inputColorSpace: 'rec709', outputColorSpace: 'rec709' }, intensity: 0.8, cubeContent: workspaceLutCubeExample,
+    }],
+    'apollo://schemas/workspace-lut-version-response/v1': [{ data: { version: workspaceLutExample.currentVersion }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/workspace-lut-lifecycle-response/v1': [{ data: { lifecycle: { id: workspaceLutExample.id, workspaceId, status: 'active', revision: 1, currentVersion: 1 } }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/workspace-lut-status-request/v1': [{ baseRevision: 1, status: 'inactive' }],
+    'apollo://schemas/workspace-lut-status-applied/v1': [{
+      data: {
+        lifecycle: { id: workspaceLutExample.id, workspaceId, status: 'inactive', revision: 2, currentVersion: 1 },
+        command: { id: 'lut-status-example-1', lutId: workspaceLutExample.id, baseRevision: 1, resultRevision: 2, status: 'inactive', createdByClientId: clientId, createdAt },
+        replayed: false,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
         data: { review: proxyReviewExample },

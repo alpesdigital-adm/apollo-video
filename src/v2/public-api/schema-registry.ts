@@ -39,6 +39,15 @@ const workspaceLutSchema = {
     },
   },
 } as const
+const workspaceLutVersionSchema = workspaceLutSchema.properties.currentVersion
+const workspaceLutLifecycleSchema = {
+  type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'status', 'revision', 'currentVersion'],
+  properties: { id: idSchema, workspaceId: idSchema, status: { enum: ['active', 'inactive'] }, revision: { type: 'integer', minimum: 1 }, currentVersion: { type: 'integer', minimum: 1 } },
+} as const
+const workspaceLutStatusCommandSchema = {
+  type: 'object', additionalProperties: false, required: ['id', 'lutId', 'baseRevision', 'resultRevision', 'status', 'createdByClientId', 'createdAt'],
+  properties: { id: idSchema, lutId: idSchema, baseRevision: { type: 'integer', minimum: 1 }, resultRevision: { type: 'integer', minimum: 2 }, status: { enum: ['active', 'inactive'] }, createdByClientId: idSchema, createdAt: dateTimeSchema },
+} as const
 const mvpCoreCheckCodes = Object.values(MVP_CORE_CRITERION_CHECKS).flat()
 const mvpCoreEvidenceReferenceSchema = {
   type: 'object',
@@ -16695,6 +16704,27 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('workspace-lut-imported', 1, 'Imported immutable workspace LUT', successSchema({ type: 'object', additionalProperties: false, required: ['lut', 'replayed'], properties: { lut: workspaceLutSchema, replayed: { type: 'boolean' } } })),
   defineSchema('workspace-lut-response', 1, 'Current immutable workspace LUT', successSchema({ type: 'object', additionalProperties: false, required: ['lut'], properties: { lut: workspaceLutSchema } })),
   defineSchema('workspace-lut-list', 1, 'Current workspace LUT library', successSchema({ type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', maxItems: 100, items: workspaceLutSchema } } })),
+  defineSchema('workspace-lut-version-create-request', 1, 'Create the next immutable version of a workspace LUT', {
+    type: 'object', additionalProperties: false,
+    required: ['baseVersion', 'name', 'owner', 'license', 'compatibility', 'cubeContent'],
+    properties: {
+      baseVersion: { type: 'integer', minimum: 1 }, name: { type: 'string', minLength: 1, maxLength: 160 }, owner: { type: 'string', minLength: 1, maxLength: 240 },
+      license: { type: 'object', additionalProperties: false, required: ['policy', 'name'], properties: { policy: { enum: ['owned', 'licensed', 'restricted'] }, name: { type: 'string', minLength: 1, maxLength: 240 }, usageNotes: { type: 'string', minLength: 1, maxLength: 2000 } } },
+      tags: { type: 'array', maxItems: 20, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 48 } },
+      compatibility: { type: 'object', additionalProperties: false, required: ['inputColorSpace', 'outputColorSpace'], properties: { inputColorSpace: { enum: ['rec709', 'display-p3', 'rec2020'] }, outputColorSpace: { enum: ['rec709', 'display-p3', 'rec2020'] } } },
+      intensity: { type: 'number', minimum: 0, maximum: 1, default: 1 }, cubeContent: { type: 'string', minLength: 1, maxLength: 8388608 },
+    },
+  }),
+  defineSchema('workspace-lut-version-response', 1, 'One immutable historical workspace LUT version', successSchema({ type: 'object', additionalProperties: false, required: ['version'], properties: { version: workspaceLutVersionSchema } })),
+  defineSchema('workspace-lut-lifecycle-response', 1, 'Current revisioned workspace LUT lifecycle', successSchema({ type: 'object', additionalProperties: false, required: ['lifecycle'], properties: { lifecycle: workspaceLutLifecycleSchema } })),
+  defineSchema('workspace-lut-status-request', 1, 'Revision-guarded workspace LUT activation or deactivation', {
+    type: 'object', additionalProperties: false, required: ['baseRevision', 'status'],
+    properties: { baseRevision: { type: 'integer', minimum: 1 }, status: { enum: ['active', 'inactive'] } },
+  }),
+  defineSchema('workspace-lut-status-applied', 1, 'Applied immutable workspace LUT lifecycle command', successSchema({
+    type: 'object', additionalProperties: false, required: ['lifecycle', 'command', 'replayed'],
+    properties: { lifecycle: workspaceLutLifecycleSchema, command: workspaceLutStatusCommandSchema, replayed: { type: 'boolean' } },
+  })),
   defineSchema('project-final-export-request', 1, 'Approve and export the current project version', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId', 'projectVersionHash', 'format', 'approval'],

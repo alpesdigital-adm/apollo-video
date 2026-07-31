@@ -239,6 +239,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Imports one size-bounded .cube into an immutable workspace-scoped version, generates one deterministic local preview and performs no provider or project mutation.',
     },
+    'apollo.workspace-luts.versions.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one size-bounded immutable successor only from the declared current LUT version and generates one deterministic local preview.',
+    },
+    'apollo.workspace-luts.lifecycle.set': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Applies one revision-guarded active/inactive lifecycle command without deleting LUT versions, previews, projects or media.',
+    },
     'apollo.projects.proof-integrity-runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Evaluates existing ProofNeed, recipe, evidence and current authorization hashes, persists an immutable fail-closed decision and starts no provider, render or media materialization work.',

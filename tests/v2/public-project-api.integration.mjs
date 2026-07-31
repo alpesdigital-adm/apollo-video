@@ -140,6 +140,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2ColorPipelineCompilation.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2WorkspaceLutStatusCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceLut.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceLutVersion.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2ProjectMediaAsset.deleteMany({
@@ -643,6 +644,10 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts'].get['x-apollo-capability-id'], 'apollo.workspace-luts.list')
     assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts/{lutId}'].get['x-apollo-capability-id'], 'apollo.workspace-luts.read')
     assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts/{lutId}/versions/{version}/preview'].get['x-apollo-capability-id'], 'apollo.workspace-luts.preview.read')
+    assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts/{lutId}/versions'].post['x-apollo-capability-id'], 'apollo.workspace-luts.versions.create')
+    assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts/{lutId}/versions/{version}'].get['x-apollo-capability-id'], 'apollo.workspace-luts.versions.read')
+    assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts/{lutId}/status'].get['x-apollo-capability-id'], 'apollo.workspace-luts.lifecycle.read')
+    assert.equal(openApi.paths['/v1/workspaces/{workspaceId}/luts/{lutId}/status'].post['x-apollo-capability-id'], 'apollo.workspace-luts.lifecycle.set')
     assert.equal(
       openApi.paths['/v1/artifacts/{artifactId}/lineage-diagnostics/{manifestId}'].get[
         'x-apollo-capability-id'
@@ -1093,6 +1098,10 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.workspace-luts.list',
         'apollo.workspace-luts.read',
         'apollo.workspace-luts.preview.read',
+        'apollo.workspace-luts.versions.create',
+        'apollo.workspace-luts.versions.read',
+        'apollo.workspace-luts.lifecycle.read',
+        'apollo.workspace-luts.lifecycle.set',
         'apollo.clients.list',
         'apollo.clients.create',
         'apollo.clients.credentials.rotate',
@@ -1135,6 +1144,35 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(lutPreviewResponse.status, 200)
     assert.equal(lutPreviewResponse.headers.get('content-type'), 'image/png')
     assert.deepEqual([...new Uint8Array(await lutPreviewResponse.arrayBuffer()).slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+    const lifecycleBefore = await (await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}/status`, { headers: { authorization } })).json()
+    assert.equal(lifecycleBefore.data.lifecycle.revision, 1)
+    const { lutId: _lutId, ...versionBody } = lutBody
+    const createVersion = () => fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}/versions`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-version-2' }, body: JSON.stringify({ ...versionBody, baseVersion: 1, name: 'CoraÃ§Ã£o ðŸŽžï¸ v2', intensity: 0.8 }),
+    })
+    const versionResponse = await createVersion(); const versionResult = await versionResponse.json()
+    assert.equal(versionResponse.status, 201)
+    assert.equal(versionResult.data.lut.currentVersion.version, 2)
+    assert.equal((await createVersion()).status, 201)
+    assert.equal(await client.v2WorkspaceLutVersion.count({ where: { workspaceId, lutId: lutBody.lutId } }), 2)
+    const historicalResponse = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}/versions/1`, { headers: { authorization } })
+    assert.equal(historicalResponse.status, 200)
+    assert.equal((await historicalResponse.json()).data.version.version, 1)
+    const deactivate = () => fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}/status`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-status-2' }, body: JSON.stringify({ baseRevision: 1, status: 'inactive' }),
+    })
+    const deactivatedResponse = await deactivate(); const deactivated = await deactivatedResponse.json()
+    assert.equal(deactivatedResponse.status, 200)
+    assert.equal(deactivated.data.lifecycle.status, 'inactive')
+    assert.equal(deactivated.data.lifecycle.revision, 2)
+    assert.equal((await deactivate()).status, 200)
+    assert.equal(await client.v2WorkspaceLutStatusCommand.count({ where: { workspaceId, lutId: lutBody.lutId } }), 1)
+    const staleStatus = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}/status`, {
+      method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-status-stale' }, body: JSON.stringify({ baseRevision: 1, status: 'active' }),
+    })
+    assert.equal(staleStatus.status, 409)
+    const preservedPreview = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}/versions/1/preview`, { headers: { authorization } })
+    assert.equal(preservedPreview.status, 200)
     assert.equal((await fetch(`${baseUrl}/v1/workspaces/${otherWorkspaceId}/luts`, { headers: { authorization } })).status, 404)
 
     const webhookEndpointListResponse = await fetch(

@@ -78,6 +78,7 @@ model V2Workspace {
   colorPipelineCompilations       V2ColorPipelineCompilation[]
   workspaceLuts                   V2WorkspaceLut[]
   workspaceLutVersions            V2WorkspaceLutVersion[]
+  workspaceLutStatusCommands      V2WorkspaceLutStatusCommand[]
   semanticReuseRuns               V2SemanticReuseRun[]
   hierarchicalProcessingRuns      V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks    V2HierarchicalProcessingChunk[]
@@ -172,6 +173,7 @@ model V2ApiClient {
   contiguousExtractions            V2ContiguousExtraction[]
   colorPipelineCompilations         V2ColorPipelineCompilation[]
   workspaceLutVersions              V2WorkspaceLutVersion[]
+  workspaceLutStatusCommands        V2WorkspaceLutStatusCommand[]
   productionBatches               V2ProductionBatch[]              @relation("ProductionBatchCreator")
   productionBatchActions          V2ProductionBatchAction[]        @relation("ProductionBatchActionActor")
   scriptAlignmentRuns             V2ScriptAlignmentRun[]           @relation("ScriptAlignmentRunCreator")
@@ -966,16 +968,42 @@ model V2WorkspaceLut {
   id               String   @db.VarChar(128)
   workspaceId      String   @db.VarChar(128)
   status           String   @default("active") @db.VarChar(16)
+  revision         Int      @default(1)
   currentVersionId String?  @db.VarChar(128)
   createdAt        DateTime @db.Timestamptz(3)
   updatedAt        DateTime @updatedAt @db.Timestamptz(3)
 
   workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   versions  V2WorkspaceLutVersion[]
+  statusCommands V2WorkspaceLutStatusCommand[]
 
   @@id([id, workspaceId])
   @@index([workspaceId, status, updatedAt(sort: Desc)])
   @@map("workspace_luts")
+}
+
+model V2WorkspaceLutStatusCommand {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  lutId                String   @db.VarChar(128)
+  baseRevision         Int
+  resultRevision       Int
+  status               String   @db.VarChar(16)
+  resultVersionId      String   @db.VarChar(128)
+  requestFingerprint   String   @db.Char(64)
+  idempotencyKey       String   @db.VarChar(128)
+  createdByClientId    String   @db.VarChar(80)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lut       V2WorkspaceLut @relation(fields: [lutId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy V2ApiClient    @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, lutId, resultRevision])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, lutId, createdAt(sort: Desc)])
+  @@map("workspace_lut_status_commands")
 }
 
 model V2WorkspaceLutVersion {

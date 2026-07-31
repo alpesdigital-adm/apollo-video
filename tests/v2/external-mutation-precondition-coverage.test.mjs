@@ -236,6 +236,12 @@ const coverage = Object.freeze({
   'apollo.workspace-luts.import': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds workspace, logical LUT ID, canonical .cube hash, license, compatibility, intensity and actor before preview generation',
   },
+  'apollo.workspace-luts.versions.create': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds logical LUT, exact baseVersion, canonical .cube hash, license, compatibility, intensity and actor; serializable persistence rechecks the current version',
+  },
+  'apollo.workspace-luts.lifecycle.set': {
+    mode: 'revision-bound-action', evidence: 'request requires baseRevision and serializable persistence records one immutable status command before compare-and-swap',
+  },
   'apollo.projects.final-exports.enqueue': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds explicit approval, current immutable ProjectVersion, EditPlan, DirectorRun, QualitySnapshot and source artifact identity',
   },
@@ -477,10 +483,10 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
-    'idempotent-create': 47,
+    'idempotent-create': 48,
     'state-machine-action': 13,
     'single-flight-action': 1,
-    'revision-bound-action': 4,
+    'revision-bound-action': 5,
     'base-version-bound-action': 3,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
