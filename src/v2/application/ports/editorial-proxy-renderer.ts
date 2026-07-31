@@ -21,6 +21,7 @@ export interface EditorialProxyRenderer {
       mediaType: 'video' | 'audio'
       colorPipelineCompilation?: Readonly<ColorPipelineCompilation>
     }>[]
+    lutPaths: Readonly<Record<string, string>>
     clips: readonly Readonly<EditorialCutClip>[]
     fps: number
     format: string

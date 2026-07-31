@@ -15,6 +15,10 @@ export interface ProjectLutSelectionResult {
   selection: Readonly<ProjectLutSelection>
   replayed: boolean
 }
+export interface EffectiveProjectLutSelection {
+  selection: Readonly<ProjectLutSelection>
+  resolvedLutVersion?: Readonly<WorkspaceLutVersion>
+}
 export interface ProjectLutSelectionCommit {
   command: Readonly<EditCommand<ProjectLutSelectionRequest & { intensity: number }>>
   version: Readonly<ProjectVersion>
@@ -27,4 +31,5 @@ export interface ProjectLutSelectionRepository {
   readContext(input: { workspaceId: string; projectId: string; requested: ProjectLutSelectionRequest }): Promise<Readonly<ProjectLutSelectionContext> | null>
   commitOrReplay(input: Readonly<ProjectLutSelectionCommit>): Promise<Readonly<ProjectLutSelectionResult>>
   readCurrent(input: { workspaceId: string; projectId: string }): Promise<Readonly<ProjectLutSelectionResult> | null>
+  readEffectiveForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string }): Promise<Readonly<EffectiveProjectLutSelection> | null>
 }

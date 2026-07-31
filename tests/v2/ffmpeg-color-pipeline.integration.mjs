@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -33,7 +33,7 @@ function implementation(provider, parameters) {
   })
 }
 
-function compilation(sourceId, createdAt) {
+function compilation(sourceId, createdAt, creativeLut) {
   const probe = createMediaColorProbe({
     id: `probe-${sourceId}`,
     workspaceId: 'workspace-color-golden',
@@ -52,7 +52,9 @@ function compilation(sourceId, createdAt) {
   const stages = [
     { id: 'technical-rec709', kind: 'technical', version: 'v1', enabled: true, input: sourceMetadata, output: sourceMetadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
     { id: 'match-source', kind: 'match', version: 'v1', enabled: false, input: sourceMetadata, output: sourceMetadata, implementation: implementation('apollo-match', { mode: 'bypass' }) },
-    { id: 'creative-none', kind: 'creative-lut', version: 'v1', enabled: false, input: sourceMetadata, output: sourceMetadata, implementation: implementation('apollo-lut', { mode: 'none' }) },
+    creativeLut
+      ? { id: 'creative-selected', kind: 'creative-lut', version: 'v1', enabled: true, input: sourceMetadata, output: sourceMetadata, implementation: implementation('apollo-lut', { mode: 'lut3d', intensity: creativeLut.intensity }), lut: { artifactId: creativeLut.artifactId, sha256: creativeLut.sha256 } }
+      : { id: 'creative-none', kind: 'creative-lut', version: 'v1', enabled: false, input: sourceMetadata, output: sourceMetadata, implementation: implementation('apollo-lut', { mode: 'none' }) },
     { id: 'output-rec709', kind: 'output', version: 'v1', enabled: true, input: sourceMetadata, output: outputMetadata, implementation: implementation('ffmpeg-zscale', { dither: true }) },
   ]
   return createColorPipelineCompilation({
@@ -134,4 +136,20 @@ test('T-FR-181 generates a real immutable PNG preview from a valid unicode .cube
   assert.ok(preview.png.byteLength > 1000)
   assert.deepEqual([...preview.png.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
   assert.equal(createHash('sha256').update(preview.png).digest('hex'), preview.sha256)
+})
+
+test('T-FR-181 applies only a pre-materialized selected LUT path in the real color processor', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-color-selected-lut-'))
+  try {
+    const sourcePath = join(root, 'source.mp4'); const outputPath = join(root, 'selected.mp4'); const lutPath = join(root, 'selected.cube')
+    const cube = `LUT_3D_SIZE 2\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n`
+    await Promise.all([generate(sourcePath, 'testsrc2=s=320x180:r=24:d=1'), writeFile(lutPath, cube, 'utf8')])
+    const selected = compilation('selected-lut-source', '2026-07-31T17:30:00.000Z', { artifactId: 'selected-lut-version', sha256: 'a'.repeat(64), intensity: 0.5 })
+    const processor = new FfmpegColorPipelineProcessor({ ffmpegPath: ffmpeg })
+    assert.match(buildFfmpegColorPipelineFilter({ compilation: selected, lutPaths: { 'selected-lut-version': lutPath } }).filter, /lut3d=/)
+    await assert.rejects(processor.process({ sourcePath, outputPath, compilation: selected }), /not materialized/)
+    const result = await processor.process({ sourcePath, outputPath, compilation: selected, lutPaths: { 'selected-lut-version': lutPath } })
+    assert.equal(result.probe.color.state, 'ready')
+    assert.ok(result.byteSize > 0)
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

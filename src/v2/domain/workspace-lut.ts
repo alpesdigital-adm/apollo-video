@@ -104,6 +104,24 @@ export function parseCube3d(content: string): Readonly<ParsedCube3d> {
   return Object.freeze({ ...body, contentHash: calculateCanonicalHash(body) })
 }
 
+export function materializeCube3dIntensity(content: string, intensity: number): Readonly<ParsedCube3d> {
+  assertDomain(Number.isFinite(intensity) && intensity >= 0 && intensity <= 1, 'INVALID_ARGUMENT', 'intensity must be between 0 and 1')
+  const parsed = parseCube3d(content)
+  const lines = parsed.canonicalContent.trimEnd().split('\n')
+  const firstRow = lines.findIndex((line) => /^[-+]?\d/.test(line))
+  assertDomain(firstRow >= 0, 'INVALID_ARGUMENT', '.cube has no data rows')
+  const header = lines.slice(0, firstRow)
+  const rows = lines.slice(firstRow).map((line) => line.split(/\s+/).map(Number))
+  const scaled = rows.map((row, index) => {
+    const red = Math.floor(index / (parsed.size * parsed.size)) / (parsed.size - 1)
+    const green = Math.floor(index / parsed.size) % parsed.size / (parsed.size - 1)
+    const blue = index % parsed.size / (parsed.size - 1)
+    const identity = [red, green, blue]
+    return row.map((value, channel) => canonicalNumber(identity[channel]! + (value - identity[channel]!) * intensity)).join(' ')
+  })
+  return parseCube3d(`${[...header, ...scaled].join('\n')}\n`)
+}
+
 export function createWorkspaceLutVersion(input: {
   id: string; workspaceId: string; lutId: string; version: number; name: string; owner: string
   license: { policy: LutLicensePolicy; name: string; usageNotes?: string }; tags?: readonly string[]

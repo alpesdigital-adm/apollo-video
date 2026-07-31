@@ -156,10 +156,14 @@ function source() {
 }
 
 function dependencies(operations, overrides = {}) {
-  const calls = { attached: 0, cleaned: 0, persisted: 0, mapped: 0, reviewed: 0 }
+  const calls = { attached: 0, cleaned: 0, lutCleaned: 0, persisted: 0, mapped: 0, reviewed: 0 }
   const deps = {
     operations: operations.repository,
     colorPipelines: { async read() { return { compilation: colorCompilation } } },
+    luts: {
+      async materialize() { return { selectionId: 'selection-project-proxy', selectionHash: '7'.repeat(64), lutPaths: {} } },
+      async cleanup() { calls.lutCleaned += 1 },
+    },
     projects: {
       async readImmutableSource() { return source() },
       async attachCompletedOutput(input) {
@@ -181,6 +185,7 @@ function dependencies(operations, overrides = {}) {
     },
     renderer: {
       async render(input) {
+        assert.deepEqual(input.lutPaths, {})
         return {
           outputPath: join(tmpdir(), 'project-proxy-worker-output.mp4'),
           sha256: 'd'.repeat(64),
@@ -229,7 +234,7 @@ test('project proxy worker materializes, attaches and settles the exact immutabl
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
   assert.deepEqual(operations.operation.result.resource, operations.operation.target)
-  assert.deepEqual(calls, { attached: 1, cleaned: 1, persisted: 1, mapped: 1, reviewed: 1 })
+  assert.deepEqual(calls, { attached: 1, cleaned: 1, lutCleaned: 1, persisted: 1, mapped: 1, reviewed: 1 })
 })
 
 test('project proxy worker does not attach an output after losing its lease', async () => {
@@ -248,5 +253,5 @@ test('project proxy worker does not attach an output after losing its lease', as
 
   assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'lease-lost' })
   assert.equal(operations.operation.status, 'running')
-  assert.deepEqual(base.calls, { attached: 0, cleaned: 0, persisted: 0, mapped: 0, reviewed: 0 })
+  assert.deepEqual(base.calls, { attached: 0, cleaned: 1, lutCleaned: 1, persisted: 0, mapped: 0, reviewed: 0 })
 })

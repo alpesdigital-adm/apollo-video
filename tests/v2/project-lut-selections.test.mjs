@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { createProjectLutSelection, projectLutRef } from '../../src/v2/domain/project-lut-selection.ts'
 import { createWorkspaceLutVersion } from '../../src/v2/domain/workspace-lut.ts'
+import { LocalProjectLutRenderMaterializer } from '../../src/v2/infrastructure/media/local-project-lut-render-materializer.ts'
 import { parseSetProjectLutSelectionBody, presentProjectLutSelectionResult } from '../../src/v2/public-api/project-lut-selection-contract.ts'
 
 const cube = `LUT_3D_SIZE 2
@@ -118,4 +123,54 @@ test('T-FR-181 public project LUT selection contract is exact and hides persiste
   })
   assert.equal('workspaceId' in presented.selection, false)
   assert.equal('payload' in presented.command, false)
+})
+
+test('T-FR-181 worker materializes the exact selected cube and intensity outside the renderer', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-project-lut-materializer-'))
+  try {
+    const creativeCube = `LUT_3D_SIZE 2
+1 0 0
+1 0 0
+1 0 0
+1 0 0
+1 0 0
+1 0 0
+1 0 0
+1 0 0
+`
+    const lut = createWorkspaceLutVersion({
+      id: 'workspace-lut-materialized-1', workspaceId: 'workspace-project-lut', lutId: 'workspace-lut-materialized', version: 1,
+      name: 'Materialized look', owner: 'Apollo Studio', license: { policy: 'owned', name: 'Workspace' },
+      compatibility: { inputColorSpace: 'rec709', outputColorSpace: 'rec709' }, intensity: 0.5, cubeContent: creativeCube,
+      preview: { byteSize: 128, sha256: 'e'.repeat(64) }, createdByClientId: 'client-project-lut', createdAt: '2026-07-31T17:02:00.000Z',
+    })
+    const selection = createProjectLutSelection({
+      id: 'project-lut-materialized-selection', workspaceId: lut.workspaceId, projectId: 'project-lut-test',
+      baseVersionId: 'project-version-lut-base-1', resultVersionId: 'project-version-lut-result-2', commandId: 'project-lut-command-materialized',
+      requested: { mode: 'lut-version', lutId: lut.lutId, version: 1 }, resolved: { mode: 'lut-version', lut: projectLutRef(lut) }, intensity: 0.5,
+      createdAt: '2026-07-31T17:03:00.000Z',
+    })
+    const creative = { kind: 'creative-lut', enabled: true, implementation: { provider: 'apollo-lut', parameters: { mode: 'lut3d', intensity: 0.5 } }, lut: { artifactId: lut.id, sha256: lut.cube.contentHash } }
+    const materializer = new LocalProjectLutRenderMaterializer({ async readEffectiveForVersion() { return { selection, resolvedLutVersion: lut } } }, join(root, 'work'))
+    const result = await materializer.materialize({
+      workspaceId: lut.workspaceId, projectId: selection.projectId, projectVersionId: selection.resultVersionId,
+      operationId: 'operation-project-lut-materialized', compilations: [{ pipeline: { stages: [{ kind: 'technical' }, { kind: 'match' }, creative, { kind: 'output' }] } }],
+    })
+    const path = result.lutPaths[lut.id]
+    assert.ok(path.startsWith(root))
+    const content = await readFile(path, 'utf8')
+    assert.match(content, /0\.5 0 0/)
+    assert.match(result.materializedCubeHash, /^[a-f0-9]{64}$/)
+    assert.equal(result.asset.artifactId, lut.id)
+    assert.equal(result.asset.byteSize, Buffer.byteLength(content, 'utf8'))
+    assert.match(result.asset.artifactKey, /^workspace-luts\//)
+    await materializer.cleanup('operation-project-lut-materialized')
+    await assert.rejects(access(path))
+
+    const mismatched = { ...creative, implementation: { ...creative.implementation, parameters: { mode: 'lut3d', intensity: 1 } } }
+    await assert.rejects(materializer.materialize({
+      workspaceId: lut.workspaceId, projectId: selection.projectId, projectVersionId: selection.resultVersionId,
+      operationId: 'operation-project-lut-mismatch', compilations: [{ pipeline: { stages: [{ kind: 'technical' }, { kind: 'match' }, mismatched, { kind: 'output' }] } }],
+    }), /does not match/)
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

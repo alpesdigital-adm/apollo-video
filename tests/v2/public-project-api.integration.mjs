@@ -58,6 +58,9 @@ test('authenticated public API manages projects, clients and artifact inspection
   const { PrismaWorkspaceRepository } = await import(
     '../../src/v2/infrastructure/prisma/workspace-repository.ts'
   )
+  const { PrismaProjectLutSelectionRepository } = await import(
+    '../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts'
+  )
   const { nodeApiCredentialCrypto } = await import(
     '../../src/v2/infrastructure/security/api-credential.ts'
   )
@@ -3909,6 +3912,8 @@ test('authenticated public API manages projects, clients and artifact inspection
     const readProjectLutResponse = await fetch(`${baseUrl}/v1/projects/${created.data.project.id}/lut-selection`, { headers: { authorization } })
     assert.equal(readProjectLutResponse.status, 200)
     assert.equal((await readProjectLutResponse.json()).data.result.selection.selectionHash, projectLut.data.selection.selectionHash)
+    const effectiveLuts = new PrismaProjectLutSelectionRepository(client)
+    assert.equal((await effectiveLuts.readEffectiveForVersion({ workspaceId, projectId: created.data.project.id, projectVersionId: projectLut.data.version.id })).resolvedLutVersion.id, versionResult.data.lut.currentVersion.id)
     const noneProjectLutResponse = await fetch(`${baseUrl}/v1/projects/${created.data.project.id}/lut-selection`, {
       method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-project-lut-none-2' },
       body: JSON.stringify({ baseVersionId: projectLut.data.version.id, baseHash: projectLut.data.version.baseHash, selection: { mode: 'none' } }),
@@ -3917,6 +3922,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(noneProjectLutResponse.status, 201)
     assert.equal(noneProjectLut.data.selection.resolved.mode, 'none')
     assert.equal(noneProjectLut.data.version.sequence, 3)
+    assert.equal((await effectiveLuts.readEffectiveForVersion({ workspaceId, projectId: created.data.project.id, projectVersionId: noneProjectLut.data.version.id })).selection.resolved.mode, 'none')
     const staleProjectLutResponse = await fetch(`${baseUrl}/v1/projects/${created.data.project.id}/lut-selection`, {
       method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-project-lut-stale' },
       body: JSON.stringify({ baseVersionId: created.data.version.id, baseHash: created.data.version.baseHash, selection: { mode: 'none' } }),

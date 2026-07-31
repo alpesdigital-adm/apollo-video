@@ -13,6 +13,7 @@ import type { ProjectFinalExportRepository } from './ports/project-final-export-
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
+import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-materializer.ts'
 import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -56,6 +57,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   renderer: EditorialProxyRenderer
   renderElementMaps: RenderElementMapRepository
   colorPipelines: ColorPipelineCompilationRepository
+  luts: ProjectLutRenderMaterializer
   artifactRoot: string
   clock?: () => Date
   leaseDurationMs?: number
@@ -187,6 +189,10 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         (!colorPipelines.has(asset.artifactId) || context.colorPipelineBindings.find((binding) => binding.sourceArtifactId === asset.artifactId)?.sourceManifestId !== asset.manifestId))) {
         throw new DomainError('INVALID_RENDER_INPUT', 'Final render video source is missing its bound color pipeline')
       }
+      const materializedLut = await dependencies.luts.materialize({
+        workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
+        operationId: operation.id, compilations: [...colorPipelines.values()],
+      })
       const immutableInputHash = calculateVersionHash({
         kind: 'project-final-export/v1',
         projectId: context.projectId,
@@ -232,6 +238,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           mediaType: asset.mediaType,
           ...(asset.mediaType === 'video' ? { colorPipelineCompilation: colorPipelines.get(asset.artifactId)! } : {}),
         })),
+        lutPaths: materializedLut.lutPaths,
         clips,
         fps: context.outputSpec.fps,
         format: source.format,
@@ -342,7 +349,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
           durationInFrames: expectedFrames,
         },
-        assets: source.renderSources.map((asset, ordinal) => ({
+        assets: [...source.renderSources.map((asset, ordinal) => ({
           id: `asset-${ordinal + 1}`,
           artifactId: asset.artifactId,
           artifactKey: asset.artifactKey,
@@ -351,12 +358,23 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           ordinal,
           sha256: asset.sha256,
           byteSize: asset.byteSize,
-        })),
+        })), ...(materializedLut.asset ? [{
+          id: `asset-${source.renderSources.length + 1}`,
+          artifactId: materializedLut.asset.artifactId,
+          artifactKey: materializedLut.asset.artifactKey,
+          kind: 'lut' as const,
+          role: 'creative-lut',
+          ordinal: source.renderSources.length,
+          sha256: materializedLut.asset.sha256,
+          byteSize: materializedLut.asset.byteSize,
+        }] : [])],
         props: {
           editPlan: source.editPlan,
           outputSpec: context.outputSpec,
           sourceArtifactIds: source.renderSources.map((asset) => asset.artifactId),
           colorPipelineBindings: context.colorPipelineBindings,
+          projectLutSelectionHash: materializedLut.selectionHash,
+          materializedCubeHash: materializedLut.materializedCubeHash ?? null,
         },
       })
       const reconstructableManifest = createReconstructableMediaArtifactManifest({
@@ -382,6 +400,9 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             outputSpec: context.outputSpec,
             approval: context.approval,
             colorPipelineBindings: context.colorPipelineBindings,
+            projectLutSelectionId: materializedLut.selectionId,
+            projectLutSelectionHash: materializedLut.selectionHash,
+            materializedCubeHash: materializedLut.materializedCubeHash ?? null,
           },
         },
         sources: source.renderSources.map((asset) => ({
@@ -465,7 +486,6 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       const succeeded = await withLeaseCommand(() =>
         dependencies.operations.succeed(command(clock())))
       if (!succeeded) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
-      await dependencies.renderer.cleanup(operation.id).catch(() => undefined)
       return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
     } catch (error) {
       stopHeartbeat()
@@ -505,10 +525,10 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         dependencies.operations.failOrRetry({ ...command(failedAt), error: failure, ...(nextAttemptAt ? { nextAttemptAt } : {}) }))
       if (!failed) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       if (failed.operation.status === 'failed') await dependencies.projects.markExportFailed({ workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId })
-      await dependencies.renderer.cleanup(operation.id).catch(() => undefined)
       return Object.freeze({ operationId: operation.id, status: failed.operation.status === 'retrying' ? 'retrying' as const : 'failed' as const })
     } finally {
       stopHeartbeat()
+      await Promise.allSettled([dependencies.renderer.cleanup(operation.id), dependencies.luts.cleanup(operation.id)])
     }
   }
 }

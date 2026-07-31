@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { join, resolve } from 'node:path'
 
 import type { PrismaClient } from '../../../generated/prisma-v2/index.js'
 
@@ -237,6 +238,7 @@ import { createLocalMediaUploadStorageFromEnvironment } from './media/local-medi
 import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
+import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
 import { createFfmpegSourceCleanupProcessorFromEnvironment } from './media/ffmpeg-source-cleanup-processor.ts'
 import {
   createFfmpegSpeakerDiarizationAudioPreparerFromEnvironment,
@@ -1170,6 +1172,7 @@ export function createProjectProxyRenderWorker(
     renderElementMaps: createRenderElementMapRepository(),
     proxyReviews: createProxyReviewRepository(),
     colorPipelines: createColorPipelineCompilationRepository(),
+    luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work')),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
@@ -1196,6 +1199,7 @@ export function createProjectFinalExportWorker(
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment),
     renderElementMaps: createRenderElementMapRepository(),
     colorPipelines: createColorPipelineCompilationRepository(),
+    luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work')),
     artifactRoot,
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),

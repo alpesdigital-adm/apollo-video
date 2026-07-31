@@ -11,6 +11,7 @@ import type { ProxyReviewRepository } from './ports/proxy-review-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
+import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-materializer.ts'
 import { evaluateRenderedProxy } from './render-workflow.ts'
 import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
@@ -42,6 +43,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   renderElementMaps: RenderElementMapRepository
   proxyReviews: ProxyReviewRepository
   colorPipelines: ColorPipelineCompilationRepository
+  luts: ProjectLutRenderMaterializer
   artifactRoot: string
   clock?: () => Date
   leaseDurationMs?: number
@@ -131,6 +133,10 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         (!colorPipelines.has(asset.artifactId) || context.colorPipelineBindings.find((binding) => binding.sourceArtifactId === asset.artifactId)?.sourceManifestId !== asset.manifestId))) {
         throw new DomainError('INVALID_RENDER_INPUT', 'Render video source is missing its bound color pipeline')
       }
+      const materializedLut = await dependencies.luts.materialize({
+        workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
+        operationId: operation.id, compilations: [...colorPipelines.values()],
+      })
       const immutableInputHash = calculateVersionHash({
         kind: 'project-proxy-render/v1',
         projectId: context.projectId,
@@ -162,6 +168,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           mediaType: asset.mediaType,
           ...(asset.mediaType === 'video' ? { colorPipelineCompilation: colorPipelines.get(asset.artifactId)! } : {}),
         })),
+        lutPaths: materializedLut.lutPaths,
         clips, fps: source.editPlan.fps, format: source.format, subtitleCues, transitions, ...(composition ? { composition } : {}),
         signal: abortController.signal,
       })
@@ -172,7 +179,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editorial-proxy/1.1.0').digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: '1.1.0', parameters: { inputHash: context.inputHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings } },
+        recipe: { id: 'editorial-proxy', version: '1.1.0', parameters: { inputHash: context.inputHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null } },
         sources: source.renderSources.map((asset) => ({
           artifactKey: asset.artifactKey,
           sha256: asset.sha256,
@@ -239,7 +246,6 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const succeeded = await withLeaseCommand(() =>
         dependencies.operations.succeed(command(clock())))
       if (!succeeded) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
-      await dependencies.renderer.cleanup(operation.id).catch(() => undefined)
       return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
     } catch (error) {
       stopHeartbeat()
@@ -250,10 +256,10 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const failed = await withLeaseCommand(() =>
         dependencies.operations.failOrRetry({ ...command(failedAt), error: failure, ...(nextAttemptAt ? { nextAttemptAt } : {}) }))
       if (!failed) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
-      await dependencies.renderer.cleanup(operation.id).catch(() => undefined)
       return Object.freeze({ operationId: operation.id, status: failed.operation.status === 'retrying' ? 'retrying' as const : 'failed' as const })
     } finally {
       stopHeartbeat()
+      await Promise.allSettled([dependencies.renderer.cleanup(operation.id), dependencies.luts.cleanup(operation.id)])
     }
   }
 }

@@ -137,6 +137,35 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
     return hydrate(row, false)
   }
 
+  async readEffectiveForVersion(input: { workspaceId: string; projectId: string; projectVersionId: string }) {
+    const lineage = await this.client.$queryRaw<Array<{ selectionId: string }>>(Prisma.sql`
+      WITH RECURSIVE lineage AS (
+        SELECT "id", "parentVersionId", 0 AS depth
+        FROM "project_versions"
+        WHERE "id" = ${input.projectVersionId} AND "workspaceId" = ${input.workspaceId} AND "projectId" = ${input.projectId}
+        UNION ALL
+        SELECT parent."id", parent."parentVersionId", lineage.depth + 1
+        FROM "project_versions" parent
+        INNER JOIN lineage ON parent."id" = lineage."parentVersionId"
+        WHERE parent."workspaceId" = ${input.workspaceId} AND parent."projectId" = ${input.projectId} AND lineage.depth < 999
+      )
+      SELECT selection."id" AS "selectionId"
+      FROM lineage
+      INNER JOIN "project_lut_selections" selection
+        ON selection."resultVersionId" = lineage."id"
+        AND selection."workspaceId" = ${input.workspaceId}
+        AND selection."projectId" = ${input.projectId}
+      ORDER BY lineage.depth ASC
+      LIMIT 1
+    `)
+    const selectionId = lineage[0]?.selectionId
+    if (!selectionId) return null
+    const row = await this.client.v2ProjectLutSelection.findUnique({ where: { id: selectionId }, include: { command: true, resultVersion: true, resolvedLutVersion: true } })
+    if (!row || row.workspaceId !== input.workspaceId || row.projectId !== input.projectId) throw new DomainError('PERSISTENCE_CONFLICT', 'Effective project LUT selection disappeared')
+    const result = hydrate(row, false)
+    return Object.freeze({ selection: result.selection, ...(row.resolvedLutVersion ? { resolvedLutVersion: hydrateLut(row.resolvedLutVersion) } : {}) })
+  }
+
   async commitOrReplay(input: Readonly<ProjectLutSelectionCommit>, serializationAttempt = 1): Promise<Readonly<ProjectLutSelectionResult>> {
     try {
       return await this.client.$transaction(async (transaction) => {

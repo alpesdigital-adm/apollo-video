@@ -105,7 +105,7 @@ function creative(
     throw new DomainError('INVALID_RENDER_INPUT', 'creative LUT requires apollo-lut')
   }
   const parameters = stage.implementation.parameters
-  if (Object.keys(parameters).some((key) => key !== 'mode')) {
+  if (Object.keys(parameters).some((key) => !['mode', 'intensity'].includes(key))) {
     throw new DomainError('INVALID_RENDER_INPUT', 'creative LUT has unsupported parameters')
   }
   if (!stage.enabled) {
@@ -116,6 +116,10 @@ function creative(
   }
   if (parameters.mode !== 'lut3d') {
     throw new DomainError('INVALID_RENDER_INPUT', 'enabled creative LUT must declare lut3d mode')
+  }
+  const intensity = Number(parameters.intensity)
+  if (!Number.isFinite(intensity) || intensity < 0 || intensity > 1) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'creative LUT intensity is invalid')
   }
   const artifactId = stage.lut?.artifactId ?? ''
   const path = lutPaths[artifactId]

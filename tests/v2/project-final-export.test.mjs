@@ -290,12 +290,16 @@ function workerDependencies(
   persistedIdentity = { artifactId: 'artifact-final-output', manifestId: 'manifest-final-output' },
 ) {
   let now = Date.parse('2026-07-19T01:00:00.000Z')
-  const calls = { rights: 0, rendered: 0, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 0, failed: 0, cleaned: 0 }
+  const calls = { rights: 0, rendered: 0, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 0, failed: 0, cleaned: 0, lutCleaned: 0 }
   return {
     calls,
     dependencies: {
       operations: operations.repository,
       colorPipelines,
+      luts: {
+        async materialize() { return { selectionId: 'selection-final-export', selectionHash: '8'.repeat(64), lutPaths: {} } },
+        async cleanup() { calls.lutCleaned += 1 },
+      },
       projects: {
         async readImmutableApprovedSource() { return approvedSource() },
         async convergeOutputIdentity(input) {
@@ -375,6 +379,7 @@ function workerDependencies(
           calls.rendered += 1
           assert.equal(input.renderKind, 'final')
           assert.equal(input.fps, 30)
+          assert.deepEqual(input.lutPaths, {})
           assert.deepEqual(input.sources, [{
             artifactId: sourceArtifactId,
             path: join(
@@ -422,7 +427,7 @@ test('final export worker revalidates rights, persists lineage and completes the
   const { calls, dependencies } = workerDependencies(operations)
   const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-success')
 
-  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 1, mapped: 1, converged: 0, attached: 1, attempts: 1, failed: 0, cleaned: 1 })
+  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 1, mapped: 1, converged: 0, attached: 1, attempts: 1, failed: 0, cleaned: 1, lutCleaned: 1 })
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'succeeded' })
   assert.equal(operations.operation.status, 'succeeded')
 })
@@ -470,7 +475,7 @@ test('final export worker fails closed if rights are revoked before persistence'
 
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
   assert.equal(operations.operation.status, 'failed')
-  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 1, failed: 1, cleaned: 1 })
+  assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 1, failed: 1, cleaned: 1, lutCleaned: 1 })
 })
 
 test('final export worker converges content deduplication under the active lease', async () => {

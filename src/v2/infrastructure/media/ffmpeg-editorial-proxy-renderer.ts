@@ -139,6 +139,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         sourcePath: source.path,
         outputPath,
         compilation: source.colorPipelineCompilation!,
+        lutPaths: input.lutPaths,
         signal: input.signal,
       })
       return Object.freeze({ ...source, path: outputPath })
