@@ -7,6 +7,7 @@ import {
   FfmpegEditorialProxyRenderer,
   assertClipRate,
   atempoFactors,
+  mapTimelineRangeToSourceFrames,
 } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { MAX_PARTIAL_RENDER_RANGES } from '../../src/v2/application/ports/project-proxy-render-repository.ts'
 
@@ -143,6 +144,21 @@ test('T-FR-233 atempo decomposes any supported rate into factors FFmpeg accepts'
     const product = factors.reduce((total, factor) => total * factor, 1)
     assert.ok(Math.abs(product - rate) < 1e-9, `rate ${rate} product drifted to ${product}`)
   }
+})
+
+test('T-FR-233 fractional-rate range mapping rounds absolute boundaries without accumulated drift', () => {
+  assert.deepEqual(mapTimelineRangeToSourceFrames({
+    sourceInFrame: 0, sourceOutFrame: 9, timelineInFrame: 0, timelineOutFrame: 6,
+    overlapStartFrame: 1, overlapEndFrame: 2, rate: 1.5,
+  }), { sourceInFrame: 2, sourceOutFrame: 3 })
+  assert.deepEqual(mapTimelineRangeToSourceFrames({
+    sourceInFrame: 30, sourceOutFrame: 120, timelineInFrame: 10, timelineOutFrame: 55,
+    overlapStartFrame: 20, overlapEndFrame: 40, rate: 2,
+  }), { sourceInFrame: 50, sourceOutFrame: 90 })
+  assert.throws(() => mapTimelineRangeToSourceFrames({
+    sourceInFrame: 0, sourceOutFrame: 45, timelineInFrame: 0, timelineOutFrame: 90,
+    overlapStartFrame: 1, overlapEndFrame: 2, rate: 0.5,
+  }), /cannot be represented by whole source frames/)
 })
 
 test('T-FR-233 renderer accepts several disjoint stale ranges and refuses non-canonical sets', async () => {

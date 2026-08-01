@@ -33,9 +33,15 @@ operation, creates no artifact, performs no color resolution and is never
 claimed by a worker. The transaction revalidates Command/impact, current/base
 versions, source, proxy operation, artifact and manifest, then records the
 self-referential `reusedFromOperationId` plus Command/base-version FKs. Missing
-base proxy fails closed instead of silently rendering. The current adapter is
-intentionally limited to one merged range and unit-rate clips. Other Commands
-and multiple ranges/rates remain open and prevent claiming FR-233 complete.
+base proxy fails closed instead of silently rendering. The adapter accepts up
+to eight canonical disjoint ranges; overlap and adjacency are fused in the
+domain, while malformed, excessive, or full-coverage sets fall back to a full
+render. It interleaves reused base segments with freshly encoded ranges. Clips
+use frame-first rate in `[0.25, 4]`, `setpts` for video and chained `atempo` for
+audio; reverse fails closed. Fractional partial boundaries are mapped from both
+absolute endpoints, never from an independently rounded length. Other Commands,
+PostgreSQL execution, deployment, and acceptance still prevent claiming FR-233
+complete.
 
 Manual crop is not encoded as an inspector/layout string. It is a typed,
 normalized source rectangle on one clip, scoped by the Command to one format.

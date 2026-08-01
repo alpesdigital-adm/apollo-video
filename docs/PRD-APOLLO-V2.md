@@ -1682,7 +1682,12 @@ range stale pelos frames do cue realmente alterado e recompõe apenas esse
 intervalo; o renderer recebe o texto novo no mesmo input materializado. A
 troca manual por B-roll também passa pelo `replace` comum: o clip novo mantém
 os frames de áudio do master, o impacto limita o range do clip e o proxy
-reutiliza os trechos vizinhos válidos. A
+reutiliza os trechos vizinhos válidos. O executor parcial aceita até oito
+ranges stale canônicos e disjuntos, intercalando trechos re-renderizados com o
+proxy-base. Overlap/adjacência são fundidos; excesso, cobertura integral ou
+forma inválida fazem fallback para render completo. Clips retimados usam a
+timeline frame-first, rate `[0.25, 4]`, `setpts`/`atempo` e limites absolutos
+arredondados sem acumular drift; reverse é rejeitado. A
 entrega permanece aberta até a mesma semântica cobrir todos os Commands e
 ranges e a jornada integrada ser executada, implantada e aceita.
 

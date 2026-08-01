@@ -202,6 +202,41 @@ function assertClipTimeline(clip: EditorialRenderInput['clips'][number]): void {
   }
 }
 
+export function mapTimelineRangeToSourceFrames(input: Readonly<{
+  sourceInFrame: number
+  sourceOutFrame: number
+  timelineInFrame: number
+  timelineOutFrame: number
+  overlapStartFrame: number
+  overlapEndFrame: number
+  rate: number
+}>): Readonly<{ sourceInFrame: number; sourceOutFrame: number }> {
+  const rate = assertClipRate(input.rate)
+  if (
+    ![input.sourceInFrame, input.sourceOutFrame, input.timelineInFrame, input.timelineOutFrame,
+      input.overlapStartFrame, input.overlapEndFrame].every(Number.isSafeInteger) ||
+    input.overlapStartFrame < input.timelineInFrame ||
+    input.overlapEndFrame > input.timelineOutFrame ||
+    input.overlapEndFrame <= input.overlapStartFrame
+  ) throw new DomainError('INVALID_RENDER_INPUT', 'Partial proxy overlap is outside its timeline clip')
+  // Map both absolute boundaries. Rounding the overlap length independently can
+  // drift by one frame for fractional rates because round(a) + round(b) is not
+  // generally equal to round(a + b).
+  const sourceInFrame = input.sourceInFrame + Math.round(
+    (input.overlapStartFrame - input.timelineInFrame) * rate,
+  )
+  const sourceOutFrame = input.sourceInFrame + Math.round(
+    (input.overlapEndFrame - input.timelineInFrame) * rate,
+  )
+  if (sourceOutFrame <= sourceInFrame || sourceOutFrame > input.sourceOutFrame) {
+    throw new DomainError(
+      'INVALID_RENDER_INPUT',
+      'Partial proxy overlap cannot be represented by whole source frames at its rate',
+    )
+  }
+  return Object.freeze({ sourceInFrame, sourceOutFrame })
+}
+
 /**
  * Canonical partial-render ranges: at least one, at most
  * `MAX_PARTIAL_RENDER_RANGES`, ordered, strictly disjoint (adjacency is fused
@@ -255,16 +290,13 @@ function sliceRenderRange(input: EditorialRenderInput, range: {
     const overlapEnd = Math.min(range.endFrame, clip.timelineOutFrame)
     if (overlapEnd <= overlapStart) return []
     const rate = assertClipRate(clip.rate)
-    const leadingSourceFrames = Math.round((overlapStart - clip.timelineInFrame) * rate)
-    const keptSourceFrames = Math.round((overlapEnd - overlapStart) * rate)
-    const sourceInFrame = clip.sourceInFrame + leadingSourceFrames
-    const sourceOutFrame = sourceInFrame + keptSourceFrames
-    if (keptSourceFrames < 1 || sourceOutFrame > clip.sourceOutFrame) {
-      throw new DomainError(
-        'INVALID_RENDER_INPUT',
-        'Partial proxy range does not map onto the clip source span at its rate',
-      )
-    }
+    const { sourceInFrame, sourceOutFrame } = mapTimelineRangeToSourceFrames({
+      sourceInFrame: clip.sourceInFrame, sourceOutFrame: clip.sourceOutFrame,
+      timelineInFrame: clip.timelineInFrame, timelineOutFrame: clip.timelineOutFrame,
+      overlapStartFrame: overlapStart, overlapEndFrame: overlapEnd, rate,
+    })
+    const leadingSourceFrames = sourceInFrame - clip.sourceInFrame
+    const keptSourceFrames = sourceOutFrame - sourceInFrame
     const audioSourceInFrame = (clip.audioSourceInFrame ?? clip.sourceInFrame) + leadingSourceFrames
     const audioSourceOutFrame = audioSourceInFrame + keptSourceFrames
     return [Object.freeze({

@@ -632,12 +632,18 @@ versão que o produziu. A capability aditiva
 alterar o payload persistido; replay precisa rejeitar qualquer divergência
 entre payload e linhas.
 
-O primeiro executor parcial usa o `command-impact/v1` persistido como única
-fonte do range: para um `manual-edit` com exatamente um range proxy, ele exige
-um proxy concluído da versão-base, valida identidade/hash/tamanho, recompõe só o
-trecho e monta a saída completa com prefixo e sufixo ainda válidos. O renderer
+O executor parcial usa o `command-impact/v1` persistido como única fonte dos
+ranges: para um `manual-edit` com até oito ranges proxy canônicos e disjuntos,
+ele exige um proxy concluído da versão-base, valida identidade/hash/tamanho,
+recompõe cada trecho e intercala a saída com todos os segmentos ainda válidos.
+Overlap e adjacência são fundidos no domínio; excesso, forma não canônica ou
+cobertura integral fazem fallback para render completo. Rate de clip é
+frame-first em `[0.25, 4]`: vídeo usa `setpts`, áudio usa `atempo` encadeado e
+reverse falha fechado. Cada recorte converte seus dois boundaries absolutos da
+timeline para source frames, evitando drift por arredondar comprimento à parte.
+O renderer
 recebe paths já materializados e não consulta persistência. Se não houver base
-reutilizável ou o range cobrir todo o timeline, o mesmo worker faz render V2
+reutilizável ou os ranges cobrirem todo o timeline, o mesmo worker faz render V2
 completo. A conclusão cria uma
 `V2CommandArtifactInvalidationResolution` imutável ligada à operação e ao novo
 artifact/manifest; consultas omitem a invalidação apenas após `succeeded`, de
