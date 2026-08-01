@@ -1,4 +1,11 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
+import {
+  isSupportedClipRate,
+  MAX_CLIP_RATE,
+  MIN_CLIP_RATE,
+  sourceFrameToTimelineFrame,
+  timelineSpanForRate,
+} from './clip-timing.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference, CommandImpactRange } from './command-impact.ts'
 import { assertDomain } from './errors.ts'
 import type { MediaTranscript } from './media-transcript.ts'
@@ -89,36 +96,62 @@ export function materializeSourceTranscriptReplacement(input: {
     records(track.clips, 'EditPlan video clips'))
   assertDomain(clips.length > 0, 'INVALID_ARGUMENT', 'Source transcript replacement requires timeline clips')
   const sourceRanges = clips.flatMap((clip, index) => {
-    assertDomain(Number(clip.rate) === 1, 'PRECONDITION_REQUIRED', 'Source transcript replacement currently requires unit-rate clips')
-    const audioArtifactId = String(clip.audioSourceArtifactId ?? clip.sourceArtifactId)
-    if (audioArtifactId !== sourceArtifactId) return []
+    // Every clip of the plan is validated, not only the ones carrying the
+    // replaced artifact: a plan whose timing contradicts its own rates cannot
+    // be trusted to place evidence anywhere. Only the audible ranges of the
+    // replaced artifact are then used for mapping.
+    const rate = Number(clip.rate)
+    assertDomain(
+      isSupportedClipRate(rate),
+      'INVALID_ARGUMENT',
+      `EditPlan clip ${index} rate is outside the supported range [${MIN_CLIP_RATE}, ${MAX_CLIP_RATE}]`,
+    )
+    const videoSourceInFrame = Number(clip.sourceInFrame)
+    const videoSourceOutFrame = Number(clip.sourceOutFrame)
     const sourceInFrame = Number(clip.audioSourceInFrame ?? clip.sourceInFrame)
     const sourceOutFrame = Number(clip.audioSourceOutFrame ?? clip.sourceOutFrame)
     const timelineInFrame = Number(clip.timelineInFrame)
     const timelineOutFrame = Number(clip.timelineOutFrame)
     assertDomain(
-      [sourceInFrame, sourceOutFrame, timelineInFrame, timelineOutFrame].every(Number.isSafeInteger) &&
+      [videoSourceInFrame, videoSourceOutFrame, sourceInFrame, sourceOutFrame, timelineInFrame, timelineOutFrame]
+        .every(Number.isSafeInteger) &&
+        videoSourceInFrame >= 0 && videoSourceOutFrame > videoSourceInFrame &&
         sourceInFrame >= 0 && sourceOutFrame > sourceInFrame &&
         timelineInFrame >= 0 && timelineOutFrame > timelineInFrame &&
-        sourceOutFrame - sourceInFrame === timelineOutFrame - timelineInFrame,
+        sourceOutFrame - sourceInFrame === videoSourceOutFrame - videoSourceInFrame &&
+        timelineOutFrame - timelineInFrame === timelineSpanForRate(videoSourceOutFrame - videoSourceInFrame, rate),
       'INVALID_ARGUMENT',
       `EditPlan clip ${index} cannot retime transcript evidence`,
     )
-    return [{ sourceInFrame, sourceOutFrame, timelineInFrame }]
+    const audioArtifactId = String(clip.audioSourceArtifactId ?? clip.sourceArtifactId)
+    if (audioArtifactId !== sourceArtifactId) return []
+    return [{ sourceInFrame, sourceOutFrame, timelineInFrame, timelineOutFrame, rate }]
   })
   assertDomain(sourceRanges.length > 0, 'INVALID_ARGUMENT', 'Replacement transcript source is absent from the audio timeline')
   const words = input.replacement.transcript.words.flatMap((word) => {
     const sourceStartFrame = Math.ceil(word.start * fps - 1e-7)
     const sourceEndFrame = Math.floor(word.end * fps + 1e-7)
+    // A word is evidence only when it is entirely inside one audible range:
+    // partially covered words are dropped rather than interpolated, so no text
+    // is ever attributed to frames the timeline does not play.
     const range = sourceRanges.find((candidate) =>
       sourceStartFrame >= candidate.sourceInFrame && sourceEndFrame <= candidate.sourceOutFrame)
     if (!range || sourceEndFrame < sourceStartFrame) return []
+    const timelineStartFrame = sourceFrameToTimelineFrame(sourceStartFrame, range)
+    let timelineEndFrame = sourceFrameToTimelineFrame(sourceEndFrame, range)
+    if (sourceEndFrame > sourceStartFrame && timelineEndFrame <= timelineStartFrame) {
+      // Compression (rate > 1) can round a short word onto a single frame. Give
+      // it the one frame that still fits inside the clip; if the clip has no
+      // room left, drop the word instead of inventing timeline space.
+      if (timelineStartFrame + 1 > range.timelineOutFrame) return []
+      timelineEndFrame = timelineStartFrame + 1
+    }
     return [Object.freeze({
       text: word.word,
       sourceStartSeconds: word.start,
       sourceEndSeconds: word.end,
-      timelineStartFrame: range.timelineInFrame + sourceStartFrame - range.sourceInFrame,
-      timelineEndFrame: range.timelineInFrame + sourceEndFrame - range.sourceInFrame,
+      timelineStartFrame,
+      timelineEndFrame,
     })]
   })
   assertDomain(words.length > 0, 'INVALID_ARGUMENT', 'Replacement transcript has no words retained by the current timeline')
