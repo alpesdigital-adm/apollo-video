@@ -403,19 +403,28 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         select: { id: true },
       })
       if (unresolvedInvalidations.length > 0) {
-        await transaction.v2CommandArtifactInvalidationResolution.createMany({
-          data: unresolvedInvalidations.map((invalidation) => ({
-            id: randomUUID(),
-            invalidationId: invalidation.id,
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            operationId: input.operationId,
+        for (const invalidation of unresolvedInvalidations) {
+          const replacement = {
             replacementArtifactId: input.outputArtifactId,
             replacementManifestId: input.outputManifestId,
             createdAt: new Date(input.createdAt),
-          })),
-          skipDuplicates: true,
-        })
+          }
+          await transaction.v2CommandArtifactInvalidationResolution.upsert({
+            where: { invalidationId_operationId: {
+              invalidationId: invalidation.id,
+              operationId: input.operationId,
+            } },
+            create: {
+              id: randomUUID(),
+              invalidationId: invalidation.id,
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              operationId: input.operationId,
+              ...replacement,
+            },
+            update: replacement,
+          })
+        }
       }
       await transaction.v2DirectorRun.updateMany({
         where: {

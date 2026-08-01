@@ -22,6 +22,7 @@ import { applyReviewPatchBatchService } from '../../src/v2/application/review-pa
 import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
 import { PrismaReviewPatchRepository } from '../../src/v2/infrastructure/prisma/review-patch-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
+import { PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
 
 const workspaceId = 'workspace-impact-1'
 const projectId = 'project-impact-1'
@@ -498,7 +499,7 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
 
 test('T-FR-233 completed proxy atomically records scoped invalidation resolutions', async () => {
   let invalidationQuery
-  let resolutionRows
+  const resolutionUpserts = []
   const repository = new PrismaProjectProxyRenderRepository({
     async $transaction(callback) {
       return callback({
@@ -510,7 +511,7 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
           invalidationQuery = query
           return [{ id: '1'.repeat(64) }, { id: '2'.repeat(64) }]
         } },
-        v2CommandArtifactInvalidationResolution: { async createMany({ data }) { resolutionRows = data } },
+        v2CommandArtifactInvalidationResolution: { async upsert(input) { resolutionUpserts.push(input) } },
         v2DirectorRun: { async updateMany() {} },
       })
     },
@@ -527,11 +528,11 @@ test('T-FR-233 completed proxy atomically records scoped invalidation resolution
     kind: 'proxy', variantId: '9:16',
     resolutions: { none: { operation: { status: 'succeeded' } } },
   })
-  assert.deepEqual(resolutionRows.map((row) => ({
-    invalidationId: row.invalidationId,
-    operationId: row.operationId,
-    replacementArtifactId: row.replacementArtifactId,
-    replacementManifestId: row.replacementManifestId,
+  assert.deepEqual(resolutionUpserts.map((entry) => ({
+    invalidationId: entry.where.invalidationId_operationId.invalidationId,
+    operationId: entry.where.invalidationId_operationId.operationId,
+    replacementArtifactId: entry.update.replacementArtifactId,
+    replacementManifestId: entry.update.replacementManifestId,
   })), [
     { invalidationId: '1'.repeat(64), operationId: 'operation-proxy-2', replacementArtifactId: 'artifact-proxy-replacement', replacementManifestId: 'manifest-proxy-replacement' },
     { invalidationId: '2'.repeat(64), operationId: 'operation-proxy-2', replacementArtifactId: 'artifact-proxy-replacement', replacementManifestId: 'manifest-proxy-replacement' },
@@ -672,6 +673,69 @@ test('T-FR-233 a moved clip invalidates the continuous downstream timing envelop
   const invalidations = createCommandArtifactInvalidations({ impact: moved, createdAt })
   assert.ok(invalidations.length >= 1)
   assert.deepEqual(invalidations[0].affectedRanges, moved.affectedRanges)
+})
+
+test('T-FR-233 completed final export resolves only stale finals for its exact variant', async () => {
+  let invalidationQuery
+  const resolutionUpserts = []
+  let projectUpdate
+  const repository = new PrismaProjectFinalExportRepository({
+    async $transaction(callback) {
+      return callback({
+        v2ProjectFinalExportOperation: { async findFirst() { return {
+          operationId: 'operation-final-2', outputAspectRatio: '16:9',
+        } } },
+        v2MediaArtifact: { async findFirst() { return { id: 'artifact-final-replacement' } } },
+        v2MediaArtifactManifest: { async findFirst() { return { id: 'manifest-final-replacement' } } },
+        v2ProjectMediaAsset: { async upsert() {} },
+        v2CommandArtifactInvalidation: { async findMany(query) {
+          invalidationQuery = query
+          return [{ id: '3'.repeat(64) }]
+        } },
+        v2CommandArtifactInvalidationResolution: { async upsert(input) { resolutionUpserts.push(input) } },
+        v2Project: { async updateMany(query) { projectUpdate = query; return { count: 1 } } },
+      })
+    },
+  })
+  await repository.attachCompletedOutput({
+    workspaceId, operationId: 'operation-final-2', projectId,
+    projectVersionId: resultVersionId,
+    outputArtifactId: 'artifact-final-replacement',
+    outputManifestId: 'manifest-final-replacement',
+    originalFileName: 'replacement-final.mp4', createdAt,
+  })
+  await repository.attachCompletedOutput({
+    workspaceId, operationId: 'operation-final-2', projectId,
+    projectVersionId: resultVersionId,
+    outputArtifactId: 'artifact-final-retry-winner',
+    outputManifestId: 'manifest-final-retry-winner',
+    originalFileName: 'replacement-final.mp4', createdAt: '2026-07-31T19:01:00.000Z',
+  })
+  assert.deepEqual(invalidationQuery.where, {
+    workspaceId, projectId, resultVersionId,
+    kind: 'final', variantId: '16:9',
+    resolutions: { none: { operation: { status: 'succeeded' } } },
+  })
+  assert.deepEqual(resolutionUpserts.map((entry) => ({
+    invalidationId: entry.where.invalidationId_operationId.invalidationId,
+    operationId: entry.where.invalidationId_operationId.operationId,
+    replacementArtifactId: entry.update.replacementArtifactId,
+    replacementManifestId: entry.update.replacementManifestId,
+  })), [
+    {
+      invalidationId: '3'.repeat(64), operationId: 'operation-final-2',
+      replacementArtifactId: 'artifact-final-replacement',
+      replacementManifestId: 'manifest-final-replacement',
+    },
+    {
+      invalidationId: '3'.repeat(64), operationId: 'operation-final-2',
+      replacementArtifactId: 'artifact-final-retry-winner',
+      replacementManifestId: 'manifest-final-retry-winner',
+    },
+  ])
+  assert.deepEqual(projectUpdate.where, {
+    id: projectId, workspaceId, currentVersionId: resultVersionId,
+  })
 })
 
 test('T-FR-233 the real manual move materializer does not underinvalidate shifted middle clips', () => {

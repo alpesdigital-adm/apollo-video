@@ -210,6 +210,41 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         },
         update: {},
       })
+      const unresolvedInvalidations = await transaction.v2CommandArtifactInvalidation.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          resultVersionId: input.projectVersionId,
+          kind: 'final',
+          variantId: operation.outputAspectRatio,
+          resolutions: { none: { operation: { status: 'succeeded' } } },
+        },
+        select: { id: true },
+      })
+      if (unresolvedInvalidations.length > 0) {
+        for (const invalidation of unresolvedInvalidations) {
+          const replacement = {
+            replacementArtifactId: input.outputArtifactId,
+            replacementManifestId: input.outputManifestId,
+            createdAt: new Date(input.createdAt),
+          }
+          await transaction.v2CommandArtifactInvalidationResolution.upsert({
+            where: { invalidationId_operationId: {
+              invalidationId: invalidation.id,
+              operationId: input.operationId,
+            } },
+            create: {
+              id: randomUUID(),
+              invalidationId: invalidation.id,
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              operationId: input.operationId,
+              ...replacement,
+            },
+            update: replacement,
+          })
+        }
+      }
       const updated = await transaction.v2Project.updateMany({
         where: { id: input.projectId, workspaceId: input.workspaceId, currentVersionId: input.projectVersionId },
         data: { status: 'completed' },

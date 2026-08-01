@@ -244,6 +244,8 @@ Complemento local de FR-233/FR-214 — `apply-review-patch` persiste `command-im
 
 Complemento local de FR-233/FR-215 — `apply-review-patch-batch` persiste o mesmo `command-impact/v1` no payload v2, combina a classificação de até cem operações e canonicaliza seus ranges frame-first sem transformar mudanças locais disjuntas em envelope contínuo; operações de timing continuam invalidando do menor range/target afetado até o fim. O escopo de variants reúne o formato corrente e os `formatIds` das annotations incluídas. O adapter Prisma descobre outputs concluídos, relê e fenceia o conjunto no commit serializável, grava relações stale, e o replay valida identidade, hash e linhas normalizadas. A capability de aplicação do lote evoluiu para v2 e o repository de proxy aceita esse Command para range reuse. Testes locais passam e o E2E PostgreSQL/API foi ampliado para persistência e replay, mas permanece não executado neste host; deploy e aceite continuam abertos.
 
+Correção operacional de FR-233 — tanto a promoção de proxy quanto a de final resolvem somente relações stale da versão-resultado, kind e variant exatos. A leitura considera a resolução apenas depois que a operação relacionada está `succeeded`. Para tolerar perda de lease entre promoção e settlement, o adapter atualiza por upsert a identidade `(invalidationId, operationId)`: um retry do mesmo operation ID substitui artifact/manifest anteriores antes de poder tornar a resolução efetiva. Isso impede que bytes de uma tentativa órfã sejam apresentados como substituto válido quando outra tentativa conclui. A prova local usa adapters Prisma controlados; PostgreSQL real e deploy permanecem pendentes.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.

@@ -660,6 +660,14 @@ atual aceita até oito ranges canônicos e clips em rate `[0.25, 4]`; isso
 descreve a capacidade do executor, não autoriza produtores a declararem ranges
 disjuntos sem provar que o mapping intermediário permaneceu idêntico.
 
+Proxy e export final resolvem apenas invalidations da mesma versão-resultado,
+kind e variant. A relação só deixa de ser stale quando sua operação está
+`succeeded`. Como uma perda de lease pode ocorrer depois da promoção e antes
+do settlement, retries do mesmo operation ID fazem upsert da resolução por
+`(invalidationId, operationId)`, substituindo artifact e manifest pela tentativa
+mais recente. Assim bytes promovidos por uma tentativa órfã nunca se tornam a
+resolução observável de uma tentativa vencedora diferente.
+
 `apply-review-patch` também produz `command-impact/v1` no payload schema v2 do
 Command. Os ranges em milissegundos revisados pelo humano são convertidos pelo
 FPS imutável do EditPlan; um ponto vira um frame, e `trim`/`move` mantêm envelope
