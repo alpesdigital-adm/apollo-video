@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient, type V2ProjectLutSelection, type V2ProjectVe
 import type { ProjectLutSelectionCommandPayloadV2, ProjectLutSelectionCommit, ProjectLutSelectionContext, ProjectLutSelectionRepository, ProjectLutSelectionResult } from '../../application/ports/project-lut-selection-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
+import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProjectLutSelection, type ProjectLutSelection, type ProjectLutSelectionRequest } from '../../domain/project-lut-selection.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
@@ -87,7 +88,7 @@ function hydrate(row: StoredSelection, replayed: boolean): Readonly<ProjectLutSe
   const command = createEditCommand<ProjectLutSelectionCommandPayloadV2>({
     id: commandRow.id, workspaceId: commandRow.workspaceId, projectId: commandRow.projectId, baseVersionId: commandRow.baseVersionId, baseHash: commandRow.baseHash,
     author: { type: commandRow.actorType as 'user' | 'director' | 'system' | 'api-client', id: commandRow.actorId, ...(commandRow.delegatedUserId ? { delegatedUserId: commandRow.delegatedUserId } : {}) },
-    type: commandRow.type, scope: parse(commandRow.scopeJson, 'project LUT command scope') as EditScope,
+    type: requireEditCommandType(commandRow.type), scope: parse(commandRow.scopeJson, 'project LUT command scope') as EditScope,
     payload,
     ...(commandRow.reason ? { reason: commandRow.reason } : {}), idempotencyKey: commandRow.idempotencyKey, createdAt: commandRow.createdAt.toISOString(),
   })

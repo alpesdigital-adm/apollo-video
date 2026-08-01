@@ -11,6 +11,7 @@ import type {
 } from '../../application/ports/review-patch-batch-repository.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
+import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
   createCommandArtifactInvalidations,
@@ -262,7 +263,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       baseVersionId: commandRow.baseVersionId,
       baseHash: commandRow.baseHash,
       author: { type: commandRow.actorType as 'user' | 'director' | 'system' | 'api-client', id: commandRow.actorId, ...(commandRow.delegatedUserId ? { delegatedUserId: commandRow.delegatedUserId } : {}) },
-      type: commandRow.type,
+      type: requireEditCommandType(commandRow.type),
       scope: parseJson<EditScope>(commandRow.scopeJson, 'batch patch command scope'),
       payload,
       ...(commandRow.reason ? { reason: commandRow.reason } : {}),

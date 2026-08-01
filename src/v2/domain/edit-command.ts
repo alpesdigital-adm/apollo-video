@@ -1,3 +1,4 @@
+import { type EditCommandType, requireEditCommandType } from './edit-command-registry.ts'
 import { assertDomain, DomainError } from './errors.ts'
 import type { ProjectVersion } from './project-version.ts'
 
@@ -37,7 +38,13 @@ export interface EditCommand<TPayload = unknown> {
   createdAt: string
 }
 
-export type EditCommandInput<TPayload = unknown> = Omit<EditCommand<TPayload>, 'schemaVersion'>
+/**
+ * Command creation is closed over the registry: only a type declared in
+ * `EDIT_COMMAND_POLICIES` may enter the system, so every persisted Command has a
+ * known render-invalidation policy.
+ */
+export type EditCommandInput<TPayload = unknown> =
+  Omit<EditCommand<TPayload>, 'schemaVersion' | 'type'> & { type: EditCommandType }
 
 export const SEMANTIC_DIFF_CATEGORIES = [
   'story',
@@ -185,6 +192,10 @@ export function createEditCommand<TPayload>(
   })) {
     assertDomain(value.trim().length > 0, 'INVALID_COMMAND', `${field} is required`, { field })
   }
+
+  // Fail-closed: a type without a registered invalidation policy cannot be
+  // persisted, so no Command can silently skip render invalidation.
+  requireEditCommandType(input.type)
 
   assertDomain(
     input.idempotencyKey.length <= 128,

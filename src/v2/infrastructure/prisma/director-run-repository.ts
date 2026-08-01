@@ -18,6 +18,7 @@ import {
   validateDirectorDecisions,
 } from '../../domain/director-run.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
+import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { StoryPlan } from '../../domain/story-plan.ts'
 import type { TreatmentPlan } from '../../domain/treatment-plan.ts'
@@ -73,7 +74,7 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
       id: row.command.actorId,
       ...(row.command.delegatedUserId ? { delegatedUserId: row.command.delegatedUserId } : {}),
     },
-    type: row.command.type,
+    type: requireEditCommandType(row.command.type),
     scope,
     payload,
     ...(row.command.reason ? { reason: row.command.reason } : {}),
