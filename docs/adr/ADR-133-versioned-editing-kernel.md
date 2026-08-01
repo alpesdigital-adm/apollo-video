@@ -87,9 +87,11 @@ renderer. Mapping iterates audible clips in timeline order, so reordered source
 material stays chronological and every repeated source occurrence retains its
 own evidence; partially covered words are discarded rather than invented.
 The immutable snapshot carrying those frames is read by the next DirectorRun.
-PostgreSQL/API coverage is prepared but not executable on this host, and a real
-MP4 combining replaced evidence with non-unit rate is still missing; the case
-remains unaccepted until those E2Es, deploy and visual acceptance run.
+A local FFmpeg golden now carries that snapshot through the real Director and
+renderer, proving exact frame count, rates `1`, `2`, and `0.5`, retained audio,
+discarded gaps, and visible subtitles at the retimed intervals. Persistence in
+that golden remains in-memory; PostgreSQL/API execution, deployment, and visual
+acceptance are still required.
 
 `remove-spoken-content` is the next Command integrated into persisted
 invalidation. It intentionally does not claim partial reuse: the handler
