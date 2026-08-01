@@ -57,6 +57,7 @@ import { authorizeRenderInputMaterializationService } from '../../src/v2/applica
 import { materializeAuthorizedRenderInputService } from '../../src/v2/application/materialize-authorized-render-input.ts'
 import { createMaterializationAuthorization } from '../../src/v2/domain/materialization-authorization.ts'
 import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
+import { PrismaRenderInputAssetAvailability } from '../../src/v2/infrastructure/prisma/render-input-asset-availability.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from '../../src/v2/infrastructure/prisma/materialization-authorization-repository.ts'
 import { PrismaAssetRightsRepository } from '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
@@ -1589,6 +1590,49 @@ test('local artifact resolver streams and verifies bytes inside the configured r
       error.code === 'MATERIALIZATION_REVALIDATION_FAILED' &&
       ['ASSET_BYTE_SIZE_MISMATCH', 'ASSET_CONTENT_MISMATCH'].includes(error.details.reasonCode),
   )
+})
+
+test('T-FR-234 font and data artifacts are typed, available and materialized from verified local bytes', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-render-resources-'))
+  context.after(() => rm(root, { recursive: true, force: true }))
+  const records = new Map()
+  const assets = []
+  for (const [ordinal, resource] of [
+    { kind: 'font', key: 'workspaces/workspace-1/fonts/inter.woff2', container: 'woff2', bytes: Buffer.from('licensed-font-bytes'), role: 'subtitle-font' },
+    { kind: 'data', key: 'workspaces/workspace-1/render-data/layout.json', container: 'json', bytes: Buffer.from('{"layout":"safe"}'), role: 'layout-data' },
+  ].entries()) {
+    const sha256 = createHash('sha256').update(resource.bytes).digest('hex')
+    const artifactId = `artifact-${resource.kind}-resource`
+    const target = join(root, ...resource.key.split('/'))
+    await mkdir(dirname(target), { recursive: true })
+    await writeFile(target, resource.bytes)
+    records.set(artifactId, {
+      id: artifactId, workspaceId: 'workspace-1', artifactKey: resource.key,
+      sha256, byteSize: BigInt(resource.bytes.byteLength), mediaType: resource.kind,
+      status: 'available',
+    })
+    const manifest = createMediaArtifactManifest({
+      artifactKey: resource.key, artifactSha256: sha256, byteSize: resource.bytes.byteLength,
+      mediaType: resource.kind, container: resource.container,
+      recipe: { id: 'render-resource-import', version: '1.0.0', parameters: { kind: resource.kind } },
+    })
+    assert.equal(manifest.artifact.mediaType, resource.kind)
+    assets.push({
+      id: `${resource.kind}-resource`, artifactId, artifactKey: resource.key,
+      kind: resource.kind, role: resource.role, ordinal, sha256,
+      byteSize: resource.bytes.byteLength,
+    })
+  }
+  const client = { v2MediaArtifact: { async findFirst({ where }) { return records.get(where.id) ?? null } } }
+  const availability = new PrismaRenderInputAssetAvailability(client)
+  const resolver = new LocalArtifactRenderInputResolver(client, { root, workspaceId: 'workspace-1' })
+  for (const asset of assets) {
+    assert.deepEqual(await availability.inspect('workspace-1', asset), { available: true })
+    const resolved = await resolver.resolve(asset)
+    assert.match(resolved.uri, /^file:/)
+    assert.equal(resolved.sha256, asset.sha256)
+    assert.equal(resolved.byteSize, asset.byteSize)
+  }
 })
 test('output dimensions must match the declared ratio', () => {
   expectDomainError(

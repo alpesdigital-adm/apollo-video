@@ -1705,6 +1705,13 @@ a jornada integrada ser executada em PostgreSQL, implantada e aceita.
 
 Salvar props e manifest reproduzíveis.
 
+Todo recurso consumido pelo renderer — vídeo, áudio, imagem, fonte, LUT ou dado
+auxiliar — possui identidade imutável, checksum, tamanho, rights/policy e
+location materializada antes do início do render. Fontes e dados auxiliares são
+artifacts tipados; LUTs são reconstruídas por versão/intensidade. Locations
+locais ou assinadas existem apenas na lease interna e nunca alteram o hash
+portátil nem aparecem na API.
+
 ### FR-235 — Export matrix
 
 Variantes × formatos × idiomas com preflight de volume/custo.

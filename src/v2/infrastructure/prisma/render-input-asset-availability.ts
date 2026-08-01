@@ -34,7 +34,7 @@ export class PrismaRenderInputAssetAvailability
         ? { available: true }
         : { available: false, code: 'ASSET_IDENTITY_MISMATCH' }
     }
-    if (!['video', 'audio', 'image'].includes(asset.kind)) {
+    if (!['video', 'audio', 'image', 'font', 'data'].includes(asset.kind)) {
       return { available: false, code: 'ASSET_KIND_UNSUPPORTED' }
     }
     const stored = await this.client.v2MediaArtifact.findFirst({

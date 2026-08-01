@@ -26,7 +26,7 @@ function assertExactKeys(
   )
 }
 
-export const MEDIA_ARTIFACT_TYPES = ['video', 'audio', 'image'] as const
+export const MEDIA_ARTIFACT_TYPES = ['video', 'audio', 'image', 'font', 'data'] as const
 export type MediaArtifactType = (typeof MEDIA_ARTIFACT_TYPES)[number]
 
 export interface MediaArtifactSource {

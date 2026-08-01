@@ -11097,6 +11097,35 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('artifact-detail', 2, 'Artifact detail response including immutable font and auxiliary data resources',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['artifact', 'manifests'],
+      properties: {
+        artifact: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'id', 'workspaceId', 'artifactKey', 'sha256', 'byteSize',
+            'mediaType', 'container', 'status', 'createdAt',
+          ],
+          properties: {
+            id: idSchema,
+            workspaceId: idSchema,
+            artifactKey: { type: 'string', minLength: 1, maxLength: 512 },
+            sha256: sha256Schema,
+            byteSize: { type: 'string', pattern: '^[1-9][0-9]*$' },
+            mediaType: { enum: ['video', 'audio', 'image', 'font', 'data'] },
+            container: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+            status: { enum: ['available', 'quarantined', 'deleted'] },
+            createdAt: dateTimeSchema,
+          },
+        },
+        manifests: { type: 'array', items: artifactManifestSchema },
+      },
+    }),
+  ),
   defineSchema('artifact-lineage-diagnostic', 1, 'Media artifact lineage diagnostic response',
     successSchema({
       type: 'object',

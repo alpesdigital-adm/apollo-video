@@ -5167,6 +5167,20 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/artifact-detail/v2': [
+      {
+        data: {
+          artifact: {
+            id: 'artifact-font-example-1', workspaceId,
+            artifactKey: 'artifact:artifact-font-example-1', sha256: 'f'.repeat(64),
+            byteSize: '184320', mediaType: 'font', container: 'woff2',
+            status: 'available', createdAt,
+          },
+          manifests: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/media-color-probe/v1': [
       {
         data: {

@@ -100,7 +100,7 @@ export class LocalArtifactRenderInputResolver implements RenderInputAssetResolve
         if (contentHash.digest('hex') !== materialized.sha256) throw materializationFailure('ASSET_CONTENT_MISMATCH', asset)
         return { uri: pathToFileURL(canonicalPath).href, sha256: materialized.sha256, byteSize: materialized.byteSize }
       }
-      if (!['video', 'audio', 'image'].includes(asset.kind)) {
+      if (!['video', 'audio', 'image', 'font', 'data'].includes(asset.kind)) {
         throw materializationFailure('ASSET_KIND_UNSUPPORTED', asset)
       }
       const stored = await this.client.v2MediaArtifact.findFirst({

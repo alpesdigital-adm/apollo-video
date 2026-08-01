@@ -115,7 +115,7 @@ test('T-FR-234 S3 adapter refuses storage access after authorization expiry', as
   }
 })
 
-test('T-FR-234 S3 resolver rechecks Postgres identity before object storage and delegates LUT only', async () => {
+test('T-FR-234 S3 resolver rechecks media, font and data identity before object storage and delegates LUT only', async () => {
   const sha256 = 'a'.repeat(64)
   const stored = { artifactKey: 'workspaces/1/source.mp4', sha256, byteSize: 123n, mediaType: 'video', status: 'available' }
   let objectCalls = 0
@@ -134,7 +134,12 @@ test('T-FR-234 S3 resolver rechecks Postgres identity before object storage and 
   assert.equal(objectCalls, 1)
   await resolver.resolve({ ...asset, kind: 'lut', artifactKey: 'workspace-luts/lut-1/versions/1/intensity-1.000000-' + sha256 + '.cube' })
   assert.equal(delegated, 1)
-  await assert.rejects(resolver.resolve({ ...asset, kind: 'font' }), (error) => error.details.reasonCode === 'ASSET_KIND_UNSUPPORTED')
+  for (const kind of ['font', 'data']) {
+    stored.mediaType = kind
+    const resolved = await resolver.resolve({ ...asset, kind })
+    assert.match(resolved.uri, /^https:/)
+  }
+  assert.equal(objectCalls, 3)
 })
 
 test('T-FR-234 materialized RenderInput allows HTTP only for loopback S3-compatible development', async () => {

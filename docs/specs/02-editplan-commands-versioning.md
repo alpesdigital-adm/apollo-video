@@ -775,6 +775,8 @@ Regras:
 Compiler recebe planos/snapshots já resolvidos e produz RenderInput autocontido:
 
 - URLs assinadas/resolvidas;
+- fontes e dados auxiliares como artifacts tipados com checksum/tamanho;
+- LUTs reconstruídas por identidade versionada, nunca por path implícito;
 - clips frame-first;
 - layouts/crops;
 - subtitles;
@@ -784,6 +786,8 @@ Compiler recebe planos/snapshots já resolvidos e produz RenderInput autocontido
 - checksums.
 
 Renderer não chama provider, DB, Director ou busca de biblioteca.
+Texto em `data` continua dado não confiável e só é consumido pelo schema de
+props versionado; materialização não o interpreta como instrução.
 
 ## 28. Validation errors
 

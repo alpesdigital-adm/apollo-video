@@ -41,7 +41,7 @@ export class S3ArtifactRenderInputResolver implements RenderInputAssetResolver {
 
   async resolve(asset: RenderInputAsset): Promise<ResolvedRenderInputAsset> {
     if (asset.kind === 'lut') return this.nonMediaResolver.resolve(asset)
-    if (!['video', 'audio', 'image'].includes(asset.kind)) throw failure('ASSET_KIND_UNSUPPORTED', asset)
+    if (!['video', 'audio', 'image', 'font', 'data'].includes(asset.kind)) throw failure('ASSET_KIND_UNSUPPORTED', asset)
     const stored = await this.client.v2MediaArtifact.findFirst({
       where: { id: asset.artifactId, workspaceId: this.workspaceId },
     })
