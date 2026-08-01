@@ -4,6 +4,7 @@ import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 import type { EditorialCutEditPlan } from '../../application/apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { ProjectProxyRenderRepository, ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
+import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
 import type { ProxyQualityIssue } from '../../application/render-workflow.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
@@ -299,16 +300,29 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     }
     const minimalRenders = impact.minimalRenders.filter((render) =>
       render.kind === 'proxy' && render.variantId === source.format)
-    if (minimalRenders.length !== 1 || minimalRenders[0]!.ranges.length !== 1) return source
-    const requestedRange = minimalRenders[0]!.ranges[0]!
-    const range = Object.freeze({
-      startFrame: requestedRange.startFrame,
-      endFrame: Math.min(requestedRange.endFrame, source.editPlan.durationFrames),
-    })
+    if (minimalRenders.length !== 1) return source
+    const requestedRanges = minimalRenders[0]!.ranges
+    const durationFrames = source.editPlan.durationFrames
     if (
-      range.startFrame < 0 || range.endFrame <= range.startFrame ||
-      (range.startFrame === 0 && range.endFrame === source.editPlan.durationFrames)
+      requestedRanges.length < 1 || requestedRanges.length > MAX_PARTIAL_RENDER_RANGES
     ) return source
+    // Clamp each stale range to the compiled duration and require the canonical
+    // shape the domain produces: ordered and strictly disjoint. Anything else —
+    // including a set that covers the whole timeline — falls back to a full render.
+    const ranges: { startFrame: number; endFrame: number }[] = []
+    for (const requested of requestedRanges) {
+      const startFrame = requested.startFrame
+      const endFrame = Math.min(requested.endFrame, durationFrames)
+      if (
+        !Number.isSafeInteger(startFrame) || !Number.isSafeInteger(endFrame) ||
+        startFrame < 0 || endFrame <= startFrame
+      ) return source
+      const previous = ranges.at(-1)
+      if (previous && startFrame <= previous.endFrame) return source
+      ranges.push({ startFrame, endFrame })
+    }
+    const staleFrames = ranges.reduce((total, item) => total + item.endFrame - item.startFrame, 0)
+    if (ranges.length < 1 || staleFrames >= durationFrames) return source
     const invalidations = command.artifactInvalidations
       .filter((row) => !row.resolutions.some((resolution) => resolution.operation.status === 'succeeded'))
       .map((row) => parseCommandArtifactInvalidation({
@@ -347,7 +361,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
         commandId: command.id,
         impactHash: impact.impactHash,
         baseVersionId: impact.baseVersionId,
-        ranges: Object.freeze([range]),
+        ranges: Object.freeze(ranges.map((item) => Object.freeze(item))),
         artifactId: reusable.artifactId,
         manifestId: reusable.manifestId,
         artifactKey: reusable.artifactKey,

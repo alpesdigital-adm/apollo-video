@@ -55,7 +55,12 @@ export interface EditorialCutClip {
   sourceOutFrame: number
   timelineInFrame: number
   timelineOutFrame: number
-  rate: 1
+  /**
+   * Playback speed multiplier applied to the source span. `1` is real time,
+   * `2` plays twice as fast, `0.5` half speed. Renderers accept `[0.25, 4]`;
+   * reverse playback (`rate <= 0`) is not supported.
+   */
+  rate: number
   crop?: Readonly<ManualCropRegion>
 }
 

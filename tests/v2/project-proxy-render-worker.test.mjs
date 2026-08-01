@@ -16,6 +16,7 @@ import { createManualCommandImpact } from '../../src/v2/domain/command-impact.ts
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
+import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 
 const colorCompilation = Object.freeze({
   id: 'color-pipeline-proxy-test', sourceArtifactId: 'artifact-project-proxy-source',
@@ -527,4 +528,94 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
     }),
     (error) => error.code === 'PERSISTENCE_CONFLICT' && /unchanged immutable Command/.test(error.message),
   )
+})
+
+async function runWithStaleRanges(ranges) {
+  const immutableSource = Object.freeze({
+    ...source(),
+    rangeReuse: Object.freeze({
+      schemaVersion: 'project-proxy-range-reuse/v1',
+      commandId: 'manual-command-multi-range-test',
+      impactHash: '7'.repeat(64),
+      baseVersionId: 'project-version-proxy-base',
+      ranges: Object.freeze(ranges.map((range) => Object.freeze({ ...range }))),
+      artifactId: 'artifact-project-proxy-base',
+      manifestId: 'manifest-project-proxy-base',
+      artifactKey: 'workspaces/project-proxy-test/editorial-proxies/multi-base.mp4',
+      sha256: '8'.repeat(64),
+      byteSize: 16_384,
+    }),
+  })
+  const operations = createOperations(immutableSource)
+  let renderedRange
+  let persistedManifest
+  let lineageIds
+  const base = dependencies(operations, {
+    projects: {
+      async readImmutableSource() { return immutableSource },
+      async attachCompletedOutput() { base.calls.attached += 1 },
+    },
+    renderer: {
+      async render(input) {
+        renderedRange = input.rangeReuse
+        return {
+          outputPath: join(tmpdir(), 'project-proxy-multi-range-output.mp4'),
+          sha256: 'd'.repeat(64), byteSize: 4_096,
+          probe: { width: 540, height: 960, duration: 10, fps: 30, codec: 'h264', container: 'mp4' },
+          renderElementMap: { schemaVersion: 'render-element-map/v1', proxyHash: 'd'.repeat(64), fps: 30, durationFrames: 300, canvas: { width: 540, height: 960 }, elements: [] },
+        }
+      },
+      async cleanup() { base.calls.cleaned += 1 },
+    },
+    artifacts: {
+      async persistOrReplay(input) {
+        base.calls.persisted += 1
+        persistedManifest = input.manifest
+        lineageIds = input.lineageIds
+        return { artifactId: input.artifactId, manifestId: input.manifestId, replayed: false }
+      },
+    },
+  })
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)(
+    'worker-project-proxy-multi-range',
+  )
+  return { outcome, renderedRange, persistedManifest, lineageIds, immutableSource, base }
+}
+
+test('T-FR-233 project proxy worker carries every stale range into renderer, recipe and lineage', async () => {
+  const two = await runWithStaleRanges([
+    { startFrame: 30, endFrame: 60 },
+    { startFrame: 150, endFrame: 210 },
+  ])
+
+  assert.equal(two.outcome.status, 'succeeded')
+  // Nothing truncates the range list to [0] on the way to the renderer.
+  assert.deepEqual(two.renderedRange.ranges, [
+    { startFrame: 30, endFrame: 60 },
+    { startFrame: 150, endFrame: 210 },
+  ])
+  assert.equal(two.renderedRange.impactHash, '7'.repeat(64))
+  assert.equal(two.renderedRange.commandId, 'manual-command-multi-range-test')
+  assert.equal(
+    two.renderedRange.path,
+    join(two.base.deps.artifactRoot, two.immutableSource.rangeReuse.artifactKey),
+  )
+  assert.equal(two.persistedManifest.recipe.version, EDITORIAL_PROXY_RECIPE_VERSION)
+  // The reused base proxy stays a declared lineage source of the new artifact.
+  assert.equal(two.persistedManifest.sources.at(-1).role, 'reused-proxy-range')
+  assert.equal(two.persistedManifest.sources.at(-1).sha256, two.immutableSource.rangeReuse.sha256)
+  assert.equal(two.lineageIds.length, two.immutableSource.renderSources.length + 1)
+  assert.equal(new Set(two.lineageIds).size, two.lineageIds.length)
+
+  // The manifest content-addresses its recipe parameters rather than storing them
+  // verbatim, so the proof that EVERY range reaches the recipe is that dropping
+  // or moving one changes the recorded parametersHash.
+  const truncated = await runWithStaleRanges([{ startFrame: 30, endFrame: 60 }])
+  const shifted = await runWithStaleRanges([
+    { startFrame: 30, endFrame: 60 },
+    { startFrame: 150, endFrame: 211 },
+  ])
+  const hashes = [two, truncated, shifted].map((run) => run.persistedManifest.recipe.parametersHash)
+  assert.ok(hashes.every((hash) => /^[a-f0-9]{64}$/.test(hash)))
+  assert.equal(new Set(hashes).size, 3, 'each stale-range set must address a distinct recipe')
 })

@@ -16,6 +16,7 @@ import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
+const ffprobePath = require('ffprobe-static').path
 const colorMetadata = Object.freeze({
   colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709',
   range: 'limited', bitDepth: 8,
@@ -422,6 +423,262 @@ test('T-FR-233 materialized B-roll replacement recomposes only its stale range',
     }
     await renderer.cleanup('range-reuse-partial')
     await renderer.cleanup('range-reuse-base')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('T-FR-233 renderer re-renders two disjoint stale ranges and reuses every frame between them', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-multi-range-render-'))
+  const masterPath = join(root, 'master.mp4')
+  const greenPath = join(root, 'green.mp4')
+  const bluePath = join(root, 'blue.mp4')
+  try {
+    // 6s red master with audio: 180 frames at 30fps.
+    execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=red:s=640x360:r=30:d=6',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=6',
+      '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-ar', '48000', masterPath,
+    ], { windowsHide: true })
+    for (const [color, path] of [['green', greenPath], ['blue', bluePath]]) {
+      execFileSync(ffmpegPath, [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', `color=c=${color}:s=640x360:r=30:d=1`,
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path,
+      ], { windowsHide: true })
+    }
+    const renderer = new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'work'), ffmpegPath })
+    const master = {
+      artifactId: 'artifact-multi-master', path: masterPath, mediaType: 'video',
+      colorPipelineCompilation: colorCompilation('artifact-multi-master'),
+    }
+    const green = {
+      artifactId: 'artifact-multi-green', path: greenPath, mediaType: 'video',
+      colorPipelineCompilation: colorCompilation('artifact-multi-green'),
+    }
+    const blue = {
+      artifactId: 'artifact-multi-blue', path: bluePath, mediaType: 'video',
+      colorPipelineCompilation: colorCompilation('artifact-multi-blue'),
+    }
+    const base = await renderer.render({
+      operationId: 'multi-range-base', renderKind: 'proxy',
+      sources: [master],
+      clips: [{
+        id: 'clip-base', sourceArtifactId: master.artifactId,
+        sourceInFrame: 0, sourceOutFrame: 180,
+        timelineInFrame: 0, timelineOutFrame: 180, rate: 1,
+      }],
+      fps: 30, format: '16:9',
+    })
+
+    // Two stale ranges, frames [30,60) and [120,150), each replaced by a
+    // different colour. Everything else must come from the base proxy.
+    const partial = await renderer.render({
+      operationId: 'multi-range-partial', renderKind: 'proxy',
+      sources: [master, green, blue],
+      clips: [
+        { id: 'clip-1', sourceArtifactId: master.artifactId, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+        { id: 'clip-2', sourceArtifactId: green.artifactId, audioSourceArtifactId: master.artifactId, audioSourceInFrame: 30, audioSourceOutFrame: 60, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 30, timelineOutFrame: 60, rate: 1 },
+        { id: 'clip-3', sourceArtifactId: master.artifactId, sourceInFrame: 60, sourceOutFrame: 120, timelineInFrame: 60, timelineOutFrame: 120, rate: 1 },
+        { id: 'clip-4', sourceArtifactId: blue.artifactId, audioSourceArtifactId: master.artifactId, audioSourceInFrame: 120, audioSourceOutFrame: 150, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 120, timelineOutFrame: 150, rate: 1 },
+        { id: 'clip-5', sourceArtifactId: master.artifactId, sourceInFrame: 150, sourceOutFrame: 180, timelineInFrame: 150, timelineOutFrame: 180, rate: 1 },
+      ],
+      fps: 30, format: '16:9',
+      rangeReuse: {
+        schemaVersion: 'project-proxy-range-reuse/v1',
+        commandId: 'manual-command-multi-range-golden', impactHash: '5'.repeat(64),
+        baseVersionId: 'project-version-multi-base',
+        ranges: [{ startFrame: 30, endFrame: 60 }, { startFrame: 120, endFrame: 150 }],
+        artifactId: 'artifact-multi-base-proxy', manifestId: 'manifest-multi-base-proxy',
+        path: base.outputPath, sha256: base.sha256, byteSize: base.byteSize,
+      },
+    })
+
+    // One composition file per stale range, each exactly one second long.
+    for (const index of [0, 1]) {
+      const rangeProbe = await probeVideo(
+        join(root, 'work', 'multi-range-partial', `editorial-proxy-range-0${index}.mp4`),
+      )
+      assert.ok(
+        Math.abs(rangeProbe.duration - 1) <= 0.1,
+        `range ${index} must last one second, got ${rangeProbe.duration}`,
+      )
+    }
+    // Full timeline length and audio survive the interleaved stitch.
+    assert.ok(Math.abs(partial.probe.duration - 6) <= 0.1, `expected 6s, got ${partial.probe.duration}`)
+    assert.ok(Math.abs(partial.probe.fps - 30) <= 0.01)
+    assert.equal(partial.probe.width, 960)
+    assert.equal(partial.probe.height, 540)
+    assert.equal(partial.probe.audioCodec, 'aac')
+    const audioAnalysis = spawnSync(ffmpegPath, [
+      '-hide_banner', '-nostats', '-i', partial.outputPath,
+      '-map', '0:a:0', '-af', 'ebur128=peak=true', '-f', 'null', '-',
+    ], { encoding: 'utf8', windowsHide: true })
+    assert.equal(audioAnalysis.status, 0, audioAnalysis.stderr)
+    assert.ok([...audioAnalysis.stderr.matchAll(/Peak:\s+(-?\d+(?:\.\d+)?) dBFS/g)].length >= 1)
+
+    // Colour proof: red before, green in range A, red in the GAP BETWEEN the two
+    // ranges, blue in range B, red after. The gap is the multi-range payoff.
+    const channelAt = (second) => {
+      const pixel = execFileSync(ffmpegPath, [
+        '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', partial.outputPath,
+        '-frames:v', '1', '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+      ], { windowsHide: true })
+      assert.equal(pixel.byteLength, 3)
+      return [pixel[0], pixel[1], pixel[2]]
+    }
+    for (const [second, dominant, label] of [
+      [0.5, 0, 'base prefix'],
+      [1.5, 1, 'stale range A'],
+      [2.5, 0, 'reused gap'],
+      [3.5, 0, 'reused gap'],
+      [4.5, 2, 'stale range B'],
+      [5.5, 0, 'base suffix'],
+    ]) {
+      const channels = channelAt(second)
+      for (const other of [0, 1, 2].filter((index) => index !== dominant)) {
+        assert.ok(
+          channels[dominant] > channels[other] * 2 + 8,
+          `${label} at ${second}s must be dominated by channel ${dominant}: ${channels}`,
+        )
+      }
+    }
+
+    // Byte proof: untouched regions are the reused base pixels, not a re-render.
+    const sample = (path, second) => execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', path,
+      '-frames:v', '1', '-vf', 'scale=240:135', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+    ], { windowsHide: true })
+    for (const second of [0.5, 2.5, 3.5, 5.5]) {
+      assert.deepEqual(
+        sample(partial.outputPath, second),
+        sample(base.outputPath, second),
+        `frames at ${second}s must be reused byte-for-byte from the base proxy`,
+      )
+    }
+    for (const second of [1.5, 4.5]) {
+      assert.notDeepEqual(sample(partial.outputPath, second), sample(base.outputPath, second))
+    }
+    await renderer.cleanup('multi-range-partial')
+    await renderer.cleanup('multi-range-base')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('T-FR-233 renderer retimes clips faster and slower with exact frame counts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-rate-render-'))
+  const masterPath = join(root, 'timed-master.mp4')
+  try {
+    // 6s master built from three 2s colour segments so retiming is observable:
+    // red 0-2s, green 2-4s, blue 4-6s. 180 frames at 30fps.
+    execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=red:s=640x360:r=30:d=2',
+      '-f', 'lavfi', '-i', 'color=c=green:s=640x360:r=30:d=2',
+      '-f', 'lavfi', '-i', 'color=c=blue:s=640x360:r=30:d=2',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=6',
+      '-filter_complex', '[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]',
+      '-map', '[v]', '-map', '3:a:0', '-shortest',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '48000',
+      masterPath,
+    ], { windowsHide: true })
+    const renderer = new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'work'), ffmpegPath })
+    const master = {
+      artifactId: 'artifact-rate-master', path: masterPath, mediaType: 'video',
+      colorPipelineCompilation: colorCompilation('artifact-rate-master'),
+    }
+    // 150 source frames (5s) become 120 timeline frames (4s): 120 source frames
+    // at rate 2 give 60, and 30 source frames at rate 0.5 give 60.
+    const retimed = await renderer.render({
+      operationId: 'rate-retimed', renderKind: 'proxy',
+      sources: [master],
+      clips: [
+        {
+          id: 'clip-fast', sourceArtifactId: master.artifactId,
+          sourceInFrame: 0, sourceOutFrame: 120,
+          timelineInFrame: 0, timelineOutFrame: 60, rate: 2,
+        },
+        {
+          id: 'clip-slow', sourceArtifactId: master.artifactId,
+          sourceInFrame: 120, sourceOutFrame: 150,
+          timelineInFrame: 60, timelineOutFrame: 120, rate: 0.5,
+        },
+      ],
+      fps: 30, format: '16:9',
+    })
+
+    // Numeric proof: 5 seconds of source became exactly 4 seconds of timeline.
+    assert.ok(
+      Math.abs(retimed.probe.duration - 4) <= 0.1,
+      `retimed proxy must last 4s, got ${retimed.probe.duration}`,
+    )
+    assert.ok(Math.abs(retimed.probe.fps - 30) <= 0.01)
+    const counted = execFileSync(ffprobePath, [
+      '-v', 'error', '-select_streams', 'v:0', '-count_frames',
+      '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', retimed.outputPath,
+    ], { encoding: 'utf8', windowsHide: true }).trim()
+    assert.ok(
+      Math.abs(Number(counted) - 120) <= 3,
+      `retimed proxy must hold 120 frames, ffprobe counted ${counted}`,
+    )
+    assert.equal(retimed.renderElementMap.durationFrames, 120)
+    assert.equal(retimed.probe.audioCodec, 'aac')
+    const audioAnalysis = spawnSync(ffmpegPath, [
+      '-hide_banner', '-nostats', '-i', retimed.outputPath,
+      '-map', '0:a:0', '-af', 'ebur128=peak=true', '-f', 'null', '-',
+    ], { encoding: 'utf8', windowsHide: true })
+    assert.equal(audioAnalysis.status, 0, audioAnalysis.stderr)
+    assert.ok(
+      [...audioAnalysis.stderr.matchAll(/Peak:\s+(-?\d+(?:\.\d+)?) dBFS/g)].length >= 1,
+      'retimed audio must survive the atempo chain',
+    )
+
+    // Visual proof of the mapping. Doubled speed folds source 0-2s (red) into
+    // output 0-1s and source 2-4s (green) into output 1-2s; half speed stretches
+    // source 4-5s (blue) across output 2-4s.
+    const channelAt = (second) => {
+      const pixel = execFileSync(ffmpegPath, [
+        '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', retimed.outputPath,
+        '-frames:v', '1', '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+      ], { windowsHide: true })
+      assert.equal(pixel.byteLength, 3)
+      return [pixel[0], pixel[1], pixel[2]]
+    }
+    for (const [second, dominant, label] of [
+      [0.5, 0, 'red at double speed'],
+      [1.5, 1, 'green at double speed'],
+      [2.5, 2, 'blue at half speed'],
+      [3.5, 2, 'blue still on screen at half speed'],
+    ]) {
+      const channels = channelAt(second)
+      for (const other of [0, 1, 2].filter((index) => index !== dominant)) {
+        assert.ok(
+          channels[dominant] > channels[other] * 2 + 8,
+          `${label} at ${second}s must be dominated by channel ${dominant}: ${channels}`,
+        )
+      }
+    }
+
+    // Control: the same source spans at rate 1 last 5s, not 4s.
+    const realTime = await renderer.render({
+      operationId: 'rate-real-time', renderKind: 'proxy',
+      sources: [master],
+      clips: [{
+        id: 'clip-real', sourceArtifactId: master.artifactId,
+        sourceInFrame: 0, sourceOutFrame: 150,
+        timelineInFrame: 0, timelineOutFrame: 150, rate: 1,
+      }],
+      fps: 30, format: '16:9',
+    })
+    assert.ok(
+      Math.abs(realTime.probe.duration - 5) <= 0.1,
+      `real-time control must last 5s, got ${realTime.probe.duration}`,
+    )
+    await renderer.cleanup('rate-retimed')
+    await renderer.cleanup('rate-real-time')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -10,6 +10,7 @@ import {
   timelineViewModelFromEditPlan,
 } from '../../src/v2/domain/manual-editing.ts'
 import {
+  canonicalCommandImpactRanges,
   createCommandArtifactInvalidations,
   createManualCommandImpact,
   parseCommandArtifactInvalidation,
@@ -574,4 +575,107 @@ test('T-FR-233 Prisma context discovers only completed proxy/final outputs for t
     assert.equal(query.where.projectVersionId, baseVersionId)
     assert.deepEqual(query.where.operation, { status: 'succeeded', phase: 'completed' })
   }
+})
+
+test('T-FR-233 stale ranges are canonicalized into an ordered, strictly disjoint list', () => {
+  // Adjacent ranges are FUSED, never rejected: [0,30] + [30,60] is one [0,60].
+  assert.deepEqual(
+    canonicalCommandImpactRanges([{ startFrame: 0, endFrame: 30 }, { startFrame: 30, endFrame: 60 }]),
+    [{ startFrame: 0, endFrame: 60 }],
+  )
+  // Overlaps fuse too, and the widest end wins.
+  assert.deepEqual(
+    canonicalCommandImpactRanges([{ startFrame: 0, endFrame: 40 }, { startFrame: 20, endFrame: 60 }]),
+    [{ startFrame: 0, endFrame: 60 }],
+  )
+  assert.deepEqual(
+    canonicalCommandImpactRanges([{ startFrame: 0, endFrame: 90 }, { startFrame: 20, endFrame: 30 }]),
+    [{ startFrame: 0, endFrame: 90 }],
+  )
+  // Duplicates collapse.
+  assert.deepEqual(
+    canonicalCommandImpactRanges([{ startFrame: 10, endFrame: 20 }, { startFrame: 10, endFrame: 20 }]),
+    [{ startFrame: 10, endFrame: 20 }],
+  )
+  // Genuinely separated ranges survive as separate entries, sorted by start.
+  assert.deepEqual(
+    canonicalCommandImpactRanges([{ startFrame: 120, endFrame: 150 }, { startFrame: 0, endFrame: 30 }]),
+    [{ startFrame: 0, endFrame: 30 }, { startFrame: 120, endFrame: 150 }],
+  )
+  assert.deepEqual(
+    canonicalCommandImpactRanges([
+      { startFrame: 150, endFrame: 180 },
+      { startFrame: 0, endFrame: 30 },
+      { startFrame: 60, endFrame: 90 },
+      { startFrame: 89, endFrame: 100 },
+    ]),
+    [
+      { startFrame: 0, endFrame: 30 },
+      { startFrame: 60, endFrame: 100 },
+      { startFrame: 150, endFrame: 180 },
+    ],
+  )
+  // The canonical list is deeply frozen and never merely touching.
+  const canonical = canonicalCommandImpactRanges([
+    { startFrame: 0, endFrame: 30 }, { startFrame: 120, endFrame: 150 },
+  ])
+  assert.ok(Object.isFrozen(canonical) && canonical.every((range) => Object.isFrozen(range)))
+  assert.ok(canonical.every((range, index) =>
+    index === 0 || range.startFrame > canonical[index - 1].endFrame))
+  for (const invalid of [
+    [{ startFrame: -1, endFrame: 10 }],
+    [{ startFrame: 10, endFrame: 10 }],
+    [{ startFrame: 10, endFrame: 5 }],
+    [{ startFrame: 0.5, endFrame: 10 }],
+    [{ startFrame: 0, endFrame: Number.NaN }],
+  ]) {
+    assert.throws(
+      () => canonicalCommandImpactRanges(invalid),
+      (error) => error.code === 'INVALID_ARGUMENT' && /range is invalid/.test(error.message),
+    )
+  }
+})
+
+test('T-FR-233 a moved clip invalidates two disjoint ranges instead of one wide envelope', () => {
+  const beforeEditPlan = plan()
+  beforeEditPlan.videoTracks[0].clips = [
+    { id: 'clip-1', sourceArtifactId: 'source-1', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+    { id: 'clip-2', sourceArtifactId: 'source-1', sourceInFrame: 30, sourceOutFrame: 180, timelineInFrame: 30, timelineOutFrame: 180, rate: 1 },
+  ]
+  const afterEditPlan = plan(resultVersionId)
+  afterEditPlan.videoTracks[0].clips = [
+    { id: 'clip-2', sourceArtifactId: 'source-1', sourceInFrame: 30, sourceOutFrame: 180, timelineInFrame: 0, timelineOutFrame: 150, rate: 1 },
+    { id: 'clip-1', sourceArtifactId: 'source-1', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 150, timelineOutFrame: 180, rate: 1 },
+  ]
+  const moved = impact({
+    operation: { kind: 'move', clipId: 'clip-1', toMs: 5000 },
+    beforeEditPlan,
+    afterEditPlan,
+  })
+  // The clip left [0,30] and landed at [150,180]; timing changes ripple to the
+  // end, so only the LAST range is extended through the plan duration. The
+  // frames between 30 and 150 stay reusable instead of being re-rendered.
+  assert.deepEqual(moved.affectedRanges, [
+    { startFrame: 0, endFrame: 30 },
+    { startFrame: 150, endFrame: 180 },
+  ])
+  assert.deepEqual(moved.changeKinds, ['move'])
+  assert.deepEqual(moved.minimalRenders, [{
+    kind: 'proxy', variantId: '9:16', ranges: moved.affectedRanges,
+  }])
+  // The persisted round trip keeps affectedRanges and minimalRenders[].ranges
+  // hash-identical, so a multi-range impact survives storage unchanged.
+  const parsed = parseCommandImpact(JSON.parse(JSON.stringify(moved)))
+  assert.deepEqual(parsed.affectedRanges, moved.affectedRanges)
+  assert.deepEqual(parsed.minimalRenders[0].ranges, moved.affectedRanges)
+  const invalidations = createCommandArtifactInvalidations({ impact: moved, createdAt })
+  assert.ok(invalidations.length >= 1)
+  assert.deepEqual(invalidations[0].affectedRanges, moved.affectedRanges)
+})
+
+test('T-FR-233 a single-clip edit still yields exactly one canonical range', () => {
+  // Regression guard: the multi-range path must not fragment the common case.
+  const single = impact()
+  assert.equal(single.affectedRanges.length, 1)
+  assert.deepEqual(single.affectedRanges, [{ startFrame: 15, endFrame: 45 }])
 })

@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
 import type { EditorialProxyRenderer } from '../../application/ports/editorial-proxy-renderer.ts'
+import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
@@ -131,28 +132,145 @@ function normalizedCropFilter(
   return `crop=${width}:${height}:${x}:${y},`
 }
 
+const MIN_CLIP_RATE = 0.25
+const MAX_CLIP_RATE = 4
+
+type PartialRange = Readonly<{ startFrame: number; endFrame: number }>
+
+export function assertClipRate(rate: number): number {
+  if (!Number.isFinite(rate)) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Editorial clip rate must be a finite number')
+  }
+  if (rate <= 0) {
+    throw new DomainError(
+      'INVALID_RENDER_INPUT',
+      'Editorial clip rate must be greater than zero: reverse playback is not supported',
+    )
+  }
+  if (rate < MIN_CLIP_RATE || rate > MAX_CLIP_RATE) {
+    throw new DomainError(
+      'INVALID_RENDER_INPUT',
+      `Editorial clip rate ${rate} is outside the supported range [${MIN_CLIP_RATE}, ${MAX_CLIP_RATE}]`,
+    )
+  }
+  return rate
+}
+
+/**
+ * Frame-first timing: the timeline span is the truth and the source span is read
+ * through the rate. A clip covering `s` source frames at `rate` must occupy
+ * exactly `round(s / rate)` timeline frames, so no clip can drift against its
+ * neighbours once concatenated.
+ */
+function timelineSpanForRate(sourceSpan: number, rate: number): number {
+  return Math.round(sourceSpan / rate)
+}
+
+/**
+ * `atempo` only accepts factors in [0.5, 2.0], so a rate outside that window is
+ * expressed as a chain (rate 4 becomes 2.0 x 2.0, rate 0.25 becomes 0.5 x 0.5).
+ */
+export function atempoFactors(rate: number): readonly number[] {
+  const factors: number[] = []
+  let remaining = rate
+  while (remaining > 2) {
+    factors.push(2)
+    remaining /= 2
+  }
+  while (remaining < 0.5) {
+    factors.push(0.5)
+    remaining *= 2
+  }
+  factors.push(remaining)
+  return Object.freeze(factors)
+}
+
+function assertClipTimeline(clip: EditorialRenderInput['clips'][number]): void {
+  const rate = assertClipRate(clip.rate)
+  const sourceSpan = clip.sourceOutFrame - clip.sourceInFrame
+  const timelineSpan = clip.timelineOutFrame - clip.timelineInFrame
+  if (
+    !Number.isSafeInteger(clip.sourceInFrame) || !Number.isSafeInteger(clip.sourceOutFrame) ||
+    !Number.isSafeInteger(clip.timelineInFrame) || !Number.isSafeInteger(clip.timelineOutFrame) ||
+    clip.sourceInFrame < 0 || clip.timelineInFrame < 0 || sourceSpan < 1 || timelineSpan < 1
+  ) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial clip frame range is invalid')
+  if (timelineSpan !== timelineSpanForRate(sourceSpan, rate)) {
+    throw new DomainError(
+      'INVALID_RENDER_INPUT',
+      `Editorial clip timeline span ${timelineSpan} does not match its ${sourceSpan} source frames at rate ${rate}`,
+    )
+  }
+}
+
+/**
+ * Canonical partial-render ranges: at least one, at most
+ * `MAX_PARTIAL_RENDER_RANGES`, ordered, strictly disjoint (adjacency is fused
+ * upstream by the domain) and never covering the whole timeline.
+ */
+function assertPartialRanges(
+  ranges: readonly PartialRange[],
+  fullExpectedFrames: number,
+): readonly PartialRange[] {
+  if (ranges.length < 1) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Partial proxy reuse requires at least one stale range')
+  }
+  if (ranges.length > MAX_PARTIAL_RENDER_RANGES) {
+    throw new DomainError(
+      'INVALID_RENDER_INPUT',
+      `Partial proxy reuse accepts at most ${MAX_PARTIAL_RENDER_RANGES} stale ranges`,
+    )
+  }
+  let staleFrames = 0
+  ranges.forEach((range, index) => {
+    if (
+      !Number.isSafeInteger(range.startFrame) || !Number.isSafeInteger(range.endFrame) ||
+      range.startFrame < 0 || range.endFrame <= range.startFrame ||
+      range.endFrame > fullExpectedFrames
+    ) throw new DomainError('INVALID_RENDER_INPUT', `Partial proxy range ${index} is invalid`)
+    const previous = ranges[index - 1]
+    if (previous && range.startFrame <= previous.endFrame) {
+      throw new DomainError(
+        'INVALID_RENDER_INPUT',
+        `Partial proxy range ${index} is not ordered strictly after its predecessor`,
+      )
+    }
+    staleFrames += range.endFrame - range.startFrame
+  })
+  if (staleFrames >= fullExpectedFrames) {
+    throw new DomainError(
+      'INVALID_RENDER_INPUT',
+      'Partial proxy ranges cover the whole timeline and cannot reuse a base proxy',
+    )
+  }
+  return Object.freeze(ranges.map((range) =>
+    Object.freeze({ startFrame: range.startFrame, endFrame: range.endFrame })))
+}
+
 function sliceRenderRange(input: EditorialRenderInput, range: {
   startFrame: number
   endFrame: number
 }) {
   const clips = input.clips.flatMap((clip) => {
-    if (clip.rate !== 1) {
-      throw new DomainError(
-        'INVALID_RENDER_INPUT',
-        'Partial proxy reuse requires unit-rate timeline clips',
-      )
-    }
     const overlapStart = Math.max(range.startFrame, clip.timelineInFrame)
     const overlapEnd = Math.min(range.endFrame, clip.timelineOutFrame)
     if (overlapEnd <= overlapStart) return []
-    const leadingFrames = overlapStart - clip.timelineInFrame
-    const trailingFrames = clip.timelineOutFrame - overlapEnd
-    const audioSourceInFrame = (clip.audioSourceInFrame ?? clip.sourceInFrame) + leadingFrames
-    const audioSourceOutFrame = (clip.audioSourceOutFrame ?? clip.sourceOutFrame) - trailingFrames
+    const rate = assertClipRate(clip.rate)
+    const leadingSourceFrames = Math.round((overlapStart - clip.timelineInFrame) * rate)
+    const keptSourceFrames = Math.round((overlapEnd - overlapStart) * rate)
+    const sourceInFrame = clip.sourceInFrame + leadingSourceFrames
+    const sourceOutFrame = sourceInFrame + keptSourceFrames
+    if (keptSourceFrames < 1 || sourceOutFrame > clip.sourceOutFrame) {
+      throw new DomainError(
+        'INVALID_RENDER_INPUT',
+        'Partial proxy range does not map onto the clip source span at its rate',
+      )
+    }
+    const audioSourceInFrame = (clip.audioSourceInFrame ?? clip.sourceInFrame) + leadingSourceFrames
+    const audioSourceOutFrame = audioSourceInFrame + keptSourceFrames
     return [Object.freeze({
       ...clip,
-      sourceInFrame: clip.sourceInFrame + leadingFrames,
-      sourceOutFrame: clip.sourceOutFrame - trailingFrames,
+      sourceInFrame,
+      sourceOutFrame,
       ...(clip.audioSourceArtifactId ? { audioSourceArtifactId: clip.audioSourceArtifactId } : {}),
       audioSourceInFrame,
       audioSourceOutFrame,
@@ -226,30 +344,25 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         !['video', 'audio'].includes(source.mediaType) ||
         (source.mediaType === 'video') !== Boolean(source.colorPipelineCompilation))
     ) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial proxy render input is invalid')
+    for (const clip of input.clips) assertClipTimeline(clip)
     const fullExpectedFrames = input.clips.reduce(
-      (total, clip) => total + clip.sourceOutFrame - clip.sourceInFrame,
+      (total, clip) => total + clip.timelineOutFrame - clip.timelineInFrame,
       0,
     )
     const rangeReuse = input.rangeReuse
     if (rangeReuse && (
       input.renderKind !== 'proxy' ||
       rangeReuse.schemaVersion !== 'project-proxy-range-reuse/v1' ||
-      rangeReuse.ranges.length !== 1 ||
       !isAbsolute(rangeReuse.path) ||
       !/^[a-f0-9]{64}$/.test(rangeReuse.sha256) ||
       !Number.isSafeInteger(rangeReuse.byteSize) || rangeReuse.byteSize <= 0
     )) throw new DomainError('INVALID_RENDER_INPUT', 'Partial proxy reuse input is invalid')
-    const range = rangeReuse?.ranges[0]
-    if (range && (
-      !Number.isSafeInteger(range.startFrame) || !Number.isSafeInteger(range.endFrame) ||
-      range.startFrame < 0 || range.endFrame <= range.startFrame ||
-      range.endFrame > fullExpectedFrames ||
-      (range.startFrame === 0 && range.endFrame === fullExpectedFrames)
-    )) throw new DomainError('INVALID_RENDER_INPUT', 'Partial proxy range is invalid')
-    const sliced = range ? sliceRenderRange(input, range) : undefined
-    const renderClips = sliced?.clips ?? input.clips
-    const renderSubtitleCues = sliced?.subtitleCues ?? input.subtitleCues
-    const renderTransitions = sliced?.transitions ?? input.transitions
+    const ranges = rangeReuse
+      ? assertPartialRanges(rangeReuse.ranges, fullExpectedFrames)
+      : []
+    const slices = ranges.map((range) => sliceRenderRange(input, range))
+    for (const slice of slices) for (const clip of slice.clips) assertClipTimeline(clip)
+    const renderClips = rangeReuse ? slices.flatMap((slice) => slice.clips) : input.clips
     const directory = this.directory(input.operationId)
     await mkdir(directory, { recursive: true })
     const renderSources = await Promise.all(input.sources.map(async (source, index) => {
@@ -338,120 +451,173 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     const stagingWidth = stagingProbe.width
     const stagingHeight = stagingProbe.height
     const outputPath = join(directory, input.renderKind === 'final' ? 'editorial-final.mp4' : 'editorial-proxy.mp4')
-    const compositionOutputPath = rangeReuse
-      ? join(directory, 'editorial-proxy-range.mp4')
-      : outputPath
-    const subtitlePath = join(directory, 'captions.ass')
-    await rm(outputPath, { force: true })
-    if (compositionOutputPath !== outputPath) await rm(compositionOutputPath, { force: true })
-    const filters: string[] = []
-    renderClips.forEach((clip, index) => {
-      const videoIndex = sourceIndex.get(clip.sourceArtifactId)!
-      const audioIndex = sourceIndex.get(
-        clip.audioSourceArtifactId ?? clip.sourceArtifactId,
-      )!
-      const audioInFrame = clip.audioSourceInFrame ?? clip.sourceInFrame
-      const audioOutFrame = clip.audioSourceOutFrame ?? clip.sourceOutFrame
-      const audioStart = audioInFrame / input.fps
-      const audioEnd = audioOutFrame / input.fps
-      const cropFilter = clip.crop
-        ? normalizedCropFilter(clip.crop, videoProbeByArtifactId.get(clip.sourceArtifactId)!)
-        : ''
-      filters.push(
-        `[${videoIndex}:v:0]trim=start_frame=${clip.sourceInFrame}:end_frame=${clip.sourceOutFrame},` +
-        `setpts=PTS-STARTPTS,${cropFilter}scale=${stagingWidth}:${stagingHeight}:force_original_aspect_ratio=decrease,` +
-        `pad=${stagingWidth}:${stagingHeight}:(ow-iw)/2:(oh-ih)/2:color=black,` +
-        `fps=${outputFps},setsar=1,format=yuv420p[v${index}]`,
-      )
-      const duration = audioEnd - audioStart
-      const before = renderTransitions?.find((transition) => transition.toClipId === clip.id)
-      const after = renderTransitions?.find((transition) => transition.fromClipId === clip.id)
-      const fadeIn = before ? Math.min(duration / 4, before.audioFadeMs / 1000) : 0
-      const fadeOut = after ? Math.min(duration / 4, after.audioFadeMs / 1000) : 0
-      const audioFilters = [`atrim=start=${audioStart.toFixed(6)}:end=${audioEnd.toFixed(6)}`, 'asetpts=PTS-STARTPTS']
-      if (fadeIn > 0) audioFilters.push(`afade=t=in:st=0:d=${fadeIn.toFixed(6)}`)
-      if (fadeOut > 0) audioFilters.push(`afade=t=out:st=${Math.max(0, duration - fadeOut).toFixed(6)}:d=${fadeOut.toFixed(6)}`)
-      filters.push(`[${audioIndex}:a:0]${audioFilters.join(',')}[a${index}]`)
-    })
-    const concatInputs = renderClips.map((_, index) => `[v${index}][a${index}]`).join('')
-    filters.push(`${concatInputs}concat=n=${renderClips.length}:v=1:a=1[joinedv][joineda]`)
-    filters.push(
-      '[joineda]alimiter=limit=0.794328:attack=5:release=50:level=false:latency=true[outa]',
-    )
     const [width, height] = dimensions
-    filters.push(`[joinedv]split=2[background0][foreground0]`)
-    filters.push(`[background0]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background]`)
-    const foregroundScale = input.composition?.foregroundScale ?? 1
-    const verticalPosition = input.composition?.verticalPosition ?? 0.5
-    filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground]`)
-    filters.push(`[background][foreground]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[composed]`)
-    if (renderSubtitleCues?.length) {
-      await writeFile(
-        subtitlePath,
-        buildAssSubtitles({
-          width,
-          height,
-          fps: outputFps,
-          cues: renderSubtitleCues,
-        }),
-        'utf8',
+    // A single stale range keeps the legacy `editorial-proxy-range.mp4` name so
+    // existing partial-render goldens stay byte-for-byte comparable; two or more
+    // ranges get one indexed composition file each.
+    const suffix = (index: number) => ranges.length === 1 ? '' : `-${String(index).padStart(2, '0')}`
+    const compositions = rangeReuse
+      ? slices.map((slice, index) => Object.freeze({
+        clips: slice.clips,
+        subtitleCues: slice.subtitleCues,
+        transitions: slice.transitions,
+        outputPath: join(directory, `editorial-proxy-range${suffix(index)}.mp4`),
+        subtitlePath: join(directory, `captions${suffix(index)}.ass`),
+      }))
+      : [Object.freeze({
+        clips: input.clips,
+        subtitleCues: input.subtitleCues,
+        transitions: input.transitions,
+        outputPath,
+        subtitlePath: join(directory, 'captions.ass'),
+      })]
+    await rm(outputPath, { force: true })
+    for (const composition of compositions) {
+      if (composition.outputPath !== outputPath) await rm(composition.outputPath, { force: true })
+    }
+    const buildCompositionFilters = async (composition: typeof compositions[number]) => {
+      const filters: string[] = []
+      composition.clips.forEach((clip, index) => {
+        const videoIndex = sourceIndex.get(clip.sourceArtifactId)!
+        const audioIndex = sourceIndex.get(
+          clip.audioSourceArtifactId ?? clip.sourceArtifactId,
+        )!
+        const audioInFrame = clip.audioSourceInFrame ?? clip.sourceInFrame
+        const audioOutFrame = clip.audioSourceOutFrame ?? clip.sourceOutFrame
+        const audioStart = audioInFrame / input.fps
+        const audioEnd = audioOutFrame / input.fps
+        const rate = clip.rate
+        const timelineSpan = clip.timelineOutFrame - clip.timelineInFrame
+        const cropFilter = clip.crop
+          ? normalizedCropFilter(clip.crop, videoProbeByArtifactId.get(clip.sourceArtifactId)!)
+          : ''
+        // Real-time clips keep the historical filtergraph verbatim. Retimed clips
+        // rescale PTS, then re-sample to the output fps and hard-trim to the exact
+        // timeline span so rounding never accumulates across the concat.
+        filters.push(
+          `[${videoIndex}:v:0]trim=start_frame=${clip.sourceInFrame}:end_frame=${clip.sourceOutFrame},` +
+          (rate === 1
+            ? `setpts=PTS-STARTPTS,${cropFilter}`
+            : `setpts=(PTS-STARTPTS)/${rate.toFixed(6)},${cropFilter}`) +
+          `scale=${stagingWidth}:${stagingHeight}:force_original_aspect_ratio=decrease,` +
+          `pad=${stagingWidth}:${stagingHeight}:(ow-iw)/2:(oh-ih)/2:color=black,` +
+          `fps=${outputFps},` +
+          (rate === 1 ? '' : `trim=start_frame=0:end_frame=${timelineSpan},setpts=PTS-STARTPTS,`) +
+          `setsar=1,format=yuv420p[v${index}]`,
+        )
+        const duration = (audioEnd - audioStart) / rate
+        const before = composition.transitions?.find((transition) => transition.toClipId === clip.id)
+        const after = composition.transitions?.find((transition) => transition.fromClipId === clip.id)
+        const fadeIn = before ? Math.min(duration / 4, before.audioFadeMs / 1000) : 0
+        const fadeOut = after ? Math.min(duration / 4, after.audioFadeMs / 1000) : 0
+        const audioFilters = [`atrim=start=${audioStart.toFixed(6)}:end=${audioEnd.toFixed(6)}`, 'asetpts=PTS-STARTPTS']
+        if (rate !== 1) {
+          for (const factor of atempoFactors(rate)) audioFilters.push(`atempo=${factor.toFixed(6)}`)
+          audioFilters.push(`atrim=start=0:end=${duration.toFixed(6)}`, 'asetpts=PTS-STARTPTS')
+        }
+        if (fadeIn > 0) audioFilters.push(`afade=t=in:st=0:d=${fadeIn.toFixed(6)}`)
+        if (fadeOut > 0) audioFilters.push(`afade=t=out:st=${Math.max(0, duration - fadeOut).toFixed(6)}:d=${fadeOut.toFixed(6)}`)
+        filters.push(`[${audioIndex}:a:0]${audioFilters.join(',')}[a${index}]`)
+      })
+      const concatInputs = composition.clips.map((_, index) => `[v${index}][a${index}]`).join('')
+      filters.push(`${concatInputs}concat=n=${composition.clips.length}:v=1:a=1[joinedv][joineda]`)
+      filters.push(
+        '[joineda]alimiter=limit=0.794328:attack=5:release=50:level=false:latency=true[outa]',
       )
-      filters.push(`[composed]subtitles=filename='${escapeSubtitleFilterPath(subtitlePath)}'[outv]`)
-    } else filters.push('[composed]null[outv]')
+      filters.push(`[joinedv]split=2[background0][foreground0]`)
+      filters.push(`[background0]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background]`)
+      const foregroundScale = input.composition?.foregroundScale ?? 1
+      const verticalPosition = input.composition?.verticalPosition ?? 0.5
+      filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground]`)
+      filters.push(`[background][foreground]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[composed]`)
+      if (composition.subtitleCues?.length) {
+        await writeFile(
+          composition.subtitlePath,
+          buildAssSubtitles({
+            width,
+            height,
+            fps: outputFps,
+            cues: composition.subtitleCues,
+          }),
+          'utf8',
+        )
+        filters.push(`[composed]subtitles=filename='${escapeSubtitleFilterPath(composition.subtitlePath)}'[outv]`)
+      } else filters.push('[composed]null[outv]')
+      return filters
+    }
     try {
-      await execFileAsync(this.ffmpegPath, [
-        '-hide_banner', '-loglevel', 'error', '-y',
-        ...renderSources.flatMap((source) => ['-i', source.path]),
-        '-filter_complex', filters.join(';'), '-map', '[outv]', '-map', '[outa]',
-        '-r', String(outputFps), '-c:v', 'libx264', '-preset', input.renderKind === 'final' ? 'medium' : 'veryfast', '-crf', input.renderKind === 'final' ? '18' : '23',
-        '-c:a', 'aac', '-b:a', input.renderKind === 'final' ? '192k' : '160k', '-ar', '48000', '-movflags', '+faststart', compositionOutputPath,
-      ], { windowsHide: true, timeout: 30 * 60_000, maxBuffer: 2 * 1024 * 1024, signal: input.signal })
-      if (rangeReuse && range) {
-        const [reuseMetadata, reuseHash, reuseProbe, rangeProbe] = await Promise.all([
+      for (const composition of compositions) {
+        const filters = await buildCompositionFilters(composition)
+        await execFileAsync(this.ffmpegPath, [
+          '-hide_banner', '-loglevel', 'error', '-y',
+          ...renderSources.flatMap((source) => ['-i', source.path]),
+          '-filter_complex', filters.join(';'), '-map', '[outv]', '-map', '[outa]',
+          '-r', String(outputFps), '-c:v', 'libx264', '-preset', input.renderKind === 'final' ? 'medium' : 'veryfast', '-crf', input.renderKind === 'final' ? '18' : '23',
+          '-c:a', 'aac', '-b:a', input.renderKind === 'final' ? '192k' : '160k', '-ar', '48000', '-movflags', '+faststart', composition.outputPath,
+        ], { windowsHide: true, timeout: 30 * 60_000, maxBuffer: 2 * 1024 * 1024, signal: input.signal })
+      }
+      if (rangeReuse && ranges.length > 0) {
+        const [reuseMetadata, reuseHash, reuseProbe] = await Promise.all([
           stat(rangeReuse.path),
           calculateFileSha256(rangeReuse.path),
           probeVideo(rangeReuse.path, { signal: input.signal }),
-          probeVideo(compositionOutputPath, { signal: input.signal }),
         ])
+        const rangeProbes = await Promise.all(compositions.map((composition) =>
+          probeVideo(composition.outputPath, { signal: input.signal })))
         const reuseFrames = Math.round(reuseProbe.duration * outputFps)
-        const rangeFrames = range.endFrame - range.startFrame
-        const suffixRequired = range.endFrame < fullExpectedFrames
+        const lastRange = ranges.at(-1)!
+        const suffixRequired = lastRange.endFrame < fullExpectedFrames
         if (
           !reuseMetadata.isFile() || reuseMetadata.size !== rangeReuse.byteSize ||
           reuseHash !== rangeReuse.sha256 || reuseProbe.width !== width ||
           reuseProbe.height !== height || Math.abs(reuseProbe.fps - outputFps) > 0.01 ||
           (suffixRequired
             ? Math.abs(reuseFrames - fullExpectedFrames) > 3
-            : reuseFrames + 3 < range.startFrame) ||
-          rangeProbe.width !== width || rangeProbe.height !== height ||
-          Math.abs(rangeProbe.fps - outputFps) > 0.01 ||
-          Math.abs(rangeProbe.duration * outputFps - rangeFrames) > 3
+            : reuseFrames + 3 < lastRange.startFrame)
         ) {
           throw new DomainError(
             'INVALID_RENDER_INPUT',
-            'Reusable proxy or rendered range identity is invalid',
+            'Reusable proxy identity is invalid',
           )
         }
+        rangeProbes.forEach((rangeProbe, index) => {
+          const rangeFrames = ranges[index]!.endFrame - ranges[index]!.startFrame
+          if (
+            rangeProbe.width !== width || rangeProbe.height !== height ||
+            Math.abs(rangeProbe.fps - outputFps) > 0.01 ||
+            Math.abs(rangeProbe.duration * outputFps - rangeFrames) > 3
+          ) {
+            throw new DomainError(
+              'INVALID_RENDER_INPUT',
+              `Rendered proxy range ${index} identity is invalid`,
+            )
+          }
+        })
+        // Interleave reused base segments with freshly rendered ranges:
+        // base[0,r0) r0 base[r0,r1) r1 ... base[rN,end). Empty base segments are
+        // omitted, so a range starting at frame 0 simply has no leading piece.
         const stitchFilters: string[] = []
         const pieces: string[] = []
-        if (range.startFrame > 0) {
-          const prefixEnd = range.startFrame / outputFps
+        let cursor = 0
+        ranges.forEach((range, index) => {
+          if (range.startFrame > cursor) {
+            stitchFilters.push(
+              `[0:v:0]trim=start_frame=${cursor}:end_frame=${range.startFrame},setpts=PTS-STARTPTS[keptv${index}]`,
+              `[0:a:0]atrim=start=${(cursor / outputFps).toFixed(6)}:end=${(range.startFrame / outputFps).toFixed(6)},asetpts=PTS-STARTPTS[kepta${index}]`,
+            )
+            pieces.push(`[keptv${index}][kepta${index}]`)
+          }
           stitchFilters.push(
-            `[0:v:0]trim=start_frame=0:end_frame=${range.startFrame},setpts=PTS-STARTPTS[prefixv]`,
-            `[0:a:0]atrim=start=0:end=${prefixEnd.toFixed(6)},asetpts=PTS-STARTPTS[prefixa]`,
+            `[${index + 1}:v:0]setpts=PTS-STARTPTS[rangev${index}]`,
+            `[${index + 1}:a:0]asetpts=PTS-STARTPTS[rangea${index}]`,
           )
-          pieces.push('[prefixv][prefixa]')
-        }
-        stitchFilters.push(
-          '[1:v:0]setpts=PTS-STARTPTS[rangev]',
-          '[1:a:0]asetpts=PTS-STARTPTS[rangea]',
-        )
-        pieces.push('[rangev][rangea]')
+          pieces.push(`[rangev${index}][rangea${index}]`)
+          cursor = range.endFrame
+        })
         if (suffixRequired) {
-          const suffixStart = range.endFrame / outputFps
           stitchFilters.push(
-            `[0:v:0]trim=start_frame=${range.endFrame}:end_frame=${fullExpectedFrames},setpts=PTS-STARTPTS[suffixv]`,
-            `[0:a:0]atrim=start=${suffixStart.toFixed(6)}:end=${(fullExpectedFrames / outputFps).toFixed(6)},asetpts=PTS-STARTPTS[suffixa]`,
+            `[0:v:0]trim=start_frame=${cursor}:end_frame=${fullExpectedFrames},setpts=PTS-STARTPTS[suffixv]`,
+            `[0:a:0]atrim=start=${(cursor / outputFps).toFixed(6)}:end=${(fullExpectedFrames / outputFps).toFixed(6)},asetpts=PTS-STARTPTS[suffixa]`,
           )
           pieces.push('[suffixv][suffixa]')
         }
@@ -460,7 +626,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         )
         await execFileAsync(this.ffmpegPath, [
           '-hide_banner', '-loglevel', 'error', '-y',
-          '-i', rangeReuse.path, '-i', compositionOutputPath,
+          '-i', rangeReuse.path,
+          ...compositions.flatMap((composition) => ['-i', composition.outputPath]),
           '-filter_complex', stitchFilters.join(';'),
           '-map', '[stitchedv]', '-map', '[stitcheda]',
           '-r', String(outputFps), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
