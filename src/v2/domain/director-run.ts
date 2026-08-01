@@ -35,7 +35,7 @@ interface DirectorSourceEditPlan {
       sourceOutFrame: number
       timelineInFrame: number
       timelineOutFrame: number
-      rate: 1
+      rate: number
       crop?: Readonly<ManualCropRegion>
     }>[]
   }>[]

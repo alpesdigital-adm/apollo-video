@@ -179,6 +179,35 @@ function planDuration(plan: Readonly<Record<string, unknown>>): number {
   return value
 }
 
+/**
+ * Canonical form of a stale-range list: ordered by startFrame, with overlapping
+ * AND adjacent ranges fused into one. Adjacency is fused rather than rejected so
+ * that `[0,30]` + `[30,60]` always collapses to `[0,60]`; consumers may therefore
+ * rely on `ranges[i].startFrame > ranges[i - 1].endFrame` (strictly disjoint,
+ * never merely touching) and on the list being duplicate-free.
+ */
+export function canonicalCommandImpactRanges(
+  input: readonly Readonly<CommandImpactRange>[],
+): readonly Readonly<CommandImpactRange>[] {
+  const sorted = [...input].toSorted((left, right) =>
+    left.startFrame - right.startFrame || left.endFrame - right.endFrame)
+  const merged: CommandImpactRange[] = []
+  for (const range of sorted) {
+    assertDomain(
+      Number.isSafeInteger(range.startFrame) && Number.isSafeInteger(range.endFrame) &&
+        range.startFrame >= 0 && range.endFrame > range.startFrame,
+      'INVALID_ARGUMENT',
+      'Command impact range is invalid',
+    )
+    const previous = merged.at(-1)
+    if (previous && range.startFrame <= previous.endFrame) {
+      previous.endFrame = Math.max(previous.endFrame, range.endFrame)
+    } else merged.push({ startFrame: range.startFrame, endFrame: range.endFrame })
+  }
+  assertDomain(merged.length > 0, 'INVALID_ARGUMENT', 'Command impact produced no range')
+  return Object.freeze(merged.map((range) => Object.freeze(range)))
+}
+
 function mergedRange(input: {
   before: Readonly<Record<string, unknown>>
   after: Readonly<Record<string, unknown>>
@@ -190,11 +219,14 @@ function mergedRange(input: {
     ...clipRanges(input.after, input.targetId),
   ]
   assertDomain(ranges.length > 0, 'INVALID_ARGUMENT', 'Command impact target clip is missing')
-  const startFrame = Math.min(...ranges.map((range) => range.startFrame))
-  const endFrame = input.throughEnd
-    ? Math.max(planDuration(input.before), planDuration(input.after))
-    : Math.max(...ranges.map((range) => range.endFrame))
-  return Object.freeze([Object.freeze({ startFrame, endFrame })])
+  if (!input.throughEnd) return canonicalCommandImpactRanges(ranges)
+  const endFrame = Math.max(planDuration(input.before), planDuration(input.after))
+  const canonical = canonicalCommandImpactRanges(ranges)
+  const last = canonical.at(-1)!
+  return canonicalCommandImpactRanges([
+    ...canonical.slice(0, -1),
+    { startFrame: last.startFrame, endFrame: Math.max(last.endFrame, endFrame) },
+  ])
 }
 
 function classify(action: ManualVersionAction, operation?: ManualGesture): Readonly<{

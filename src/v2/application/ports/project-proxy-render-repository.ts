@@ -2,6 +2,14 @@ import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { ProxyQualityIssue } from '../render-workflow.ts'
 
+/**
+ * Upper bound on how many disjoint stale ranges a single partial proxy render may
+ * stitch. Above it the repository falls back to a full render and the renderer
+ * fails closed, because each extra range costs one more encode plus two more
+ * concat seams.
+ */
+export const MAX_PARTIAL_RENDER_RANGES = 8
+
 export interface ProjectProxyRangeReuse {
   schemaVersion: 'project-proxy-range-reuse/v1'
   commandId: string

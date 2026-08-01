@@ -111,7 +111,7 @@ export interface ContiguousExtractionEditPlan {
       sourceOutFrame: number
       timelineInFrame: 0
       timelineOutFrame: number
-      rate: 1
+      rate: number
     }>[]
   }>[]
   synthesizedRanges: false
