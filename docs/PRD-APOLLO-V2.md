@@ -1665,7 +1665,14 @@ outputs concluídos da versão-base e solicita um proxy integral da nova direç�
 O conjunto é relido no commit serializável; replay reidrata e compara payload e
 linhas normalizadas. Sem output-base o proxy ainda é necessário, mas nenhuma
 relação stale é inventada. A capability pública devolve impacto, invalidations
-e a operação durável resultante. A
+e a operação durável resultante. `set-project-lut-selection` segue o mesmo
+modelo no contrato público v2: a escolha exata da receita de cor entra no
+Command, `project-lut-selection-impact/v1` declara dependência visual e, quando
+já existe timeline, invalida full-timeline somente nos outputs concluídos da
+base e enfileira um proxy da versão-resultado. Antes do ingest, a seleção ainda
+é versionada, mas o impacto fica `renderDeferredUntilTimeline` com ranges,
+artifacts, invalidations e renders mínimos vazios; nenhuma duração é fabricada.
+A
 operação manual `crop` persiste um retângulo normalizado dentro do clip e do
 formato declarados, produz dependência somente visual e um único range mínimo;
 o FFmpeg aplica esse crop antes da composição e o `RenderElementMap` reflete os

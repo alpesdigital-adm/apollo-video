@@ -4621,6 +4621,71 @@ const directorRunInvalidationExample = {
   impactHash: directorRunImpactExample.impactHash,
   createdAt,
 }
+const projectLutSelectionImpactExample = {
+  schemaVersion: 'project-lut-selection-impact/v1',
+  commandId: projectLutSelectionExample.command.id,
+  commandType: 'set-project-lut-selection',
+  baseVersionId: projectLutSelectionExample.command.baseVersionId,
+  resultVersionId: projectLutSelectionExample.version.id,
+  selectionId: projectLutSelectionExample.selection.id,
+  selectionHash: projectLutSelectionExample.selection.selectionHash,
+  resolvedMode: 'lut-version',
+  resolvedLutVersionId: workspaceLutExample.currentVersion.id,
+  resolvedLutRecordHash: workspaceLutExample.currentVersion.recordHash,
+  intensity: projectLutSelectionExample.selection.intensity,
+  changeKinds: ['color-pipeline-selection'], dependencyTypes: ['visual'],
+  affectedRanges: [{ startFrame: 0, endFrame: 2380 }],
+  affectedVariantIds: ['9:16'],
+  affectedArtifacts: [{
+    artifactId: 'artifact-project-lut-proxy-example-1', kind: 'proxy',
+    sourceVersionId: projectLutSelectionExample.command.baseVersionId, variantId: '9:16',
+  }],
+  minimalRenders: [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 2380 }] }],
+  renderSemanticsChanged: true, renderDeferredUntilTimeline: false, impactHash: '7'.repeat(64),
+}
+const projectLutSelectionInvalidationExample = {
+  schemaVersion: 'command-artifact-invalidation/v1', id: '8'.repeat(64), status: 'stale',
+  commandId: projectLutSelectionImpactExample.commandId,
+  baseVersionId: projectLutSelectionImpactExample.baseVersionId,
+  resultVersionId: projectLutSelectionImpactExample.resultVersionId,
+  artifactId: 'artifact-project-lut-proxy-example-1', kind: 'proxy', variantId: '9:16',
+  dependencyTypes: ['visual'], affectedRanges: projectLutSelectionImpactExample.affectedRanges,
+  impactHash: projectLutSelectionImpactExample.impactHash, createdAt,
+}
+const projectLutSelectionExampleV2 = {
+  ...projectLutSelectionExample,
+  impact: projectLutSelectionImpactExample,
+  invalidations: [projectLutSelectionInvalidationExample],
+}
+const projectLutSelectionDeferredImpactExample = {
+  ...projectLutSelectionImpactExample,
+  commandId: 'project-lut-command-deferred-example-1',
+  resultVersionId: 'project-version-example-lut-deferred-2',
+  selectionId: 'project-lut-selection-deferred-example-1',
+  selectionHash: '9'.repeat(64),
+  resolvedMode: 'none', resolvedLutVersionId: null, resolvedLutRecordHash: null, intensity: 1,
+  affectedRanges: [], affectedVariantIds: [], affectedArtifacts: [], minimalRenders: [],
+  renderDeferredUntilTimeline: true, impactHash: 'a'.repeat(64),
+}
+const projectLutSelectionDeferredExampleV2 = {
+  command: {
+    id: projectLutSelectionDeferredImpactExample.commandId, type: 'set-project-lut-selection',
+    baseVersionId: projectLutSelectionDeferredImpactExample.baseVersionId,
+    author: { type: 'api-client', id: clientId }, reason: 'Persist selection before ingest.', createdAt,
+  },
+  version: {
+    id: projectLutSelectionDeferredImpactExample.resultVersionId, sequence: 2,
+    parentVersionId: projectLutSelectionDeferredImpactExample.baseVersionId,
+    baseHash: 'b'.repeat(64), createdAt,
+  },
+  selection: {
+    id: projectLutSelectionDeferredImpactExample.selectionId,
+    requested: { mode: 'none' }, resolved: { mode: 'none' }, intensity: 1,
+    selectionHash: projectLutSelectionDeferredImpactExample.selectionHash, createdAt,
+  },
+  impact: projectLutSelectionDeferredImpactExample,
+  invalidations: [], replayed: false,
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -7609,6 +7674,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/editorial-cut-impact/v1': [editorialCutImpactExample],
     'apollo://schemas/director-run-impact/v1': [directorRunImpactExample],
+    'apollo://schemas/project-lut-selection-impact/v1': [projectLutSelectionImpactExample, projectLutSelectionDeferredImpactExample],
     'apollo://schemas/project-edit-command-applied/v3': [
       {
         data: {
@@ -8180,6 +8246,14 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/project-lut-selection-applied/v1': [{ data: projectLutSelectionExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-lut-selection-response/v1': [{ data: { result: projectLutSelectionExample }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/project-lut-selection-applied/v2': [
+      { data: { ...projectLutSelectionExampleV2, operation: queuedProjectProxyRenderOperationExample }, meta: { apiVersion: 'v1' } },
+      { data: projectLutSelectionDeferredExampleV2, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/project-lut-selection-response/v2': [
+      { data: { result: projectLutSelectionExampleV2 }, meta: { apiVersion: 'v1' } },
+      { data: { result: projectLutSelectionDeferredExampleV2 }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
         data: { review: proxyReviewExample },

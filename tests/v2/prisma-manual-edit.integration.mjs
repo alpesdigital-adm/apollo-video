@@ -974,6 +974,57 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(directorReplayResponse.status, 200, JSON.stringify(directorReplay))
     assert.equal(directorReplay.data.replayed, true)
     assert.equal(directorReplay.data.operation.id, directorApplied.data.operation.id)
+    await client.v2PublicOperation.update({
+      where: { id: directorApplied.data.operation.id },
+      data: {
+        status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
+        resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
+        startedAt: createdAt, completedAt: createdAt, updatedAt: createdAt,
+      },
+    })
+    await client.v2ProjectProxyRenderOperation.update({
+      where: { operationId: directorApplied.data.operation.id },
+      data: { outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId },
+    })
+    const lutSelectionKey = `set-project-lut-impact-${suffix}`
+    const setProjectLut = () => fetch(`${baseUrl}/v1/projects/${projectId}/lut-selection`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': lutSelectionKey },
+      body: JSON.stringify({
+        baseVersionId: directorApplied.data.version.id,
+        baseHash: directorApplied.data.version.baseHash,
+        selection: { mode: 'none' },
+        reason: 'Comprovar impacto visual full-timeline da selecao de LUT.',
+      }),
+    })
+    const lutSelectionResponse = await setProjectLut()
+    const lutSelectionApplied = await lutSelectionResponse.json()
+    assert.equal(lutSelectionResponse.status, 201, JSON.stringify(lutSelectionApplied))
+    assert.equal(lutSelectionApplied.data.version.sequence, 16)
+    assert.equal(lutSelectionApplied.data.impact.schemaVersion, 'project-lut-selection-impact/v1')
+    assert.equal(lutSelectionApplied.data.impact.renderDeferredUntilTimeline, false)
+    assert.deepEqual(lutSelectionApplied.data.impact.dependencyTypes, ['visual'])
+    assert.deepEqual(lutSelectionApplied.data.impact.affectedRanges, directorApplied.data.directorRun.impact.affectedRanges)
+    assert.deepEqual(lutSelectionApplied.data.impact.affectedArtifacts, [{
+      artifactId: completedProxyArtifactId, kind: 'proxy',
+      sourceVersionId: directorApplied.data.version.id, variantId: '9:16',
+    }])
+    assert.equal(lutSelectionApplied.data.impact.minimalRenders.length, 1)
+    assert.equal(lutSelectionApplied.data.invalidations.length, 1)
+    assert.equal(lutSelectionApplied.data.invalidations[0].artifactId, completedProxyArtifactId)
+    assert.equal(lutSelectionApplied.data.operation.status, 'queued')
+    const storedLutSelectionCommand = await client.v2EditCommand.findUniqueOrThrow({
+      where: { id: lutSelectionApplied.data.command.id }, include: { artifactInvalidations: true },
+    })
+    assert.equal(JSON.parse(storedLutSelectionCommand.payloadJson).schemaVersion, 2)
+    assert.equal(JSON.parse(storedLutSelectionCommand.payloadJson).impact.impactHash, lutSelectionApplied.data.impact.impactHash)
+    assert.equal(storedLutSelectionCommand.artifactInvalidations.length, 1)
+    assert.deepEqual(JSON.parse(storedLutSelectionCommand.artifactInvalidations[0].dependencyTypesJson), ['visual'])
+    const lutSelectionReplayResponse = await setProjectLut()
+    const lutSelectionReplay = await lutSelectionReplayResponse.json()
+    assert.equal(lutSelectionReplayResponse.status, 200, JSON.stringify(lutSelectionReplay))
+    assert.equal(lutSelectionReplay.data.replayed, true)
+    assert.equal(lutSelectionReplay.data.operation.id, lutSelectionApplied.data.operation.id)
     await context.close()
     await browser.close()
     browser = undefined

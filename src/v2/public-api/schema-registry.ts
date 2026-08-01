@@ -5451,6 +5451,41 @@ const directorRunImpactSchema = {
     impactHash: sha256Schema,
   },
 }
+const projectLutSelectionImpactSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId',
+    'selectionId', 'selectionHash', 'resolvedMode', 'resolvedLutVersionId',
+    'resolvedLutRecordHash', 'intensity', 'changeKinds', 'dependencyTypes',
+    'affectedRanges', 'affectedVariantIds', 'affectedArtifacts', 'minimalRenders',
+    'renderSemanticsChanged', 'renderDeferredUntilTimeline', 'impactHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'project-lut-selection-impact/v1' },
+    commandId: idSchema, commandType: { const: 'set-project-lut-selection' },
+    baseVersionId: idSchema, resultVersionId: idSchema, selectionId: idSchema,
+    selectionHash: sha256Schema, resolvedMode: { enum: ['none', 'lut-version'] },
+    resolvedLutVersionId: { anyOf: [idSchema, { type: 'null' }] },
+    resolvedLutRecordHash: { anyOf: [sha256Schema, { type: 'null' }] },
+    intensity: { type: 'number', minimum: 0, maximum: 1 },
+    changeKinds: { type: 'array', minItems: 1, maxItems: 1, prefixItems: [{ const: 'color-pipeline-selection' }], items: false },
+    dependencyTypes: { type: 'array', minItems: 1, maxItems: 1, prefixItems: [{ const: 'visual' }], items: false },
+    affectedRanges: { ...commandImpactSchema.properties.affectedRanges, minItems: 0 },
+    affectedVariantIds: commandImpactSchema.properties.affectedVariantIds,
+    affectedArtifacts: commandImpactSchema.properties.affectedArtifacts,
+    minimalRenders: commandImpactSchema.properties.minimalRenders,
+    renderSemanticsChanged: { const: true }, renderDeferredUntilTimeline: { type: 'boolean' }, impactHash: sha256Schema,
+  },
+}
+const projectLutSelectionResultSchemaV2 = {
+  ...projectLutSelectionResultSchema,
+  required: [...projectLutSelectionResultSchema.required, 'impact', 'invalidations'],
+  properties: {
+    ...projectLutSelectionResultSchema.properties,
+    impact: projectLutSelectionImpactSchema,
+    invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+  },
+}
 const versionComparisonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -16795,6 +16830,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('source-transcript-replacement-impact', 1, 'Content-addressed invalidation impact of selecting a new immutable source transcript', sourceTranscriptReplacementImpactSchema),
   defineSchema('editorial-cut-impact', 1, 'Content-addressed full-timeline impact of removing aligned spoken content', editorialCutImpactSchema),
   defineSchema('director-run-impact', 1, 'Content-addressed full-timeline impact of a persisted Director replan', directorRunImpactSchema),
+  defineSchema('project-lut-selection-impact', 1, 'Content-addressed full-timeline impact of selecting a project color recipe', projectLutSelectionImpactSchema),
   defineSchema('project-edit-command-applied', 3, 'Applied edit command response including source transcript replacement and required Director recomputation',
     successSchema({
       oneOf: [
@@ -17293,6 +17329,13 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   }),
   defineSchema('project-lut-selection-applied', 1, 'Applied project LUT EditCommand and immutable result version', successSchema(projectLutSelectionResultSchema)),
   defineSchema('project-lut-selection-response', 1, 'Current explicit project LUT selection', successSchema({ type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectLutSelectionResultSchema] } } })),
+  defineSchema('project-lut-selection-applied', 2, 'Applied project LUT selection with persisted impact, stale outputs and a proxy operation when the timeline is renderable', successSchema({
+    ...projectLutSelectionResultSchemaV2,
+    properties: { ...projectLutSelectionResultSchemaV2.properties, operation: publicOperationSchemaV3 },
+  })),
+  defineSchema('project-lut-selection-response', 2, 'Current explicit project LUT selection with persisted impact and stale outputs', successSchema({
+    type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectLutSelectionResultSchemaV2] } },
+  })),
   defineSchema('project-final-export-request', 1, 'Approve and export the current project version', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId', 'projectVersionHash', 'format', 'approval'],

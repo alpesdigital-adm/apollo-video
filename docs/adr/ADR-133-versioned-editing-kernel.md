@@ -103,3 +103,14 @@ hash; no completed base output means no fabricated invalidation while the proxy
 request remains. The public response exposes impact, invalidations and the
 durable operation. PostgreSQL/API execution, deployment and acceptance remain
 open, so this does not complete FR-233.
+
+`set-project-lut-selection` also participates in the same atomic invalidation
+model through `project-lut-selection-impact/v1`. A color-recipe selection is a
+full-timeline visual change once a compiled timeline exists: the serializable
+commit fences the exact completed base outputs, writes normalized stale edges,
+and the public v2 capability enqueues one full proxy for the result version.
+Selection is still valid before ingest, but its impact is explicitly deferred;
+zero duration produces no range, variant, artifact, invalidation, or render
+request. This avoids inventing render evidence while preserving the immutable
+selection for later compilation. PostgreSQL execution, deployment, and
+acceptance remain open, so FR-233 remains incomplete.

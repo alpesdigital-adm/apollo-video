@@ -32,6 +32,8 @@ export function presentProjectLutSelectionResult(value: Readonly<ProjectLutSelec
       ...(value.selection.workspaceDefaultRevision !== undefined ? { workspaceDefaultRevision: value.selection.workspaceDefaultRevision } : {}),
       intensity: value.selection.intensity, selectionHash: value.selection.selectionHash, createdAt: value.selection.createdAt,
     }),
+    impact: value.impact,
+    invalidations: value.invalidations,
     replayed: value.replayed,
   })
 }

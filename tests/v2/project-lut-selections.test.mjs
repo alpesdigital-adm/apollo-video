@@ -8,6 +8,7 @@ import { setProjectLutSelectionService } from '../../src/v2/application/project-
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createProjectLutSelection, projectLutRef } from '../../src/v2/domain/project-lut-selection.ts'
 import { createWorkspaceLutVersion } from '../../src/v2/domain/workspace-lut.ts'
+import { createProjectLutSelectionImpact, createProjectLutSelectionInvalidations, parseProjectLutSelectionImpact } from '../../src/v2/domain/project-lut-selection-impact.ts'
 import { LocalProjectLutRenderMaterializer } from '../../src/v2/infrastructure/media/local-project-lut-render-materializer.ts'
 import { parseSetProjectLutSelectionBody, presentProjectLutSelectionResult } from '../../src/v2/public-api/project-lut-selection-contract.ts'
 
@@ -45,9 +46,18 @@ function memoryRepository(context) {
   return {
     commits: [],
     async findIdempotent({ idempotencyKey }) { return replays.get(idempotencyKey) ?? null },
-    async readContext() { return context },
+    async readContext() {
+      return {
+        currentDurationFrames: 180,
+        proxyVariantId: '9:16',
+        outputReferences: [{ artifactId: 'artifact-project-lut-proxy-base', kind: 'proxy', sourceVersionId: context.currentVersion.id, variantId: '9:16' }],
+        ...context,
+      }
+    },
     async commitOrReplay(input) {
-      const result = Object.freeze({ command: input.command, version: input.version, selection: input.selection, replayed: false })
+      const impact = parseProjectLutSelectionImpact(input.command.payload.impact)
+      const invalidations = createProjectLutSelectionInvalidations({ impact, createdAt: input.command.createdAt })
+      const result = Object.freeze({ command: input.command, version: input.version, selection: input.selection, impact, invalidations, replayed: false })
       this.commits.push(input); current = result
       replays.set(input.command.idempotencyKey, Object.freeze({ requestFingerprint: input.requestFingerprint, result: Object.freeze({ ...result, replayed: true }) }))
       return result
@@ -76,7 +86,9 @@ test('T-FR-181 workspace default resolves to an exact immutable LUT in a Command
   const result = await apply(request)
 
   assert.equal(result.command.type, 'set-project-lut-selection')
-  assert.deepEqual(result.command.payload, { mode: 'workspace-default', intensity: 0.65 })
+  assert.equal(result.command.payload.schemaVersion, 2)
+  assert.equal(result.command.payload.mode, 'workspace-default')
+  assert.equal(result.command.payload.intensity, 0.65)
   assert.equal(result.version.sequence, 2)
   assert.equal(result.version.parentVersionId, base.id)
   assert.deepEqual(result.version.snapshotRefs, base.snapshotRefs)
@@ -88,6 +100,11 @@ test('T-FR-181 workspace default resolves to an exact immutable LUT in a Command
   })
   assert.match(result.selection.selectionHash, /^[a-f0-9]{64}$/)
   assert.equal(repository.commits[0].event.type, 'project.version.created')
+  assert.deepEqual(result.impact.dependencyTypes, ['visual'])
+  assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 0, endFrame: 180 }])
+  assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 180 }] }])
+  assert.equal(result.invalidations.length, 1)
+  assert.equal(repository.commits[0].event.data.commandImpactHash, result.impact.impactHash)
   assert.equal((await apply(request)).replayed, true)
   await assert.rejects(apply({ ...request, selection: { mode: 'none' } }), /another project LUT selection/)
 })
@@ -107,6 +124,35 @@ test('T-FR-181 explicit none is version-bound and stale project bases are reject
   assert.equal(result.selection.intensity, 0.4)
 })
 
+test('T-FR-233 LUT selection requests a full proxy without fabricating stale rows when no base output exists', async () => {
+  const base = baseVersion()
+  const repository = memoryRepository({ currentVersion: base, outputReferences: [] })
+  const result = await service(repository)({
+    workspaceId: base.workspaceId, projectId: base.projectId, baseVersionId: base.id, baseHash: base.baseHash,
+    selection: { mode: 'none' }, actor: { type: 'api-client', id: 'client-project-lut' },
+    idempotencyKey: 'project-lut-selection-no-output-1',
+  })
+  assert.deepEqual(result.impact.affectedArtifacts, [])
+  assert.deepEqual(result.invalidations, [])
+  assert.equal(result.impact.minimalRenders.length, 1)
+})
+
+test('T-FR-233 LUT selection before a timeline defers rendering without fabricating impact', async () => {
+  const base = baseVersion()
+  const repository = memoryRepository({ currentVersion: base, currentDurationFrames: 0, outputReferences: [] })
+  const result = await service(repository)({
+    workspaceId: base.workspaceId, projectId: base.projectId, baseVersionId: base.id, baseHash: base.baseHash,
+    selection: { mode: 'none' }, actor: { type: 'api-client', id: 'client-project-lut' },
+    idempotencyKey: 'project-lut-selection-deferred-1',
+  })
+  assert.equal(result.impact.renderDeferredUntilTimeline, true)
+  assert.deepEqual(result.impact.affectedRanges, [])
+  assert.deepEqual(result.impact.affectedVariantIds, [])
+  assert.deepEqual(result.impact.affectedArtifacts, [])
+  assert.deepEqual(result.impact.minimalRenders, [])
+  assert.deepEqual(result.invalidations, [])
+})
+
 test('T-FR-181 public project LUT selection contract is exact and hides persistence fields', () => {
   assert.deepEqual(parseSetProjectLutSelectionBody({
     baseVersionId: 'project-version-lut-base-1', baseHash: 'a'.repeat(64), selection: { mode: 'lut-version', lutId: 'workspace-lut-project', version: 2 }, intensity: 0.5,
@@ -117,12 +163,20 @@ test('T-FR-181 public project LUT selection contract is exact and hides persiste
   const base = baseVersion(); const selection = {
     id: 'selection', requested: { mode: 'none' }, resolved: { mode: 'none' }, intensity: 1, selectionHash: 'd'.repeat(64), createdAt: '2026-07-31T17:01:00.000Z',
   }
+  const impact = createProjectLutSelectionImpact({
+    commandId: 'command', baseVersionId: base.id, resultVersionId: 'result', selectionId: selection.id,
+    selectionHash: selection.selectionHash, resolvedMode: 'none', intensity: selection.intensity,
+    durationFrames: 180, proxyVariantId: '9:16', outputReferences: [],
+  })
   const presented = presentProjectLutSelectionResult({
     command: { id: 'command', type: 'set-project-lut-selection', baseVersionId: base.id, author: { type: 'api-client', id: 'client' }, createdAt: selection.createdAt },
-    version: { ...base, id: 'result', sequence: 2, parentVersionId: base.id, commandId: 'command' }, selection, replayed: false,
+    version: { ...base, id: 'result', sequence: 2, parentVersionId: base.id, commandId: 'command' }, selection, impact,
+    invalidations: createProjectLutSelectionInvalidations({ impact, createdAt: selection.createdAt }), replayed: false,
   })
   assert.equal('workspaceId' in presented.selection, false)
   assert.equal('payload' in presented.command, false)
+  assert.equal(presented.impact.impactHash, impact.impactHash)
+  assert.deepEqual(presented.invalidations, [])
 })
 
 test('T-FR-181 worker materializes the exact selected cube and intensity outside the renderer', async () => {

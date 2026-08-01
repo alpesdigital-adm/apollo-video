@@ -4,6 +4,7 @@ import { DomainError } from '../domain/errors.ts'
 import { createProjectLutSelection, projectLutRef, type ProjectLutSelectionRequest } from '../domain/project-lut-selection.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
+import { createProjectLutSelectionImpact } from '../domain/project-lut-selection-impact.ts'
 import type { ProjectLutSelectionRepository } from './ports/project-lut-selection-repository.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
@@ -45,23 +46,34 @@ export function setProjectLutSelectionService(dependencies: {
     if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== baseHash) throw new DomainError('VERSION_CONFLICT', 'Project LUT selection base version is stale')
     const createdAt = clock().toISOString(); const commandId = id(dependencies.createId('command'), 'commandId'); const versionId = id(dependencies.createId('version'), 'versionId')
     const intensity = request.intensity ?? context.resolvedLutVersion?.intensity.default ?? 1
-    const payload = Object.freeze({ ...requested, intensity }) as ProjectLutSelectionRequest & { intensity: number }
-    const command = createEditCommand({ id: commandId, workspaceId, projectId, baseVersionId, baseHash, author: request.actor, type: 'set-project-lut-selection', scope: { project: true }, payload, ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}), idempotencyKey, createdAt })
     const resolved = context.resolvedLutVersion ? Object.freeze({ mode: 'lut-version' as const, lut: projectLutRef(context.resolvedLutVersion) }) : Object.freeze({ mode: 'none' as const })
     const selection = createProjectLutSelection({
       id: id(dependencies.createId('selection'), 'selectionId'), workspaceId, projectId, baseVersionId, resultVersionId: versionId, commandId,
       requested, resolved, ...(requested.mode === 'workspace-default' ? { workspaceDefaultRevision: context.workspaceDefaultRevision ?? 0 } : {}), intensity, createdAt,
     })
+    const impact = createProjectLutSelectionImpact({
+      commandId, baseVersionId, resultVersionId: versionId,
+      selectionId: selection.id, selectionHash: selection.selectionHash,
+      resolvedMode: selection.resolved.mode,
+      ...(selection.resolved.mode === 'lut-version' ? {
+        resolvedLutVersionId: selection.resolved.lut.versionId,
+        resolvedLutRecordHash: selection.resolved.lut.recordHash,
+      } : {}),
+      intensity, durationFrames: context.currentDurationFrames,
+      proxyVariantId: context.proxyVariantId, outputReferences: context.outputReferences,
+    })
+    const payload = Object.freeze({ schemaVersion: 2 as const, ...requested, intensity, impact })
+    const command = createEditCommand({ id: commandId, workspaceId, projectId, baseVersionId, baseHash, author: request.actor, type: 'set-project-lut-selection', scope: { project: true }, payload, ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}), idempotencyKey, createdAt })
     const version = createProjectVersion({
       id: versionId, workspaceId, projectId, sequence: context.currentVersion.sequence + 1, parentVersionId: context.currentVersion.id,
       snapshotRefs: context.currentVersion.snapshotRefs,
-      baseHash: calculateCanonicalHash({ schemaVersion: 'project-version-lut-selection/v1', previousBaseHash: context.currentVersion.baseHash, commandId, selectionHash: selection.selectionHash }),
+      baseHash: calculateCanonicalHash({ schemaVersion: 'project-version-lut-selection/v2', previousBaseHash: context.currentVersion.baseHash, commandId, selectionHash: selection.selectionHash, impactHash: impact.impactHash }),
       createdBy: request.actor.id, commandId, createdAt,
     })
     const event = createPublicEvent({
       id: dependencies.createEventId(), type: 'project.version.created', version: '1.0.0', workspaceId, occurredAt: createdAt, sequence: version.sequence,
       actor: request.actor.type === 'api-client' ? { clientId: request.actor.id, ...(request.actor.delegatedUserId ? { userId: request.actor.delegatedUserId } : {}) } : { userId: request.actor.id },
-      resource: { type: 'project-version', id: version.id }, data: { projectId, sequence: version.sequence, parentVersionId: version.parentVersionId, baseHash: version.baseHash, commandId, commandType: command.type, selectionHash: selection.selectionHash, createdAt },
+      resource: { type: 'project-version', id: version.id }, data: { projectId, sequence: version.sequence, parentVersionId: version.parentVersionId, baseHash: version.baseHash, commandId, commandType: command.type, selectionHash: selection.selectionHash, commandImpactHash: impact.impactHash, artifactInvalidationCount: impact.affectedArtifacts.length, createdAt },
     })
     return dependencies.repository.commitOrReplay({ command, version, selection, requestFingerprint, event })
   }

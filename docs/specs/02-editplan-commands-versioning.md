@@ -611,7 +611,17 @@ Sem output concluído não há linha stale, mas o render mínimo permanece. Payl
 linhas e hash são reidratados e comparados no replay antes de a API devolver
 impacto, invalidations e operação.
 
-Para `manual-edit`, `remove-spoken-content` e `run-director`, cada output do mapa também cria atomicamente uma relação
+`set-project-lut-selection` usa `project-lut-selection-impact/v1` no payload v2
+do mesmo Command. Uma troca da receita de cor é visual e full-timeline: com
+EditPlan renderizável, o mapa referencia somente outputs `succeeded/completed`
+da base, cria suas relações stale e solicita um proxy integral do formato do
+projeto. A transação relê o conjunto antes de gravar. Um projeto recém-criado
+pode escolher LUT antes do ingest; nesse caso `renderDeferredUntilTimeline`
+é verdadeiro e ranges, variants, artifacts, invalidations e renders mínimos
+são vazios. A API não enfileira operação até existir timeline.
+
+Para `manual-edit`, `remove-spoken-content`, `run-director` e
+`set-project-lut-selection`, cada output do mapa também cria atomicamente uma relação
 normalizada `command-artifact-invalidation/v1`, identificada por hash canônico
 e ligada por FK ao Command, à versão-base, à versão-resultado e ao artifact. A
 relação carrega `stale`, variant, dependências, ranges e `impactHash`. Nenhuma

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { Prisma, type PrismaClient, type V2ProjectLutSelection, type V2ProjectVersion, type V2WorkspaceLutVersion } from '../../../../generated/prisma-v2/index.js'
-import type { ProjectLutSelectionCommit, ProjectLutSelectionContext, ProjectLutSelectionRepository, ProjectLutSelectionResult } from '../../application/ports/project-lut-selection-repository.ts'
+import type { ProjectLutSelectionCommandPayloadV2, ProjectLutSelectionCommit, ProjectLutSelectionContext, ProjectLutSelectionRepository, ProjectLutSelectionResult } from '../../application/ports/project-lut-selection-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -8,8 +8,15 @@ import { createProjectLutSelection, type ProjectLutSelection, type ProjectLutSel
 import { createProjectVersion } from '../../domain/project-version.ts'
 import { createWorkspaceLutVersion, type LutColorSpace, type LutLicensePolicy } from '../../domain/workspace-lut.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { createProjectLutSelectionInvalidations, parseProjectLutSelectionImpact } from '../../domain/project-lut-selection-impact.ts'
+import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 
-type StoredSelection = Prisma.V2ProjectLutSelectionGetPayload<{ include: { command: true; resultVersion: true; resolvedLutVersion: true } }>
+const selectionInclude = Prisma.validator<Prisma.V2ProjectLutSelectionInclude>()({
+  command: { include: { artifactInvalidations: true } },
+  resultVersion: true,
+  resolvedLutVersion: true,
+})
+type StoredSelection = Prisma.V2ProjectLutSelectionGetPayload<{ include: typeof selectionInclude }>
 type DbClient = PrismaClient | Prisma.TransactionClient
 
 function parse(value: string, field: string): Record<string, unknown> {
@@ -23,6 +30,11 @@ function parseTags(value: string): string[] {
     if (!Array.isArray(result) || !result.every((tag) => typeof tag === 'string') || stableSerialize(result) !== value) throw new Error('invalid')
     return result
   } catch { throw new DomainError('PERSISTENCE_CONFLICT', 'Stored selected LUT tags are invalid') }
+}
+
+function parseArray(value: string, field: string): unknown[] {
+  try { const result = JSON.parse(value) as unknown; if (!Array.isArray(result) || stableSerialize(result) !== value) throw new Error('invalid'); return result }
+  catch { throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`) }
 }
 
 function hydrateVersion(row: V2ProjectVersion) {
@@ -70,22 +82,41 @@ function hydrate(row: StoredSelection, replayed: boolean): Readonly<ProjectLutSe
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project LUT selection projections are invalid')
   if (selection.resolved.mode === 'lut-version' && (!row.resolvedLutVersion || row.resolvedLutVersion.id !== selection.resolved.lut.versionId || hydrateLut(row.resolvedLutVersion).recordHash !== selection.resolved.lut.recordHash)) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project LUT resolution is invalid')
   const commandRow = row.command
-  const command = createEditCommand<ProjectLutSelectionRequest & { intensity: number }>({
+  const payload = parse(commandRow.payloadJson, 'project LUT command payload') as unknown as ProjectLutSelectionCommandPayloadV2
+  const impact = parseProjectLutSelectionImpact(payload.impact)
+  const command = createEditCommand<ProjectLutSelectionCommandPayloadV2>({
     id: commandRow.id, workspaceId: commandRow.workspaceId, projectId: commandRow.projectId, baseVersionId: commandRow.baseVersionId, baseHash: commandRow.baseHash,
     author: { type: commandRow.actorType as 'user' | 'director' | 'system' | 'api-client', id: commandRow.actorId, ...(commandRow.delegatedUserId ? { delegatedUserId: commandRow.delegatedUserId } : {}) },
     type: commandRow.type, scope: parse(commandRow.scopeJson, 'project LUT command scope') as EditScope,
-    payload: parse(commandRow.payloadJson, 'project LUT command payload') as unknown as ProjectLutSelectionRequest & { intensity: number },
+    payload,
     ...(commandRow.reason ? { reason: commandRow.reason } : {}), idempotencyKey: commandRow.idempotencyKey, createdAt: commandRow.createdAt.toISOString(),
   })
   const version = hydrateVersion(row.resultVersion)
-  const expectedPayload = { ...selection.requested, intensity: selection.intensity }
+  const expectedPayload = { schemaVersion: 2, ...selection.requested, intensity: selection.intensity, impact }
   if (
     command.type !== 'set-project-lut-selection' || stableSerialize(command.payload) !== stableSerialize(expectedPayload) ||
+    impact.commandId !== command.id || impact.baseVersionId !== selection.baseVersionId ||
+    impact.resultVersionId !== selection.resultVersionId || impact.selectionId !== selection.id ||
+    impact.selectionHash !== selection.selectionHash || impact.resolvedMode !== selection.resolved.mode ||
+    impact.resolvedLutVersionId !== (selection.resolved.mode === 'lut-version' ? selection.resolved.lut.versionId : null) ||
+    impact.resolvedLutRecordHash !== (selection.resolved.mode === 'lut-version' ? selection.resolved.lut.recordHash : null) ||
+    impact.intensity !== selection.intensity ||
     command.workspaceId !== selection.workspaceId || command.projectId !== selection.projectId || command.baseVersionId !== selection.baseVersionId ||
     version.workspaceId !== selection.workspaceId || version.projectId !== selection.projectId || version.parentVersionId !== selection.baseVersionId ||
     version.commandId !== command.id || selection.commandId !== command.id || selection.resultVersionId !== version.id
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project LUT command lineage is invalid')
-  return Object.freeze({ command, version, selection, replayed })
+  const expectedInvalidations = createProjectLutSelectionInvalidations({ impact, createdAt: command.createdAt })
+    .toSorted((left, right) => left.id.localeCompare(right.id))
+  const invalidations = commandRow.artifactInvalidations.map((item) => parseCommandArtifactInvalidation({
+    schemaVersion: 'command-artifact-invalidation/v1', id: item.id, status: item.status,
+    commandId: item.commandId, baseVersionId: item.baseVersionId, resultVersionId: item.resultVersionId,
+    artifactId: item.artifactId, kind: item.kind, variantId: item.variantId,
+    dependencyTypes: parseArray(item.dependencyTypesJson, 'project LUT invalidation dependencies'),
+    affectedRanges: parseArray(item.affectedRangesJson, 'project LUT invalidation ranges'),
+    impactHash: item.impactHash, createdAt: item.createdAt.toISOString(),
+  })).toSorted((left, right) => left.id.localeCompare(right.id))
+  if (stableSerialize(expectedInvalidations) !== stableSerialize(invalidations)) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project LUT invalidations are inconsistent')
+  return Object.freeze({ command, version, selection, impact, invalidations: Object.freeze(invalidations), replayed })
 }
 
 async function resolve(client: DbClient, input: { workspaceId: string; requested: ProjectLutSelectionRequest }): Promise<Readonly<{ workspaceDefaultRevision?: number; lut?: ReturnType<typeof hydrateLut> }>> {
@@ -112,27 +143,55 @@ async function resolve(client: DbClient, input: { workspaceId: string; requested
 }
 
 export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async findIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string }) {
     const command = await this.client.v2EditCommand.findUnique({ where: { workspaceId_projectId_idempotencyKey: input }, select: { id: true, requestFingerprint: true } })
     if (!command) return null
-    const row = await this.client.v2ProjectLutSelection.findUnique({ where: { commandId_workspaceId: { commandId: command.id, workspaceId: input.workspaceId } }, include: { command: true, resultVersion: true, resolvedLutVersion: true } })
+    const row = await this.client.v2ProjectLutSelection.findUnique({ where: { commandId_workspaceId: { commandId: command.id, workspaceId: input.workspaceId } }, include: selectionInclude })
     if (!row) throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotent project LUT selection disappeared')
     return Object.freeze({ requestFingerprint: command.requestFingerprint, result: hydrate(row, true) })
   }
 
   async readContext(input: { workspaceId: string; projectId: string; requested: ProjectLutSelectionRequest }): Promise<Readonly<ProjectLutSelectionContext> | null> {
-    const project = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, include: { currentVersion: true } })
+    const project = await this.client.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, include: { currentVersion: { include: { editPlanSnapshot: true } } } })
     if (!project?.currentVersion) return null
-    const resolved = await resolve(this.client, { workspaceId: input.workspaceId, requested: input.requested })
-    return Object.freeze({ currentVersion: hydrateVersion(project.currentVersion), ...(resolved.workspaceDefaultRevision !== undefined ? { workspaceDefaultRevision: resolved.workspaceDefaultRevision } : {}), ...(resolved.lut ? { resolvedLutVersion: resolved.lut } : {}) })
+    const [resolved, proxyOutputs, finalOutputs] = await Promise.all([
+      resolve(this.client, { workspaceId: input.workspaceId, requested: input.requested }),
+      this.client.v2ProjectProxyRenderOperation.findMany({
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true },
+      }),
+      this.client.v2ProjectFinalExportOperation.findMany({
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: project.currentVersion.id, operation: { status: 'succeeded', phase: 'completed' } },
+        select: { outputArtifactId: true, outputAspectRatio: true },
+      }),
+    ])
+    const editPlan = parse(project.currentVersion.editPlanSnapshot.contentJson, 'current project LUT EditPlan')
+    const currentDurationFrames = Number(editPlan.durationFrames)
+    if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames < 0 || !project.format) throw new DomainError('PERSISTENCE_CONFLICT', 'Project LUT render context is incomplete')
+    if (currentDurationFrames === 0 && (proxyOutputs.length > 0 || finalOutputs.length > 0)) throw new DomainError('PERSISTENCE_CONFLICT', 'Project outputs exist before a renderable timeline')
+    return Object.freeze({
+      currentVersion: hydrateVersion(project.currentVersion),
+      ...(resolved.workspaceDefaultRevision !== undefined ? { workspaceDefaultRevision: resolved.workspaceDefaultRevision } : {}),
+      ...(resolved.lut ? { resolvedLutVersion: resolved.lut } : {}),
+      currentDurationFrames,
+      proxyVariantId: project.format,
+      outputReferences: Object.freeze([
+        ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: project.currentVersion!.id, variantId: project.format! })),
+        ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: project.currentVersion!.id, variantId: output.outputAspectRatio })),
+      ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))),
+    })
   }
 
   async readCurrent(input: { workspaceId: string; projectId: string }) {
     const head = await this.client.v2ProjectLutSelectionHead.findUnique({ where: { projectId_workspaceId: { projectId: input.projectId, workspaceId: input.workspaceId } } })
     if (!head) return null
-    const row = await this.client.v2ProjectLutSelection.findUnique({ where: { id: head.selectionId }, include: { command: true, resultVersion: true, resolvedLutVersion: true } })
+    const row = await this.client.v2ProjectLutSelection.findUnique({ where: { id: head.selectionId }, include: selectionInclude })
     if (!row || row.workspaceId !== input.workspaceId || row.projectId !== input.projectId) throw new DomainError('PERSISTENCE_CONFLICT', 'Project LUT selection head is invalid')
     return hydrate(row, false)
   }
@@ -160,7 +219,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
     `)
     const selectionId = lineage[0]?.selectionId
     if (!selectionId) return null
-    const row = await this.client.v2ProjectLutSelection.findUnique({ where: { id: selectionId }, include: { command: true, resultVersion: true, resolvedLutVersion: true } })
+    const row = await this.client.v2ProjectLutSelection.findUnique({ where: { id: selectionId }, include: selectionInclude })
     if (!row || row.workspaceId !== input.workspaceId || row.projectId !== input.projectId) throw new DomainError('PERSISTENCE_CONFLICT', 'Effective project LUT selection disappeared')
     const result = hydrate(row, false)
     return Object.freeze({ selection: result.selection, ...(row.resolvedLutVersion ? { resolvedLutVersion: hydrateLut(row.resolvedLutVersion) } : {}) })
@@ -174,6 +233,21 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
         const resolved = await resolve(transaction, { workspaceId: input.command.workspaceId, requested: input.selection.requested })
         const expectedLut = input.selection.resolved.mode === 'lut-version' ? input.selection.resolved.lut : undefined
         if ((resolved.workspaceDefaultRevision ?? undefined) !== input.selection.workspaceDefaultRevision || resolved.lut?.id !== expectedLut?.versionId || resolved.lut?.recordHash !== expectedLut?.recordHash) throw new DomainError('VERSION_CONFLICT', 'Project LUT selection resolution changed before commit')
+        const [proxyOutputs, finalOutputs] = await Promise.all([
+          transaction.v2ProjectProxyRenderOperation.findMany({
+            where: { workspaceId: input.command.workspaceId, projectId: input.command.projectId, projectVersionId: input.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+            select: { outputArtifactId: true },
+          }),
+          transaction.v2ProjectFinalExportOperation.findMany({
+            where: { workspaceId: input.command.workspaceId, projectId: input.command.projectId, projectVersionId: input.command.baseVersionId, operation: { status: 'succeeded', phase: 'completed' } },
+            select: { outputArtifactId: true, outputAspectRatio: true },
+          }),
+        ])
+        const currentOutputs = [
+          ...proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: input.command.baseVersionId, variantId: project.format ?? '9:16' })),
+          ...finalOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: input.command.baseVersionId, variantId: output.outputAspectRatio })),
+        ].toSorted((left, right) => `${left.kind}:${left.artifactId}`.localeCompare(`${right.kind}:${right.artifactId}`))
+        if (stableSerialize(currentOutputs) !== stableSerialize(input.command.payload.impact.affectedArtifacts)) throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before LUT selection impact commit')
         await transaction.v2EditCommand.create({ data: {
           id: input.command.id, workspaceId: input.command.workspaceId, projectId: input.command.projectId, baseVersionId: input.command.baseVersionId, baseHash: input.command.baseHash,
           type: input.command.type, scopeJson: stableSerialize(input.command.scope), payloadJson: stableSerialize(input.command.payload), reason: input.command.reason,
@@ -195,6 +269,16 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
           workspaceDefaultRevision: input.selection.workspaceDefaultRevision, intensity: input.selection.intensity,
           selectionJson: stableSerialize(input.selection), selectionHash: input.selection.selectionHash, createdAt: new Date(input.selection.createdAt),
         } })
+        const invalidations = createProjectLutSelectionInvalidations({ impact: input.command.payload.impact, createdAt: input.command.createdAt })
+        if (invalidations.length > 0) {
+          await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((item) => ({
+            id: item.id, workspaceId: input.command.workspaceId, projectId: input.command.projectId,
+            commandId: item.commandId, baseVersionId: item.baseVersionId, resultVersionId: item.resultVersionId,
+            artifactId: item.artifactId, kind: item.kind, variantId: item.variantId, status: item.status,
+            dependencyTypesJson: stableSerialize(item.dependencyTypes), affectedRangesJson: stableSerialize(item.affectedRanges),
+            impactHash: item.impactHash, createdAt: new Date(item.createdAt),
+          })) })
+        }
         await transaction.v2ProjectLutSelectionHead.upsert({
           where: { projectId_workspaceId: { projectId: input.selection.projectId, workspaceId: input.selection.workspaceId } },
           create: { projectId: input.selection.projectId, workspaceId: input.selection.workspaceId, selectionId: input.selection.id, updatedAt: new Date(input.selection.createdAt) },
@@ -206,7 +290,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
           id: input.event.id, workspaceId: input.event.workspaceId, type: input.event.type, version: input.event.version, occurredAt: new Date(input.event.occurredAt), sequence: input.event.sequence,
           actorClientId: input.event.actor?.clientId, actorUserId: input.event.actor?.userId, resourceType: input.event.resource.type, resourceId: input.event.resource.id, dataJson: stableSerialize(input.event.data),
         } })
-        const row = await transaction.v2ProjectLutSelection.findUniqueOrThrow({ where: { id: input.selection.id }, include: { command: true, resultVersion: true, resolvedLutVersion: true } })
+        const row = await transaction.v2ProjectLutSelection.findUniqueOrThrow({ where: { id: input.selection.id }, include: selectionInclude })
         return hydrate(row, false)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {

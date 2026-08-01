@@ -3,16 +3,29 @@ import type { ProjectLutSelection, ProjectLutSelectionRequest } from '../../doma
 import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { WorkspaceLutVersion } from '../../domain/workspace-lut.ts'
+import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
+import type { ProjectLutSelectionImpactV1 } from '../../domain/project-lut-selection-impact.ts'
+
+export type ProjectLutSelectionCommandPayloadV2 = ProjectLutSelectionRequest & Readonly<{
+  schemaVersion: 2
+  intensity: number
+  impact: Readonly<ProjectLutSelectionImpactV1>
+}>
 
 export interface ProjectLutSelectionContext {
   currentVersion: Readonly<ProjectVersion>
   workspaceDefaultRevision?: number
   resolvedLutVersion?: Readonly<WorkspaceLutVersion>
+  currentDurationFrames: number
+  proxyVariantId: string
+  outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }
 export interface ProjectLutSelectionResult {
-  command: Readonly<EditCommand<ProjectLutSelectionRequest & { intensity: number }>>
+  command: Readonly<EditCommand<ProjectLutSelectionCommandPayloadV2>>
   version: Readonly<ProjectVersion>
   selection: Readonly<ProjectLutSelection>
+  impact: Readonly<ProjectLutSelectionImpactV1>
+  invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
   replayed: boolean
 }
 export interface EffectiveProjectLutSelection {
@@ -20,7 +33,7 @@ export interface EffectiveProjectLutSelection {
   resolvedLutVersion?: Readonly<WorkspaceLutVersion>
 }
 export interface ProjectLutSelectionCommit {
-  command: Readonly<EditCommand<ProjectLutSelectionRequest & { intensity: number }>>
+  command: Readonly<EditCommand<ProjectLutSelectionCommandPayloadV2>>
   version: Readonly<ProjectVersion>
   selection: Readonly<ProjectLutSelection>
   requestFingerprint: string
