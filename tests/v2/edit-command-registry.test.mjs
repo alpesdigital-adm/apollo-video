@@ -29,6 +29,10 @@ import {
   parseDirectorRunImpact,
 } from '../../src/v2/domain/director-run-impact.ts'
 import {
+  createCompareActionImpact,
+  parseCompareActionImpact,
+} from '../../src/v2/domain/compare-action-impact.ts'
+import {
   createProjectLutSelectionImpact,
   parseProjectLutSelectionImpact,
 } from '../../src/v2/domain/project-lut-selection-impact.ts'
@@ -181,8 +185,18 @@ function sourceTranscriptImpact() {
   })
 }
 
+function compareActionImpact(action = 'accept') {
+  return createCompareActionImpact({
+    commandId: 'edit-command-registry-compare',
+    baseVersionId,
+    resultVersionId: baseVersionId,
+    action,
+  })
+}
+
 /** Real impact document plus its real parser, per registered Command type. */
 const IMPACT_FIXTURES = {
+  'compare-action': { build: () => compareActionImpact(), parse: parseCompareActionImpact },
   'manual-edit': { build: () => manualImpact(), parse: parseCommandImpact },
   'apply-review-patch': { build: () => reviewPatchImpact('apply-review-patch'), parse: parseCommandImpact },
   'apply-review-patch-batch': { build: () => reviewPatchImpact('apply-review-patch-batch'), parse: parseCommandImpact },
@@ -230,9 +244,11 @@ test('T-F0-027 the registry is frozen, exhaustive and internally consistent', ()
       assert.notEqual(policy.deferralReason, null, `${type} must say what unblocks its render`)
     }
     if (policy.renderPolicy === 'no-render') {
-      assert.equal(policy.impactSchema, null)
-      assert.equal(policy.requiresImpact, false)
-      assert.equal(policy.supportsRenderFreeImpact, false)
+      // A no-render type still owes an impact document — an explicit zero, not
+      // the absence of a policy. Nothing about it may be deferred.
+      assert.equal(policy.requiresImpact, true)
+      assert.notEqual(policy.impactSchema, null)
+      assert.equal(policy.supportsRenderFreeImpact, true)
       assert.equal(policy.deferralReason, null)
     }
     assert.match(policy.evidence, /\.ts:\d+/, `${type} must cite the code proving its policy`)
@@ -345,25 +361,44 @@ test('T-F0-027 deferred types enqueue no render before their unblocking event', 
   assert.equal(lutSelectionImpact().renderDeferredUntilTimeline, false)
 })
 
-test('T-F0-027 no-render types carry no impact, no ranges, no artifacts and no minimal renders', () => {
+test('T-F0-027 no-render types carry an explicit zero impact and preserve their version', () => {
   assert.deepEqual([...editCommandTypesByRenderPolicy('no-render')], ['compare-action'])
   const policy = editCommandPolicy('compare-action')
-  assert.equal(policy.impactSchema, null)
-  assert.equal(policy.requiresImpact, false)
+  assert.equal(policy.impactSchema, 'compare-action-impact/v1')
+  assert.equal(policy.requiresImpact, true)
   assert.notEqual(editCommandRenderPolicy('compare-action'), 'partial-range')
 
-  // No impact parser in the domain accepts a compare-action document, so no
-  // range, artifact or minimal render can be attributed to it.
+  for (const action of ['accept', 'reopen']) {
+    const impact = compareActionImpact(action)
+    assert.equal(impact.action, action)
+    assert.equal(impact.renderSemanticsChanged, false)
+    assert.equal(impact.resultVersionId, impact.baseVersionId, 'the compared versions are preserved')
+    assert.deepEqual([...impact.changeKinds], ['review-state'])
+    for (const field of ['dependencyTypes', 'affectedRanges', 'affectedVariantIds', 'affectedArtifacts', 'minimalRenders']) {
+      assert.deepEqual([...impact[field]], [], `${field} must stay empty for a no-render Command`)
+    }
+    assert.match(impact.impactHash, /^[a-f0-9]{64}$/)
+  }
+  // Distinct decisions are distinct documents: the hash is content-addressed.
+  assert.notEqual(compareActionImpact('accept').impactHash, compareActionImpact('reopen').impactHash)
+
+  // No other impact parser in the domain accepts a compare-action document, and
+  // the compare-action parser accepts no other type.
   const borrowed = { ...JSON.parse(JSON.stringify(manualImpact())), commandType: 'compare-action' }
   assert.throws(() => parseCommandImpact(borrowed), /Stored Command impact is invalid/)
-  for (const { parse } of Object.values(IMPACT_FIXTURES)) {
-    assert.throws(() => parse({ schemaVersion: 'compare-action-impact/v1', commandType: 'compare-action' }))
+  for (const [type, { parse }] of Object.entries(IMPACT_FIXTURES)) {
+    if (type === 'compare-action') continue
+    assert.throws(() => parse(JSON.parse(JSON.stringify(compareActionImpact()))))
   }
+  assert.throws(() => parseCompareActionImpact(JSON.parse(JSON.stringify(manualImpact()))))
 
   const persisted = command('compare-action', {
-    payload: { schemaVersion: 1, action: 'accept', beforeVersionId: baseVersionId, afterVersionId: resultVersionId },
+    payload: {
+      schemaVersion: 2, action: 'accept', beforeVersionId: baseVersionId,
+      afterVersionId: resultVersionId, impact: compareActionImpact(),
+    },
   })
-  assert.equal(Object.hasOwn(persisted.payload, 'impact'), false)
+  assert.equal(persisted.payload.impact.impactHash, compareActionImpact().impactHash)
 })
 
 test('T-F0-027 createEditCommand refuses a type without a registered policy', () => {
@@ -404,6 +439,14 @@ test('T-F0-027 an impact belonging to another type is rejected by the declared p
   assert.throws(() => parseDirectorRunImpact({ ...director, schemaVersion: 'command-impact/v1' }))
   assert.throws(() => parseSourceTranscriptReplacementImpact({ ...transcript, renderBlockedUntilDirectorRun: false }))
   assert.throws(() => parseProjectLutSelectionImpact({ ...lut, minimalRenders: [] }))
+
+  const compare = JSON.parse(JSON.stringify(compareActionImpact()))
+  assert.throws(() => parseCompareActionImpact({ ...compare, commandType: 'manual-edit' }))
+  assert.throws(() => parseCompareActionImpact({ ...compare, renderSemanticsChanged: true }))
+  assert.throws(() => parseCompareActionImpact({ ...compare, action: 'reopen' }))
+  assert.throws(() => parseCompareActionImpact({ ...compare, resultVersionId }))
+  assert.throws(() => parseCompareActionImpact({ ...compare, affectedArtifacts: [outputs[0]] }))
+  assert.throws(() => parseCompareActionImpact({ ...compare, impactHash: hashB }))
 })
 
 test('T-F0-027 proxy range reuse derives its allowlist from the registry', async () => {

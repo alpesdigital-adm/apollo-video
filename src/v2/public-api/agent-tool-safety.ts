@@ -325,7 +325,7 @@ export function createFoundationAgentToolSafety(
     },
     'apollo.projects.version-comparisons.act': {
       impact: 'bounded', confirmation: 'none',
-      reason: 'Records one reversible version comparison decision or restores a prior snapshot as a new immutable child version.',
+      reason: 'Records one reversible version comparison decision that renders nothing and preserves both compared versions, or restores a prior snapshot as a new immutable child version.',
     },
     'apollo.projects.annotations.create': {
       impact: 'bounded', confirmation: 'none',

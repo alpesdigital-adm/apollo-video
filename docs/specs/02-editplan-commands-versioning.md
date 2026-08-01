@@ -530,6 +530,16 @@ Um mapping só é `shared` quando ambos os snapshots possuem a mesma identidade 
 `POST /v1/projects/{projectId}/version-comparisons` aceita `accept`, `reopen` e `restore`. O envelope inclui as duas versões, modo, `baseVersionId`, `baseHash`, `expectedRevision`, `variantId` e `Idempotency-Key`.
 
 - `accept` e `reopen` exigem que `afterVersionId` seja a versão corrente; uma transação serializável cria Command `compare-action`, altera apenas o status do projeto por compare-and-swap e grava `project.status.changed` na outbox;
+- `compare-action` é o único Command `no-render` do produto e mesmo assim carrega
+  impacto explícito. O payload schema v2 persiste `compare-action-impact/v1`
+  content-addressed: `resultVersionId` é sempre o próprio `baseVersionId`
+  (versão preservada), `changeKinds=[review-state]` e `dependencyTypes`,
+  `affectedRanges`, `affectedVariantIds`, `affectedArtifacts` e `minimalRenders`
+  ficam vazios com `renderSemanticsChanged=false`. Nenhuma
+  `command-artifact-invalidation/v1` é gravada e nenhum render é enfileirado. O
+  evento de outbox declara `commandImpactHash` e `artifactInvalidationCount=0`,
+  e a hidratação recusa payload sem impacto (`PERSISTENCE_CONFLICT`) em vez de
+  presumir impacto zero;
 - `restore` executa o mesmo handler `manual-edit` com `action=restore`, cria snapshot e ProjectVersion filha, mantém A/B intactas e enfileira proxy durável;
 - replay da mesma chave/fingerprint devolve o mesmo Command/versão;
 - chave reutilizada com outro payload ou base stale falha sem escrita parcial.
@@ -739,6 +749,22 @@ preserva áudio AAC e a duração integral.
 | AddLocale | localization/audio/alignment/locale/format/renders | source story e outputs existentes |
 | ReorderStoryBlock | editorial timeline, EditPlan, subtitle/audio timing/renders | masters e catalog |
 | UpdateBrandLogo | placements/renders que usam logo | mídia principal e story |
+| compare-action (accept/reopen) | nada: só o status de revisão | toda versão, artifact, range e render |
+
+### 24.1 Registro de política de invalidação
+
+`src/v2/domain/edit-command-registry.ts` é o gate contra um Command futuro sem
+política. Cada tipo persistível declara `renderPolicy`
+(`partial-range | full-timeline | deferred | no-render`), o schema do documento
+de impacto, se o impacto é obrigatório, se ele pode legitimamente reportar
+`renderSemanticsChanged=false`, o que destrava um render deferido e a evidência
+em código que prova a classificação. `createEditCommand` recusa tipo não
+registrado (fail-closed) e o repositório de proxy deriva daqui a allowlist de
+reuso parcial, em vez de repetir uma lista fixa.
+
+Um tipo novo, portanto, não entra pelo `type: string`: ele precisa primeiro
+declarar como invalida renders. Nem `no-render` é exceção — `compare-action`
+declara `compare-action-impact/v1` e prova o zero, em vez de não declarar nada.
 
 ## 25. Diff semântico
 

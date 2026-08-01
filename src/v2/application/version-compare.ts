@@ -4,6 +4,7 @@ import type {
   PersistedVersionCompareDecision,
   VersionCompareRepository,
 } from './ports/version-compare-repository.ts'
+import { createCompareActionImpact } from '../domain/compare-action-impact.ts'
 import {
   createEditCommand,
   type CommandActor,
@@ -196,17 +197,27 @@ export function decideVersionComparisonService(dependencies: {
       return Object.freeze({ ...existing.result, replayed: true })
     }
     const createdAt = dependencies.clock().toISOString()
+    const commandId = dependencies.createCommandId()
+    // Accept and reopen move only the review state: no EditPlan, no bytes and no
+    // new ProjectVersion, so the result version is the base version itself.
+    const impact = createCompareActionImpact({
+      commandId,
+      baseVersionId,
+      resultVersionId: baseVersionId,
+      action,
+    })
     const payload: Readonly<PersistedVersionCompareDecision> = Object.freeze({
-      schemaVersion: 1,
+      schemaVersion: 2,
       action,
       expectedRevision: request.expectedRevision,
       beforeVersionId: comparisonState.versions.before.id,
       afterVersionId: comparisonState.versions.after.id,
       mode: comparisonState.comparison.mode,
       comparison,
+      impact,
     })
     const command = createEditCommand<PersistedVersionCompareDecision>({
-      id: dependencies.createCommandId(),
+      id: commandId,
       workspaceId,
       projectId,
       baseVersionId,
@@ -239,6 +250,8 @@ export function decideVersionComparisonService(dependencies: {
         afterVersionId: payload.afterVersionId,
         mode: payload.mode,
         versionsPreserved: true,
+        commandImpactHash: impact.impactHash,
+        artifactInvalidationCount: impact.affectedArtifacts.length,
       },
     })
     return dependencies.comparisonRepository.commitDecision({

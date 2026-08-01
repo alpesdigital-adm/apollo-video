@@ -31,6 +31,7 @@ export const EDIT_COMMAND_IMPACT_SCHEMAS = [
   'director-run-impact/v1',
   'source-transcript-replacement-impact/v1',
   'project-lut-selection-impact/v1',
+  'compare-action-impact/v1',
 ] as const
 export type EditCommandImpactSchema = (typeof EDIT_COMMAND_IMPACT_SCHEMAS)[number]
 
@@ -122,12 +123,13 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
   }),
   'compare-action': Object.freeze({
     renderPolicy: 'no-render',
-    impactSchema: null,
-    requiresImpact: false,
-    supportsRenderFreeImpact: false,
+    impactSchema: 'compare-action-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: true,
     deferralReason: null,
-    evidence: 'version-compare.ts:198 persists only PersistedVersionCompareDecision — no impact '
-      + 'document and no render invalidation exists for this Command type',
+    evidence: 'compare-action-impact.ts:76 renderSemanticsChanged is the literal false, every '
+      + 'impact list is frozen empty and resultVersionId is forced to baseVersionId — the review '
+      + 'state moves while the compared versions are preserved',
   }),
 } as const satisfies Record<string, EditCommandPolicy>)
 

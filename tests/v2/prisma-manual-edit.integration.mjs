@@ -33,6 +33,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
 }, async () => {
   const { applyManualEditService, readManualTimelineService } = await import('../../src/v2/application/manual-edit.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
+  const { parseCompareActionImpact } = await import('../../src/v2/domain/compare-action-impact.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
@@ -573,39 +574,132 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       expectedRevision: 9,
       variantId: '9:16',
     })
-    const acceptKey = `manual-compare-accept-${suffix}`
-    const accept = () => fetch(`${baseUrl}/v1/projects/${projectId}/version-comparisons`, {
+    // A compare action is the only no-render Command: it moves the review state
+    // and must leave versions, renders and artifact invalidations untouched.
+    const compareBaseline = {
+      versions: await client.v2ProjectVersion.count({ where: { projectId } }),
+      invalidations: await client.v2CommandArtifactInvalidation.count({ where: { workspaceId } }),
+      renderOperations: await client.v2ProjectProxyRenderOperation.count({ where: { workspaceId } }),
+      commands: await client.v2EditCommand.count({ where: { projectId } }),
+    }
+    const compareAct = (action, key) => fetch(`${baseUrl}/v1/projects/${projectId}/version-comparisons`, {
       method: 'POST',
       headers: {
         authorization,
         'content-type': 'application/json',
-        'idempotency-key': acceptKey,
+        'idempotency-key': key,
       },
-      body: JSON.stringify(compareActionBody('accept')),
+      body: JSON.stringify(compareActionBody(action)),
     })
+    const acceptKey = `manual-compare-accept-${suffix}`
+    const accept = () => compareAct('accept', acceptKey)
     const acceptedResponse = await accept()
     const accepted = await acceptedResponse.json()
     assert.equal(acceptedResponse.status, 201, JSON.stringify(accepted))
     assert.equal(accepted.data.command.type, 'compare-action')
     assert.equal(accepted.data.projectStatus, 'reviewing-proxy')
     assert.equal(accepted.data.versionsPreserved, true)
+
+    const acceptedImpact = accepted.data.impact
+    assert.equal(acceptedImpact.schemaVersion, 'compare-action-impact/v1')
+    assert.equal(acceptedImpact.commandType, 'compare-action')
+    assert.equal(acceptedImpact.commandId, accepted.data.command.id)
+    assert.equal(acceptedImpact.action, 'accept')
+    assert.equal(acceptedImpact.baseVersionId, afterCompareVersionId)
+    assert.equal(acceptedImpact.resultVersionId, afterCompareVersionId, 'accept preserves its version')
+    assert.equal(acceptedImpact.renderSemanticsChanged, false)
+    assert.deepEqual(acceptedImpact.changeKinds, ['review-state'])
+    for (const field of [
+      'dependencyTypes', 'affectedRanges', 'affectedVariantIds',
+      'affectedArtifacts', 'minimalRenders',
+    ]) {
+      assert.deepEqual(acceptedImpact[field], [], `${field} must stay empty in persisted state`)
+    }
+    assert.match(acceptedImpact.impactHash, /^[a-f0-9]{64}$/)
+    assert.equal(accepted.data.command.payload.schemaVersion, 2)
+    assert.equal(accepted.data.command.payload.impact.impactHash, acceptedImpact.impactHash)
+
+    // The impact really is in Postgres, byte for byte, and the parser accepts it.
+    const storedAcceptCommand = await client.v2EditCommand.findUnique({
+      where: { id: accepted.data.command.id },
+    })
+    const storedAcceptPayload = JSON.parse(storedAcceptCommand.payloadJson)
+    assert.equal(storedAcceptPayload.schemaVersion, 2)
+    assert.equal(storedAcceptPayload.impact.impactHash, acceptedImpact.impactHash)
+    assert.equal(
+      parseCompareActionImpact(storedAcceptPayload.impact).impactHash,
+      acceptedImpact.impactHash,
+    )
+    assert.equal(storedAcceptCommand.baseVersionId, afterCompareVersionId)
+
+    const acceptedEvent = await client.v2PublicEventOutbox.findFirst({
+      where: { workspaceId, type: 'project.status.changed', resourceId: projectId },
+      orderBy: { occurredAt: 'desc' },
+    })
+    const acceptedEventData = JSON.parse(acceptedEvent.dataJson)
+    assert.equal(acceptedEventData.commandImpactHash, acceptedImpact.impactHash)
+    assert.equal(acceptedEventData.artifactInvalidationCount, 0)
+    assert.equal(acceptedEventData.versionsPreserved, true)
+    assert.equal(acceptedEventData.compareAction, 'accept')
+
     const acceptedReplayResponse = await accept()
     const acceptedReplay = await acceptedReplayResponse.json()
     assert.equal(acceptedReplayResponse.status, 200)
     assert.equal(acceptedReplay.data.replayed, true)
-    const reopenedResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/version-comparisons`, {
+    assert.equal(acceptedReplay.data.command.id, accepted.data.command.id)
+    assert.equal(
+      acceptedReplay.data.impact.impactHash,
+      acceptedImpact.impactHash,
+      'the replay rehydrates the stored impact instead of rebuilding it',
+    )
+
+    // A stale revision rolls the whole decision back: no Command, no status move.
+    const staleResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/version-comparisons`, {
       method: 'POST',
       headers: {
         authorization,
         'content-type': 'application/json',
-        'idempotency-key': `manual-compare-reopen-${suffix}`,
+        'idempotency-key': `manual-compare-stale-${suffix}`,
       },
-      body: JSON.stringify(compareActionBody('reopen')),
+      body: JSON.stringify({ ...compareActionBody('accept'), expectedRevision: 8 }),
     })
+    const stale = await staleResponse.json()
+    assert.equal(staleResponse.status, 409, JSON.stringify(stale))
+    assert.equal(stale.error.code, 'VERSION_CONFLICT')
+    assert.equal(
+      await client.v2EditCommand.count({ where: { projectId, idempotencyKey: `manual-compare-stale-${suffix}` } }),
+      0,
+      'a conflicting compare action persists nothing',
+    )
+    assert.equal(
+      (await client.v2Project.findUnique({ where: { id: projectId } })).status,
+      'reviewing-proxy',
+      'a conflicting compare action leaves the review state where accept put it',
+    )
+
+    const reopenedResponse = await compareAct('reopen', `manual-compare-reopen-${suffix}`)
     const reopened = await reopenedResponse.json()
     assert.equal(reopenedResponse.status, 201, JSON.stringify(reopened))
     assert.equal(reopened.data.projectStatus, 'revising')
+    assert.equal(reopened.data.impact.action, 'reopen')
+    assert.equal(reopened.data.impact.resultVersionId, afterCompareVersionId)
+    assert.equal(reopened.data.impact.renderSemanticsChanged, false)
+    assert.notEqual(
+      reopened.data.impact.impactHash,
+      acceptedImpact.impactHash,
+      'accept and reopen are distinct content-addressed decisions',
+    )
     assert.equal((await client.v2Project.findUnique({ where: { id: projectId } })).status, 'revising')
+
+    assert.deepEqual({
+      versions: await client.v2ProjectVersion.count({ where: { projectId } }),
+      invalidations: await client.v2CommandArtifactInvalidation.count({ where: { workspaceId } }),
+      renderOperations: await client.v2ProjectProxyRenderOperation.count({ where: { workspaceId } }),
+      commands: await client.v2EditCommand.count({ where: { projectId } }),
+    }, {
+      ...compareBaseline,
+      commands: compareBaseline.commands + 2,
+    }, 'accept and reopen add two Commands and nothing else — no version, no render, no invalidation')
 
     await page.reload()
     await page.getByTestId('version-compare').waitFor({ state: 'visible' })

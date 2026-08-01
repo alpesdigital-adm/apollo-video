@@ -5493,6 +5493,28 @@ const projectLutSelectionImpactSchema = {
     renderSemanticsChanged: { const: true }, renderDeferredUntilTimeline: { type: 'boolean' }, impactHash: sha256Schema,
   },
 }
+const compareActionImpactSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId',
+    'action', 'changeKinds', 'dependencyTypes', 'affectedRanges', 'affectedVariantIds',
+    'affectedArtifacts', 'minimalRenders', 'renderSemanticsChanged', 'impactHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'compare-action-impact/v1' },
+    commandId: idSchema, commandType: { const: 'compare-action' },
+    baseVersionId: idSchema, resultVersionId: idSchema,
+    action: { enum: ['accept', 'reopen'] },
+    changeKinds: { type: 'array', minItems: 1, maxItems: 1, prefixItems: [{ const: 'review-state' }], items: false },
+    dependencyTypes: { type: 'array', maxItems: 0, items: false },
+    affectedRanges: { type: 'array', maxItems: 0, items: false },
+    affectedVariantIds: { type: 'array', maxItems: 0, items: false },
+    affectedArtifacts: { type: 'array', maxItems: 0, items: false },
+    minimalRenders: { type: 'array', maxItems: 0, items: false },
+    renderSemanticsChanged: { const: false },
+    impactHash: sha256Schema,
+  },
+}
 const projectLutSelectionResultSchemaV2 = {
   ...projectLutSelectionResultSchema,
   required: [...projectLutSelectionResultSchema.required, 'impact', 'invalidations'],
@@ -10762,14 +10784,17 @@ function projectManualEditAppliedBody(timeline: Record<string, unknown>) {
   })
 }
 
-function projectVersionComparisonActionResultBody(timeline: Record<string, unknown>) {
+function projectVersionComparisonActionResultBody(
+  timeline: Record<string, unknown>,
+  impact?: Record<string, unknown>,
+) {
   return successSchema({
     oneOf: [
       {
         type: 'object', additionalProperties: false,
         required: [
           'action', 'command', 'projectStatus', 'comparison',
-          'versionsPreserved', 'replayed',
+          'versionsPreserved', 'replayed', ...(impact ? ['impact'] : []),
         ],
         properties: {
           action: { enum: ['accept', 'reopen'] },
@@ -10783,6 +10808,7 @@ function projectVersionComparisonActionResultBody(timeline: Record<string, unkno
           },
           projectStatus: { enum: ['reviewing-proxy', 'revising'] },
           comparison: versionComparisonSchema,
+          ...(impact ? { impact } : {}),
           versionsPreserved: { const: true },
           replayed: { type: 'boolean' },
         },
@@ -17174,6 +17200,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ),
   defineSchema('project-version-comparison-action-result', 2, 'Audited version comparison action result with normalized clip crops',
     projectVersionComparisonActionResultBody(manualTimelineSchema),
+  ),
+  defineSchema('project-version-comparison-action-result', 3, 'Audited version comparison action result with the explicit zero impact of the accept or reopen decision',
+    projectVersionComparisonActionResultBody(manualTimelineSchema, compareActionImpactSchema),
   ),
   defineSchema('project-proxy-review-response', 1, 'Version-bound post-render proxy review',
     successSchema({
