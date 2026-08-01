@@ -1738,6 +1738,12 @@ checksum dos bytes antes da compilação; URI inválida, propriedade extra,
 override concorrente ou mudança de identidade bloqueia o render. O renderer
 aguarda o carregamento da fonte antes do primeiro frame.
 
+Reconstrução deve partir do manifest e payload protegido efetivamente salvos.
+Uma nova autorização relê rights e identidades atuais, materializa os bytes e
+entrega ao renderer o mesmo input portátil; nenhum caller pode remontar props.
+Reexecuções da mesma identidade devem manter canvas, fps, timeline e conteúdo
+decodificado dentro do golden definido para o renderer fixado.
+
 ### FR-235 — Export matrix
 
 Variantes × formatos × idiomas com preflight de volume/custo.

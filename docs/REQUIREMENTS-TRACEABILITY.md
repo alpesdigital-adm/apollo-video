@@ -187,6 +187,8 @@ Complemento local de FR-234 — o compiler da composição Apollo resolve `fontA
 
 Correção local de FR-234 — `media-artifact-manifest/v4` deixou de aceitar RenderInput com recurso não-LUT oculto do lineage. A criação exige igualdade ordenada por canonical key, SHA-256 e role entre `manifest.sources` e todos os assets de vídeo, áudio, imagem, fonte ou dado; a validação inversa também impede source declarada que não participa do render. Preflight, autorização e revalidação da lease repetem o gate depois de autenticar o protected RenderInput, portanto registros anteriores assimétricos falham antes de availability, rights, resolução de localização ou render. LUT permanece excluída somente porque sua identidade e rights são resolvidas pelo repositório versionado especializado. As regressões cobrem fonte omitida, lineage persistido adulterado e LUT legítima; PostgreSQL real, golden reexecutado, deploy e aceite permanecem pendentes.
 
+Complemento local de FR-234 — o golden de reconstrução serializa em disco `media-artifact-manifest/v4`, payload canônico de `render-input/v1`, rights e identidades dos assets e, depois dessa fronteira, reidrata somente a fixture salva. Duas autorizações independentes passam pelos services reais de autorização, materialização verificada e render Remotion. Os dois MP4s mantêm 270×480, 30 fps, duração tolerante à cauda AAC e hashes `framemd5` idênticos para toda a sequência decodificada de vídeo e áudio. PostgreSQL/MinIO reais, deploy e aceite continuam pendentes; a caixa permanece aberta.
+
 ## F3 — Sintético e transformação
 
 | Req | Título | Spec | Dep. | Evidência de aceite | Teste |

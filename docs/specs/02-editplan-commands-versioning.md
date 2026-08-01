@@ -925,6 +925,8 @@ carregamento, evitando fallback silencioso no primeiro frame.
     versionada especializada.
 17. Fonte e dado declarados alteram pixels do golden real; bytes, URI, kind ou
     schema divergentes falham antes do render.
+18. Reconstrução relê manifest, payload protegido, rights e assets persistidos;
+    duas autorizações da mesma identidade preservam todos os frames decodificados.
 
 ## 32. Questões para ADR
 

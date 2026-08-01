@@ -12,6 +12,13 @@ served only by the private render process under the fixed
 `ApolloResourceFont` family, and Remotion delays frames until `FontFace.load()`
 completes. Missing, changed, wrongly typed or undeclared resources fail closed.
 
+Reconstruction is manifest-first. The saved v4 manifest locates one canonical
+protected RenderInput; a fresh authorization rechecks rights and asset identity
+before materialization. Callers do not rebuild props. The local golden persists
+and reloads this full fixture before two independent authorized renders and
+compares every decoded video and audio frame. PostgreSQL/object-storage proof,
+deployment, and acceptance remain required.
+
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.
 The record is content-addressed, frame-first and format-scoped; completed
