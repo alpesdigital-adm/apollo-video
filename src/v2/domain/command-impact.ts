@@ -26,7 +26,7 @@ export interface CommandImpactRange {
 export interface CommandImpactV1 {
   schemaVersion: 'command-impact/v1'
   commandId: string
-  commandType: 'manual-edit' | 'apply-review-patch'
+  commandType: 'manual-edit' | 'apply-review-patch' | 'apply-review-patch-batch'
   baseVersionId: string
   resultVersionId: string
   changeKinds: readonly string[]
@@ -431,6 +431,7 @@ function reviewPatchFrameRanges(input: {
 }
 
 export function createReviewPatchCommandImpact(input: {
+  commandType?: 'apply-review-patch' | 'apply-review-patch-batch'
   commandId: string
   baseVersionId: string
   resultVersionId: string
@@ -476,7 +477,7 @@ export function createReviewPatchCommandImpact(input: {
   const body = {
     schemaVersion: 'command-impact/v1' as const,
     commandId: input.commandId,
-    commandType: 'apply-review-patch' as const,
+    commandType: input.commandType ?? 'apply-review-patch',
     baseVersionId: input.baseVersionId,
     resultVersionId: input.resultVersionId,
     changeKinds: classification.changeKinds,
@@ -598,7 +599,7 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
   const impact = stored as unknown as CommandImpactV1
   assertDomain(
     impact.schemaVersion === 'command-impact/v1' &&
-      ['manual-edit', 'apply-review-patch'].includes(impact.commandType) &&
+      ['manual-edit', 'apply-review-patch', 'apply-review-patch-batch'].includes(impact.commandType) &&
       validId(impact.commandId) &&
       validId(impact.baseVersionId) &&
       validId(impact.resultVersionId) &&
@@ -670,7 +671,7 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
     'PERSISTENCE_CONFLICT',
     'Stored Command impact dependencies are inconsistent',
   )
-  if (impact.commandType === 'apply-review-patch') {
+  if (impact.commandType === 'apply-review-patch' || impact.commandType === 'apply-review-patch-batch') {
     const renderVariants = impact.minimalRenders.map((render) => render.variantId).toSorted()
     assertDomain(
       impact.renderSemanticsChanged === true && impact.dependencyTypes.length > 0 &&

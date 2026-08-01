@@ -5342,6 +5342,14 @@ const reviewPatchCommandImpactSchema = {
     renderSemanticsChanged: { const: true },
   },
 }
+const reviewPatchBatchCommandImpactSchema = {
+  ...commandImpactSchema,
+  properties: {
+    ...commandImpactSchema.properties,
+    commandType: { const: 'apply-review-patch-batch' },
+    renderSemanticsChanged: { const: true },
+  },
+}
 const commandArtifactInvalidationSchema = {
   type: 'object',
   additionalProperties: false,
@@ -12544,6 +12552,22 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'], properties: { id: idSchema, type: { const: 'apply-review-patch-batch' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema } },
         version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema, baseHash: sha256Schema, snapshotRefs: { type: 'object' }, createdAt: dateTimeSchema } },
         comparison: patchBatchSchema.properties.comparison,
+        operation: publicOperationSchemaV4,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('review-patch-batch-applied', 2, 'Atomic immutable version, persisted frame-first impact, stale output relationships and durable proxy render created by a confirmed batch patch',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['batch', 'command', 'version', 'comparison', 'impact', 'invalidations', 'operation', 'replayed'],
+      properties: {
+        batch: patchBatchSchema,
+        command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'], properties: { id: idSchema, type: { const: 'apply-review-patch-batch' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema } },
+        version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema, baseHash: sha256Schema, snapshotRefs: { type: 'object' }, createdAt: dateTimeSchema } },
+        comparison: patchBatchSchema.properties.comparison,
+        impact: reviewPatchBatchCommandImpactSchema,
+        invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
         operation: publicOperationSchemaV4,
         replayed: { type: 'boolean' },
       },

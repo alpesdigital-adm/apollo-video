@@ -50,6 +50,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
   let server
 
   const cleanup = async () => {
+    await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
     await client.v2ReviewPatchBatch.deleteMany({ where: { workspaceId } })
     await client.v2ReviewPatchProposal.deleteMany({ where: { workspaceId } })
     await client.v2ReviewAnnotation.deleteMany({ where: { workspaceId } })
@@ -177,6 +178,21 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
       { id: randomUUID(), workspaceId, projectId, artifactId, role: 'source-master', originalFileName: 'batch.mp4', createdAt },
       { id: randomUUID(), workspaceId, projectId, artifactId, role: 'editing-proxy', originalFileName: 'batch.mp4', createdAt },
     ] })
+    const seedOperationId = `batch-review-seed-operation-${suffix}`
+    await client.v2PublicOperation.create({ data: {
+      id: seedOperationId, workspaceId, clientId: issued.client.id, type: 'project-proxy-render',
+      status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: artifactId,
+      cancelable: false, retryable: false, attempt: 1, resultJson: stableSerialize({ artifactId }),
+      idempotencyKey: `batch-review-seed-${suffix}`, requestFingerprint: calculateVersionHash({ seedOperationId }),
+      createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
+    } })
+    await client.v2ProjectProxyRenderOperation.create({ data: {
+      operationId: seedOperationId, workspaceId, projectId, projectVersionId: initialVersionId,
+      editPlanSnapshotId: editPlanId, sourceArtifactId: artifactId,
+      sourceManifestId: `batch-review-manifest-${suffix}`,
+      inputHash: calculateVersionHash({ seedOperationId, input: true }), outputArtifactId: artifactId,
+      outputManifestId: `batch-review-manifest-${suffix}`, originalFileName: 'batch.mp4', createdAt,
+    } })
 
     const first = await seedAnnotationAndProposal({ versionId: initialVersionId, targetId: 'subtitle:cue-1', text: 'Trocar primeira legenda.', operationText: 'Primeira corrigida' })
     const second = await seedAnnotationAndProposal({ versionId: initialVersionId, targetId: 'subtitle:cue-2', text: 'Trocar segunda legenda.', operationText: 'Segunda corrigida' })
@@ -186,6 +202,16 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     const applied = await applyBatch(ready.batch.id, `batch-ready-apply-${suffix}`)
     assert.equal(applied.version.sequence, 2)
     assert.equal(applied.batch.items.filter((item) => item.status === 'applied').length, 2)
+    assert.equal(applied.impact.commandType, 'apply-review-patch-batch')
+    assert.deepEqual(applied.impact.affectedRanges, [{ startFrame: 29, endFrame: 30 }, { startFrame: 59, endFrame: 60 }])
+    assert.equal(applied.invalidations.length, 1)
+    assert.equal(applied.invalidations[0].artifactId, artifactId)
+    const persistedInvalidations = await client.v2CommandArtifactInvalidation.findMany({ where: { commandId: applied.command.id } })
+    assert.equal(persistedInvalidations.length, 1)
+    const replayed = await applyBatch(ready.batch.id, `batch-ready-apply-${suffix}`)
+    assert.equal(replayed.replayed, true)
+    assert.equal(replayed.impact.impactHash, applied.impact.impactHash)
+    assert.equal(replayed.invalidations.length, 1)
     assert.match(JSON.stringify(applied.editPlan), /Primeira corrigida/)
     assert.match(JSON.stringify(applied.editPlan), /Segunda corrigida/)
 

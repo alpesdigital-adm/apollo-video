@@ -28,7 +28,7 @@ function parseJson<T>(value: string, field: string): T {
   }
 }
 
-function hydrateInvalidation(item: Prisma.V2CommandArtifactInvalidationGetPayload<{}>) {
+export function hydrateInvalidation(item: Prisma.V2CommandArtifactInvalidationGetPayload<{}>) {
   return parseCommandArtifactInvalidation({
     schemaVersion: 'command-artifact-invalidation/v1',
     id: item.id,

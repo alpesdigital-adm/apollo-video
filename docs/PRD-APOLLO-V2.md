@@ -1448,7 +1448,7 @@ O operador pode selecionar de duas a cem annotations abertas da mesma `ProjectVe
 
 O modo padrão é `all-or-nothing`: qualquer conflito impede o patch e marca todos os itens como `rolled-back`, sem criar Command, snapshot ou versão. `partial-retry` só existe por escolha explícita e inclui apenas annotations sem conflito, preservando as demais abertas e `retryable`.
 
-A confirmação cria um único Command `apply-review-patch-batch`, um snapshot de EditPlan e uma ProjectVersion filha dentro de transação serializável. A API, a UI e agentes usam o mesmo application service; o proxy da versão resultante é uma operação durável associada ao lote. Idempotência, optimistic concurrency, protected/policy/budget gates herdados das propostas e rollback total em falha intermediária são obrigatórios.
+A confirmação cria um único Command `apply-review-patch-batch`, um snapshot de EditPlan e uma ProjectVersion filha dentro de transação serializável. O payload v2 inclui `command-impact/v1` frame-first para todas as operações incluídas, preserva ranges disjuntos canônicos quando o mapping intermediário não muda e registra relações stale apenas para outputs concluídos das variants abrangidas. A API, a UI e agentes usam o mesmo application service; o proxy da versão resultante é uma operação durável associada ao lote. Idempotência, optimistic concurrency, fencing dos outputs-base, protected/policy/budget gates herdados das propostas e rollback total em falha intermediária são obrigatórios.
 
 ### FR-216 — Edição manual
 

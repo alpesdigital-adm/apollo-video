@@ -489,7 +489,7 @@ O compilador agrupa operações por `targetId`:
 - `partial-retry`, somente quando pedido explicitamente, inclui os itens seguros e mantém conflitantes `retryable`;
 - lote sem item seguro nunca é aplicável.
 
-A aplicação exige `confirmed: true`, `Idempotency-Key` e aprovação humana para uso como agent tool. Uma transação serializável cria exatamente um Command `apply-review-patch-batch`, um snapshot, uma ProjectVersion filha, o compare e o evento de outbox; move somente annotations/propostas incluídas para `applied`. Mudança concorrente em versão, annotation ou proposta aborta toda a transação. Após commit, uma operação durável de proxy é vinculada ao lote. Replay com a mesma chave e fingerprint reconstrói o mesmo resultado; chave reutilizada com outro payload falha.
+A aplicação exige `confirmed: true`, `Idempotency-Key` e aprovação humana para uso como agent tool. Uma transação serializável cria exatamente um Command `apply-review-patch-batch`, um snapshot, uma ProjectVersion filha, o compare e o evento de outbox; o payload v2 materializa `command-impact/v1`, e as relações stale dos outputs concluídos abrangidos são criadas na mesma transação. Mudança concorrente nos outputs-base, versão, annotation ou proposta aborta toda a transação. Após commit, uma operação durável de proxy é vinculada ao lote e pode reutilizar ranges válidos quando o impacto comprova ranges disjuntos canônicos. Replay com a mesma chave e fingerprint reconstrói e verifica impacto e invalidations; chave reutilizada com outro payload falha.
 
 ### 22.6 Edição manual integrada
 

@@ -4,6 +4,7 @@ import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { ReviewPatchProposal } from './review-patch-repository.ts'
+import type { CommandArtifactInvalidationV1, CommandImpactOutputReference, CommandImpactV1 } from '../../domain/command-impact.ts'
 
 export type ReviewPatchBatchMode = 'all-or-nothing' | 'partial-retry'
 export type ReviewPatchBatchStatus = 'ready' | 'conflict' | 'partial' | 'applied'
@@ -53,6 +54,8 @@ export interface ReviewPatchBatchProposalContext {
   editPlan: Readonly<Record<string, unknown>>
   editPlanHash: string
   availableAssetIds: readonly string[]
+  renderVariantIds: readonly string[]
+  outputReferences: readonly Readonly<CommandImpactOutputReference>[]
   entries: readonly Readonly<{ annotation: Readonly<ReviewAnnotation>; proposal: Readonly<ReviewPatchProposal> }>[]
 }
 
@@ -69,6 +72,7 @@ export interface ReviewPatchBatchCommit {
   version: Readonly<ProjectVersion>
   event: Readonly<PublicEvent>
   comparison: NonNullable<ReviewPatchBatch['comparison']>
+  impact: Readonly<CommandImpactV1>
 }
 
 export interface ReviewPatchBatchApplyResult {
@@ -77,6 +81,8 @@ export interface ReviewPatchBatchApplyResult {
   version: Readonly<ProjectVersion>
   editPlan: Readonly<Record<string, unknown>>
   comparison: NonNullable<ReviewPatchBatch['comparison']>
+  impact: Readonly<CommandImpactV1>
+  invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
   replayed: boolean
 }
 

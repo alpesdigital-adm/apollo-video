@@ -826,7 +826,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.review-patch-batches.apply',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Apply a confirmed batch review patch',
     description: 'Atomically applies every included annotation in one Command and immutable ProjectVersion, or applies only the non-conflicting subset when partial retry was explicitly requested.',
     exposure: 'public',
@@ -834,7 +834,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:write'],
     inputSchemaRef: 'apollo://schemas/apply-review-patch-batch-request/v1',
-    outputSchemaRef: 'apollo://schemas/review-patch-batch-applied/v1',
+    outputSchemaRef: 'apollo://schemas/review-patch-batch-applied/v2',
     endpoint: { method: 'POST', path: '/v1/projects/{projectId}/patch-batches/{batchId}/apply' },
     toolName: 'apollo.projects.review-patch-batches.apply',
     supportsDryRun: false,

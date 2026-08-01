@@ -18,6 +18,7 @@ import {
   parseCommandImpact,
 } from '../../src/v2/domain/command-impact.ts'
 import { applyReviewPatchService } from '../../src/v2/application/review-patch.ts'
+import { applyReviewPatchBatchService } from '../../src/v2/application/review-patch-batch.ts'
 import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
 import { PrismaReviewPatchRepository } from '../../src/v2/infrastructure/prisma/review-patch-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
@@ -765,6 +766,107 @@ test('T-FR-233 review patch converts millisecond points to frame ranges and fenc
     }),
     (error) => error.code === 'INVALID_ARGUMENT' && /outside the timeline/.test(error.message),
   )
+})
+
+test('T-FR-233 batch review preserves disjoint canonical ranges under its own command identity', () => {
+  const value = createReviewPatchCommandImpact({
+    commandType: 'apply-review-patch-batch',
+    commandId: 'edit-command-review-batch-impact-1',
+    baseVersionId,
+    resultVersionId,
+    variantIds: ['9:16', '16:9'],
+    operations: [
+      { op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1500] },
+      { op: 'update-text', targetId: 'subtitle:cue-2', value: { text: 'Revisado' }, rangeMs: [4000, 4500] },
+    ],
+    invalidatedRangesMs: [[4000, 4500], [1000, 1500]],
+    beforeEditPlan: plan(),
+    afterEditPlan: plan(resultVersionId),
+    outputReferences: outputs,
+  })
+  assert.equal(value.commandType, 'apply-review-patch-batch')
+  assert.deepEqual(value.changeKinds, ['update-layout', 'update-text'])
+  assert.deepEqual(value.dependencyTypes, ['content', 'visual'])
+  assert.deepEqual(value.affectedRanges, [
+    { startFrame: 30, endFrame: 45 },
+    { startFrame: 120, endFrame: 135 },
+  ])
+  assert.deepEqual(value.affectedVariantIds, ['16:9', '9:16'])
+  assert.equal(value.affectedArtifacts.length, 3)
+  assert.deepEqual(parseCommandImpact(JSON.parse(JSON.stringify(value))), value)
+})
+
+test('T-FR-233 applied review batch persists impact v2 and normalized invalidations', async () => {
+  let committed
+  const patch = {
+    id: 'patch-batch-impact-1', baseVersionId,
+    operations: [
+      { op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1500] },
+      { op: 'update-text', targetId: 'subtitle:cue-1', value: { text: 'Texto revisado' }, rangeMs: [4000, 4500] },
+    ],
+    annotationIds: ['annotation-batch-impact-1', 'annotation-batch-impact-2'],
+    estimatedCost: 0,
+    invalidatedRanges: [[1000, 1500], [4000, 4500]],
+  }
+  const service = applyReviewPatchBatchService({
+    repository: {
+      async readApplyContext() {
+        return {
+          currentVersion: {
+            id: baseVersionId, workspaceId, projectId, sequence: 1,
+            snapshotRefs: { brief: 'snapshot-brief-1', editPlan: 'snapshot-edit-1', policies: 'snapshot-policy-1' },
+            baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', createdAt,
+          },
+          editPlan: plan(), editPlanHash: 'b'.repeat(64), availableAssetIds: ['source-1'],
+          renderVariantIds: ['9:16'], outputReferences: outputs,
+          entries: [],
+          batch: {
+            id: 'review-patch-batch-impact-1', workspaceId, projectId, baseVersionId,
+            mode: 'all-or-nothing', status: 'ready', patch,
+            impact: { operationCount: 2, cost: 0, invalidatedRanges: patch.invalidatedRanges, changedTargets: ['subtitle:cue-1'], expectedScoreDelta: 2, invalidatedArtifacts: ['proxy', 'final'] },
+            conflicts: [],
+            items: patch.annotationIds.map((annotationId, index) => ({
+              id: `review-patch-batch-item-impact-${index + 1}`, annotationId,
+              proposalId: `review-patch-proposal-impact-${index + 1}`, status: 'included',
+              operation: patch.operations[index], conflictIds: [], createdAt, updatedAt: createdAt,
+            })),
+            createdAt, updatedAt: createdAt,
+          },
+        }
+      },
+      async commitOrReplay(bundle) {
+        committed = bundle
+        return {
+          batch: { id: bundle.batchId }, command: bundle.command, version: bundle.version,
+          editPlan: JSON.parse(bundle.snapshot.contentJson), comparison: bundle.comparison,
+          impact: bundle.impact,
+          invalidations: createCommandArtifactInvalidations({ impact: bundle.impact, createdAt: bundle.command.createdAt }),
+          replayed: false,
+        }
+      },
+    },
+    clock: () => new Date('2026-08-01T02:00:00.000Z'),
+    createId: (kind) => ({
+      'edit-command': 'edit-command-review-batch-impact-2',
+      'project-version': resultVersionId,
+      'project-snapshot': 'project-snapshot-review-batch-impact-2',
+    })[kind],
+    createEventId: () => '4e0a7962-5347-4bef-a810-95ab71340456',
+  })
+  const result = await service({
+    workspaceId, projectId, batchId: 'review-patch-batch-impact-1', confirmed: true,
+    actor: { type: 'api-client', id: 'client-impact-1' }, idempotencyKey: 'review-batch-impact-apply-1',
+  })
+  assert.equal(committed.command.payload.schemaVersion, 2)
+  assert.equal(result.impact.commandType, 'apply-review-patch-batch')
+  assert.equal(committed.command.payload.impact.impactHash, result.impact.impactHash)
+  assert.equal(committed.event.data.commandImpactHash, result.impact.impactHash)
+  assert.equal(committed.event.data.artifactInvalidationCount, 2)
+  assert.deepEqual(result.impact.affectedRanges, [
+    { startFrame: 30, endFrame: 45 },
+    { startFrame: 120, endFrame: 135 },
+  ])
+  assert.equal(result.invalidations.length, 2)
 })
 
 test('T-FR-233 applied review patch persists impact v2 and normalized invalidations', async () => {

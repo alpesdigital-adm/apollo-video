@@ -9,12 +9,23 @@ import { DomainError, assertDomain } from '../domain/errors.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
+import { createReviewPatchCommandImpact, type CommandImpactV1 } from '../domain/command-impact.ts'
 import {
   compileBatchReview,
   materializePatchEditPlan,
   type PatchImpact,
   type PatchSet,
 } from '../domain/review-system.ts'
+
+interface AppliedReviewPatchBatchPayloadV2 {
+  schemaVersion: 2
+  batchId: string
+  mode: ReviewPatchBatchMode
+  annotationIds: readonly string[]
+  proposalIds: readonly string[]
+  patch: Readonly<PatchSet>
+  impact: Readonly<CommandImpactV1>
+}
 
 function validateIdentity(value: string, field: string): string {
   const normalized = value.trim()
@@ -213,15 +224,33 @@ export function applyReviewPatchBatchService(dependencies: {
     })
     const editPlanJson = stableSerialize(editPlan)
     const editPlanHash = calculateVersionHash(editPlan)
-    const payload = Object.freeze({
-      schemaVersion: 1 as const,
+    assertDomain(
+      stableSerialize(patch.invalidatedRanges) === stableSerialize(context.batch.impact!.invalidatedRanges),
+      'PERSISTENCE_CONFLICT',
+      'Batch review patch impact ranges are inconsistent',
+    )
+    const impact = createReviewPatchCommandImpact({
+      commandType: 'apply-review-patch-batch',
+      commandId,
+      baseVersionId: context.currentVersion.id,
+      resultVersionId: versionId,
+      variantIds: context.renderVariantIds,
+      operations: patch.operations,
+      invalidatedRangesMs: context.batch.impact!.invalidatedRanges,
+      beforeEditPlan: context.editPlan,
+      afterEditPlan: editPlan,
+      outputReferences: context.outputReferences,
+    })
+    const payload: Readonly<AppliedReviewPatchBatchPayloadV2> = Object.freeze({
+      schemaVersion: 2 as const,
       batchId,
       mode: context.batch.mode,
       annotationIds: patch.annotationIds,
       proposalIds: context.batch.items.filter((item) => patch.annotationIds.includes(item.annotationId)).map((item) => item.proposalId),
       patch,
+      impact,
     })
-    const command = createEditCommand({
+    const command = createEditCommand<AppliedReviewPatchBatchPayloadV2>({
       id: commandId,
       workspaceId,
       projectId,
@@ -290,6 +319,8 @@ export function applyReviewPatchBatchService(dependencies: {
         commandId,
         commandType: command.type,
         patchBatchId: batchId,
+        commandImpactHash: impact.impactHash,
+        artifactInvalidationCount: impact.affectedArtifacts.length,
         snapshotRefs: version.snapshotRefs,
         createdAt,
       },
@@ -303,6 +334,7 @@ export function applyReviewPatchBatchService(dependencies: {
       version,
       event,
       comparison,
+      impact,
     })
   }
 }

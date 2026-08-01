@@ -13,6 +13,12 @@ import { stableSerialize } from '../../application/version-hash.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
+  createCommandArtifactInvalidations,
+  normalizeCommandImpactOutputReferences,
+  parseCommandImpact,
+} from '../../domain/command-impact.ts'
+import {
+  hydrateInvalidation,
   hydrateReviewAnnotation,
   hydrateReviewPatchProposal,
   hydrateReviewPatchVersion,
@@ -122,11 +128,56 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
         proposal: hydrateReviewPatchProposal(row),
       })
     })
+    const renderVariantIds = Object.freeze([
+      ...new Set([
+        project.format ?? '9:16',
+        ...entries.flatMap((entry) => entry.annotation.applicationScope.formatIds),
+      ]),
+    ].toSorted())
+    const [proxyOutputs, finalOutputs] = await Promise.all([
+      this.client.v2ProjectProxyRenderOperation.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          projectVersionId: version.id,
+          operation: { status: 'succeeded', phase: 'completed' },
+        },
+        select: { outputArtifactId: true },
+      }),
+      this.client.v2ProjectFinalExportOperation.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          projectVersionId: version.id,
+          operation: { status: 'succeeded', phase: 'completed' },
+        },
+        select: { outputArtifactId: true, outputAspectRatio: true },
+      }),
+    ])
     return Object.freeze({
       currentVersion: hydrateReviewPatchVersion(version),
       editPlan: Object.freeze(parseJson<Record<string, unknown>>(version.editPlanSnapshot.contentJson, 'batch review EditPlan')),
       editPlanHash: version.editPlanSnapshot.contentHash,
       availableAssetIds: Object.freeze([...new Set(project.mediaAssets.map((asset) => asset.artifactId))]),
+      renderVariantIds,
+      outputReferences: normalizeCommandImpactOutputReferences([
+        ...(renderVariantIds.includes(project.format ?? '9:16')
+          ? proxyOutputs.map((output) => ({
+              artifactId: output.outputArtifactId,
+              kind: 'proxy' as const,
+              sourceVersionId: version.id,
+              variantId: project.format ?? '9:16',
+            }))
+          : []),
+        ...finalOutputs
+          .filter((output) => renderVariantIds.includes(output.outputAspectRatio))
+          .map((output) => ({
+            artifactId: output.outputArtifactId,
+            kind: 'final' as const,
+            sourceVersionId: version.id,
+            variantId: output.outputAspectRatio,
+          })),
+      ]),
       entries: Object.freeze(entries),
     })
   }
@@ -188,12 +239,22 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       include: {
         items: true,
         renderOperation: true,
-        resultVersion: { include: { editPlanSnapshot: true, command: true } },
+        resultVersion: { include: { editPlanSnapshot: true, command: { include: { artifactInvalidations: true } } } },
       },
     })
     if (!row || row.status !== 'applied' || !row.resultVersion?.command || !row.comparisonJson) return null
     if (row.applyIdempotencyKey !== input.applyIdempotencyKey || row.applyRequestFingerprint !== input.applyRequestFingerprint) return null
     const commandRow = row.resultVersion.command
+    const payload = parseJson<Record<string, unknown>>(commandRow.payloadJson, 'batch patch command payload')
+    if (payload.schemaVersion !== 2 || !payload.impact) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored batch review command impact is missing')
+    const impact = parseCommandImpact(payload.impact)
+    if (
+      impact.commandType !== 'apply-review-patch-batch' || impact.commandId !== commandRow.id ||
+      impact.baseVersionId !== commandRow.baseVersionId || impact.resultVersionId !== row.resultVersion.id
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored batch review command impact identity is inconsistent')
+    const invalidations = Object.freeze(createCommandArtifactInvalidations({ impact, createdAt: commandRow.createdAt.toISOString() }).toSorted((left, right) => left.id.localeCompare(right.id)))
+    const storedInvalidations = Object.freeze(commandRow.artifactInvalidations.map(hydrateInvalidation).toSorted((left, right) => left.id.localeCompare(right.id)))
+    if (stableSerialize(invalidations) !== stableSerialize(storedInvalidations)) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored batch review artifact invalidations are inconsistent')
     const command = createEditCommand({
       id: commandRow.id,
       workspaceId: commandRow.workspaceId,
@@ -203,7 +264,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       author: { type: commandRow.actorType as 'user' | 'director' | 'system' | 'api-client', id: commandRow.actorId, ...(commandRow.delegatedUserId ? { delegatedUserId: commandRow.delegatedUserId } : {}) },
       type: commandRow.type,
       scope: parseJson<EditScope>(commandRow.scopeJson, 'batch patch command scope'),
-      payload: parseJson<unknown>(commandRow.payloadJson, 'batch patch command payload'),
+      payload,
       ...(commandRow.reason ? { reason: commandRow.reason } : {}),
       idempotencyKey: commandRow.idempotencyKey,
       createdAt: commandRow.createdAt.toISOString(),
@@ -214,6 +275,8 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       version: hydrateReviewPatchVersion(row.resultVersion),
       editPlan: Object.freeze(parseJson<Record<string, unknown>>(row.resultVersion.editPlanSnapshot.contentJson, 'applied batch review EditPlan')),
       comparison: Object.freeze(parseJson<NonNullable<ReviewPatchBatch['comparison']>>(row.comparisonJson, 'batch comparison')),
+      impact,
+      invalidations,
       replayed: true,
     })
   }
@@ -251,6 +314,44 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
         }
         const included = batch.items.filter((item) => item.status === 'included')
         if (!included.length) throw new DomainError('PRECONDITION_REQUIRED', 'Batch review has no included annotations')
+        const payload = bundle.command.payload as Readonly<{ schemaVersion?: unknown; impact?: unknown }>
+        const persistedImpact = payload.schemaVersion === 2 && payload.impact ? parseCommandImpact(payload.impact) : null
+        if (
+          !persistedImpact || persistedImpact.commandType !== 'apply-review-patch-batch' ||
+          persistedImpact.impactHash !== bundle.impact.impactHash
+        ) throw new DomainError('PERSISTENCE_CONFLICT', 'Batch review command and impact payload are inconsistent')
+        const [proxyOutputs, finalOutputs] = await Promise.all([
+          transaction.v2ProjectProxyRenderOperation.findMany({
+            where: {
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              projectVersionId: bundle.command.baseVersionId,
+              operation: { status: 'succeeded', phase: 'completed' },
+            },
+            select: { outputArtifactId: true },
+          }),
+          transaction.v2ProjectFinalExportOperation.findMany({
+            where: {
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              projectVersionId: bundle.command.baseVersionId,
+              operation: { status: 'succeeded', phase: 'completed' },
+            },
+            select: { outputArtifactId: true, outputAspectRatio: true },
+          }),
+        ])
+        const projectVariantId = project.format ?? '9:16'
+        const currentAffectedArtifacts = normalizeCommandImpactOutputReferences([
+          ...(bundle.impact.affectedVariantIds.includes(projectVariantId)
+            ? proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: projectVariantId }))
+            : []),
+          ...finalOutputs
+            .filter((output) => bundle.impact.affectedVariantIds.includes(output.outputAspectRatio))
+            .map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
+        ])
+        if (stableSerialize(currentAffectedArtifacts) !== stableSerialize(bundle.impact.affectedArtifacts)) {
+          throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before batch review impact commit')
+        }
         await transaction.v2EditCommand.create({ data: {
           id: bundle.command.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
           baseVersionId: bundle.command.baseVersionId, baseHash: bundle.command.baseHash, type: bundle.command.type,
@@ -268,6 +369,25 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
           storySnapshotId: bundle.version.snapshotRefs.story, editPlanSnapshotId: bundle.version.snapshotRefs.editPlan, policiesSnapshotId: bundle.version.snapshotRefs.policies,
           baseHash: bundle.version.baseHash, createdBy: bundle.version.createdBy, commandId: bundle.command.id, createdAt: new Date(bundle.version.createdAt),
         } })
+        const invalidations = createCommandArtifactInvalidations({ impact: bundle.impact, createdAt: bundle.command.createdAt })
+        if (invalidations.length > 0) {
+          await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((invalidation) => ({
+            id: invalidation.id,
+            workspaceId: bundle.command.workspaceId,
+            projectId: bundle.command.projectId,
+            commandId: invalidation.commandId,
+            baseVersionId: invalidation.baseVersionId,
+            resultVersionId: invalidation.resultVersionId,
+            artifactId: invalidation.artifactId,
+            kind: invalidation.kind,
+            variantId: invalidation.variantId,
+            status: invalidation.status,
+            dependencyTypesJson: stableSerialize(invalidation.dependencyTypes),
+            affectedRangesJson: stableSerialize(invalidation.affectedRanges),
+            impactHash: invalidation.impactHash,
+            createdAt: new Date(invalidation.createdAt),
+          })) })
+        }
         const updated = await transaction.v2Project.updateMany({
           where: { id: bundle.version.projectId, workspaceId: bundle.version.workspaceId, currentVersionId: bundle.command.baseVersionId },
           data: { currentVersionId: bundle.version.id },

@@ -67,6 +67,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       command: { id: result.command.id, type: result.command.type, baseVersionId: result.command.baseVersionId, resultVersionId: result.version.id, createdAt: result.command.createdAt },
       version: { id: result.version.id, sequence: result.version.sequence, parentVersionId: result.version.parentVersionId, baseHash: result.version.baseHash, snapshotRefs: result.version.snapshotRefs, createdAt: result.version.createdAt },
       comparison: result.comparison,
+      impact: result.impact,
+      invalidations: result.invalidations,
       operation: presentPublicOperation(render.operation),
       replayed: result.replayed && render.replayed,
     }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
