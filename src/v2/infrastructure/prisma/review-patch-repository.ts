@@ -10,6 +10,7 @@ import type {
 } from '../../application/ports/review-patch-repository.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
+import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProjectVersion, type ProjectVersion } from '../../domain/project-version.ts'
 import { createReviewAnnotation, type ReviewAnnotation, type ReviewScope } from '../../domain/review-system.ts'
@@ -286,7 +287,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       baseVersionId: commandRow.baseVersionId,
       baseHash: commandRow.baseHash,
       author: { type: commandRow.actorType as 'user' | 'director' | 'system' | 'api-client', id: commandRow.actorId, ...(commandRow.delegatedUserId ? { delegatedUserId: commandRow.delegatedUserId } : {}) },
-      type: commandRow.type,
+      type: requireEditCommandType(commandRow.type),
       scope: parseJson<EditScope>(commandRow.scopeJson, 'review patch command scope'),
       payload,
       ...(commandRow.reason ? { reason: commandRow.reason } : {}),

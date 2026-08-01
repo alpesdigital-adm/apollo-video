@@ -11,6 +11,7 @@ import {
   parseCommandArtifactInvalidation,
   parseCommandImpact,
 } from '../../domain/command-impact.ts'
+import { editCommandRenderPolicy } from '../../domain/edit-command-registry.ts'
 
 function parseRecord(value: string, field: string): Record<string, unknown> {
   try {
@@ -265,7 +266,9 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
   ): Promise<Readonly<ProjectProxyRenderSource>> {
     const version = project.versions[0]
     const command = version?.command
-    if (!version || !command || !['manual-edit', 'apply-review-patch', 'apply-review-patch-batch'].includes(command.type)) return source
+    // Range reuse is derived from the canonical registry: only Command types whose
+    // declared policy is partial-range may narrow a render to stale ranges.
+    if (!version || !command || editCommandRenderPolicy(command.type) !== 'partial-range') return source
     const payload = parseRecord(command.payloadJson, 'project proxy Command payload')
     if (!payload.impact) return source
     const impact = parseCommandImpact(payload.impact)
