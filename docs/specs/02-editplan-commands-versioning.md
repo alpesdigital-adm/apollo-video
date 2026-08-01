@@ -592,6 +592,12 @@ Palavras parcialmente cobertas são descartadas. Expandir o mesmo contrato para
 os Commands editoriais restantes e batch ainda é obrigatório antes de
 considerar FR-233 concluído.
 
+O golden local de integração carrega a evidência retimada por uma serialização
+equivalente à snapshot persistida, executa o Diretor real e entrega seu plano ao
+renderer FFmpeg real. A prova mede 240 frames exatos em rates `1`, `2` e `0.5`,
+presença de áudio, compressão/expansão visual, legendas nos intervalos retimados
+e ausência nos gaps descartados. Ela não substitui o E2E PostgreSQL/API.
+
 `remove-spoken-content` também usa esse modelo sem fingir uma otimização local.
 O handler recompila o EditPlan a partir do transcript alinhado; por isso seu
 `editorial-cut-impact/v1` cobre o maior timeline entre base e resultado,

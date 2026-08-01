@@ -1696,10 +1696,11 @@ um envelope contínuo até o fim, pois os clips intermediários mudam de mapping
 aplicação confirmada de review patch também persiste esse mapa: converte o
 escopo temporal humano para frames, fenceia outputs da base, grava stale
 atomicamente e expõe impacto/invalidações na capability pública v2 antes de
-enfileirar o proxy reutilizável. A
-entrega permanece aberta até a mesma semântica cobrir todos os Commands e
-ranges, um MP4 real combinar transcript substituído com rate diferente de 1 e
-a jornada integrada ser executada em PostgreSQL, implantada e aceita.
+enfileirar o proxy reutilizável. A jornada golden local já combina transcript
+substituído, snapshot persistível, Diretor e FFmpeg real com rates `1`, `2` e
+`0.5`, 240 frames exatos, áudio e legendas retimadas. A entrega permanece
+aberta até a mesma semântica cobrir todos os Commands e ranges e a jornada
+integrada ser executada em PostgreSQL, implantada e aceita.
 
 ### FR-234 — Props/manifest
 
