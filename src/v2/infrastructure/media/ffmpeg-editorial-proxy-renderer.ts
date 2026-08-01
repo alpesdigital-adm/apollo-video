@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 
 import type { EditorialProxyRenderer } from '../../application/ports/editorial-proxy-renderer.ts'
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
+import { assertClipRate, timelineSpanForRate } from '../../domain/clip-timing.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
@@ -132,39 +133,9 @@ function normalizedCropFilter(
   return `crop=${width}:${height}:${x}:${y},`
 }
 
-const MIN_CLIP_RATE = 0.25
-const MAX_CLIP_RATE = 4
-
 type PartialRange = Readonly<{ startFrame: number; endFrame: number }>
 
-export function assertClipRate(rate: number): number {
-  if (!Number.isFinite(rate)) {
-    throw new DomainError('INVALID_RENDER_INPUT', 'Editorial clip rate must be a finite number')
-  }
-  if (rate <= 0) {
-    throw new DomainError(
-      'INVALID_RENDER_INPUT',
-      'Editorial clip rate must be greater than zero: reverse playback is not supported',
-    )
-  }
-  if (rate < MIN_CLIP_RATE || rate > MAX_CLIP_RATE) {
-    throw new DomainError(
-      'INVALID_RENDER_INPUT',
-      `Editorial clip rate ${rate} is outside the supported range [${MIN_CLIP_RATE}, ${MAX_CLIP_RATE}]`,
-    )
-  }
-  return rate
-}
-
-/**
- * Frame-first timing: the timeline span is the truth and the source span is read
- * through the rate. A clip covering `s` source frames at `rate` must occupy
- * exactly `round(s / rate)` timeline frames, so no clip can drift against its
- * neighbours once concatenated.
- */
-function timelineSpanForRate(sourceSpan: number, rate: number): number {
-  return Math.round(sourceSpan / rate)
-}
+export { assertClipRate }
 
 /**
  * `atempo` only accepts factors in [0.5, 2.0], so a rate outside that window is
