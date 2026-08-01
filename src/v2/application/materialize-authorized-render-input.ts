@@ -3,6 +3,7 @@ import {
   normalizeAssetUseContext,
 } from '../domain/asset-rights.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
+import { renderInputLineageMatches } from '../domain/media-artifact.ts'
 import type { MaterializationAuthorization } from '../domain/materialization-authorization.ts'
 import type {
   MaterializedRenderInputV1,
@@ -157,6 +158,9 @@ export function materializeAuthorizedRenderInputService(dependencies: {
     )
     if (!input || input.inputHash !== authorization.inputHash) {
       revalidationFailure('RENDER_INPUT_CHANGED')
+    }
+    if (!renderInputLineageMatches(manifest.sources, input)) {
+      revalidationFailure('RENDER_INPUT_LINEAGE_CHANGED')
     }
     if (!dependencies.targets.supportsRenderer(input.renderer)) {
       revalidationFailure('RENDERER_UNAVAILABLE')

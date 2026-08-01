@@ -1253,6 +1253,14 @@ test('materialization authorization evaluates every RenderInput asset and record
     createdBy: { type: 'api-client', id: 'client-1' },
     createdAt: '2026-07-14T12:00:00.000Z',
   })
+  const authSources = [{
+    artifactId: 'artifact-auth-source',
+    artifactKey: 'workspaces/1/source.mp4',
+    sha256: 'c'.repeat(64),
+    role: 'primary',
+    ordinal: 0,
+  }]
+  let persistedAuthSources = authSources
   let recorded
   const authorize = authorizeRenderInputMaterializationService({
     artifactRepository: {
@@ -1266,6 +1274,7 @@ test('materialization authorization evaluates every RenderInput asset and record
                 ref: `render-input/sha256/${input.inputHash}`,
                 inputHash: input.inputHash,
               },
+              sources: persistedAuthSources,
             },
           ],
         }
@@ -1303,6 +1312,20 @@ test('materialization authorization evaluates every RenderInput asset and record
   assert.equal(recorded.requestFingerprint.length, 64)
   assert.equal(JSON.stringify(result).includes('must-not-leak'), false)
   assert.equal(JSON.stringify(result).includes('workspaces/1/source.mp4'), false)
+
+  persistedAuthSources = []
+  await assert.rejects(
+    authorize({
+      workspaceId: 'workspace-1',
+      artifactId: 'artifact-output',
+      manifestId: 'manifest-output',
+      use: 'paid-ad',
+      market: 'BR',
+      actor: { type: 'api-client', id: 'client-1' },
+      idempotencyKey: 'authorization-lineage-mismatch-1',
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
 })
 
 test('materialization authorization retries serialization conflicts before failing explicitly', async () => {
@@ -1424,6 +1447,14 @@ test('authorized worker materialization revalidates rights and keeps locations i
   let workerNow = new Date('2026-07-14T12:02:00.000Z')
   let resolverCalls = 0
   let resolverAuthorization
+  const workerSources = [{
+    artifactId: 'artifact-worker-source',
+    artifactKey: 'workspaces/1/worker-source.mp4',
+    sha256: 'f'.repeat(64),
+    role: 'primary',
+    ordinal: 0,
+  }]
+  let persistedWorkerSources = workerSources
   const materialize = materializeAuthorizedRenderInputService({
     artifacts: {
       async findById() {
@@ -1436,6 +1467,7 @@ test('authorized worker materialization revalidates rights and keeps locations i
                 ref: `render-input/sha256/${input.inputHash}`,
                 inputHash: input.inputHash,
               },
+              sources: persistedWorkerSources,
             },
           ],
         }
@@ -1482,6 +1514,19 @@ test('authorized worker materialization revalidates rights and keeps locations i
   assert.equal(serialized.includes('file:///'), false)
   assert.equal(serialized.includes('workspaces/1/worker-source.mp4'), false)
   assert.equal(serialized.includes('never-serialize-this'), false)
+
+  persistedWorkerSources = []
+  await assert.rejects(
+    materialize({
+      workspaceId: 'workspace-1',
+      authorizationId: 'materialization-worker-1',
+    }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'MATERIALIZATION_REVALIDATION_FAILED' &&
+      error.details.reasonCode === 'RENDER_INPUT_LINEAGE_CHANGED',
+  )
+  persistedWorkerSources = workerSources
 
   workerNow = new Date('2026-07-14T12:06:00.000Z')
   await assert.rejects(
@@ -2487,7 +2532,13 @@ test('artifact reconstruction preflight authenticates input and fails closed bef
           canonicalByteSize: 1024,
           algorithm: 'aes-256-gcm',
         },
-        sources: [],
+        sources: [{
+          artifactId: 'artifact-source',
+          artifactKey: 'workspaces/1/private/source.mp4',
+          sha256: '3'.repeat(64),
+          role: 'primary',
+          ordinal: 0,
+        }],
         createdAt: '2026-07-14T11:30:00.000Z',
       },
       {
@@ -2534,6 +2585,17 @@ test('artifact reconstruction preflight authenticates input and fails closed bef
   assert.equal(JSON.stringify(eligible).includes('private-logical-asset-id'), false)
   assert.equal(JSON.stringify(eligible).includes('workspaces/1/private'), false)
 
+  const persistedSources = artifact.manifests[0].sources
+  artifact.manifests[0].sources = []
+  await assert.rejects(
+    createPreflight(
+      { async inspect() { throw new Error('must not inspect mismatched lineage') } },
+      configuredTargets,
+    )('workspace-1', artifact.id, 'manifest-v4'),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  artifact.manifests[0].sources = persistedSources
+
   const blocked = await createPreflight(
     { async inspect() { return { available: false, code: 'ASSET_UNAVAILABLE' } } },
     { supportsRenderer() { return false }, supportsComposition() { return false } },
@@ -2558,7 +2620,7 @@ test('artifact reconstruction preflight authenticates input and fails closed bef
   assert.equal(legacy.payloadAuthenticated, false)
   assert.equal(legacy.eligible, false)
   assert.deepEqual(legacy.issues.map((issue) => issue.code), ['RENDER_INPUT_MISSING'])
-  assert.equal(protectedReads, 2)
+  assert.equal(protectedReads, 3)
 })
 
 test('media artifact lookup normalizes ids and hides missing workspace records', async () => {

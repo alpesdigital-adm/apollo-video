@@ -1,4 +1,5 @@
 import { DomainError } from '../domain/errors.ts'
+import { renderInputLineageMatches } from '../domain/media-artifact.ts'
 import type { MediaArtifactQueryRepository } from './ports/media-artifact-query-repository.ts'
 import type { ProtectedRenderInputStore } from './ports/protected-render-input-store.ts'
 import type {
@@ -74,6 +75,12 @@ export function preflightMediaArtifactReconstructionService(dependencies: {
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
         'Protected RenderInput linked by the manifest was not found',
+      )
+    }
+    if (!renderInputLineageMatches(manifest.sources, input)) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Manifest lineage does not match its protected RenderInput',
       )
     }
 

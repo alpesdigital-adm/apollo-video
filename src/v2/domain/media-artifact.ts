@@ -171,6 +171,21 @@ export interface ReconstructableMediaArtifactManifest {
   renderInput: RenderInputPayload
 }
 
+export function renderInputLineageMatches(
+  sources: readonly Pick<MediaArtifactSource, 'artifactKey' | 'sha256' | 'role'>[],
+  renderInput: RenderInputSpecV1,
+): boolean {
+  const lineageAssets = renderInput.assets.filter((asset) => asset.kind !== 'lut')
+  return lineageAssets.length === sources.length &&
+    lineageAssets.every((asset, index) => {
+      const source = sources[index]
+      return source !== undefined &&
+        asset.artifactKey === source.artifactKey &&
+        asset.sha256 === source.sha256 &&
+        asset.role === source.role
+    })
+}
+
 function validatePortableKey(value: string, field: string): string {
   const normalized = value.trim()
   const segments = normalized.split('/')
@@ -383,16 +398,8 @@ export function createReconstructableMediaArtifactManifest(
 ): ReconstructableMediaArtifactManifest {
   const replayable = createReplayableMediaArtifactManifest(input)
   const renderInput = createRenderInputPayload(input.renderInput)
-  const lineageAssets = input.renderInput.assets.filter((asset) => asset.kind !== 'lut')
   assertDomain(
-    lineageAssets.length === replayable.manifest.sources.length &&
-      lineageAssets.every((asset, index) => {
-        const source = replayable.manifest.sources[index]
-        return source !== undefined &&
-          asset.artifactKey === source.artifactKey &&
-          asset.sha256 === source.sha256 &&
-          asset.role === source.role
-      }),
+    renderInputLineageMatches(replayable.manifest.sources, input.renderInput),
     'INVALID_MEDIA_ARTIFACT',
     'Manifest sources must exactly match the ordered non-LUT RenderInput assets',
   )

@@ -3,6 +3,7 @@ import {
   normalizeAssetUseContext,
 } from '../domain/asset-rights.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
+import { renderInputLineageMatches } from '../domain/media-artifact.ts'
 import {
   createMaterializationAuthorization,
   type MaterializationAuthorizationIssue,
@@ -110,6 +111,12 @@ export function authorizeRenderInputMaterializationService(dependencies: {
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
         'Protected RenderInput linked by the manifest was not found',
+      )
+    }
+    if (!renderInputLineageMatches(manifest.sources, input)) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Manifest lineage does not match its protected RenderInput',
       )
     }
 

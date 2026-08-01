@@ -103,7 +103,7 @@ test('T-FR-181 materialization authorization permits licensed immutable LUTs and
     const version = lut(policy)
     const input = renderInput(asset(version))
     const authorize = authorizeRenderInputMaterializationService({
-      artifactRepository: { async findById() { return { id: 'artifact-output-lut-1', manifests: [{ id: 'manifest-output-lut-1', renderInput: { ref: `render-input/sha256/${input.inputHash}`, inputHash: input.inputHash } }] } } },
+      artifactRepository: { async findById() { return { id: 'artifact-output-lut-1', manifests: [{ id: 'manifest-output-lut-1', renderInput: { ref: `render-input/sha256/${input.inputHash}`, inputHash: input.inputHash }, sources: [] }] } } },
       protectedRenderInputs: { async read() { return input } },
       assetAvailability: { async inspect() { return { available: true } } },
       targets: { supportsRenderer() { return true }, supportsComposition() { return true } },
@@ -132,7 +132,7 @@ test('T-FR-234 authorized worker revalidates LUT policy identity before resolvin
   })
   let resolved = 0
   const materialize = materializeAuthorizedRenderInputService({
-    artifacts: { async findById() { return { id: 'artifact-output-lut-1', manifests: [{ id: 'manifest-output-lut-1', renderInput: { ref: `render-input/sha256/${input.inputHash}`, inputHash: input.inputHash } }] } } },
+    artifacts: { async findById() { return { id: 'artifact-output-lut-1', manifests: [{ id: 'manifest-output-lut-1', renderInput: { ref: `render-input/sha256/${input.inputHash}`, inputHash: input.inputHash }, sources: [] }] } } },
     protectedRenderInputs: { async read() { return input } }, assetAvailability: { async inspect() { return { available: true } } },
     targets: { supportsRenderer() { return true }, supportsComposition() { return true } },
     rights: { async findCurrentForArtifacts(_workspaceId, ids) { assert.deepEqual(ids, []); return new Map() } },
