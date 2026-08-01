@@ -580,11 +580,15 @@ históricos continuam imutáveis e disponíveis para leitura da versão antiga:
 O primeiro adapter integrado cobre `manual-edit`. O Command público
 `replace-source-transcript` cobre a troca explícita da evidência fonte: valida
 ID/hash e source artifact, retima as palavras sobre o áudio materializado no
-EditPlan, cria snapshot/ProjectVersion imutáveis e invalida todos os outputs
+EditPlan com a mesma regra frame-first de rate `[0.25, 4]` do renderer, cria
+snapshot/ProjectVersion imutáveis e invalida todos os outputs
 concluídos da base. Como percepção, TreatmentPlan, StoryPlan e EditPlan precisam
 ser recalculados, ele não enfileira render e declara `run-director` como próxima
 capability obrigatória. O Diretor consulta o transcript ID gravado no EditPlan,
-em vez de inferir a seleção pela data de criação. Expandir o mesmo contrato para
+em vez de inferir a seleção pela data de criação. Clips audíveis são percorridos
+na ordem da timeline: reordenação de source mantém a evidência cronológica e
+reuso do mesmo range produz uma ocorrência por posição, sem `first-match`.
+Palavras parcialmente cobertas são descartadas. Expandir o mesmo contrato para
 os Commands editoriais restantes e batch ainda é obrigatório antes de
 considerar FR-233 concluído.
 
@@ -652,7 +656,9 @@ completo. A conclusão cria uma
 `V2CommandArtifactInvalidationResolution` imutável ligada à operação e ao novo
 artifact/manifest; consultas omitem a invalidação apenas após `succeeded`, de
 modo que queda ou retry não declare o stale resolvido antes da hora. O suporte
-atual é deliberadamente restrito a um range mesclado e clips em rate 1.
+atual aceita até oito ranges canônicos e clips em rate `[0.25, 4]`; isso
+descreve a capacidade do executor, não autoriza produtores a declararem ranges
+disjuntos sem provar que o mapping intermediário permaneceu idêntico.
 
 Quando o impacto persistido declara somente `selection`, sem artifacts afetados
 e sem render mínimo, o enqueue não materializa um render vazio nem cria bytes.

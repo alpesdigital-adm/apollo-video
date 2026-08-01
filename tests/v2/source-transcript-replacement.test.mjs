@@ -244,9 +244,8 @@ test('T-FR-233 rate 0.5 expands transcript evidence', () => {
   assert.deepEqual(retimed(result), [['texto', 12, 30], ['corrigido', 72, 102]])
 })
 
-test('T-FR-233 each word is retimed by the first clip that fully contains it, at that clip rate', () => {
-  // Two clips of the SAME source with different rates. Ranges are scanned in
-  // plan order and the FIRST fully containing range wins (documented first-match).
+test('T-FR-233 each word is retimed through the timeline clip that fully contains it, at that clip rate', () => {
+  // Two non-overlapping ranges of the SAME source with different rates.
   const result = materialize(ratePlan([
     { id: 'clip-unit', sourceArtifactId: 'artifact-master', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
     { id: 'clip-fast', sourceArtifactId: 'artifact-master', sourceInFrame: 30, sourceOutFrame: 90, timelineInFrame: 30, timelineOutFrame: 60, rate: 2 },
@@ -255,6 +254,33 @@ test('T-FR-233 each word is retimed by the first clip that fully contains it, at
     ['texto', 6, 15], // source 6..15 fits clip-unit (rate 1): offsets pass through
     ['corrigido', 33, 41], // source 36..51 in clip-fast: 30+round(6/2)=33, 30+round(21/2)=41
     ['depois', 48, 54], // source 66..78 in clip-fast: 30+round(36/2)=48, 30+round(48/2)=54
+  ])
+})
+
+test('T-FR-233 transcript evidence follows timeline order when source chronology is reordered', () => {
+  const reorderedTranscript = transcriptFromFrames('t', [
+    ['primeiro-no-source', 6, 15],
+    ['segundo-no-source', 66, 78],
+  ])
+  const result = materialize(ratePlan([
+    { id: 'clip-late-source', sourceArtifactId: 'artifact-master', sourceInFrame: 60, sourceOutFrame: 90, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+    { id: 'clip-early-source', sourceArtifactId: 'artifact-master', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 30, timelineOutFrame: 60, rate: 1 },
+  ], 60), reorderedTranscript)
+  assert.deepEqual(retimed(result), [
+    ['segundo-no-source', 6, 18],
+    ['primeiro-no-source', 36, 45],
+  ])
+})
+
+test('T-FR-233 repeated source audio produces one evidence occurrence per timeline occurrence', () => {
+  const repeatedTranscript = transcriptFromFrames('t', [['repetida', 6, 15]])
+  const result = materialize(ratePlan([
+    { id: 'clip-repeat-1', sourceArtifactId: 'artifact-master', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+    { id: 'clip-repeat-2', sourceArtifactId: 'artifact-master', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 30, timelineOutFrame: 60, rate: 1 },
+  ], 60), repeatedTranscript)
+  assert.deepEqual(retimed(result), [
+    ['repetida', 6, 15],
+    ['repetida', 36, 45],
   ])
 })
 
@@ -403,6 +429,11 @@ class DirectorRepository {
       brief: { productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } } },
       policies: { automaticZoom: false, faceProtection: true },
       editPlan: this.editPlan,
+      currentDurationFrames: this.editPlan.durationFrames,
+      proxyVariantId: '9:16',
+      outputReferences: [
+        { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: 'version-next', variantId: '9:16' },
+      ],
       transcript: {
         id: this.transcriptId, sourceArtifactId: 'artifact-master', language: 'pt-BR',
         provider: 'groq', model: 'whisper-large-v3', transcriptHash: directorTranscript.transcriptHash,

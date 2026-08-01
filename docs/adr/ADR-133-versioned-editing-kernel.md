@@ -82,8 +82,14 @@ response requires a new `run-director`, because perception, treatment, story
 and edit decisions all depend on the replaced evidence. The Director repository
 therefore resolves the transcript selected by the current EditPlan and verifies
 its optional hash, even when a newer unselected transcript exists. Domain tests
-pass and PostgreSQL/API coverage is prepared, but not executable on this host;
-the case remains unaccepted until that E2E, deploy and visual acceptance run.
+also prove rate `[0.25, 4]` with the same frame-first rounding used by the
+renderer. Mapping iterates audible clips in timeline order, so reordered source
+material stays chronological and every repeated source occurrence retains its
+own evidence; partially covered words are discarded rather than invented.
+The immutable snapshot carrying those frames is read by the next DirectorRun.
+PostgreSQL/API coverage is prepared but not executable on this host, and a real
+MP4 combining replaced evidence with non-unit rate is still missing; the case
+remains unaccepted until those E2Es, deploy and visual acceptance run.
 
 `remove-spoken-content` is the next Command integrated into persisted
 invalidation. It intentionally does not claim partial reuse: the handler

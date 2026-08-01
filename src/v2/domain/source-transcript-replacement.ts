@@ -118,6 +118,7 @@ export function materializeSourceTranscriptReplacement(input: {
         videoSourceInFrame >= 0 && videoSourceOutFrame > videoSourceInFrame &&
         sourceInFrame >= 0 && sourceOutFrame > sourceInFrame &&
         timelineInFrame >= 0 && timelineOutFrame > timelineInFrame &&
+        timelineOutFrame <= durationFrames &&
         sourceOutFrame - sourceInFrame === videoSourceOutFrame - videoSourceInFrame &&
         timelineOutFrame - timelineInFrame === timelineSpanForRate(videoSourceOutFrame - videoSourceInFrame, rate),
       'INVALID_ARGUMENT',
@@ -125,18 +126,27 @@ export function materializeSourceTranscriptReplacement(input: {
     )
     const audioArtifactId = String(clip.audioSourceArtifactId ?? clip.sourceArtifactId)
     if (audioArtifactId !== sourceArtifactId) return []
-    return [{ sourceInFrame, sourceOutFrame, timelineInFrame, timelineOutFrame, rate }]
-  })
+    return [{ sourceInFrame, sourceOutFrame, timelineInFrame, timelineOutFrame, rate, ordinal: index }]
+  }).toSorted((left, right) =>
+    left.timelineInFrame - right.timelineInFrame ||
+    left.timelineOutFrame - right.timelineOutFrame ||
+    left.ordinal - right.ordinal)
   assertDomain(sourceRanges.length > 0, 'INVALID_ARGUMENT', 'Replacement transcript source is absent from the audio timeline')
-  const words = input.replacement.transcript.words.flatMap((word) => {
+  const sourceWords = input.replacement.transcript.words.map((word) => {
     const sourceStartFrame = Math.ceil(word.start * fps - 1e-7)
     const sourceEndFrame = Math.floor(word.end * fps + 1e-7)
+    return Object.freeze({ word, sourceStartFrame, sourceEndFrame })
+  })
+  const words = sourceRanges.flatMap((range) => sourceWords.flatMap(({ word, sourceStartFrame, sourceEndFrame }) => {
     // A word is evidence only when it is entirely inside one audible range:
     // partially covered words are dropped rather than interpolated, so no text
-    // is ever attributed to frames the timeline does not play.
-    const range = sourceRanges.find((candidate) =>
-      sourceStartFrame >= candidate.sourceInFrame && sourceEndFrame <= candidate.sourceOutFrame)
-    if (!range || sourceEndFrame < sourceStartFrame) return []
+    // is ever attributed to frames the timeline does not play. Iterating ranges
+    // in timeline order also preserves intentional source repeats and edits
+    // that reorder source chronology.
+    if (
+      sourceEndFrame < sourceStartFrame ||
+      sourceStartFrame < range.sourceInFrame || sourceEndFrame > range.sourceOutFrame
+    ) return []
     const timelineStartFrame = sourceFrameToTimelineFrame(sourceStartFrame, range)
     let timelineEndFrame = sourceFrameToTimelineFrame(sourceEndFrame, range)
     if (sourceEndFrame > sourceStartFrame && timelineEndFrame <= timelineStartFrame) {
@@ -153,7 +163,7 @@ export function materializeSourceTranscriptReplacement(input: {
       timelineStartFrame,
       timelineEndFrame,
     })]
-  })
+  }))
   assertDomain(words.length > 0, 'INVALID_ARGUMENT', 'Replacement transcript has no words retained by the current timeline')
   plan.id = `edit-plan-${identifier(input.newVersionId, 'newVersionId')}`
   plan.projectVersionId = input.newVersionId

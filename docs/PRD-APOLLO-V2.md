@@ -1649,7 +1649,10 @@ de render reutiliza o proxy concluído da versão-base como cache hit observáve
 sem renderer nem novo artifact, e registra a operação de origem no Postgres. A
 troca de transcript fonte também é explícita: `replace-source-transcript`
 seleciona uma transcrição imutável por ID/hash, retima o alinhamento sobre o
-áudio corrente e cria nova versão. Como toda a cadeia editorial depende dessa
+áudio corrente com a mesma aritmética frame-first de rate `[0.25, 4]` do
+renderer e cria nova versão. A ordem da timeline prevalece sobre a cronologia
+do source e cada ocorrência repetida conserva sua própria evidência. Como toda
+a cadeia editorial depende dessa
 evidência, todos os outputs concluídos da base ficam stale e render permanece
 bloqueado até um novo `run-director`; o Diretor resolve o transcript escolhido
 pelo EditPlan, não o registro mais recente por data. A
@@ -1691,7 +1694,8 @@ arredondados sem acumular drift; reverse é rejeitado. Suporte multi-range não
 autoriza subinvalidação: `move` e outros gestos que deslocam timing preservam
 um envelope contínuo até o fim, pois os clips intermediários mudam de mapping. A
 entrega permanece aberta até a mesma semântica cobrir todos os Commands e
-ranges e a jornada integrada ser executada, implantada e aceita.
+ranges, um MP4 real combinar transcript substituído com rate diferente de 1 e
+a jornada integrada ser executada em PostgreSQL, implantada e aceita.
 
 ### FR-234 — Props/manifest
 
