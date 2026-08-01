@@ -383,16 +383,19 @@ export function createReconstructableMediaArtifactManifest(
 ): ReconstructableMediaArtifactManifest {
   const replayable = createReplayableMediaArtifactManifest(input)
   const renderInput = createRenderInputPayload(input.renderInput)
-  for (const source of replayable.manifest.sources) {
-    assertDomain(
-      input.renderInput.assets.some(
-        (asset) =>
-          asset.artifactKey === source.artifactKey && asset.sha256 === source.sha256,
-      ),
-      'INVALID_MEDIA_ARTIFACT',
-      'Every manifest source must be present in the RenderInput assets',
-    )
-  }
+  const lineageAssets = input.renderInput.assets.filter((asset) => asset.kind !== 'lut')
+  assertDomain(
+    lineageAssets.length === replayable.manifest.sources.length &&
+      lineageAssets.every((asset, index) => {
+        const source = replayable.manifest.sources[index]
+        return source !== undefined &&
+          asset.artifactKey === source.artifactKey &&
+          asset.sha256 === source.sha256 &&
+          asset.role === source.role
+      }),
+    'INVALID_MEDIA_ARTIFACT',
+    'Manifest sources must exactly match the ordered non-LUT RenderInput assets',
+  )
   const { manifestHash: _v3Hash, ...v3Body } = replayable.manifest
   const body: MediaArtifactManifestBodyV4 = {
     ...v3Body,

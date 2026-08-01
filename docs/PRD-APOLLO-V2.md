@@ -1712,6 +1712,11 @@ artifacts tipados; LUTs são reconstruídas por versão/intensidade. Locations
 locais ou assinadas existem apenas na lease interna e nunca alteram o hash
 portátil nem aparecem na API.
 
+No manifest reconstruível, a lista ordenada de sources deve corresponder
+exatamente aos assets não-LUT do RenderInput por canonical key, checksum e
+role. Nenhum recurso de mídia, fonte ou dado pode influenciar o render sem uma
+edge de lineage; LUT mantém vínculo próprio por versão e intensidade.
+
 ### FR-235 — Export matrix
 
 Variantes × formatos × idiomas com preflight de volume/custo.

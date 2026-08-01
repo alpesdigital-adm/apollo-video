@@ -883,6 +883,9 @@ props versionado; materialização não o interpreta como instrução.
 13. Transição nunca lê frame fora da fonte.
 14. Locale timing não reutiliza alignment original.
 15. Cada RenderArtifact registra plan/input hash.
+16. Manifest reconstruível e RenderInput possuem o mesmo conjunto ordenado de
+    assets não-LUT por canonical key, checksum e role; LUT usa sua identidade
+    versionada especializada.
 
 ## 32. Questões para ADR
 

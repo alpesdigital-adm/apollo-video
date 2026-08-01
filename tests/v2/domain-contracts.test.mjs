@@ -2182,6 +2182,144 @@ test('manifest v4 links a protected portable RenderInput without exposing its pr
       }),
     'INVALID_MEDIA_ARTIFACT',
   )
+
+  const replayOutput = {
+    id: renderInput.output.id,
+    locale: renderInput.output.locale,
+    aspectRatio: renderInput.output.aspectRatio,
+    width: renderInput.output.width,
+    height: renderInput.output.height,
+    fps: renderInput.output.fps,
+    safeArea: renderInput.output.safeArea,
+    durationInFrames: renderInput.output.durationInFrames,
+  }
+  const hiddenFontInput = createRenderInputSpec({
+    schemaVersion: 'render-input/v1',
+    renderer: renderInput.renderer,
+    composition: {
+      id: renderInput.composition.id,
+      version: renderInput.composition.version,
+      propsSchemaRef: renderInput.composition.propsSchemaRef,
+    },
+    plan: renderInput.plan,
+    output: replayOutput,
+    assets: [
+      renderInput.assets[0],
+      {
+        id: 'font-brand',
+        artifactId: 'artifact-font-brand',
+        artifactKey: 'workspaces/ws/fonts/brand.woff2',
+        kind: 'font',
+        role: 'brand-primary',
+        ordinal: 1,
+        sha256: 'e'.repeat(64),
+        byteSize: 2048,
+      },
+    ],
+    props: renderInput.props,
+  })
+  expectDomainError(
+    () => createReconstructableMediaArtifactManifest({
+      artifactKey: 'workspaces/ws/artifacts/hidden-font.mp4',
+      artifactSha256: 'f'.repeat(64),
+      byteSize: 2,
+      mediaType: 'video',
+      container: 'mp4',
+      recipe: { id: 'render-video', version: 'v4', parameters: {} },
+      sources: reconstructable.manifest.sources.map((source) => ({
+        ...source,
+        execution: {
+          tool: source.execution.tool,
+          ...(source.execution.model ? {
+            model: { ...source.execution.model, config: {} },
+          } : {}),
+        },
+      })),
+      renderInput: hiddenFontInput,
+    }),
+    'INVALID_MEDIA_ARTIFACT',
+  )
+  const completeFontSources = [
+    {
+      artifactKey: sourceKey,
+      sha256: sourceHash,
+      role: 'primary',
+      execution: {
+        tool: { id: 'remotion', version: '4.0.489', digest: '1'.repeat(64) },
+      },
+    },
+    {
+      artifactKey: 'workspaces/ws/fonts/brand.woff2',
+      sha256: 'e'.repeat(64),
+      role: 'brand-primary',
+      execution: {
+        tool: { id: 'remotion', version: '4.0.489', digest: '1'.repeat(64) },
+      },
+    },
+  ]
+  const fontManifestInput = {
+    artifactKey: 'workspaces/ws/artifacts/with-font.mp4',
+    artifactSha256: '8'.repeat(64),
+    byteSize: 2,
+    mediaType: 'video',
+    container: 'mp4',
+    recipe: { id: 'render-video', version: 'v4', parameters: {} },
+    renderInput: hiddenFontInput,
+  }
+  assert.doesNotThrow(() => createReconstructableMediaArtifactManifest({
+    ...fontManifestInput,
+    sources: completeFontSources,
+  }))
+  expectDomainError(
+    () => createReconstructableMediaArtifactManifest({
+      ...fontManifestInput,
+      sources: [...completeFontSources].reverse(),
+    }),
+    'INVALID_MEDIA_ARTIFACT',
+  )
+
+  const lutInput = createRenderInputSpec({
+    schemaVersion: 'render-input/v1',
+    renderer: renderInput.renderer,
+    composition: {
+      id: renderInput.composition.id,
+      version: renderInput.composition.version,
+      propsSchemaRef: renderInput.composition.propsSchemaRef,
+    },
+    plan: renderInput.plan,
+    output: replayOutput,
+    assets: [
+      renderInput.assets[0],
+      {
+        id: 'creative-lut',
+        artifactId: 'workspace-lut-version-1',
+        artifactKey: 'workspace-luts/creative/v1.cube',
+        kind: 'lut',
+        role: 'creative-lut',
+        ordinal: 1,
+        sha256: 'f'.repeat(64),
+        byteSize: 512,
+      },
+    ],
+    props: renderInput.props,
+  })
+  assert.doesNotThrow(() => createReconstructableMediaArtifactManifest({
+    artifactKey: 'workspaces/ws/artifacts/versioned-lut.mp4',
+    artifactSha256: '9'.repeat(64),
+    byteSize: 2,
+    mediaType: 'video',
+    container: 'mp4',
+    recipe: { id: 'render-video', version: 'v4', parameters: {} },
+    sources: [{
+      artifactKey: sourceKey,
+      sha256: sourceHash,
+      role: 'primary',
+      execution: {
+        tool: { id: 'remotion', version: '4.0.489', digest: '1'.repeat(64) },
+      },
+    }],
+    renderInput: lutInput,
+  }))
 })
 
 test('artifact replay specification exposes references but never protected parameters', async () => {

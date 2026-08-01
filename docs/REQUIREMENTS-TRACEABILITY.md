@@ -181,6 +181,8 @@ Atualização local de FR-234 — o composition root do render aceita agora `loc
 
 Complemento local de FR-234 — `font` e `data` deixaram de ser kinds apenas declarativos do RenderInput: são `MediaArtifactType` persistível, entram em manifests content-addressed, passam por disponibilidade workspace-scoped e rights revalidation e são materializados pelos adapters local e S3 com identidade/tamanho/checksum exatos. O adapter local mantém contenção por realpath e leitura estável; o S3 exige a mesma versão imutável e URL de lease já usada por mídia. LUT continua fora do media lookup e usa seu repository versionado. A capability `apollo.artifacts.read` evoluiu para v2, preservando v1, para representar os novos tipos. Testes locais usam bytes reais de fonte/dado e o cliente S3 controlado; MinIO/S3 e PostgreSQL reais, render que consuma esses recursos, deploy e aceite permanecem pendentes.
 
+Correção local de FR-234 — `media-artifact-manifest/v4` deixou de aceitar RenderInput com recurso não-LUT oculto do lineage. A criação exige igualdade ordenada por canonical key, SHA-256 e role entre `manifest.sources` e todos os assets de vídeo, áudio, imagem, fonte ou dado; a validação inversa também impede source declarada que não participa do render. LUT permanece excluída somente porque sua identidade e rights são resolvidas pelo repositório versionado especializado. A regressão cobre fonte omitida e LUT legítima; PostgreSQL real, golden reexecutado, deploy e aceite permanecem pendentes.
+
 ## F3 — Sintético e transformação
 
 | Req | Título | Spec | Dep. | Evidência de aceite | Teste |
