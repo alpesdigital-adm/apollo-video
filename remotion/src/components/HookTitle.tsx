@@ -1,5 +1,13 @@
-import React from 'react';
-import { AbsoluteFill, spring, useCurrentFrame, useVideoConfig } from 'remotion';
+import React, { useEffect, useState } from 'react';
+import {
+  AbsoluteFill,
+  cancelRender,
+  continueRender,
+  delayRender,
+  spring,
+  useCurrentFrame,
+  useVideoConfig,
+} from 'remotion';
 
 interface HookTitleProps {
   text?: string;
@@ -17,6 +25,8 @@ interface HookTitleProps {
   // this frame instead of frame 0, so the title never flashes on before the
   // video actually has room for it. Defaults to 0 for existing callers.
   entranceFrame?: number;
+  fontSrc?: string;
+  fontFamily?: 'ApolloResourceFont';
 }
 
 /**
@@ -31,9 +41,25 @@ export const HookTitle: React.FC<HookTitleProps> = ({
   format,
   visibility = 1,
   entranceFrame = 0,
+  fontSrc,
+  fontFamily,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const [fontHandle] = useState<number | null>(() =>
+    fontSrc && fontFamily ? delayRender('Loading materialized Apollo font') : null
+  );
+
+  useEffect(() => {
+    if (!fontSrc || !fontFamily || fontHandle === null) return;
+    const font = new FontFace(fontFamily, `url(${JSON.stringify(fontSrc)})`);
+    font.load().then((loaded) => {
+      document.fonts.add(loaded);
+      continueRender(fontHandle);
+    }).catch((error) => {
+      cancelRender(error instanceof Error ? error : new Error('Materialized font failed to load'));
+    });
+  }, [fontFamily, fontHandle, fontSrc]);
 
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
   if (!clean) {
@@ -85,7 +111,7 @@ export const HookTitle: React.FC<HookTitleProps> = ({
       >
         <div
           style={{
-            fontFamily: 'Aptos, Segoe UI, Helvetica, Arial, sans-serif',
+            fontFamily: fontFamily ?? 'Aptos, Segoe UI, Helvetica, Arial, sans-serif',
             fontSize,
             fontWeight: 800,
             lineHeight: 1.1,

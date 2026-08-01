@@ -1730,6 +1730,14 @@ exatamente aos assets não-LUT do RenderInput por canonical key, checksum e
 role. Nenhum recurso de mídia, fonte ou dado pode influenciar o render sem uma
 edge de lineage; LUT mantém vínculo próprio por versão e intensidade.
 
+O schema de props referencia fontes e dados por asset ID portátil, nunca por
+location. Depois da materialização autorizada, o compiler resolve a fonte para
+uma família interna fixa e interpreta dado auxiliar somente pelo schema fechado
+e versionado `apollo-video-render-data/v1`. O worker deve reler tamanho e
+checksum dos bytes antes da compilação; URI inválida, propriedade extra,
+override concorrente ou mudança de identidade bloqueia o render. O renderer
+aguarda o carregamento da fonte antes do primeiro frame.
+
 ### FR-235 — Export matrix
 
 Variantes × formatos × idiomas com preflight de volume/custo.

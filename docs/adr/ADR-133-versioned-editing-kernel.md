@@ -4,6 +4,14 @@ EditPlan v2 is an immutable, validated graph of typed tracks, explicit source/ti
 
 Every confirmed change creates a ProjectVersion. Forks share media read-only and copy no bytes; commands remain isolated. Semantic diff and restore preserve history. Artifact lineage contains exact plan/source/job/tool hashes. Generic durable jobs checkpoint external effects and expose truthful state. Render materialization resolves assets, fonts and LUTs before the renderer receives a portable identity.
 
+For Apollo composition props, portable `fontAssetId` and `renderDataAssetId`
+are resolved only from the authorized materialized input. Auxiliary text uses
+the closed `apollo-video-render-data/v1` schema; the worker rechecks byte size
+and SHA-256 before parsing it as untrusted UTF-8 JSON. A materialized font is
+served only by the private render process under the fixed
+`ApolloResourceFont` family, and Remotion delays frames until `FontFace.load()`
+completes. Missing, changed, wrongly typed or undeclared resources fail closed.
+
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.
 The record is content-addressed, frame-first and format-scoped; completed

@@ -33,6 +33,10 @@ function contentType(filePath) {
   if (extension === '.png') return 'image/png'
   if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg'
   if (extension === '.webp') return 'image/webp'
+  if (extension === '.woff2') return 'font/woff2'
+  if (extension === '.woff') return 'font/woff'
+  if (extension === '.ttf') return 'font/ttf'
+  if (extension === '.otf') return 'font/otf'
   return 'application/octet-stream'
 }
 
@@ -73,6 +77,7 @@ async function startPrivateAssetServer(inputProps) {
 
   const markedProps = structuredClone(inputProps)
   markedProps.videoSrc = await markLocation(markedProps.videoSrc)
+  if ('fontSrc' in markedProps) markedProps.fontSrc = await markLocation(markedProps.fontSrc)
   for (const scene of markedProps.scenes ?? []) {
     if (!scene?.props || typeof scene.props !== 'object') continue
     if ('imageSrc' in scene.props) scene.props.imageSrc = await markLocation(scene.props.imageSrc)
@@ -91,8 +96,10 @@ async function startPrivateAssetServer(inputProps) {
       const range = parseRange(request.headers.range, asset.size)
       const headers = {
         'Accept-Ranges': 'bytes',
+        'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'no-store',
         'Content-Type': contentType(asset.filePath),
+        'Cross-Origin-Resource-Policy': 'cross-origin',
       }
       if (request.headers.range && !range) {
         response.writeHead(416, { ...headers, 'Content-Range': `bytes */${asset.size}` }).end()
@@ -133,6 +140,7 @@ async function startPrivateAssetServer(inputProps) {
     return value
   }
   markedProps.videoSrc = unmarkLocation(markedProps.videoSrc)
+  if ('fontSrc' in markedProps) markedProps.fontSrc = unmarkLocation(markedProps.fontSrc)
   for (const scene of markedProps.scenes ?? []) {
     if (!scene?.props || typeof scene.props !== 'object') continue
     if ('imageSrc' in scene.props) scene.props.imageSrc = unmarkLocation(scene.props.imageSrc)

@@ -1,9 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { mkdir, realpath, rename, rm, stat } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-import { compileApolloVideoRenderProps } from '../application/compile-apollo-video-render-props.ts'
+import {
+  compileApolloVideoRenderProps,
+  parseApolloVideoRenderData,
+  type LoadedApolloVideoRenderData,
+} from '../application/compile-apollo-video-render-props.ts'
 import type {
   CommittedRenderReceipt,
   RenderInputRenderer,
@@ -17,6 +22,99 @@ import { probeVideo } from './media/video-probe.ts'
 
 const DEFAULT_TIMEOUT_MS = 20 * 60_000
 const MAX_WORKER_OUTPUT_BYTES = 1024 * 1024
+const MAX_RENDER_DATA_BYTES = 64 * 1024
+const RENDER_DATA_TIMEOUT_MS = 10_000
+
+async function readHttpRenderData(uri: string): Promise<Buffer> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), RENDER_DATA_TIMEOUT_MS)
+  timeout.unref()
+  try {
+    const response = await fetch(uri, {
+      method: 'GET',
+      redirect: 'error',
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    if (!response.ok || !response.body) {
+      throw new DomainError('INVALID_RENDER_INPUT', 'Render data could not be loaded')
+    }
+    const declaredLength = Number(response.headers.get('content-length'))
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_RENDER_DATA_BYTES) {
+      throw new DomainError('INVALID_RENDER_INPUT', 'Render data exceeds its size limit')
+    }
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let total = 0
+    while (true) {
+      const result = await reader.read()
+      if (result.done) break
+      total += result.value.byteLength
+      if (total > MAX_RENDER_DATA_BYTES) {
+        await reader.cancel()
+        throw new DomainError('INVALID_RENDER_INPUT', 'Render data exceeds its size limit')
+      }
+      chunks.push(result.value)
+    }
+    return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total)
+  } catch (error) {
+    if (error instanceof DomainError) throw error
+    throw new DomainError('INVALID_RENDER_INPUT', 'Render data could not be loaded')
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function loadApolloVideoRenderData(
+  input: MaterializedRenderInputV1,
+): Promise<Readonly<LoadedApolloVideoRenderData> | undefined> {
+  if (typeof input.props !== 'object' || input.props === null || Array.isArray(input.props)) return undefined
+  const assetId = (input.props as Record<string, unknown>).renderDataAssetId
+  if (assetId === undefined) return undefined
+  if (typeof assetId !== 'string') return undefined
+  const asset = input.assets.find((candidate) => candidate.id === assetId)
+  if (!asset || asset.kind !== 'data' || asset.byteSize > MAX_RENDER_DATA_BYTES) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Render data asset is invalid')
+  }
+  let url: URL
+  try {
+    url = new URL(asset.uri)
+  } catch {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Render data URI is invalid')
+  }
+  let bytes: Buffer
+  if (url.protocol === 'file:') {
+    if (url.username || url.password || url.search || url.hash) {
+      throw new DomainError('INVALID_RENDER_INPUT', 'Render data URI is invalid')
+    }
+    try {
+      const filePath = fileURLToPath(url)
+      const metadata = await stat(filePath)
+      if (!metadata.isFile() || metadata.size !== asset.byteSize || metadata.size > MAX_RENDER_DATA_BYTES) {
+        throw new DomainError('INVALID_RENDER_INPUT', 'Render data bytes are invalid')
+      }
+      bytes = await readFile(filePath)
+    } catch (error) {
+      if (error instanceof DomainError) throw error
+      throw new DomainError('INVALID_RENDER_INPUT', 'Render data could not be loaded')
+    }
+  } else if (url.protocol === 'https:' || url.protocol === 'http:') {
+    bytes = await readHttpRenderData(asset.uri)
+  } else {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Render data URI scheme is unsupported')
+  }
+  const digest = createHash('sha256').update(bytes).digest('hex')
+  if (bytes.byteLength !== asset.byteSize || digest !== asset.sha256) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Render data identity changed after materialization')
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+  } catch {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Render data must be canonical UTF-8 JSON')
+  }
+  return Object.freeze({ assetId: asset.id, value: parseApolloVideoRenderData(parsed) })
+}
 
 function contained(root: string, candidate: string): boolean {
   const child = relative(root, candidate)
@@ -202,7 +300,7 @@ export class RemotionRenderInputRenderer implements RenderInputRenderer {
     input: MaterializedRenderInputV1,
     request: { outputKey: string },
   ): Promise<Readonly<CommittedRenderReceipt> | null> {
-    compileApolloVideoRenderProps(input)
+    compileApolloVideoRenderProps(input, await loadApolloVideoRenderData(input))
     const outputKey = portableOutputKey(request.outputKey)
     let root: string
     try {
@@ -278,7 +376,7 @@ export class RemotionRenderInputRenderer implements RenderInputRenderer {
     input: MaterializedRenderInputV1,
     request: { outputKey: string; signal?: AbortSignal },
   ): Promise<StagedRender> {
-    const inputProps = compileApolloVideoRenderProps(input)
+    const inputProps = compileApolloVideoRenderProps(input, await loadApolloVideoRenderData(input))
     const outputKey = portableOutputKey(request.outputKey)
     let root: string
     try {

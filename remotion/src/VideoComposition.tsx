@@ -109,6 +109,8 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   stylePreset,
   subtitleStyle,
   hookTitle,
+  fontSrc,
+  fontFamily,
   creator,
   layoutSegments,
   punchIns,
@@ -621,6 +623,8 @@ export const VideoComposition: React.FC<CompositionProps> = ({
       <HookTitle
         text={hookTitle}
         format={format}
+        fontSrc={fontSrc}
+        fontFamily={fontFamily}
         visibility={hookVisibility}
         entranceFrame={entranceFrame}
       />

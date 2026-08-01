@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
+import { pathToFileURL } from 'node:url'
 
 import { evaluateAssetUse, createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { createMaterializationAuthorization } from '../../src/v2/domain/materialization-authorization.ts'
@@ -88,6 +90,32 @@ async function serveVersionedSource(filePath) {
     getCount: () => getCount,
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   }
+}
+
+async function findLocalTestFont() {
+  const candidates = process.platform === 'win32'
+    ? [
+        path.join(process.env.WINDIR ?? 'C:\\Windows', 'Fonts', 'consola.ttf'),
+        path.join(process.env.WINDIR ?? 'C:\\Windows', 'Fonts', 'arial.ttf'),
+      ]
+    : [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
+        '/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf',
+      ]
+  for (const candidate of candidates) {
+    try {
+      if ((await stat(candidate)).isFile()) return candidate
+    } catch {}
+  }
+  return null
+}
+
+async function decodedFrameHash(videoPath, second = 1) {
+  const { stdout } = await execFileAsync(ffmpegPath, [
+    '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', videoPath,
+    '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1',
+  ], { encoding: 'buffer', maxBuffer: 2 * 1024 * 1024 })
+  return createHash('sha256').update(stdout).digest('hex')
 }
 
 test('authorized materialized lease produces and promotes a real Remotion smoke render', { timeout: 180_000 }, async (context) => {
@@ -228,6 +256,11 @@ test('authorized materialized lease produces and promotes a real Remotion smoke 
                 ref: `render-input/sha256/${input.inputHash}`,
                 inputHash: input.inputHash,
               },
+              sources: [{
+                artifactKey,
+                sha256: sourceSha256,
+                role: 'primary',
+              }],
             },
           ],
         }
@@ -298,7 +331,7 @@ test('authorized materialized lease produces and promotes a real Remotion smoke 
     '2026-07-14T12:06:00.000Z',
   )
   const s3Materialize = materializeAuthorizedRenderInputService({
-    artifacts: { async findById() { return { id: 'golden-output-artifact', manifests: [{ id: 'golden-output-manifest', renderInput: { ref: `render-input/sha256/${input.inputHash}`, inputHash: input.inputHash } }] } } },
+    artifacts: { async findById() { return { id: 'golden-output-artifact', manifests: [{ id: 'golden-output-manifest', renderInput: { ref: `render-input/sha256/${input.inputHash}`, inputHash: input.inputHash }, sources: [{ artifactKey, sha256: sourceSha256, role: 'primary' }] }] } } },
     protectedRenderInputs: { async read() { return input } },
     assetAvailability: { async inspect() { return { available: true } } },
     targets: { supportsRenderer() { return true }, supportsComposition() { return true } },
@@ -318,4 +351,111 @@ test('authorized materialized lease produces and promotes a real Remotion smoke 
   assert.ok(objectServer.getCount() > 0)
   assert.equal(JSON.stringify(s3Receipt).includes('X-Amz-'), false)
   assert.deepEqual((await readdir(path.dirname(outputPath))).sort(), ['smoke-s3.mp4', 'smoke.mp4'])
+})
+
+test('T-FR-234 real Remotion output consumes the exact materialized font and typed data bytes', { timeout: 240_000 }, async (context) => {
+  const sourceFont = await findLocalTestFont()
+  if (!sourceFont) {
+    context.skip('No local TrueType font is available for the real font-consumption golden')
+    return
+  }
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'apollo-remotion-resources-'))
+  context.after(() => rm(directory, { recursive: true, force: true }))
+  const outputRoot = path.join(directory, 'outputs')
+  const sourcePath = path.join(directory, 'source.mp4')
+  const fontPath = path.join(directory, 'brand-mono.ttf')
+  const dataPath = path.join(directory, 'hook.json')
+  await mkdir(outputRoot, { recursive: true })
+  await createSource(sourcePath)
+  await copyFile(sourceFont, fontPath)
+  const dataBytes = Buffer.from(JSON.stringify({
+    schemaVersion: 'apollo-video-render-data/v1',
+    hookTitle: 'FONTE E DADOS REAIS',
+  }))
+  await writeFile(dataPath, dataBytes)
+  const sourceBytes = await stat(sourcePath)
+  const fontBytes = await stat(fontPath)
+  const sourceSha256 = await calculateFileSha256(sourcePath)
+  const fontSha256 = await calculateFileSha256(fontPath)
+  const dataSha256 = createHash('sha256').update(dataBytes).digest('hex')
+  const asset = (input) => Object.freeze(input)
+  const videoAsset = asset({
+    id: 'primary-video', artifactId: 'artifact-resource-video', artifactKey: 'resources/source.mp4',
+    kind: 'video', role: 'primary', ordinal: 0, sha256: sourceSha256,
+    byteSize: sourceBytes.size, uri: pathToFileURL(sourcePath).href,
+  })
+  const fontAsset = asset({
+    id: 'brand-font', artifactId: 'artifact-resource-font', artifactKey: 'resources/brand-mono.ttf',
+    kind: 'font', role: 'hook-font', ordinal: 1, sha256: fontSha256,
+    byteSize: fontBytes.size, uri: pathToFileURL(fontPath).href,
+  })
+  const dataAsset = asset({
+    id: 'hook-data', artifactId: 'artifact-resource-data', artifactKey: 'resources/hook.json',
+    kind: 'data', role: 'hook-copy', ordinal: 2, sha256: dataSha256,
+    byteSize: dataBytes.byteLength, uri: pathToFileURL(dataPath).href,
+  })
+  const common = {
+    schemaVersion: 'materialized-render-input/v1',
+    renderer: { id: 'remotion', version: '4.0.489', digest: '1'.repeat(64) },
+    composition: { id: 'apollo-video', version: 'v1', propsSchemaRef: 'apollo://render-props/apollo-video/v1' },
+    plan: { id: 'plan-resource-golden', versionId: 'version-resource-golden', hash: '2'.repeat(64) },
+    output: {
+      id: 'resource-golden-9x16', locale: 'pt-BR', aspectRatio: '9:16', width: 270, height: 480,
+      fps: 30, safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 }, durationInFrames: 90,
+    },
+  }
+  const palette = {
+    primary: '#FFB800', secondary: '#20202A', accent: '#FF6B35', text: '#FFFFFF', background: '#050508',
+  }
+  const props = (extra = {}) => ({
+    primaryVideoAssetId: 'primary-video', scenes: [], subtitles: [], palette, ...extra,
+  })
+  const inputs = [
+    {
+      ...common, inputHash: '3'.repeat(64), assets: [videoAsset, fontAsset, dataAsset],
+      props: props({ fontAssetId: 'brand-font', renderDataAssetId: 'hook-data' }),
+    },
+    {
+      ...common, inputHash: '4'.repeat(64), assets: [videoAsset, dataAsset],
+      props: props({ renderDataAssetId: 'hook-data' }),
+    },
+    {
+      ...common, inputHash: '5'.repeat(64), assets: [videoAsset, fontAsset],
+      props: props({ fontAssetId: 'brand-font' }),
+    },
+  ]
+  let stage = 0
+  const renderer = new RemotionRenderInputRenderer({
+    projectRoot: process.cwd(), outputRoot, timeoutMs: 180_000,
+    createId: () => `resource-stage-${++stage}`,
+    clock: () => new Date('2026-08-01T12:00:00.000Z'),
+  })
+  const paths = []
+  for (const [index, input] of inputs.entries()) {
+    const outputKey = `resources/render-${index}.mp4`
+    const staged = await renderer.stage(input, { outputKey })
+    await staged.commit()
+    paths.push(path.join(outputRoot, ...outputKey.split('/')))
+  }
+  const [fontAndData, dataOnly, fontOnly] = await Promise.all(paths.map((item) => decodedFrameHash(item)))
+  assert.notEqual(fontAndData, dataOnly, 'removing the declared font must change decoded pixels')
+  assert.notEqual(fontAndData, fontOnly, 'removing the declared data must remove its visible title')
+
+  await writeFile(dataPath, Buffer.from(JSON.stringify({
+    schemaVersion: 'apollo-video-render-data/v1', hookTitle: 'BYTES E DADOS REAIS',
+  })))
+  await assert.rejects(
+    () => renderer.stage(inputs[0], { outputKey: 'resources/tampered.mp4' }),
+    (error) => error.code === 'INVALID_RENDER_INPUT' && /identity changed/.test(error.message),
+  )
+  const invalidUriInput = {
+    ...inputs[0],
+    assets: inputs[0].assets.map((item) => item.id === 'hook-data'
+      ? { ...item, uri: 'not-a-materialized-uri' }
+      : item),
+  }
+  await assert.rejects(
+    () => renderer.stage(invalidUriInput, { outputKey: 'resources/invalid-uri.mp4' }),
+    (error) => error.code === 'INVALID_RENDER_INPUT' && /URI is invalid/.test(error.message),
+  )
 })

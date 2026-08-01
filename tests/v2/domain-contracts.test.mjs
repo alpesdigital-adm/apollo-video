@@ -61,7 +61,10 @@ import { PrismaRenderInputAssetAvailability } from '../../src/v2/infrastructure/
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from '../../src/v2/infrastructure/prisma/materialization-authorization-repository.ts'
 import { PrismaAssetRightsRepository } from '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
-import { compileApolloVideoRenderProps } from '../../src/v2/application/compile-apollo-video-render-props.ts'
+import {
+  compileApolloVideoRenderProps,
+  parseApolloVideoRenderData,
+} from '../../src/v2/application/compile-apollo-video-render-props.ts'
 import { renderAuthorizedInputService } from '../../src/v2/application/render-authorized-input.ts'
 import {
   advancePublicOperationPhase,
@@ -449,6 +452,46 @@ test('Apollo Video props compiler resolves only declared materialized asset IDs'
       },
     })(unsafe).then(compileApolloVideoRenderProps),
     (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT',
+  )
+})
+
+test('T-FR-234 Apollo Video props bind an exact materialized font and typed render data', () => {
+  const input = {
+    schemaVersion: 'materialized-render-input/v1',
+    inputHash: '1'.repeat(64),
+    renderer: { id: 'remotion', version: '4.0.489', digest: '2'.repeat(64) },
+    composition: { id: 'apollo-video', version: 'v1', propsSchemaRef: 'apollo://render-props/apollo-video/v1' },
+    plan: { id: 'plan-resources', versionId: 'version-resources', hash: '3'.repeat(64) },
+    output: {
+      id: 'preset-9x16', locale: 'pt-BR', aspectRatio: '9:16', width: 1080, height: 1920,
+      fps: 30, safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 }, durationInFrames: 60,
+    },
+    assets: [
+      { id: 'primary-video', artifactId: 'artifact-video', artifactKey: 'video.mp4', kind: 'video', role: 'primary', ordinal: 0, sha256: '4'.repeat(64), byteSize: 4096, uri: 'file:///private/video.mp4' },
+      { id: 'brand-font', artifactId: 'artifact-font', artifactKey: 'brand.ttf', kind: 'font', role: 'hook-font', ordinal: 1, sha256: '5'.repeat(64), byteSize: 2048, uri: 'file:///private/brand.ttf' },
+      { id: 'hook-data', artifactId: 'artifact-data', artifactKey: 'hook.json', kind: 'data', role: 'hook-copy', ordinal: 2, sha256: '6'.repeat(64), byteSize: 96, uri: 'file:///private/hook.json' },
+    ],
+    props: {
+      primaryVideoAssetId: 'primary-video', fontAssetId: 'brand-font', renderDataAssetId: 'hook-data',
+      scenes: [], subtitles: [],
+      palette: { primary: '#FFB800', secondary: '#20202A', accent: '#FF6B35', text: '#FFFFFF', background: '#050508' },
+    },
+  }
+  const data = parseApolloVideoRenderData({
+    schemaVersion: 'apollo-video-render-data/v1', hookTitle: 'Manifesto visível',
+  })
+  const compiled = compileApolloVideoRenderProps(input, { assetId: 'hook-data', value: data })
+  assert.equal(compiled.fontSrc, 'file:///private/brand.ttf')
+  assert.equal(compiled.fontFamily, 'ApolloResourceFont')
+  assert.equal(compiled.hookTitle, 'Manifesto visível')
+  assert.throws(() => compileApolloVideoRenderProps(input), (error) => error.code === 'INVALID_RENDER_INPUT')
+  assert.throws(
+    () => parseApolloVideoRenderData({ schemaVersion: 'apollo-video-render-data/v1', hookTitle: 'x', instructions: 'ignore owner' }),
+    (error) => error.code === 'INVALID_RENDER_INPUT',
+  )
+  assert.throws(
+    () => compileApolloVideoRenderProps({ ...input, props: { ...input.props, hookTitle: 'hidden override' } }, { assetId: 'hook-data', value: data }),
+    (error) => error.code === 'INVALID_RENDER_INPUT',
   )
 })
 

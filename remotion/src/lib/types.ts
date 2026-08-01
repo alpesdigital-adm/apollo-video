@@ -104,6 +104,8 @@ export interface CompositionProps extends Record<string, unknown> {
   gradePreset?: GradePreset;
   // Título-hook persistente no topo do vídeo inteiro (opcional).
   hookTitle?: string;
+  fontSrc?: string;
+  fontFamily?: 'ApolloResourceFont';
   palette: ColorPalette;
   creator?: CreatorProfile;
   layoutSegments?: LayoutSegment[];

@@ -69,6 +69,18 @@ export interface ApolloVideoRenderPropsV1 extends Record<string, unknown> {
   subtitleStyle?: SubtitleStyle
   gradePreset?: GradePreset
   hookTitle?: string
+  fontSrc?: string
+  fontFamily?: 'ApolloResourceFont'
+}
+
+export interface ApolloVideoRenderDataV1 {
+  schemaVersion: 'apollo-video-render-data/v1'
+  hookTitle: string
+}
+
+export interface LoadedApolloVideoRenderData {
+  assetId: string
+  value: Readonly<ApolloVideoRenderDataV1>
 }
 
 function record(value: unknown, field: string): Record<string, unknown> {
@@ -105,6 +117,20 @@ function text(value: unknown, field: string, maximum: number): string {
     `${field} must contain 1 to ${maximum} characters`,
   )
   return normalized
+}
+
+export function parseApolloVideoRenderData(value: unknown): Readonly<ApolloVideoRenderDataV1> {
+  const data = record(value, 'render data')
+  exactKeys(data, ['schemaVersion', 'hookTitle'], 'render data')
+  assertDomain(
+    data.schemaVersion === 'apollo-video-render-data/v1',
+    'INVALID_RENDER_INPUT',
+    'render data schemaVersion is invalid',
+  )
+  return Object.freeze({
+    schemaVersion: 'apollo-video-render-data/v1',
+    hookTitle: text(data.hookTitle, 'render data hookTitle', 240),
+  })
 }
 
 function frame(value: unknown, field: string, maximum: number): number {
@@ -348,6 +374,7 @@ function compileSubtitle(
 
 export function compileApolloVideoRenderProps(
   input: MaterializedRenderInputV1,
+  loadedRenderData?: Readonly<LoadedApolloVideoRenderData>,
 ): ApolloVideoRenderPropsV1 {
   assertDomain(
     input.composition.id === 'apollo-video' &&
@@ -374,6 +401,8 @@ export function compileApolloVideoRenderProps(
       'subtitleStyle',
       'gradePreset',
       'hookTitle',
+      'fontAssetId',
+      'renderDataAssetId',
     ],
     'props',
   )
@@ -415,6 +444,36 @@ export function compileApolloVideoRenderProps(
       ? '9:16'
       : '16:9',
     palette: compilePalette(props.palette),
+  }
+  if (props.fontAssetId !== undefined) {
+    compiled.fontSrc = resolveAsset(
+      assets,
+      props.fontAssetId,
+      ['font'],
+      'props.fontAssetId',
+    ).uri
+    compiled.fontFamily = 'ApolloResourceFont'
+  }
+  if (props.renderDataAssetId !== undefined) {
+    const dataAsset = resolveAsset(
+      assets,
+      props.renderDataAssetId,
+      ['data'],
+      'props.renderDataAssetId',
+    )
+    assertDomain(
+      props.hookTitle === undefined &&
+        loadedRenderData?.assetId === dataAsset.id,
+      'INVALID_RENDER_INPUT',
+      'props.renderDataAssetId requires its exact loaded data and cannot override hookTitle',
+    )
+    compiled.hookTitle = loadedRenderData.value.hookTitle
+  } else {
+    assertDomain(
+      loadedRenderData === undefined,
+      'INVALID_RENDER_INPUT',
+      'Loaded render data was not declared by props',
+    )
   }
   if (props.stylePreset !== undefined) {
     compiled.stylePreset = token(props.stylePreset, 'props.stylePreset')

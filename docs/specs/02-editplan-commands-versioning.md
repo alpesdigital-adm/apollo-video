@@ -820,6 +820,11 @@ Compiler recebe planos/snapshots já resolvidos e produz RenderInput autocontido
 Renderer não chama provider, DB, Director ou busca de biblioteca.
 Texto em `data` continua dado não confiável e só é consumido pelo schema de
 props versionado; materialização não o interpreta como instrução.
+Referências portáteis `fontAssetId` e `renderDataAssetId` são resolvidas apenas
+depois da lease. Para a composição Apollo v1, dados auxiliares obedecem ao
+contrato fechado `apollo-video-render-data/v1`; tamanho e SHA-256 são relidos
+antes do parse. A fonte recebe família interna fixa e o renderer espera seu
+carregamento, evitando fallback silencioso no primeiro frame.
 
 ## 28. Validation errors
 
@@ -918,6 +923,8 @@ props versionado; materialização não o interpreta como instrução.
 16. Manifest reconstruível e RenderInput possuem o mesmo conjunto ordenado de
     assets não-LUT por canonical key, checksum e role; LUT usa sua identidade
     versionada especializada.
+17. Fonte e dado declarados alteram pixels do golden real; bytes, URI, kind ou
+    schema divergentes falham antes do render.
 
 ## 32. Questões para ADR
 
