@@ -10,6 +10,7 @@ import type {
   VersionCompareRepository,
 } from '../../application/ports/version-compare-repository.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
+import { parseCompareActionImpact } from '../../domain/compare-action-impact.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
@@ -40,8 +41,10 @@ function hydrateDecision(
     row.payloadJson,
     'version comparison payload',
   ) as unknown as PersistedVersionCompareDecision
+  // Fail-closed on schemaVersion: a payload without an explicit impact document
+  // (the pre-impact schemaVersion 1) is never hydrated as if it had none.
   if (
-    payload.schemaVersion !== 1 ||
+    payload.schemaVersion !== 2 ||
     !['accept', 'reopen'].includes(payload.action) ||
     !['toggle', 'split', 'overlay'].includes(payload.mode) ||
     !Number.isInteger(payload.expectedRevision) ||
@@ -49,6 +52,15 @@ function hydrateDecision(
     payload.comparison === null
   ) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored version comparison payload is invalid')
+  }
+  const impact = parseCompareActionImpact(payload.impact)
+  if (
+    impact.commandId !== row.id ||
+    impact.baseVersionId !== row.baseVersionId ||
+    impact.resultVersionId !== row.baseVersionId ||
+    impact.action !== payload.action
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored version comparison impact belongs to another decision')
   }
   const command = createEditCommand<PersistedVersionCompareDecision>({
     id: row.id,
@@ -72,6 +84,7 @@ function hydrateDecision(
     command,
     projectStatus: payload.action === 'accept' ? 'reviewing-proxy' : 'revising',
     comparison: payload.comparison,
+    impact,
     replayed,
   })
 }

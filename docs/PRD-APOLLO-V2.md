@@ -1675,6 +1675,18 @@ já existe timeline, invalida full-timeline somente nos outputs concluídos da
 base e enfileira um proxy da versão-resultado. Antes do ingest, a seleção ainda
 é versionada, mas o impacto fica `renderDeferredUntilTimeline` com ranges,
 artifacts, invalidations e renders mínimos vazios; nenhuma duração é fabricada.
+`compare-action` fecha a lista pelo outro extremo: aceitar ou reabrir uma
+comparação é `no-render` e mesmo assim persiste
+`compare-action-impact/v1` content-addressed, com `resultVersionId` igual ao
+`baseVersionId` — a versão comparada é preservada, não substituída —,
+`changeKinds=[review-state]`, todas as listas vazias e
+`renderSemanticsChanged=false`. Nenhuma invalidation é gravada, nenhum render é
+enfileirado e o evento declara `commandImpactHash` com
+`artifactInvalidationCount=0`. O registro
+`edit-command-registry.ts` é o gate que sustenta essa lista: cada Command
+persistível declara render policy, schema de impacto e a evidência em código que
+prova a classificação, e `createEditCommand` recusa tipo não registrado. Um
+Command futuro sem política não chega ao banco.
 A
 operação manual `crop` persiste um retângulo normalizado dentro do clip e do
 formato declarados, produz dependência somente visual e um único range mínimo;

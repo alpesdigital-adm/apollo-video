@@ -153,6 +153,7 @@ export async function POST(
         },
         projectStatus: result.projectStatus,
         comparison: result.comparison,
+        impact: result.impact,
         versionsPreserved: true,
         replayed: result.replayed,
       }), {

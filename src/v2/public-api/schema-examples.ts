@@ -1,4 +1,5 @@
 import type { PublicSchemaDefinition } from './schema-registry.ts'
+import { createCompareActionImpact } from '../domain/compare-action-impact.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
@@ -6,6 +7,13 @@ import {
 } from '../domain/mvp-core-gate.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
+/** Built by the real factory so the published example carries a real impact hash. */
+const compareActionImpactExample = createCompareActionImpact({
+  commandId: 'compare-command-example-3',
+  baseVersionId: 'project-version-example-5',
+  resultVersionId: 'project-version-example-5',
+  action: 'accept',
+})
 const projectId = 'project-example-1'
 const workspaceId = 'workspace-example-1'
 const clientId = 'client-example-1'
@@ -8282,6 +8290,36 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           },
           projectStatus: 'reviewing-proxy',
           comparison: versionComparisonExample,
+          versionsPreserved: true,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-version-comparison-action-result/v3': [
+      {
+        data: {
+          action: 'accept',
+          command: {
+            id: 'compare-command-example-3',
+            type: 'compare-action',
+            baseVersionId: 'project-version-example-5',
+            scope: { project: true },
+            payload: {
+              schemaVersion: 2,
+              action: 'accept',
+              expectedRevision: 5,
+              beforeVersionId: 'project-version-example-4',
+              afterVersionId: 'project-version-example-5',
+              mode: 'split',
+              comparison: versionComparisonExample,
+              impact: compareActionImpactExample,
+            },
+            createdAt,
+          },
+          projectStatus: 'reviewing-proxy',
+          comparison: versionComparisonExample,
+          impact: compareActionImpactExample,
           versionsPreserved: true,
           replayed: false,
         },
