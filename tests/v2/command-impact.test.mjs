@@ -636,7 +636,7 @@ test('T-FR-233 stale ranges are canonicalized into an ordered, strictly disjoint
   }
 })
 
-test('T-FR-233 a moved clip invalidates two disjoint ranges instead of one wide envelope', () => {
+test('T-FR-233 a moved clip invalidates the continuous downstream timing envelope', () => {
   const beforeEditPlan = plan()
   beforeEditPlan.videoTracks[0].clips = [
     { id: 'clip-1', sourceArtifactId: 'source-1', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
@@ -652,13 +652,10 @@ test('T-FR-233 a moved clip invalidates two disjoint ranges instead of one wide 
     beforeEditPlan,
     afterEditPlan,
   })
-  // The clip left [0,30] and landed at [150,180]; timing changes ripple to the
-  // end, so only the LAST range is extended through the plan duration. The
-  // frames between 30 and 150 stay reusable instead of being re-rendered.
-  assert.deepEqual(moved.affectedRanges, [
-    { startFrame: 0, endFrame: 30 },
-    { startFrame: 150, endFrame: 180 },
-  ])
+  // The clip left [0,30] and landed at [150,180], shifting clip-2 throughout
+  // the middle. Reusing [30,150] would preserve frames with the wrong source
+  // timing, so the safe impact is one continuous envelope through the end.
+  assert.deepEqual(moved.affectedRanges, [{ startFrame: 0, endFrame: 180 }])
   assert.deepEqual(moved.changeKinds, ['move'])
   assert.deepEqual(moved.minimalRenders, [{
     kind: 'proxy', variantId: '9:16', ranges: moved.affectedRanges,
@@ -671,6 +668,35 @@ test('T-FR-233 a moved clip invalidates two disjoint ranges instead of one wide 
   const invalidations = createCommandArtifactInvalidations({ impact: moved, createdAt })
   assert.ok(invalidations.length >= 1)
   assert.deepEqual(invalidations[0].affectedRanges, moved.affectedRanges)
+})
+
+test('T-FR-233 the real manual move materializer does not underinvalidate shifted middle clips', () => {
+  const beforeEditPlan = plan()
+  beforeEditPlan.videoTracks = [
+    {
+      id: 'base-video', kind: 'base-video', clips: [
+        { id: 'clip-1', sourceArtifactId: 'source-1', sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+        { id: 'clip-2', sourceArtifactId: 'source-1', sourceInFrame: 30, sourceOutFrame: 180, timelineInFrame: 30, timelineOutFrame: 180, rate: 1 },
+      ],
+    },
+    {
+      id: 'alternate-video', kind: 'b-roll', clips: [
+        { id: 'clip-3', sourceArtifactId: 'source-1', sourceInFrame: 30, sourceOutFrame: 180, timelineInFrame: 0, timelineOutFrame: 150, rate: 1 },
+      ],
+    },
+  ]
+  const operation = { kind: 'move', clipId: 'clip-1', startMs: 5000, track: 1 }
+  const afterEditPlan = materializeManualEditPlan({
+    editPlan: beforeEditPlan, operation, newVersionId: resultVersionId, createdAt,
+    availableAssetIds: ['source-1'], variantId: '9:16',
+  })
+  assert.deepEqual(
+    afterEditPlan.videoTracks[1].clips.map((clip) => ({ id: clip.id, start: clip.timelineInFrame, end: clip.timelineOutFrame })),
+    [{ id: 'clip-3', start: 0, end: 150 }, { id: 'clip-1', start: 150, end: 180 }],
+  )
+  const moved = impact({ operation, beforeEditPlan, afterEditPlan })
+  assert.deepEqual(moved.affectedRanges, [{ startFrame: 0, endFrame: 180 }])
+  assert.deepEqual(moved.minimalRenders[0].ranges, moved.affectedRanges)
 })
 
 test('T-FR-233 a single-clip edit still yields exactly one canonical range', () => {

@@ -120,3 +120,10 @@ zero duration produces no range, variant, artifact, invalidation, or render
 request. This avoids inventing render evidence while preserving the immutable
 selection for later compilation. PostgreSQL execution, deployment, and
 acceptance remain open, so FR-233 remains incomplete.
+
+Canonical multi-range support does not make every edit sparse. A `move` or
+other downstream timing change keeps one continuous envelope from the earliest
+affected frame through the plan end: clips between the target's old and new
+locations shift and their previous bytes are not reusable. Disjoint ranges are
+accepted only when the producing Command can prove independent unchanged
+regions.

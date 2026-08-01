@@ -220,13 +220,12 @@ function mergedRange(input: {
   ]
   assertDomain(ranges.length > 0, 'INVALID_ARGUMENT', 'Command impact target clip is missing')
   if (!input.throughEnd) return canonicalCommandImpactRanges(ranges)
+  const startFrame = Math.min(...ranges.map((range) => range.startFrame))
   const endFrame = Math.max(planDuration(input.before), planDuration(input.after))
-  const canonical = canonicalCommandImpactRanges(ranges)
-  const last = canonical.at(-1)!
-  return canonicalCommandImpactRanges([
-    ...canonical.slice(0, -1),
-    { startFrame: last.startFrame, endFrame: Math.max(last.endFrame, endFrame) },
-  ])
+  // Timing edits retime every downstream clip. Even if the target's old and new
+  // locations are disjoint, frames between them are not reusable because their
+  // timeline-to-source mapping shifted.
+  return Object.freeze([Object.freeze({ startFrame, endFrame })])
 }
 
 function classify(action: ManualVersionAction, operation?: ManualGesture): Readonly<{

@@ -641,6 +641,10 @@ cobertura integral fazem fallback para render completo. Rate de clip é
 frame-first em `[0.25, 4]`: vídeo usa `setpts`, áudio usa `atempo` encadeado e
 reverse falha fechado. Cada recorte converte seus dois boundaries absolutos da
 timeline para source frames, evitando drift por arredondar comprimento à parte.
+O produtor só pode emitir ranges disjuntos quando provar que o intervalo entre
+eles manteve o mesmo mapping. `move`, trim e outras mudanças de timing downstream
+usam um envelope contínuo desde o primeiro frame afetado até o fim; a posição
+antiga e a nova do alvo, isoladamente, não demonstram que o miolo é reutilizável.
 O renderer
 recebe paths já materializados e não consulta persistência. Se não houver base
 reutilizável ou os ranges cobrirem todo o timeline, o mesmo worker faz render V2

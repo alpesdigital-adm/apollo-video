@@ -1687,7 +1687,9 @@ ranges stale canônicos e disjuntos, intercalando trechos re-renderizados com o
 proxy-base. Overlap/adjacência são fundidos; excesso, cobertura integral ou
 forma inválida fazem fallback para render completo. Clips retimados usam a
 timeline frame-first, rate `[0.25, 4]`, `setpts`/`atempo` e limites absolutos
-arredondados sem acumular drift; reverse é rejeitado. A
+arredondados sem acumular drift; reverse é rejeitado. Suporte multi-range não
+autoriza subinvalidação: `move` e outros gestos que deslocam timing preservam
+um envelope contínuo até o fim, pois os clips intermediários mudam de mapping. A
 entrega permanece aberta até a mesma semântica cobrir todos os Commands e
 ranges e a jornada integrada ser executada, implantada e aceita.
 
