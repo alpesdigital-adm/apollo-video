@@ -13,10 +13,13 @@ import {
   canonicalCommandImpactRanges,
   createCommandArtifactInvalidations,
   createManualCommandImpact,
+  createReviewPatchCommandImpact,
   parseCommandArtifactInvalidation,
   parseCommandImpact,
 } from '../../src/v2/domain/command-impact.ts'
+import { applyReviewPatchService } from '../../src/v2/application/review-patch.ts'
 import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/manual-edit-repository.ts'
+import { PrismaReviewPatchRepository } from '../../src/v2/infrastructure/prisma/review-patch-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
 
 const workspaceId = 'workspace-impact-1'
@@ -704,4 +707,179 @@ test('T-FR-233 a single-clip edit still yields exactly one canonical range', () 
   const single = impact()
   assert.equal(single.affectedRanges.length, 1)
   assert.deepEqual(single.affectedRanges, [{ startFrame: 15, endFrame: 45 }])
+})
+
+test('T-FR-233 review patch converts millisecond points to frame ranges and fences scoped outputs', () => {
+  const value = createReviewPatchCommandImpact({
+    commandId: 'edit-command-review-impact-1',
+    baseVersionId,
+    resultVersionId,
+    variantIds: ['9:16'],
+    operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1000] }],
+    invalidatedRangesMs: [[1000, 1000]],
+    beforeEditPlan: plan(),
+    afterEditPlan: plan(resultVersionId),
+    outputReferences: outputs,
+  })
+  assert.equal(value.commandType, 'apply-review-patch')
+  assert.deepEqual(value.changeKinds, ['update-layout'])
+  assert.deepEqual(value.dependencyTypes, ['visual'])
+  assert.deepEqual(value.affectedRanges, [{ startFrame: 30, endFrame: 31 }])
+  assert.deepEqual(value.affectedArtifacts.map((item) => item.artifactId), [
+    'artifact-final-9x16', 'artifact-proxy-9x16',
+  ])
+  assert.deepEqual(parseCommandImpact(JSON.parse(JSON.stringify(value))), value)
+  assert.equal(createCommandArtifactInvalidations({ impact: value, createdAt }).length, 2)
+
+  const trim = createReviewPatchCommandImpact({
+    commandId: 'edit-command-review-impact-2',
+    baseVersionId,
+    resultVersionId,
+    variantIds: ['9:16'],
+    operations: [{ op: 'trim', targetId: 'clip:clip-1', value: {}, rangeMs: [1000, 2000] }],
+    invalidatedRangesMs: [[1000, 2000]],
+    beforeEditPlan: plan(),
+    afterEditPlan: { ...plan(resultVersionId), durationFrames: 150 },
+    outputReferences: outputs,
+  })
+  assert.deepEqual(trim.dependencyTypes, ['audio', 'timing', 'visual'])
+  assert.deepEqual(trim.affectedRanges, [{ startFrame: 0, endFrame: 180 }])
+  const movedPlan = plan(resultVersionId)
+  movedPlan.videoTracks[0].clips = [
+    { ...movedPlan.videoTracks[0].clips[1], timelineInFrame: 0, timelineOutFrame: 90 },
+    { ...movedPlan.videoTracks[0].clips[0], timelineInFrame: 90, timelineOutFrame: 180 },
+  ]
+  const moved = createReviewPatchCommandImpact({
+    commandId: 'edit-command-review-impact-move', baseVersionId, resultVersionId,
+    variantIds: ['9:16'],
+    operations: [{ op: 'move', targetId: 'clip:clip-1', value: { afterTargetId: 'clip-2' }, rangeMs: [4000, 4000] }],
+    invalidatedRangesMs: [[4000, 4000]], beforeEditPlan: plan(), afterEditPlan: movedPlan,
+    outputReferences: outputs,
+  })
+  assert.deepEqual(moved.affectedRanges, [{ startFrame: 0, endFrame: 180 }])
+  assert.throws(
+    () => createReviewPatchCommandImpact({
+      commandId: 'edit-command-review-impact-3', baseVersionId, resultVersionId,
+      variantIds: ['9:16'], operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: {} }],
+      invalidatedRangesMs: [[7000, 7000]], beforeEditPlan: plan(), afterEditPlan: plan(resultVersionId), outputReferences: outputs,
+    }),
+    (error) => error.code === 'INVALID_ARGUMENT' && /outside the timeline/.test(error.message),
+  )
+})
+
+test('T-FR-233 applied review patch persists impact v2 and normalized invalidations', async () => {
+  let committed
+  const service = applyReviewPatchService({
+    repository: {
+      async readApplyContext() {
+        return {
+          annotation: {
+            id: 'annotation-impact-1', projectVersionId: baseVersionId, frame: 30,
+            timeRangeMs: [1000, 1000], screenshotRef: 'screenshot-impact-1', scope: 'point',
+            targetIds: ['subtitle:cue-1'], applicationScope: { kind: 'frame', targetIds: ['subtitle:cue-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: [], global: false },
+            affectedCount: 1, text: 'Mover legenda', author: { id: 'client-impact-1', name: 'Client', type: 'api-client' }, status: 'open', createdAt,
+          },
+          currentVersion: {
+            id: baseVersionId, workspaceId, projectId, sequence: 1,
+            snapshotRefs: { brief: 'snapshot-brief-1', editPlan: 'snapshot-edit-1', policies: 'snapshot-policy-1' },
+            baseHash: 'a'.repeat(64), createdBy: 'client-impact-1', createdAt,
+          },
+          editPlan: plan(), editPlanHash: 'b'.repeat(64), policies: {}, availableAssetIds: ['source-1'],
+          renderVariantIds: ['9:16'], outputReferences: outputs,
+          proposal: {
+            id: 'review-proposal-impact-1', workspaceId, projectId, annotationId: 'annotation-impact-1', baseVersionId,
+            status: 'ready', interpretationVersion: 'review-patch-interpreter/1.0.0', choices: [],
+            patch: { id: 'patch-impact-1', baseVersionId, operations: [{ op: 'update-layout', targetId: 'subtitle:cue-1', value: { anchor: 'bottom' }, rangeMs: [1000, 1000] }], annotationIds: ['annotation-impact-1'], estimatedCost: 0, invalidatedRanges: [[1000, 1000]] },
+            impact: { operationCount: 1, cost: 0, invalidatedRanges: [[1000, 1000]], changedTargets: ['subtitle:cue-1'], expectedScoreDelta: 3, invalidatedArtifacts: ['proxy', 'final'] },
+            gates: [], createdAt, updatedAt: createdAt,
+          },
+        }
+      },
+      async commitOrReplay(bundle) {
+        committed = bundle
+        return {
+          proposal: { id: bundle.proposalId }, command: bundle.command, version: bundle.version,
+          editPlan: JSON.parse(bundle.snapshot.contentJson), comparison: bundle.comparison,
+          impact: bundle.impact,
+          invalidations: createCommandArtifactInvalidations({ impact: bundle.impact, createdAt: bundle.command.createdAt }),
+          replayed: false,
+        }
+      },
+    },
+    clock: () => new Date('2026-08-01T01:00:00.000Z'),
+    createId: (kind) => ({
+      'edit-command': 'edit-command-review-impact-4',
+      'project-version': resultVersionId,
+      'project-snapshot': 'project-snapshot-review-impact-2',
+    })[kind],
+    createEventId: () => '3e0a7962-5347-4bef-a810-95ab71340456',
+  })
+  const result = await service({
+    workspaceId, projectId, proposalId: 'review-proposal-impact-1', confirmed: true,
+    actor: { type: 'api-client', id: 'client-impact-1' }, idempotencyKey: 'review-impact-apply-1',
+  })
+  assert.equal(committed.command.payload.schemaVersion, 2)
+  assert.equal(committed.command.payload.impact.impactHash, result.impact.impactHash)
+  assert.equal(committed.event.data.commandImpactHash, result.impact.impactHash)
+  assert.equal(committed.event.data.artifactInvalidationCount, 2)
+  assert.deepEqual(result.impact.affectedRanges, [{ startFrame: 30, endFrame: 31 }])
+  assert.equal(result.invalidations.length, 2)
+
+  const driftRepository = new PrismaReviewPatchRepository({
+    v2ReviewPatchProposal: { async findFirst() { return null } },
+    async $transaction(callback) {
+      return callback({
+        v2ReviewPatchProposal: { async findFirst() { return { id: committed.proposalId, status: 'ready', baseVersionId } } },
+        v2Project: { async findFirst() { return { format: '9:16', currentVersion: { id: baseVersionId, sequence: 1 } } } },
+        v2ProjectProxyRenderOperation: { async findMany() { return [
+          { outputArtifactId: 'artifact-proxy-9x16' }, { outputArtifactId: 'artifact-proxy-concurrent' },
+        ] } },
+        v2ProjectFinalExportOperation: { async findMany() { return [{ outputArtifactId: 'artifact-final-9x16', outputAspectRatio: '9:16' }] } },
+      })
+    },
+  })
+  await assert.rejects(
+    () => driftRepository.commitOrReplay(committed),
+    (error) => error.code === 'VERSION_CONFLICT' && /outputs changed/.test(error.message),
+  )
+
+  const persistedInvalidations = result.invalidations.map((invalidation) => ({
+    ...invalidation,
+    dependencyTypesJson: JSON.stringify(invalidation.dependencyTypes),
+    affectedRangesJson: JSON.stringify(invalidation.affectedRanges),
+    createdAt: new Date(invalidation.createdAt),
+    resolutions: [],
+  }))
+  const rangeRepository = new PrismaProjectProxyRenderRepository({
+    v2Project: { async findFirst() { return {
+      id: projectId, format: '9:16', currentVersionId: resultVersionId,
+      versions: [{
+        id: resultVersionId, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
+        editPlanSnapshot: { contentJson: committed.snapshot.contentJson, contentHash: committed.snapshot.contentHash },
+        directorRunAsResult: null,
+        command: {
+          id: committed.command.id, type: 'apply-review-patch', baseVersionId,
+          payloadJson: JSON.stringify(committed.command.payload), artifactInvalidations: persistedInvalidations,
+        },
+      }],
+      mediaAssets: [{
+        role: 'source-master', artifactId: 'source-1', originalFileName: 'source.mp4', createdAt: new Date(createdAt), upload: null,
+        artifact: {
+          id: 'source-1', status: 'available', mediaType: 'video', container: 'mp4', sha256: 'c'.repeat(64), byteSize: 4096n,
+          manifests: [{ id: 'manifest-source-1', manifestJson: JSON.stringify({ artifact: { artifactKey: 'masters/source.mp4' } }) }],
+        },
+      }],
+    } } },
+    v2ProjectProxyRenderOperation: { async findFirst() { return {
+      operationId: 'operation-review-base-1', outputArtifactId: 'artifact-proxy-9x16', outputManifestId: 'manifest-review-base-1',
+    } } },
+    v2MediaArtifact: { async findFirst() { return {
+      id: 'artifact-proxy-9x16', sha256: 'd'.repeat(64), byteSize: 8192n,
+      manifests: [{ id: 'manifest-review-base-1', manifestJson: JSON.stringify({ artifact: { artifactKey: 'editorial-proxies/review-base.mp4' } }) }],
+    } } },
+  })
+  const rangeSource = await rangeRepository.readCurrentSource({ workspaceId, projectId })
+  assert.equal(rangeSource.rangeReuse.commandId, committed.command.id)
+  assert.deepEqual(rangeSource.rangeReuse.ranges, [{ startFrame: 30, endFrame: 31 }])
+  assert.equal(rangeSource.rangeReuse.artifactId, 'artifact-proxy-9x16')
 })

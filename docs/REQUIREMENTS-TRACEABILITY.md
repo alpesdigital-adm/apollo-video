@@ -240,6 +240,8 @@ Atualização local de FR-234 — o composition root do render aceita agora `loc
 | FR-204 | Mix/master | S8 | D5,D9 | ducking/loudness/limiter | audio fixture |
 | FR-205 | Crítico audiovisual | S1,S8 | D2,D5,D9 | masking/drift/tails/issues | audiovisual eval |
 
+Complemento local de FR-233/FR-214 — `apply-review-patch` persiste `command-impact/v1` no payload v2 do mesmo Command, converte ranges humanos em frames pelo FPS do EditPlan, transforma ponto em um frame e usa envelope downstream para `trim`/`move`. O adapter relê outputs proxy/final concluídos no commit serializável, grava `command-artifact-invalidation/v1`, reidrata payload/hash/linhas e aborta em drift. O repository de proxy reconhece o Command e materializa range reuse somente contra o artifact-base listado pelas invalidations. A capability `apollo.projects.review-patches.apply` evoluiu para v2 e expõe impacto e stale relationships. Um golden FFmpeg real parte do PatchSet aplicado e comprova que somente o range frame-first da legenda muda pixels, preservando prefixo/sufixo do proxy-base. Contrato e testes locais passam, enquanto o E2E PostgreSQL/API preparado, deploy e aceite continuam abertos.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.

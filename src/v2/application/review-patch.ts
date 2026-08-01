@@ -5,6 +5,7 @@ import { DomainError, assertDomain } from '../domain/errors.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
+import { createReviewPatchCommandImpact, type CommandImpactV1 } from '../domain/command-impact.ts'
 import {
   PATCH_OPERATION_KINDS,
   interpretReviewAnnotation,
@@ -25,6 +26,14 @@ const OPERATION_COST_CENTS: Readonly<Record<PatchOperationKind, number>> = Objec
   'update-subtitle': 0,
   move: 0,
 })
+
+interface AppliedReviewPatchPayloadV2 {
+  schemaVersion: 2
+  proposalId: string
+  annotationIds: readonly string[]
+  patch: Readonly<PatchSet>
+  impact: Readonly<CommandImpactV1>
+}
 
 function validateIdentity(value: string, field: string): string {
   const normalized = value.trim()
@@ -200,8 +209,30 @@ export function applyReviewPatchService(dependencies: {
     const editPlanJson = stableSerialize(editPlan)
     const editPlanHash = calculateVersionHash(editPlan)
     const patch = context.proposal.patch as PatchSet
-    const payload = Object.freeze({ schemaVersion: 1 as const, proposalId, annotationIds: patch.annotationIds, patch })
-    const command = createEditCommand({
+    assertDomain(
+      stableSerialize(patch.invalidatedRanges) === stableSerialize(context.proposal.impact!.invalidatedRanges),
+      'PERSISTENCE_CONFLICT',
+      'Review patch proposal impact ranges are inconsistent',
+    )
+    const impact = createReviewPatchCommandImpact({
+      commandId,
+      baseVersionId: context.currentVersion.id,
+      resultVersionId: versionId,
+      variantIds: context.renderVariantIds,
+      operations: patch.operations,
+      invalidatedRangesMs: context.proposal.impact!.invalidatedRanges,
+      beforeEditPlan: context.editPlan,
+      afterEditPlan: editPlan,
+      outputReferences: context.outputReferences,
+    })
+    const payload: Readonly<AppliedReviewPatchPayloadV2> = Object.freeze({
+      schemaVersion: 2 as const,
+      proposalId,
+      annotationIds: patch.annotationIds,
+      patch,
+      impact,
+    })
+    const command = createEditCommand<AppliedReviewPatchPayloadV2>({
       id: commandId,
       workspaceId,
       projectId,
@@ -262,7 +293,7 @@ export function applyReviewPatchService(dependencies: {
       sequence: version.sequence,
       actor: request.actor.type === 'api-client' ? { clientId: request.actor.id, ...(request.actor.delegatedUserId ? { userId: request.actor.delegatedUserId } : {}) } : { userId: request.actor.id },
       resource: { type: 'project-version', id: version.id },
-      data: { projectId, sequence: version.sequence, parentVersionId: version.parentVersionId, baseHash: version.baseHash, commandId, commandType: command.type, patchProposalId: proposalId, snapshotRefs: version.snapshotRefs, createdAt },
+      data: { projectId, sequence: version.sequence, parentVersionId: version.parentVersionId, baseHash: version.baseHash, commandId, commandType: command.type, patchProposalId: proposalId, commandImpactHash: impact.impactHash, artifactInvalidationCount: impact.affectedArtifacts.length, snapshotRefs: version.snapshotRefs, createdAt },
     })
     return dependencies.repository.commitOrReplay({
       proposalId,
@@ -273,6 +304,7 @@ export function applyReviewPatchService(dependencies: {
       version,
       event,
       comparison,
+      impact,
     })
   }
 }

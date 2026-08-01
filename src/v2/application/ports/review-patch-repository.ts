@@ -3,6 +3,7 @@ import type { PatchGateResult, PatchImpact, PatchOperation, PatchSet, ReviewAnno
 import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
+import type { CommandArtifactInvalidationV1, CommandImpactOutputReference, CommandImpactV1 } from '../../domain/command-impact.ts'
 
 export type ReviewPatchProposalStatus = 'ready' | 'ambiguous' | 'prohibited' | 'budget-blocked' | 'applied'
 
@@ -41,6 +42,8 @@ export interface ReviewPatchProposalContext {
   editPlanHash: string
   policies: Readonly<Record<string, unknown>>
   availableAssetIds: readonly string[]
+  renderVariantIds: readonly string[]
+  outputReferences: readonly Readonly<CommandImpactOutputReference>[]
 }
 
 export interface ReviewPatchApplyContext extends ReviewPatchProposalContext {
@@ -56,6 +59,7 @@ export interface ReviewPatchCommit {
   version: Readonly<ProjectVersion>
   event: Readonly<PublicEvent>
   comparison: NonNullable<ReviewPatchProposal['comparison']>
+  impact: Readonly<CommandImpactV1>
 }
 
 export interface ReviewPatchApplyResult {
@@ -64,6 +68,8 @@ export interface ReviewPatchApplyResult {
   version: Readonly<ProjectVersion>
   editPlan: Readonly<Record<string, unknown>>
   comparison: NonNullable<ReviewPatchProposal['comparison']>
+  impact: Readonly<CommandImpactV1>
+  invalidations: readonly Readonly<CommandArtifactInvalidationV1>[]
   replayed: boolean
 }
 

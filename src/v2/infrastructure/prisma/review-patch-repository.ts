@@ -13,6 +13,12 @@ import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProjectVersion, type ProjectVersion } from '../../domain/project-version.ts'
 import { createReviewAnnotation, type ReviewAnnotation, type ReviewScope } from '../../domain/review-system.ts'
+import {
+  createCommandArtifactInvalidations,
+  normalizeCommandImpactOutputReferences,
+  parseCommandArtifactInvalidation,
+  parseCommandImpact,
+} from '../../domain/command-impact.ts'
 
 function parseJson<T>(value: string, field: string): T {
   try {
@@ -20,6 +26,24 @@ function parseJson<T>(value: string, field: string): T {
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
   }
+}
+
+function hydrateInvalidation(item: Prisma.V2CommandArtifactInvalidationGetPayload<{}>) {
+  return parseCommandArtifactInvalidation({
+    schemaVersion: 'command-artifact-invalidation/v1',
+    id: item.id,
+    status: item.status,
+    commandId: item.commandId,
+    baseVersionId: item.baseVersionId,
+    resultVersionId: item.resultVersionId,
+    artifactId: item.artifactId,
+    kind: item.kind,
+    variantId: item.variantId,
+    dependencyTypes: parseJson<unknown[]>(item.dependencyTypesJson, 'review patch invalidation dependencies'),
+    affectedRanges: parseJson<unknown[]>(item.affectedRangesJson, 'review patch invalidation ranges'),
+    impactHash: item.impactHash,
+    createdAt: item.createdAt.toISOString(),
+  })
 }
 
 export function hydrateReviewAnnotation(row: {
@@ -141,13 +165,59 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     if (!annotation || !version) return null
     const editPlan = parseJson<Record<string, unknown>>(version.editPlanSnapshot.contentJson, 'review patch EditPlan')
     const policies = parseJson<Record<string, unknown>>(version.policiesSnapshot.contentJson, 'review patch policies')
+    const hydratedAnnotation = hydrateReviewAnnotation(annotation)
+    const renderVariantIds = Object.freeze([
+      ...new Set([
+        annotation.project.format ?? '9:16',
+        ...hydratedAnnotation.applicationScope.formatIds,
+      ]),
+    ].toSorted())
+    const [proxyOutputs, finalOutputs] = await Promise.all([
+      this.client.v2ProjectProxyRenderOperation.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          projectVersionId: version.id,
+          operation: { status: 'succeeded', phase: 'completed' },
+        },
+        select: { outputArtifactId: true },
+      }),
+      this.client.v2ProjectFinalExportOperation.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          projectVersionId: version.id,
+          operation: { status: 'succeeded', phase: 'completed' },
+        },
+        select: { outputArtifactId: true, outputAspectRatio: true },
+      }),
+    ])
     return Object.freeze({
-      annotation: hydrateReviewAnnotation(annotation),
+      annotation: hydratedAnnotation,
       currentVersion: hydrateReviewPatchVersion(version),
       editPlan: Object.freeze(editPlan),
       editPlanHash: version.editPlanSnapshot.contentHash,
       policies: Object.freeze(policies),
       availableAssetIds: Object.freeze([...new Set(annotation.project.mediaAssets.map((asset) => asset.artifactId))]),
+      renderVariantIds,
+      outputReferences: normalizeCommandImpactOutputReferences([
+        ...(renderVariantIds.includes(annotation.project.format ?? '9:16')
+          ? proxyOutputs.map((output) => ({
+              artifactId: output.outputArtifactId,
+              kind: 'proxy' as const,
+              sourceVersionId: version.id,
+              variantId: annotation.project.format ?? '9:16',
+            }))
+          : []),
+        ...finalOutputs
+          .filter((output) => renderVariantIds.includes(output.outputAspectRatio))
+          .map((output) => ({
+            artifactId: output.outputArtifactId,
+            kind: 'final' as const,
+            sourceVersionId: version.id,
+            variantId: output.outputAspectRatio,
+          })),
+      ]),
     })
   }
 
@@ -194,11 +264,21 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
   async readAppliedResult(input: { workspaceId: string; projectId: string; proposalId: string; applyIdempotencyKey: string; applyRequestFingerprint: string }): Promise<Readonly<ReviewPatchApplyResult> | null> {
     const proposal = await this.client.v2ReviewPatchProposal.findFirst({
       where: { id: input.proposalId, workspaceId: input.workspaceId, projectId: input.projectId },
-      include: { renderOperation: true, resultVersion: { include: { editPlanSnapshot: true, command: true } } },
+      include: { renderOperation: true, resultVersion: { include: { editPlanSnapshot: true, command: { include: { artifactInvalidations: true } } } } },
     })
     if (!proposal || proposal.status !== 'applied' || !proposal.resultVersion || !proposal.resultVersion.command || !proposal.comparisonJson) return null
     if (proposal.applyIdempotencyKey !== input.applyIdempotencyKey || proposal.applyRequestFingerprint !== input.applyRequestFingerprint) return null
     const commandRow = proposal.resultVersion.command
+    const payload = parseJson<Record<string, unknown>>(commandRow.payloadJson, 'review patch command payload')
+    if (payload.schemaVersion !== 2 || !payload.impact) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored review patch command impact is missing')
+    const impact = parseCommandImpact(payload.impact)
+    if (
+      impact.commandType !== 'apply-review-patch' || impact.commandId !== commandRow.id ||
+      impact.baseVersionId !== commandRow.baseVersionId || impact.resultVersionId !== proposal.resultVersion.id
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored review patch command impact identity is inconsistent')
+    const invalidations = Object.freeze(createCommandArtifactInvalidations({ impact, createdAt: commandRow.createdAt.toISOString() }).toSorted((left, right) => left.id.localeCompare(right.id)))
+    const storedInvalidations = Object.freeze(commandRow.artifactInvalidations.map(hydrateInvalidation).toSorted((left, right) => left.id.localeCompare(right.id)))
+    if (stableSerialize(invalidations) !== stableSerialize(storedInvalidations)) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored review patch artifact invalidations are inconsistent')
     const command = createEditCommand({
       id: commandRow.id,
       workspaceId: commandRow.workspaceId,
@@ -208,7 +288,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       author: { type: commandRow.actorType as 'user' | 'director' | 'system' | 'api-client', id: commandRow.actorId, ...(commandRow.delegatedUserId ? { delegatedUserId: commandRow.delegatedUserId } : {}) },
       type: commandRow.type,
       scope: parseJson<EditScope>(commandRow.scopeJson, 'review patch command scope'),
-      payload: parseJson<unknown>(commandRow.payloadJson, 'review patch command payload'),
+      payload,
       ...(commandRow.reason ? { reason: commandRow.reason } : {}),
       idempotencyKey: commandRow.idempotencyKey,
       createdAt: commandRow.createdAt.toISOString(),
@@ -219,6 +299,8 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       version: hydrateReviewPatchVersion(proposal.resultVersion),
       editPlan: Object.freeze(parseJson<Record<string, unknown>>(proposal.resultVersion.editPlanSnapshot.contentJson, 'applied review patch EditPlan')),
       comparison: Object.freeze(parseJson<NonNullable<ReviewPatchProposal['comparison']>>(proposal.comparisonJson, 'patch comparison')),
+      impact,
+      invalidations,
       replayed: true,
     })
   }
@@ -238,6 +320,44 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
         if (proposal.status !== 'ready' || project.currentVersion.id !== proposal.baseVersionId || bundle.version.parentVersionId !== project.currentVersion.id || bundle.version.sequence !== project.currentVersion.sequence + 1) {
           throw new DomainError('VERSION_CONFLICT', 'Project version changed before review patch commit', { currentVersionId: project.currentVersion.id })
         }
+        const payload = bundle.command.payload as Readonly<{ schemaVersion?: unknown; impact?: unknown }>
+        const persistedImpact = payload.schemaVersion === 2 && payload.impact ? parseCommandImpact(payload.impact) : null
+        if (
+          !persistedImpact || persistedImpact.commandType !== 'apply-review-patch' ||
+          persistedImpact.impactHash !== bundle.impact.impactHash
+        ) throw new DomainError('PERSISTENCE_CONFLICT', 'Review patch command and impact payload are inconsistent')
+        const [proxyOutputs, finalOutputs] = await Promise.all([
+          transaction.v2ProjectProxyRenderOperation.findMany({
+            where: {
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              projectVersionId: bundle.command.baseVersionId,
+              operation: { status: 'succeeded', phase: 'completed' },
+            },
+            select: { outputArtifactId: true },
+          }),
+          transaction.v2ProjectFinalExportOperation.findMany({
+            where: {
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              projectVersionId: bundle.command.baseVersionId,
+              operation: { status: 'succeeded', phase: 'completed' },
+            },
+            select: { outputArtifactId: true, outputAspectRatio: true },
+          }),
+        ])
+        const projectVariantId = project.format ?? '9:16'
+        const currentAffectedArtifacts = normalizeCommandImpactOutputReferences([
+          ...(bundle.impact.affectedVariantIds.includes(projectVariantId)
+            ? proxyOutputs.map((output) => ({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: bundle.command.baseVersionId, variantId: projectVariantId }))
+            : []),
+          ...finalOutputs
+            .filter((output) => bundle.impact.affectedVariantIds.includes(output.outputAspectRatio))
+            .map((output) => ({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: bundle.command.baseVersionId, variantId: output.outputAspectRatio })),
+        ])
+        if (stableSerialize(currentAffectedArtifacts) !== stableSerialize(bundle.impact.affectedArtifacts)) {
+          throw new DomainError('VERSION_CONFLICT', 'Project render outputs changed before review patch impact commit')
+        }
         await transaction.v2EditCommand.create({ data: {
           id: bundle.command.id, workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId,
           baseVersionId: bundle.command.baseVersionId, baseHash: bundle.command.baseHash, type: bundle.command.type,
@@ -255,6 +375,25 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
           storySnapshotId: bundle.version.snapshotRefs.story, editPlanSnapshotId: bundle.version.snapshotRefs.editPlan, policiesSnapshotId: bundle.version.snapshotRefs.policies,
           baseHash: bundle.version.baseHash, createdBy: bundle.version.createdBy, commandId: bundle.command.id, createdAt: new Date(bundle.version.createdAt),
         } })
+        const invalidations = createCommandArtifactInvalidations({ impact: bundle.impact, createdAt: bundle.command.createdAt })
+        if (invalidations.length > 0) {
+          await transaction.v2CommandArtifactInvalidation.createMany({ data: invalidations.map((invalidation) => ({
+            id: invalidation.id,
+            workspaceId: bundle.command.workspaceId,
+            projectId: bundle.command.projectId,
+            commandId: invalidation.commandId,
+            baseVersionId: invalidation.baseVersionId,
+            resultVersionId: invalidation.resultVersionId,
+            artifactId: invalidation.artifactId,
+            kind: invalidation.kind,
+            variantId: invalidation.variantId,
+            status: invalidation.status,
+            dependencyTypesJson: stableSerialize(invalidation.dependencyTypes),
+            affectedRangesJson: stableSerialize(invalidation.affectedRanges),
+            impactHash: invalidation.impactHash,
+            createdAt: new Date(invalidation.createdAt),
+          })) })
+        }
         const updated = await transaction.v2Project.updateMany({ where: { id: bundle.version.projectId, workspaceId: bundle.version.workspaceId, currentVersionId: bundle.command.baseVersionId }, data: { currentVersionId: bundle.version.id } })
         if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project current version changed during review patch commit')
         await transaction.v2ReviewAnnotation.update({ where: { id: proposal.annotationId }, data: { status: 'applied', updatedAt: new Date(bundle.command.createdAt) } })

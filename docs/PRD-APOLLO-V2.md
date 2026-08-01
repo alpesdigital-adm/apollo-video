@@ -1693,6 +1693,10 @@ timeline frame-first, rate `[0.25, 4]`, `setpts`/`atempo` e limites absolutos
 arredondados sem acumular drift; reverse é rejeitado. Suporte multi-range não
 autoriza subinvalidação: `move` e outros gestos que deslocam timing preservam
 um envelope contínuo até o fim, pois os clips intermediários mudam de mapping. A
+aplicação confirmada de review patch também persiste esse mapa: converte o
+escopo temporal humano para frames, fenceia outputs da base, grava stale
+atomicamente e expõe impacto/invalidações na capability pública v2 antes de
+enfileirar o proxy reutilizável. A
 entrega permanece aberta até a mesma semântica cobrir todos os Commands e
 ranges, um MP4 real combinar transcript substituído com rate diferente de 1 e
 a jornada integrada ser executada em PostgreSQL, implantada e aceita.

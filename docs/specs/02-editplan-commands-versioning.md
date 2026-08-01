@@ -660,6 +660,16 @@ atual aceita até oito ranges canônicos e clips em rate `[0.25, 4]`; isso
 descreve a capacidade do executor, não autoriza produtores a declararem ranges
 disjuntos sem provar que o mapping intermediário permaneceu idêntico.
 
+`apply-review-patch` também produz `command-impact/v1` no payload schema v2 do
+Command. Os ranges em milissegundos revisados pelo humano são convertidos pelo
+FPS imutável do EditPlan; um ponto vira um frame, e `trim`/`move` mantêm envelope
+contínuo até o fim. Variants incluem o formato canônico corrente e os formatos
+adicionais do escopo da annotation; outputs concluídos da base são descobertos
+e relidos no commit serializável, e cada dependente gera a
+mesma relação normalizada stale. O repository de proxy reconhece esse Command e
+reutiliza o proxy-base somente quando hash, invalidations e range canônico
+concordam; caso contrário faz fallback para render integral.
+
 Quando o impacto persistido declara somente `selection`, sem artifacts afetados
 e sem render mínimo, o enqueue não materializa um render vazio nem cria bytes.
 Ele exige um proxy `succeeded/completed` da versão-base, reutiliza exatamente o

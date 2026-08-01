@@ -5334,6 +5334,14 @@ const commandImpactSchema = {
     impactHash: sha256Schema,
   },
 }
+const reviewPatchCommandImpactSchema = {
+  ...commandImpactSchema,
+  properties: {
+    ...commandImpactSchema.properties,
+    commandType: { const: 'apply-review-patch' },
+    renderSemanticsChanged: { const: true },
+  },
+}
 const commandArtifactInvalidationSchema = {
   type: 'object',
   additionalProperties: false,
@@ -12490,6 +12498,22 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'], properties: { id: idSchema, type: { const: 'apply-review-patch' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema } },
         version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema, baseHash: sha256Schema, snapshotRefs: { type: 'object' }, createdAt: dateTimeSchema } },
         comparison: patchProposalSchema.properties.comparison,
+        operation: publicOperationSchemaV4,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('review-patch-applied', 2, 'Immutable version, persisted frame-first impact, stale output relationships and durable proxy render created by a confirmed patch',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['proposal', 'command', 'version', 'comparison', 'impact', 'invalidations', 'operation', 'replayed'],
+      properties: {
+        proposal: patchProposalSchema,
+        command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'], properties: { id: idSchema, type: { const: 'apply-review-patch' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema } },
+        version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema, baseHash: sha256Schema, snapshotRefs: { type: 'object' }, createdAt: dateTimeSchema } },
+        comparison: patchProposalSchema.properties.comparison,
+        impact: reviewPatchCommandImpactSchema,
+        invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
         operation: publicOperationSchemaV4,
         replayed: { type: 'boolean' },
       },

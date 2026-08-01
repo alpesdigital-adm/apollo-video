@@ -1,6 +1,7 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
 import type { ManualGesture, ManualVersionAction } from './manual-editing.ts'
+import type { PatchOperation } from './review-system.ts'
 
 export type CommandImpactDependency =
   | 'content'
@@ -25,7 +26,7 @@ export interface CommandImpactRange {
 export interface CommandImpactV1 {
   schemaVersion: 'command-impact/v1'
   commandId: string
-  commandType: 'manual-edit'
+  commandType: 'manual-edit' | 'apply-review-patch'
   baseVersionId: string
   resultVersionId: string
   changeKinds: readonly string[]
@@ -370,6 +371,129 @@ export function createManualCommandImpact(input: {
   return Object.freeze({ ...body, impactHash: calculateCanonicalHash(body) })
 }
 
+function reviewPatchClassification(operations: readonly Readonly<PatchOperation>[]): Readonly<{
+  changeKinds: readonly string[]
+  dependencyTypes: readonly CommandImpactDependency[]
+  throughEnd: boolean
+}> {
+  assertDomain(operations.length > 0 && operations.length <= 100, 'INVALID_ARGUMENT', 'Review patch operations are invalid')
+  const dependencies = new Set<CommandImpactDependency>()
+  let throughEnd = false
+  for (const operation of operations) {
+    assertDomain(validId(operation.targetId), 'INVALID_ARGUMENT', 'Review patch targetId is invalid')
+    if (operation.op === 'trim' || operation.op === 'move') {
+      dependencies.add('timing'); dependencies.add('visual'); dependencies.add('audio')
+      throughEnd = true
+    } else if (operation.op === 'replace-asset') {
+      dependencies.add('content'); dependencies.add('visual'); dependencies.add('audio')
+    } else if (operation.op === 'update-text') {
+      dependencies.add('content'); dependencies.add('visual')
+    } else {
+      dependencies.add('visual')
+    }
+  }
+  return Object.freeze({
+    changeKinds: Object.freeze([...new Set(operations.map((operation) => operation.op))].toSorted()),
+    dependencyTypes: Object.freeze([...dependencies].toSorted()),
+    throughEnd,
+  })
+}
+
+function reviewPatchFrameRanges(input: {
+  rangesMs: readonly (readonly [number, number])[]
+  fps: number
+  durationFrames: number
+}): readonly Readonly<CommandImpactRange>[] {
+  assertDomain(
+    Number.isFinite(input.fps) && input.fps > 0 &&
+      Number.isSafeInteger(input.durationFrames) && input.durationFrames > 0 &&
+      input.rangesMs.length > 0 && input.rangesMs.length <= 100,
+    'INVALID_ARGUMENT',
+    'Review patch timing is invalid',
+  )
+  const ranges = input.rangesMs.map((range) => {
+    assertDomain(
+      Array.isArray(range) && range.length === 2 &&
+        Number.isSafeInteger(range[0]) && Number.isSafeInteger(range[1]) &&
+        range[0] >= 0 && range[1] >= range[0],
+      'INVALID_ARGUMENT',
+      'Review patch range is invalid',
+    )
+    const startFrame = Math.floor(range[0] * input.fps / 1000 + 1e-7)
+    const rawEndFrame = Math.ceil(range[1] * input.fps / 1000 - 1e-7)
+    assertDomain(startFrame < input.durationFrames, 'INVALID_ARGUMENT', 'Review patch range starts outside the timeline')
+    return Object.freeze({
+      startFrame,
+      endFrame: Math.min(input.durationFrames, Math.max(startFrame + 1, rawEndFrame)),
+    })
+  })
+  return canonicalCommandImpactRanges(ranges)
+}
+
+export function createReviewPatchCommandImpact(input: {
+  commandId: string
+  baseVersionId: string
+  resultVersionId: string
+  variantIds: readonly string[]
+  operations: readonly Readonly<PatchOperation>[]
+  invalidatedRangesMs: readonly (readonly [number, number])[]
+  beforeEditPlan: Readonly<Record<string, unknown>>
+  afterEditPlan: Readonly<Record<string, unknown>>
+  outputReferences: readonly Readonly<CommandImpactOutputReference>[]
+}): Readonly<CommandImpactV1> {
+  for (const [field, value] of Object.entries({
+    commandId: input.commandId,
+    baseVersionId: input.baseVersionId,
+    resultVersionId: input.resultVersionId,
+  })) assertDomain(validId(value), 'INVALID_ARGUMENT', `${field} is invalid`)
+  const variants = Object.freeze([...new Set(input.variantIds.map((item) => item.trim()))].toSorted())
+  assertDomain(variants.length > 0 && variants.every(validId), 'INVALID_ARGUMENT', 'Review patch variants are invalid')
+  const beforeFps = Number(input.beforeEditPlan.fps)
+  const afterFps = Number(input.afterEditPlan.fps)
+  assertDomain(Number.isFinite(beforeFps) && beforeFps > 0 && beforeFps === afterFps, 'INVALID_ARGUMENT', 'Review patch EditPlan FPS is inconsistent')
+  const classification = reviewPatchClassification(input.operations)
+  const durationFrames = Math.max(planDuration(input.beforeEditPlan), planDuration(input.afterEditPlan))
+  const reviewedRanges = reviewPatchFrameRanges({
+    rangesMs: input.invalidatedRangesMs,
+    fps: beforeFps,
+    durationFrames,
+  })
+  const timingTargetRanges = input.operations
+    .filter((operation) => operation.op === 'trim' || operation.op === 'move')
+    .flatMap((operation) => {
+      const targetId = operation.targetId.replace(/^(?:subtitle|presenter|background|scene|clip):/, '')
+      return [...clipRanges(input.beforeEditPlan, targetId), ...clipRanges(input.afterEditPlan, targetId)]
+    })
+  const affectedRanges = classification.throughEnd
+    ? Object.freeze([Object.freeze({
+        startFrame: Math.min(reviewedRanges[0]!.startFrame, ...timingTargetRanges.map((range) => range.startFrame)),
+        endFrame: durationFrames,
+      })])
+    : reviewedRanges
+  const affectedArtifacts = normalizeCommandImpactOutputReferences(
+    input.outputReferences.filter((output) => variants.includes(output.variantId)),
+  )
+  const body = {
+    schemaVersion: 'command-impact/v1' as const,
+    commandId: input.commandId,
+    commandType: 'apply-review-patch' as const,
+    baseVersionId: input.baseVersionId,
+    resultVersionId: input.resultVersionId,
+    changeKinds: classification.changeKinds,
+    dependencyTypes: classification.dependencyTypes,
+    affectedRanges,
+    affectedVariantIds: variants,
+    affectedArtifacts,
+    minimalRenders: Object.freeze(variants.map((variantId) => Object.freeze({
+      kind: 'proxy' as const,
+      variantId,
+      ranges: affectedRanges,
+    }))),
+    renderSemanticsChanged: true,
+  }
+  return Object.freeze({ ...body, impactHash: calculateCanonicalHash(body) })
+}
+
 export function createCommandArtifactInvalidations(input: {
   impact: Readonly<CommandImpactV1>
   createdAt: string
@@ -474,7 +598,7 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
   const impact = stored as unknown as CommandImpactV1
   assertDomain(
     impact.schemaVersion === 'command-impact/v1' &&
-      impact.commandType === 'manual-edit' &&
+      ['manual-edit', 'apply-review-patch'].includes(impact.commandType) &&
       validId(impact.commandId) &&
       validId(impact.baseVersionId) &&
       validId(impact.resultVersionId) &&
@@ -546,6 +670,16 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
     'PERSISTENCE_CONFLICT',
     'Stored Command impact dependencies are inconsistent',
   )
+  if (impact.commandType === 'apply-review-patch') {
+    const renderVariants = impact.minimalRenders.map((render) => render.variantId).toSorted()
+    assertDomain(
+      impact.renderSemanticsChanged === true && impact.dependencyTypes.length > 0 &&
+        impact.affectedVariantIds.length > 0 &&
+        calculateCanonicalHash(renderVariants) === calculateCanonicalHash([...impact.affectedVariantIds].toSorted()),
+      'PERSISTENCE_CONFLICT',
+      'Stored review patch impact is inconsistent',
+    )
+  }
   const { impactHash, ...body } = impact
   assertDomain(
     calculateCanonicalHash(body) === impactHash,

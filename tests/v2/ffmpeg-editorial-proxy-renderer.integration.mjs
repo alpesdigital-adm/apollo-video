@@ -8,10 +8,11 @@ import test from 'node:test'
 
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
-import { createManualCommandImpact } from '../../src/v2/domain/command-impact.ts'
+import { createManualCommandImpact, createReviewPatchCommandImpact } from '../../src/v2/domain/command-impact.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { materializeManualEditPlan } from '../../src/v2/domain/manual-editing.ts'
+import { materializePatchEditPlan } from '../../src/v2/domain/review-system.ts'
 import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 
 const require = createRequire(import.meta.url)
@@ -248,7 +249,7 @@ test('T-FR-233 renderer applies a scoped normalized crop only inside the stale p
   }
 })
 
-test('T-FR-233 renderer changes subtitle pixels only inside the stale cue range', async () => {
+test('T-FR-233 applied review patch changes subtitle pixels only inside its frame-first stale range', async () => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-subtitle-range-render-'))
   const masterPath = join(root, 'subtitle-master.mp4')
   try {
@@ -272,20 +273,53 @@ test('T-FR-233 renderer changes subtitle pixels only inside the stale cue range'
       sourceInFrame: 0, sourceOutFrame: 90,
       timelineInFrame: 0, timelineOutFrame: 90, rate: 1,
     }]
+    const beforePlan = {
+      schemaVersion: 2, state: 'compiled', id: 'edit-plan-review-subtitle-base',
+      projectVersionId: 'project-version-review-subtitle-base', fps: 30, durationFrames: 90,
+      videoTracks: [{ id: 'base-video', kind: 'base-video', clips }],
+      subtitleTracks: [{ id: 'captions', kind: 'captions', cues: [
+        { id: 'cue-manual', startFrame: 30, endFrame: 60, text: 'ANTES', anchor: 'bottom' },
+      ] }],
+      composition: { layout: 'fit', background: 'black', foregroundScale: 1, verticalPosition: 0.5 },
+      createdAt: '2026-08-01T01:10:00.000Z',
+    }
+    const patch = {
+      id: 'review-patch-subtitle-golden', baseVersionId: beforePlan.projectVersionId,
+      operations: [{ op: 'update-text', targetId: 'subtitle:cue-manual', value: { text: 'DEPOIS REVISADO' }, rangeMs: [1000, 2000] }],
+      annotationIds: ['annotation-review-subtitle-golden'], estimatedCost: 0,
+      invalidatedRanges: [[1000, 2000]],
+    }
+    const afterPlan = materializePatchEditPlan({
+      editPlan: beforePlan, patch, newVersionId: 'project-version-review-subtitle-result',
+      createdAt: '2026-08-01T01:11:00.000Z',
+    })
+    const impact = createReviewPatchCommandImpact({
+      commandId: 'review-command-subtitle-golden',
+      baseVersionId: beforePlan.projectVersionId,
+      resultVersionId: afterPlan.projectVersionId,
+      variantIds: ['16:9'], operations: patch.operations,
+      invalidatedRangesMs: patch.invalidatedRanges,
+      beforeEditPlan: beforePlan, afterEditPlan: afterPlan,
+      outputReferences: [{
+        artifactId: 'artifact-subtitle-base-proxy', kind: 'proxy',
+        sourceVersionId: beforePlan.projectVersionId, variantId: '16:9',
+      }],
+    })
+    assert.deepEqual(impact.affectedRanges, [{ startFrame: 30, endFrame: 60 }])
     const base = await renderer.render({
       operationId: 'subtitle-range-base', renderKind: 'proxy', sources: [source], clips,
       fps: 30, format: '16:9',
-      subtitleCues: [{ id: 'cue-manual', startFrame: 30, endFrame: 60, text: 'ANTES', anchor: 'bottom' }],
+      subtitleCues: beforePlan.subtitleTracks[0].cues,
     })
     const revised = await renderer.render({
-      operationId: 'subtitle-range-partial', renderKind: 'proxy', sources: [source], clips,
+      operationId: 'subtitle-range-partial', renderKind: 'proxy', sources: [source], clips: afterPlan.videoTracks[0].clips,
       fps: 30, format: '16:9',
-      subtitleCues: [{ id: 'cue-manual', startFrame: 30, endFrame: 60, text: 'DEPOIS REVISADO', anchor: 'bottom' }],
+      subtitleCues: afterPlan.subtitleTracks[0].cues,
       rangeReuse: {
         schemaVersion: 'project-proxy-range-reuse/v1',
-        commandId: 'manual-command-subtitle-golden', impactHash: '3'.repeat(64),
-        baseVersionId: 'project-version-subtitle-base',
-        ranges: [{ startFrame: 30, endFrame: 60 }],
+        commandId: impact.commandId, impactHash: impact.impactHash,
+        baseVersionId: impact.baseVersionId,
+        ranges: impact.minimalRenders[0].ranges,
         artifactId: 'artifact-subtitle-base-proxy', manifestId: 'manifest-subtitle-base-proxy',
         path: base.outputPath, sha256: base.sha256, byteSize: base.byteSize,
       },

@@ -72,6 +72,8 @@ test('T-FR-214 public review patch E2E persists valid, ambiguous, prohibited and
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
     await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactLineage.deleteMany({ where: { workspaceId } })
+    await client.v2CommandArtifactInvalidationResolution.deleteMany({ where: { workspaceId } })
+    await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
@@ -163,7 +165,18 @@ test('T-FR-214 public review patch E2E persists valid, ambiguous, prohibited and
     assert.equal(applyResponse.status, 201, `${JSON.stringify(applyPayload)}\n${serverLogs.slice(-4000)}`)
     assert.equal(applyPayload.data.version.sequence, 2)
     assert.equal(applyPayload.data.comparison.beforeVersionId, versionId)
+    assert.equal(applyPayload.data.impact.commandType, 'apply-review-patch')
+    assert.deepEqual(applyPayload.data.impact.affectedRanges, [{ startFrame: 30, endFrame: 31 }])
+    assert.equal(applyPayload.data.invalidations.length, 1)
+    assert.equal(applyPayload.data.invalidations[0].artifactId, sourceArtifactId)
+    assert.equal(applyPayload.data.invalidations[0].impactHash, applyPayload.data.impact.impactHash)
     assert.equal(applyPayload.data.operation.status, 'queued')
+    const persistedInvalidations = await client.v2CommandArtifactInvalidation.findMany({
+      where: { workspaceId, projectId, resultVersionId: applyPayload.data.version.id },
+    })
+    assert.equal(persistedInvalidations.length, 1)
+    assert.equal(persistedInvalidations[0].commandId, applyPayload.data.command.id)
+    assert.equal(persistedInvalidations[0].affectedRangesJson, JSON.stringify([{ startFrame: 30, endFrame: 31 }]))
     let workerNow = new Date('2026-07-22T01:31:00.000Z')
     const workerEnvironment = { ...process.env, APOLLO_V2_ARTIFACT_ROOT: root, APOLLO_V2_RENDER_RETRY_BASE_MS: '1', APOLLO_V2_RENDER_RETRY_MAX_MS: '2', APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'patch-e2e-key-v1', APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url') }
     const worker = createProjectProxyRenderWorker(workerEnvironment, () => workerNow)

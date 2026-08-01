@@ -133,3 +133,15 @@ affected frame through the plan end: clips between the target's old and new
 locations shift and their previous bytes are not reusable. Disjoint ranges are
 accepted only when the producing Command can prove independent unchanged
 regions.
+
+`apply-review-patch` now joins the same persisted invalidation model. Proposal
+ranges remain human-facing milliseconds, but application converts them with the
+EditPlan FPS into positive frame-first ranges; point annotations receive exactly
+one frame. `trim` and `move` conservatively extend from the first affected frame
+through the timeline end. The serializable commit re-reads completed base
+outputs before writing normalized stale relationships, and the proxy repository
+accepts the stored impact for partial base reuse. Public capability v2 exposes
+impact and invalidations. Local controlled-adapter tests are green, and a real
+FFmpeg golden starts from the materialized PatchSet and changes subtitle pixels
+only inside its frame-first range while reusing the base prefix/suffix. The
+PostgreSQL/API E2E is prepared but unexecuted; deploy and acceptance remain open.
