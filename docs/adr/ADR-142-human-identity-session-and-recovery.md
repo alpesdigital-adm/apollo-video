@@ -23,8 +23,8 @@ O Apollo já publica login, leitura de sessão e logout em `/v1/session`, mas a 
 
 ## Consequências
 
-- Esta decisão fecha a seleção do mecanismo, expiração e recuperação. O bootstrap transitório agora usa identidade humana e `WorkspaceMember` ativos, sessão revogável, idle timeout, throttle distribuído e audit redigido no PostgreSQL; isso não afirma que OIDC, identificador opaco rotacionável ou E2E de troca de workspace já estejam implementados.
-- Deploy de produção permanece bloqueado enquanto `/v1/session` aceitar apenas o bootstrap local; as páginas V2 já exigem a sessão durável no boundary server-side.
+- Esta decisão fecha a seleção do mecanismo, expiração e recuperação. O adapter OIDC, identificador opaco, revogação, idle timeout, throttle distribuído, identidade e membership já estão integrados localmente e em CI; isso não equivale a IdP real configurado, deploy ou aceite.
+- Deploy de produção permanece bloqueado até configurar o IdP real, pré-vincular a identidade administrativa, provar recuperação no IdP e concluir rotação periódica do identificador em até 15 minutos.
 - Bearer de `ApiClient` continua sendo a única autenticação de automação; cookie humano não autentica MCP nem worker.
 
 ## Evidências exigidas para implementação
@@ -38,4 +38,4 @@ O Apollo já publica login, leitura de sessão e logout em `/v1/session`, mas a 
 
 ## Evidência incremental
 
-O run hospedado `30766068302` (attempt 2) aplicou as tabelas de sessão, throttle e tentativas em PostgreSQL limpo e passou 808 testes, contratos, build, integrações e goldens. Duas instâncias do repository observaram a mesma revogação e janela de brute force; o E2E HTTP confirmou que logout invalida o cookie anterior, a sexta tentativa falha retorna `429`, a senha correta permanece bloqueada durante a janela e o audit não persiste username nem senha. O run `30768229810` comprovou proteção SSR. O run `30768936087` aplicou identidade/membership em PostgreSQL limpo e provou papel ativo, replay sem elevação, FK de sessão e suspensão fail-closed. O cookie assinado serve somente como envelope transitório e triagem do Proxy; OIDC e rotação permanecem gates abertos.
+O run hospedado `30766068302` (attempt 2) aplicou as tabelas de sessão, throttle e tentativas em PostgreSQL limpo. Os runs `30768229810`, `30768936087` e `30770605092` comprovaram proteção SSR, identidade/membership ativa e troca de workspace isolada. O run `30771147749` substituiu o envelope assinado por cookie aleatório opaco de 256 bits, com toda autoridade reidratada do PostgreSQL. O run `30773060731` passou 822 testes, build, migrations, goldens e Compose; seu E2E iniciou um IdP OIDC local real, verificou discovery, Authorization Code, S256 PKCE, state, browser binding, nonce, issuer, audience, assinatura/JWKS e criou sessão opaca somente para membership pré-autorizada. Binder incorreto, replay, nonce incorreto e identidade sem membership foram negados; o modo OIDC também recusou login por senha. Permanecem abertos IdP real, recuperação exercitada, rotação periódica em 15 minutos, deploy e aceite.
