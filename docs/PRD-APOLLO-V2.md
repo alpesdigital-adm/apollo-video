@@ -2317,6 +2317,8 @@ Jobs longos devem retomar após restart.
 
 Logs estruturados, trace por project/workflow/provider job, métricas de custo e duração.
 
+Estado integrado parcial (`197d51d`, run `30765019248`): lifecycle, spans e alertas redigidos são persistidos em tabelas PostgreSQL tipadas e consultáveis por capability pública workspace-scoped em janela máxima de 31 dias, sem payloads ou identificadores individuais na resposta agregada. Permanecem necessários dashboard por jornada/fase, alertas de hard invariants, implantação e aceite operacional antes de concluir NFR-003.
+
 ### NFR-004 — Reprodutibilidade
 
 Manifest, props, versões, hashes e provider config suficientes para reproduzir output quando providers permitirem.

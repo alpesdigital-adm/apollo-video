@@ -212,6 +212,8 @@ Complemento local de FR-234 — o golden de reconstrução serializa em disco `m
 
 Evidência integrada F0.030/FR-234 — o run `30763463127` promove master e derivados com SHA-256 full-object e `VersionId` obrigatório, apaga o namespace local antes do proxy, relê ProjectVersion/EditPlan, artifacts e manifests do PostgreSQL, rematerializa a versão exata do MinIO em storage efêmero pertencente à operação e executa FFmpeg real. O proxy promovido é reaberto por outro work root e validado por bytes, checksum, 540×960 e duração. O mesmo run mantém API e quatro workers supervisionados sem restart e executa teardown integral. A exceção HTTP aceita somente loopback ou service name Compose de rótulo único com opt-in explícito; hostname público/dotted continua exigindo HTTPS. Isso fecha a microtarefa de reconstrução do proxy, mas não conclui toda F0.028/FR-234, deploy ou aceite.
 
+Evidência integrada F0.030/NFR-003 — o run `30765019248` aplicou em PostgreSQL limpo as tabelas tipadas de eventos e alertas operacionais, comprovou gravação idempotente por hash, isolamento por workspace e agregados exatos de fila, execução, span, bytes, tokens e custo. A capability pública `GET /v1/operations/telemetry/summary` exige `operations:read`, limita a consulta a 31 dias e devolve somente contagens/somas/máximos sem trace, job, project ou payload do provider. O mesmo run passou 807 testes, contratos, build, integrações API/PostgreSQL, goldens e Compose supervisionado com cleanup. Dashboard por jornada/fase, hard-invariant alerts, implantação e aceite operacional permanecem abertos; NFR-003 e a caixa de F0.030 não estão concluídos.
+
 ## F3 — Sintético e transformação
 
 | Req | Título | Spec | Dep. | Evidência de aceite | Teste |
