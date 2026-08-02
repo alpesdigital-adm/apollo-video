@@ -49,4 +49,6 @@ ProjectVersion remains immutable and has no writable lifecycle column. Its
 visible relation is derived as `current` when its identity equals the Project
 head and `superseded` otherwise. Review history v3 opens a historical output
 only when persisted preview evidence exists; otherwise it offers history
-inspection. Other version-bearing responses have not yet adopted this view.
+inspection. Project create v4, duplicate v2 and workspace v7 expose their
+current version through the same projection. Editorial mutation responses have
+not yet adopted this view.

@@ -6675,6 +6675,18 @@ const reviewVersionVisibleStateSchema = {
   },
 }
 
+const currentProjectVersionVisibleStateSchema = {
+  ...reviewVersionVisibleStateSchema,
+  properties: {
+    ...reviewVersionVisibleStateSchema.properties,
+    label: { const: 'current' },
+    tone: { const: 'info' },
+    primaryAction: { const: 'open-result' },
+    availableActions: { const: ['open-result'] },
+    terminal: { const: false },
+  },
+}
+
 const reviewVersionSchemaV2 = {
   ...reviewVersionSchema,
   required: [...reviewVersionSchema.required, 'visibleState'],
@@ -16341,6 +16353,145 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         version: {
           type: 'object', additionalProperties: false, required: ['id', 'sequence', 'baseHash', 'createdAt'],
           properties: { id: idSchema, sequence: { type: 'integer', minimum: 1 }, baseHash: sha256Schema, createdAt: dateTimeSchema },
+        },
+        brief: { type: 'object', additionalProperties: true },
+        editPlan: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'state', 'fps', 'durationFrames', 'clipCount', 'cutCount', 'automaticZoom', 'subtitleFaceProtection'],
+          properties: {
+            id: idSchema, state: { type: 'string' }, fps: { type: 'number', minimum: 0 }, durationFrames: { type: 'integer', minimum: 0 },
+            clipCount: { type: 'integer', minimum: 0 }, cutCount: { type: 'integer', minimum: 0 },
+            automaticZoom: { type: 'boolean' }, subtitleFaceProtection: { type: 'boolean' },
+          },
+        },
+        commands: {
+          type: 'array', maxItems: 20,
+          items: {
+            type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'createdAt'],
+            properties: { id: idSchema, type: { enum: ['remove-spoken-content', 'run-director'] }, baseVersionId: idSchema, resultVersionId: idSchema, reason: { type: 'string', maxLength: 1000 }, createdAt: dateTimeSchema },
+          },
+        },
+        directorRuns: {
+          type: 'array', maxItems: 10,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: [
+              'id', 'status', 'plannerVersion', 'criticVersion', 'baseVersionId', 'resultVersionId',
+              'treatmentSnapshotId', 'storySnapshotId', 'qualitySnapshotId', 'qualityStatus',
+              'qualityScore', 'decisionCount', 'assumptionCount', 'subtitleCueCount', 'transitionCount',
+              'automaticZoom', 'createdAt',
+            ],
+            properties: {
+              id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
+              plannerVersion: { type: 'string', minLength: 3, maxLength: 64 }, criticVersion: { type: 'string', minLength: 3, maxLength: 64 },
+              baseVersionId: idSchema, resultVersionId: idSchema, treatmentSnapshotId: idSchema,
+              storySnapshotId: idSchema, qualitySnapshotId: idSchema,
+              qualityStatus: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
+              qualityScore: { type: 'number', minimum: 0, maximum: 1 },
+              decisionCount: { type: 'integer', minimum: 0, maximum: 64 }, assumptionCount: { type: 'integer', minimum: 0, maximum: 64 },
+              subtitleCueCount: { type: 'integer', minimum: 0 }, transitionCount: { type: 'integer', minimum: 0 },
+              automaticZoom: { type: 'boolean' }, createdAt: dateTimeSchema,
+            },
+          },
+        },
+        media: {
+          type: 'array', maxItems: 1000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'role', 'originalFileName', 'artifactId', 'manifestId', 'mediaType', 'container', 'byteSize', 'sha256', 'status', 'createdAt'],
+            properties: {
+              id: idSchema, role: { enum: ['source-master', 'editing-proxy', 'editorial-proxy', 'final-output'] }, originalFileName: { type: 'string', minLength: 1, maxLength: 255 },
+              artifactId: idSchema, manifestId: idSchema, mediaType: { enum: ['video', 'audio', 'image'] }, container: { type: 'string', minLength: 2, maxLength: 16 },
+              byteSize: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' }, sha256: sha256Schema, status: { enum: ['available', 'quarantined', 'deleted'] }, rightsStatus: { type: 'string' },
+              probe: { type: 'object', additionalProperties: false, required: ['width', 'height', 'duration', 'fps'], properties: { width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 }, duration: { type: 'number', exclusiveMinimum: 0 }, fps: { type: 'number', exclusiveMinimum: 0 } } },
+              createdAt: dateTimeSchema,
+            },
+          },
+        },
+        transcripts: {
+          type: 'array', maxItems: 1000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'sourceArtifactId', 'language', 'provider', 'model', 'transcriptHash', 'text', 'wordCount', 'segmentCount', 'createdAt'],
+            properties: {
+              id: idSchema, sourceArtifactId: idSchema, language: { type: 'string', minLength: 2, maxLength: 35 }, provider: { type: 'string' }, model: { type: 'string' },
+              transcriptHash: sha256Schema, text: { type: 'string' }, wordCount: { type: 'integer', minimum: 0 }, segmentCount: { type: 'integer', minimum: 0 }, createdAt: dateTimeSchema,
+            },
+          },
+        },
+        operationIds: { type: 'array', maxItems: 1000, items: idSchema, uniqueItems: true },
+        operations: { type: 'array', maxItems: 1000, items: publicOperationSchemaV7 },
+      },
+    }),
+  ),
+  defineSchema('project-created', 4, 'Project creation response with visible project and current version states',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['project', 'version', 'replayed'],
+      properties: {
+        project: searchableProjectSchemaV2,
+        version: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'sequence', 'baseHash', 'snapshotRefs', 'createdAt', 'visibleState'],
+          properties: {
+            id: idSchema, sequence: { type: 'integer', minimum: 1 }, baseHash: sha256Schema,
+            snapshotRefs: {
+              type: 'object', additionalProperties: false, required: ['brief', 'editPlan', 'policies'],
+              properties: { brief: idSchema, editPlan: idSchema, policies: idSchema },
+            },
+            createdAt: dateTimeSchema,
+            visibleState: currentProjectVersionVisibleStateSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-duplicated', 2, 'Copy-on-write project duplication with visible project and current version states',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['project', 'version', 'sharedArtifactIds', 'copiedBytes', 'replayed'],
+      properties: {
+        project: {
+          ...searchableProjectSchemaV2,
+          required: [...searchableProjectSchemaV2.required, 'duplicatedFromProjectId'],
+          properties: { ...searchableProjectSchemaV2.properties, duplicatedFromProjectId: idSchema },
+        },
+        version: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'id', 'sequence', 'baseHash', 'forkedFromProjectId', 'forkedFromVersionId',
+            'snapshotRefs', 'createdAt', 'visibleState',
+          ],
+          properties: {
+            id: idSchema, sequence: { const: 1 }, baseHash: sha256Schema,
+            forkedFromProjectId: idSchema, forkedFromVersionId: idSchema,
+            snapshotRefs: {
+              type: 'object', additionalProperties: false, required: ['brief', 'editPlan', 'policies'],
+              properties: { brief: idSchema, treatment: idSchema, story: idSchema, editPlan: idSchema, policies: idSchema },
+            },
+            createdAt: dateTimeSchema,
+            visibleState: currentProjectVersionVisibleStateSchema,
+          },
+        },
+        sharedArtifactIds: { type: 'array', maxItems: 1000, uniqueItems: true, items: idSchema },
+        copiedBytes: { const: 0 },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-workspace', 7, 'Project workspace with visible project, current version and operation states',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations'],
+      properties: {
+        project: searchableProjectSchemaV2,
+        version: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'sequence', 'baseHash', 'createdAt', 'visibleState'],
+          properties: {
+            id: idSchema, sequence: { type: 'integer', minimum: 1 }, baseHash: sha256Schema,
+            createdAt: dateTimeSchema, visibleState: currentProjectVersionVisibleStateSchema,
+          },
         },
         brief: { type: 'object', additionalProperties: true },
         editPlan: {

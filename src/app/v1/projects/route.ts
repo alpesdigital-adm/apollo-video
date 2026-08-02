@@ -17,7 +17,7 @@ import {
   resolveRequestId,
   respondPublicError,
 } from '@/v2/public-api/errors'
-import { presentProjectV2, presentSuccess } from '@/v2/public-api/presenters'
+import { presentProjectV2, presentProjectVersionV2, presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -117,13 +117,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       presentSuccess({
         project: presentProjectV2(result.project),
-        version: {
+        version: presentProjectVersionV2({
           id: result.version.id,
           sequence: result.version.sequence,
           baseHash: result.version.baseHash,
           snapshotRefs: result.version.snapshotRefs,
           createdAt: result.version.createdAt,
-        },
+        }, { current: true, previewAvailable: false }),
         replayed: result.replayed,
       }),
       {

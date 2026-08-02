@@ -6550,6 +6550,40 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-duplicated/v2': [
+      {
+        data: {
+          project: {
+            id: 'project-duplicate-example-1', workspaceId,
+            name: 'AnÃºncio de descoberta â€” variaÃ§Ã£o', status: 'draft',
+            objective: 'discovery', format: '9:16', locale: 'pt-BR', ownerId: clientId,
+            currentVersionId: 'project-version-duplicate-example-1', duplicatedFromProjectId: projectId,
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'draft', tone: 'neutral',
+              progress: { mode: 'not-started', percent: 0 }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          version: {
+            id: 'project-version-duplicate-example-1', sequence: 1, baseHash: 'b'.repeat(64),
+            forkedFromProjectId: projectId, forkedFromVersionId: 'project-version-example-1',
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', editPlan: 'project-snapshot-edit-plan-1',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          sharedArtifactIds: ['artifact-example-source-1'], copiedBytes: 0, replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/run-mvp-core-gate-request/v1': [
       {
         primaryVersionId: mvpCorePrimaryVersionId,
@@ -7418,6 +7452,31 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-workspace/v7': [
+      {
+        data: {
+          project: {
+            id: projectId, workspaceId, name: 'Anuncio de descoberta', status: 'completed',
+            objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'completed', tone: 'success',
+              progress: { mode: 'complete', percent: 100 }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: true,
+            },
+          },
+          version: {
+            id: 'project-version-example-4', sequence: 4, baseHash: 'd'.repeat(64), createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          commands: [], directorRuns: [], media: [], transcripts: [], operationIds: [], operations: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-created/v3': [
       {
         data: {
@@ -7452,6 +7511,37 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
               policies: 'project-snapshot-policies-1',
             },
             createdAt,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-created/v4': [
+      {
+        data: {
+          project: {
+            id: projectId, workspaceId, name: 'AnÃƒÂºncio de descoberta', status: 'draft',
+            objective: 'discovery', format: '9:16', locale: 'pt-BR', ownerId: clientId,
+            currentVersionId: 'project-version-example-1', createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'draft', tone: 'neutral',
+              progress: { mode: 'not-started', percent: 0 }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          version: {
+            id: 'project-version-example-1', sequence: 1, baseHash: 'a'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', editPlan: 'project-snapshot-edit-plan-1',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
           },
           replayed: false,
         },

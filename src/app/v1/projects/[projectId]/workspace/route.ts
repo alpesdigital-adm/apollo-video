@@ -8,7 +8,7 @@ import {
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
-import { presentProjectWorkspaceV6, presentSuccess } from '@/v2/public-api/presenters'
+import { presentProjectWorkspaceV7, presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +26,7 @@ export async function GET(
       operations: createPublicOperationRepository(),
     })({ workspaceId: actor.workspaceId, projectId })
     return NextResponse.json(
-      presentSuccess(presentProjectWorkspaceV6(workspace)),
+      presentSuccess(presentProjectWorkspaceV7(workspace)),
       { headers: publicApiHeaders(requestId) },
     )
   } catch (error) {

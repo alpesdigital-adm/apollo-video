@@ -1790,7 +1790,9 @@ ProjectVersion não recebe lifecycle mutável. `current` é derivado pela iguald
 com `Project.currentVersionId`; todas as demais versões são `superseded`. Na
 revisão, a versão atual abre o resultado, enquanto a histórica só oferece abrir
 preview quando um artifact realmente existe, ou inspecionar histórico quando
-não existe. Outras respostas de versão ainda precisam adotar a projeção.
+não existe. Create v4, duplicate v2 e workspace v7 também expõem a versão
+corrente com essa projeção; respostas de mutations editoriais ainda precisam
+evoluir aditivamente.
 
 ---
 

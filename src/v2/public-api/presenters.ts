@@ -14,6 +14,7 @@ import { presentPublicOperationVisibleState } from '../domain/visible-state.ts'
 import {
   presentCommandArtifactInvalidationVisibleState,
   presentMediaArtifactVisibleState,
+  presentProjectVersionVisibleState,
   presentProjectVisibleState,
 } from '../domain/visible-state.ts'
 import type { Project } from '../domain/project.ts'
@@ -175,7 +176,17 @@ export function presentProjectV2(
   })
 }
 
-export function presentProjectWorkspaceV6(
+export function presentProjectVersionV2<T extends object>(
+  version: T,
+  options: { current: boolean; previewAvailable: boolean },
+) {
+  return Object.freeze({
+    ...version,
+    visibleState: presentProjectVersionVisibleState(options),
+  })
+}
+
+export function presentProjectWorkspaceV7(
   workspace: Readonly<ProjectWorkspaceRecord> & {
     operations: readonly Readonly<PublicOperation>[]
   },
@@ -183,6 +194,14 @@ export function presentProjectWorkspaceV6(
   return Object.freeze({
     ...workspace,
     project: presentProjectV2(workspace.project),
+    ...(workspace.version
+      ? {
+          version: presentProjectVersionV2(workspace.version, {
+            current: workspace.version.id === workspace.project.currentVersionId,
+            previewAvailable: false,
+          }),
+        }
+      : {}),
     operations: Object.freeze(workspace.operations.map(presentPublicOperationV2)),
   })
 }
