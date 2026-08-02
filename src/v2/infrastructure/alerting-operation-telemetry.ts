@@ -1,23 +1,10 @@
 import type {
   OperationTelemetryEvent,
+  OperationTelemetryAlert,
+  OperationAlertSink,
   OperationTelemetrySink,
 } from '../application/ports/operation-telemetry.ts'
 import { DomainError } from '../domain/errors.ts'
-
-export interface OperationTelemetryAlert {
-  schemaVersion: 'public-operation-alert/v1'
-  event: 'operation.alert-triggered'
-  occurredAt: string
-  alertKind: 'operation-failed' | 'queue-wait-high' | 'run-duration-high' | 'span-duration-high' | 'cost-high'
-  severity: 'warning' | 'critical'
-  traceId: string
-  jobId: string
-  workspaceId: string
-  projectId?: string
-  operationType: OperationTelemetryEvent['operationType']
-  observed: number
-  threshold: number
-}
 
 export interface OperationAlertThresholds {
   queueWaitMs: number
@@ -84,21 +71,25 @@ export class AlertingOperationTelemetry implements OperationTelemetrySink {
   private readonly downstream: OperationTelemetrySink
   private readonly thresholds: Readonly<OperationAlertThresholds>
   private readonly writer: AlertWriter
+  private readonly alertSink?: OperationAlertSink
 
   constructor(
     downstream: OperationTelemetrySink,
     thresholds: Readonly<OperationAlertThresholds>,
     writer: AlertWriter = console,
+    alertSink?: OperationAlertSink,
   ) {
     this.downstream = downstream
     this.thresholds = thresholds
     this.writer = writer
+    this.alertSink = alertSink
   }
 
   async emit(event: Readonly<OperationTelemetryEvent>): Promise<void> {
     try { await this.downstream.emit(event) } catch { /* telemetry remains best-effort */ }
     for (const alert of evaluateOperationTelemetryAlerts(event, this.thresholds)) {
       try { this.writer.error(JSON.stringify(alert)) } catch { /* alert delivery cannot change jobs */ }
+      try { await this.alertSink?.emitAlert(alert) } catch { /* durable alert delivery remains best-effort */ }
     }
   }
 }

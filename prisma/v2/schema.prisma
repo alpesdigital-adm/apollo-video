@@ -39,6 +39,8 @@ model V2Workspace {
   materializations                V2MaterializationAuthorization[]
   assetUseDecisions               V2AssetUseDecision[]
   publicOperations                V2PublicOperation[]
+  operationTelemetryEvents       V2OperationTelemetryEvent[]
+  operationTelemetryAlerts       V2OperationTelemetryAlert[]
   renderOperations                V2ArtifactRenderOperation[]
   publicEventOutbox               V2PublicEventOutbox[]
   webhookEndpoints                V2WebhookEndpoint[]
@@ -1581,6 +1583,62 @@ model V2PublicOperation {
   @@index([status, leaseExpiresAt, createdAt])
   @@index([status, nextAttemptAt, createdAt])
   @@map("public_operations")
+}
+
+model V2OperationTelemetryEvent {
+  eventHash       String   @id @db.Char(64)
+  workspaceId     String   @db.VarChar(128)
+  schemaVersion   String   @db.VarChar(64)
+  event            String   @db.VarChar(64)
+  occurredAt       DateTime @db.Timestamptz(3)
+  traceId          String   @db.VarChar(100)
+  jobId            String   @db.VarChar(128)
+  projectId        String?  @db.VarChar(128)
+  operationType    String   @db.VarChar(64)
+  status           String?  @db.VarChar(32)
+  phase            String?  @db.VarChar(64)
+  attempt          Int
+  spanId           String?  @db.VarChar(128)
+  spanKind         String?  @db.VarChar(32)
+  spanName         String?  @db.VarChar(80)
+  queueWaitMs      BigInt?
+  runDurationMs    BigInt?
+  durationMs       BigInt?
+  inputBytes       BigInt?
+  outputBytes      BigInt?
+  inputTokens      BigInt?
+  outputTokens     BigInt?
+  costMinorUnits   BigInt?
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, occurredAt(sort: Desc)])
+  @@index([workspaceId, event, occurredAt(sort: Desc)])
+  @@map("operation_telemetry_events")
+}
+
+model V2OperationTelemetryAlert {
+  alertHash      String   @id @db.Char(64)
+  workspaceId    String   @db.VarChar(128)
+  schemaVersion  String   @db.VarChar(64)
+  occurredAt     DateTime @db.Timestamptz(3)
+  alertKind      String   @db.VarChar(64)
+  severity       String   @db.VarChar(16)
+  traceId        String   @db.VarChar(100)
+  jobId          String   @db.VarChar(128)
+  projectId      String?  @db.VarChar(128)
+  operationType  String   @db.VarChar(64)
+  observed       BigInt
+  threshold      BigInt
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, occurredAt(sort: Desc)])
+  @@index([workspaceId, severity, occurredAt(sort: Desc)])
+  @@index([workspaceId, alertKind, occurredAt(sort: Desc)])
+  @@map("operation_telemetry_alerts")
 }
 
 model V2MediaIngestOperation {

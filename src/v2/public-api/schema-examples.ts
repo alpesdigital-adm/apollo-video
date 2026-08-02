@@ -5463,6 +5463,26 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-list/v7': [
       { data: { operations: [queuedLongFormIndexOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/operation-telemetry-summary/v1': [
+      {
+        data: {
+          from: '2026-07-11T20:00:00.000Z', to: createdAt,
+          events: { total: 12, created: 2, succeeded: 1, failed: 1, canceled: 0, spansSucceeded: 4, spansFailed: 0 },
+          alerts: { total: 2, warning: 1, critical: 1, operationFailed: 1, queueWaitHigh: 0, runDurationHigh: 0, spanDurationHigh: 1, costHigh: 0 },
+          metrics: {
+            queueWaitMs: { sampleCount: 2, total: '2400', maximum: '1800' },
+            runDurationMs: { sampleCount: 2, total: '42000', maximum: '30000' },
+            spanDurationMs: { sampleCount: 4, total: '39000', maximum: '21000' },
+            inputBytes: { sampleCount: 1, total: '1048576', maximum: '1048576' },
+            outputBytes: { sampleCount: 1, total: '524288', maximum: '524288' },
+            inputTokens: { sampleCount: 1, total: '1200', maximum: '1200' },
+            outputTokens: { sampleCount: 1, total: '300', maximum: '300' },
+            costMinorUnits: { sampleCount: 1, total: '75', maximum: '75' },
+          },
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-delivery-list/v1': [
       {
         data: { deliveries: [] },

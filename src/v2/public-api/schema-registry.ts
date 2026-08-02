@@ -13037,6 +13037,32 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('operation-telemetry-summary', 1, 'Bounded durable operation telemetry summary',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['from', 'to', 'events', 'alerts', 'metrics'],
+      properties: {
+        from: dateTimeSchema, to: dateTimeSchema,
+        events: {
+          type: 'object', additionalProperties: false,
+          required: ['total', 'created', 'succeeded', 'failed', 'canceled', 'spansSucceeded', 'spansFailed'],
+          properties: Object.fromEntries(['total', 'created', 'succeeded', 'failed', 'canceled', 'spansSucceeded', 'spansFailed'].map((name) => [name, { type: 'integer', minimum: 0 }])),
+        },
+        alerts: {
+          type: 'object', additionalProperties: false,
+          required: ['total', 'warning', 'critical', 'operationFailed', 'queueWaitHigh', 'runDurationHigh', 'spanDurationHigh', 'costHigh'],
+          properties: Object.fromEntries(['total', 'warning', 'critical', 'operationFailed', 'queueWaitHigh', 'runDurationHigh', 'spanDurationHigh', 'costHigh'].map((name) => [name, { type: 'integer', minimum: 0 }])),
+        },
+        metrics: {
+          type: 'object', additionalProperties: false,
+          required: ['queueWaitMs', 'runDurationMs', 'spanDurationMs', 'inputBytes', 'outputBytes', 'inputTokens', 'outputTokens', 'costMinorUnits'],
+          properties: Object.fromEntries(['queueWaitMs', 'runDurationMs', 'spanDurationMs', 'inputBytes', 'outputBytes', 'inputTokens', 'outputTokens', 'costMinorUnits'].map((name) => [name, {
+            type: 'object', additionalProperties: false, required: ['sampleCount', 'total', 'maximum'],
+            properties: { sampleCount: { type: 'integer', minimum: 0 }, total: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' }, maximum: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' } },
+          }])),
+        },
+      },
+    }),
+  ),
   defineSchema('binary-media-content', 1, 'Binary media content', {
     type: 'string',
     format: 'binary',

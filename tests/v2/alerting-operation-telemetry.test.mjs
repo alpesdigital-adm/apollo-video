@@ -36,10 +36,12 @@ test('configured thresholds fail closed and alert delivery cannot alter telemetr
   assert.throws(() => operationAlertThresholdsFromEnvironment({ APOLLO_V2_ALERT_COST_MINOR_UNITS: '0' }), /invalid/)
   const forwarded = []
   const alerts = []
+  const durableAlerts = []
   const telemetry = new AlertingOperationTelemetry(
     { emit(event) { forwarded.push(event) } },
     { queueWaitMs: 1, runDurationMs: 1, spanDurationMs: 1, costMinorUnits: 1 },
     { error(message) { alerts.push(JSON.parse(message)) } },
+    { emitAlert(alert) { durableAlerts.push(alert) } },
   )
   const event = {
     ...common, schemaVersion: 'public-operation-span-telemetry/v1', event: 'operation.span-succeeded',
@@ -49,9 +51,11 @@ test('configured thresholds fail closed and alert delivery cannot alter telemetr
   await telemetry.emit(event)
   assert.equal(forwarded[0], event)
   assert.equal(alerts[0].alertKind, 'span-duration-high')
+  assert.equal(durableAlerts[0].alertKind, 'span-duration-high')
   await new AlertingOperationTelemetry(
     { emit() { throw new Error('collector down') } },
     { queueWaitMs: 1, runDurationMs: 1, spanDurationMs: 1, costMinorUnits: 1 },
     { error() { throw new Error('alert sink down') } },
+    { emitAlert() { throw new Error('durable alert sink down') } },
   ).emit(event)
 })

@@ -218,12 +218,14 @@ import { PrismaProxyReviewRepository } from './prisma/proxy-review-repository.ts
 import { PrismaProjectFinalExportRepository } from './prisma/project-final-export-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
-import { StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
+import { CompositeOperationTelemetry, StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
 import {
   AlertingOperationTelemetry,
   operationAlertThresholdsFromEnvironment,
 } from './alerting-operation-telemetry.ts'
 import type { OperationTelemetrySink } from '../application/ports/operation-telemetry.ts'
+import type { OperationTelemetryQueryRepository } from '../application/ports/operation-telemetry-query-repository.ts'
+import { PrismaOperationTelemetryRepository } from './prisma/operation-telemetry-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
 import { PrismaWebhookFanoutRepository } from './prisma/webhook-fanout-repository.ts'
@@ -774,10 +776,17 @@ export function createPublicOperationRepository(
 }
 
 function createConfiguredOperationTelemetry(environment: NodeJS.ProcessEnv = process.env): OperationTelemetrySink {
+  const persistent = new PrismaOperationTelemetryRepository(resolveV2Client())
   return new AlertingOperationTelemetry(
-    new StructuredConsoleOperationTelemetry(),
+    new CompositeOperationTelemetry([new StructuredConsoleOperationTelemetry(), persistent]),
     operationAlertThresholdsFromEnvironment(environment),
+    console,
+    persistent,
   )
+}
+
+export function createOperationTelemetryQueryRepository(): OperationTelemetryQueryRepository {
+  return new PrismaOperationTelemetryRepository(resolveV2Client())
 }
 
 export function createWebhookRegistrationRepository(): WebhookRegistrationRepository {

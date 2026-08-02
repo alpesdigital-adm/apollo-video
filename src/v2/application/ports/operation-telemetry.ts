@@ -87,6 +87,25 @@ export type OperationTelemetryEvent =
   | PublicOperationTelemetryEvent
   | PublicOperationSpanTelemetryEvent
 
+export interface OperationTelemetryAlert {
+  schemaVersion: 'public-operation-alert/v1'
+  event: 'operation.alert-triggered'
+  occurredAt: string
+  alertKind: 'operation-failed' | 'queue-wait-high' | 'run-duration-high' | 'span-duration-high' | 'cost-high'
+  severity: 'warning' | 'critical'
+  traceId: string
+  jobId: string
+  workspaceId: string
+  projectId?: string
+  operationType: OperationTelemetryEvent['operationType']
+  observed: number
+  threshold: number
+}
+
 export interface OperationTelemetrySink {
   emit(event: Readonly<OperationTelemetryEvent>): void | Promise<void>
+}
+
+export interface OperationAlertSink {
+  emitAlert(alert: Readonly<OperationTelemetryAlert>): void | Promise<void>
 }

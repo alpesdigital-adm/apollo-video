@@ -34,3 +34,15 @@ export class StructuredConsoleOperationTelemetry implements OperationTelemetrySi
     }
   }
 }
+
+export class CompositeOperationTelemetry implements OperationTelemetrySink {
+  private readonly sinks: readonly OperationTelemetrySink[]
+
+  constructor(sinks: readonly OperationTelemetrySink[]) { this.sinks = sinks }
+
+  async emit(event: Readonly<OperationTelemetryEvent>): Promise<void> {
+    await Promise.all(this.sinks.map(async (sink) => {
+      try { await sink.emit(event) } catch { /* one sink cannot disable the others */ }
+    }))
+  }
+}
