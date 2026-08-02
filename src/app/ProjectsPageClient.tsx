@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
 import LogoutButton from '@/components/LogoutButton'
+import AppShellNavigation from '@/components/AppShellNavigation'
 import {
   STRATEGIC_OBJECTIVES,
   type StrategicObjectiveId,
@@ -268,27 +269,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <nav aria-label="Navegação principal" className="mt-10 space-y-1">
-            <Link className="flex items-center gap-3 rounded-xl border border-[#e0af37]/20 bg-[#e0af37]/10 px-3 py-2.5 text-sm font-medium text-[#f0c65c]" href="/">
-              <ApiIcon path="M4 5.5A1.5 1.5 0 0 1 5.5 4h5A1.5 1.5 0 0 1 12 5.5v5a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 4 10.5v-5Zm8 8A1.5 1.5 0 0 1 13.5 12h5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-5Zm2-8.5h5m-2.5-2.5V7.5M4 16h5" />
-              Projetos
-            </Link>
-            <Link className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#8e8a82] transition hover:bg-white/[0.035] hover:text-white" href="/batches">
-              <ApiIcon path="M5 4h14v4H5V4Zm0 6h14v4H5v-4Zm0 6h14v4H5v-4Zm3-10h8m-8 6h5m-5 6h7" />
-              Lotes
-              <span className="ml-auto rounded-md bg-[#e0af37]/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wider text-[#c49b39]">V2</span>
-            </Link>
-            <div className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#696762]" title="A biblioteca V2 será conectada em uma etapa posterior">
-              <ApiIcon path="M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-11ZM8 5V3m8 2V3M4 9h16" />
-              Biblioteca
-              <span className="ml-auto text-[9px] uppercase tracking-wider">em breve</span>
-            </div>
-            <div className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#696762]" title="As configurações V2 do workspace ainda não estão conectadas">
-              <ApiIcon path="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7-3.5 2-1-2-3-2.2.2L15.5 6 16 4h-4l-1 2-2.5.2L7 4 4 6l.8 2.2L3 10v4l2 1 .5 2.5L4 19l3 2 1.5-2.2L11 19l1 2h4l-.5-2.5 1.7-1.7L20 17l1-3-2-2Z" />
-              Workspace
-              <span className="ml-auto text-[9px] uppercase tracking-wider">em breve</span>
-            </div>
-          </nav>
+          <AppShellNavigation active="projects" />
 
           <div className="mt-auto rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3.5">
             <div className="flex items-center gap-2 text-[11px] font-medium text-[#a5a198]">

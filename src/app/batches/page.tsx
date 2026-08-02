@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
 import LogoutButton from '@/components/LogoutButton'
+import AppShellNavigation from '@/components/AppShellNavigation'
 import type { VisibleState, VisibleStateLabel } from '@/v2/domain/visible-state'
 
 type BatchStatus =
@@ -3304,22 +3305,7 @@ export default function BatchesPage() {
               <p className="mt-0.5 text-[9px] uppercase tracking-[0.18em] text-[#66635c]">AI video director</p>
             </div>
           </Link>
-          <nav aria-label="Navegação principal" className="mt-10 space-y-1">
-            <Link className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#8e8a82] transition hover:bg-white/[0.035] hover:text-white" href="/">
-              <Icon path="M4 5.5A1.5 1.5 0 0 1 5.5 4h5A1.5 1.5 0 0 1 12 5.5v5a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 4 10.5v-5Zm8 8A1.5 1.5 0 0 1 13.5 12h5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-5Z" />
-              Projetos
-            </Link>
-            <Link className="flex items-center gap-3 rounded-xl border border-[#e0af37]/20 bg-[#e0af37]/10 px-3 py-2.5 text-sm font-medium text-[#f0c65c]" href="/batches">
-              <Icon path="M5 4h14v4H5V4Zm0 6h14v4H5v-4Zm0 6h14v4H5v-4Zm3-10h8m-8 6h5m-5 6h7" />
-              Lotes
-              <span className="ml-auto rounded-md bg-[#e0af37]/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wider">V2</span>
-            </Link>
-            <div className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#5f5c56]">
-              <Icon path="M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-11ZM8 5V3m8 2V3M4 9h16" />
-              Biblioteca
-              <span className="ml-auto text-[8px] uppercase tracking-wider">em breve</span>
-            </div>
-          </nav>
+          <AppShellNavigation active="batches" />
           <div className="mt-auto rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3.5">
             <div className="flex items-center gap-2 text-[11px] font-medium text-[#a5a198]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#4fb97a] shadow-[0_0_8px_rgba(79,185,122,.7)]" />

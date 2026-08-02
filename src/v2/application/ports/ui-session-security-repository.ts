@@ -1,4 +1,5 @@
 import type { ApolloUiSession } from '../../domain/ui-session.ts'
+import type { ApiEnvironment } from '../../domain/api-client.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 export type UiLoginAttemptOutcome = 'succeeded' | 'invalid' | 'configuration-error'
@@ -28,6 +29,18 @@ export interface UiSessionSecurityRepository {
   }>): Promise<Readonly<DurableUiSessionRecord>>
   readActiveAndTouch(input: Readonly<{ nonceHash: string; now: string; idleTtlSeconds: number }>): Promise<Readonly<DurableUiSessionRecord> | null>
   revokeSession(input: Readonly<{ nonceHash: string; revokedAt: string }>): Promise<void>
+  rotateSession(input: Readonly<{
+    currentNonceHash: string
+    session: ApolloUiSession
+    nonceHash: string
+    subjectHash: string
+    workspaceId: string
+    clientId: string
+    memberId: string
+    environment: ApiEnvironment
+    idleTtlSeconds: number
+    now: string
+  }>): Promise<Readonly<DurableUiSessionRecord>>
   reserveLoginAttempt(input: Readonly<{
     attemptId: string
     keyHash: string

@@ -10,7 +10,11 @@ import {
   settleUiLoginAttemptService,
 } from '@/v2/application/manage-ui-session-security'
 import { DomainError } from '@/v2/domain/errors'
-import { provisionBootstrapWorkspaceMemberService } from '@/v2/application/workspace-members'
+import {
+  listSelectableWorkspacesService,
+  provisionBootstrapWorkspaceMemberService,
+  provisionBootstrapWorkspaceUiPrincipalService,
+} from '@/v2/application/workspace-members'
 import { createApiClientRepository, createUiSessionSecurityRepository, createWorkspaceMemberRepository } from '@/v2/infrastructure/repository-factory'
 import {
   APOLLO_SESSION_COOKIE,
@@ -92,14 +96,22 @@ export async function GET(request: NextRequest) {
       { retryable: true, category: 'internal' },
     )
   }
-  return NextResponse.json(
-    presentSuccess({
-      subject: session.subject,
-      workspaceId: actor.workspaceId,
-      expiresAt: actor.sessionExpiresAt,
-    }),
-    { headers: publicApiHeaders(requestId) },
-  )
+  try {
+    const workspaces = await listSelectableWorkspacesService({ members: createWorkspaceMemberRepository() })(actor.delegatedUserId!)
+    return NextResponse.json(
+      presentSuccess({
+        subject: session.subject,
+        workspaceId: actor.workspaceId,
+        memberId: actor.delegatedUserId,
+        role: actor.workspaceRole,
+        expiresAt: actor.sessionExpiresAt,
+        workspaces: workspaces.map(({ uiClientId: _uiClientId, ...workspace }) => workspace),
+      }),
+      { headers: publicApiHeaders(requestId) },
+    )
+  } catch {
+    return sessionError(requestId, 503, 'AUTH_UNAVAILABLE', 'Não foi possível listar os workspaces agora.', { retryable: true, category: 'internal' })
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -212,6 +224,7 @@ export async function POST(request: NextRequest) {
   const subject = configuredUiUsername()
   let member
   try {
+    await provisionBootstrapWorkspaceUiPrincipalService({ members: createWorkspaceMemberRepository() })({ workspaceId, clientId })
     member = await provisionBootstrapWorkspaceMemberService({
       members: createWorkspaceMemberRepository(), id: randomUUID,
     })({

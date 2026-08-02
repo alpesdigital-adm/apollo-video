@@ -1,4 +1,4 @@
-import type { WorkspaceMember, WorkspaceMemberRole } from '../../domain/workspace-member.ts'
+import type { SelectableWorkspaceMembership, WorkspaceMember, WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 export interface WorkspaceMemberRepository {
   provisionBootstrapMembership(input: Readonly<{
@@ -14,4 +14,16 @@ export interface WorkspaceMemberRepository {
     memberId: string
     workspaceId: string
   }>): Promise<Readonly<WorkspaceMember> | null>
+  provisionBootstrapUiPrincipal(input: Readonly<{
+    workspaceId: string
+    clientId: string
+    now: string
+  }>): Promise<void>
+  listSelectableForMember(input: Readonly<{
+    memberId: string
+  }>): Promise<readonly Readonly<SelectableWorkspaceMembership>[]>
+  resolveSelectableForMember(input: Readonly<{
+    memberId: string
+    workspaceId: string
+  }>): Promise<Readonly<SelectableWorkspaceMembership> | null>
 }

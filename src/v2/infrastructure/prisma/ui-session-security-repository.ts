@@ -65,6 +65,67 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
     })
   }
 
+  async rotateSession(input: Parameters<UiSessionSecurityRepository['rotateSession']>[0], retry = 0): Promise<Readonly<DurableUiSessionRecord>> {
+    const now = new Date(input.now)
+    const issuedAt = new Date(input.session.issuedAt * 1000)
+    const expiresAt = new Date(input.session.expiresAt * 1000)
+    const idleExpiresAt = new Date(Math.min(expiresAt.getTime(), issuedAt.getTime() + input.idleTtlSeconds * 1000))
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const current = await transaction.v2UiSession.findUnique({
+          where: { nonceHash: input.currentNonceHash },
+          include: { member: { include: { identity: true } } },
+        })
+        if (
+          !current || current.revokedAt || current.expiresAt <= now || current.idleExpiresAt <= now ||
+          current.subjectHash !== input.subjectHash || current.member.status !== 'active' || current.member.identity.status !== 'active'
+        ) throw new DomainError('AUTH_INVALID', 'Current UI session is not active')
+
+        const target = await transaction.v2WorkspaceMember.findFirst({
+          where: {
+            id: input.memberId,
+            workspaceId: input.workspaceId,
+            identityId: current.member.identityId,
+            status: 'active',
+            identity: { status: 'active' },
+            workspace: {
+              status: 'active',
+              uiPrincipal: { is: { clientId: input.clientId, client: { status: 'active', environment: input.environment } } },
+            },
+          },
+        })
+        if (!target || input.session.clientId !== input.clientId) {
+          throw new DomainError('AUTH_INVALID', 'Target workspace is not authorized')
+        }
+
+        const revoked = await transaction.v2UiSession.updateMany({
+          where: { nonceHash: input.currentNonceHash, revokedAt: null },
+          data: { revokedAt: now },
+        })
+        if (revoked.count !== 1) throw new DomainError('PERSISTENCE_CONFLICT', 'Current UI session changed during rotation')
+        const created = await transaction.v2UiSession.create({
+          data: {
+            nonceHash: input.nonceHash,
+            workspaceId: input.workspaceId,
+            clientId: input.clientId,
+            memberId: input.memberId,
+            subjectHash: input.subjectHash,
+            issuedAt,
+            lastSeenAt: issuedAt,
+            idleExpiresAt,
+            expiresAt,
+          },
+          include: { member: true },
+        })
+        return hydrate(created, created.member.role)
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if ((prismaCode(error, 'P2034') || prismaCode(error, 'P2002')) && retry < 3) return this.rotateSession(input, retry + 1)
+      if (prismaCode(error, 'P2034') || prismaCode(error, 'P2002')) throw new DomainError('PERSISTENCE_CONFLICT', 'UI session could not be rotated')
+      throw error
+    }
+  }
+
   async reserveLoginAttempt(input: Parameters<UiSessionSecurityRepository['reserveLoginAttempt']>[0], retry = 0): Promise<Readonly<{ allowed: boolean; attemptId?: string; retryAfterSeconds?: number }>> {
     const occurredAt = new Date(input.occurredAt)
     try {

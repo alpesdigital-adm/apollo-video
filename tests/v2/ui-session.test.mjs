@@ -39,6 +39,12 @@ test('UI password and signed session authenticate without storing plaintext', ()
   })
   assert.equal(session?.subject, 'leandro')
   assert.equal(session?.clientId, 'apollo-ui-client')
+  const switchedToken = issueUiSession('leandro', 'another-workspace-ui-client', {
+    environment,
+    now: new Date('2026-07-18T12:00:00Z'),
+    nonce: 'switched-session-nonce',
+  })
+  assert.equal(verifyUiSession(switchedToken, { environment, now: new Date('2026-07-18T13:00:00Z') })?.clientId, 'another-workspace-ui-client')
   assert.equal(verifyUiSession(`${token}x`, { environment, now: new Date('2026-07-18T13:00:00Z') }), null)
   assert.equal(verifyUiSession(token, { environment, now: new Date('2026-07-19T02:00:00Z') }), null)
 })

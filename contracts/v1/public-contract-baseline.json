@@ -5323,12 +5323,12 @@
       "responseMediaType": "application/json"
     },
     "apollo.sessions.read": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [],
-      "outputSchemaRef": "apollo://schemas/ui-session-status/v1",
+      "outputSchemaRef": "apollo://schemas/ui-session-status/v2",
       "endpoint": {
         "method": "GET",
         "path": "/v1/session"
@@ -5340,6 +5340,28 @@
         200
       ],
       "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.sessions.switch-workspace": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [],
+      "inputSchemaRef": "apollo://schemas/ui-workspace-switch-request/v1",
+      "outputSchemaRef": "apollo://schemas/ui-workspace-switched/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/session/workspace"
+      },
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
     "apollo.tools.list": {
@@ -120794,6 +120816,233 @@
             "expiresAt": {
               "type": "string",
               "format": "date-time"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/ui-session-status/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subject",
+            "workspaceId",
+            "memberId",
+            "role",
+            "expiresAt",
+            "workspaces"
+          ],
+          "properties": {
+            "subject": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 80
+            },
+            "workspaceId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "memberId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "role": {
+              "enum": [
+                "administrator",
+                "director",
+                "operator",
+                "reviewer"
+              ]
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "workspaces": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "memberId",
+                  "workspaceId",
+                  "workspaceSlug",
+                  "workspaceName",
+                  "role"
+                ],
+                "properties": {
+                  "memberId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceSlug": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 63,
+                    "pattern": "^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$"
+                  },
+                  "workspaceName": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  },
+                  "role": {
+                    "enum": [
+                      "administrator",
+                      "director",
+                      "operator",
+                      "reviewer"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/ui-workspace-switch-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        }
+      }
+    },
+    "apollo://schemas/ui-workspace-switched/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "workspaceId",
+            "memberId",
+            "role",
+            "expiresAt",
+            "workspaces",
+            "rotated"
+          ],
+          "properties": {
+            "workspaceId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "memberId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "role": {
+              "enum": [
+                "administrator",
+                "director",
+                "operator",
+                "reviewer"
+              ]
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "rotated": {
+              "type": "boolean"
+            },
+            "workspaces": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "memberId",
+                  "workspaceId",
+                  "workspaceSlug",
+                  "workspaceName",
+                  "role"
+                ],
+                "properties": {
+                  "memberId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceSlug": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 63
+                  },
+                  "workspaceName": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  },
+                  "role": {
+                    "enum": [
+                      "administrator",
+                      "director",
+                      "operator",
+                      "reviewer"
+                    ]
+                  }
+                }
+              }
             }
           }
         },

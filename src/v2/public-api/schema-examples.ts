@@ -5316,6 +5316,36 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v6': [
       { data: { operation: queuedLongFormIndexOperationExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/ui-session-status/v2': [
+      {
+        data: {
+          subject: 'apollo-operator', workspaceId,
+          memberId: '11111111-1111-4111-8111-111111111111', role: 'administrator',
+          expiresAt: '2026-07-13T08:00:00.000Z',
+          workspaces: [{
+            memberId: '11111111-1111-4111-8111-111111111111', workspaceId,
+            workspaceSlug: 'apollo-main', workspaceName: 'Apollo Main', role: 'administrator',
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/ui-workspace-switch-request/v1': [
+      { workspaceId: 'workspace-secondary' },
+    ],
+    'apollo://schemas/ui-workspace-switched/v1': [
+      {
+        data: {
+          workspaceId: 'workspace-secondary', memberId: '22222222-2222-4222-8222-222222222222',
+          role: 'director', expiresAt: '2026-07-13T08:00:00.000Z', rotated: true,
+          workspaces: [{
+            memberId: '22222222-2222-4222-8222-222222222222', workspaceId: 'workspace-secondary',
+            workspaceSlug: 'apollo-secondary', workspaceName: 'Apollo Secondary', role: 'director',
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/artifact-detail/v3': [
       {
         data: {

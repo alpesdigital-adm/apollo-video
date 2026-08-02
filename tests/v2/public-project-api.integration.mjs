@@ -94,6 +94,7 @@ test('authenticated public API manages projects, clients and artifact inspection
   const {
     APOLLO_SESSION_COOKIE,
     createUiPasswordHash,
+    issueUiSession,
     uiLoginThrottleKey,
     uiSessionNonceHash,
     uiSessionSubjectHash,
@@ -110,6 +111,8 @@ test('authenticated public API manages projects, clients and artifact inspection
   const otherWorkspaceId = 'public-api-other-workspace-v2'
   const workspaceIds = [workspaceId, otherWorkspaceId]
   const apiClientId = 'public-api-client-v2'
+  const otherApiClientId = 'public-api-other-ui-client-v2'
+  const otherMemberId = '00000000-0000-4000-8000-000000000919'
   const uiUsername = 'apollo-e2e'
   const uiPassword = 'apollo-e2e-password'
   const uiPasswordHash = createUiPasswordHash(uiPassword, 'public-api-test-salt')
@@ -222,8 +225,10 @@ test('authenticated public API manages projects, clients and artifact inspection
       where: { workspaceId: { in: workspaceIds } },
     })
     await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2ApiCredential.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2ApiClient.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2HumanIdentity.deleteMany({ where: { issuer: 'urn:apollo:bootstrap', subjectHash: uiSessionSubjectHash(uiUsername, uiEnvironment) } })
     await client.v2Workspace.deleteMany({ where: { id: { in: workspaceIds } } })
   }
@@ -425,6 +430,23 @@ test('authenticated public API manages projects, clients and artifact inspection
       manifest: sourceManifest,
       createdAt: '2026-07-12T16:02:00.000Z',
     })
+    await createApiClientService({
+      repository: new PrismaApiClientRepository(client),
+      credentialCrypto: nodeApiCredentialCrypto,
+      clock: () => new Date('2026-07-12T16:01:01.000Z'),
+    })({
+      id: otherApiClientId,
+      workspaceId: otherWorkspaceId,
+      name: 'Other Workspace UI Client',
+      environment: apiEnvironment,
+      scopes: ['artifacts:read', 'projects:read', 'projects:write'],
+    })
+    await client.v2WorkspaceUiPrincipal.create({ data: {
+      workspaceId: otherWorkspaceId,
+      clientId: otherApiClientId,
+      createdAt: new Date('2026-07-12T16:01:02.000Z'),
+      updatedAt: new Date('2026-07-12T16:01:02.000Z'),
+    } })
     const sourceColorProbe = createMediaColorProbe({
       id: 'public-api-source-color-probe-v2',
       workspaceId,
@@ -620,7 +642,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.match(uiLoginPayload.data.expiresAt, /^\d{4}-\d{2}-\d{2}T/)
     assert.equal(uiLoginResponse.headers.get('apollo-api-version'), 'v1')
     assert.ok(uiLoginResponse.headers.get('apollo-request-id'))
-    const uiSession = uiLoginResponse.headers
+    let uiSession = uiLoginResponse.headers
       .get('set-cookie')
       ?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
     assert.ok(uiSession)
@@ -653,13 +675,28 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.ok(persistedMember)
     assert.equal(persistedMember.role, 'administrator')
     assert.equal(persistedMember.identity.subjectHash, uiSessionSubjectHash(uiUsername, uiEnvironment))
+    await client.v2WorkspaceMember.create({ data: {
+      id: otherMemberId,
+      workspaceId: otherWorkspaceId,
+      identityId: persistedMember.identityId,
+      role: 'director',
+      status: 'active',
+      createdAt: new Date('2026-07-12T16:05:00.000Z'),
+      updatedAt: new Date('2026-07-12T16:05:00.000Z'),
+    } })
     assert.equal(await client.v2UiSession.count({ where: { workspaceId, memberId: persistedMember.id } }), 2)
-    for (const pathname of ['/', '/batches', '/projects/session-route-proof']) {
+    for (const pathname of ['/', '/batches', '/projects/session-route-proof', '/library', '/presenters', '/brand', '/workspace-settings']) {
       const protectedPageResponse = await fetch(`${baseUrl}${pathname}`, {
         headers: { cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}` },
         redirect: 'manual',
       })
       assert.equal(protectedPageResponse.status, 200, `durable session must authorize ${pathname}`)
+      if (['/library', '/presenters', '/brand', '/workspace-settings'].includes(pathname)) {
+        const html = await protectedPageResponse.text()
+        for (const label of ['Projetos', 'Lotes', 'Biblioteca', 'Apresentadores', 'Marca', 'Configurações']) {
+          assert.equal(html.includes(label), true, `${pathname} shell must expose ${label}`)
+        }
+      }
     }
     const activeLoginPageResponse = await fetch(`${baseUrl}/login?next=/batches`, {
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}` },
@@ -673,10 +710,52 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(uiSessionResponse.status, 200)
     assert.equal(uiSessionPayload.data.subject, uiUsername)
     assert.equal(uiSessionPayload.data.workspaceId, workspaceId)
+    assert.equal(uiSessionPayload.data.memberId, persistedMember.id)
+    assert.equal(uiSessionPayload.data.role, 'administrator')
+    assert.deepEqual(uiSessionPayload.data.workspaces.map((workspace) => workspace.workspaceId).sort(), [otherWorkspaceId, workspaceId].sort())
+    assert.equal(JSON.stringify(uiSessionPayload).includes(otherApiClientId), false)
     const uiProjectListResponse = await fetch(`${baseUrl}/v1/projects`, {
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
     })
     assert.equal(uiProjectListResponse.status, 200)
+    const initialSession = uiSession
+    const initialDecodedSession = verifyUiSession(initialSession, { environment: uiEnvironment })
+    assert.ok(initialDecodedSession)
+    assert.equal((await fetch(`${baseUrl}/v1/session/workspace`, {
+      method: 'POST',
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}`, 'content-type': 'application/json', origin: 'https://attacker.example' },
+      body: JSON.stringify({ workspaceId: otherWorkspaceId }),
+    })).status, 403, 'cross-origin workspace switch must fail closed')
+    await client.v2WorkspaceMember.update({ where: { id: otherMemberId }, data: { status: 'suspended' } })
+    assert.equal((await fetch(`${baseUrl}/v1/session/workspace`, {
+      method: 'POST',
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}`, 'content-type': 'application/json', origin: baseUrl, 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ workspaceId: otherWorkspaceId }),
+    })).status, 403, 'suspended target membership must be denied')
+    await client.v2WorkspaceMember.update({ where: { id: otherMemberId }, data: { status: 'active' } })
+    const switchResponse = await fetch(`${baseUrl}/v1/session/workspace`, {
+      method: 'POST',
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}`, 'content-type': 'application/json', origin: baseUrl, 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ workspaceId: otherWorkspaceId }),
+    })
+    const switchPayload = await switchResponse.json()
+    assert.equal(switchResponse.status, 200, JSON.stringify(switchPayload))
+    assert.equal(switchPayload.data.workspaceId, otherWorkspaceId)
+    assert.equal(switchPayload.data.memberId, otherMemberId)
+    assert.equal(switchPayload.data.role, 'director')
+    assert.equal(switchPayload.data.rotated, true)
+    uiSession = switchResponse.headers.get('set-cookie')?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
+    assert.ok(uiSession)
+    assert.equal((await fetch(`${baseUrl}/v1/session`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${initialSession}` } })).status, 401)
+    assert.equal((await client.v2UiSession.findUnique({ where: { nonceHash: uiSessionNonceHash(initialDecodedSession.nonce) } }))?.revokedAt instanceof Date, true)
+    const targetSessionPayload = await (await fetch(`${baseUrl}/v1/session`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` } })).json()
+    assert.equal(targetSessionPayload.data.workspaceId, otherWorkspaceId)
+    assert.equal((await fetch(`${baseUrl}/v1/artifacts/${otherArtifactId}`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` } })).status, 200)
+    assert.equal((await fetch(`${baseUrl}/v1/artifacts/${sourceArtifactId}`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` } })).status, 404)
+    const expiredToken = issueUiSession(uiUsername, otherApiClientId, {
+      now: new Date('2026-07-12T16:00:00.000Z'), maxAgeSeconds: 60, environment: uiEnvironment,
+    })
+    assert.equal((await fetch(`${baseUrl}/v1/session`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${expiredToken}` } })).status, 401)
     const uiLogoutResponse = await fetch(`${baseUrl}/v1/session`, {
       method: 'DELETE',
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },

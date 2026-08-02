@@ -110,6 +110,7 @@ export function issueUiSession(
   options: {
     now?: Date
     maxAgeSeconds?: number
+    expiresAt?: number
     environment?: NodeJS.ProcessEnv
     nonce?: string
   } = {},
@@ -121,12 +122,16 @@ export function issueUiSession(
     throw new DomainError('INVALID_ARGUMENT', 'UI session duration is invalid')
   }
   const issuedAt = Math.floor(now.getTime() / 1000)
+  const expiresAt = options.expiresAt ?? issuedAt + maxAgeSeconds
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= issuedAt || expiresAt - issuedAt > 24 * 60 * 60) {
+    throw new DomainError('INVALID_ARGUMENT', 'UI session expiry is invalid')
+  }
   const payload: ApolloUiSession = {
     version: 1,
     subject,
     clientId,
     issuedAt,
-    expiresAt: issuedAt + maxAgeSeconds,
+    expiresAt,
     nonce: options.nonce ?? randomBytes(16).toString('base64url'),
   }
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url')
@@ -148,7 +153,8 @@ export function verifyUiSession(
     if (
       payload.version !== 1 ||
       payload.subject !== configuredUiUsername(environment) ||
-      payload.clientId !== configuredUiApiClientId(environment) ||
+      typeof payload.clientId !== 'string' ||
+      !/^[A-Za-z0-9_-]{3,80}$/.test(payload.clientId) ||
       !Number.isSafeInteger(payload.issuedAt) ||
       !Number.isSafeInteger(payload.expiresAt) ||
       typeof payload.nonce !== 'string' ||

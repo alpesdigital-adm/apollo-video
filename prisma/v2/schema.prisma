@@ -43,6 +43,7 @@ model V2Workspace {
   operationTelemetryAlerts       V2OperationTelemetryAlert[]
   uiSessions                     V2UiSession[]
   workspaceMembers               V2WorkspaceMember[]
+  uiPrincipal                    V2WorkspaceUiPrincipal?
   renderOperations                V2ArtifactRenderOperation[]
   publicEventOutbox               V2PublicEventOutbox[]
   webhookEndpoints                V2WebhookEndpoint[]
@@ -162,6 +163,7 @@ model V2ApiClient {
   credentials                     V2ApiCredential[]
   operations                      V2PublicOperation[]
   uiSessions                      V2UiSession[]
+  workspaceUiPrincipal            V2WorkspaceUiPrincipal?
   mediaUploads                    V2MediaUpload[]
   mediaDownloadGrants             V2MediaDownloadGrant[]
   createdWebhookEndpoints         V2WebhookEndpoint[]              @relation("WebhookEndpointCreator")
@@ -1699,6 +1701,19 @@ model V2WorkspaceMember {
   @@unique([id, workspaceId])
   @@index([workspaceId, status, role])
   @@map("workspace_members")
+}
+
+model V2WorkspaceUiPrincipal {
+  workspaceId String   @id @db.VarChar(128)
+  clientId    String   @unique @db.VarChar(80)
+  createdAt   DateTime @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client    V2ApiClient @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([clientId, workspaceId])
+  @@map("workspace_ui_principals")
 }
 
 model V2UiLoginThrottle {

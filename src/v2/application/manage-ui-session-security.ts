@@ -25,6 +25,18 @@ export function revokeDurableUiSessionService(dependencies: { sessions: UiSessio
   }
 }
 
+export function rotateDurableUiSessionService(dependencies: { sessions: UiSessionSecurityRepository; now?: () => Date }) {
+  return async function rotate(input: Omit<Parameters<UiSessionSecurityRepository['rotateSession']>[0], 'idleTtlSeconds' | 'now'>) {
+    assertDomain(HASH.test(input.currentNonceHash) && HASH.test(input.nonceHash) && HASH.test(input.subjectHash), 'INVALID_ARGUMENT', 'Session hashes are invalid')
+    assertDomain(input.currentNonceHash !== input.nonceHash, 'INVALID_ARGUMENT', 'Session rotation requires a fresh nonce')
+    return dependencies.sessions.rotateSession({
+      ...input,
+      idleTtlSeconds: UI_SESSION_IDLE_TTL_SECONDS,
+      now: (dependencies.now?.() ?? new Date()).toISOString(),
+    })
+  }
+}
+
 export function reserveUiLoginAttemptService(dependencies: {
   sessions: UiSessionSecurityRepository
   id: () => string

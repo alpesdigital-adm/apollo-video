@@ -278,6 +278,7 @@ const coverage = Object.freeze({
   },
   'apollo.sessions.login': { mode: 'state-machine-action', evidence: 'credential verification creates a bounded server-signed session' },
   'apollo.sessions.logout': { mode: 'state-machine-action', evidence: 'session revocation is naturally idempotent' },
+  'apollo.sessions.switch-workspace': { mode: 'state-machine-action', evidence: 'current session nonce and target membership are revalidated atomically' },
 })
 
 const externalMutations = FOUNDATION_CAPABILITIES.filter(
@@ -494,7 +495,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
     'idempotent-create': 48,
-    'state-machine-action': 13,
+    'state-machine-action': 14,
     'single-flight-action': 1,
     'revision-bound-action': 7,
     'base-version-bound-action': 4,

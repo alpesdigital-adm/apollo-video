@@ -12,30 +12,42 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
   const second = new PrismaUiSessionSecurityRepository(client)
   const members = new PrismaWorkspaceMemberRepository(client)
   const workspaceId = 'ui-session-security-workspace'
+  const otherWorkspaceId = 'ui-session-security-other'
   const clientId = 'ui-session-security-client'
+  const otherClientId = 'ui-session-security-other-client'
   const nonceHash = 'a'.repeat(64)
   const subjectHash = 'b'.repeat(64)
   const keyHash = 'c'.repeat(64)
   const resetKeyHash = 'd'.repeat(64)
   const identityId = '00000000-0000-4000-8000-000000000981'
   const memberId = '00000000-0000-4000-8000-000000000982'
+  const otherMemberId = '00000000-0000-4000-8000-000000000983'
+  const workspaceIds = [workspaceId, otherWorkspaceId]
   const cleanup = async () => {
-    await client.v2UiSession.deleteMany({ where: { workspaceId } })
+    await client.v2UiSession.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2UiLoginAttempt.deleteMany({ where: { keyHash: { in: [keyHash, resetKeyHash] } } })
     await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: { in: [keyHash, resetKeyHash] } } })
-    await client.v2ApiCredential.deleteMany({ where: { workspaceId } })
-    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
-    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId } })
+    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2ApiCredential.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2ApiClient.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2HumanIdentity.deleteMany({ where: { id: identityId } })
-    await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+    await client.v2Workspace.deleteMany({ where: { id: { in: workspaceIds } } })
   }
   try {
     await cleanup()
     await client.v2Workspace.create({ data: { id: workspaceId, slug: 'ui-session-security', name: 'UI Session Security' } })
+    await client.v2Workspace.create({ data: { id: otherWorkspaceId, slug: 'ui-session-security-other', name: 'Other UI Session Security' } })
     await client.v2ApiClient.create({ data: {
       id: clientId, workspaceId, name: 'UI Session Security Client', environment: 'production',
       scopesJson: '[]', secretSalt: 'test-salt', secretHash: 'e'.repeat(64),
     } })
+    await client.v2ApiClient.create({ data: {
+      id: otherClientId, workspaceId: otherWorkspaceId, name: 'Other UI Session Security Client', environment: 'production',
+      scopesJson: '["projects:read"]', secretSalt: 'test-salt', secretHash: 'f'.repeat(64),
+    } })
+    await members.provisionBootstrapUiPrincipal({ workspaceId, clientId, now: '2026-08-02T00:00:00.000Z' })
+    await members.provisionBootstrapUiPrincipal({ workspaceId: otherWorkspaceId, clientId: otherClientId, now: '2026-08-02T00:00:00.000Z' })
     const member = await members.provisionBootstrapMembership({
       identityId, memberId, issuer: 'urn:apollo:bootstrap', subjectHash, workspaceId,
       role: 'operator', now: '2026-08-02T00:00:00.000Z',
@@ -45,6 +57,13 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
       role: 'administrator', now: '2026-08-02T00:00:01.000Z',
     })).id, memberId, 'bootstrap replay must preserve the original member and role')
     assert.equal(member.role, 'operator')
+    const otherMember = await members.provisionBootstrapMembership({
+      identityId: randomUUID(), memberId: otherMemberId, issuer: 'urn:apollo:bootstrap', subjectHash,
+      workspaceId: otherWorkspaceId, role: 'director', now: '2026-08-02T00:00:02.000Z',
+    })
+    assert.equal(otherMember.id, otherMemberId)
+    assert.deepEqual((await members.listSelectableForMember({ memberId })).map((entry) => entry.workspaceId), [otherWorkspaceId, workspaceId])
+    assert.equal((await members.resolveSelectableForMember({ memberId, workspaceId: otherWorkspaceId }))?.uiClientId, otherClientId)
     const session = { version: 1, subject: 'operator', clientId, issuedAt: 1_785_628_800, expiresAt: 1_785_672_000, nonce: 'session-security-nonce' }
     await first.createSession({ session, nonceHash, subjectHash, workspaceId, memberId, idleTtlSeconds: 1800 })
     const touched = await second.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:10:00.000Z', idleTtlSeconds: 1800 })
@@ -57,6 +76,21 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     assert.equal(await first.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:40:00.000Z', idleTtlSeconds: 1800 }), null)
     await second.revokeSession({ nonceHash, revokedAt: '2026-08-02T00:20:00.000Z' })
     assert.equal(await first.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:21:00.000Z', idleTtlSeconds: 1800 }), null)
+
+    const rotationNonceHash = 'e'.repeat(64)
+    const nextNonceHash = 'f'.repeat(64)
+    const rotationSession = { version: 1, subject: 'operator', clientId, issuedAt: 1_785_636_000, expiresAt: 1_785_672_000, nonce: 'rotation-current-nonce' }
+    await first.createSession({ session: rotationSession, nonceHash: rotationNonceHash, subjectHash, workspaceId, memberId, idleTtlSeconds: 1800 })
+    const nextSession = { ...rotationSession, clientId: otherClientId, issuedAt: 1_785_636_300, nonce: 'rotation-target-nonce' }
+    const rotated = await second.rotateSession({
+      currentNonceHash: rotationNonceHash, session: nextSession, nonceHash: nextNonceHash, subjectHash,
+      workspaceId: otherWorkspaceId, clientId: otherClientId, memberId: otherMemberId,
+      environment: 'production', idleTtlSeconds: 1800, now: '2026-08-02T02:05:00.000Z',
+    })
+    assert.equal(rotated.workspaceId, otherWorkspaceId)
+    assert.equal(rotated.memberRole, 'director')
+    assert.equal(await first.readActiveAndTouch({ nonceHash: rotationNonceHash, now: '2026-08-02T02:06:00.000Z', idleTtlSeconds: 1800 }), null)
+    assert.equal((await first.readActiveAndTouch({ nonceHash: nextNonceHash, now: '2026-08-02T02:06:00.000Z', idleTtlSeconds: 1800 }))?.workspaceId, otherWorkspaceId)
 
     const reserve = (repository, attempt, throttleKey = keyHash) => repository.reserveLoginAttempt({
       attemptId: randomUUID(), keyHash: throttleKey, subjectHash, requestId: `request-ui-security-${attempt}`,

@@ -10,6 +10,26 @@ const dashboardSource = readFileSync(
   new URL('../../src/app/ProjectsPageClient.tsx', import.meta.url),
   'utf8',
 )
+const appShellSource = readFileSync(
+  new URL('../../src/components/AppShellNavigation.tsx', import.meta.url),
+  'utf8',
+)
+const appShellRegistrySource = readFileSync(
+  new URL('../../src/v2/domain/app-shell.ts', import.meta.url),
+  'utf8',
+)
+const capabilityHubSource = readFileSync(
+  new URL('../../src/components/WorkspaceCapabilityHub.tsx', import.meta.url),
+  'utf8',
+)
+const workspaceSelectorSource = readFileSync(
+  new URL('../../src/components/WorkspaceSelector.tsx', import.meta.url),
+  'utf8',
+)
+const workspaceSwitchRouteSource = readFileSync(
+  new URL('../../src/app/v1/session/workspace/route.ts', import.meta.url),
+  'utf8',
+)
 const architectureLintSource = readFileSync(
   new URL('../../scripts/lint-architecture.mjs', import.meta.url),
   'utf8',
@@ -80,9 +100,35 @@ test('T-FR-087 /batches supports independent retry, resume, cancel and bulk sele
 })
 
 test('dashboard exposes the V2 production-batch control room as a first-class destination', () => {
-  assert.match(dashboardSource, /href="\/batches"/)
-  assert.match(dashboardSource, />\s*Lotes\s*</)
+  assert.match(dashboardSource, /AppShellNavigation active="projects"/)
+  assert.match(appShellRegistrySource, /id: 'batches', label: 'Lotes', href: '\/batches', available: true/)
   assert.doesNotMatch(architectureLintSource, /['"]src\/app\/batches['"]/)
+})
+
+test('F0.031 shell declares six canonical destinations and retains fail-closed unavailable rendering', () => {
+  for (const id of ['projects', 'batches', 'library', 'presenters', 'brand', 'settings']) {
+    assert.match(appShellRegistrySource, new RegExp(`id: '${id}'`))
+  }
+  assert.equal((appShellRegistrySource.match(/available: true/g) ?? []).length, 6)
+  assert.match(appShellSource, /if \(!destination\.available\)/)
+  assert.match(appShellSource, /aria-disabled="true"/)
+  assert.match(appShellSource, /Capability V2 ainda não integrada/)
+  assert.match(capabilityHubSource, /fetch\('\/v1\/capabilities'/)
+  assert.match(capabilityHubSource, /Nenhum profile fictício foi criado/)
+  assert.doesNotMatch(capabilityHubSource, /@prisma|PrismaClient|DATABASE_URL/)
+})
+
+test('F0.031 workspace selector rotates through the public API and destroys prior workspace client state', () => {
+  assert.match(appShellSource, /<WorkspaceSelector \/>/)
+  assert.match(workspaceSelectorSource, /fetch\('\/v1\/session', \{ cache: 'no-store'/)
+  assert.match(workspaceSelectorSource, /fetch\('\/v1\/session\/workspace'/)
+  assert.match(workspaceSelectorSource, /apollo:workspace-changing/)
+  assert.match(workspaceSelectorSource, /startsWith\('apollo:workspace:'\)/)
+  assert.match(workspaceSelectorSource, /startsWith\('apollo-workspace-'\)/)
+  assert.match(workspaceSelectorSource, /window\.location\.assign\('\/'\)/)
+  assert.match(workspaceSwitchRouteSource, /isSameOrigin\(request\)/)
+  assert.match(workspaceSwitchRouteSource, /rotateDurableUiSessionService/)
+  assert.doesNotMatch(workspaceSelectorSource, /@prisma|PrismaClient|DATABASE_URL/)
 })
 
 test('T-FR-084 /batches compiles and renders VariantRecipe through the public V2 API', () => {

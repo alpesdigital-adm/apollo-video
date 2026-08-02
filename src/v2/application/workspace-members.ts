@@ -27,3 +27,34 @@ export function provisionBootstrapWorkspaceMemberService(dependencies: {
     return member
   }
 }
+
+export function provisionBootstrapWorkspaceUiPrincipalService(dependencies: {
+  members: WorkspaceMemberRepository
+  clock?: () => Date
+}) {
+  return async function provision(input: { workspaceId: string; clientId: string }) {
+    assertDomain(input.workspaceId.trim().length > 0, 'INVALID_ARGUMENT', 'Workspace is required')
+    assertDomain(/^[A-Za-z0-9_-]{3,80}$/.test(input.clientId), 'INVALID_ARGUMENT', 'UI client is invalid')
+    await dependencies.members.provisionBootstrapUiPrincipal({
+      ...input,
+      now: (dependencies.clock?.() ?? new Date()).toISOString(),
+    })
+  }
+}
+
+export function listSelectableWorkspacesService(dependencies: { members: WorkspaceMemberRepository }) {
+  return async function list(memberId: string) {
+    assertDomain(/^[0-9a-f-]{36}$/.test(memberId), 'AUTH_INVALID', 'Workspace member is invalid')
+    return dependencies.members.listSelectableForMember({ memberId })
+  }
+}
+
+export function resolveWorkspaceSwitchTargetService(dependencies: { members: WorkspaceMemberRepository }) {
+  return async function resolve(input: { memberId: string; workspaceId: string }) {
+    assertDomain(/^[0-9a-f-]{36}$/.test(input.memberId), 'AUTH_INVALID', 'Workspace member is invalid')
+    assertDomain(input.workspaceId.trim().length > 0 && input.workspaceId.length <= 128, 'INVALID_ARGUMENT', 'Workspace is invalid')
+    const target = await dependencies.members.resolveSelectableForMember(input)
+    if (!target) throw new DomainError('AUTH_INVALID', 'Workspace is not available to this identity')
+    return target
+  }
+}

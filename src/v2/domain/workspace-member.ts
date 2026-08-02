@@ -15,6 +15,15 @@ export interface WorkspaceMember {
   createdAt: string
 }
 
+export interface SelectableWorkspaceMembership {
+  memberId: string
+  workspaceId: string
+  workspaceSlug: string
+  workspaceName: string
+  role: WorkspaceMemberRole
+  uiClientId: string
+}
+
 export function assertWorkspaceMemberRole(value: string): asserts value is WorkspaceMemberRole {
   assertDomain(
     WORKSPACE_MEMBER_ROLES.includes(value as WorkspaceMemberRole),
