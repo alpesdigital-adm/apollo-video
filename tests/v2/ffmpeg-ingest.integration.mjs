@@ -7,12 +7,57 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
 
+import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
+import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
+import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { FfmpegIngestProcessor } from '../../src/v2/infrastructure/media/ffmpeg-ingest-processor.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
 const execFileAsync = promisify(execFile)
+const colorMetadata = Object.freeze({
+  colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709',
+  range: 'limited', bitDepth: 8,
+})
+
+function colorCompilation(artifactId) {
+  const manifestId = `manifest-${artifactId}`
+  const probe = createMediaColorProbe({
+    id: `probe-${artifactId}`,
+    workspaceId: 'workspace-ffmpeg-ingest',
+    artifactId,
+    manifestId,
+    detection: {
+      state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr',
+    },
+    producer: { provider: 'ffprobe', version: 'json-v1', binaryDigest: '9'.repeat(64) },
+    createdAt: '2026-08-02T00:00:00.000Z',
+  })
+  const implementation = (provider, parameters) => ({
+    provider,
+    version: 'v1',
+    parameters,
+    parametersHash: calculateCanonicalHash(parameters),
+  })
+  return createColorPipelineCompilation({
+    id: `compilation-${artifactId}`,
+    workspaceId: probe.workspaceId,
+    projectId: 'project-ffmpeg-ingest',
+    sourceArtifactId: artifactId,
+    sourceManifestId: manifestId,
+    probe,
+    outputMetadata: colorMetadata,
+    createdByClientId: 'client-ffmpeg-ingest',
+    createdAt: '2026-08-02T00:01:00.000Z',
+    stages: [
+      { id: 'technical-rec709', kind: 'technical', version: 'v1', enabled: true, input: colorMetadata, output: colorMetadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
+      { id: 'match-bypass', kind: 'match', version: 'v1', enabled: false, input: colorMetadata, output: colorMetadata, implementation: implementation('apollo-match', { mode: 'bypass' }) },
+      { id: 'creative-none', kind: 'creative-lut', version: 'v1', enabled: false, input: colorMetadata, output: colorMetadata, implementation: implementation('apollo-lut', { mode: 'none' }) },
+      { id: 'output-rec709', kind: 'output', version: 'v1', enabled: true, input: colorMetadata, output: colorMetadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
+    ],
+  })
+}
 
 test('V2 FFmpeg ingest creates an inspectable proxy and speech derivative from a real master', async (t) => {
   assert.equal(typeof ffmpegPath, 'string')
@@ -78,6 +123,7 @@ test('V2 editorial renderer materializes exact retained clips as a format-aware 
       artifactId: 'artifact-1',
       path: sourcePath,
       mediaType: 'video',
+      colorPipelineCompilation: colorCompilation('artifact-1'),
     }],
     fps: 25,
     format: '9:16',
@@ -133,6 +179,7 @@ test('V2 editorial renderer produces a verified 1080x1920 final MP4 from the app
       artifactId: 'artifact-1',
       path: sourcePath,
       mediaType: 'video',
+      colorPipelineCompilation: colorCompilation('artifact-1'),
     }],
     fps: 30,
     format: '9:16',
