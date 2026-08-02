@@ -1794,7 +1794,8 @@ não existe. Create v4, duplicate v2 e workspace v7 também expõem a versão
 corrente com essa projeção. Commands v7/result v6 faz o mesmo para remove,
 Director e transcript replacement; manual edit v3 cobre apply, undo, redo e
 restore. Patch individual e batch v3 usam a mesma projeção; LUT selection ainda
-precisa evoluir aditivamente.
+read/set v3 cobre seleção renderable e deferred. Compare restore ainda precisa
+evoluir aditivamente.
 
 ---
 

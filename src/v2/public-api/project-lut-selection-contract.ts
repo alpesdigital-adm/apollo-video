@@ -1,5 +1,6 @@
 import type { ProjectLutSelectionResult } from '../application/ports/project-lut-selection-repository.ts'
 import { DomainError } from '../domain/errors.ts'
+import { presentProjectVersionV2 } from './presenters.ts'
 
 function object(value: unknown, field: string): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new DomainError('INVALID_ARGUMENT', `${field} must be an object`); return value as Record<string, unknown> }
 function exact(value: Record<string, unknown>, fields: readonly string[], field: string) { const unknown = Object.keys(value).filter((key) => !fields.includes(key)); if (unknown.length) throw new DomainError('INVALID_ARGUMENT', `${field} contains unknown fields`, { fields: unknown }) }
@@ -26,7 +27,10 @@ export function parseSetProjectLutSelectionBody(raw: unknown) {
 export function presentProjectLutSelectionResult(value: Readonly<ProjectLutSelectionResult>) {
   return Object.freeze({
     command: Object.freeze({ id: value.command.id, type: value.command.type, baseVersionId: value.command.baseVersionId, author: value.command.author, reason: value.command.reason, createdAt: value.command.createdAt }),
-    version: Object.freeze({ id: value.version.id, sequence: value.version.sequence, parentVersionId: value.version.parentVersionId, baseHash: value.version.baseHash, createdAt: value.version.createdAt }),
+    version: presentProjectVersionV2(
+      { id: value.version.id, sequence: value.version.sequence, parentVersionId: value.version.parentVersionId, baseHash: value.version.baseHash, createdAt: value.version.createdAt },
+      { current: true, previewAvailable: false },
+    ),
     selection: Object.freeze({
       id: value.selection.id, requested: value.selection.requested, resolved: value.selection.resolved,
       ...(value.selection.workspaceDefaultRevision !== undefined ? { workspaceDefaultRevision: value.selection.workspaceDefaultRevision } : {}),

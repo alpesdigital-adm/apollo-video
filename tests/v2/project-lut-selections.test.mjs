@@ -3,6 +3,8 @@ import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import Ajv2020 from 'ajv/dist/2020.js'
+import addFormats from 'ajv-formats'
 
 import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
@@ -11,6 +13,9 @@ import { createWorkspaceLutVersion } from '../../src/v2/domain/workspace-lut.ts'
 import { createProjectLutSelectionImpact, createProjectLutSelectionInvalidations, parseProjectLutSelectionImpact } from '../../src/v2/domain/project-lut-selection-impact.ts'
 import { LocalProjectLutRenderMaterializer } from '../../src/v2/infrastructure/media/local-project-lut-render-materializer.ts'
 import { parseSetProjectLutSelectionBody, presentProjectLutSelectionResult } from '../../src/v2/public-api/project-lut-selection-contract.ts'
+import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
+import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 const cube = `LUT_3D_SIZE 2
 0 0 0
@@ -177,6 +182,34 @@ test('T-FR-181 public project LUT selection contract is exact and hides persiste
   assert.equal('payload' in presented.command, false)
   assert.equal(presented.impact.impactHash, impact.impactHash)
   assert.deepEqual(presented.invalidations, [])
+  assert.equal(presented.version.visibleState.label, 'current')
+  assert.equal(presented.version.visibleState.primaryAction, 'open-result')
+  assert.equal(Object.isFrozen(presented.version.visibleState), true)
+})
+
+test('T-FR-236 project LUT read and set expose the current selection version state', () => {
+  const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
+  assert.equal(capabilities.get('apollo.projects.lut-selection.read').version, '3.0.0')
+  assert.equal(capabilities.get('apollo.projects.lut-selection.read').outputSchemaRef, 'apollo://schemas/project-lut-selection-response/v3')
+  assert.equal(capabilities.get('apollo.projects.lut-selection.set').version, '3.0.0')
+  assert.equal(capabilities.get('apollo.projects.lut-selection.set').outputSchemaRef, 'apollo://schemas/project-lut-selection-applied/v3')
+  assert.equal(getPublicSchema('apollo://schemas/project-lut-selection-response/v2').ref, 'apollo://schemas/project-lut-selection-response/v2')
+  assert.equal(getPublicSchema('apollo://schemas/project-lut-selection-applied/v2').ref, 'apollo://schemas/project-lut-selection-applied/v2')
+
+  for (const ref of [
+    'apollo://schemas/project-lut-selection-response/v3',
+    'apollo://schemas/project-lut-selection-applied/v3',
+  ]) {
+    const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+      .compile(getPublicSchema(ref).schema)
+    for (const example of publicSchemaExamples(getPublicSchema(ref))) {
+      assert.equal(validate(example), true, `${ref}: ${JSON.stringify(validate.errors)}`)
+      const mismatched = structuredClone(example)
+      const version = mismatched.data.result?.version ?? mismatched.data.version
+      version.visibleState.label = 'superseded'
+      assert.equal(validate(mismatched), false, ref)
+    }
+  }
 })
 
 test('T-FR-181 worker materializes the exact selected cube and intensity outside the renderer', async () => {

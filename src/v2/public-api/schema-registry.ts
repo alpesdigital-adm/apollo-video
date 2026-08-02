@@ -6687,6 +6687,24 @@ const currentProjectVersionVisibleStateSchema = {
   },
 }
 
+const projectLutSelectionResultSchemaV3 = {
+  ...projectLutSelectionResultSchemaV2,
+  properties: {
+    ...projectLutSelectionResultSchemaV2.properties,
+    version: {
+      ...projectLutSelectionResultSchema.properties.version,
+      required: [
+        ...projectLutSelectionResultSchema.properties.version.required,
+        'visibleState',
+      ],
+      properties: {
+        ...projectLutSelectionResultSchema.properties.version.properties,
+        visibleState: currentProjectVersionVisibleStateSchema,
+      },
+    },
+  },
+}
+
 function currentProjectVersionResultSchema(snapshotRefNames: readonly string[]) {
   return {
     type: 'object',
@@ -18401,6 +18419,13 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   })),
   defineSchema('project-lut-selection-response', 2, 'Current explicit project LUT selection with persisted impact and stale outputs', successSchema({
     type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectLutSelectionResultSchemaV2] } },
+  })),
+  defineSchema('project-lut-selection-applied', 3, 'Applied project LUT selection with explicit current ProjectVersion state', successSchema({
+    ...projectLutSelectionResultSchemaV3,
+    properties: { ...projectLutSelectionResultSchemaV3.properties, operation: publicOperationSchemaV3 },
+  })),
+  defineSchema('project-lut-selection-response', 3, 'Current project LUT selection with explicit current ProjectVersion state', successSchema({
+    type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectLutSelectionResultSchemaV3] } },
   })),
   defineSchema('project-final-export-request', 1, 'Approve and export the current project version', {
     type: 'object', additionalProperties: false,

@@ -4730,6 +4730,25 @@ const projectLutSelectionDeferredExampleV2 = {
   impact: projectLutSelectionDeferredImpactExample,
   invalidations: [], replayed: false,
 }
+const currentProjectVersionVisibleStateExample = {
+  schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+  progress: { mode: 'none' }, primaryAction: 'open-result',
+  availableActions: ['open-result'], terminal: false,
+}
+const projectLutSelectionExampleV3 = {
+  ...projectLutSelectionExampleV2,
+  version: {
+    ...projectLutSelectionExampleV2.version,
+    visibleState: currentProjectVersionVisibleStateExample,
+  },
+}
+const projectLutSelectionDeferredExampleV3 = {
+  ...projectLutSelectionDeferredExampleV2,
+  version: {
+    ...projectLutSelectionDeferredExampleV2.version,
+    visibleState: currentProjectVersionVisibleStateExample,
+  },
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -9038,6 +9057,14 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/project-lut-selection-response/v2': [
       { data: { result: projectLutSelectionExampleV2 }, meta: { apiVersion: 'v1' } },
       { data: { result: projectLutSelectionDeferredExampleV2 }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/project-lut-selection-applied/v3': [
+      { data: { ...projectLutSelectionExampleV3, operation: queuedProjectProxyRenderOperationExample }, meta: { apiVersion: 'v1' } },
+      { data: projectLutSelectionDeferredExampleV3, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/project-lut-selection-response/v3': [
+      { data: { result: projectLutSelectionExampleV3 }, meta: { apiVersion: 'v1' } },
+      { data: { result: projectLutSelectionDeferredExampleV3 }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
