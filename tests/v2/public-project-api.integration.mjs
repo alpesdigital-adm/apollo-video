@@ -2,11 +2,15 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
+import { createRequire } from 'node:module'
 import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+
+const require = createRequire(import.meta.url)
+const ffmpegPath = require('ffmpeg-static')
 
 const capabilityById = new Map(
   FOUNDATION_CAPABILITIES.map((capability) => [capability.id, capability]),
@@ -566,6 +570,7 @@ test('authenticated public API manages projects, clients and artifact inspection
           APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'public-api-recipe-key-v1',
           APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 9).toString('base64url'),
           APOLLO_RENDERER_DIGEST: sha('8'),
+          APOLLO_FFMPEG_PATH: ffmpegPath,
           ...uiEnvironment,
         },
         stdio: 'ignore',

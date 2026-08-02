@@ -20,7 +20,7 @@ function escapeFilterPath(value: string): string {
 export class FfmpegLutPreviewGenerator implements LutPreviewGenerator {
   private readonly ffmpegPath: string
   constructor(options: { ffmpegPath?: string } = {}) {
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = options.ffmpegPath?.trim() || process.env.APOLLO_FFMPEG_PATH?.trim() || ffmpegStatic || 'ffmpeg'
   }
 
   async generate(input: { canonicalCube: string; signal?: AbortSignal }) {
