@@ -597,9 +597,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(healthResponse.headers.get('apollo-api-version'), 'v1')
     assert.ok(healthResponse.headers.get('apollo-request-id'))
 
-    const anonymousPageResponse = await fetch(`${baseUrl}/`, { redirect: 'manual' })
-    assert.equal(anonymousPageResponse.status, 307)
-    const anonymousLoginLocation = new URL(anonymousPageResponse.headers.get('location'))
+    const anonymousPageResponse = await fetch(`${baseUrl}/`)
+    assert.equal(anonymousPageResponse.status, 200)
+    const anonymousLoginLocation = new URL(anonymousPageResponse.url)
     assert.equal(anonymousLoginLocation.pathname, '/login')
     assert.equal(anonymousLoginLocation.searchParams.get('next'), '/')
 
@@ -651,10 +651,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     }
     const activeLoginPageResponse = await fetch(`${baseUrl}/login?next=/batches`, {
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}` },
-      redirect: 'manual',
     })
-    assert.equal(activeLoginPageResponse.status, 307)
-    assert.equal(new URL(activeLoginPageResponse.headers.get('location')).pathname, '/batches')
+    assert.equal(activeLoginPageResponse.status, 200)
+    assert.equal(new URL(activeLoginPageResponse.url).pathname, '/batches')
     const uiSessionResponse = await fetch(`${baseUrl}/v1/session`, {
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
     })
@@ -683,10 +682,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal((await fetch(`${baseUrl}/v1/session`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` } })).status, 401)
     const revokedPageResponse = await fetch(`${baseUrl}/batches`, {
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
-      redirect: 'manual',
     })
-    assert.equal(revokedPageResponse.status, 307)
-    const revokedLoginLocation = new URL(revokedPageResponse.headers.get('location'))
+    assert.equal(revokedPageResponse.status, 200)
+    const revokedLoginLocation = new URL(revokedPageResponse.url)
     assert.equal(revokedLoginLocation.pathname, '/login')
     assert.equal(revokedLoginLocation.searchParams.get('next'), '/batches')
     assert.equal((await fetch(`${baseUrl}/login?next=/batches`, {
