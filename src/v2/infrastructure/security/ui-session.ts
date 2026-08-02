@@ -174,3 +174,18 @@ export function safeUiRedirect(value: unknown): string {
   if (value === '/login' || value.startsWith('/v1/session')) return '/'
   return value.slice(0, 1024)
 }
+
+export function isTrustedUiMutationOrigin(input: Readonly<{
+  origin: string | null
+  host: string | null
+  protocol: string | null
+  fetchSite: string | null
+}>): boolean {
+  if (!input.origin || !input.host || (input.fetchSite && input.fetchSite !== 'same-origin')) return false
+  if (input.protocol !== 'http' && input.protocol !== 'https') return false
+  try {
+    return new URL(input.origin).origin === `${input.protocol}://${input.host}`
+  } catch {
+    return false
+  }
+}

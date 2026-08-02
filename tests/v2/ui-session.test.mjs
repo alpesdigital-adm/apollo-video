@@ -8,6 +8,7 @@ import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createUiPasswordHash,
   issueUiSession,
+  isTrustedUiMutationOrigin,
   safeUiRedirect,
   uiLoginThrottleKey,
   uiSessionNonceHash,
@@ -113,6 +114,14 @@ test('UI redirect accepts only local application paths', () => {
   assert.equal(safeUiRedirect('https://attacker.example'), '/')
   assert.equal(safeUiRedirect('//attacker.example'), '/')
   assert.equal(safeUiRedirect('/v1/session'), '/')
+})
+
+test('UI state mutations accept only the effective same origin', () => {
+  assert.equal(isTrustedUiMutationOrigin({ origin: 'http://127.0.0.1:3100', host: '127.0.0.1:3100', protocol: 'http', fetchSite: 'same-origin' }), true)
+  assert.equal(isTrustedUiMutationOrigin({ origin: 'https://apollo.example', host: 'apollo.example', protocol: 'https', fetchSite: 'same-origin' }), true)
+  assert.equal(isTrustedUiMutationOrigin({ origin: 'https://attacker.example', host: 'apollo.example', protocol: 'https', fetchSite: 'cross-site' }), false)
+  assert.equal(isTrustedUiMutationOrigin({ origin: 'https://attacker.example', host: 'apollo.example', protocol: 'https', fetchSite: null }), false)
+  assert.equal(isTrustedUiMutationOrigin({ origin: null, host: 'apollo.example', protocol: 'https', fetchSite: 'same-origin' }), false)
 })
 
 test('V2 pages require the durable server-side session and login never trusts the signed cookie alone', () => {

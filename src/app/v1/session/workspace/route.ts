@@ -11,6 +11,7 @@ import {
 } from '@/v2/infrastructure/repository-factory'
 import {
   APOLLO_SESSION_COOKIE,
+  isTrustedUiMutationOrigin,
   issueUiSession,
   uiSessionNonceHash,
   uiSessionSubjectHash,
@@ -28,14 +29,17 @@ function errorResponse(requestId: string, status: number, code: string, message:
 }
 
 function isSameOrigin(request: NextRequest): boolean {
-  const origin = request.headers.get('origin')
-  const fetchSite = request.headers.get('sec-fetch-site')
-  if (!origin || (fetchSite && fetchSite !== 'same-origin')) return false
-  try {
-    return new URL(origin).origin === request.nextUrl.origin
-  } catch {
-    return false
-  }
+  const trustProxy = process.env.APOLLO_UI_TRUST_PROXY_HEADERS === 'true'
+  return isTrustedUiMutationOrigin({
+    origin: request.headers.get('origin'),
+    fetchSite: request.headers.get('sec-fetch-site'),
+    host: trustProxy
+      ? request.headers.get('x-forwarded-host')?.split(',')[0]?.trim() ?? null
+      : request.headers.get('host'),
+    protocol: trustProxy
+      ? request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() ?? null
+      : request.nextUrl.protocol.slice(0, -1),
+  })
 }
 
 function secureCookie(request: NextRequest): boolean {
