@@ -642,7 +642,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       .get('set-cookie')
       ?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
     assert.ok(formUiSession)
-    for (const pathname of ['/', '/batches', `/projects/${projectId}`]) {
+    for (const pathname of ['/', '/batches', '/projects/session-route-proof']) {
       const protectedPageResponse = await fetch(`${baseUrl}${pathname}`, {
         headers: { cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}` },
         redirect: 'manual',
