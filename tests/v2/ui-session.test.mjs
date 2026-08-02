@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { authenticateUiSessionService } from '../../src/v2/application/authenticate-ui-session.ts'
-import { provisionBootstrapWorkspaceMemberService } from '../../src/v2/application/workspace-members.ts'
+import { provisionBootstrapWorkspaceMemberService, provisionOidcWorkspaceMemberService } from '../../src/v2/application/workspace-members.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createUiPasswordHash,
@@ -117,7 +117,7 @@ test('V2 pages require the durable server-side session and login never trusts th
 test('authenticated bootstrap identity provisions one active workspace role without role escalation on replay', async () => {
   const persisted = new Map()
   const members = {
-    async provisionBootstrapMembership(input) {
+    async provisionMembership(input) {
       const key = `${input.issuer}:${input.subjectHash}:${input.workspaceId}`
       if (persisted.has(key)) return persisted.get(key)
       const member = { id: input.memberId, workspaceId: input.workspaceId, identityId: input.identityId, role: input.role, status: 'active', createdAt: input.now }
@@ -136,6 +136,27 @@ test('authenticated bootstrap identity provisions one active workspace role with
   assert.equal(replay.role, 'reviewer')
   await assert.rejects(
     () => provision({ issuer: 'https://untrusted.example', subjectHash: 'a'.repeat(64), workspaceId: 'workspace-1', role: 'reviewer' }),
+    (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+  )
+})
+
+test('OIDC membership provisioning is explicit, issuer-bound and cannot use the bootstrap issuer', async () => {
+  const writes = []
+  const provision = provisionOidcWorkspaceMemberService({
+    members: { async provisionMembership(input) {
+      writes.push(input)
+      return { id: input.memberId, workspaceId: input.workspaceId, identityId: input.identityId, role: input.role, status: 'active', createdAt: input.now }
+    } },
+    id: () => '00000000-0000-4000-8000-000000000991',
+    clock: () => new Date('2026-08-02T00:00:00.000Z'),
+  })
+  const member = await provision({
+    issuer: 'https://identity.example.test', subjectHash: 'c'.repeat(64), workspaceId: 'workspace-1', role: 'administrator',
+  })
+  assert.equal(member.role, 'administrator')
+  assert.equal(writes[0].subjectHash, 'c'.repeat(64))
+  await assert.rejects(
+    () => provision({ issuer: 'urn:apollo:bootstrap', subjectHash: 'c'.repeat(64), workspaceId: 'workspace-1', role: 'administrator' }),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
   )
 })

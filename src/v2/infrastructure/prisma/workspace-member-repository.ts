@@ -40,7 +40,7 @@ export class PrismaWorkspaceMemberRepository implements WorkspaceMemberRepositor
 
   constructor(client: PrismaClient) { this.client = client }
 
-  async provisionBootstrapMembership(input: Parameters<WorkspaceMemberRepository['provisionBootstrapMembership']>[0], retry = 0): Promise<Readonly<WorkspaceMember>> {
+  async provisionMembership(input: Parameters<WorkspaceMemberRepository['provisionMembership']>[0], retry = 0): Promise<Readonly<WorkspaceMember>> {
     try {
       return await this.client.$transaction(async (transaction) => {
         const identity = await transaction.v2HumanIdentity.upsert({
@@ -62,7 +62,7 @@ export class PrismaWorkspaceMemberRepository implements WorkspaceMemberRepositor
         } }))
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (retryable(error) && retry < 3) return this.provisionBootstrapMembership(input, retry + 1)
+      if (retryable(error) && retry < 3) return this.provisionMembership(input, retry + 1)
       if (retryable(error)) throw new DomainError('PERSISTENCE_CONFLICT', 'Workspace membership could not be provisioned')
       throw error
     }

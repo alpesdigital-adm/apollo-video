@@ -1,7 +1,7 @@
 import type { SelectableWorkspaceMembership, WorkspaceMember, WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 export interface WorkspaceMemberRepository {
-  provisionBootstrapMembership(input: Readonly<{
+  provisionMembership(input: Readonly<{
     identityId: string
     memberId: string
     issuer: string

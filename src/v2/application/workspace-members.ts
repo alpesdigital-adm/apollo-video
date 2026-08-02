@@ -20,8 +20,33 @@ export function provisionBootstrapWorkspaceMemberService(dependencies: {
     assertDomain(input.workspaceId.trim().length > 0, 'INVALID_ARGUMENT', 'Workspace is required')
     assertWorkspaceMemberRole(input.role)
     const now = (dependencies.clock?.() ?? new Date()).toISOString()
-    const member = await dependencies.members.provisionBootstrapMembership({
+    const member = await dependencies.members.provisionMembership({
       identityId: dependencies.id(), memberId: dependencies.id(), ...input, now,
+    })
+    if (member.status !== 'active') throw new DomainError('AUTH_INVALID', 'Workspace membership is not active')
+    return member
+  }
+}
+
+export function provisionOidcWorkspaceMemberService(dependencies: {
+  members: WorkspaceMemberRepository
+  id: () => string
+  clock?: () => Date
+}) {
+  return async function provision(input: {
+    issuer: string
+    subjectHash: string
+    workspaceId: string
+    role: WorkspaceMemberRole
+  }) {
+    assertDomain(input.issuer.startsWith('https://') || input.issuer.startsWith('http://127.0.0.1:'), 'AUTH_INVALID', 'OIDC identity issuer is invalid')
+    assertDomain(input.issuer !== 'urn:apollo:bootstrap' && input.issuer.length <= 512, 'AUTH_INVALID', 'OIDC identity issuer is invalid')
+    assertDomain(HASH.test(input.subjectHash), 'INVALID_ARGUMENT', 'Identity subject hash is invalid')
+    assertDomain(input.workspaceId.trim().length > 0, 'INVALID_ARGUMENT', 'Workspace is required')
+    assertWorkspaceMemberRole(input.role)
+    const member = await dependencies.members.provisionMembership({
+      identityId: dependencies.id(), memberId: dependencies.id(), ...input,
+      now: (dependencies.clock?.() ?? new Date()).toISOString(),
     })
     if (member.status !== 'active') throw new DomainError('AUTH_INVALID', 'Workspace membership is not active')
     return member

@@ -49,16 +49,16 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     } })
     await members.provisionBootstrapUiPrincipal({ workspaceId, clientId, now: '2026-08-02T00:00:00.000Z' })
     await members.provisionBootstrapUiPrincipal({ workspaceId: otherWorkspaceId, clientId: otherClientId, now: '2026-08-02T00:00:00.000Z' })
-    const member = await members.provisionBootstrapMembership({
+    const member = await members.provisionMembership({
       identityId, memberId, issuer: 'urn:apollo:bootstrap', subjectHash, workspaceId,
       role: 'operator', now: '2026-08-02T00:00:00.000Z',
     })
-    assert.equal((await members.provisionBootstrapMembership({
+    assert.equal((await members.provisionMembership({
       identityId: randomUUID(), memberId: randomUUID(), issuer: 'urn:apollo:bootstrap', subjectHash, workspaceId,
       role: 'administrator', now: '2026-08-02T00:00:01.000Z',
     })).id, memberId, 'bootstrap replay must preserve the original member and role')
     assert.equal(member.role, 'operator')
-    const otherMember = await members.provisionBootstrapMembership({
+    const otherMember = await members.provisionMembership({
       identityId: randomUUID(), memberId: otherMemberId, issuer: 'urn:apollo:bootstrap', subjectHash,
       workspaceId: otherWorkspaceId, role: 'director', now: '2026-08-02T00:00:02.000Z',
     })
