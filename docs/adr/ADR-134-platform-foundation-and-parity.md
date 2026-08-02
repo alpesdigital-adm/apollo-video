@@ -83,6 +83,8 @@ under stable trace/job identities, while unit tests cover failure and collector
 isolation. Wait/byte/token/cost metrics, dashboards, alerts and operational
 acceptance remain open.
 
+Hosted run `30763965449` extends the closed envelopes without inspecting provider payloads. Lifecycle events measure queue wait at claim and total running duration at terminal settlement. Provider/renderer spans accept only explicitly measured non-negative integer bytes, tokens and minor-unit cost; render and media workers report typed output sizes, while long-form stages report their persisted cost. Invalid measurements are omitted and collector failure remains unable to affect durable work. The production composition root also evaluates deterministic thresholds for failed operations, queue/run/span duration and cost and emits redacted `public-operation-alert/v1` records with canonical IDs, observed value and threshold only. The run passed 804 tests, build, all media/Remotion goldens, Prisma/API integration and the supervised Compose topology. A durable collector/query surface, dashboard and operational acceptance remain open, so F0.030 telemetry is still partial.
+
 Canonical persisted documents must be compared with canonical serialization,
 never JavaScript insertion order. Hosted API integration exposed this at the
 project LUT impact boundary after the command-type constraint was corrected:
