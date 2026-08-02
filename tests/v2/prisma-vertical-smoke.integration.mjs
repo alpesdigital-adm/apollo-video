@@ -16,6 +16,7 @@ import { enqueueProjectProxyRenderService } from '../../src/v2/application/enque
 import { runNextMediaIngestOperationService } from '../../src/v2/application/run-media-ingest-worker.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
+import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createWorkspace } from '../../src/v2/domain/workspace.ts'
@@ -284,6 +285,24 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     assert.equal(directed.run.status, 'planned')
     assert.equal(directed.run.editPlan.movementPolicy.automaticZoom, false)
     assert.ok(directed.run.editPlan.subtitleTracks[0].cues.length > 0)
+    const lutSelections = new PrismaProjectLutSelectionRepository(prisma)
+    const noLut = await setProjectLutSelectionService({
+      repository: lutSelections,
+      createId: (kind) => `vertical-lut-${kind}-${randomUUID()}`,
+      createEventId: randomUUID,
+      clock,
+    })({
+      workspaceId,
+      projectId: seed.project.id,
+      baseVersionId: directed.version.id,
+      baseHash: directed.version.baseHash,
+      selection: { mode: 'none' },
+      actor: { type: 'api-client', id: clientId },
+      idempotencyKey: 'vertical-smoke-lut-none-v1',
+      reason: 'Keep the controlled vertical smoke colorimetrically neutral.',
+    })
+    assert.equal(noLut.selection.resolved.mode, 'none')
+    assert.equal(noLut.version.parentVersionId, directed.version.id)
 
     const enqueued = await enqueueProjectProxyRenderService({
       projects: proxyProjects,
@@ -294,7 +313,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     })({
       workspaceId,
       projectId: seed.project.id,
-      expectedProjectVersionId: directed.version.id,
+      expectedProjectVersionId: noLut.version.id,
       actor: { type: 'api-client', id: clientId },
       idempotencyKey: 'vertical-smoke-proxy-v1',
     })
@@ -326,7 +345,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       proxyReviews: new PrismaProxyReviewRepository(prisma),
       colorPipelines,
       luts: new LocalProjectLutRenderMaterializer(
-        new PrismaProjectLutSelectionRepository(prisma),
+        lutSelections,
         join(root, '.lut-work'),
       ),
       artifactRoot: root,
