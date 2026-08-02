@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { authenticateUiSessionService } from '../../src/v2/application/authenticate-ui-session.ts'
@@ -103,4 +104,21 @@ test('UI redirect accepts only local application paths', () => {
   assert.equal(safeUiRedirect('https://attacker.example'), '/')
   assert.equal(safeUiRedirect('//attacker.example'), '/')
   assert.equal(safeUiRedirect('/v1/session'), '/')
+})
+
+test('V2 pages require the durable server-side session and login never trusts the signed cookie alone', () => {
+  const sources = {
+    root: readFileSync(new URL('../../src/app/page.tsx', import.meta.url), 'utf8'),
+    projects: readFileSync(new URL('../../src/app/projects/layout.tsx', import.meta.url), 'utf8'),
+    batches: readFileSync(new URL('../../src/app/batches/layout.tsx', import.meta.url), 'utf8'),
+    login: readFileSync(new URL('../../src/app/login/page.tsx', import.meta.url), 'utf8'),
+    proxy: readFileSync(new URL('../../src/proxy.ts', import.meta.url), 'utf8'),
+  }
+  assert.match(sources.root, /requireActiveUiPageSession\('\/'\)/)
+  assert.match(sources.projects, /requireActiveUiPageSession\('\/'\)/)
+  assert.match(sources.batches, /requireActiveUiPageSession\('\/batches'\)/)
+  assert.match(sources.login, /readActiveUiPageSession\(\)/)
+  const loginProxyBranch = sources.proxy.match(/if \(pathname === '\/login'\) \{([\s\S]*?)\n  \}/)?.[1] ?? ''
+  assert.match(loginProxyBranch, /return NextResponse\.next\(\)/)
+  assert.doesNotMatch(loginProxyBranch, /authenticated|NextResponse\.redirect/)
 })

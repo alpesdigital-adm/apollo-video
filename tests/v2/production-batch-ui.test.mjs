@@ -7,7 +7,7 @@ const batchUiSource = readFileSync(
   'utf8',
 )
 const dashboardSource = readFileSync(
-  new URL('../../src/app/page.tsx', import.meta.url),
+  new URL('../../src/app/ProjectsPageClient.tsx', import.meta.url),
   'utf8',
 )
 const architectureLintSource = readFileSync(

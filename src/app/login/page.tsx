@@ -1,5 +1,8 @@
 import type { Metadata } from 'next'
+import { redirect } from 'next/navigation'
 
+import { readActiveUiPageSession } from '../_auth/ui-page-session'
+import { safeUiRedirect } from '@/v2/infrastructure/security/ui-session'
 import LoginForm from './LoginForm'
 
 export const metadata: Metadata = {
@@ -13,7 +16,16 @@ const frames = [
   { label: 'CTA', width: 'w-[28%]', tone: 'bg-[#9b7aff]' },
 ]
 
-export default function LoginPage() {
+export const dynamic = 'force-dynamic'
+
+export default async function LoginPage({
+  searchParams,
+}: Readonly<{ searchParams: Promise<{ next?: string | string[] }> }>) {
+  const activeSession = await readActiveUiPageSession()
+  if (activeSession) {
+    const next = (await searchParams).next
+    redirect(safeUiRedirect(Array.isArray(next) ? next[0] : next))
+  }
   return (
     <main className="min-h-screen overflow-hidden bg-[#08090d] text-[#f4f5f7] lg:grid lg:grid-cols-[minmax(0,1.08fr)_minmax(440px,0.92fr)]">
       <section className="relative hidden min-h-screen overflow-hidden border-r border-white/8 bg-[#0b0c12] p-12 lg:flex lg:flex-col lg:justify-between xl:p-16">

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import {
   APOLLO_SESSION_COOKIE,
-  safeUiRedirect,
   verifyUiSession,
 } from '@/v2/infrastructure/security/ui-session'
 
@@ -15,9 +14,9 @@ export function proxy(request: NextRequest) {
 
   const authenticated = hasValidSession(request)
   if (pathname === '/login') {
-    if (!authenticated) return NextResponse.next()
-    const destination = safeUiRedirect(request.nextUrl.searchParams.get('next'))
-    return NextResponse.redirect(new URL(destination, request.url))
+    // A signed cookie is only coarse edge triage. The login server component
+    // checks the durable PostgreSQL session before redirecting an active user.
+    return NextResponse.next()
   }
 
   if (!authenticated) {

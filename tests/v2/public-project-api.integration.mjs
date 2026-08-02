@@ -597,6 +597,12 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(healthResponse.headers.get('apollo-api-version'), 'v1')
     assert.ok(healthResponse.headers.get('apollo-request-id'))
 
+    const anonymousPageResponse = await fetch(`${baseUrl}/`, { redirect: 'manual' })
+    assert.equal(anonymousPageResponse.status, 307)
+    const anonymousLoginLocation = new URL(anonymousPageResponse.headers.get('location'))
+    assert.equal(anonymousLoginLocation.pathname, '/login')
+    assert.equal(anonymousLoginLocation.searchParams.get('next'), '/')
+
     const uiLoginResponse = await fetch(`${baseUrl}/v1/session`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -632,6 +638,23 @@ test('authenticated public API manages projects, clients and artifact inspection
       formLoginResponse.headers.get('set-cookie') ?? '',
       new RegExp(`^${APOLLO_SESSION_COOKIE}=`),
     )
+    const formUiSession = formLoginResponse.headers
+      .get('set-cookie')
+      ?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
+    assert.ok(formUiSession)
+    for (const pathname of ['/', '/batches', `/projects/${projectId}`]) {
+      const protectedPageResponse = await fetch(`${baseUrl}${pathname}`, {
+        headers: { cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}` },
+        redirect: 'manual',
+      })
+      assert.equal(protectedPageResponse.status, 200, `durable session must authorize ${pathname}`)
+    }
+    const activeLoginPageResponse = await fetch(`${baseUrl}/login?next=/batches`, {
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}` },
+      redirect: 'manual',
+    })
+    assert.equal(activeLoginPageResponse.status, 307)
+    assert.equal(new URL(activeLoginPageResponse.headers.get('location')).pathname, '/batches')
     const uiSessionResponse = await fetch(`${baseUrl}/v1/session`, {
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
     })
@@ -658,6 +681,18 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.ok(decodedUiSession)
     assert.equal((await client.v2UiSession.findUnique({ where: { nonceHash: uiSessionNonceHash(decodedUiSession.nonce) } }))?.revokedAt instanceof Date, true)
     assert.equal((await fetch(`${baseUrl}/v1/session`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` } })).status, 401)
+    const revokedPageResponse = await fetch(`${baseUrl}/batches`, {
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
+      redirect: 'manual',
+    })
+    assert.equal(revokedPageResponse.status, 307)
+    const revokedLoginLocation = new URL(revokedPageResponse.headers.get('location'))
+    assert.equal(revokedLoginLocation.pathname, '/login')
+    assert.equal(revokedLoginLocation.searchParams.get('next'), '/batches')
+    assert.equal((await fetch(`${baseUrl}/login?next=/batches`, {
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
+      redirect: 'manual',
+    })).status, 200, 'revoked signed cookie must not create a login redirect loop')
     const invalidLoginStatuses = []
     for (let attempt = 0; attempt < 6; attempt += 1) {
       invalidLoginStatuses.push((await fetch(`${baseUrl}/v1/session`, {

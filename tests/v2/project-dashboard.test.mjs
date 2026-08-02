@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const dashboardSource = readFileSync(
-  new URL('../../src/app/page.tsx', import.meta.url),
+  new URL('../../src/app/ProjectsPageClient.tsx', import.meta.url),
   'utf8',
 )
 
