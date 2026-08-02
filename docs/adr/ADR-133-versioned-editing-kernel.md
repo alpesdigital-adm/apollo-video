@@ -211,6 +211,13 @@ request. This avoids inventing render evidence while preserving the immutable
 selection for later compilation. PostgreSQL execution, deployment, and
 acceptance remain open, so FR-233 remains incomplete.
 
+The canonical EditCommand registry and PostgreSQL must expose the same closed
+set. The latest `edit_commands_type_check` migration contains all eight
+registered types, including `replace-source-transcript` and
+`set-project-lut-selection`. A structural test reads the latest constraint and
+compares it with `EDIT_COMMAND_TYPES`; adding an application Command without a
+matching persistence migration now fails the default suite before hosted E2E.
+
 Canonical multi-range support does not make every edit sparse. A `move` or
 other downstream timing change keeps one continuous envelope from the earliest
 affected frame through the plan end: clips between the target's old and new

@@ -261,6 +261,30 @@ test('T-F0-027 the registry is frozen, exhaustive and internally consistent', ()
   assert.equal(isEditCommandType('future-command'), false)
 })
 
+test('T-F0-027 the latest PostgreSQL Command constraint matches the canonical registry', async () => {
+  const migrationsRoot = fileURLToPath(new URL('../../prisma/v2/migrations/', import.meta.url))
+  const migrations = (await readdir(migrationsRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .toSorted()
+    .toReversed()
+  let constraintSql
+  let constraintMigration
+  for (const migration of migrations) {
+    const sql = await readFile(`${migrationsRoot}/${migration}/migration.sql`, 'utf8')
+    if (sql.includes('ADD CONSTRAINT "edit_commands_type_check"')) {
+      constraintSql = sql
+      constraintMigration = migration
+      break
+    }
+  }
+  assert.ok(constraintSql, 'edit_commands_type_check must be declared by a migration')
+  const match = constraintSql.match(/ADD CONSTRAINT "edit_commands_type_check"[\s\S]*?CHECK \("type" IN \(([\s\S]*?)\)\)/)
+  assert.ok(match, `${constraintMigration} must declare a closed IN constraint`)
+  const persistedTypes = [...match[1].matchAll(/'([^']+)'/g)].map((value) => value[1]).toSorted()
+  assert.deepEqual(persistedTypes, [...EDIT_COMMAND_TYPES])
+})
+
 test('T-F0-027 every registered type is produced by an application service and vice versa', async () => {
   const applicationRoot = fileURLToPath(new URL('../../src/v2/application/', import.meta.url))
   const entries = await readdir(applicationRoot, { withFileTypes: true, recursive: true })
