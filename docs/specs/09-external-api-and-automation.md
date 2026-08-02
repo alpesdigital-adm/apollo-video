@@ -165,6 +165,7 @@ A Web App não possui um caminho privilegiado de autenticação. O contrato púb
 | `apollo.sessions.login` | `POST /v1/session` | nenhuma; credenciais no body protegido por TLS | cria cookie de sessão HTTP-only e devolve subject, workspace e expiração |
 | `apollo.sessions.read` | `GET /v1/session` | cookie `apollo_session` | devolve a sessão corrente sem token ou secret |
 | `apollo.sessions.logout` | `DELETE /v1/session` | cookie opcional | expira o cookie de modo idempotente |
+| `apollo.sessions.switch-workspace` | `POST /v1/session/workspace` | cookie `apollo_session` + mesma origem | rotaciona a sessão para outra membership ativa sem aceitar client ID do navegador |
 
 O schema de login marca password como `writeOnly`; logs, errors, analytics e eventos nunca registram username/password. Rate limit é aplicado antes da derivação de senha. Cookie usa `HttpOnly`, `SameSite=Strict`, `Secure` em HTTPS, path `/` e duração máxima documentada.
 
@@ -172,7 +173,7 @@ Para continuar seguro quando o JavaScript da Web App não hidratar, `POST /v1/se
 
 Essas capabilities aparecem em OpenAPI/capability discovery, mas não recebem `toolName`: agentes e MCP não devem solicitar nem manipular senha humana. Automação usa exclusivamente `Authorization: Bearer <ApiCredential>` e pode operar todas as capabilities permitidas por seus scopes sem criar sessão humana.
 
-O bootstrap local de usuário único é transitório e não conclui F0.031. Identidade por issuer/subject hash, `WorkspaceMember` ativo, sessão revogável, idle timeout, audit redigido e rate limit distribuído já usam PostgreSQL; `/`, `/batches` e `/projects/*` consultam essa sessão no SSR, enquanto o Proxy apenas rejeita cedo cookies ausentes ou inválidos. Produção multiusuário ainda exige callback/recuperação no IdP, rotação do identificador de sessão e OIDC/OAuth 2.1 conforme ADR-142.
+O bootstrap local de usuário único é transitório e não conclui F0.031. Identidade por issuer/subject hash, `WorkspaceMember` ativo, sessão revogável, idle timeout, audit redigido e rate limit distribuído já usam PostgreSQL; todas as páginas do shell consultam essa sessão no SSR, enquanto o Proxy apenas rejeita cedo cookies ausentes ou inválidos. A troca de workspace usa um principal interno da Web App por workspace, separado da membership humana, e nunca aceita `clientId` do navegador. A transação revalida identity, membership, workspace, principal e ambiente, revoga o nonce anterior e cria o novo preservando a expiração absoluta. Produção multiusuário ainda exige callback/recuperação no IdP e OIDC/OAuth 2.1 conforme ADR-142.
 
 ## 8. Escopos
 
