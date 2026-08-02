@@ -29,25 +29,11 @@ test('UI password and signed session authenticate without storing plaintext', ()
   assert.equal(verifyUiPassword('leandro', 'a-valid-test-password', environment), true)
   assert.equal(verifyUiPassword('leandro', 'wrong-password', environment), false)
   assert.equal(environment.APOLLO_UI_PASSWORD_HASH.includes('a-valid-test-password'), false)
-  const token = issueUiSession('leandro', 'apollo-ui-client', {
-    environment,
-    now: new Date('2026-07-18T12:00:00Z'),
-    nonce: 'fixed-session-nonce',
-  })
-  const session = verifyUiSession(token, {
-    environment,
-    now: new Date('2026-07-18T13:00:00Z'),
-  })
-  assert.equal(session?.subject, 'leandro')
-  assert.equal(session?.clientId, 'apollo-ui-client')
-  const switchedToken = issueUiSession('leandro', 'another-workspace-ui-client', {
-    environment,
-    now: new Date('2026-07-18T12:00:00Z'),
-    nonce: 'switched-session-nonce',
-  })
-  assert.equal(verifyUiSession(switchedToken, { environment, now: new Date('2026-07-18T13:00:00Z') })?.clientId, 'another-workspace-ui-client')
-  assert.equal(verifyUiSession(`${token}x`, { environment, now: new Date('2026-07-18T13:00:00Z') }), null)
-  assert.equal(verifyUiSession(token, { environment, now: new Date('2026-07-19T02:00:00Z') }), null)
+  const token = issueUiSession({ token: 'a'.repeat(43) })
+  assert.equal(verifyUiSession(token), token)
+  assert.equal(token.includes('leandro'), false)
+  assert.equal(token.includes('apollo-ui-client'), false)
+  assert.equal(verifyUiSession(`${token}x`), null)
 })
 
 test('UI session and throttle identities are one-way and source-wide', () => {
@@ -76,7 +62,7 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
   const sessions = {
     async readActiveAndTouch({ nonceHash }) {
       return nonceHash === 'a'.repeat(64)
-        ? { nonceHash, workspaceId: 'workspace-1', clientId: 'apollo-ui-client', memberId: 'member-1', memberRole: 'director', subjectHash: 'b'.repeat(64), issuedAt: '1970-01-01T00:00:01.000Z', lastSeenAt: '1970-01-01T00:00:01.000Z', idleExpiresAt: '1970-01-01T00:00:02.000Z', expiresAt: '1970-01-01T00:00:02.000Z' }
+        ? { nonceHash, workspaceId: 'workspace-1', clientId: 'apollo-ui-client', memberId: 'member-1', identityId: 'identity-1', memberRole: 'director', subjectHash: 'b'.repeat(64), issuedAt: '1970-01-01T00:00:01.000Z', lastSeenAt: '1970-01-01T00:00:01.000Z', idleExpiresAt: '1970-01-01T00:00:02.000Z', expiresAt: '1970-01-01T00:00:02.000Z' }
         : null
     },
   }
@@ -84,27 +70,14 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
     repository,
     sessions,
     environment: 'production',
-  })({
-    version: 1,
-    subject: 'leandro',
-    clientId: 'apollo-ui-client',
-    issuedAt: 1,
-    expiresAt: 2,
-    nonce: 'fixed-session-nonce',
-  }, 'a'.repeat(64), 'b'.repeat(64))
+  })('a'.repeat(43), 'a'.repeat(64))
   assert.equal(actor.workspaceId, 'workspace-1')
   assert.equal(actor.delegatedUserId, 'member-1')
+  assert.equal(actor.delegatedIdentityId, 'identity-1')
   assert.equal(actor.workspaceRole, 'director')
   assert.equal(actor.scopes.has('projects:write'), true)
   await assert.rejects(
-    () => authenticateUiSessionService({ repository, sessions, environment: 'sandbox' })({
-      version: 1,
-      subject: 'leandro',
-      clientId: 'apollo-ui-client',
-      issuedAt: 1,
-      expiresAt: 2,
-      nonce: 'fixed-session-nonce',
-    }, 'a'.repeat(64), 'b'.repeat(64)),
+    () => authenticateUiSessionService({ repository, sessions, environment: 'sandbox' })('a'.repeat(43), 'a'.repeat(64)),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
   )
 })

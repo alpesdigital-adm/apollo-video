@@ -719,7 +719,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     assert.equal(uiProjectListResponse.status, 200)
     const initialSession = uiSession
-    const initialDecodedSession = verifyUiSession(initialSession, { environment: uiEnvironment })
+    const initialDecodedSession = verifyUiSession(initialSession)
     assert.ok(initialDecodedSession)
     assert.equal((await fetch(`${baseUrl}/v1/session/workspace`, {
       method: 'POST',
@@ -747,14 +747,19 @@ test('authenticated public API manages projects, clients and artifact inspection
     uiSession = switchResponse.headers.get('set-cookie')?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
     assert.ok(uiSession)
     assert.equal((await fetch(`${baseUrl}/v1/session`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${initialSession}` } })).status, 401)
-    assert.equal((await client.v2UiSession.findUnique({ where: { nonceHash: uiSessionNonceHash(initialDecodedSession.nonce) } }))?.revokedAt instanceof Date, true)
+    assert.equal((await client.v2UiSession.findUnique({ where: { nonceHash: uiSessionNonceHash(initialDecodedSession) } }))?.revokedAt instanceof Date, true)
     const targetSessionPayload = await (await fetch(`${baseUrl}/v1/session`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` } })).json()
     assert.equal(targetSessionPayload.data.workspaceId, otherWorkspaceId)
     assert.equal((await fetch(`${baseUrl}/v1/artifacts/${otherArtifactId}`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` } })).status, 200)
     assert.equal((await fetch(`${baseUrl}/v1/artifacts/${sourceArtifactId}`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` } })).status, 404)
-    const expiredToken = issueUiSession(uiUsername, otherApiClientId, {
-      now: new Date('2026-07-12T16:00:00.000Z'), maxAgeSeconds: 60, environment: uiEnvironment,
-    })
+    const expiredToken = issueUiSession({ token: 'x'.repeat(43) })
+    const expiredAt = new Date(Date.now() - 60_000)
+    await client.v2UiSession.create({ data: {
+      nonceHash: uiSessionNonceHash(expiredToken), workspaceId: otherWorkspaceId, clientId: otherApiClientId,
+      memberId: otherMemberId, subjectHash: uiSessionSubjectHash(uiUsername, uiEnvironment),
+      issuedAt: new Date(expiredAt.getTime() - 60_000), lastSeenAt: new Date(expiredAt.getTime() - 60_000),
+      idleExpiresAt: expiredAt, expiresAt: expiredAt,
+    } })
     assert.equal((await fetch(`${baseUrl}/v1/session`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${expiredToken}` } })).status, 401)
     const uiLogoutResponse = await fetch(`${baseUrl}/v1/session`, {
       method: 'DELETE',
@@ -767,9 +772,9 @@ test('authenticated public API manages projects, clients and artifact inspection
       uiLogoutResponse.headers.get('set-cookie') ?? '',
       new RegExp(`^${APOLLO_SESSION_COOKIE}=;`),
     )
-    const decodedUiSession = verifyUiSession(uiSession, { environment: uiEnvironment })
+    const decodedUiSession = verifyUiSession(uiSession)
     assert.ok(decodedUiSession)
-    assert.equal((await client.v2UiSession.findUnique({ where: { nonceHash: uiSessionNonceHash(decodedUiSession.nonce) } }))?.revokedAt instanceof Date, true)
+    assert.equal((await client.v2UiSession.findUnique({ where: { nonceHash: uiSessionNonceHash(decodedUiSession) } }))?.revokedAt instanceof Date, true)
     assert.equal((await fetch(`${baseUrl}/v1/session`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` } })).status, 401)
     const revokedPageResponse = await fetch(`${baseUrl}/batches`, {
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },

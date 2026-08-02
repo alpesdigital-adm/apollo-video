@@ -1,4 +1,4 @@
-import type { ApolloUiSession } from '../../domain/ui-session.ts'
+import type { UiSessionGrant } from '../../domain/ui-session.ts'
 import type { ApiEnvironment } from '../../domain/api-client.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
@@ -9,6 +9,7 @@ export interface DurableUiSessionRecord {
   workspaceId: string
   clientId: string
   memberId: string
+  identityId: string
   memberRole: WorkspaceMemberRole
   subjectHash: string
   issuedAt: string
@@ -20,7 +21,7 @@ export interface DurableUiSessionRecord {
 
 export interface UiSessionSecurityRepository {
   createSession(input: Readonly<{
-    session: ApolloUiSession
+    grant: UiSessionGrant
     nonceHash: string
     subjectHash: string
     workspaceId: string
@@ -31,9 +32,8 @@ export interface UiSessionSecurityRepository {
   revokeSession(input: Readonly<{ nonceHash: string; revokedAt: string }>): Promise<void>
   rotateSession(input: Readonly<{
     currentNonceHash: string
-    session: ApolloUiSession
+    grant: UiSessionGrant
     nonceHash: string
-    subjectHash: string
     workspaceId: string
     clientId: string
     memberId: string

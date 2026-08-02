@@ -1,7 +1,6 @@
 import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 
 import { DomainError } from '../../domain/errors.ts'
-import type { ApolloUiSession } from '../../domain/ui-session.ts'
 import { assertWorkspaceMemberRole, type WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 export const APOLLO_SESSION_COOKIE = 'apollo_session'
@@ -100,73 +99,18 @@ export function verifyUiPassword(
   return safeEqual(username, expectedUsername) && safeEqual(actualHash, expectedHash)
 }
 
-function sign(payload: string, environment: NodeJS.ProcessEnv): string {
-  return createHmac('sha256', sessionSecret(environment)).update(payload).digest('base64url')
-}
-
 export function issueUiSession(
-  subject: string,
-  clientId: string,
-  options: {
-    now?: Date
-    maxAgeSeconds?: number
-    expiresAt?: number
-    environment?: NodeJS.ProcessEnv
-    nonce?: string
-  } = {},
+  options: { token?: string } = {},
 ): string {
-  const environment = options.environment ?? process.env
-  const now = options.now ?? new Date()
-  const maxAgeSeconds = options.maxAgeSeconds ?? APOLLO_SESSION_MAX_AGE_SECONDS
-  if (!Number.isSafeInteger(maxAgeSeconds) || maxAgeSeconds < 60 || maxAgeSeconds > 24 * 60 * 60) {
-    throw new DomainError('INVALID_ARGUMENT', 'UI session duration is invalid')
-  }
-  const issuedAt = Math.floor(now.getTime() / 1000)
-  const expiresAt = options.expiresAt ?? issuedAt + maxAgeSeconds
-  if (!Number.isSafeInteger(expiresAt) || expiresAt <= issuedAt || expiresAt - issuedAt > 24 * 60 * 60) {
-    throw new DomainError('INVALID_ARGUMENT', 'UI session expiry is invalid')
-  }
-  const payload: ApolloUiSession = {
-    version: 1,
-    subject,
-    clientId,
-    issuedAt,
-    expiresAt,
-    nonce: options.nonce ?? randomBytes(16).toString('base64url'),
-  }
-  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url')
-  return `${encoded}.${sign(encoded, environment)}`
+  const token = options.token ?? randomBytes(32).toString('base64url')
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new DomainError('INVALID_ARGUMENT', 'UI session token is invalid')
+  return token
 }
 
 export function verifyUiSession(
   token: string | undefined,
-  options: { now?: Date; environment?: NodeJS.ProcessEnv } = {},
-): Readonly<ApolloUiSession> | null {
-  if (!token || token.length > 2048) return null
-  const environment = options.environment ?? process.env
-  const [encoded, signature, ...extra] = token.split('.')
-  if (!encoded || !signature || extra.length > 0) return null
-  try {
-    if (!safeEqual(sign(encoded, environment), signature)) return null
-    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as Partial<ApolloUiSession>
-    const now = Math.floor((options.now ?? new Date()).getTime() / 1000)
-    if (
-      payload.version !== 1 ||
-      payload.subject !== configuredUiUsername(environment) ||
-      typeof payload.clientId !== 'string' ||
-      !/^[A-Za-z0-9_-]{3,80}$/.test(payload.clientId) ||
-      !Number.isSafeInteger(payload.issuedAt) ||
-      !Number.isSafeInteger(payload.expiresAt) ||
-      typeof payload.nonce !== 'string' ||
-      payload.nonce.length < 16 ||
-      payload.issuedAt! > now + 60 ||
-      payload.expiresAt! <= now ||
-      payload.expiresAt! - payload.issuedAt! > 24 * 60 * 60
-    ) return null
-    return Object.freeze(payload as ApolloUiSession)
-  } catch {
-    return null
-  }
+): string | null {
+  return token && /^[A-Za-z0-9_-]{43}$/.test(token) ? token : null
 }
 
 export function safeUiRedirect(value: unknown): string {

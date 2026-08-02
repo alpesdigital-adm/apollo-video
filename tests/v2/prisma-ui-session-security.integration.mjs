@@ -64,8 +64,8 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     assert.equal(otherMember.id, otherMemberId)
     assert.deepEqual((await members.listSelectableForMember({ memberId })).map((entry) => entry.workspaceId), [otherWorkspaceId, workspaceId])
     assert.equal((await members.resolveSelectableForMember({ memberId, workspaceId: otherWorkspaceId }))?.uiClientId, otherClientId)
-    const session = { version: 1, subject: 'operator', clientId, issuedAt: 1_785_628_800, expiresAt: 1_785_672_000, nonce: 'session-security-nonce' }
-    await first.createSession({ session, nonceHash, subjectHash, workspaceId, memberId, idleTtlSeconds: 1800 })
+    const grant = { clientId, issuedAt: '2026-08-02T00:00:00.000Z', expiresAt: '2026-08-02T12:00:00.000Z' }
+    await first.createSession({ grant, nonceHash, subjectHash, workspaceId, memberId, idleTtlSeconds: 1800 })
     const touched = await second.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:10:00.000Z', idleTtlSeconds: 1800 })
     assert.equal(touched.idleExpiresAt, '2026-08-02T00:40:00.000Z')
     assert.equal(touched.memberId, memberId)
@@ -79,11 +79,11 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
 
     const rotationNonceHash = 'e'.repeat(64)
     const nextNonceHash = 'f'.repeat(64)
-    const rotationSession = { version: 1, subject: 'operator', clientId, issuedAt: 1_785_636_000, expiresAt: 1_785_672_000, nonce: 'rotation-current-nonce' }
-    await first.createSession({ session: rotationSession, nonceHash: rotationNonceHash, subjectHash, workspaceId, memberId, idleTtlSeconds: 1800 })
-    const nextSession = { ...rotationSession, clientId: otherClientId, issuedAt: 1_785_636_300, nonce: 'rotation-target-nonce' }
+    const rotationGrant = { clientId, issuedAt: '2026-08-02T02:00:00.000Z', expiresAt: '2026-08-02T12:00:00.000Z' }
+    await first.createSession({ grant: rotationGrant, nonceHash: rotationNonceHash, subjectHash, workspaceId, memberId, idleTtlSeconds: 1800 })
+    const nextGrant = { ...rotationGrant, clientId: otherClientId, issuedAt: '2026-08-02T02:05:00.000Z' }
     const rotated = await second.rotateSession({
-      currentNonceHash: rotationNonceHash, session: nextSession, nonceHash: nextNonceHash, subjectHash,
+      currentNonceHash: rotationNonceHash, grant: nextGrant, nonceHash: nextNonceHash,
       workspaceId: otherWorkspaceId, clientId: otherClientId, memberId: otherMemberId,
       environment: 'production', idleTtlSeconds: 1800, now: '2026-08-02T02:05:00.000Z',
     })

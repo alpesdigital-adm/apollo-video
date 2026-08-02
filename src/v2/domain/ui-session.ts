@@ -1,8 +1,5 @@
-export interface ApolloUiSession {
-  version: 1
-  subject: string
+export interface UiSessionGrant {
   clientId: string
-  issuedAt: number
-  expiresAt: number
-  nonce: string
+  issuedAt: string
+  expiresAt: string
 }

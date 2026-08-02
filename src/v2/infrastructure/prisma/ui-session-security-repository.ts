@@ -10,10 +10,11 @@ import { DomainError } from '../../domain/errors.ts'
 function hydrate(row: {
   nonceHash: string; workspaceId: string; clientId: string; memberId: string; subjectHash: string
   issuedAt: Date; lastSeenAt: Date; idleExpiresAt: Date; expiresAt: Date; revokedAt: Date | null
-}, memberRole: string): Readonly<DurableUiSessionRecord> {
+}, memberRole: string, identityId: string): Readonly<DurableUiSessionRecord> {
   return Object.freeze({
     nonceHash: row.nonceHash, workspaceId: row.workspaceId, clientId: row.clientId,
     memberId: row.memberId, memberRole: memberRole as DurableUiSessionRecord['memberRole'],
+    identityId,
     subjectHash: row.subjectHash, issuedAt: row.issuedAt.toISOString(), lastSeenAt: row.lastSeenAt.toISOString(),
     idleExpiresAt: row.idleExpiresAt.toISOString(), expiresAt: row.expiresAt.toISOString(),
     ...(row.revokedAt ? { revokedAt: row.revokedAt.toISOString() } : {}),
@@ -30,14 +31,14 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
   constructor(client: PrismaClient) { this.client = client }
 
   async createSession(input: Parameters<UiSessionSecurityRepository['createSession']>[0]) {
-    const issuedAt = new Date(input.session.issuedAt * 1000)
-    const expiresAt = new Date(input.session.expiresAt * 1000)
+    const issuedAt = new Date(input.grant.issuedAt)
+    const expiresAt = new Date(input.grant.expiresAt)
     const idleExpiresAt = new Date(Math.min(expiresAt.getTime(), issuedAt.getTime() + input.idleTtlSeconds * 1000))
     const row = await this.client.v2UiSession.create({ data: {
-      nonceHash: input.nonceHash, workspaceId: input.workspaceId, clientId: input.session.clientId, memberId: input.memberId,
+      nonceHash: input.nonceHash, workspaceId: input.workspaceId, clientId: input.grant.clientId, memberId: input.memberId,
       subjectHash: input.subjectHash, issuedAt, lastSeenAt: issuedAt, idleExpiresAt, expiresAt,
     }, include: { member: true } })
-    return hydrate(row, row.member.role)
+    return hydrate(row, row.member.role, row.member.identityId)
   }
 
   async readActiveAndTouch(input: Parameters<UiSessionSecurityRepository['readActiveAndTouch']>[0], retry = 0): Promise<Readonly<DurableUiSessionRecord> | null> {
@@ -50,7 +51,7 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
         const updated = await transaction.v2UiSession.update({
           where: { nonceHash: input.nonceHash }, data: { lastSeenAt: now, idleExpiresAt }, include: { member: true },
         })
-        return hydrate(updated, updated.member.role)
+        return hydrate(updated, updated.member.role, updated.member.identityId)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (prismaCode(error, 'P2034') && retry < 3) return this.readActiveAndTouch(input, retry + 1)
@@ -67,8 +68,8 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
 
   async rotateSession(input: Parameters<UiSessionSecurityRepository['rotateSession']>[0], retry = 0): Promise<Readonly<DurableUiSessionRecord>> {
     const now = new Date(input.now)
-    const issuedAt = new Date(input.session.issuedAt * 1000)
-    const expiresAt = new Date(input.session.expiresAt * 1000)
+    const issuedAt = new Date(input.grant.issuedAt)
+    const expiresAt = new Date(input.grant.expiresAt)
     const idleExpiresAt = new Date(Math.min(expiresAt.getTime(), issuedAt.getTime() + input.idleTtlSeconds * 1000))
     try {
       return await this.client.$transaction(async (transaction) => {
@@ -78,7 +79,7 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
         })
         if (
           !current || current.revokedAt || current.expiresAt <= now || current.idleExpiresAt <= now ||
-          current.subjectHash !== input.subjectHash || current.member.status !== 'active' || current.member.identity.status !== 'active'
+          current.member.status !== 'active' || current.member.identity.status !== 'active'
         ) throw new DomainError('AUTH_INVALID', 'Current UI session is not active')
 
         const target = await transaction.v2WorkspaceMember.findFirst({
@@ -94,7 +95,7 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
             },
           },
         })
-        if (!target || input.session.clientId !== input.clientId) {
+        if (!target || input.grant.clientId !== input.clientId) {
           throw new DomainError('AUTH_INVALID', 'Target workspace is not authorized')
         }
 
@@ -109,7 +110,7 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
             workspaceId: input.workspaceId,
             clientId: input.clientId,
             memberId: input.memberId,
-            subjectHash: input.subjectHash,
+            subjectHash: current.subjectHash,
             issuedAt,
             lastSeenAt: issuedAt,
             idleExpiresAt,
@@ -117,7 +118,7 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
           },
           include: { member: true },
         })
-        return hydrate(created, created.member.role)
+        return hydrate(created, created.member.role, created.member.identityId)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if ((prismaCode(error, 'P2034') || prismaCode(error, 'P2002')) && retry < 3) return this.rotateSession(input, retry + 1)

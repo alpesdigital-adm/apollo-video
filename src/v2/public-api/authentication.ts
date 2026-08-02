@@ -9,7 +9,6 @@ import { nodeApiCredentialCrypto } from '../infrastructure/security/api-credenti
 import {
   APOLLO_SESSION_COOKIE,
   uiSessionNonceHash,
-  uiSessionSubjectHash,
   verifyUiSession,
 } from '../infrastructure/security/ui-session.ts'
 import {
@@ -32,11 +31,10 @@ export async function authenticateExternalRequest(request: NextRequest) {
   const environment = resolveApiEnvironment()
   const authorization = request.headers.get('authorization')
   if (!authorization) {
-    const session = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
+    const sessionToken = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
     return authenticateUiSessionService({ repository, sessions: createUiSessionSecurityRepository(), environment })(
-      session,
-      session ? uiSessionNonceHash(session.nonce) : undefined,
-      session ? uiSessionSubjectHash(session.subject) : undefined,
+      sessionToken,
+      sessionToken ? uiSessionNonceHash(sessionToken) : undefined,
     )
   }
   const authenticate = authenticateApiClientService({

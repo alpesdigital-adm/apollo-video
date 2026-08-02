@@ -73,8 +73,8 @@ function sessionError(
 
 export async function GET(request: NextRequest) {
   const requestId = resolveRequestId(request)
-  const session = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
-  if (!session) {
+  const sessionToken = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
+  if (!sessionToken) {
     return sessionError(requestId, 401, 'AUTH_INVALID', 'Entre para continuar.')
   }
   let actor
@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
       repository: createApiClientRepository(),
       sessions: createUiSessionSecurityRepository(),
       environment: resolveApiEnvironment(),
-    })(session, uiSessionNonceHash(session.nonce), uiSessionSubjectHash(session.subject))
+    })(sessionToken, uiSessionNonceHash(sessionToken))
   } catch (error) {
     if (error instanceof DomainError && error.code === 'AUTH_INVALID') {
       return sessionError(requestId, 401, 'AUTH_INVALID', 'A sessão não está mais autorizada.')
@@ -100,7 +100,7 @@ export async function GET(request: NextRequest) {
     const workspaces = await listSelectableWorkspacesService({ members: createWorkspaceMemberRepository() })(actor.delegatedUserId!)
     return NextResponse.json(
       presentSuccess({
-        subject: session.subject,
+        subject: configuredUiUsername(),
         workspaceId: actor.workspaceId,
         memberId: actor.delegatedUserId,
         role: actor.workspaceRole,
@@ -235,21 +235,13 @@ export async function POST(request: NextRequest) {
     await settleSafely('configuration-error')
     return sessionError(requestId, 503, 'LOGIN_NOT_CONFIGURED', 'O acesso ao workspace ainda não foi configurado.', { category: 'internal' })
   }
-  const token = issueUiSession(subject, clientId)
-  const session = verifyUiSession(token)
-  if (!session) {
-    await settleSafely('configuration-error')
-    return sessionError(
-      requestId,
-      503,
-      'LOGIN_NOT_CONFIGURED',
-      'O acesso ao Apollo ainda não foi configurado.',
-      { category: 'internal' },
-    )
-  }
+  const token = issueUiSession()
+  const issuedAt = new Date()
+  const expiresAt = new Date(issuedAt.getTime() + APOLLO_SESSION_MAX_AGE_SECONDS * 1000)
   try {
     await createDurableUiSessionService({ sessions })({
-      session, nonceHash: uiSessionNonceHash(session.nonce), subjectHash: uiSessionSubjectHash(subject), workspaceId, memberId: member.id,
+      grant: { clientId, issuedAt: issuedAt.toISOString(), expiresAt: expiresAt.toISOString() },
+      nonceHash: uiSessionNonceHash(token), subjectHash: uiSessionSubjectHash(subject), workspaceId, memberId: member.id,
     })
     if (!await settleSafely('succeeded')) throw new Error('login settlement failed')
   } catch {
@@ -268,7 +260,7 @@ export async function POST(request: NextRequest) {
       presentSuccess({
         subject,
         workspaceId,
-        expiresAt: new Date(session.expiresAt * 1000).toISOString(),
+        expiresAt: expiresAt.toISOString(),
         redirectTo,
       }),
       { headers: publicApiHeaders(requestId) },
@@ -289,10 +281,10 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const requestId = resolveRequestId(request)
-  const session = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
-  if (session) {
+  const sessionToken = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
+  if (sessionToken) {
     try {
-      await revokeDurableUiSessionService({ sessions: createUiSessionSecurityRepository() })(uiSessionNonceHash(session.nonce))
+      await revokeDurableUiSessionService({ sessions: createUiSessionSecurityRepository() })(uiSessionNonceHash(sessionToken))
     } catch {
       return sessionError(requestId, 503, 'AUTH_UNAVAILABLE', 'Não foi possível encerrar a sessão agora.', { retryable: true, category: 'internal' })
     }

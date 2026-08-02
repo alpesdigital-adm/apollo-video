@@ -1,5 +1,5 @@
 import { assertDomain } from '../domain/errors.ts'
-import type { ApolloUiSession } from '../domain/ui-session.ts'
+import type { UiSessionGrant } from '../domain/ui-session.ts'
 import type { UiLoginAttemptOutcome, UiSessionSecurityRepository } from './ports/ui-session-security-repository.ts'
 import { UI_SESSION_IDLE_TTL_SECONDS } from './authenticate-ui-session.ts'
 
@@ -11,7 +11,7 @@ const REQUEST_ID = /^[A-Za-z0-9_-]{8,100}$/
 
 export function createDurableUiSessionService(dependencies: { sessions: UiSessionSecurityRepository }) {
   return async function create(input: {
-    session: ApolloUiSession; nonceHash: string; subjectHash: string; workspaceId: string; memberId: string
+    grant: UiSessionGrant; nonceHash: string; subjectHash: string; workspaceId: string; memberId: string
   }) {
     assertDomain(HASH.test(input.nonceHash) && HASH.test(input.subjectHash), 'INVALID_ARGUMENT', 'Session hashes are invalid')
     return dependencies.sessions.createSession({ ...input, idleTtlSeconds: UI_SESSION_IDLE_TTL_SECONDS })
@@ -27,7 +27,7 @@ export function revokeDurableUiSessionService(dependencies: { sessions: UiSessio
 
 export function rotateDurableUiSessionService(dependencies: { sessions: UiSessionSecurityRepository; now?: () => Date }) {
   return async function rotate(input: Omit<Parameters<UiSessionSecurityRepository['rotateSession']>[0], 'idleTtlSeconds' | 'now'>) {
-    assertDomain(HASH.test(input.currentNonceHash) && HASH.test(input.nonceHash) && HASH.test(input.subjectHash), 'INVALID_ARGUMENT', 'Session hashes are invalid')
+    assertDomain(HASH.test(input.currentNonceHash) && HASH.test(input.nonceHash), 'INVALID_ARGUMENT', 'Session hashes are invalid')
     assertDomain(input.currentNonceHash !== input.nonceHash, 'INVALID_ARGUMENT', 'Session rotation requires a fresh nonce')
     return dependencies.sessions.rotateSession({
       ...input,

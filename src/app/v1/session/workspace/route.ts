@@ -14,7 +14,6 @@ import {
   isTrustedUiMutationOrigin,
   issueUiSession,
   uiSessionNonceHash,
-  uiSessionSubjectHash,
   verifyUiSession,
 } from '@/v2/infrastructure/security/ui-session'
 import { resolveApiEnvironment } from '@/v2/public-api/authentication'
@@ -62,17 +61,16 @@ export async function POST(request: NextRequest) {
     typeof body.workspaceId !== 'string' || body.workspaceId.length < 1 || body.workspaceId.length > 128
   ) return errorResponse(requestId, 422, 'INVALID_ARGUMENT', 'Informe um workspace válido.')
 
-  const session = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
-  if (!session) return errorResponse(requestId, 401, 'AUTH_INVALID', 'Entre para continuar.')
-  const nonceHash = uiSessionNonceHash(session.nonce)
-  const subjectHash = uiSessionSubjectHash(session.subject)
+  const sessionToken = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
+  if (!sessionToken) return errorResponse(requestId, 401, 'AUTH_INVALID', 'Entre para continuar.')
+  const nonceHash = uiSessionNonceHash(sessionToken)
   const environment = resolveApiEnvironment()
   const sessions = createUiSessionSecurityRepository()
   const members = createWorkspaceMemberRepository()
   try {
     const actor = await authenticateUiSessionService({
       repository: createApiClientRepository(), sessions, environment,
-    })(session, nonceHash, subjectHash)
+    })(sessionToken, nonceHash)
     const target = await resolveWorkspaceSwitchTargetService({ members })({
       memberId: actor.delegatedUserId!, workspaceId: body.workspaceId,
     })
@@ -90,16 +88,13 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date()
-    const nowSeconds = Math.floor(now.getTime() / 1000)
-    if (session.expiresAt <= nowSeconds) throw new DomainError('AUTH_INVALID', 'Apollo session expired')
-    const token = issueUiSession(session.subject, target.uiClientId, { now, expiresAt: session.expiresAt })
-    const nextSession = verifyUiSession(token, { now })
-    if (!nextSession) throw new DomainError('AUTH_INVALID', 'Rotated Apollo session is invalid')
+    const absoluteExpiresAt = new Date(actor.sessionExpiresAt)
+    if (absoluteExpiresAt <= now) throw new DomainError('AUTH_INVALID', 'Apollo session expired')
+    const token = issueUiSession()
     await rotateDurableUiSessionService({ sessions, now: () => now })({
       currentNonceHash: nonceHash,
-      session: nextSession,
-      nonceHash: uiSessionNonceHash(nextSession.nonce),
-      subjectHash,
+      grant: { clientId: target.uiClientId, issuedAt: now.toISOString(), expiresAt: absoluteExpiresAt.toISOString() },
+      nonceHash: uiSessionNonceHash(token),
       workspaceId: target.workspaceId,
       clientId: target.uiClientId,
       memberId: target.memberId,
@@ -109,7 +104,7 @@ export async function POST(request: NextRequest) {
       workspaceId: target.workspaceId,
       memberId: target.memberId,
       role: target.role,
-      expiresAt: new Date(nextSession.expiresAt * 1000).toISOString(),
+      expiresAt: absoluteExpiresAt.toISOString(),
       workspaces,
       rotated: true,
     }), { headers: publicApiHeaders(requestId) })
@@ -118,7 +113,7 @@ export async function POST(request: NextRequest) {
       secure: secureCookie(request),
       sameSite: 'strict',
       path: '/',
-      maxAge: nextSession.expiresAt - nowSeconds,
+      maxAge: Math.max(1, Math.floor((absoluteExpiresAt.getTime() - now.getTime()) / 1000)),
     })
     return response
   } catch (error) {

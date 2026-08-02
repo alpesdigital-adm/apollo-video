@@ -11,6 +11,7 @@ export interface AuthenticatedExternalActor {
   environment: ApiEnvironment
   scopes: ReadonlySet<string>
   delegatedUserId?: string
+  delegatedIdentityId?: string
   workspaceRole?: string
 }
 

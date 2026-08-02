@@ -11,23 +11,22 @@ import {
   APOLLO_SESSION_COOKIE,
   safeUiRedirect,
   uiSessionNonceHash,
-  uiSessionSubjectHash,
   verifyUiSession,
 } from '@/v2/infrastructure/security/ui-session'
 import { resolveApiEnvironment } from '@/v2/public-api/authentication'
 
 export async function readActiveUiPageSession() {
   const cookieStore = await cookies()
-  const session = verifyUiSession(cookieStore.get(APOLLO_SESSION_COOKIE)?.value)
-  if (!session) return null
+  const sessionToken = verifyUiSession(cookieStore.get(APOLLO_SESSION_COOKIE)?.value)
+  if (!sessionToken) return null
 
   try {
     const actor = await authenticateUiSessionService({
       repository: createApiClientRepository(),
       sessions: createUiSessionSecurityRepository(),
       environment: resolveApiEnvironment(),
-    })(session, uiSessionNonceHash(session.nonce), uiSessionSubjectHash(session.subject))
-    return { actor, session }
+    })(sessionToken, uiSessionNonceHash(sessionToken))
+    return { actor, sessionToken }
   } catch (error) {
     if (error instanceof DomainError && error.code === 'AUTH_INVALID') return null
     throw error
