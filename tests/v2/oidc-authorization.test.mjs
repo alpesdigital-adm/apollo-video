@@ -82,8 +82,11 @@ test('OIDC PKCE envelope is bound to its state and fails closed after tampering'
     () => protector.open(protectedVerifier, 'b'.repeat(64)),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
   )
+  const tamperedParts = protectedVerifier.split('.')
+  const authTag = tamperedParts.at(-1)
+  tamperedParts[tamperedParts.length - 1] = `${authTag.startsWith('x') ? 'y' : 'x'}${authTag.slice(1)}`
   await assert.rejects(
-    () => protector.open(`${protectedVerifier.slice(0, -1)}x`, 'a'.repeat(64)),
+    () => protector.open(tamperedParts.join('.'), 'a'.repeat(64)),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
   )
 })
