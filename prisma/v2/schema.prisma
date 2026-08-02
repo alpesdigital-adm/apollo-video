@@ -42,6 +42,7 @@ model V2Workspace {
   operationTelemetryEvents       V2OperationTelemetryEvent[]
   operationTelemetryAlerts       V2OperationTelemetryAlert[]
   uiSessions                     V2UiSession[]
+  workspaceMembers               V2WorkspaceMember[]
   renderOperations                V2ArtifactRenderOperation[]
   publicEventOutbox               V2PublicEventOutbox[]
   webhookEndpoints                V2WebhookEndpoint[]
@@ -1647,6 +1648,7 @@ model V2UiSession {
   nonceHash      String    @id @db.Char(64)
   workspaceId    String    @db.VarChar(128)
   clientId       String    @db.VarChar(80)
+  memberId       String    @db.Uuid
   subjectHash    String    @db.Char(64)
   issuedAt       DateTime  @db.Timestamptz(3)
   lastSeenAt     DateTime  @db.Timestamptz(3)
@@ -1657,10 +1659,46 @@ model V2UiSession {
 
   workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   client    V2ApiClient @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  member    V2WorkspaceMember @relation(fields: [memberId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
 
   @@index([workspaceId, clientId, expiresAt])
+  @@index([memberId, expiresAt])
   @@index([expiresAt])
   @@map("ui_sessions")
+}
+
+model V2HumanIdentity {
+  id          String    @id @db.Uuid
+  issuer      String    @db.VarChar(512)
+  subjectHash String    @db.Char(64)
+  status      String    @default("active") @db.VarChar(32)
+  createdAt   DateTime  @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  memberships V2WorkspaceMember[]
+
+  @@unique([issuer, subjectHash])
+  @@index([status])
+  @@map("human_identities")
+}
+
+model V2WorkspaceMember {
+  id          String    @id @db.Uuid
+  workspaceId String    @db.VarChar(128)
+  identityId  String    @db.Uuid
+  role        String    @db.VarChar(32)
+  status      String    @default("active") @db.VarChar(32)
+  createdAt   DateTime  @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  identity  V2HumanIdentity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  sessions  V2UiSession[]
+
+  @@unique([workspaceId, identityId])
+  @@unique([id, workspaceId])
+  @@index([workspaceId, status, role])
+  @@map("workspace_members")
 }
 
 model V2UiLoginThrottle {

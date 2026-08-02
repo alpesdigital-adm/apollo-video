@@ -226,8 +226,10 @@ import {
 import type { OperationTelemetrySink } from '../application/ports/operation-telemetry.ts'
 import type { OperationTelemetryQueryRepository } from '../application/ports/operation-telemetry-query-repository.ts'
 import type { UiSessionSecurityRepository } from '../application/ports/ui-session-security-repository.ts'
+import type { WorkspaceMemberRepository } from '../application/ports/workspace-member-repository.ts'
 import { PrismaOperationTelemetryRepository } from './prisma/operation-telemetry-repository.ts'
 import { PrismaUiSessionSecurityRepository } from './prisma/ui-session-security-repository.ts'
+import { PrismaWorkspaceMemberRepository } from './prisma/workspace-member-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
 import { PrismaWebhookFanoutRepository } from './prisma/webhook-fanout-repository.ts'
@@ -793,6 +795,10 @@ export function createOperationTelemetryQueryRepository(): OperationTelemetryQue
 
 export function createUiSessionSecurityRepository(): UiSessionSecurityRepository {
   return new PrismaUiSessionSecurityRepository(resolveV2Client())
+}
+
+export function createWorkspaceMemberRepository(): WorkspaceMemberRepository {
+  return new PrismaWorkspaceMemberRepository(resolveV2Client())
 }
 
 export function createWebhookRegistrationRepository(): WebhookRegistrationRepository {

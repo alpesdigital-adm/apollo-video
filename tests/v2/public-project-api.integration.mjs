@@ -115,6 +115,7 @@ test('authenticated public API manages projects, clients and artifact inspection
   const uiSessionSecret = 'public-api-ui-session-secret-with-at-least-32-characters'
   const uiEnvironment = {
     APOLLO_UI_API_CLIENT_ID: apiClientId,
+    APOLLO_UI_BOOTSTRAP_ROLE: 'administrator',
     APOLLO_UI_PASSWORD_HASH: uiPasswordHash,
     APOLLO_UI_SESSION_SECRET: uiSessionSecret,
     APOLLO_UI_USERNAME: uiUsername,
@@ -221,6 +222,8 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2HumanIdentity.deleteMany({ where: { issuer: 'urn:apollo:bootstrap', subjectHash: uiSessionSubjectHash(uiUsername, uiEnvironment) } })
     await client.v2Workspace.deleteMany({ where: { id: { in: workspaceIds } } })
   }
 
@@ -642,6 +645,14 @@ test('authenticated public API manages projects, clients and artifact inspection
       .get('set-cookie')
       ?.match(new RegExp(`${APOLLO_SESSION_COOKIE}=([^;]+)`))?.[1]
     assert.ok(formUiSession)
+    const persistedMember = await client.v2WorkspaceMember.findFirst({
+      where: { workspaceId, status: 'active', identity: { issuer: 'urn:apollo:bootstrap', status: 'active' } },
+      include: { identity: true },
+    })
+    assert.ok(persistedMember)
+    assert.equal(persistedMember.role, 'administrator')
+    assert.equal(persistedMember.identity.subjectHash, uiSessionSubjectHash(uiUsername, uiEnvironment))
+    assert.equal(await client.v2UiSession.count({ where: { workspaceId, memberId: persistedMember.id } }), 2)
     for (const pathname of ['/', '/batches', '/projects/session-route-proof']) {
       const protectedPageResponse = await fetch(`${baseUrl}${pathname}`, {
         headers: { cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}` },

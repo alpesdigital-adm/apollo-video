@@ -34,6 +34,8 @@ export function authenticateUiSessionService(dependencies: {
       clientId: client.id,
       credentialId: `ui-session:${session.nonce}`,
       workspaceId: client.workspaceId,
+      delegatedUserId: durable.memberId,
+      workspaceRole: durable.memberRole,
       environment: client.environment,
       scopes: new Set(client.scopes),
       sessionExpiresAt: durable.expiresAt,

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { authenticateUiSessionService } from '../../src/v2/application/authenticate-ui-session.ts'
+import { provisionBootstrapWorkspaceMemberService } from '../../src/v2/application/workspace-members.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createUiPasswordHash,
@@ -68,7 +69,7 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
   const sessions = {
     async readActiveAndTouch({ nonceHash }) {
       return nonceHash === 'a'.repeat(64)
-        ? { nonceHash, workspaceId: 'workspace-1', clientId: 'apollo-ui-client', subjectHash: 'b'.repeat(64), issuedAt: '1970-01-01T00:00:01.000Z', lastSeenAt: '1970-01-01T00:00:01.000Z', idleExpiresAt: '1970-01-01T00:00:02.000Z', expiresAt: '1970-01-01T00:00:02.000Z' }
+        ? { nonceHash, workspaceId: 'workspace-1', clientId: 'apollo-ui-client', memberId: 'member-1', memberRole: 'director', subjectHash: 'b'.repeat(64), issuedAt: '1970-01-01T00:00:01.000Z', lastSeenAt: '1970-01-01T00:00:01.000Z', idleExpiresAt: '1970-01-01T00:00:02.000Z', expiresAt: '1970-01-01T00:00:02.000Z' }
         : null
     },
   }
@@ -85,6 +86,8 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
     nonce: 'fixed-session-nonce',
   }, 'a'.repeat(64), 'b'.repeat(64))
   assert.equal(actor.workspaceId, 'workspace-1')
+  assert.equal(actor.delegatedUserId, 'member-1')
+  assert.equal(actor.workspaceRole, 'director')
   assert.equal(actor.scopes.has('projects:write'), true)
   await assert.rejects(
     () => authenticateUiSessionService({ repository, sessions, environment: 'sandbox' })({
@@ -121,4 +124,30 @@ test('V2 pages require the durable server-side session and login never trusts th
   const loginProxyBranch = sources.proxy.match(/if \(pathname === '\/login'\) \{([\s\S]*?)\n  \}/)?.[1] ?? ''
   assert.match(loginProxyBranch, /return NextResponse\.next\(\)/)
   assert.doesNotMatch(loginProxyBranch, /authenticated|NextResponse\.redirect/)
+})
+
+test('authenticated bootstrap identity provisions one active workspace role without role escalation on replay', async () => {
+  const persisted = new Map()
+  const members = {
+    async provisionBootstrapMembership(input) {
+      const key = `${input.issuer}:${input.subjectHash}:${input.workspaceId}`
+      if (persisted.has(key)) return persisted.get(key)
+      const member = { id: input.memberId, workspaceId: input.workspaceId, identityId: input.identityId, role: input.role, status: 'active', createdAt: input.now }
+      persisted.set(key, member)
+      return member
+    },
+  }
+  let sequence = 0
+  const provision = provisionBootstrapWorkspaceMemberService({
+    members, id: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`,
+    clock: () => new Date('2026-08-02T00:00:00.000Z'),
+  })
+  const first = await provision({ issuer: 'urn:apollo:bootstrap', subjectHash: 'a'.repeat(64), workspaceId: 'workspace-1', role: 'reviewer' })
+  const replay = await provision({ issuer: 'urn:apollo:bootstrap', subjectHash: 'a'.repeat(64), workspaceId: 'workspace-1', role: 'administrator' })
+  assert.equal(replay.id, first.id)
+  assert.equal(replay.role, 'reviewer')
+  await assert.rejects(
+    () => provision({ issuer: 'https://untrusted.example', subjectHash: 'a'.repeat(64), workspaceId: 'workspace-1', role: 'reviewer' }),
+    (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+  )
 })

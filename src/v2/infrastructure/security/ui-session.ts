@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from
 
 import { DomainError } from '../../domain/errors.ts'
 import type { ApolloUiSession } from '../../domain/ui-session.ts'
+import { assertWorkspaceMemberRole, type WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 export const APOLLO_SESSION_COOKIE = 'apollo_session'
 export const APOLLO_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60
@@ -36,6 +37,16 @@ export function configuredUiApiClientId(environment: NodeJS.ProcessEnv = process
     throw new DomainError('AUTH_NOT_CONFIGURED', 'APOLLO_UI_API_CLIENT_ID is invalid')
   }
   return value
+}
+
+export function configuredUiBootstrapRole(environment: NodeJS.ProcessEnv = process.env): WorkspaceMemberRole {
+  const value = requiredEnvironmentValue('APOLLO_UI_BOOTSTRAP_ROLE', environment, 3)
+  try {
+    assertWorkspaceMemberRole(value)
+    return value
+  } catch {
+    throw new DomainError('AUTH_NOT_CONFIGURED', 'APOLLO_UI_BOOTSTRAP_ROLE is invalid')
+  }
 }
 
 function sessionSecret(environment: NodeJS.ProcessEnv): string {

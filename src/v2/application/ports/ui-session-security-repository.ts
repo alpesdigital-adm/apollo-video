@@ -1,4 +1,5 @@
 import type { ApolloUiSession } from '../../domain/ui-session.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 export type UiLoginAttemptOutcome = 'succeeded' | 'invalid' | 'configuration-error'
 
@@ -6,6 +7,8 @@ export interface DurableUiSessionRecord {
   nonceHash: string
   workspaceId: string
   clientId: string
+  memberId: string
+  memberRole: WorkspaceMemberRole
   subjectHash: string
   issuedAt: string
   lastSeenAt: string
@@ -20,6 +23,7 @@ export interface UiSessionSecurityRepository {
     nonceHash: string
     subjectHash: string
     workspaceId: string
+    memberId: string
     idleTtlSeconds: number
   }>): Promise<Readonly<DurableUiSessionRecord>>
   readActiveAndTouch(input: Readonly<{ nonceHash: string; now: string; idleTtlSeconds: number }>): Promise<Readonly<DurableUiSessionRecord> | null>

@@ -8,11 +8,12 @@ import type {
 import { DomainError } from '../../domain/errors.ts'
 
 function hydrate(row: {
-  nonceHash: string; workspaceId: string; clientId: string; subjectHash: string
+  nonceHash: string; workspaceId: string; clientId: string; memberId: string; subjectHash: string
   issuedAt: Date; lastSeenAt: Date; idleExpiresAt: Date; expiresAt: Date; revokedAt: Date | null
-}): Readonly<DurableUiSessionRecord> {
+}, memberRole: string): Readonly<DurableUiSessionRecord> {
   return Object.freeze({
     nonceHash: row.nonceHash, workspaceId: row.workspaceId, clientId: row.clientId,
+    memberId: row.memberId, memberRole: memberRole as DurableUiSessionRecord['memberRole'],
     subjectHash: row.subjectHash, issuedAt: row.issuedAt.toISOString(), lastSeenAt: row.lastSeenAt.toISOString(),
     idleExpiresAt: row.idleExpiresAt.toISOString(), expiresAt: row.expiresAt.toISOString(),
     ...(row.revokedAt ? { revokedAt: row.revokedAt.toISOString() } : {}),
@@ -33,23 +34,23 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
     const expiresAt = new Date(input.session.expiresAt * 1000)
     const idleExpiresAt = new Date(Math.min(expiresAt.getTime(), issuedAt.getTime() + input.idleTtlSeconds * 1000))
     const row = await this.client.v2UiSession.create({ data: {
-      nonceHash: input.nonceHash, workspaceId: input.workspaceId, clientId: input.session.clientId,
+      nonceHash: input.nonceHash, workspaceId: input.workspaceId, clientId: input.session.clientId, memberId: input.memberId,
       subjectHash: input.subjectHash, issuedAt, lastSeenAt: issuedAt, idleExpiresAt, expiresAt,
-    } })
-    return hydrate(row)
+    }, include: { member: true } })
+    return hydrate(row, row.member.role)
   }
 
   async readActiveAndTouch(input: Parameters<UiSessionSecurityRepository['readActiveAndTouch']>[0], retry = 0): Promise<Readonly<DurableUiSessionRecord> | null> {
     const now = new Date(input.now)
     try {
       return await this.client.$transaction(async (transaction) => {
-        const current = await transaction.v2UiSession.findUnique({ where: { nonceHash: input.nonceHash } })
-        if (!current || current.revokedAt || current.expiresAt <= now || current.idleExpiresAt <= now) return null
+        const current = await transaction.v2UiSession.findUnique({ where: { nonceHash: input.nonceHash }, include: { member: { include: { identity: true } } } })
+        if (!current || current.revokedAt || current.expiresAt <= now || current.idleExpiresAt <= now || current.member.status !== 'active' || current.member.identity.status !== 'active') return null
         const idleExpiresAt = new Date(Math.min(current.expiresAt.getTime(), now.getTime() + input.idleTtlSeconds * 1000))
         const updated = await transaction.v2UiSession.update({
-          where: { nonceHash: input.nonceHash }, data: { lastSeenAt: now, idleExpiresAt },
+          where: { nonceHash: input.nonceHash }, data: { lastSeenAt: now, idleExpiresAt }, include: { member: true },
         })
-        return hydrate(updated)
+        return hydrate(updated, updated.member.role)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (prismaCode(error, 'P2034') && retry < 3) return this.readActiveAndTouch(input, retry + 1)

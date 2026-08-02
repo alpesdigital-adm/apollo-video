@@ -11,7 +11,7 @@ const REQUEST_ID = /^[A-Za-z0-9_-]{8,100}$/
 
 export function createDurableUiSessionService(dependencies: { sessions: UiSessionSecurityRepository }) {
   return async function create(input: {
-    session: ApolloUiSession; nonceHash: string; subjectHash: string; workspaceId: string
+    session: ApolloUiSession; nonceHash: string; subjectHash: string; workspaceId: string; memberId: string
   }) {
     assertDomain(HASH.test(input.nonceHash) && HASH.test(input.subjectHash), 'INVALID_ARGUMENT', 'Session hashes are invalid')
     return dependencies.sessions.createSession({ ...input, idleTtlSeconds: UI_SESSION_IDLE_TTL_SECONDS })

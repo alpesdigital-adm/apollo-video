@@ -10,6 +10,8 @@ export interface AuthenticatedExternalActor {
   workspaceId: string
   environment: ApiEnvironment
   scopes: ReadonlySet<string>
+  delegatedUserId?: string
+  workspaceRole?: string
 }
 
 export interface AuthenticateApiClientDependencies {

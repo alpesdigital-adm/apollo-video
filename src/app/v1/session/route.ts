@@ -10,11 +10,13 @@ import {
   settleUiLoginAttemptService,
 } from '@/v2/application/manage-ui-session-security'
 import { DomainError } from '@/v2/domain/errors'
-import { createApiClientRepository, createUiSessionSecurityRepository } from '@/v2/infrastructure/repository-factory'
+import { provisionBootstrapWorkspaceMemberService } from '@/v2/application/workspace-members'
+import { createApiClientRepository, createUiSessionSecurityRepository, createWorkspaceMemberRepository } from '@/v2/infrastructure/repository-factory'
 import {
   APOLLO_SESSION_COOKIE,
   APOLLO_SESSION_MAX_AGE_SECONDS,
   configuredUiApiClientId,
+  configuredUiBootstrapRole,
   configuredUiUsername,
   issueUiSession,
   safeUiRedirect,
@@ -208,6 +210,18 @@ export async function POST(request: NextRequest) {
   }
 
   const subject = configuredUiUsername()
+  let member
+  try {
+    member = await provisionBootstrapWorkspaceMemberService({
+      members: createWorkspaceMemberRepository(), id: randomUUID,
+    })({
+      issuer: 'urn:apollo:bootstrap', subjectHash: uiSessionSubjectHash(subject),
+      workspaceId, role: configuredUiBootstrapRole(),
+    })
+  } catch {
+    await settleSafely('configuration-error')
+    return sessionError(requestId, 503, 'LOGIN_NOT_CONFIGURED', 'O acesso ao workspace ainda não foi configurado.', { category: 'internal' })
+  }
   const token = issueUiSession(subject, clientId)
   const session = verifyUiSession(token)
   if (!session) {
@@ -222,7 +236,7 @@ export async function POST(request: NextRequest) {
   }
   try {
     await createDurableUiSessionService({ sessions })({
-      session, nonceHash: uiSessionNonceHash(session.nonce), subjectHash: uiSessionSubjectHash(subject), workspaceId,
+      session, nonceHash: uiSessionNonceHash(session.nonce), subjectHash: uiSessionSubjectHash(subject), workspaceId, memberId: member.id,
     })
     if (!await settleSafely('succeeded')) throw new Error('login settlement failed')
   } catch {
