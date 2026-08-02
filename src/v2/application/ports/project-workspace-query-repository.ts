@@ -16,7 +16,7 @@ export interface ProjectWorkspaceMediaRecord {
 
 export interface ProjectWorkspaceRecord {
   project: {
-    id: string; workspaceId: string; name: string; status: string; objective?: string;
+    id: string; workspaceId: string; name: string; status: ProjectStatus; objective?: string;
     format?: string; locale?: string; currentVersionId?: string; createdAt: string
   }
   version?: { id: string; sequence: number; baseHash: string; createdAt: string }
@@ -47,3 +47,4 @@ export interface ProjectWorkspaceRecord {
 export interface ProjectWorkspaceQueryRepository {
   read(input: { workspaceId: string; projectId: string }): Promise<Readonly<ProjectWorkspaceRecord> | null>
 }
+import type { ProjectStatus } from '../../domain/project.ts'

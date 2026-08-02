@@ -7,8 +7,9 @@ import { listProjectsService } from '../../src/v2/application/list-projects.ts'
 import { PROJECT_STATUSES } from '../../src/v2/domain/project.ts'
 import { presentProjectVisibleState } from '../../src/v2/domain/visible-state.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
-import { presentProjectV2 } from '../../src/v2/public-api/presenters.ts'
+import { presentProjectV2, presentProjectWorkspaceV6 } from '../../src/v2/public-api/presenters.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
+import { PrismaProjectWorkspaceQueryRepository } from '../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts'
 
 function project(id, createdAt) {
   return { id, workspaceId: 'workspace-projects-1', name: id, status: 'draft', createdAt }
@@ -116,4 +117,51 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
   const invalidAction = structuredClone(validBody)
   invalidAction.data.projects[0].visibleState.primaryAction = 'inspect-error'
   assert.equal(validate(invalidAction), false)
+})
+
+test('T-FR-236 aligns both workspace capabilities on visible project and operation state', async () => {
+  const publicWorkspace = presentProjectWorkspaceV6({
+    project: {
+      id: 'project-workspace-visible-1', workspaceId: 'workspace-projects-1',
+      name: 'Visible workspace', status: 'reviewing-proxy', objective: 'discovery',
+      format: '9:16', locale: 'pt-BR', currentVersionId: 'version-visible-1',
+      createdAt: '2026-08-01T12:00:00.000Z',
+    },
+    commands: [], directorRuns: [], media: [], transcripts: [], operationIds: [], operations: [],
+  })
+  assert.equal(publicWorkspace.project.visibleState.label, 'reviewing-proxy')
+  assert.equal(publicWorkspace.project.visibleState.primaryAction, 'review-output')
+
+  const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
+  for (const id of ['apollo.projects.workspace.read', 'apollo.projects.workspace.current.read']) {
+    assert.equal(capabilities.get(id).version, '5.0.0')
+    assert.equal(capabilities.get(id).outputSchemaRef, 'apollo://schemas/project-workspace/v6')
+  }
+  assert.equal(getPublicSchema('apollo://schemas/project-workspace/v5').ref, 'apollo://schemas/project-workspace/v5')
+  const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+    .compile(getPublicSchema('apollo://schemas/project-workspace/v6').schema)
+  const validBody = { data: publicWorkspace, meta: { apiVersion: 'v1' } }
+  assert.equal(validate(validBody), true, JSON.stringify(validate.errors))
+  const mismatch = structuredClone(validBody)
+  mismatch.data.project.visibleState.label = 'completed'
+  assert.equal(validate(mismatch), false)
+
+  const repository = new PrismaProjectWorkspaceQueryRepository({
+    v2Project: {
+      async findFirst() {
+        return {
+          id: 'project-workspace-corrupt-1', workspaceId: 'workspace-projects-1',
+          name: 'Corrupt workspace', status: 'invented-phase', objective: null, format: null,
+          locale: null, currentVersionId: null, currentVersion: null,
+          editCommands: [], directorRuns: [], mediaAssets: [], mediaTranscripts: [],
+          mediaIngestOperations: [], proxyRenderOperations: [], finalExportOperations: [],
+          createdAt: new Date('2026-08-01T12:00:00.000Z'),
+        }
+      },
+    },
+  })
+  await assert.rejects(
+    () => repository.read({ workspaceId: 'workspace-projects-1', projectId: 'project-workspace-corrupt-1' }),
+    /Stored project status is invalid/,
+  )
 })

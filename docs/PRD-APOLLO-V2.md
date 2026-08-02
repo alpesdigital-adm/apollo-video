@@ -1778,9 +1778,10 @@ As 14 fases persistidas de Project também formam um enum fechado. Sua projeçã
 mantém o mesmo label da fase técnica, usa progresso indeterminado durante
 processamento, ação de revisão nas duas fases de review e 100% somente em
 `completed`; `failed`, `canceled` e `archived` são terminais sem inventar
-percentual. Create/list expõem esse contrato de forma aditiva. Workspace,
-matriz canônica das transições persistidas, E2E PostgreSQL, deploy e aceite
-continuam pendentes.
+percentual. Create/list e as duas leituras de workspace expõem esse contrato de
+forma aditiva; operações aninhadas no workspace usam a mesma projeção das
+capabilities de operações. Matriz canônica das transições persistidas, estado
+de versão, E2E PostgreSQL, deploy e aceite continuam pendentes.
 
 ---
 

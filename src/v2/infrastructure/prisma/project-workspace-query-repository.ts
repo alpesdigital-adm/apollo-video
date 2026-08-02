@@ -2,6 +2,14 @@ import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { ProjectWorkspaceQueryRepository, ProjectWorkspaceMediaRecord } from '../../application/ports/project-workspace-query-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { PROJECT_STATUSES, type ProjectStatus } from '../../domain/project.ts'
+
+function hydrateProjectStatus(value: string): ProjectStatus {
+  if (!PROJECT_STATUSES.includes(value as ProjectStatus)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project status is invalid')
+  }
+  return value as ProjectStatus
+}
 
 function parseJson(value: string, field: string): Record<string, unknown> {
   try {
@@ -33,7 +41,11 @@ function probeFromManifest(value: string): ProjectWorkspaceMediaRecord['probe'] 
 }
 
 export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQueryRepository {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) {
+    this.client = client
+  }
 
   async read(input: { workspaceId: string; projectId: string }) {
     const project = await this.client.v2Project.findFirst({
@@ -149,7 +161,8 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
     })
     return Object.freeze({
       project: Object.freeze({
-        id: project.id, workspaceId: project.workspaceId, name: project.name, status: project.status,
+        id: project.id, workspaceId: project.workspaceId, name: project.name,
+        status: hydrateProjectStatus(project.status),
         ...(project.objective ? { objective: project.objective } : {}), ...(project.format ? { format: project.format } : {}),
         ...(project.locale ? { locale: project.locale } : {}), ...(project.currentVersionId ? { currentVersionId: project.currentVersionId } : {}),
         createdAt: project.createdAt.toISOString(),

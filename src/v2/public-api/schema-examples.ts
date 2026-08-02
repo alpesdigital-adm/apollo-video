@@ -7334,6 +7334,50 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-workspace/v6': [
+      {
+        data: {
+          project: {
+            id: projectId, workspaceId, name: 'Anuncio de descoberta', status: 'completed',
+            objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'completed', tone: 'success',
+              progress: { mode: 'complete', percent: 100 }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: true,
+            },
+          },
+          version: { id: 'project-version-example-4', sequence: 4, baseHash: 'd'.repeat(64), createdAt },
+          editPlan: { id: 'edit-plan-example-4', state: 'compiled', fps: 30, durationFrames: 2380, clipCount: 3, cutCount: 2, automaticZoom: false, subtitleFaceProtection: true },
+          commands: [{
+            id: 'edit-command-director-example-1', type: 'run-director', baseVersionId: 'project-version-example-3',
+            resultVersionId: 'project-version-example-4', reason: 'Planejar e revisar a composicao completa.', createdAt,
+          }],
+          directorRuns: [{
+            id: 'director-run-example-1', status: 'succeeded', plannerVersion: 'apollo-director-policy/v1', criticVersion: 'apollo-director-critic/v1',
+            baseVersionId: 'project-version-example-3', resultVersionId: 'project-version-example-4',
+            treatmentSnapshotId: 'project-snapshot-treatment-1', storySnapshotId: 'project-snapshot-story-1', qualitySnapshotId: 'project-snapshot-quality-1',
+            qualityStatus: 'approved-with-warnings', qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+          }],
+          media: [{
+            id: 'project-media-final-example-1', role: 'final-output', originalFileName: 'video-final-1080x1920.mp4',
+            artifactId: 'artifact-final-example-1', manifestId: 'manifest-final-example-1', mediaType: 'video', container: 'mp4',
+            byteSize: '6234567', sha256: 'f'.repeat(64), status: 'available', probe: { width: 1080, height: 1920, duration: 79.3, fps: 30 }, createdAt,
+          }],
+          transcripts: [],
+          operationIds: [queuedProjectFinalExportOperationExample.id],
+          operations: [{
+            ...queuedProjectFinalExportOperationExample,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'queued', tone: 'neutral',
+              progress: { mode: 'not-started', percent: 0 }, primaryAction: 'view-progress',
+              availableActions: ['view-progress', 'cancel'], terminal: false,
+            },
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-created/v3': [
       {
         data: {

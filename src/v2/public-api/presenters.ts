@@ -17,6 +17,7 @@ import {
   presentProjectVisibleState,
 } from '../domain/visible-state.ts'
 import type { Project } from '../domain/project.ts'
+import type { ProjectWorkspaceRecord } from '../application/ports/project-workspace-query-repository.ts'
 import type { ManualEditInvalidationView } from '../application/ports/manual-edit-repository.ts'
 import type {
   WebhookDeliveryDiagnosticRecord,
@@ -171,6 +172,18 @@ export function presentProjectV2(
     currentVersionId: project.currentVersionId,
     createdAt: project.createdAt,
     visibleState: presentProjectVisibleState(project.status),
+  })
+}
+
+export function presentProjectWorkspaceV6(
+  workspace: Readonly<ProjectWorkspaceRecord> & {
+    operations: readonly Readonly<PublicOperation>[]
+  },
+) {
+  return Object.freeze({
+    ...workspace,
+    project: presentProjectV2(workspace.project),
+    operations: Object.freeze(workspace.operations.map(presentPublicOperationV2)),
   })
 }
 
