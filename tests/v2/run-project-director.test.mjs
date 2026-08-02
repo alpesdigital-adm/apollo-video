@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
+import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
@@ -196,6 +197,10 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.invalidations.every((item) => item.status === 'stale' && item.impactHash === result.impact.impactHash), true)
   assert.equal(repository.lastBundle.event.data.commandImpactHash, result.impact.impactHash)
   assert.equal(repository.lastBundle.event.data.artifactInvalidationCount, 2)
+  assert.deepEqual(
+    parseDirectorRunImpact(JSON.parse(stableSerialize(result.impact))),
+    result.impact,
+  )
   assert.throws(
     () => parseDirectorRunImpact({ ...result.impact, impactHash: 'f'.repeat(64) }),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
