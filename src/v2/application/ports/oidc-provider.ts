@@ -6,7 +6,6 @@ export interface OidcProviderConfiguration {
   recoveryUrl: string
   allowInsecureLoopback: boolean
 }
-
 export interface OidcProviderClaims {
   issuer: string
   subject: string
@@ -29,4 +28,3 @@ export interface OidcProvider {
     expectedNonceHash: string
   }>): Promise<Readonly<OidcProviderClaims>>
 }
-

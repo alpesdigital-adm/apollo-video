@@ -38,4 +38,3 @@ export default function OidcCallback({ code, state }: Readonly<{ code: string; s
     </main>
   )
 }
-

@@ -11,7 +11,6 @@ export interface OidcAuthorizationTransaction {
   expiresAt: string
   consumedAt?: string
 }
-
 export interface OidcAuthorizationRepository {
   create(input: Readonly<OidcAuthorizationTransaction>): Promise<void>
   consume(input: Readonly<{
@@ -21,4 +20,3 @@ export interface OidcAuthorizationRepository {
   }>): Promise<Readonly<OidcAuthorizationTransaction> | null>
   deleteExpired(input: Readonly<{ before: string; limit: number }>): Promise<number>
 }
-

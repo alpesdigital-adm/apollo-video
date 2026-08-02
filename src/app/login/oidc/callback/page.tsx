@@ -13,4 +13,3 @@ export default async function OidcCallbackPage({
   }
   return <OidcCallback code={code} state={state} />
 }
-

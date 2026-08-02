@@ -24,7 +24,6 @@ ALTER TABLE "oidc_authorizations"
         "browserBindingHash" ~ '^[a-f0-9]{64}$' AND
         "nonceHash" ~ '^[a-f0-9]{64}$'
     );
-
 ALTER TABLE "oidc_authorizations"
     ADD CONSTRAINT "oidc_authorizations_lifetime_check"
     CHECK (
@@ -32,4 +31,3 @@ ALTER TABLE "oidc_authorizations"
         "expiresAt" <= "createdAt" + INTERVAL '10 minutes' AND
         ("consumedAt" IS NULL OR "consumedAt" >= "createdAt")
     );
-
