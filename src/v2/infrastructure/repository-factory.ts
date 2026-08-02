@@ -219,6 +219,10 @@ import { PrismaProjectFinalExportRepository } from './prisma/project-final-expor
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
 import { StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
+import {
+  AlertingOperationTelemetry,
+  operationAlertThresholdsFromEnvironment,
+} from './alerting-operation-telemetry.ts'
 import type { OperationTelemetrySink } from '../application/ports/operation-telemetry.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
@@ -761,11 +765,18 @@ export function createMediaDownloadGrantRepository(): MediaDownloadGrantReposito
 }
 
 export function createPublicOperationRepository(
-  telemetry: OperationTelemetrySink = new StructuredConsoleOperationTelemetry(),
+  telemetry: OperationTelemetrySink = createConfiguredOperationTelemetry(),
 ): PublicOperationRepository {
   return new TelemetryPublicOperationRepository(
     new PrismaPublicOperationRepository(resolveV2Client()),
     telemetry,
+  )
+}
+
+function createConfiguredOperationTelemetry(environment: NodeJS.ProcessEnv = process.env): OperationTelemetrySink {
+  return new AlertingOperationTelemetry(
+    new StructuredConsoleOperationTelemetry(),
+    operationAlertThresholdsFromEnvironment(environment),
   )
 }
 
@@ -1186,7 +1197,7 @@ export function createPublicOperationWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
-  const telemetry = new StructuredConsoleOperationTelemetry()
+  const telemetry = createConfiguredOperationTelemetry(environment)
   const configuredLease = Number(environment.APOLLO_V2_WORKER_LEASE_MS)
   const configuredHeartbeat = Number(environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
   const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
@@ -1216,7 +1227,7 @@ export function createMediaIngestWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
-  const telemetry = new StructuredConsoleOperationTelemetry()
+  const telemetry = createConfiguredOperationTelemetry(environment)
   const configuredLease = Number(environment.APOLLO_V2_INGEST_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS)
   const configuredHeartbeat = Number(environment.APOLLO_V2_INGEST_HEARTBEAT_MS ?? environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
   const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
@@ -1243,7 +1254,7 @@ export function createLongFormIndexWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
-  const telemetry = new StructuredConsoleOperationTelemetry()
+  const telemetry = createConfiguredOperationTelemetry(environment)
   const configuredLease = Number(
     environment.APOLLO_V2_LONG_FORM_LEASE_MS ??
       environment.APOLLO_V2_WORKER_LEASE_MS,
@@ -1291,7 +1302,7 @@ export function createProjectProxyRenderWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
-  const telemetry = new StructuredConsoleOperationTelemetry()
+  const telemetry = createConfiguredOperationTelemetry(environment)
   const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
   if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
   const configuredLease = Number(environment.APOLLO_V2_RENDER_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS)
@@ -1319,7 +1330,7 @@ export function createProjectFinalExportWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
-  const telemetry = new StructuredConsoleOperationTelemetry()
+  const telemetry = createConfiguredOperationTelemetry(environment)
   const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
   if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
   const configuredLease = Number(environment.APOLLO_V2_RENDER_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS)
@@ -1350,7 +1361,7 @@ export function createSourceCleanupWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
-  const telemetry = new StructuredConsoleOperationTelemetry()
+  const telemetry = createConfiguredOperationTelemetry(environment)
   const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
   if (!artifactRoot) {
     throw new DomainError(
