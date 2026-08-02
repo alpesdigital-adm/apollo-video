@@ -41,6 +41,7 @@ model V2Workspace {
   publicOperations                V2PublicOperation[]
   operationTelemetryEvents       V2OperationTelemetryEvent[]
   operationTelemetryAlerts       V2OperationTelemetryAlert[]
+  uiSessions                     V2UiSession[]
   renderOperations                V2ArtifactRenderOperation[]
   publicEventOutbox               V2PublicEventOutbox[]
   webhookEndpoints                V2WebhookEndpoint[]
@@ -159,6 +160,7 @@ model V2ApiClient {
   workspace                       V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   credentials                     V2ApiCredential[]
   operations                      V2PublicOperation[]
+  uiSessions                      V2UiSession[]
   mediaUploads                    V2MediaUpload[]
   mediaDownloadGrants             V2MediaDownloadGrant[]
   createdWebhookEndpoints         V2WebhookEndpoint[]              @relation("WebhookEndpointCreator")
@@ -1639,6 +1641,51 @@ model V2OperationTelemetryAlert {
   @@index([workspaceId, severity, occurredAt(sort: Desc)])
   @@index([workspaceId, alertKind, occurredAt(sort: Desc)])
   @@map("operation_telemetry_alerts")
+}
+
+model V2UiSession {
+  nonceHash      String    @id @db.Char(64)
+  workspaceId    String    @db.VarChar(128)
+  clientId       String    @db.VarChar(80)
+  subjectHash    String    @db.Char(64)
+  issuedAt       DateTime  @db.Timestamptz(3)
+  lastSeenAt     DateTime  @db.Timestamptz(3)
+  idleExpiresAt  DateTime  @db.Timestamptz(3)
+  expiresAt      DateTime  @db.Timestamptz(3)
+  revokedAt      DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client    V2ApiClient @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@index([workspaceId, clientId, expiresAt])
+  @@index([expiresAt])
+  @@map("ui_sessions")
+}
+
+model V2UiLoginThrottle {
+  keyHash         String    @id @db.Char(64)
+  windowStartedAt DateTime  @db.Timestamptz(3)
+  attemptCount    Int
+  blockedUntil    DateTime? @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([blockedUntil])
+  @@map("ui_login_throttles")
+}
+
+model V2UiLoginAttempt {
+  id          String    @id @db.Uuid
+  keyHash     String    @db.Char(64)
+  subjectHash String    @db.Char(64)
+  requestId   String    @db.VarChar(100)
+  outcome     String    @db.VarChar(32)
+  occurredAt  DateTime  @db.Timestamptz(3)
+  settledAt   DateTime? @db.Timestamptz(3)
+
+  @@index([keyHash, occurredAt(sort: Desc)])
+  @@index([outcome, occurredAt(sort: Desc)])
+  @@map("ui_login_attempts")
 }
 
 model V2MediaIngestOperation {

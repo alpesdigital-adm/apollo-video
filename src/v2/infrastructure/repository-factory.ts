@@ -225,7 +225,9 @@ import {
 } from './alerting-operation-telemetry.ts'
 import type { OperationTelemetrySink } from '../application/ports/operation-telemetry.ts'
 import type { OperationTelemetryQueryRepository } from '../application/ports/operation-telemetry-query-repository.ts'
+import type { UiSessionSecurityRepository } from '../application/ports/ui-session-security-repository.ts'
 import { PrismaOperationTelemetryRepository } from './prisma/operation-telemetry-repository.ts'
+import { PrismaUiSessionSecurityRepository } from './prisma/ui-session-security-repository.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
 import { PrismaWebhookFanoutRepository } from './prisma/webhook-fanout-repository.ts'
@@ -787,6 +789,10 @@ function createConfiguredOperationTelemetry(environment: NodeJS.ProcessEnv = pro
 
 export function createOperationTelemetryQueryRepository(): OperationTelemetryQueryRepository {
   return new PrismaOperationTelemetryRepository(resolveV2Client())
+}
+
+export function createUiSessionSecurityRepository(): UiSessionSecurityRepository {
+  return new PrismaUiSessionSecurityRepository(resolveV2Client())
 }
 
 export function createWebhookRegistrationRepository(): WebhookRegistrationRepository {

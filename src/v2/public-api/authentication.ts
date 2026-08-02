@@ -4,10 +4,12 @@ import { authenticateApiClientService } from '../application/authenticate-api-cl
 import { authenticateUiSessionService } from '../application/authenticate-ui-session.ts'
 import type { ApiEnvironment } from '../domain/api-client.ts'
 import { DomainError } from '../domain/errors.ts'
-import { createApiClientRepository } from '../infrastructure/repository-factory.ts'
+import { createApiClientRepository, createUiSessionSecurityRepository } from '../infrastructure/repository-factory.ts'
 import { nodeApiCredentialCrypto } from '../infrastructure/security/api-credential.ts'
 import {
   APOLLO_SESSION_COOKIE,
+  uiSessionNonceHash,
+  uiSessionSubjectHash,
   verifyUiSession,
 } from '../infrastructure/security/ui-session.ts'
 import {
@@ -30,8 +32,11 @@ export async function authenticateExternalRequest(request: NextRequest) {
   const environment = resolveApiEnvironment()
   const authorization = request.headers.get('authorization')
   if (!authorization) {
-    return authenticateUiSessionService({ repository, environment })(
-      verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value),
+    const session = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
+    return authenticateUiSessionService({ repository, sessions: createUiSessionSecurityRepository(), environment })(
+      session,
+      session ? uiSessionNonceHash(session.nonce) : undefined,
+      session ? uiSessionSubjectHash(session.subject) : undefined,
     )
   }
   const authenticate = authenticateApiClientService({

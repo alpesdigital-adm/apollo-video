@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 
 import { DomainError } from '../../domain/errors.ts'
 import type { ApolloUiSession } from '../../domain/ui-session.ts'
@@ -40,6 +40,24 @@ export function configuredUiApiClientId(environment: NodeJS.ProcessEnv = process
 
 function sessionSecret(environment: NodeJS.ProcessEnv): string {
   return requiredEnvironmentValue('APOLLO_UI_SESSION_SECRET', environment, 32)
+}
+
+export function uiSessionNonceHash(nonce: string): string {
+  return createHash('sha256').update(nonce).digest('hex')
+}
+
+export function uiSessionSubjectHash(subject: string, environment: NodeJS.ProcessEnv = process.env): string {
+  return createHmac('sha256', sessionSecret(environment)).update(`subject:${subject}`).digest('hex')
+}
+
+export function uiLoginThrottleKey(
+  clientIdentifier: string,
+  username: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const source = clientIdentifier.trim().slice(0, 256) || 'unknown'
+  void username
+  return createHmac('sha256', sessionSecret(environment)).update(`login-source:${source}`).digest('hex')
 }
 
 export function createUiPasswordHash(

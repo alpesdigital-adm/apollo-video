@@ -94,7 +94,10 @@ test('authenticated public API manages projects, clients and artifact inspection
   const {
     APOLLO_SESSION_COOKIE,
     createUiPasswordHash,
+    uiLoginThrottleKey,
+    uiSessionNonceHash,
     verifyUiPassword,
+    verifyUiSession,
   } = await import('../../src/v2/infrastructure/security/ui-session.ts')
   const { createAesRecipeParameterCipher } = await import(
     '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
@@ -116,6 +119,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     APOLLO_UI_SESSION_SECRET: uiSessionSecret,
     APOLLO_UI_USERNAME: uiUsername,
   }
+  const uiThrottleKey = uiLoginThrottleKey('direct', uiUsername, uiEnvironment)
   assert.equal(verifyUiPassword(uiUsername, uiPassword, uiEnvironment), true)
   const sourceArtifactId = 'public-api-source-artifact-v2'
   const derivedArtifactId = 'public-api-derived-artifact-v2'
@@ -135,6 +139,9 @@ test('authenticated public API manages projects, clients and artifact inspection
   let serverDiagnostics = ''
 
   const cleanup = async () => {
+    await client.v2UiSession.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2UiLoginAttempt.deleteMany({ where: { keyHash: uiThrottleKey } })
+    await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: uiThrottleKey } })
     await client.v2WebhookDeliveryAttempt.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
@@ -647,6 +654,30 @@ test('authenticated public API manages projects, clients and artifact inspection
       uiLogoutResponse.headers.get('set-cookie') ?? '',
       new RegExp(`^${APOLLO_SESSION_COOKIE}=;`),
     )
+    const decodedUiSession = verifyUiSession(uiSession, { environment: uiEnvironment })
+    assert.ok(decodedUiSession)
+    assert.equal((await client.v2UiSession.findUnique({ where: { nonceHash: uiSessionNonceHash(decodedUiSession.nonce) } }))?.revokedAt instanceof Date, true)
+    assert.equal((await fetch(`${baseUrl}/v1/session`, { headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` } })).status, 401)
+    const invalidLoginStatuses = []
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      invalidLoginStatuses.push((await fetch(`${baseUrl}/v1/session`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: uiUsername, password: `wrong-password-${attempt}` }),
+      })).status)
+    }
+    assert.deepEqual(invalidLoginStatuses, [401, 401, 401, 401, 401, 429])
+    assert.equal((await fetch(`${baseUrl}/v1/session`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: uiUsername, password: uiPassword }),
+    })).status, 429)
+    const persistedLoginAttempts = await client.v2UiLoginAttempt.findMany({ where: { keyHash: uiThrottleKey }, orderBy: { occurredAt: 'asc' } })
+    assert.deepEqual(persistedLoginAttempts.reduce((counts, attempt) => ({ ...counts, [attempt.outcome]: (counts[attempt.outcome] ?? 0) + 1 }), {}), { succeeded: 2, invalid: 6, blocked: 1 })
+    assert.equal(persistedLoginAttempts.length, 9)
+    const persistedLoginText = JSON.stringify(persistedLoginAttempts)
+    assert.equal(persistedLoginText.includes(uiUsername), false)
+    assert.equal(persistedLoginText.includes(uiPassword), false)
+    assert.equal(persistedLoginText.includes('wrong-password'), false)
+    assert.equal((await client.v2UiLoginThrottle.findUnique({ where: { keyHash: uiThrottleKey } }))?.attemptCount, 6)
     assert.equal(serverDiagnostics.includes(uiPassword), false, 'UI password must never reach server logs')
 
     const openApiResponse = await fetch(`${baseUrl}/v1/openapi.json`)

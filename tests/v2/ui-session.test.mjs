@@ -7,6 +7,9 @@ import {
   createUiPasswordHash,
   issueUiSession,
   safeUiRedirect,
+  uiLoginThrottleKey,
+  uiSessionNonceHash,
+  uiSessionSubjectHash,
   verifyUiPassword,
   verifyUiSession,
 } from '../../src/v2/infrastructure/security/ui-session.ts'
@@ -38,6 +41,16 @@ test('UI password and signed session authenticate without storing plaintext', ()
   assert.equal(verifyUiSession(token, { environment, now: new Date('2026-07-19T02:00:00Z') }), null)
 })
 
+test('UI session and throttle identities are one-way and source-wide', () => {
+  const sourceKey = uiLoginThrottleKey('203.0.113.8', 'leandro', environment)
+  assert.equal(sourceKey, uiLoginThrottleKey('203.0.113.8', 'another-user', environment))
+  assert.notEqual(sourceKey, uiLoginThrottleKey('203.0.113.9', 'leandro', environment))
+  assert.match(sourceKey, /^[a-f0-9]{64}$/)
+  assert.equal(sourceKey.includes('203.0.113.8'), false)
+  assert.notEqual(uiSessionSubjectHash('leandro', environment), uiSessionSubjectHash('another-user', environment))
+  assert.match(uiSessionNonceHash('fixed-session-nonce'), /^[a-f0-9]{64}$/)
+})
+
 test('UI session resolves the active Postgres API actor and its scopes', async () => {
   const repository = {
     async findActiveClientById(id) {
@@ -51,8 +64,16 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
         : null
     },
   }
+  const sessions = {
+    async readActiveAndTouch({ nonceHash }) {
+      return nonceHash === 'a'.repeat(64)
+        ? { nonceHash, workspaceId: 'workspace-1', clientId: 'apollo-ui-client', subjectHash: 'b'.repeat(64), issuedAt: '1970-01-01T00:00:01.000Z', lastSeenAt: '1970-01-01T00:00:01.000Z', idleExpiresAt: '1970-01-01T00:00:02.000Z', expiresAt: '1970-01-01T00:00:02.000Z' }
+        : null
+    },
+  }
   const actor = await authenticateUiSessionService({
     repository,
+    sessions,
     environment: 'production',
   })({
     version: 1,
@@ -61,18 +82,18 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
     issuedAt: 1,
     expiresAt: 2,
     nonce: 'fixed-session-nonce',
-  })
+  }, 'a'.repeat(64), 'b'.repeat(64))
   assert.equal(actor.workspaceId, 'workspace-1')
   assert.equal(actor.scopes.has('projects:write'), true)
   await assert.rejects(
-    () => authenticateUiSessionService({ repository, environment: 'sandbox' })({
+    () => authenticateUiSessionService({ repository, sessions, environment: 'sandbox' })({
       version: 1,
       subject: 'leandro',
       clientId: 'apollo-ui-client',
       issuedAt: 1,
       expiresAt: 2,
       nonce: 'fixed-session-nonce',
-    }),
+    }, 'a'.repeat(64), 'b'.repeat(64)),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
   )
 })
