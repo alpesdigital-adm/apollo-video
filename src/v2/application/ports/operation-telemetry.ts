@@ -32,6 +32,8 @@ export interface PublicOperationTelemetryEvent {
   status: PublicOperationStatus
   phase: PublicOperation['phase']
   attempt: number
+  queueWaitMs?: number
+  runDurationMs?: number
 }
 
 export const PUBLIC_OPERATION_SPAN_TELEMETRY_SCHEMA_VERSION =
@@ -66,6 +68,19 @@ export interface PublicOperationSpanTelemetryEvent {
   spanKind: PublicOperationSpanKind
   spanName: PublicOperationSpanName
   durationMs?: number
+  inputBytes?: number
+  outputBytes?: number
+  inputTokens?: number
+  outputTokens?: number
+  costMinorUnits?: number
+}
+
+export interface PublicOperationSpanMetrics {
+  inputBytes?: number
+  outputBytes?: number
+  inputTokens?: number
+  outputTokens?: number
+  costMinorUnits?: number
 }
 
 export type OperationTelemetryEvent =

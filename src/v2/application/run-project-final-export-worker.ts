@@ -258,6 +258,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             spanName: 'ffmpeg-final-export',
             clock,
             action: render,
+            metrics: (result) => ({ outputBytes: result.byteSize }),
           })
         : await render()
       await enter('verifying')

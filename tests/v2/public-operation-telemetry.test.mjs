@@ -161,9 +161,11 @@ test('telemetry repository emits the durable worker lifecycle with one stable tr
   ])
   assert.equal(new Set(events.map((event) => event.traceId)).size, 1)
   assert.equal(events[0].traceId, 'request_trace_worker_lifecycle_001')
+  assert.equal(events[0].queueWaitMs, 1_000)
   assert.equal(events.every((event) => event.jobId === operation.id), true)
   assert.equal(events.at(-1).status, 'succeeded')
   assert.equal(events.at(-1).phase, 'completed')
+  assert.equal(events.at(-1).runDurationMs, 8_000)
 })
 
 test('telemetry failures never change durable repository results', async () => {

@@ -325,6 +325,7 @@ export function runNextLongFormIndexOperationService(
               spanName,
               clock,
               action: processStage,
+              metrics: (stageResult) => ({ costMinorUnits: stageResult.costMinorUnits }),
             })
           : await processStage()
         if (!(await heartbeat())) {

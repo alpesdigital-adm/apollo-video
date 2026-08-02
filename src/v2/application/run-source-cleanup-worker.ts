@@ -318,6 +318,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
             spanName: 'ffmpeg-source-cleanup',
             clock,
             action: processCleanup,
+            metrics: (result) => ({ outputBytes: result.byteSize }),
           })
         : await processCleanup()
       await enter('verifying')

@@ -188,6 +188,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             spanName: 'ffmpeg-editorial-proxy',
             clock,
             action: render,
+            metrics: (result) => ({ outputBytes: result.byteSize }),
           })
         : await render()
       await enter('verifying')

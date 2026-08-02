@@ -164,6 +164,7 @@ export function runNextMediaIngestOperationService(dependencies: {
             spanName: 'ffmpeg-media-normalize',
             clock,
             action: normalize,
+            metrics: (result) => ({ outputBytes: result.proxyByteSize }),
           })
         : await normalize()
       const proxyStored = await dependencies.storage.promoteDerived({

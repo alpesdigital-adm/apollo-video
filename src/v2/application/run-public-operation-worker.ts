@@ -203,6 +203,7 @@ export function runNextPublicOperationService(dependencies: {
             spanName: 'remotion-authorized-render',
             clock,
             action: render,
+            metrics: (result) => ({ outputBytes: result.output.byteSize }),
           })
         : await render()
 

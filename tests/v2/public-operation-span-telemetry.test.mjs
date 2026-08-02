@@ -49,6 +49,7 @@ test('provider and renderer span carries only durable identifiers and duration',
       '2026-08-02T19:00:03.250Z',
     ),
     action: async () => 'rendered',
+    metrics: () => ({ inputBytes: 2048, outputBytes: 1024, costMinorUnits: 7 }),
   })
 
   assert.equal(result, 'rendered')
@@ -57,6 +58,10 @@ test('provider and renderer span carries only durable identifiers and duration',
     'operation.span-succeeded',
   ])
   assert.equal(events[1].durationMs, 1_250)
+  assert.deepEqual(
+    { inputBytes: events[1].inputBytes, outputBytes: events[1].outputBytes, costMinorUnits: events[1].costMinorUnits },
+    { inputBytes: 2048, outputBytes: 1024, costMinorUnits: 7 },
+  )
   assert.equal(events[0].traceId, 'request_trace_span_test_001')
   assert.equal(events[0].jobId, 'operation-span-test')
   assert.equal(events[0].workspaceId, 'workspace-span-test')
@@ -64,6 +69,20 @@ test('provider and renderer span carries only durable identifiers and duration',
   assert.equal(events[0].attempt, 2)
   assert.equal(JSON.stringify(events).includes('artifact-span-test'), false)
   assert.equal(Object.isFrozen(events[0]), true)
+})
+
+test('span metric allowlist drops invalid values and never inspects provider payloads', async () => {
+  const events = []
+  const result = { secret: 'provider-payload', tokens: 12 }
+  assert.equal(await runPublicOperationSpan({
+    telemetry: { emit(event) { events.push(event) } }, record: record(),
+    spanKind: 'provider', spanName: 'groq-transcription',
+    action: async () => result,
+    metrics: () => ({ inputTokens: 12, outputTokens: -1, outputBytes: Number.NaN }),
+  }), result)
+  assert.equal(events.at(-1).inputTokens, 12)
+  assert.equal('outputTokens' in events.at(-1), false)
+  assert.equal(JSON.stringify(events).includes('provider-payload'), false)
 })
 
 test('failed span preserves the provider error and telemetry failures are isolated', async () => {

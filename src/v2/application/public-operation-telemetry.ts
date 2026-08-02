@@ -29,10 +29,18 @@ export function createPublicOperationTelemetryEvent(input: {
   occurredAt?: string
 }): Readonly<PublicOperationTelemetryEvent> {
   const projectId = projectIdOf(input.record)
+  const occurredAt = input.occurredAt ?? input.record.operation.updatedAt
+  const occurredAtMs = Date.parse(occurredAt)
+  const queueWaitMs = input.event === 'operation.claimed'
+    ? Math.max(0, occurredAtMs - Date.parse(input.record.operation.createdAt))
+    : undefined
+  const runDurationMs = ['operation.succeeded', 'operation.failed', 'operation.canceled'].includes(input.event) && input.record.operation.startedAt
+    ? Math.max(0, occurredAtMs - Date.parse(input.record.operation.startedAt))
+    : undefined
   return Object.freeze({
     schemaVersion: PUBLIC_OPERATION_TELEMETRY_SCHEMA_VERSION,
     event: input.event,
-    occurredAt: input.occurredAt ?? input.record.operation.updatedAt,
+    occurredAt,
     traceId: input.record.traceId ?? publicOperationTraceId({
       workspaceId: input.record.operation.workspaceId,
       operationId: input.record.operation.id,
@@ -44,5 +52,7 @@ export function createPublicOperationTelemetryEvent(input: {
     status: input.record.operation.status,
     phase: input.record.operation.phase,
     attempt: input.record.operation.attempt,
+    ...(queueWaitMs !== undefined ? { queueWaitMs } : {}),
+    ...(runDurationMs !== undefined ? { runDurationMs } : {}),
   })
 }

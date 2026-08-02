@@ -4,6 +4,7 @@ import type {
   OperationTelemetrySink,
   PublicOperationSpanKind,
   PublicOperationSpanName,
+  PublicOperationSpanMetrics,
   PublicOperationSpanTelemetryEvent,
 } from './ports/operation-telemetry.ts'
 import type {
@@ -40,6 +41,7 @@ export async function runPublicOperationSpan<T>(input: {
   spanName: PublicOperationSpanName
   clock?: () => Date
   action: () => Promise<T>
+  metrics?: (result: T) => Readonly<PublicOperationSpanMetrics>
 }): Promise<T> {
   const clock = input.clock ?? (() => new Date())
   const startedAt = clock()
@@ -79,11 +81,20 @@ export async function runPublicOperationSpan<T>(input: {
   try {
     const result = await input.action()
     const completedAt = clock()
+    let metrics: PublicOperationSpanMetrics = {}
+    try {
+      const measured = input.metrics?.(result) ?? {}
+      metrics = Object.fromEntries(Object.entries(measured).filter(([, value]) =>
+        Number.isSafeInteger(value) && (value as number) >= 0))
+    } catch {
+      // Invalid measurement must not alter provider or renderer behavior.
+    }
     emitSafely(input.telemetry, Object.freeze({
       ...common,
       event: 'operation.span-succeeded',
       occurredAt: completedAt.toISOString(),
       durationMs: Math.max(0, completedAt.getTime() - startedAt.getTime()),
+      ...metrics,
     }))
     return result
   } catch (error) {
