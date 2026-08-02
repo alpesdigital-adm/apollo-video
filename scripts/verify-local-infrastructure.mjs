@@ -46,6 +46,7 @@ requires(envExample, /V2_DATABASE_URL=postgresql:\/\/apollo:[^\r\n]+@127\.0\.0\.
 requires(envExample, /APOLLO_V2_S3_ENDPOINT=http:\/\/127\.0\.0\.1:59000/, 'Local S3 endpoint must match the loopback compose port')
 requires(envExample, /APOLLO_V2_S3_BUCKET=apollo-video/, 'Local bucket must be explicit')
 requires(envExample, /APOLLO_V2_S3_FORCE_PATH_STYLE=true/, 'Local MinIO must use path-style addressing')
+requires(ci, /services:\s+[\s\S]*?postgres:\s+[\s\S]*?image: pgvector\/pgvector:0\.8\.5-pg16-trixie/, 'CI PostgreSQL must include the pinned pgvector extension used by migrations')
 requires(ci, /run: npm run infra:validate/, 'CI must enforce the local infrastructure contract')
 
 console.log('Local infrastructure contracts verified: PostgreSQL 16 and versioned MinIO are isolated and fail closed')
