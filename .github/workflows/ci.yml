@@ -94,6 +94,11 @@ jobs:
       - name: Apply database migrations
         run: npm run db:v2:migrate:deploy
 
+      - name: Run vertical upload-to-proxy smoke
+        run: npm run test:integration:vertical-smoke
+        env:
+          APOLLO_V2_VERTICAL_SMOKE: "1"
+
       - name: Run FFmpeg integration tests
         run: npm run test:integration:media
 
@@ -129,8 +134,3 @@ jobs:
 
       - name: Run public API integration tests
         run: npm run test:integration:api
-
-      - name: Run vertical upload-to-proxy smoke
-        run: npm run test:integration:vertical-smoke
-        env:
-          APOLLO_V2_VERTICAL_SMOKE: "1"
