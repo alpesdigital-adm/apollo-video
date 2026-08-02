@@ -217,6 +217,8 @@ import { PrismaProjectProxyRenderRepository } from './prisma/project-proxy-rende
 import { PrismaProxyReviewRepository } from './prisma/proxy-review-repository.ts'
 import { PrismaProjectFinalExportRepository } from './prisma/project-final-export-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
+import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
+import { StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
 import { PrismaWebhookFanoutRepository } from './prisma/webhook-fanout-repository.ts'
@@ -728,7 +730,10 @@ export function createMediaDownloadGrantRepository(): MediaDownloadGrantReposito
 }
 
 export function createPublicOperationRepository(): PublicOperationRepository {
-  return new PrismaPublicOperationRepository(resolveV2Client())
+  return new TelemetryPublicOperationRepository(
+    new PrismaPublicOperationRepository(resolveV2Client()),
+    new StructuredConsoleOperationTelemetry(),
+  )
 }
 
 export function createWebhookRegistrationRepository(): WebhookRegistrationRepository {

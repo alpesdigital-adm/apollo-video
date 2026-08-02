@@ -43,6 +43,26 @@ unused/explicit-any/empty-object rules are excluded until their underlying
 patterns can be migrated without a UI rewrite; architecture, typecheck and
 domain-language gates continue to cover their respective invariants.
 
+Durable public-operation telemetry is emitted through an application port, not
+from domain code. The production repository factory decorates operation
+lifecycle writes and emits a closed `public-operation-telemetry/v1` JSON
+envelope for creation/replay, claim, heartbeat, phase changes, waiting/resume,
+retry, cancellation, success and failure. The trace is deterministic from the
+workspace and operation identities, the operation ID is the job ID, and project
+ID is included only when the persisted operation context has that relationship.
+Type, status, phase and attempt are allowed; editorial payloads, file names,
+transcripts, URLs and artifact identities are structurally absent. Telemetry is
+best-effort and may never change the durable result. This is the worker-runtime
+foundation only: inbound request trace propagation, provider/renderer spans,
+complete metrics, dashboards and acceptance remain open under T-NFR-003.
+
+Canonical persisted documents must be compared with canonical serialization,
+never JavaScript insertion order. Hosted API integration exposed this at the
+project LUT impact boundary after the command-type constraint was corrected:
+the stored impact had identical content and hash but alphabetized keys. The
+hydrator now revalidates with `stableSerialize`, and a regression test performs
+the same canonical persistence round-trip.
+
 OIDC-verified identities become signed, expiring workspace sessions; production never trusts an unverified local identity. Workspace switching invalidates caches and subscriptions. Architecture imports are enforced by a CI boundary check. UI actions, REST endpoints and tests map through capability IDs, while sensitive internals have explicit deny-only reasons.
 
 Public operations generalize across ingest, Director, provider, sync, batch, render and export. Public conventions, deprecation/sunset headers, client kill switches and transition outbox events are stable application contracts.
