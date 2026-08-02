@@ -6654,6 +6654,77 @@ const publicOperationTargetSchema = {
   },
 }
 
+const reviewVersionVisibleStateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schemaVersion', 'label', 'tone', 'progress', 'primaryAction', 'availableActions', 'terminal'],
+  properties: {
+    schemaVersion: { const: 'visible-state/v1' },
+    label: { enum: ['current', 'superseded'] },
+    tone: { enum: ['neutral', 'info'] },
+    progress: {
+      type: 'object', additionalProperties: false, required: ['mode'],
+      properties: { mode: { const: 'none' } },
+    },
+    primaryAction: { enum: ['open-result', 'open-historical-output', 'inspect-history'] },
+    availableActions: {
+      type: 'array', minItems: 1, maxItems: 1, uniqueItems: true,
+      items: { enum: ['open-result', 'open-historical-output', 'inspect-history'] },
+    },
+    terminal: { type: 'boolean' },
+  },
+}
+
+const reviewVersionSchemaV2 = {
+  ...reviewVersionSchema,
+  required: [...reviewVersionSchema.required, 'visibleState'],
+  properties: { ...reviewVersionSchema.properties, visibleState: reviewVersionVisibleStateSchema },
+  oneOf: [
+    {
+      properties: {
+        current: { const: true },
+        visibleState: {
+          type: 'object',
+          properties: {
+            label: { const: 'current' }, tone: { const: 'info' },
+            primaryAction: { const: 'open-result' }, availableActions: { const: ['open-result'] },
+            terminal: { const: false },
+          },
+        },
+      },
+      required: ['current', 'visibleState'],
+    },
+    {
+      properties: {
+        current: { const: false }, previewAvailable: { const: true },
+        visibleState: {
+          type: 'object',
+          properties: {
+            label: { const: 'superseded' }, tone: { const: 'neutral' },
+            primaryAction: { const: 'open-historical-output' },
+            availableActions: { const: ['open-historical-output'] }, terminal: { const: true },
+          },
+        },
+      },
+      required: ['current', 'previewAvailable', 'visibleState'],
+    },
+    {
+      properties: {
+        current: { const: false }, previewAvailable: { const: false },
+        visibleState: {
+          type: 'object',
+          properties: {
+            label: { const: 'superseded' }, tone: { const: 'neutral' },
+            primaryAction: { const: 'inspect-history' },
+            availableActions: { const: ['inspect-history'] }, terminal: { const: true },
+          },
+        },
+      },
+      required: ['current', 'previewAvailable', 'visibleState'],
+    },
+  ],
+}
+
 const visibleStateSchema = {
   type: 'object',
   additionalProperties: false,
@@ -16217,6 +16288,19 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: {
         batch: productionBatchSchema,
         replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-review', 3, 'Project review with derived current and superseded version states',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['session', 'versions', 'scopeContext', 'scenes', 'annotations'],
+      properties: {
+        session: reviewSessionSchemaV2,
+        versions: { type: 'array', minItems: 1, maxItems: 1000, items: reviewVersionSchemaV2 },
+        scopeContext: reviewScopeContextSchema,
+        scenes: { type: 'array', maxItems: 1000, items: reviewSceneSchema },
+        annotations: { type: 'array', maxItems: 100, items: reviewAnnotationSchemaV2 },
       },
     }),
   ),

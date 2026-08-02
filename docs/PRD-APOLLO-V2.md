@@ -1786,6 +1786,12 @@ sem saída; os writers atuais cercam a transição no próprio update persistido
 Estado/transições de versão e artifact, E2E PostgreSQL, deploy e aceite
 continuam pendentes.
 
+ProjectVersion não recebe lifecycle mutável. `current` é derivado pela igualdade
+com `Project.currentVersionId`; todas as demais versões são `superseded`. Na
+revisão, a versão atual abre o resultado, enquanto a histórica só oferece abrir
+preview quando um artifact realmente existe, ou inspecionar histórico quando
+não existe. Outras respostas de versão ainda precisam adotar a projeção.
+
 ---
 
 ## 7.24 API externa e automação

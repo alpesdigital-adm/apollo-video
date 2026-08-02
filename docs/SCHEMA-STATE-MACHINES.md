@@ -44,3 +44,9 @@ declared paths can reach completed or leave review. Current ingest, proxy
 review, compare-decision and final-export writers put the allowed source state
 inside the same persisted update and reject a zero-row result as a domain
 conflict. Future writers must use the same matrix.
+
+ProjectVersion remains immutable and has no writable lifecycle column. Its
+visible relation is derived as `current` when its identity equals the Project
+head and `superseded` otherwise. Review history v3 opens a historical output
+only when persisted preview evidence exists; otherwise it offers history
+inspection. Other version-bearing responses have not yet adopted this view.

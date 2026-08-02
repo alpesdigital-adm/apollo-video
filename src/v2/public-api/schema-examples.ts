@@ -5761,6 +5761,46 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-review/v3': [
+      {
+        data: {
+          session: {
+            currentProjectVersionId: 'project-version-example-2',
+            projectVersionId: 'project-version-example-2', proxyArtifactId: 'artifact-review-proxy-1',
+            proxyUrl: '/v1/artifacts/artifact-review-proxy-1/content', proxyHash: 'e'.repeat(64),
+            fps: 30, resolution: { width: 1080, height: 1920 }, durationFrames: 2400, stale: false,
+          },
+          versions: [
+            {
+              id: 'project-version-example-2', sequence: 2, createdAt, current: true, previewAvailable: true,
+              visibleState: {
+                schemaVersion: 'visible-state/v1', label: 'current', tone: 'info', progress: { mode: 'none' },
+                primaryAction: 'open-result', availableActions: ['open-result'], terminal: false,
+              },
+            },
+            {
+              id: 'project-version-example-1', sequence: 1, createdAt, current: false, previewAvailable: false,
+              visibleState: {
+                schemaVersion: 'visible-state/v1', label: 'superseded', tone: 'neutral', progress: { mode: 'none' },
+                primaryAction: 'inspect-history', availableActions: ['inspect-history'], terminal: true,
+              },
+            },
+          ],
+          scopeContext: {
+            formatId: '9:16', localeId: 'pt-BR', recipeIds: ['project-final-export'],
+            options: [
+              { kind: 'frame', affectedCount: 2400, enabled: true }, { kind: 'region', affectedCount: 1, enabled: true },
+              { kind: 'clip', affectedCount: 3, enabled: true }, { kind: 'scene', affectedCount: 3, enabled: true },
+              { kind: 'range', affectedCount: 1, enabled: true }, { kind: 'project', affectedCount: 1, enabled: true },
+              { kind: 'formats', affectedCount: 1, enabled: true }, { kind: 'locales', affectedCount: 1, enabled: true },
+              { kind: 'recipes', affectedCount: 1, enabled: true },
+            ],
+          },
+          scenes: [], annotations: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/review-annotation-created/v1': [
       {
         data: {

@@ -60,6 +60,12 @@ aborts with a domain conflict; no writer may assign status without the canonical
 path/source helper. Processing phases without runtime writers are defined but
 are not claimed as integrated behavior.
 
+ProjectVersion state is relational rather than mutable. The Project head
+identity derives `current`; every other immutable version is `superseded`.
+Review history v3 combines that relation with persisted preview availability so
+it never offers an output that does not exist. Older review schemas remain
+published, and other version-bearing responses still require additive evolution.
+
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.
 The record is content-addressed, frame-first and format-scoped; completed

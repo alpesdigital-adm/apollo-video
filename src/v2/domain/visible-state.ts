@@ -33,6 +33,7 @@ export const VISIBLE_STATE_LABELS = [
   'available',
   'quarantined',
   'deleted',
+  'current',
   'draft',
   'ingesting',
   'perceiving',
@@ -324,6 +325,28 @@ export function presentProjectVisibleState(
         primaryAction: 'inspect-history', availableActions: ['inspect-history'], terminal: true,
       })
   }
+}
+
+export function presentProjectVersionVisibleState(input: {
+  current: boolean
+  previewAvailable: boolean
+}): Readonly<VisibleState> {
+  if (input.current) {
+    return freezeVisibleState({
+      label: 'current', tone: 'info', progress: { mode: 'none' },
+      primaryAction: 'open-result', availableActions: ['open-result'], terminal: false,
+    })
+  }
+  return input.previewAvailable
+    ? freezeVisibleState({
+        label: 'superseded', tone: 'neutral', progress: { mode: 'none' },
+        primaryAction: 'open-historical-output',
+        availableActions: ['open-historical-output'], terminal: true,
+      })
+    : freezeVisibleState({
+        label: 'superseded', tone: 'neutral', progress: { mode: 'none' },
+        primaryAction: 'inspect-history', availableActions: ['inspect-history'], terminal: true,
+      })
 }
 
 export function presentPublicOperationVisibleState(

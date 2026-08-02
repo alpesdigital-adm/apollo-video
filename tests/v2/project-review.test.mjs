@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import Ajv2020 from 'ajv/dist/2020.js'
+import addFormats from 'ajv-formats'
 
 import {
   createProjectReviewAnnotationService,
   readProjectReviewService,
 } from '../../src/v2/application/review-project.ts'
+import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 const screenshotRef = `data:image/jpeg;base64,${Buffer.from('project-review-frame').toString('base64')}`
 const context = Object.freeze({
@@ -59,7 +63,9 @@ test('F1-039 review session binds the exact active version, proxy identity, meta
     durationFrames: 2400,
     stale: false,
   })
-  assert.deepEqual(result.versions, context.versions)
+  assert.equal(result.versions[0].visibleState.label, 'current')
+  assert.equal(result.versions[0].visibleState.primaryAction, 'open-result')
+  assert.equal(result.versions[0].visibleState.terminal, false)
   assert.equal(result.scopeContext.options.length, 9)
   assert.deepEqual(result.scopeContext.recipeIds, ['review-proxy'])
   assert.deepEqual(result.scenes, context.scenes)
@@ -89,6 +95,36 @@ test('F1-039 historic review forwards the selected immutable version and exposes
   assert.equal(result.session.projectVersionId, 'project-version-review-0')
   assert.equal(result.session.currentProjectVersionId, context.currentProjectVersionId)
   assert.equal(result.session.stale, true)
+  assert.equal(result.versions[1].visibleState.label, 'superseded')
+  assert.equal(result.versions[1].visibleState.primaryAction, 'open-historical-output')
+  assert.equal(result.versions[1].visibleState.terminal, true)
+})
+
+test('T-FR-236 version state is derived from current identity and preview availability', async () => {
+  const reviewContext = {
+    ...context,
+    versions: Object.freeze([
+      context.versions[0],
+      { id: 'project-version-review-0', sequence: 1, createdAt: '2026-07-19T13:00:00.000Z', current: false, previewAvailable: false },
+    ]),
+  }
+  const result = await readProjectReviewService({
+    repository: repositoryFixture({ async readPreviewContext() { return reviewContext } }),
+  })({ workspaceId: 'workspace-review-1', projectId: 'project-review-1' })
+  assert.equal(result.versions[1].visibleState.primaryAction, 'inspect-history')
+  assert.throws(() => result.versions[1].visibleState.availableActions.push('open-result'))
+
+  const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.annotations.list')
+  assert.equal(capability.version, '3.0.0')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-review/v3')
+  assert.equal(getPublicSchema('apollo://schemas/project-review/v2').ref, 'apollo://schemas/project-review/v2')
+  const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+    .compile(getPublicSchema(capability.outputSchemaRef).schema)
+  const body = { data: result, meta: { apiVersion: 'v1' } }
+  assert.equal(validate(body), true, JSON.stringify(validate.errors))
+  const mismatch = structuredClone(body)
+  mismatch.data.versions[1].visibleState.label = 'current'
+  assert.equal(validate(mismatch), false)
 })
 
 test('F1-040 persists a bounded regional annotation independently and replays idempotently', async () => {

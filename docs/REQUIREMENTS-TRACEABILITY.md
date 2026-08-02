@@ -73,6 +73,8 @@ Atualização local de workspace em FR-236 — `apollo.projects.workspace.read` 
 
 Atualização local de transições Project em FR-236 — uma matriz exaustiva governa as 14 fases, repetição convergente e terminais. Todos os writers atuais de status (ingest, proxy review, compare e export final) incluem no mesmo `UPDATE` os estados de origem válidos; resultado zero aborta a transação com conflito. Testes cobrem exaustividade, caminhos permitidos, terminais, salto inválido e fence persistido de falha de ingest. Fases sem writer executável não são contadas como integradas; E2E PostgreSQL dos demais writers, versão/artifact, deploy e aceite permanecem pendentes.
 
+Atualização local de ProjectVersion em FR-236 — `current|superseded` é uma projeção da relação com `Project.currentVersionId`, sem coluna de lifecycle mutável. `apollo.projects.annotations.list` v3 expõe ação histórica somente quando há preview persistido; sem preview oferece inspeção de histórico. Testes cobrem as três combinações, imutabilidade e mismatch de schema. Demais respostas de versão, PostgreSQL E2E, deploy e aceite permanecem pendentes.
+
 | FR-240 | Paridade API-first | S9 | D0,D3,D4,D10 | toda ação da UI, inclusive login/sessão/logout, possui capability e contrato externo sobre o mesmo domínio | contract/e2e |
 | FR-241 | Contrato público e descoberta | S9 | D0,D10 | OpenAPI/schemas/versionamento/capabilities publicados | contract/schema |
 | FR-242 | Clients, autenticação e escopos | S9 | D0,D7,D10 | sessão humana usa cookie seguro; client revogável usa Bearer e só acessa workspace/scope autorizado; senha nunca vira tool | security/e2e |

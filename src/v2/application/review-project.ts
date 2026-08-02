@@ -4,6 +4,7 @@ import type {
   ReviewAnnotationRepository,
 } from './ports/review-annotation-repository.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
+import { presentProjectVersionVisibleState } from '../domain/visible-state.ts'
 import {
   createReviewAnnotation,
   resolveReviewScope,
@@ -53,7 +54,10 @@ export function readProjectReviewService(dependencies: {
         durationFrames: context.durationFrames,
         stale: context.stale,
       }),
-      versions: Object.freeze(context.versions.map((version) => Object.freeze({ ...version }))),
+      versions: Object.freeze(context.versions.map((version) => Object.freeze({
+        ...version,
+        visibleState: presentProjectVersionVisibleState(version),
+      }))),
       scopeContext: Object.freeze({
         formatId: context.formatId,
         localeId: context.localeId,
