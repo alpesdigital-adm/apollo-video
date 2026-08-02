@@ -187,14 +187,17 @@ jobs:
 
       - name: Start supervised app and workers
         run: |
-          cp .env.local.example .env.local
+          touch .env.local
           docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml up -d --build --wait app ingest-worker render-worker webhook-worker long-form-worker
           curl --fail --silent --show-error http://127.0.0.1:3333/v1/health > /dev/null
           for service in app ingest-worker render-worker webhook-worker long-form-worker; do
             container_id="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml ps -q "$service")"
+            status="$(docker inspect --format '{{.State.Status}}' "$container_id")"
+            restart_policy="$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$container_id")"
+            printf '%s id=%s status=%s restart=%s\n' "$service" "$container_id" "$status" "$restart_policy"
             test -n "$container_id"
-            test "$(docker inspect --format '{{.State.Status}}' "$container_id")" = running
-            test "$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$container_id")" = unless-stopped
+            test "$status" = running
+            test "$restart_policy" = unless-stopped
           done
 
       - name: Stop isolated infrastructure
