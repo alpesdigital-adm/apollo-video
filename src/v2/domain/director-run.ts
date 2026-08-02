@@ -56,7 +56,7 @@ interface DirectorSourceEditPlan {
   formatVariantRefs: readonly never[]
   lineageRefs: readonly string[]
   editorial: Readonly<{
-    commandType: 'remove-spoken-content'
+    commandType: 'remove-spoken-content' | 'source-ingest'
     exclusions: readonly unknown[]
     retainedSourceRanges: readonly Readonly<{ sourceStartSeconds: number; sourceEndSeconds: number }>[]
   }>

@@ -199,9 +199,24 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     assert.equal(ingestOutcome.status, 'succeeded')
     assert.equal(seed.ingestOperation.status, 'succeeded')
 
-    const baseVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({
-      where: { id: seed.project.versionId },
+    const projectAfterIngest = await prisma.v2Project.findUniqueOrThrow({
+      where: { id: seed.project.id },
+      select: { currentVersionId: true },
     })
+    assert.notEqual(projectAfterIngest.currentVersionId, seed.project.versionId)
+    const baseVersion = await prisma.v2ProjectVersion.findUniqueOrThrow({
+      where: { id: projectAfterIngest.currentVersionId },
+    })
+    assert.equal(baseVersion.sequence, 2)
+    assert.equal(baseVersion.parentVersionId, seed.project.versionId)
+    const ingestPlanSnapshot = await prisma.v2ProjectSnapshot.findUniqueOrThrow({
+      where: { id: baseVersion.editPlanSnapshotId },
+    })
+    const ingestPlan = JSON.parse(ingestPlanSnapshot.contentJson)
+    assert.equal(ingestPlan.editorial.commandType, 'source-ingest')
+    assert.equal(ingestPlan.videoTracks[0].clips.length, 1)
+    assert.equal(ingestPlan.videoTracks[0].clips[0].sourceArtifactId, seed.sourceArtifact.id)
+    assert.equal(ingestPlan.editorial.exclusions.length, 0)
     const counters = new Map()
     const directed = await runProjectDirectorService({
       repository: new PrismaDirectorRunRepository(prisma),

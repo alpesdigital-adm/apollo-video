@@ -1,13 +1,39 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { applyEditorialCutCommandService } from '../../src/v2/application/apply-editorial-cut-command.ts'
+import {
+  applyEditorialCutCommandService,
+  compileInitialSourceEditPlan,
+} from '../../src/v2/application/apply-editorial-cut-command.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createEditorialCutInvalidations, parseEditorialCutImpact } from '../../src/v2/domain/editorial-cut-impact.ts'
 
 const baseHash = 'a'.repeat(64)
+
+test('ingest compiles one full-source plan with transcript evidence and no fabricated cut', () => {
+  const transcript = createMediaTranscript({
+    language: 'pt-BR', text: 'fonte íntegra', provider: 'controlled', model: 'ingest/v1',
+    words: [{ word: 'fonte', start: 0.2, end: 0.6 }, { word: 'íntegra', start: 0.7, end: 1.2 }],
+    segments: [{ id: 0, text: 'fonte íntegra', start: 0.2, end: 1.2 }],
+  })
+  const plan = compileInitialSourceEditPlan({
+    id: 'edit-plan-ingest-test', projectVersionId: 'version-ingest-test',
+    transcriptId: 'transcript-ingest-test', transcript,
+    sourceArtifactId: 'artifact-ingest-test', sourceDurationSeconds: 2, fps: 30,
+    createdAt: '2026-08-02T18:00:00.000Z',
+  })
+
+  assert.equal(plan.editorial.commandType, 'source-ingest')
+  assert.deepEqual(plan.editorial.exclusions, [])
+  assert.deepEqual(plan.editorial.retainedSourceRanges, [{ sourceStartSeconds: 0, sourceEndSeconds: 2 }])
+  assert.equal(plan.videoTracks[0].clips.length, 1)
+  assert.equal(plan.videoTracks[0].clips[0].sourceInFrame, 0)
+  assert.equal(plan.videoTracks[0].clips[0].sourceOutFrame, 60)
+  assert.equal(plan.durationFrames, 60)
+  assert.equal(plan.retimedTranscript.sourceTranscriptHash, transcript.transcriptHash)
+})
 
 function alignedTranscript() {
   return createMediaTranscript({

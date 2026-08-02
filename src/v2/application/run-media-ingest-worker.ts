@@ -9,9 +9,14 @@ import { assetRightsRevision } from '../domain/asset-rights.ts'
 import { createMediaColorProbe } from '../domain/color-and-export.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createMediaArtifactManifest, createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
+import { createProjectSnapshot } from '../domain/project-snapshot.ts'
+import { createProjectVersion } from '../domain/project-version.ts'
+import { createPublicEvent } from '../domain/public-event.ts'
 import { probeVideo } from '../infrastructure/media/video-probe.ts'
 import { setAssetRightsService } from './set-asset-rights.ts'
 import { calculatePublicOperationRetryDelayMs } from './run-public-operation-worker.ts'
+import { compileInitialSourceEditPlan } from './apply-editorial-cut-command.ts'
+import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 
 const NON_RETRYABLE_CODES = new Set([
   'INVALID_ARGUMENT', 'INVALID_MEDIA_ARTIFACT', 'MEDIA_UPLOAD_TRANSITION_REJECTED',
@@ -30,6 +35,11 @@ function containerFromKey(key: string): string {
   const extension = key.split('.').at(-1)?.toLowerCase()
   if (!extension || !/^[a-z0-9]{2,8}$/.test(extension)) throw new DomainError('INVALID_MEDIA_ARTIFACT', 'Artifact key has no supported container')
   return extension
+}
+
+function deterministicUuid(identity: string): string {
+  const value = createHash('sha256').update(identity).digest('hex')
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-4${value.slice(13, 16)}-a${value.slice(17, 20)}-${value.slice(20, 32)}`
 }
 
 export function runNextMediaIngestOperationService(dependencies: {
@@ -199,6 +209,71 @@ export function runNextMediaIngestOperationService(dependencies: {
       if (!project) throw new DomainError('PERSISTENCE_CONFLICT', 'Ingest project no longer exists')
       const transcript = await dependencies.transcriber.transcribe({ audioPath: normalized.audioPath, language: project.locale, signal: abortController.signal })
       const transcriptId = `transcript-${workspaceNamespace}-${transcript.transcriptHash}`
+      const planIdentity = createHash('sha256')
+        .update(`${operation.id}:${context.sourceArtifactId}:${context.sourceManifestId}:${transcript.transcriptHash}`)
+        .digest('hex')
+      const planVersionId = `project-version-ingest-${planIdentity.slice(0, 48)}`
+      const planSnapshotId = `project-snapshot-ingest-${planIdentity.slice(0, 48)}`
+      const initialEditPlan = compileInitialSourceEditPlan({
+        id: `edit-plan-ingest-${planIdentity.slice(0, 48)}`,
+        projectVersionId: planVersionId,
+        transcriptId,
+        transcript,
+        sourceArtifactId: context.sourceArtifactId,
+        sourceDurationSeconds: sourceProbe.duration,
+        fps: normalized.probe.fps,
+        createdAt: clock().toISOString(),
+      })
+      const planSnapshot = createProjectSnapshot({
+        id: planSnapshotId,
+        workspaceId: operation.workspaceId,
+        projectId: context.projectId,
+        kind: 'edit-plan',
+        contentSchemaVersion: 2,
+        contentJson: stableSerialize(initialEditPlan),
+        contentHash: calculateVersionHash(initialEditPlan),
+        createdAt: initialEditPlan.createdAt,
+      })
+      const planVersion = createProjectVersion({
+        id: planVersionId,
+        workspaceId: operation.workspaceId,
+        projectId: context.projectId,
+        sequence: project.currentVersion.sequence + 1,
+        parentVersionId: project.currentVersion.id,
+        snapshotRefs: {
+          ...project.currentVersion.snapshotRefs,
+          editPlan: planSnapshot.id,
+        },
+        baseHash: calculateVersionHash({
+          schemaVersion: 'ingested-source-project-version/v1',
+          previousBaseHash: project.currentVersion.baseHash,
+          editPlanHash: planSnapshot.contentHash,
+          transcriptHash: transcript.transcriptHash,
+          sourceManifestHash: sourceManifest.manifestHash,
+        }),
+        createdBy: operation.clientId,
+        createdAt: initialEditPlan.createdAt,
+      })
+      const planEvent = createPublicEvent({
+        id: deterministicUuid(`ingest-plan:${operation.id}`),
+        type: 'project.version.created',
+        version: '1.0.0',
+        workspaceId: operation.workspaceId,
+        occurredAt: initialEditPlan.createdAt,
+        sequence: planVersion.sequence,
+        actor: { clientId: operation.clientId },
+        resource: { type: 'project-version', id: planVersion.id },
+        data: {
+          projectId: context.projectId,
+          sequence: planVersion.sequence,
+          parentVersionId: planVersion.parentVersionId,
+          baseHash: planVersion.baseHash,
+          sourceTranscriptId: transcriptId,
+          sourceArtifactId: context.sourceArtifactId,
+          editPlanSnapshotId: planSnapshot.id,
+          createdAt: planVersion.createdAt,
+        },
+      })
 
       await enter('verifying')
       const lastWordEnd = transcript.words.at(-1)?.end ?? transcript.segments.at(-1)?.end ?? 0
@@ -213,6 +288,11 @@ export function runNextMediaIngestOperationService(dependencies: {
         sourceManifestId: context.sourceManifestId, proxyArtifactId, proxyManifestId, transcriptId,
         transcript, sourceManifest, proxyManifest, createdAt: clock().toISOString(),
         sourceColorProbe, proxyColorProbe,
+        initialPlan: Object.freeze({
+          snapshot: planSnapshot,
+          version: planVersion,
+          event: planEvent,
+        }),
       })
       stopHeartbeat()
       const succeeded = await dependencies.operations.succeed(command(clock()))

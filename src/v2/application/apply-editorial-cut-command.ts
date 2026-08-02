@@ -107,12 +107,13 @@ export interface EditorialCutEditPlan {
   formatVariantRefs: readonly never[]
   lineageRefs: readonly string[]
   editorial: Readonly<{
-    commandType: 'remove-spoken-content'
+    commandType: 'remove-spoken-content' | 'source-ingest'
     exclusions: readonly Readonly<EditorialExclusionRange>[]
     retainedSourceRanges: readonly Readonly<SourceTimeRange>[]
   }>
   retimedTranscript: Readonly<{
     sourceTranscriptId: string
+    sourceTranscriptHash?: string
     words: readonly Readonly<RetimedTranscriptWord>[]
   }>
   movementPolicy: Readonly<{
@@ -195,7 +196,7 @@ export interface ApplyEditorialCutCommandDependencies {
 }
 
 function frameAtOrAfter(seconds: number, fps: number): number {
-  return Math.ceil(seconds * fps - 1e-7)
+  return Math.max(0, Math.ceil(seconds * fps - 1e-7))
 }
 
 function frameAtOrBefore(seconds: number, fps: number): number {
@@ -299,6 +300,7 @@ function compileEditPlan(input: {
   exclusions: readonly EditorialExclusionRange[]
   retainedSourceRanges: readonly SourceTimeRange[]
   createdAt: string
+  commandType?: 'remove-spoken-content' | 'source-ingest'
 }): Readonly<EditorialCutEditPlan> {
   const { clips, durationFrames } = compileClips({
     ranges: input.retainedSourceRanges,
@@ -345,12 +347,13 @@ function compileEditPlan(input: {
     formatVariantRefs: Object.freeze([]),
     lineageRefs: Object.freeze([input.sourceArtifactId, input.transcriptId]),
     editorial: Object.freeze({
-      commandType: 'remove-spoken-content' as const,
+      commandType: input.commandType ?? 'remove-spoken-content',
       exclusions: input.exclusions,
       retainedSourceRanges: input.retainedSourceRanges,
     }),
     retimedTranscript: Object.freeze({
       sourceTranscriptId: input.transcriptId,
+      sourceTranscriptHash: input.transcript.transcriptHash,
       words: retimeTranscriptWords({
         transcript: input.transcript,
         ranges: input.retainedSourceRanges,
@@ -363,6 +366,32 @@ function compileEditPlan(input: {
     }),
     subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: 'bottom' as const, maxCharactersPerBlock: 42 }),
     createdAt: input.createdAt,
+  })
+}
+
+export function compileInitialSourceEditPlan(input: {
+  id: string
+  projectVersionId: string
+  transcriptId: string
+  transcript: Readonly<MediaTranscript>
+  sourceArtifactId: string
+  sourceDurationSeconds: number
+  fps: number
+  createdAt: string
+}): Readonly<EditorialCutEditPlan> {
+  assertDomain(
+    Number.isFinite(input.sourceDurationSeconds) && input.sourceDurationSeconds > 0,
+    'INVALID_COMMAND',
+    'Initial source duration is invalid',
+  )
+  return compileEditPlan({
+    ...input,
+    exclusions: Object.freeze([]),
+    retainedSourceRanges: Object.freeze([Object.freeze({
+      sourceStartSeconds: 0,
+      sourceEndSeconds: input.sourceDurationSeconds,
+    })]),
+    commandType: 'source-ingest',
   })
 }
 

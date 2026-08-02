@@ -252,9 +252,13 @@ test('completed ingest persists immutable source and proxy color probes atomical
     segments: [{ id: 0, text: 'teste', start: 0, end: 0.5 }],
   })
   const colorRows = new Map()
+  const snapshotRows = new Map()
+  const versionRows = new Map()
+  const eventRows = new Map()
+  const parentVersionId = 'project-version-ingest-parent'
   const transaction = {
     v2Project: {
-      async findFirst() { return { id: projectId } },
+      async findFirst() { return { id: projectId, currentVersionId: parentVersionId } },
       async updateMany() { return { count: 1 } },
     },
     v2MediaArtifact: {
@@ -302,6 +306,18 @@ test('completed ingest persists immutable source and proxy color probes atomical
       async findUnique() { return null },
       async create() { return {} },
     },
+    v2ProjectSnapshot: {
+      async findUnique({ where }) { return snapshotRows.get(where.id) ?? null },
+      async create({ data }) { snapshotRows.set(data.id, data); return data },
+    },
+    v2ProjectVersion: {
+      async findUnique({ where }) { return versionRows.get(where.id) ?? null },
+      async create({ data }) { versionRows.set(data.id, data); return data },
+    },
+    v2PublicEventOutbox: {
+      async findUnique({ where }) { return eventRows.get(where.id) ?? null },
+      async create({ data }) { eventRows.set(data.id, data); return data },
+    },
   }
   const repository = new PrismaProjectMediaRepository({
     async $transaction(callback) {
@@ -323,11 +339,34 @@ test('completed ingest persists immutable source and proxy color probes atomical
     proxyManifest,
     sourceColorProbe,
     proxyColorProbe,
+    initialPlan: {
+      snapshot: {
+        id: 'snapshot-ingest-plan', workspaceId, projectId, kind: 'edit-plan',
+        contentSchemaVersion: 2, contentJson: '{}', contentHash: '8'.repeat(64), createdAt,
+      },
+      version: {
+        id: 'version-ingest-plan', workspaceId, projectId, sequence: 2,
+        parentVersionId, snapshotRefs: {
+          brief: 'snapshot-brief', editPlan: 'snapshot-ingest-plan', policies: 'snapshot-policies',
+        },
+        baseHash: '9'.repeat(64), createdBy: 'client-ingest', createdAt,
+      },
+      event: {
+        id: '00000000-0000-4000-8000-000000000991',
+        type: 'project.version.created', version: '1.0.0', workspaceId,
+        occurredAt: createdAt, sequence: 2, actor: { clientId: 'client-ingest' },
+        resource: { type: 'project-version', id: 'version-ingest-plan' },
+        data: { projectId },
+      },
+    },
     createdAt,
   }
   await repository.persistCompletedIngest(input)
   await repository.persistCompletedIngest(input)
   assert.equal(colorRows.size, 2)
+  assert.equal(snapshotRows.size, 1)
+  assert.equal(versionRows.size, 1)
+  assert.equal(eventRows.size, 1)
   assert.deepEqual(
     JSON.parse(colorRows.get(sourceArtifactId).metadataJson),
     detection.metadata,

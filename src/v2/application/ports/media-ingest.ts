@@ -5,6 +5,9 @@ import type {
   DetectedMediaColor,
   MediaColorProbe,
 } from '../../domain/color-and-export.ts'
+import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
+import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { PublicEvent } from '../../domain/public-event.ts'
 
 export interface MediaIngestProbe {
   width: number
@@ -45,7 +48,11 @@ export interface VerifiedMediaStorage {
 }
 
 export interface ProjectMediaRepository {
-  readProject(input: { workspaceId: string; projectId: string }): Promise<Readonly<{ id: string; locale: string }> | null>
+  readProject(input: { workspaceId: string; projectId: string }): Promise<Readonly<{
+    id: string
+    locale: string
+    currentVersion: Readonly<ProjectVersion>
+  }> | null>
   persistCompletedIngest(input: {
     workspaceId: string
     projectId: string
@@ -61,6 +68,11 @@ export interface ProjectMediaRepository {
     proxyManifest: Readonly<MediaArtifactManifest>
     sourceColorProbe: Readonly<MediaColorProbe>
     proxyColorProbe: Readonly<MediaColorProbe>
+    initialPlan: Readonly<{
+      snapshot: Readonly<ProjectSnapshot>
+      version: Readonly<ProjectVersion>
+      event: Readonly<PublicEvent>
+    }>
     createdAt: string
   }): Promise<void>
   markIngestFailed(input: { workspaceId: string; projectId: string }): Promise<void>
