@@ -33,7 +33,7 @@ export class FfmpegLutPreviewGenerator implements LutPreviewGenerator {
         '-hide_banner', '-loglevel', 'error', '-y',
         '-f', 'lavfi', '-i', 'testsrc2=size=512x288:rate=1:duration=1',
         '-vf', `lut3d=file='${escapeFilterPath(cubePath)}':interp=tetrahedral`,
-        '-frames:v', '1', '-c:v', 'png', '-pix_fmt', 'rgb24', pngPath,
+        '-frames:v', '1', '-c:v', 'png', '-threads', '1', '-pix_fmt', 'rgb24', pngPath,
       ], { windowsHide: true, timeout: 60_000, maxBuffer: 1024 * 1024, signal: input.signal })
       const png = await readFile(pngPath)
       if (png.length < 100 || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
