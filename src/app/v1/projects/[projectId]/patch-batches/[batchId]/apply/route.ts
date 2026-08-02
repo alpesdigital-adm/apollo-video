@@ -14,7 +14,7 @@ import {
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
-import { presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
+import { presentProjectVersionV2, presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,7 +65,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     return NextResponse.json(presentSuccess({
       batch,
       command: { id: result.command.id, type: result.command.type, baseVersionId: result.command.baseVersionId, resultVersionId: result.version.id, createdAt: result.command.createdAt },
-      version: { id: result.version.id, sequence: result.version.sequence, parentVersionId: result.version.parentVersionId, baseHash: result.version.baseHash, snapshotRefs: result.version.snapshotRefs, createdAt: result.version.createdAt },
+      version: presentProjectVersionV2(
+        { id: result.version.id, sequence: result.version.sequence, parentVersionId: result.version.parentVersionId, baseHash: result.version.baseHash, snapshotRefs: result.version.snapshotRefs, createdAt: result.version.createdAt },
+        { current: true, previewAvailable: false },
+      ),
       comparison: result.comparison,
       impact: result.impact,
       invalidations: result.invalidations,

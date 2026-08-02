@@ -6709,7 +6709,13 @@ function currentProjectVersionResultSchema(snapshotRefNames: readonly string[]) 
   }
 }
 
-function appliedProjectCommandSchema(type: 'remove-spoken-content' | 'run-director' | 'replace-source-transcript') {
+function appliedProjectCommandSchema(type:
+  | 'remove-spoken-content'
+  | 'run-director'
+  | 'replace-source-transcript'
+  | 'apply-review-patch'
+  | 'apply-review-patch-batch'
+) {
   return {
     type: 'object', additionalProperties: false,
     required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'],
@@ -13078,6 +13084,22 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('review-patch-applied', 3, 'Confirmed patch result with explicit current ProjectVersion state',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['proposal', 'command', 'version', 'comparison', 'impact', 'invalidations', 'operation', 'replayed'],
+      properties: {
+        proposal: patchProposalSchema,
+        command: appliedProjectCommandSchema('apply-review-patch'),
+        version: currentProjectVersionResultSchema(['brief', 'treatment', 'story', 'editPlan', 'policies']),
+        comparison: patchProposalSchema.properties.comparison,
+        impact: reviewPatchCommandImpactSchema,
+        invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+        operation: publicOperationSchemaV4,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('create-review-patch-batch-request', 1, 'Compile compatible review patch proposals with atomic or explicit partial-retry semantics', {
     type: 'object', additionalProperties: false, required: ['proposalIds'],
     properties: {
@@ -13116,6 +13138,22 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         batch: patchBatchSchema,
         command: { type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'], properties: { id: idSchema, type: { const: 'apply-review-patch-batch' }, baseVersionId: idSchema, resultVersionId: idSchema, createdAt: dateTimeSchema } },
         version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema, baseHash: sha256Schema, snapshotRefs: { type: 'object' }, createdAt: dateTimeSchema } },
+        comparison: patchBatchSchema.properties.comparison,
+        impact: reviewPatchBatchCommandImpactSchema,
+        invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+        operation: publicOperationSchemaV4,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('review-patch-batch-applied', 3, 'Confirmed batch patch result with explicit current ProjectVersion state',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['batch', 'command', 'version', 'comparison', 'impact', 'invalidations', 'operation', 'replayed'],
+      properties: {
+        batch: patchBatchSchema,
+        command: appliedProjectCommandSchema('apply-review-patch-batch'),
+        version: currentProjectVersionResultSchema(['brief', 'treatment', 'story', 'editPlan', 'policies']),
         comparison: patchBatchSchema.properties.comparison,
         impact: reviewPatchBatchCommandImpactSchema,
         invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },

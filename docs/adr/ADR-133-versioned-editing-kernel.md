@@ -67,8 +67,8 @@ it never offers an output that does not exist. Older review schemas remain
 published. Create v4, duplicate v2 and workspace v7 expose the current version
 through the same projector while their prior schemas remain available. Commands
 v7/result v6 applies it to all three command branches and manual edit v3 covers
-apply/undo/redo/restore; patch and LUT-selection responses still require
-additive evolution.
+apply/undo/redo/restore. Individual and batch patch v3 apply the same rule;
+LUT-selection still requires additive evolution.
 
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.

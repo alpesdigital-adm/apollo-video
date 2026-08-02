@@ -90,6 +90,30 @@ test('T-FR-236 exposes manual apply, undo, redo and restore result versions as c
   }
 })
 
+test('T-FR-236 exposes individual and batch patch result versions as current', () => {
+  const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
+  const cases = [
+    ['apollo.projects.review-patches.apply', 'review-patch-applied'],
+    ['apollo.projects.review-patch-batches.apply', 'review-patch-batch-applied'],
+  ]
+  for (const [capabilityId, schemaName] of cases) {
+    assert.equal(capabilities.get(capabilityId).version, '3.0.0')
+    assert.equal(capabilities.get(capabilityId).outputSchemaRef, `apollo://schemas/${schemaName}/v3`)
+    assert.equal(getPublicSchema(`apollo://schemas/${schemaName}/v2`).ref, `apollo://schemas/${schemaName}/v2`)
+    const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+      .compile(getPublicSchema(`apollo://schemas/${schemaName}/v3`).schema)
+    const body = structuredClone(publicSchemaExamples(getPublicSchema(`apollo://schemas/${schemaName}/v2`))[0])
+    body.data.version = presentProjectVersionV2(
+      body.data.version,
+      { current: true, previewAvailable: false },
+    )
+    assert.equal(validate(body), true, `${schemaName}: ${JSON.stringify(validate.errors)}`)
+    const mismatched = structuredClone(body)
+    mismatched.data.version.visibleState.terminal = true
+    assert.equal(validate(mismatched), false, schemaName)
+  }
+})
+
 function plan(versionId = baseVersionId) {
   return {
     schemaVersion: 2,

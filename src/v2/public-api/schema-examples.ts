@@ -5946,6 +5946,64 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/review-patch-applied/v3': [
+      {
+        data: {
+          proposal: {
+            ...reviewPatchProposalExample, status: 'applied',
+            resultCommandId: 'edit-command-example-214', resultVersionId: 'project-version-example-3',
+            renderOperationId: queuedProjectProxyRenderOperationExample.id,
+            comparison: {
+              beforeVersionId: 'project-version-example-2', afterVersionId: 'project-version-example-3',
+              beforeEditPlanHash: 'a'.repeat(64), afterEditPlanHash: 'b'.repeat(64),
+              changedTargets: ['subtitle:subtitle-cue-2'], invalidatedRanges: [[10500, 10500]],
+            },
+            render: { operationId: queuedProjectProxyRenderOperationExample.id, status: 'queued', phase: 'queued' },
+          },
+          command: {
+            id: 'edit-command-example-214', type: 'apply-review-patch',
+            baseVersionId: 'project-version-example-2', resultVersionId: 'project-version-example-3', createdAt,
+          },
+          version: {
+            id: 'project-version-example-3', sequence: 3,
+            parentVersionId: 'project-version-example-2', baseHash: 'c'.repeat(64),
+            snapshotRefs: {
+              brief: 'snapshot-brief-example-1', treatment: 'snapshot-treatment-example-1',
+              story: 'snapshot-story-example-1', editPlan: 'snapshot-edit-plan-example-3',
+              policies: 'snapshot-policies-example-1',
+            },
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          comparison: {
+            beforeVersionId: 'project-version-example-2', afterVersionId: 'project-version-example-3',
+            beforeEditPlanHash: 'a'.repeat(64), afterEditPlanHash: 'b'.repeat(64),
+            changedTargets: ['subtitle:subtitle-cue-2'], invalidatedRanges: [[10500, 10500]],
+          },
+          impact: {
+            schemaVersion: 'command-impact/v1', commandId: 'edit-command-example-214', commandType: 'apply-review-patch',
+            baseVersionId: 'project-version-example-2', resultVersionId: 'project-version-example-3',
+            changeKinds: ['update-layout'], dependencyTypes: ['visual'],
+            affectedRanges: [{ startFrame: 315, endFrame: 316 }], affectedVariantIds: ['9:16'],
+            affectedArtifacts: [{ artifactId: 'artifact-proxy-example-2', kind: 'proxy', sourceVersionId: 'project-version-example-2', variantId: '9:16' }],
+            minimalRenders: [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 315, endFrame: 316 }] }],
+            renderSemanticsChanged: true, impactHash: 'd'.repeat(64),
+          },
+          invalidations: [{
+            schemaVersion: 'command-artifact-invalidation/v1', id: 'e'.repeat(64), status: 'stale',
+            commandId: 'edit-command-example-214', baseVersionId: 'project-version-example-2', resultVersionId: 'project-version-example-3',
+            artifactId: 'artifact-proxy-example-2', kind: 'proxy', variantId: '9:16', dependencyTypes: ['visual'],
+            affectedRanges: [{ startFrame: 315, endFrame: 316 }], impactHash: 'd'.repeat(64), createdAt,
+          }],
+          operation: queuedProjectProxyRenderOperationExample, replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/create-review-patch-batch-request/v1': [
       { proposalIds: [reviewPatchProposalExample.id, reviewPatchProposalTwoId], mode: 'all-or-nothing' },
     ],
@@ -6038,6 +6096,69 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           }],
           operation: queuedProjectProxyRenderOperationExample,
           replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/review-patch-batch-applied/v3': [
+      {
+        data: {
+          batch: {
+            ...reviewPatchBatchExample, status: 'applied',
+            items: reviewPatchBatchExample.items.map((item) => ({ ...item, status: 'applied' })),
+            resultCommandId: 'edit-command-example-215', resultVersionId: 'project-version-example-3',
+            renderOperationId: queuedProjectProxyRenderOperationExample.id,
+            comparison: {
+              beforeVersionId: 'project-version-example-2', afterVersionId: 'project-version-example-3',
+              beforeEditPlanHash: 'a'.repeat(64), afterEditPlanHash: 'b'.repeat(64),
+              changedTargets: ['clip:clip-example-2', 'subtitle:subtitle-cue-2'],
+              invalidatedRanges: [[10500, 10500], [14000, 17000]],
+            },
+            render: { operationId: queuedProjectProxyRenderOperationExample.id, status: 'queued', phase: 'queued' },
+          },
+          command: {
+            id: 'edit-command-example-215', type: 'apply-review-patch-batch',
+            baseVersionId: 'project-version-example-2', resultVersionId: 'project-version-example-3', createdAt,
+          },
+          version: {
+            id: 'project-version-example-3', sequence: 3,
+            parentVersionId: 'project-version-example-2', baseHash: 'c'.repeat(64),
+            snapshotRefs: {
+              brief: 'snapshot-brief-example-1', treatment: 'snapshot-treatment-example-1',
+              story: 'snapshot-story-example-1', editPlan: 'snapshot-edit-plan-example-3',
+              policies: 'snapshot-policies-example-1',
+            },
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          comparison: {
+            beforeVersionId: 'project-version-example-2', afterVersionId: 'project-version-example-3',
+            beforeEditPlanHash: 'a'.repeat(64), afterEditPlanHash: 'b'.repeat(64),
+            changedTargets: ['clip:clip-example-2', 'subtitle:subtitle-cue-2'],
+            invalidatedRanges: [[10500, 10500], [14000, 17000]],
+          },
+          impact: {
+            schemaVersion: 'command-impact/v1', commandId: 'edit-command-example-215', commandType: 'apply-review-patch-batch',
+            baseVersionId: 'project-version-example-2', resultVersionId: 'project-version-example-3',
+            changeKinds: ['update-text'], dependencyTypes: ['content', 'visual'],
+            affectedRanges: [{ startFrame: 315, endFrame: 316 }, { startFrame: 420, endFrame: 510 }],
+            affectedVariantIds: ['9:16'],
+            affectedArtifacts: [{ artifactId: 'artifact-proxy-example-2', kind: 'proxy', sourceVersionId: 'project-version-example-2', variantId: '9:16' }],
+            minimalRenders: [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 315, endFrame: 316 }, { startFrame: 420, endFrame: 510 }] }],
+            renderSemanticsChanged: true, impactHash: 'd'.repeat(64),
+          },
+          invalidations: [{
+            schemaVersion: 'command-artifact-invalidation/v1', id: 'e'.repeat(64), status: 'stale',
+            commandId: 'edit-command-example-215', baseVersionId: 'project-version-example-2', resultVersionId: 'project-version-example-3',
+            artifactId: 'artifact-proxy-example-2', kind: 'proxy', variantId: '9:16', dependencyTypes: ['content', 'visual'],
+            affectedRanges: [{ startFrame: 315, endFrame: 316 }, { startFrame: 420, endFrame: 510 }],
+            impactHash: 'd'.repeat(64), createdAt,
+          }],
+          operation: queuedProjectProxyRenderOperationExample, replayed: false,
         },
         meta: { apiVersion: 'v1' },
       },
