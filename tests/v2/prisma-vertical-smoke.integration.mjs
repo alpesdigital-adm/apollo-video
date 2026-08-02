@@ -22,7 +22,12 @@ import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createWorkspace } from '../../src/v2/domain/workspace.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { FfmpegIngestProcessor } from '../../src/v2/infrastructure/media/ffmpeg-ingest-processor.ts'
-import { LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
+import { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
+import {
+  createArtifactS3ClientFromEnvironment,
+  S3ArtifactSourceMaterializer,
+  S3VerifiedMediaStorage,
+} from '../../src/v2/infrastructure/media/s3-artifact-storage.ts'
 import { LocalProjectLutRenderMaterializer } from '../../src/v2/infrastructure/media/local-project-lut-render-materializer.ts'
 import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 import { PrismaApiClientRepository } from '../../src/v2/infrastructure/prisma/api-client-repository.ts'
@@ -111,7 +116,10 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
   const clientId = `vertical-client-${randomUUID()}`
   const prisma = new PrismaClient()
   const clock = monotonicClock()
-  const storage = new LocalMediaUploadStorage(root)
+  const localStorage = new LocalMediaUploadStorage(root)
+  const useS3 = process.env.APOLLO_V2_S3_RECONSTRUCTION_SMOKE === '1'
+  const s3 = useS3 ? createArtifactS3ClientFromEnvironment(process.env) : undefined
+  const storage = s3 ? new S3VerifiedMediaStorage(localStorage, s3) : localStorage
   const operations = new PrismaPublicOperationRepository(prisma)
   const artifacts = new PrismaMediaArtifactRepository(prisma)
   const telemetryEvents = []
@@ -309,6 +317,11 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     assert.equal(noLut.selection.resolved.mode, 'none')
     assert.equal(noLut.version.parentVersionId, directed.version.id)
 
+    if (useS3) {
+      await rm(join(root, 'workspaces'), { recursive: true, force: true })
+      assert.equal(await stat(join(root, 'workspaces')).catch(() => null), null)
+    }
+
     const enqueued = await enqueueProjectProxyRenderService({
       projects: proxyProjects,
       operations,
@@ -354,7 +367,9 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
         lutSelections,
         join(root, '.lut-work'),
       ),
-      artifactRoot: root,
+      sources: s3
+        ? new S3ArtifactSourceMaterializer(join(root, '.s3-render-materialized'), s3)
+        : new LocalArtifactSourceMaterializer(root),
       clock,
       leaseDurationMs: 60_000,
       heartbeatIntervalMs: 10_000,
@@ -379,7 +394,16 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       select: { manifestJson: true },
     })
     const outputManifestDocument = JSON.parse(outputManifest.manifestJson)
-    const outputPath = join(root, outputManifestDocument.artifact.artifactKey)
+    const verificationMaterializer = s3
+      ? new S3ArtifactSourceMaterializer(join(root, '.s3-fresh-verification'), s3)
+      : new LocalArtifactSourceMaterializer(root)
+    const verifiedOutput = await verificationMaterializer.materialize({
+      operationId: 'vertical-smoke-fresh-verification',
+      artifactKey: outputManifestDocument.artifact.artifactKey,
+      sha256: outputManifestDocument.artifact.sha256,
+      byteSize: outputManifestDocument.artifact.byteSize,
+    })
+    const outputPath = verifiedOutput.path
     const outputStat = await stat(outputPath)
     const outputProbe = await probeVideo(outputPath)
     assert.ok(outputStat.size > 0)
@@ -387,6 +411,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     assert.equal(outputProbe.height, 960)
     assert.ok(Math.abs(outputProbe.duration - 6) < 0.15)
     assert.match(outputManifestDocument.artifact.sha256, /^[a-f0-9]{64}$/)
+    await verificationMaterializer.cleanup('vertical-smoke-fresh-verification')
     assert.equal(await prisma.v2RenderElementMap.count({
       where: { workspaceId, projectId: seed.project.id, projectVersionId: noLut.version.id },
     }), 1)

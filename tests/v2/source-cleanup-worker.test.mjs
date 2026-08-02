@@ -339,7 +339,16 @@ test('T-FR-122 cleanup worker publishes only after immutable-source, lineage, ri
         processorCleaned = true
       },
     },
-    artifactRoot: resolve('tests/fixtures'),
+    sources: {
+      async materialize(input) {
+        return {
+          path: resolve('tests/fixtures', input.artifactKey),
+          sha256: input.sha256,
+          byteSize: input.byteSize,
+        }
+      },
+      async cleanup() {},
+    },
     clock: () => new Date((clockMs += 100)),
   })
 

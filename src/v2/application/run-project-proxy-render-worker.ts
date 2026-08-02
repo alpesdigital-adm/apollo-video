@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto'
-import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
-import type { VerifiedMediaStorage } from './ports/media-ingest.ts'
+import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import {
   EDITORIAL_PROXY_RECIPE_VERSION,
   FFMPEG_EDITORIAL_RENDERER_VERSION,
@@ -30,15 +29,6 @@ function safeFailure(error: unknown) {
   return { code: error instanceof DomainError ? error.code.toLowerCase() : 'render_execution_failed', message: 'Project proxy render could not be completed', retryable }
 }
 
-function resolveArtifactPath(rootValue: string, key: string): string {
-  const root = resolve(rootValue)
-  if (!rootValue.trim() || !isAbsolute(root) || key.startsWith('/') || key.includes('\\') || key.split('/').some((part) => !part || part === '.' || part === '..')) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Project proxy artifact storage is invalid')
-  const candidate = join(root, ...key.split('/'))
-  const rel = relative(root, candidate)
-  if (rel.startsWith('..') || isAbsolute(rel)) throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy source escaped artifact storage')
-  return candidate
-}
-
 export function runNextProjectProxyRenderOperationService(dependencies: {
   operations: PublicOperationRepository
   projects: ProjectProxyRenderRepository
@@ -49,7 +39,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   proxyReviews: ProxyReviewRepository
   colorPipelines: ColorPipelineCompilationRepository
   luts: ProjectLutRenderMaterializer
-  artifactRoot: string
+  sources: ArtifactSourceMaterializer
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -156,12 +146,27 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       await enter('rendering')
+      const materializedSources = await Promise.all(source.renderSources.map((asset) =>
+        dependencies.sources.materialize({
+          operationId: operation.id,
+          artifactKey: asset.artifactKey,
+          sha256: asset.sha256,
+          byteSize: asset.byteSize,
+        })))
+      const materializedRangeReuse = source.rangeReuse
+        ? await dependencies.sources.materialize({
+            operationId: operation.id,
+            artifactKey: source.rangeReuse.artifactKey,
+            sha256: source.rangeReuse.sha256,
+            byteSize: source.rangeReuse.byteSize,
+          })
+        : undefined
       const render = () => dependencies.renderer.render({
         operationId: operation.id,
         renderKind: 'proxy',
-        sources: source.renderSources.map((asset) => ({
+        sources: source.renderSources.map((asset, index) => ({
           artifactId: asset.artifactId,
-          path: resolveArtifactPath(dependencies.artifactRoot, asset.artifactKey),
+          path: materializedSources[index]!.path,
           mediaType: asset.mediaType,
           ...(asset.mediaType === 'video' ? { colorPipelineCompilation: colorPipelines.get(asset.artifactId)! } : {}),
         })),
@@ -170,7 +175,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         ...(source.rangeReuse ? {
           rangeReuse: {
             ...source.rangeReuse,
-            path: resolveArtifactPath(dependencies.artifactRoot, source.rangeReuse.artifactKey),
+            path: materializedRangeReuse!.path,
           },
         } : {}),
         signal: abortController.signal,
@@ -283,7 +288,11 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       return Object.freeze({ operationId: operation.id, status: failed.operation.status === 'retrying' ? 'retrying' as const : 'failed' as const })
     } finally {
       stopHeartbeat()
-      await Promise.allSettled([dependencies.renderer.cleanup(operation.id), dependencies.luts.cleanup(operation.id)])
+      await Promise.allSettled([
+        dependencies.renderer.cleanup(operation.id),
+        dependencies.luts.cleanup(operation.id),
+        dependencies.sources.cleanup(operation.id),
+      ])
     }
   }
 }

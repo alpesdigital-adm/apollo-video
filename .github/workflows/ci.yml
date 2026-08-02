@@ -175,6 +175,21 @@ jobs:
       - name: Migrate clean Compose PostgreSQL
         run: npm run db:v2:migrate:deploy
 
+      - name: Reconstruct proxy from PostgreSQL and versioned MinIO only
+        run: npm run test:integration:vertical-smoke
+        env:
+          APOLLO_V2_VERTICAL_SMOKE: "1"
+          APOLLO_V2_S3_RECONSTRUCTION_SMOKE: "1"
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3
+          APOLLO_V2_ARTIFACT_ROOT: ${{ runner.temp }}/apollo-v2-s3-staging
+          APOLLO_V2_RENDER_WORK_ROOT: ${{ runner.temp }}/apollo-v2-s3-render
+          APOLLO_V2_S3_ENDPOINT: http://127.0.0.1:59000
+          APOLLO_V2_S3_REGION: us-east-1
+          APOLLO_V2_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+          APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
+          APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
+
       - name: Verify PostgreSQL and versioned object round-trip
         run: |
           table_count="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from information_schema.tables where table_schema = 'public'")"

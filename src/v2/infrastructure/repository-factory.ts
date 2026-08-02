@@ -246,7 +246,15 @@ import {
   type S3RenderInputObjectClient,
 } from './s3-render-input-object-client.ts'
 import { RemotionRenderInputRenderer } from './remotion-render-input-renderer.ts'
-import { createLocalMediaUploadStorageFromEnvironment } from './media/local-media-upload-storage.ts'
+import {
+  createLocalMediaUploadStorageFromEnvironment,
+  LocalArtifactSourceMaterializer,
+} from './media/local-media-upload-storage.ts'
+import {
+  createArtifactS3ClientFromEnvironment,
+  S3ArtifactSourceMaterializer,
+  S3VerifiedMediaStorage,
+} from './media/s3-artifact-storage.ts'
 import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
@@ -708,6 +716,28 @@ export function createArtifactContentStorage(environment: NodeJS.ProcessEnv = pr
 
 export function createProjectMediaRepository(): ProjectMediaRepository {
   return new PrismaProjectMediaRepository(resolveV2Client())
+}
+
+function artifactStorageDriver(environment: NodeJS.ProcessEnv): 'local' | 's3' {
+  const driver = environment.APOLLO_V2_ARTIFACT_STORAGE_DRIVER?.trim().toLowerCase() || 'local'
+  if (driver !== 'local' && driver !== 's3') throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact storage driver is invalid')
+  return driver
+}
+
+function createVerifiedMediaStorage(environment: NodeJS.ProcessEnv) {
+  const local = createLocalMediaUploadStorageFromEnvironment(environment)
+  if (artifactStorageDriver(environment) === 'local') return local
+  const s3 = createArtifactS3ClientFromEnvironment(environment)
+  return new S3VerifiedMediaStorage(local, s3)
+}
+
+function createArtifactSourceMaterializer(environment: NodeJS.ProcessEnv) {
+  const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
+  if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
+  if (artifactStorageDriver(environment) === 'local') return new LocalArtifactSourceMaterializer(artifactRoot)
+  const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
+  if (!workRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Render work root is required for S3 artifact materialization')
+  return new S3ArtifactSourceMaterializer(workRoot, createArtifactS3ClientFromEnvironment(environment))
 }
 
 export function createProjectProxyRenderRepository(): ProjectProxyRenderRepository {
@@ -1195,7 +1225,7 @@ export function createMediaIngestWorker(
     uploads: createMediaTransferRepository(),
     artifacts: createMediaArtifactPersistenceRepository(environment),
     projectMedia: createProjectMediaRepository(),
-    storage: createLocalMediaUploadStorageFromEnvironment(environment),
+    storage: createVerifiedMediaStorage(environment),
     processor: createFfmpegIngestProcessorFromEnvironment(environment),
     transcriber: createMediaTranscriberFromEnvironment(environment),
     rights: createAssetRightsRepository(),
@@ -1269,8 +1299,9 @@ export function createProjectProxyRenderWorker(
   return runNextProjectProxyRenderOperationService({
     operations: createPublicOperationRepository(telemetry), projects: createProjectProxyRenderRepository(),
     telemetry,
-    artifacts: createMediaArtifactPersistenceRepository(environment), storage: createLocalMediaUploadStorageFromEnvironment(environment),
-    renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment), artifactRoot, clock,
+    artifacts: createMediaArtifactPersistenceRepository(environment), storage: createVerifiedMediaStorage(environment),
+    renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment),
+    sources: createArtifactSourceMaterializer(environment), clock,
     renderElementMaps: createRenderElementMapRepository(),
     proxyReviews: createProxyReviewRepository(),
     colorPipelines: createColorPipelineCompilationRepository(),
@@ -1299,12 +1330,12 @@ export function createProjectFinalExportWorker(
     projects: createProjectFinalExportRepository(),
     rights: createAssetRightsRepository(),
     artifacts: createMediaArtifactPersistenceRepository(environment),
-    storage: createLocalMediaUploadStorageFromEnvironment(environment),
+    storage: createVerifiedMediaStorage(environment),
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment),
     renderElementMaps: createRenderElementMapRepository(),
     colorPipelines: createColorPipelineCompilationRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work')),
-    artifactRoot,
+    sources: createArtifactSourceMaterializer(environment),
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
@@ -1347,10 +1378,10 @@ export function createSourceCleanupWorker(
     artifacts: createMediaArtifactPersistenceRepository(environment),
     rights: createAssetRightsRepository(),
     projects: createProjectWorkspaceQueryRepository(),
-    storage: createLocalMediaUploadStorageFromEnvironment(environment),
+    storage: createVerifiedMediaStorage(environment),
     processor:
       createFfmpegSourceCleanupProcessorFromEnvironment(environment),
-    artifactRoot,
+    sources: createArtifactSourceMaterializer(environment),
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0
       ? { leaseDurationMs: configuredLease }

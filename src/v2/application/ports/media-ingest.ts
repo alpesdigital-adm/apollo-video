@@ -47,6 +47,16 @@ export interface VerifiedMediaStorage {
   promoteDerived(input: { workspaceId: string; sourcePath: string; sha256: string; extension: string; prefix: string }): Promise<Readonly<{ key: string; path: string; byteSize: number; sha256: string }>>
 }
 
+export interface ArtifactSourceMaterializer {
+  materialize(input: {
+    operationId: string
+    artifactKey: string
+    sha256: string
+    byteSize: number
+  }): Promise<Readonly<{ path: string; sha256: string; byteSize: number }>>
+  cleanup(operationId: string): Promise<void>
+}
+
 export interface ProjectMediaRepository {
   readProject(input: { workspaceId: string; projectId: string }): Promise<Readonly<{
     id: string

@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import {
   assetRightsRevision,
@@ -22,6 +21,7 @@ import type {
   MediaArtifactQueryRepository,
 } from './ports/media-artifact-query-repository.ts'
 import type {
+  ArtifactSourceMaterializer,
   VerifiedMediaStorage,
 } from './ports/media-ingest.ts'
 import type {
@@ -66,32 +66,6 @@ function safeFailure(error: unknown) {
   }
 }
 
-function resolveArtifactPath(rootValue: string, key: string): string {
-  const root = resolve(rootValue)
-  if (
-    !rootValue.trim() ||
-    !isAbsolute(root) ||
-    key.startsWith('/') ||
-    key.includes('\\') ||
-    key.split('/').some((part) =>
-      !part || part === '.' || part === '..')
-  ) {
-    throw new DomainError(
-      'PERSISTENCE_NOT_CONFIGURED',
-      'Source cleanup artifact storage is invalid',
-    )
-  }
-  const candidate = join(root, ...key.split('/'))
-  const rel = relative(root, candidate)
-  if (rel.startsWith('..') || isAbsolute(rel)) {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Source cleanup source escaped artifact storage',
-    )
-  }
-  return candidate
-}
-
 export function runNextSourceCleanupOperationService(dependencies: {
   operations: PublicOperationRepository
   cleanups: SourceCleanupRepository
@@ -101,7 +75,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
   projects: ProjectWorkspaceQueryRepository
   storage: VerifiedMediaStorage
   processor: SourceCleanupProcessor
-  artifactRoot: string
+  sources: ArtifactSourceMaterializer
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -312,10 +286,12 @@ export function runNextSourceCleanupOperationService(dependencies: {
           { reasonCodes: sourceRightsDecision.reasonCodes },
         )
       }
-      const sourcePath = resolveArtifactPath(
-        dependencies.artifactRoot,
-        source.artifactKey,
-      )
+      const sourcePath = (await dependencies.sources.materialize({
+        operationId: operation.id,
+        artifactKey: source.artifactKey,
+        sha256: source.sha256,
+        byteSize: Number(source.byteSize),
+      })).path
       const sourceShaBefore = await calculateFileSha256(sourcePath)
       if (sourceShaBefore !== context.sourceArtifactSha256) {
         throw new DomainError(
@@ -609,6 +585,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
       })
     } finally {
       stopHeartbeat()
+      await dependencies.sources.cleanup(operation.id).catch(() => undefined)
     }
   }
 }

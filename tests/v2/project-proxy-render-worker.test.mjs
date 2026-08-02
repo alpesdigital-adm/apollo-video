@@ -151,6 +151,7 @@ function source() {
 
 function dependencies(operations, overrides = {}) {
   const calls = { attached: 0, cleaned: 0, lutCleaned: 0, persisted: 0, mapped: 0, reviewed: 0 }
+  const artifactRoot = join(tmpdir(), 'apollo-project-proxy-worker-artifacts')
   const deps = {
     operations: operations.repository,
     colorPipelines: { async read() { return { compilation: colorCompilation } } },
@@ -212,7 +213,11 @@ function dependencies(operations, overrides = {}) {
         return { ...input.review, id: input.id }
       },
     },
-    artifactRoot: join(tmpdir(), 'apollo-project-proxy-worker-artifacts'),
+    artifactRoot,
+    sources: {
+      async materialize(input) { return { path: join(artifactRoot, ...input.artifactKey.split('/')), sha256: input.sha256, byteSize: input.byteSize } },
+      async cleanup() {},
+    },
     clock: createClock(),
     leaseDurationMs: 10_000,
     heartbeatIntervalMs: 1_000,

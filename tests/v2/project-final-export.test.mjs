@@ -414,7 +414,16 @@ function workerDependencies(
           return { record: {}, replayed: false }
         },
       },
-      artifactRoot: join(tmpdir(), 'apollo-final-export-artifacts'),
+      sources: {
+        async materialize(input) {
+          return {
+            path: join(tmpdir(), 'apollo-final-export-artifacts', ...input.artifactKey.split('/')),
+            sha256: input.sha256,
+            byteSize: input.byteSize,
+          }
+        },
+        async cleanup() {},
+      },
       clock: () => new Date((now += 100)),
       leaseDurationMs: 10_000,
       heartbeatIntervalMs: 1_000,

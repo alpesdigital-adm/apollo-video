@@ -28,7 +28,7 @@ import {
 } from '../../src/v2/domain/public-operation.ts'
 import { createSourceTranscriptArtifactInvalidations } from '../../src/v2/domain/source-transcript-replacement.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
-import { LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
+import { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -611,7 +611,7 @@ async function renderThroughRealWorker(input) {
         return { ...persist.review, id: persist.id }
       },
     },
-    artifactRoot,
+    sources: new LocalArtifactSourceMaterializer(artifactRoot),
     clock: sequentialClock('2026-07-31T09:30:00.000Z'),
     leaseDurationMs: 120_000,
     heartbeatIntervalMs: 10_000,

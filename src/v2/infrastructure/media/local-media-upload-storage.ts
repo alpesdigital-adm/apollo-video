@@ -5,6 +5,7 @@ import { isAbsolute, join, normalize, relative, resolve } from 'node:path'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
+import type { ArtifactSourceMaterializer } from '../../application/ports/media-ingest.ts'
 import type { MediaUploadContentStorage, MediaUploadVerifier } from '../../application/ports/media-transfer-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { MediaUpload, MediaUploadPart } from '../../domain/media-transfer.ts'
@@ -37,8 +38,15 @@ function extensionFor(upload: MediaUpload): string {
   return extension
 }
 
-function workspaceNamespace(workspaceId: string): string {
+export function workspaceNamespace(workspaceId: string): string {
   return createHash('sha256').update(workspaceId).digest('hex').slice(0, 32)
+}
+
+export function contentAddressedArtifactKey(input: { workspaceId: string; prefix: string; sha256: string; extension: string }): string {
+  if (!/^[a-f0-9]{64}$/.test(input.sha256) || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(input.prefix) || !/^[a-z0-9]{2,8}$/.test(input.extension)) {
+    throw new DomainError('INVALID_ARGUMENT', 'Artifact storage identity is invalid')
+  }
+  return `workspaces/${workspaceNamespace(input.workspaceId)}/${input.prefix}/sha256/${input.sha256.slice(0, 2)}/${input.sha256}.${input.extension}`
 }
 
 export class LocalMediaUploadStorage implements MediaUploadContentStorage, MediaUploadVerifier {
@@ -201,10 +209,7 @@ export class LocalMediaUploadStorage implements MediaUploadContentStorage, Media
   }
 
   private async promote(input: { workspaceId: string; sourcePath: string; sha256: string; extension: string; prefix: string }) {
-    if (!/^[a-f0-9]{64}$/.test(input.sha256) || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(input.prefix) || !/^[a-z0-9]{2,8}$/.test(input.extension)) {
-      throw new DomainError('INVALID_ARGUMENT', 'Artifact storage identity is invalid')
-    }
-    const key = `workspaces/${workspaceNamespace(input.workspaceId)}/${input.prefix}/sha256/${input.sha256.slice(0, 2)}/${input.sha256}.${input.extension}`
+    const key = contentAddressedArtifactKey(input)
     const target = join(this.root, ...key.split('/'))
     assertContained(this.root, target)
     await mkdir(join(target, '..'), { recursive: true })
@@ -222,6 +227,32 @@ export class LocalMediaUploadStorage implements MediaUploadContentStorage, Media
     }
     return Object.freeze({ key, path: target, byteSize: metadata.size, sha256: input.sha256 })
   }
+}
+
+export class LocalArtifactSourceMaterializer implements ArtifactSourceMaterializer {
+  private readonly root: string
+
+  constructor(root: string) {
+    this.root = new LocalMediaUploadStorage(root).root
+  }
+
+  async materialize(input: { operationId: string; artifactKey: string; sha256: string; byteSize: number }) {
+    if (!input.operationId.trim() || !/^[a-f0-9]{64}$/.test(input.sha256) || !Number.isSafeInteger(input.byteSize) || input.byteSize <= 0) {
+      throw new DomainError('INVALID_ARGUMENT', 'Artifact materialization identity is invalid')
+    }
+    if (input.artifactKey.startsWith('/') || input.artifactKey.includes('\\') || input.artifactKey.split('/').some((part) => !part || part === '.' || part === '..')) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Artifact key is invalid')
+    }
+    const path = join(this.root, ...input.artifactKey.split('/'))
+    assertContained(this.root, path)
+    const metadata = await stat(path).catch(() => null)
+    if (!metadata?.isFile() || metadata.size !== input.byteSize || await calculateFileSha256(path) !== input.sha256) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Artifact bytes do not match their immutable identity')
+    }
+    return Object.freeze({ path, sha256: input.sha256, byteSize: input.byteSize })
+  }
+
+  async cleanup(_operationId: string): Promise<void> {}
 }
 
 export function createLocalMediaUploadStorageFromEnvironment(environment: NodeJS.ProcessEnv = process.env) {
