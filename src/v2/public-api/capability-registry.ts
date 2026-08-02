@@ -4055,7 +4055,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.commands.apply',
-    version: '6.0.0',
+    version: '7.0.0',
     title: 'Apply project edit command',
     description: 'Applies a typed editorial command against an immutable base version. Spoken-content removal and DirectorRun persist full-timeline impacts and exact stale output relationships before proxy enqueue; source-transcript replacement blocks render until recomputation.',
     exposure: 'public',
@@ -4063,7 +4063,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:write'],
     inputSchemaRef: 'apollo://schemas/apply-project-edit-command-request/v4',
-    outputSchemaRef: 'apollo://schemas/project-edit-command-applied/v5',
+    outputSchemaRef: 'apollo://schemas/project-edit-command-applied/v6',
     endpoint: { method: 'POST', path: '/v1/projects/{projectId}/commands' },
     toolName: 'apollo.projects.commands.apply',
     supportsDryRun: false,

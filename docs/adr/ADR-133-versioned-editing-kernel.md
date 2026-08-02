@@ -65,8 +65,9 @@ identity derives `current`; every other immutable version is `superseded`.
 Review history v3 combines that relation with persisted preview availability so
 it never offers an output that does not exist. Older review schemas remain
 published. Create v4, duplicate v2 and workspace v7 expose the current version
-through the same projector while their prior schemas remain available;
-editorial mutation responses still require additive evolution.
+through the same projector while their prior schemas remain available. Commands
+v7/result v6 applies it to all three command branches; manual edit, patch and
+LUT-selection responses still require additive evolution.
 
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.

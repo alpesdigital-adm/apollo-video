@@ -6687,6 +6687,39 @@ const currentProjectVersionVisibleStateSchema = {
   },
 }
 
+function currentProjectVersionResultSchema(snapshotRefNames: readonly string[]) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt', 'visibleState'],
+    properties: {
+      id: idSchema,
+      sequence: { type: 'integer', minimum: 2 },
+      parentVersionId: idSchema,
+      baseHash: sha256Schema,
+      snapshotRefs: {
+        type: 'object',
+        additionalProperties: false,
+        required: [...snapshotRefNames],
+        properties: Object.fromEntries(snapshotRefNames.map((name) => [name, idSchema])),
+      },
+      createdAt: dateTimeSchema,
+      visibleState: currentProjectVersionVisibleStateSchema,
+    },
+  }
+}
+
+function appliedProjectCommandSchema(type: 'remove-spoken-content' | 'run-director' | 'replace-source-transcript') {
+  return {
+    type: 'object', additionalProperties: false,
+    required: ['id', 'type', 'baseVersionId', 'resultVersionId', 'createdAt'],
+    properties: {
+      id: idSchema, type: { const: type }, baseVersionId: idSchema,
+      resultVersionId: idSchema, createdAt: dateTimeSchema,
+    },
+  }
+}
+
 const reviewVersionSchemaV2 = {
   ...reviewVersionSchema,
   required: [...reviewVersionSchema.required, 'visibleState'],
@@ -17860,6 +17893,106 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         {
           type: 'object', required: ['command', 'version', 'sourceTranscript', 'replayed'],
           properties: { command: { type: 'object' }, version: { type: 'object' }, sourceTranscript: { type: 'object' }, replayed: { type: 'boolean' } },
+        },
+      ],
+    }),
+  ),
+  defineSchema('project-edit-command-applied', 6, 'Applied edit command response with explicit current ProjectVersion state',
+    successSchema({
+      oneOf: [
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'editorial', 'operation', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('remove-spoken-content'),
+            version: currentProjectVersionResultSchema(['brief', 'editPlan', 'policies']),
+            editorial: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'sourceTranscriptId', 'sourceArtifactId', 'exclusions', 'retainedSourceRanges',
+                'outputDurationFrames', 'fps', 'automaticZoom', 'protectedOpeningFrames',
+                'subtitleFaceProtection', 'impact', 'invalidations',
+              ],
+              properties: {
+                sourceTranscriptId: idSchema, sourceArtifactId: idSchema,
+                exclusions: { type: 'array', minItems: 1, maxItems: 128 },
+                retainedSourceRanges: { type: 'array', minItems: 1, maxItems: 129 },
+                outputDurationFrames: { type: 'integer', minimum: 1 },
+                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: { const: false },
+                protectedOpeningFrames: { type: 'integer', minimum: 1 }, subtitleFaceProtection: { const: true },
+                impact: editorialCutImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+              },
+            },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'directorRun', 'operation', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('run-director'),
+            version: currentProjectVersionResultSchema([
+              'brief', 'perception', 'treatment', 'story', 'editPlan', 'quality', 'policies',
+            ]),
+            directorRun: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'id', 'status', 'plannerVersion', 'criticVersion', 'baseVersionId', 'resultVersionId',
+                'perception', 'treatmentPlan', 'storyPlan', 'editPlan', 'qualityReport', 'decisions',
+                'assumptions', 'impact', 'invalidations', 'createdAt',
+              ],
+              properties: {
+                id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
+                plannerVersion: { type: 'string' }, criticVersion: { type: 'string' },
+                baseVersionId: idSchema, resultVersionId: idSchema,
+                perception: { type: 'object', additionalProperties: false, required: ['snapshotId', 'summary'], properties: { snapshotId: idSchema, summary: { type: 'object' } } },
+                treatmentPlan: { type: 'object', additionalProperties: false, required: ['snapshotId', 'plan'], properties: { snapshotId: idSchema, plan: { type: 'object' } } },
+                storyPlan: { type: 'object', additionalProperties: false, required: ['snapshotId', 'plan'], properties: { snapshotId: idSchema, plan: { type: 'object' } } },
+                editPlan: {
+                  type: 'object', additionalProperties: false,
+                  required: ['snapshotId', 'id', 'durationFrames', 'fps', 'subtitleCueCount', 'transitionCount', 'automaticZoom'],
+                  properties: {
+                    snapshotId: idSchema, id: idSchema, durationFrames: { type: 'integer', minimum: 1 },
+                    fps: { type: 'number', exclusiveMinimum: 0 }, subtitleCueCount: { type: 'integer', minimum: 1 },
+                    transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: { const: false },
+                  },
+                },
+                qualityReport: { type: 'object', additionalProperties: false, required: ['snapshotId', 'report'], properties: { snapshotId: idSchema, report: { type: 'object' } } },
+                decisions: { type: 'array', minItems: 4, maxItems: 64, items: { type: 'object' } },
+                assumptions: { type: 'array', maxItems: 64, items: { type: 'string' } },
+                impact: directorRunImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+                createdAt: dateTimeSchema,
+              },
+            },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'sourceTranscript', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('replace-source-transcript'),
+            version: currentProjectVersionResultSchema(['brief', 'treatment', 'story', 'editPlan', 'policies']),
+            sourceTranscript: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'previousTranscriptId', 'previousTranscriptHash', 'replacementTranscriptId',
+                'replacementTranscriptHash', 'impact', 'invalidations', 'nextRequiredCapability',
+              ],
+              properties: {
+                previousTranscriptId: idSchema, previousTranscriptHash: sha256Schema,
+                replacementTranscriptId: idSchema, replacementTranscriptHash: sha256Schema,
+                impact: sourceTranscriptReplacementImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+                nextRequiredCapability: { const: 'apollo.projects.commands.apply:run-director' },
+              },
+            },
+            replayed: { type: 'boolean' },
+          },
         },
       ],
     }),

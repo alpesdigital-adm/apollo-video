@@ -1791,8 +1791,9 @@ com `Project.currentVersionId`; todas as demais versões são `superseded`. Na
 revisão, a versão atual abre o resultado, enquanto a histórica só oferece abrir
 preview quando um artifact realmente existe, ou inspecionar histórico quando
 não existe. Create v4, duplicate v2 e workspace v7 também expõem a versão
-corrente com essa projeção; respostas de mutations editoriais ainda precisam
-evoluir aditivamente.
+corrente com essa projeção. Commands v7/result v6 faz o mesmo para remove,
+Director e transcript replacement; manual edit, patches e LUT selection ainda
+precisam evoluir aditivamente.
 
 ---
 

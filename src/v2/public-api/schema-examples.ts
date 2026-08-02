@@ -8297,6 +8297,60 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-edit-command-applied/v6': [
+      {
+        data: {
+          command: {
+            id: directorRunImpactExample.commandId, type: 'run-director',
+            baseVersionId: directorRunImpactExample.baseVersionId,
+            resultVersionId: directorRunImpactExample.resultVersionId, createdAt,
+          },
+          version: {
+            id: directorRunImpactExample.resultVersionId, sequence: 4,
+            parentVersionId: directorRunImpactExample.baseVersionId, baseHash: 'd'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', perception: 'project-snapshot-perception-1',
+              treatment: 'project-snapshot-treatment-1', story: 'project-snapshot-story-1',
+              editPlan: 'project-snapshot-edit-plan-4', quality: 'project-snapshot-quality-1',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          directorRun: {
+            id: 'director-run-example-1', status: 'planned',
+            plannerVersion: directorRunImpactExample.plannerVersion,
+            criticVersion: directorRunImpactExample.criticVersion,
+            baseVersionId: directorRunImpactExample.baseVersionId,
+            resultVersionId: directorRunImpactExample.resultVersionId,
+            perception: { snapshotId: 'project-snapshot-perception-1', summary: { speechCoverage: 0.78 } },
+            treatmentPlan: { snapshotId: 'project-snapshot-treatment-1', plan: { mode: 'talking-head' } },
+            storyPlan: { snapshotId: 'project-snapshot-story-1', plan: { blockCount: 3 } },
+            editPlan: {
+              snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4',
+              durationFrames: 2380, fps: 30, subtitleCueCount: 28,
+              transitionCount: 2, automaticZoom: false,
+            },
+            qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
+            decisions: [
+              { id: 'decision-narrative-linear' }, { id: 'decision-motion-none' },
+              { id: 'decision-layout-inset' }, { id: 'decision-subtitle-bottom' },
+            ],
+            assumptions: ['Face detector indisponivel; aplicar safe area conservadora.'],
+            impact: directorRunImpactExample,
+            invalidations: [directorRunInvalidationExample],
+            createdAt,
+          },
+          operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-manual-timeline/v1': [
       {
         data: {

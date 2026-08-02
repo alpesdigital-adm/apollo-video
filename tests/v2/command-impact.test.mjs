@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import Ajv2020 from 'ajv/dist/2020.js'
+import addFormats from 'ajv-formats'
 
 import {
   applyManualEditService,
@@ -25,7 +27,11 @@ import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/
 import { PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
 import {
   presentArtifactInvalidationViewV2,
+  presentProjectVersionV2,
 } from '../../src/v2/public-api/presenters.ts'
+import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
+import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 const workspaceId = 'workspace-impact-1'
 const projectId = 'project-impact-1'
@@ -33,6 +39,31 @@ const baseVersionId = 'project-version-impact-1'
 const resultVersionId = 'project-version-impact-2'
 const commandId = 'edit-command-impact-1'
 const createdAt = '2026-07-31T19:00:00.000Z'
+
+test('T-FR-236 exposes the resulting Command version as the current project head', () => {
+  const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.commands.apply')
+  assert.equal(capability.version, '7.0.0')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v6')
+  assert.equal(getPublicSchema('apollo://schemas/project-edit-command-applied/v5').ref, 'apollo://schemas/project-edit-command-applied/v5')
+
+  const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v6').schema)
+  for (const previousRef of [
+    'apollo://schemas/project-edit-command-applied/v4',
+    'apollo://schemas/project-edit-command-applied/v5',
+    'apollo://schemas/project-edit-command-applied/v3',
+  ]) {
+    const body = structuredClone(publicSchemaExamples(getPublicSchema(previousRef))[0])
+    body.data.version = presentProjectVersionV2(
+      body.data.version,
+      { current: true, previewAvailable: false },
+    )
+    assert.equal(validate(body), true, `${previousRef}: ${JSON.stringify(validate.errors)}`)
+    const mismatched = structuredClone(body)
+    mismatched.data.version.visibleState.label = 'superseded'
+    assert.equal(validate(mismatched), false, previousRef)
+  }
+})
 
 function plan(versionId = baseVersionId) {
   return {

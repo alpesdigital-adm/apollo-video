@@ -17,7 +17,11 @@ import {
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
-import { presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
+import {
+  presentProjectVersionV2,
+  presentPublicOperation,
+  presentSuccess,
+} from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -128,14 +132,14 @@ export async function POST(
           resultVersionId: result.version.id,
           createdAt: result.command.createdAt,
         },
-        version: {
+        version: presentProjectVersionV2({
           id: result.version.id,
           sequence: result.version.sequence,
           parentVersionId: result.version.parentVersionId,
           baseHash: result.version.baseHash,
           snapshotRefs: { ...result.version.snapshotRefs, perception: refs.perception, quality: refs.quality },
           createdAt: result.version.createdAt,
-        },
+        }, { current: true, previewAvailable: false }),
         directorRun: {
           id: result.run.id,
           status: result.run.status,
@@ -196,14 +200,14 @@ export async function POST(
           resultVersionId: result.version.id,
           createdAt: result.command.createdAt,
         },
-        version: {
+        version: presentProjectVersionV2({
           id: result.version.id,
           sequence: result.version.sequence,
           parentVersionId: result.version.parentVersionId,
           baseHash: result.version.baseHash,
           snapshotRefs: result.version.snapshotRefs,
           createdAt: result.version.createdAt,
-        },
+        }, { current: true, previewAvailable: false }),
         sourceTranscript: {
           previousTranscriptId: result.command.payload.previousTranscriptId,
           previousTranscriptHash: result.command.payload.previousTranscriptHash,
@@ -259,14 +263,14 @@ export async function POST(
           resultVersionId: result.version.id,
           createdAt: result.command.createdAt,
         },
-        version: {
+        version: presentProjectVersionV2({
           id: result.version.id,
           sequence: result.version.sequence,
           parentVersionId: result.version.parentVersionId,
           baseHash: result.version.baseHash,
           snapshotRefs: result.version.snapshotRefs,
           createdAt: result.version.createdAt,
-        },
+        }, { current: true, previewAvailable: false }),
         editorial: {
           sourceTranscriptId: result.editPlan.retimedTranscript.sourceTranscriptId,
           sourceArtifactId: result.editPlan.sources[0]!.artifactId,
