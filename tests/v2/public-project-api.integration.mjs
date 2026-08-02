@@ -6,6 +6,28 @@ import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+
+const capabilityById = new Map(
+  FOUNDATION_CAPABILITIES.map((capability) => [capability.id, capability]),
+)
+
+function assertAuthorizedCapabilities(actual, required) {
+  assert.equal(new Set(actual).size, actual.length)
+  assert.deepEqual(actual.filter((id) => required.includes(id)), required)
+  const grantedScopes = new Set(
+    required.flatMap((id) => capabilityById.get(id)?.requiredScopes ?? []),
+  )
+  for (const id of actual) {
+    const capability = capabilityById.get(id)
+    assert.ok(capability, `Capability ${id} is absent from the canonical registry`)
+    assert.equal(
+      capability.requiredScopes.every((scope) => grantedScopes.has(scope)),
+      true,
+      `Capability ${id} exceeds the granted integration-test scopes`,
+    )
+  }
+}
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -1044,7 +1066,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     assert.equal(capabilitiesResponse.status, 200)
     const capabilities = await capabilitiesResponse.json()
-    assert.deepEqual(
+    assertAuthorizedCapabilities(
       capabilities.data.capabilities.map((capability) => capability.id),
       [
         'apollo.health.read',
@@ -2478,7 +2500,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     const childCapabilities = await childCapabilitiesResponse.json()
     assert.equal(childCapabilitiesResponse.status, 200)
-    assert.deepEqual(
+    assertAuthorizedCapabilities(
       childCapabilities.data.capabilities.map((capability) => capability.id),
       [
         'apollo.health.read',
