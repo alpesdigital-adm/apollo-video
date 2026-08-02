@@ -298,12 +298,30 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       actor: { type: 'api-client', id: clientId },
       idempotencyKey: 'vertical-smoke-proxy-v1',
     })
+    const ffmpegRenderer = new FfmpegEditorialProxyRenderer({
+      workRoot: join(root, '.render-work'),
+      ffmpegPath,
+    })
+    let observedRenderError
+    const observedRenderer = {
+      async render(input) {
+        try {
+          return await ffmpegRenderer.render(input)
+        } catch (error) {
+          observedRenderError = error
+          throw error
+        }
+      },
+      cleanup(operationId) {
+        return ffmpegRenderer.cleanup(operationId)
+      },
+    }
     const render = runNextProjectProxyRenderOperationService({
       operations,
       projects: proxyProjects,
       artifacts,
       storage,
-      renderer: new FfmpegEditorialProxyRenderer({ workRoot: join(root, '.render-work'), ffmpegPath }),
+      renderer: observedRenderer,
       renderElementMaps: new PrismaRenderElementMapRepository(prisma),
       proxyReviews: new PrismaProxyReviewRepository(prisma),
       colorPipelines,
@@ -326,7 +344,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       renderOutcome.status,
       'succeeded',
       completed?.operation.error
-        ? `${completed.operation.error.code}: ${completed.operation.error.message}`
+        ? `${completed.operation.error.code}: ${observedRenderError instanceof Error ? observedRenderError.message : completed.operation.error.message}`
         : 'Project proxy worker returned no persisted failure detail',
     )
     assert.equal(completed.operation.status, 'succeeded')
