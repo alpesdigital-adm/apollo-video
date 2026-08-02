@@ -51,5 +51,6 @@ head and `superseded` otherwise. Review history v3 opens a historical output
 only when persisted preview evidence exists; otherwise it offers history
 inspection. Project create v4, duplicate v2 and workspace v7 expose their
 current version through the same projection. Commands v7/result v6 also covers
-remove-spoken-content, run-director and replace-source-transcript. Manual edit,
-patch and LUT-selection responses have not yet adopted this view.
+remove-spoken-content, run-director and replace-source-transcript. Manual edit
+v3 covers apply, undo, redo and restore. Patch and LUT-selection responses have
+not yet adopted this view.

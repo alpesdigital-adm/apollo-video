@@ -1792,8 +1792,8 @@ revisão, a versão atual abre o resultado, enquanto a histórica só oferece ab
 preview quando um artifact realmente existe, ou inspecionar histórico quando
 não existe. Create v4, duplicate v2 e workspace v7 também expõem a versão
 corrente com essa projeção. Commands v7/result v6 faz o mesmo para remove,
-Director e transcript replacement; manual edit, patches e LUT selection ainda
-precisam evoluir aditivamente.
+Director e transcript replacement; manual edit v3 cobre apply, undo, redo e
+restore. Patches e LUT selection ainda precisam evoluir aditivamente.
 
 ---
 

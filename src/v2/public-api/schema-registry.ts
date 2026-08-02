@@ -11179,7 +11179,10 @@ function applyProjectManualEditRequestBody(operation: Record<string, unknown>) {
   }
 }
 
-function projectManualEditAppliedBody(timeline: Record<string, unknown>) {
+function projectManualEditAppliedBody(
+  timeline: Record<string, unknown>,
+  includeVisibleVersionState = false,
+) {
   return successSchema({
     type: 'object',
     additionalProperties: false,
@@ -11199,7 +11202,10 @@ function projectManualEditAppliedBody(timeline: Record<string, unknown>) {
       },
       version: {
         type: 'object', additionalProperties: false,
-        required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'],
+        required: [
+          'id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt',
+          ...(includeVisibleVersionState ? ['visibleState'] : []),
+        ],
         properties: {
           id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema,
           baseHash: sha256Schema,
@@ -11209,6 +11215,9 @@ function projectManualEditAppliedBody(timeline: Record<string, unknown>) {
             properties: { brief: idSchema, editPlan: idSchema, policies: idSchema },
           },
           createdAt: dateTimeSchema,
+          ...(includeVisibleVersionState
+            ? { visibleState: currentProjectVersionVisibleStateSchema }
+            : {}),
         },
       },
       timeline,
@@ -18017,6 +18026,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ),
   defineSchema('project-manual-edit-applied', 2, 'Applied manual edit with normalized clip crops, immutable version and proxy operation',
     projectManualEditAppliedBody(manualTimelineSchema),
+  ),
+  defineSchema('project-manual-edit-applied', 3, 'Applied manual edit with explicit current ProjectVersion state',
+    projectManualEditAppliedBody(manualTimelineSchema, true),
   ),
   defineSchema('project-artifact-invalidations', 1, 'Version-scoped stale output relationships for one immutable project version',
     successSchema({

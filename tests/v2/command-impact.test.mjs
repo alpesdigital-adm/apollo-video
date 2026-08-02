@@ -65,6 +65,31 @@ test('T-FR-236 exposes the resulting Command version as the current project head
   }
 })
 
+test('T-FR-236 exposes manual apply, undo, redo and restore result versions as current', () => {
+  const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.manual-edits.apply')
+  assert.equal(capability.version, '3.0.0')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-manual-edit-applied/v3')
+  assert.equal(getPublicSchema('apollo://schemas/project-manual-edit-applied/v2').ref, 'apollo://schemas/project-manual-edit-applied/v2')
+
+  const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+    .compile(getPublicSchema('apollo://schemas/project-manual-edit-applied/v3').schema)
+  const previous = publicSchemaExamples(getPublicSchema('apollo://schemas/project-manual-edit-applied/v2'))[0]
+  for (const action of ['apply', 'undo', 'redo', 'restore']) {
+    const body = structuredClone(previous)
+    body.data.command.action = action
+    body.data.command.payload.action = action
+    body.data.comparison.action = action
+    body.data.version = presentProjectVersionV2(
+      body.data.version,
+      { current: true, previewAvailable: false },
+    )
+    assert.equal(validate(body), true, `${action}: ${JSON.stringify(validate.errors)}`)
+    const mismatched = structuredClone(body)
+    mismatched.data.version.visibleState.primaryAction = 'inspect-history'
+    assert.equal(validate(mismatched), false, action)
+  }
+})
+
 function plan(versionId = baseVersionId) {
   return {
     schemaVersion: 2,

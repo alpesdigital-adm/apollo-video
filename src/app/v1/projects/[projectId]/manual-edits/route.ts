@@ -23,6 +23,7 @@ import {
   respondPublicError,
 } from '@/v2/public-api/errors'
 import {
+  presentProjectVersionV2,
   presentPublicOperation,
   presentSuccess,
 } from '@/v2/public-api/presenters'
@@ -217,14 +218,14 @@ export async function POST(
         payload: result.command.payload,
         createdAt: result.command.createdAt,
       },
-      version: {
+      version: presentProjectVersionV2({
         id: result.version.id,
         sequence: result.version.sequence,
         parentVersionId: result.version.parentVersionId,
         baseHash: result.version.baseHash,
         snapshotRefs: result.version.snapshotRefs,
         createdAt: result.version.createdAt,
-      },
+      }, { current: true, previewAvailable: false }),
       timeline: result.timeline,
       comparison: result.comparison,
       operation: presentPublicOperation(proxy.operation),

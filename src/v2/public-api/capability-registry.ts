@@ -4101,7 +4101,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.manual-edits.apply',
-    version: '2.0.0',
+    version: '3.0.0',
     title: 'Apply, undo or redo a manual project edit',
     description: 'Applies one scoped trim, split, move, replacement, normalized crop or inspector edit, or restores an immutable version through auditable undo/redo, then queues a fresh proxy.',
     exposure: 'public',
@@ -4109,7 +4109,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:write'],
     inputSchemaRef: 'apollo://schemas/apply-project-manual-edit-request/v2',
-    outputSchemaRef: 'apollo://schemas/project-manual-edit-applied/v2',
+    outputSchemaRef: 'apollo://schemas/project-manual-edit-applied/v3',
     endpoint: { method: 'POST', path: '/v1/projects/{projectId}/manual-edits' },
     toolName: 'apollo.projects.manual-edits.apply',
     supportsDryRun: false,

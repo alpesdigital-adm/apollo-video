@@ -8535,6 +8535,57 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-manual-edit-applied/v3': [
+      {
+        data: {
+          command: {
+            id: 'manual-edit-command-example-crop', type: 'manual-edit', action: 'apply',
+            baseVersionId: 'project-version-example-4', resultVersionId: 'project-version-example-5',
+            scope: { clipIds: ['clip-example-1'], outputSpecIds: ['output-spec-9x16'] },
+            payload: {
+              schemaVersion: 2, action: 'apply', expectedRevision: 4,
+              variantId: 'output-spec-9x16', targetId: 'clip-example-1',
+              operation: {
+                kind: 'crop', clipId: 'clip-example-1',
+                crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
+              },
+            },
+            createdAt,
+          },
+          version: {
+            id: 'project-version-example-5', sequence: 5,
+            parentVersionId: 'project-version-example-4', baseHash: 'e'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', editPlan: 'project-snapshot-edit-plan-5',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          timeline: {
+            versionId: 'project-version-example-5', revision: 5,
+            clips: [{
+              id: 'clip-example-1', sourceId: 'artifact-example-1',
+              startMs: 0, endMs: 5000, track: 0, selected: true, inspector: {},
+              crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
+            }],
+            snapPointsMs: [0, 5000],
+          },
+          comparison: {
+            beforeVersionId: 'project-version-example-4', afterVersionId: 'project-version-example-5',
+            beforeEditPlanHash: '4'.repeat(64), afterEditPlanHash: '5'.repeat(64),
+            action: 'apply', targetId: 'clip-example-1',
+          },
+          operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-artifact-invalidations/v1': [{
       data: {
         projectId: 'project-example-1',
