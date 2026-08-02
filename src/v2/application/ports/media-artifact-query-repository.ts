@@ -51,6 +51,7 @@ export interface MediaArtifactRecord {
   mediaType: MediaArtifactType
   container: string
   status: MediaArtifactLifecycleStatus
+  lifecycleRevision: number
   manifests: readonly MediaArtifactManifestRecord[]
   createdAt: string
 }

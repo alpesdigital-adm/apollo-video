@@ -44,6 +44,14 @@ open, inspect or historical actions respectively. Both hydration and
 presentation fail closed for an unknown lifecycle value; `stale-output` is not
 an artifact status.
 
+Artifact lifecycle mutations use a separate monotonic revision and immutable
+transition record. The v4 detail exposes that revision and the API-first
+transition command requires an Idempotency-Key and a human-readable reason.
+The serializable update fences workspace, current status and base revision,
+preventing ABA and concurrent overwrite. Available and quarantined may recover
+or become deleted; deleted cannot be resurrected. It is a logical tombstone,
+not permission to bypass retention and remove immutable bytes.
+
 Project presentation uses the same boundary over its closed 14-phase enum.
 Create v3, list v2 and workspace v6 bind technical status to an identical
 visible label and an exact tone/progress/action/terminality tuple; only completed

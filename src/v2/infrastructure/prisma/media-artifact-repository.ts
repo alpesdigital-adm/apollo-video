@@ -354,6 +354,13 @@ export class PrismaMediaArtifactRepository
         { artifactId: row.id },
       )
     }
+    if (!Number.isSafeInteger(row.lifecycleRevision) || row.lifecycleRevision < 1) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Stored media artifact lifecycle revision is invalid',
+        { artifactId: row.id },
+      )
+    }
 
     const manifests = row.manifests.map((stored) => {
       let manifest: MediaArtifactManifest
@@ -495,6 +502,7 @@ export class PrismaMediaArtifactRepository
       mediaType: row.mediaType as MediaArtifactRecord['mediaType'],
       container: row.container,
       status: row.status as MediaArtifactRecord['status'],
+      lifecycleRevision: row.lifecycleRevision,
       manifests,
       createdAt: row.createdAt.toISOString(),
     }

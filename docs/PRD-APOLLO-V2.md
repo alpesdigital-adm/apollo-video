@@ -1769,6 +1769,13 @@ O lifecycle global do artifact é um enum separado e fechado: `available`,
 job. Available abre o resultado, quarantined exige inspeção e deleted preserva
 somente a ação de histórico; qualquer estado desconhecido falha fechado.
 
+Transições desse lifecycle são comandos públicos auditáveis e cercados por uma
+revisão monotônica própria, distinta de rights e de ProjectVersion. Available e
+quarantined podem alternar ou chegar a deleted; deleted é terminal, salvo a
+repetição convergente do próprio estado. Cada comando exige motivo e
+Idempotency-Key, rejeita revisão obsoleta e grava o antes/depois. Deleted é um
+tombstone lógico sujeito à retention policy: a transição não remove bytes.
+
 Em lote, o progresso visível é derivado exclusivamente dos steps persistidos.
 Falha de um item não transforma itens concluídos em falha nem apresenta o lote
 como concluído: a projeção distingue `partially-failed`, preserva resultados

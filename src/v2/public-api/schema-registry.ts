@@ -6992,6 +6992,51 @@ const mediaArtifactPublicSchemaV3 = {
   ],
 }
 
+const mediaArtifactPublicSchemaV4 = {
+  ...mediaArtifactPublicSchemaV3,
+  required: [...mediaArtifactPublicSchemaV3.required, 'lifecycleRevision'],
+  properties: {
+    ...mediaArtifactPublicSchemaV3.properties,
+    lifecycleRevision: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  },
+}
+
+const mediaArtifactLifecycleTransitionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id', 'artifactId', 'baseRevision', 'resultRevision', 'fromStatus',
+    'targetStatus', 'changed', 'reason', 'actorClientId', 'visibleState', 'createdAt',
+  ],
+  properties: {
+    id: idSchema,
+    artifactId: idSchema,
+    baseRevision: { type: 'integer', minimum: 1, maximum: 2147483647 },
+    resultRevision: { type: 'integer', minimum: 1, maximum: 2147483647 },
+    fromStatus: { enum: ['available', 'quarantined', 'deleted'] },
+    targetStatus: { enum: ['available', 'quarantined', 'deleted'] },
+    changed: { type: 'boolean' },
+    reason: { type: 'string', minLength: 3, maxLength: 500 },
+    actorClientId: idSchema,
+    visibleState: mediaArtifactVisibleStateSchema,
+    createdAt: dateTimeSchema,
+  },
+  allOf: [
+    {
+      if: { type: 'object', properties: { targetStatus: { const: 'available' } } },
+      then: { type: 'object', properties: { visibleState: { type: 'object', properties: { label: { const: 'available' } } } } },
+    },
+    {
+      if: { type: 'object', properties: { targetStatus: { const: 'quarantined' } } },
+      then: { type: 'object', properties: { visibleState: { type: 'object', properties: { label: { const: 'quarantined' } } } } },
+    },
+    {
+      if: { type: 'object', properties: { targetStatus: { const: 'deleted' } } },
+      then: { type: 'object', properties: { visibleState: { type: 'object', properties: { label: { const: 'deleted' } } } } },
+    },
+  ],
+}
+
 const projectStatusValues = [
   'draft', 'ingesting', 'perceiving', 'planning', 'generating',
   'reviewing-assets', 'rendering-proxy', 'reviewing-proxy', 'revising',
@@ -12500,6 +12545,38 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: {
         artifact: mediaArtifactPublicSchemaV3,
         manifests: { type: 'array', items: artifactManifestSchema },
+      },
+    }),
+  ),
+  defineSchema('artifact-detail', 4, 'Artifact detail response with revision-fenced lifecycle state',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['artifact', 'manifests'],
+      properties: {
+        artifact: mediaArtifactPublicSchemaV4,
+        manifests: { type: 'array', items: artifactManifestSchema },
+      },
+    }),
+  ),
+  defineSchema('media-artifact-lifecycle-transition-request', 1, 'Revision-fenced media artifact lifecycle transition request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['baseRevision', 'targetStatus', 'reason'],
+    properties: {
+      baseRevision: { type: 'integer', minimum: 1, maximum: 2147483647 },
+      targetStatus: { enum: ['available', 'quarantined', 'deleted'] },
+      reason: { type: 'string', minLength: 3, maxLength: 500 },
+    },
+  }),
+  defineSchema('media-artifact-lifecycle-transition-result', 1, 'Audited media artifact lifecycle transition result',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['transition', 'replayed'],
+      properties: {
+        transition: mediaArtifactLifecycleTransitionSchema,
+        replayed: { type: 'boolean' },
       },
     }),
   ),

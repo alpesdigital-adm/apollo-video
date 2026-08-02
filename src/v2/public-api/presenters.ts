@@ -154,6 +154,17 @@ export function presentMediaArtifactV3(artifact: MediaArtifactRecord) {
   })
 }
 
+export function presentMediaArtifactV4(artifact: MediaArtifactRecord) {
+  const presented = presentMediaArtifactV3(artifact)
+  return Object.freeze({
+    ...presented,
+    artifact: Object.freeze({
+      ...presented.artifact,
+      lifecycleRevision: artifact.lifecycleRevision,
+    }),
+  })
+}
+
 export function presentProjectV2(
   project: Pick<
     Project,

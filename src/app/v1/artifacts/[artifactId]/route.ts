@@ -9,7 +9,7 @@ import {
   resolveRequestId,
   respondPublicError,
 } from '@/v2/public-api/errors'
-import { presentMediaArtifactV3, presentSuccess } from '@/v2/public-api/presenters'
+import { presentMediaArtifactV4, presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +29,7 @@ export async function GET(
     const artifact = await readArtifact(actor.workspaceId, artifactId)
 
     return NextResponse.json(
-      presentSuccess(presentMediaArtifactV3(artifact)),
+      presentSuccess(presentMediaArtifactV4(artifact)),
       { headers: publicApiHeaders(requestId) },
     )
   } catch (error) {

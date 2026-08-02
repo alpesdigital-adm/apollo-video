@@ -79,6 +79,7 @@ import type { MediaTransferRepository } from '../application/ports/media-transfe
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
 import type { MediaArtifactPersistenceRepository } from '../application/ports/media-artifact-repository.ts'
+import type { MediaArtifactLifecycleRepository } from '../application/ports/media-artifact-lifecycle-repository.ts'
 import type { ProjectMediaRepository } from '../application/ports/media-ingest.ts'
 import type { ProtectedRenderInputStore } from '../application/ports/protected-render-input-store.ts'
 import type { RenderInputAssetResolver } from '../application/ports/render-input-asset-resolver.ts'
@@ -195,6 +196,7 @@ import { PrismaMaterializationAuthorizationRepository } from './prisma/materiali
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
+import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
 import { PrismaProjectCreationRepository } from './prisma/project-creation-repository.ts'
@@ -682,6 +684,10 @@ export function createMaterializationAuthorizationRepository(): MaterializationA
 
 export function createMediaArtifactQueryRepository(): MediaArtifactQueryRepository {
   return new PrismaMediaArtifactRepository(resolveV2Client())
+}
+
+export function createMediaArtifactLifecycleRepository(): MediaArtifactLifecycleRepository {
+  return new PrismaMediaArtifactLifecycleRepository(resolveV2Client())
 }
 
 export function createMediaArtifactPersistenceRepository(

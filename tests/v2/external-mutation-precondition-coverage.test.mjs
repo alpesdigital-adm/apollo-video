@@ -11,6 +11,10 @@ const coverage = Object.freeze({
   'apollo.artifacts.rights.set': {
     mode: 'explicit-precondition', mechanism: 'if-match', evidence: 'F0-076',
   },
+  'apollo.artifacts.lifecycle.transition': {
+    mode: 'revision-bound-action',
+    evidence: 'F0.029 requires baseRevision; serializable persistence fences workspace, current status and lifecycle revision before writing immutable audit history',
+  },
   'apollo.artifacts.materialization.authorize': {
     mode: 'idempotent-create', evidence: 'F0-067',
   },
@@ -492,7 +496,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'idempotent-create': 48,
     'state-machine-action': 13,
     'single-flight-action': 1,
-    'revision-bound-action': 6,
+    'revision-bound-action': 7,
     'base-version-bound-action': 4,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,

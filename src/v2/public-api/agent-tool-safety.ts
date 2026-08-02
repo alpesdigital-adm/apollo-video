@@ -83,6 +83,10 @@ export function createFoundationAgentToolSafety(
   capabilities: readonly PublicCapability[],
 ) {
   return defineAgentToolSafetyRegistry(capabilities, {
+    'apollo.artifacts.lifecycle.transition': {
+      impact: 'destructive', confirmation: 'human-approval',
+      reason: 'Can quarantine an artifact or make deletion terminal while preserving retained immutable bytes and audit history.',
+    },
     'apollo.artifacts.rights.set': {
       impact: 'destructive', confirmation: 'human-approval',
       reason: 'Can revoke or replace the declared rights state used by later renders.',

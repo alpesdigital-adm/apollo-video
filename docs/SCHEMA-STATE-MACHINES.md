@@ -29,6 +29,12 @@ The media artifact aggregate has a separate closed lifecycle:
 `available|quarantined|deleted`. It never inherits `stale-output` from a
 version edge and never invents progress. The Prisma adapter and v3 public
 presenter share the domain allowlist and reject unknown persisted values.
+The additive v4 detail exposes a monotonic lifecycle revision. The public
+transition command persists a reason and immutable before/after audit record,
+uses durable idempotency and fences the artifact row by workspace, status and
+revision. Available and quarantined may move between each other or to deleted;
+deleted is terminal except for a convergent self-transition. Deleted remains a
+logical tombstone, so lifecycle change never physically discards retained bytes.
 
 Project has a separate closed 14-phase enum and a canonical visible projection.
 The public create v3, list v2, and workspace v6 responses expose it while

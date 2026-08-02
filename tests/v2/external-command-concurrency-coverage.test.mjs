@@ -10,6 +10,10 @@ const coverage = Object.freeze({
   'apollo.artifacts.rights.set': {
     mode: 'durable-covered', evidence: 'F0-072/F0-076',
   },
+  'apollo.artifacts.lifecycle.transition': {
+    mode: 'durable-covered',
+    evidence: 'F0.029 serializable workspace/status/revision CAS, actor-bound idempotency ledger and immutable lifecycle transition audit',
+  },
   'apollo.artifacts.materialization.authorize': {
     mode: 'durable-covered', evidence: 'F0-067',
   },
@@ -301,7 +305,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    84,
+    85,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

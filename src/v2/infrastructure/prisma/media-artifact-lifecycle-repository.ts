@@ -1,0 +1,270 @@
+import {
+  Prisma,
+  type PrismaClient,
+  type V2IdempotencyRecord,
+  type V2MediaArtifactLifecycleTransition,
+} from '../../../../generated/prisma-v2/index.js'
+
+import type {
+  MediaArtifactLifecycleRepository,
+  MediaArtifactLifecycleTransitionBundle,
+  MediaArtifactLifecycleTransitionRecord,
+  MediaArtifactLifecycleTransitionResult,
+} from '../../application/ports/media-artifact-lifecycle-repository.ts'
+import { DomainError } from '../../domain/errors.ts'
+import {
+  assertMediaArtifactLifecycleTransition,
+  MEDIA_ARTIFACT_LIFECYCLE_STATUSES,
+  type MediaArtifactLifecycleStatus,
+} from '../../domain/media-artifact.ts'
+
+interface StoredResponse {
+  transitionId: string
+}
+
+function isSerializationConflict(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
+}
+
+function parseStoredResponse(record: V2IdempotencyRecord): StoredResponse {
+  if (record.status !== 'completed' || !record.responseJson) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Artifact lifecycle idempotency record is incomplete',
+      { idempotencyRecordId: record.id, status: record.status },
+    )
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(record.responseJson)
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Artifact lifecycle idempotency response is invalid')
+  }
+  if (
+    typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) ||
+    Object.keys(parsed).length !== 1 || typeof (parsed as StoredResponse).transitionId !== 'string'
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Artifact lifecycle idempotency response is invalid')
+  }
+  return { transitionId: (parsed as StoredResponse).transitionId }
+}
+
+function hydrateTransition(
+  row: V2MediaArtifactLifecycleTransition,
+): Readonly<MediaArtifactLifecycleTransitionRecord> {
+  const fromStatus = row.fromStatus as MediaArtifactLifecycleStatus
+  const targetStatus = row.targetStatus as MediaArtifactLifecycleStatus
+  if (
+    !MEDIA_ARTIFACT_LIFECYCLE_STATUSES.includes(fromStatus) ||
+    !MEDIA_ARTIFACT_LIFECYCLE_STATUSES.includes(targetStatus) ||
+    !Number.isSafeInteger(row.baseRevision) || row.baseRevision < 1 ||
+    !Number.isSafeInteger(row.resultRevision) ||
+    row.resultRevision !== row.baseRevision + (row.changed ? 1 : 0) ||
+    row.changed !== (fromStatus !== targetStatus)
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored media artifact lifecycle transition is invalid',
+      { transitionId: row.id },
+    )
+  }
+  try {
+    assertMediaArtifactLifecycleTransition(fromStatus, targetStatus)
+  } catch {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored media artifact lifecycle transition is forbidden',
+      { transitionId: row.id },
+    )
+  }
+  return Object.freeze({
+    id: row.id,
+    workspaceId: row.workspaceId,
+    artifactId: row.artifactId,
+    baseRevision: row.baseRevision,
+    resultRevision: row.resultRevision,
+    fromStatus,
+    targetStatus,
+    changed: row.changed,
+    reason: row.reason,
+    actorClientId: row.actorClientId,
+    idempotencyKey: row.idempotencyKey,
+    requestFingerprint: row.requestFingerprint,
+    createdAt: row.createdAt.toISOString(),
+  })
+}
+
+export class PrismaMediaArtifactLifecycleRepository
+implements MediaArtifactLifecycleRepository {
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) {
+    this.client = client
+  }
+
+  async transitionOrReplay(
+    bundle: MediaArtifactLifecycleTransitionBundle,
+    serializationAttempt = 1,
+  ): Promise<MediaArtifactLifecycleTransitionResult> {
+    try {
+      return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
+        const idempotencyWhere = {
+          workspaceId_clientId_key: {
+            workspaceId: bundle.workspaceId,
+            clientId: bundle.actorClientId,
+            key: bundle.idempotencyKey,
+          },
+        }
+        const existing = await transaction.v2IdempotencyRecord.findUnique({
+          where: idempotencyWhere,
+        })
+        if (existing && existing.expiresAt > new Date()) {
+          if (existing.requestFingerprint !== bundle.requestFingerprint) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Idempotency key was already used with a different artifact lifecycle request',
+            )
+          }
+          const stored = parseStoredResponse(existing)
+          const transition = await transaction.v2MediaArtifactLifecycleTransition.findUnique({
+            where: { id: stored.transitionId },
+          })
+          if (
+            !transition || transition.workspaceId !== bundle.workspaceId ||
+            transition.actorClientId !== bundle.actorClientId ||
+            transition.idempotencyKey !== bundle.idempotencyKey ||
+            transition.requestFingerprint !== bundle.requestFingerprint
+          ) {
+            throw new DomainError(
+              'PERSISTENCE_CONFLICT',
+              'Artifact lifecycle idempotency result is missing or mismatched',
+            )
+          }
+          return { transition: hydrateTransition(transition), replayed: true }
+        }
+        if (existing) {
+          await transaction.v2IdempotencyRecord.delete({ where: { id: existing.id } })
+        }
+
+        const workspace = await transaction.v2Workspace.findUnique({
+          where: { id: bundle.workspaceId },
+          select: { id: true, status: true },
+        })
+        if (!workspace || workspace.status !== 'active') {
+          throw new DomainError('WORKSPACE_NOT_FOUND', 'Active workspace was not found')
+        }
+        const artifact = await transaction.v2MediaArtifact.findFirst({
+          where: { id: bundle.artifactId, workspaceId: bundle.workspaceId },
+          select: { id: true, status: true, lifecycleRevision: true },
+        })
+        if (!artifact) {
+          throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Media artifact was not found')
+        }
+        const fromStatus = artifact.status as MediaArtifactLifecycleStatus
+        if (!MEDIA_ARTIFACT_LIFECYCLE_STATUSES.includes(fromStatus)) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Stored media artifact status is invalid')
+        }
+        if (artifact.lifecycleRevision !== bundle.baseRevision) {
+          throw new DomainError(
+            'MEDIA_ARTIFACT_LIFECYCLE_REVISION_MISMATCH',
+            'Media artifact lifecycle revision changed',
+            { expectedRevision: bundle.baseRevision, currentRevision: artifact.lifecycleRevision },
+          )
+        }
+        assertMediaArtifactLifecycleTransition(fromStatus, bundle.targetStatus)
+        const changed = fromStatus !== bundle.targetStatus
+        const resultRevision = bundle.baseRevision + (changed ? 1 : 0)
+
+        await transaction.v2IdempotencyRecord.create({
+          data: {
+            id: bundle.idempotencyRecordId,
+            workspaceId: bundle.workspaceId,
+            clientId: bundle.actorClientId,
+            key: bundle.idempotencyKey,
+            requestFingerprint: bundle.requestFingerprint,
+            status: 'processing',
+            expiresAt: new Date(bundle.idempotencyExpiresAt),
+            createdAt: new Date(bundle.createdAt),
+          },
+        })
+
+        if (changed) {
+          const updated = await transaction.v2MediaArtifact.updateMany({
+            where: {
+              id: bundle.artifactId,
+              workspaceId: bundle.workspaceId,
+              status: fromStatus,
+              lifecycleRevision: bundle.baseRevision,
+            },
+            data: { status: bundle.targetStatus, lifecycleRevision: { increment: 1 } },
+          })
+          if (updated.count !== 1) {
+            throw new DomainError(
+              'MEDIA_ARTIFACT_LIFECYCLE_REVISION_MISMATCH',
+              'Media artifact lifecycle changed during transition',
+            )
+          }
+        }
+
+        const transition = await transaction.v2MediaArtifactLifecycleTransition.create({
+          data: {
+            id: bundle.transitionId,
+            workspaceId: bundle.workspaceId,
+            artifactId: bundle.artifactId,
+            baseRevision: bundle.baseRevision,
+            resultRevision,
+            fromStatus,
+            targetStatus: bundle.targetStatus,
+            changed,
+            reason: bundle.reason,
+            actorClientId: bundle.actorClientId,
+            idempotencyKey: bundle.idempotencyKey,
+            requestFingerprint: bundle.requestFingerprint,
+            createdAt: new Date(bundle.createdAt),
+          },
+        })
+
+        await transaction.v2IdempotencyRecord.update({
+          where: { id: bundle.idempotencyRecordId },
+          data: {
+            status: 'completed',
+            responseStatus: 201,
+            responseJson: JSON.stringify({ transitionId: transition.id }),
+          },
+        })
+        return { transition: hydrateTransition(transition), replayed: false }
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if (isSerializationConflict(error) && serializationAttempt < 3) {
+        return this.transitionOrReplay(bundle, serializationAttempt + 1)
+      }
+      if (isSerializationConflict(error)) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Media artifact lifecycle transition conflicted with another transaction',
+        )
+      }
+      if (isUniqueConstraintError(error)) {
+        const existing = await this.client.v2IdempotencyRecord.findUnique({
+          where: {
+            workspaceId_clientId_key: {
+              workspaceId: bundle.workspaceId,
+              clientId: bundle.actorClientId,
+              key: bundle.idempotencyKey,
+            },
+          },
+        })
+        if (existing) return this.transitionOrReplay(bundle, serializationAttempt)
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          'Media artifact lifecycle transition identity collided',
+        )
+      }
+      throw error
+    }
+  }
+}

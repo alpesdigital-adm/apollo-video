@@ -5372,6 +5372,58 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/artifact-detail/v4': [
+      {
+        data: {
+          artifact: {
+            id: 'artifact-font-example-1', workspaceId,
+            artifactKey: 'artifact:artifact-font-example-1', sha256: 'f'.repeat(64),
+            byteSize: '184320', mediaType: 'font', container: 'woff2',
+            status: 'available', lifecycleRevision: 1,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'available', tone: 'success',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: true,
+            },
+            createdAt,
+          },
+          manifests: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-artifact-lifecycle-transition-request/v1': [
+      {
+        baseRevision: 1,
+        targetStatus: 'quarantined',
+        reason: 'Automated integrity verification requires human inspection.',
+      },
+    ],
+    'apollo://schemas/media-artifact-lifecycle-transition-result/v1': [
+      {
+        data: {
+          transition: {
+            id: '123e4567-e89b-42d3-a456-426614174099',
+            artifactId,
+            baseRevision: 1,
+            resultRevision: 2,
+            fromStatus: 'available',
+            targetStatus: 'quarantined',
+            changed: true,
+            reason: 'Automated integrity verification requires human inspection.',
+            actorClientId: clientId,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'quarantined', tone: 'warning',
+              progress: { mode: 'none' }, primaryAction: 'inspect-error',
+              availableActions: ['inspect-error'], terminal: false,
+            },
+            createdAt,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/public-operation-detail/v7': [
       { data: { operation: queuedLongFormIndexOperationVisibleExample }, meta: { apiVersion: 'v1' } },
     ],

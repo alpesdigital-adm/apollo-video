@@ -10,6 +10,7 @@ import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-regi
 import {
   presentMediaArtifact,
   presentMediaArtifactV3,
+  presentMediaArtifactV4,
 } from '../../src/v2/public-api/presenters.ts'
 
 test('all public examples exclude permanent storage identities', () => {
@@ -21,7 +22,7 @@ test('all public examples exclude permanent storage identities', () => {
 test('public artifact presentation replaces internal keys with logical references', () => {
   const output = presentMediaArtifact({
     id: 'artifact-output-1', workspaceId: 'workspace-1', artifactKey: 'workspaces/1/private/output.mp4', sha256: 'a'.repeat(64), byteSize: 10n,
-    mediaType: 'video', container: 'mp4', status: 'available', createdAt: '2026-07-16T23:00:00.000Z',
+    mediaType: 'video', container: 'mp4', status: 'available', lifecycleRevision: 1, createdAt: '2026-07-16T23:00:00.000Z',
     manifests: [{ id: 'manifest-1', schemaVersion: 'v1', manifestHash: 'b'.repeat(64), recipe: { id: 'test', version: 'v1', parametersHash: 'c'.repeat(64) }, createdAt: '2026-07-16T23:00:00.000Z', sources: [{ artifactId: 'artifact-source-1', artifactKey: 'workspaces/1/private/source.mov', sha256: 'd'.repeat(64), role: 'primary', ordinal: 0 }] }],
   })
   assert.equal(output.artifact.artifactKey, 'artifact:artifact-output-1')
@@ -41,11 +42,12 @@ test('T-FR-236 maps the three persisted artifact lifecycle states without confla
     id: 'artifact-output-1', workspaceId: 'workspace-1',
     artifactKey: 'private/artifact-output-1.mp4', sha256: 'a'.repeat(64),
     byteSize: 10n, mediaType: 'video', container: 'mp4',
-    createdAt: '2026-07-16T23:00:00.000Z', manifests: [],
+    lifecycleRevision: 1, createdAt: '2026-07-16T23:00:00.000Z', manifests: [],
   }
   const available = presentMediaArtifactV3({ ...base, status: 'available' })
   const quarantined = presentMediaArtifactV3({ ...base, status: 'quarantined' })
   const deleted = presentMediaArtifactV3({ ...base, status: 'deleted' })
+  const availableV4 = presentMediaArtifactV4({ ...base, status: 'available' })
 
   assert.deepEqual(available.artifact.visibleState, {
     schemaVersion: 'visible-state/v1', label: 'available', tone: 'success',
@@ -66,15 +68,15 @@ test('T-FR-236 maps the three persisted artifact lifecycle states without confla
 
   const capability = FOUNDATION_CAPABILITIES.find((item) =>
     item.id === 'apollo.artifacts.read')
-  assert.equal(capability.version, '3.0.0')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/artifact-detail/v3')
+  assert.equal(capability.version, '4.0.0')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/artifact-detail/v4')
   assert.equal(
     getPublicSchema('apollo://schemas/artifact-detail/v2').ref,
     'apollo://schemas/artifact-detail/v2',
   )
   const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
     .compile(getPublicSchema(capability.outputSchemaRef).schema)
-  const validBody = { data: available, meta: { apiVersion: 'v1' } }
+  const validBody = { data: availableV4, meta: { apiVersion: 'v1' } }
   assert.equal(validate(validBody), true, JSON.stringify(validate.errors))
   const mismatched = structuredClone(validBody)
   mismatched.data.artifact.visibleState = quarantined.artifact.visibleState

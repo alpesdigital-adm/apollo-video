@@ -37,6 +37,46 @@ export const MEDIA_ARTIFACT_LIFECYCLE_STATUSES = [
 export type MediaArtifactLifecycleStatus =
   (typeof MEDIA_ARTIFACT_LIFECYCLE_STATUSES)[number]
 
+const MEDIA_ARTIFACT_LIFECYCLE_TRANSITIONS: Readonly<
+  Record<MediaArtifactLifecycleStatus, readonly MediaArtifactLifecycleStatus[]>
+> = Object.freeze({
+  available: Object.freeze(['available', 'quarantined', 'deleted'] as const),
+  quarantined: Object.freeze(['available', 'quarantined', 'deleted'] as const),
+  deleted: Object.freeze(['deleted'] as const),
+})
+
+export function assertMediaArtifactLifecycleStatus(
+  status: string,
+): asserts status is MediaArtifactLifecycleStatus {
+  assertDomain(
+    MEDIA_ARTIFACT_LIFECYCLE_STATUSES.includes(status as MediaArtifactLifecycleStatus),
+    'INVALID_MEDIA_ARTIFACT',
+    'Media artifact lifecycle status is invalid',
+    { status },
+  )
+}
+
+export function mediaArtifactLifecycleTargets(
+  status: MediaArtifactLifecycleStatus,
+): readonly MediaArtifactLifecycleStatus[] {
+  assertMediaArtifactLifecycleStatus(status)
+  return MEDIA_ARTIFACT_LIFECYCLE_TRANSITIONS[status]
+}
+
+export function assertMediaArtifactLifecycleTransition(
+  fromStatus: MediaArtifactLifecycleStatus,
+  targetStatus: MediaArtifactLifecycleStatus,
+): void {
+  assertMediaArtifactLifecycleStatus(fromStatus)
+  assertMediaArtifactLifecycleStatus(targetStatus)
+  assertDomain(
+    MEDIA_ARTIFACT_LIFECYCLE_TRANSITIONS[fromStatus].includes(targetStatus),
+    'MEDIA_ARTIFACT_TRANSITION_REJECTED',
+    'Media artifact lifecycle transition is not allowed',
+    { fromStatus, targetStatus },
+  )
+}
+
 export interface MediaArtifactSource {
   artifactKey: string
   sha256: string
