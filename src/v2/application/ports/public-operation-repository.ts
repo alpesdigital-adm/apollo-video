@@ -164,6 +164,16 @@ export interface PublicOperationLeaseCommand {
   now: string
 }
 
+export interface ResumeWaitingPublicOperationCommand {
+  workspaceId: string
+  operationId: string
+  leaseOwner: string
+  attempt: number
+  phase: PublicOperationRunningPhase
+  now: string
+  leaseUntil: string
+}
+
 export interface PublicOperationRepository {
   findById(workspaceId: string, operationId: string): Promise<PublicOperationRecord | null>
   list(input: PublicOperationListQuery): Promise<readonly PublicOperationRecord[]>
@@ -203,6 +213,10 @@ export interface PublicOperationRepository {
   advancePhase(input: PublicOperationLeaseCommand & {
     phase: PublicOperationRunningPhase
   }): Promise<boolean>
+  wait(input: PublicOperationLeaseCommand): Promise<PublicOperationRecord | null>
+  resumeWaiting(
+    input: ResumeWaitingPublicOperationCommand,
+  ): Promise<ClaimedPublicOperationRecord | null>
   succeed(input: PublicOperationLeaseCommand): Promise<PublicOperationRecord | null>
   failOrRetry(input: PublicOperationLeaseCommand & {
     error: PublicOperationError

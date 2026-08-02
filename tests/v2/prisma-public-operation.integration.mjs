@@ -215,6 +215,48 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       true,
     )
 
+    const waiting = await repository.wait({
+      operationId,
+      leaseOwner: firstOwner,
+      attempt: 1,
+      now: '2026-01-01T15:31:11.000Z',
+    })
+    assert.equal(waiting.operation.status, 'waiting')
+    assert.equal(waiting.operation.phase, 'waiting')
+    assert.equal(waiting.operation.attempt, 1)
+    const waitingRow = await client.v2PublicOperation.findUnique({ where: { id: operationId } })
+    assert.equal(waitingRow.leaseOwner, null)
+    assert.equal(waitingRow.leaseExpiresAt, null)
+    assert.equal(waitingRow.heartbeatAt, null)
+    assert.equal(await repository.claimNext({
+      workspaceId,
+      leaseOwner: recoveryOwner,
+      now: '2026-01-01T15:31:12.000Z',
+      leaseUntil: '2026-01-01T15:31:39.000Z',
+    }), null)
+    const resumed = await repository.resumeWaiting({
+      workspaceId,
+      operationId,
+      leaseOwner: firstOwner,
+      attempt: 1,
+      phase: 'verifying',
+      now: '2026-01-01T15:31:13.000Z',
+      leaseUntil: '2026-01-01T15:31:40.000Z',
+    })
+    assert.equal(resumed.operation.status, 'running')
+    assert.equal(resumed.operation.phase, 'verifying')
+    assert.equal(resumed.operation.attempt, 1)
+    assert.equal(resumed.lease.owner, firstOwner)
+    assert.equal(await repository.resumeWaiting({
+      workspaceId,
+      operationId,
+      leaseOwner: recoveryOwner,
+      attempt: 1,
+      phase: 'verifying',
+      now: '2026-01-01T15:31:14.000Z',
+      leaseUntil: '2026-01-01T15:31:40.000Z',
+    }), null)
+
     const recovered = await repository.claimNext({
       workspaceId,
       leaseOwner: recoveryOwner,

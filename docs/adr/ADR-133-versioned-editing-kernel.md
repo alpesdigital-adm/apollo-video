@@ -24,6 +24,10 @@ projection rather than UI-specific inference. Technical status remains the
 source of truth. Determinate progress requires a real denominator; waiting and
 scheduled retry are explicitly indeterminate. `running → waiting → running`
 preserves attempt and progress and cannot resume behind its last known phase.
+Entering waiting is fenced by the active owner, attempt and lease and releases
+all lease fields. Resumption is not a generic queue claim: the dependency
+coordinator fences workspace, waiting state and attempt, then atomically assigns
+a fresh owner, heartbeat and expiry while preserving attempt and start time.
 Artifact availability remains separate from version-scoped stale output edges.
 
 Production batch presentation follows the same rule over the persisted batch

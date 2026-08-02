@@ -9,7 +9,10 @@ state remains authoritative; the projection supplies semantic label, tone,
 truthful progress mode, primary/available actions and terminality. `waiting`
 may only be entered from `running` and resumed without incrementing attempt at
 the same or a later running phase. The projection never invents a percentage
-without a positive total.
+without a positive total. The persistence boundary requires the current lease
+to enter waiting and clears it in the same commit. A dependency coordinator
+resumes with a workspace/status/attempt CAS and atomically installs a new
+lease; generic workers never claim waiting rows.
 
 `ProductionBatch` and each persisted batch item also receive a visible
 projection. Percent is the ratio of completed canonical steps, never an

@@ -8,6 +8,7 @@ import type {
   PublicOperationRecord,
   PublicOperationRepository,
   PublicOperationCreationContext,
+  ResumeWaitingPublicOperationCommand,
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
@@ -21,9 +22,11 @@ import {
   rehydratePublicOperation,
   retryPublicOperation,
   retryOrFailPublicOperation,
+  resumeWaitingPublicOperation,
   requiresArtifactRenderCheckpoint,
   startPublicOperationAttempt,
   succeedPublicOperation,
+  waitPublicOperation,
   type PublicOperation,
   type PublicOperationError,
   type PublicOperationResult,
@@ -1546,6 +1549,77 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       advancePublicOperationPhase(operation, input.phase, input.now),
     )
     return record !== null
+  }
+
+  wait(input: PublicOperationLeaseCommand): Promise<PublicOperationRecord | null> {
+    return this.transitionRunning(input, (operation) =>
+      waitPublicOperation(operation, input.now),
+    )
+  }
+
+  async resumeWaiting(
+    input: ResumeWaitingPublicOperationCommand,
+  ): Promise<ClaimedPublicOperationRecord | null> {
+    const now = parseCommandDate(input.now, 'now')
+    const leaseUntil = parseCommandDate(input.leaseUntil, 'leaseUntil')
+    if (!ID_PATTERN.test(input.leaseOwner) || leaseUntil.getTime() <= now.getTime()) {
+      throw new DomainError(
+        'INVALID_PUBLIC_OPERATION',
+        'Waiting operation resume lease input is invalid',
+      )
+    }
+    return this.client.$transaction(async (transaction) => {
+      const stored = await transaction.v2PublicOperation.findFirst({
+        where: { id: input.operationId, workspaceId: input.workspaceId },
+        include: OPERATION_INCLUDE,
+      })
+      if (!stored) return null
+      const record = hydrateRecord(stored)
+      if (
+        stored.status !== 'waiting' ||
+        stored.phase !== 'waiting' ||
+        stored.attempt !== input.attempt
+      ) {
+        return null
+      }
+      const resumed = resumeWaitingPublicOperation(
+        record.operation,
+        input.phase,
+        input.now,
+      )
+      const updated = await transaction.v2PublicOperation.updateMany({
+        where: {
+          id: input.operationId,
+          workspaceId: input.workspaceId,
+          status: 'waiting',
+          phase: 'waiting',
+          attempt: input.attempt,
+          updatedAt: stored.updatedAt,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          heartbeatAt: null,
+        },
+        data: {
+          status: resumed.status,
+          phase: resumed.phase,
+          progressCompleted: resumed.progress?.completed,
+          progressTotal: resumed.progress?.total,
+          progressUnit: resumed.progress?.unit,
+          cancelable: resumed.cancelable,
+          retryable: resumed.retryable,
+          updatedAt: now,
+          leaseOwner: input.leaseOwner,
+          leaseExpiresAt: leaseUntil,
+          heartbeatAt: now,
+        },
+      })
+      if (updated.count !== 1) return null
+      const persisted = await transaction.v2PublicOperation.findUnique({
+        where: { id: input.operationId },
+        include: OPERATION_INCLUDE,
+      })
+      return persisted ? hydrateClaim(persisted) : null
+    })
   }
 
   succeed(input: PublicOperationLeaseCommand): Promise<PublicOperationRecord | null> {

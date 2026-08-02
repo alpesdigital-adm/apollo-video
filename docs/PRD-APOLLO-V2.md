@@ -1756,7 +1756,9 @@ Estado técnico e estado visível são contratos distintos. A API expõe uma
 projeção versionada com label semântica, tone, progresso determinado somente
 quando existe denominador real, estado indeterminado explícito, ação primária,
 ações permitidas e terminalidade. `waiting` preserva attempt e checkpoint e só
-pode retomar na mesma fase ou adiante. Artifact disponível não se torna
+pode retomar na mesma fase ou adiante. A entrada em espera exige a lease ativa
+e a libera; a retomada cerca workspace, estado e attempt e instala uma nova
+lease atomicamente sem incrementar a tentativa. Artifact disponível não se torna
 globalmente stale: stale é relação da versão/variant de saída.
 
 A leitura pública dessa relação declara `availabilityEffect: none`: o estado

@@ -333,8 +333,9 @@ Para `artifact-render`, a implementação durável aplica estas regras adicionai
 3. heartbeat, fase e conclusão exigem o mesmo owner e attempt e uma lease ainda válida;
 4. a tentativa antiga perde o direito de escrever assim que a lease expira ou outra tentativa é iniciada;
 5. imediatamente antes de promover o output, o worker renova a lease e grava `persisting`; falha nesse gate aborta e descarta o partial;
-6. `succeeded/failed/retrying` limpa os campos internos de lease;
-7. somente target/result/error seguros atravessam o presenter público. Owner, heartbeat, authorization, input hash, output key e diagnóstico interno permanecem privados.
+6. `waiting/succeeded/failed/retrying` limpa os campos internos de lease;
+7. a retomada de `waiting` preserva `attempt` e `startedAt`, cerca workspace/status/attempt e instala uma nova lease atomicamente; claim genérico não seleciona waiting;
+8. somente target/result/error seguros atravessam o presenter público. Owner, heartbeat, authorization, input hash, output key e diagnóstico interno permanecem privados.
 
 As fases reais iniciais são `materializing → rendering → persisting`. `verifying` já pertence à state machine e será usado quando probe/quality gates forem separados do renderer. Progresso continua 0/1 até existir medição determinística mais granular.
 
