@@ -10,7 +10,7 @@ import {
   resolveRequestId,
   respondPublicError,
 } from '@/v2/public-api/errors'
-import { presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
+import { presentPublicOperationV2, presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     })
     return NextResponse.json(
       presentSuccess({
-        operations: result.operations.map(presentPublicOperation),
+        operations: result.operations.map(presentPublicOperationV2),
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
       }),
       { status: 200, headers: publicApiHeaders(requestId) },

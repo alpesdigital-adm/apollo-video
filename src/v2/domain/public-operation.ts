@@ -584,6 +584,51 @@ export function advancePublicOperationPhase(
   })
 }
 
+export function waitPublicOperation(
+  operation: PublicOperation,
+  updatedAtValue: string,
+): Readonly<PublicOperation> {
+  assertPublicOperation(operation)
+  assertDomain(
+    operation.status === 'running',
+    'INVALID_PUBLIC_OPERATION',
+    'Only a running PublicOperation can wait for a dependency',
+  )
+  return freezeOperation({
+    ...operation,
+    status: 'waiting',
+    phase: 'waiting',
+    cancelable: true,
+    retryable: false,
+    updatedAt: transitionDate(operation, updatedAtValue),
+  })
+}
+
+export function resumeWaitingPublicOperation(
+  operation: PublicOperation,
+  phase: PublicOperationRunningPhase,
+  updatedAtValue: string,
+): Readonly<PublicOperation> {
+  assertPublicOperation(operation)
+  const order = runningPhasesFor(operation.type)
+  const nextIndex = order.indexOf(phase)
+  const completed = operation.progress?.completed ?? 0
+  assertDomain(
+    operation.status === 'waiting' && nextIndex >= completed,
+    'INVALID_PUBLIC_OPERATION',
+    'Waiting PublicOperation cannot resume at the requested phase',
+  )
+  return freezeOperation({
+    ...operation,
+    status: 'running',
+    phase,
+    progress: { completed: nextIndex, total: order.length, unit: progressUnit(operation.type) },
+    cancelable: true,
+    retryable: false,
+    updatedAt: transitionDate(operation, updatedAtValue),
+  })
+}
+
 export function succeedPublicOperation(
   operation: PublicOperation,
   updatedAtValue: string,

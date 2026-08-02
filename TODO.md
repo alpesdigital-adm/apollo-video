@@ -501,10 +501,10 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 ### F0.029 — Estados visíveis [FR-236]
 
-- [ ] Definir estados válidos de projeto, versão, job, item batch e artifact. Evidência: T-FR-236 e ADR-133.
-- [ ] Implementar transições server-side e rejeitar saltos inválidos. Evidência: T-FR-236 e ADR-133.
-- [ ] Mapear estado técnico para label, progresso e ação na UI. Evidência: T-FR-236 e ADR-133.
-- [ ] Testar sucesso, espera, retry, cancel, falha parcial, stale e conclusão. Parcial F0-028: sucesso, retry, cancelamento de queued/retrying/running, stale worker, checkpoint tardio e conclusão terminal estão cobertos; waiting e falha parcial genérica permanecem abertos. Evidência: T-FR-236 e ADR-133.
+- [ ] Definir estados válidos de projeto, versão, job, item batch e artifact. Parcial F0.029: o agregado real `PublicOperation` possui os sete estados técnicos fechados e agora deriva `visible-state/v1`; projeto, relação de versão, item batch e artifact ainda precisam convergir no mesmo contrato sem confundir artifact disponível com relação stale. Evidência: T-FR-236 e ADR-133.
+- [ ] Implementar transições server-side e rejeitar saltos inválidos. Parcial F0.029: `PublicOperation` ganhou transições puras `running → waiting → running`, preservando attempt/progresso e recusando espera fora de execução ou retomada para fase anterior. Persistência/lease e transições dos demais agregados permanecem abertas. Evidência: T-FR-236 e ADR-133.
+- [ ] Mapear estado técnico para label, progresso e ação na UI. Parcial F0.029: as cinco capabilities próprias de operações evoluíram para v7 e retornam `visible-state/v1` com label semântica, tone, progresso `not-started|determinate|indeterminate|complete|none`, ação primária, ações permitidas e terminalidade; schemas v1–v6 permanecem publicados. Projeto, batch e artifact ainda não usam a projeção. Evidência: T-FR-236 e ADR-133.
+- [ ] Testar sucesso, espera, retry, cancel, falha parcial, stale e conclusão. Parcial F0.029: operações reais cobrem queued, progresso determinado, waiting indeterminado, retomada, retry agendado, cancelamento, falha terminal, sucesso e estado inventado fail-closed. Falha parcial de batch, stale version-scoped e os demais agregados permanecem abertos. Evidência: T-FR-236 e ADR-133.
 
 ### F0.030 — Infraestrutura e smoke vertical
 

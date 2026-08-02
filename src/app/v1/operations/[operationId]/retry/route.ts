@@ -9,7 +9,7 @@ import {
   resolveRequestId,
   respondPublicError,
 } from '@/v2/public-api/errors'
-import { presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
+import { presentPublicOperationV2, presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +27,7 @@ export async function POST(
     })
     const operation = await retry({ workspaceId: actor.workspaceId, operationId })
     return NextResponse.json(
-      presentSuccess({ operation: presentPublicOperation(operation) }),
+      presentSuccess({ operation: presentPublicOperationV2(operation) }),
       { status: 200, headers: publicApiHeaders(requestId) },
     )
   } catch (error) {

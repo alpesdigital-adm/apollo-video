@@ -1838,14 +1838,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.operations.cancel": {
-      "version": "6.0.0",
+      "version": "7.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
       "requiredScopes": [
         "operations:cancel"
       ],
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v6",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v7",
       "endpoint": {
         "method": "POST",
         "path": "/v1/operations/{operationId}/cancel"
@@ -1861,14 +1861,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.operations.dead-letter.list": {
-      "version": "6.0.0",
+      "version": "7.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "operations:read"
       ],
-      "outputSchemaRef": "apollo://schemas/public-operation-list/v6",
+      "outputSchemaRef": "apollo://schemas/public-operation-list/v7",
       "endpoint": {
         "method": "GET",
         "path": "/v1/operations/dead-letter"
@@ -1956,14 +1956,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.operations.list": {
-      "version": "6.0.0",
+      "version": "7.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "operations:read"
       ],
-      "outputSchemaRef": "apollo://schemas/public-operation-list/v6",
+      "outputSchemaRef": "apollo://schemas/public-operation-list/v7",
       "endpoint": {
         "method": "GET",
         "path": "/v1/operations"
@@ -2045,14 +2045,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.operations.read": {
-      "version": "6.0.0",
+      "version": "7.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "operations:read"
       ],
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v6",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v7",
       "endpoint": {
         "method": "GET",
         "path": "/v1/operations/{operationId}"
@@ -2068,14 +2068,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.operations.retry": {
-      "version": "6.0.0",
+      "version": "7.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
       "requiredScopes": [
         "operations:retry"
       ],
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v6",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v7",
       "endpoint": {
         "method": "POST",
         "path": "/v1/operations/{operationId}/retry"
@@ -74949,6 +74949,329 @@
         }
       }
     },
+    "apollo://schemas/public-operation-detail/v7": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operation"
+          ],
+          "properties": {
+            "operation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "type",
+                "status",
+                "phase",
+                "cancelable",
+                "retryable",
+                "target",
+                "attempt",
+                "maxAttempts",
+                "createdAt",
+                "updatedAt",
+                "visibleState"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "public-operation/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "type": {
+                  "enum": [
+                    "artifact-render",
+                    "media-ingest",
+                    "project-proxy-render",
+                    "project-final-export",
+                    "source-cleanup",
+                    "long-form-index"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "waiting",
+                    "retrying",
+                    "succeeded",
+                    "failed",
+                    "canceled"
+                  ]
+                },
+                "phase": {
+                  "enum": [
+                    "queued",
+                    "assembling",
+                    "probing",
+                    "normalizing",
+                    "transcribing",
+                    "diarizing",
+                    "chunking",
+                    "indexing",
+                    "materializing",
+                    "rendering",
+                    "verifying",
+                    "persisting",
+                    "waiting",
+                    "retrying",
+                    "completed",
+                    "failed",
+                    "canceled"
+                  ]
+                },
+                "progress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "completed"
+                  ],
+                  "properties": {
+                    "completed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "unit": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                    }
+                  }
+                },
+                "cancelable": {
+                  "type": "boolean"
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "target": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id",
+                    "manifestId"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "media-artifact"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "manifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "result": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "resource"
+                  ],
+                  "properties": {
+                    "resource": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "manifestId"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "media-artifact"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "manifestId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "error": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "maxAttempts": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "startedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "visibleState": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "label",
+                    "tone",
+                    "progress",
+                    "primaryAction",
+                    "availableActions",
+                    "terminal"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "visible-state/v1"
+                    },
+                    "label": {
+                      "enum": [
+                        "queued",
+                        "in-progress",
+                        "waiting",
+                        "retry-scheduled",
+                        "completed",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "tone": {
+                      "enum": [
+                        "neutral",
+                        "info",
+                        "warning",
+                        "danger",
+                        "success"
+                      ]
+                    },
+                    "progress": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "mode"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "enum": [
+                            "not-started",
+                            "determinate",
+                            "indeterminate",
+                            "complete",
+                            "none"
+                          ]
+                        },
+                        "percent": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100
+                        }
+                      }
+                    },
+                    "primaryAction": {
+                      "enum": [
+                        "view-progress",
+                        "cancel",
+                        "resolve-dependency",
+                        "open-result",
+                        "inspect-error",
+                        "retry"
+                      ]
+                    },
+                    "availableActions": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 6,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "view-progress",
+                          "cancel",
+                          "resolve-dependency",
+                          "open-result",
+                          "inspect-error",
+                          "retry"
+                        ]
+                      }
+                    },
+                    "terminal": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/public-operation-list/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -76339,6 +76662,339 @@
                   "completedAt": {
                     "type": "string",
                     "format": "date-time"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1024,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/public-operation-list/v7": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operations"
+          ],
+          "properties": {
+            "operations": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "type",
+                  "status",
+                  "phase",
+                  "cancelable",
+                  "retryable",
+                  "target",
+                  "attempt",
+                  "maxAttempts",
+                  "createdAt",
+                  "updatedAt",
+                  "visibleState"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "public-operation/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "type": {
+                    "enum": [
+                      "artifact-render",
+                      "media-ingest",
+                      "project-proxy-render",
+                      "project-final-export",
+                      "source-cleanup",
+                      "long-form-index"
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "queued",
+                      "running",
+                      "waiting",
+                      "retrying",
+                      "succeeded",
+                      "failed",
+                      "canceled"
+                    ]
+                  },
+                  "phase": {
+                    "enum": [
+                      "queued",
+                      "assembling",
+                      "probing",
+                      "normalizing",
+                      "transcribing",
+                      "diarizing",
+                      "chunking",
+                      "indexing",
+                      "materializing",
+                      "rendering",
+                      "verifying",
+                      "persisting",
+                      "waiting",
+                      "retrying",
+                      "completed",
+                      "failed",
+                      "canceled"
+                    ]
+                  },
+                  "progress": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "completed"
+                    ],
+                    "properties": {
+                      "completed": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "total": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "unit": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "cancelable": {
+                    "type": "boolean"
+                  },
+                  "retryable": {
+                    "type": "boolean"
+                  },
+                  "target": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "id",
+                      "manifestId"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "media-artifact"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "manifestId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "result": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "resource"
+                    ],
+                    "properties": {
+                      "resource": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "id",
+                          "manifestId"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "media-artifact"
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "manifestId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "error": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "code",
+                      "message",
+                      "retryable"
+                    ],
+                    "properties": {
+                      "code": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                      },
+                      "message": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "retryable": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "maxAttempts": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "startedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "completedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "visibleState": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "label",
+                      "tone",
+                      "progress",
+                      "primaryAction",
+                      "availableActions",
+                      "terminal"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "visible-state/v1"
+                      },
+                      "label": {
+                        "enum": [
+                          "queued",
+                          "in-progress",
+                          "waiting",
+                          "retry-scheduled",
+                          "completed",
+                          "failed",
+                          "canceled"
+                        ]
+                      },
+                      "tone": {
+                        "enum": [
+                          "neutral",
+                          "info",
+                          "warning",
+                          "danger",
+                          "success"
+                        ]
+                      },
+                      "progress": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "mode"
+                        ],
+                        "properties": {
+                          "mode": {
+                            "enum": [
+                              "not-started",
+                              "determinate",
+                              "indeterminate",
+                              "complete",
+                              "none"
+                            ]
+                          },
+                          "percent": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100
+                          }
+                        }
+                      },
+                      "primaryAction": {
+                        "enum": [
+                          "view-progress",
+                          "cancel",
+                          "resolve-dependency",
+                          "open-result",
+                          "inspect-error",
+                          "retry"
+                        ]
+                      },
+                      "availableActions": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 6,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "view-progress",
+                            "cancel",
+                            "resolve-dependency",
+                            "open-result",
+                            "inspect-error",
+                            "retry"
+                          ]
+                        }
+                      },
+                      "terminal": {
+                        "type": "boolean"
+                      }
+                    }
                   }
                 }
               }

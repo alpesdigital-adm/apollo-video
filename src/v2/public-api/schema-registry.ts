@@ -6654,6 +6654,32 @@ const publicOperationTargetSchema = {
   },
 }
 
+const visibleStateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schemaVersion', 'label', 'tone', 'progress', 'primaryAction', 'availableActions', 'terminal'],
+  properties: {
+    schemaVersion: { const: 'visible-state/v1' },
+    label: { enum: ['queued', 'in-progress', 'waiting', 'retry-scheduled', 'completed', 'failed', 'canceled'] },
+    tone: { enum: ['neutral', 'info', 'warning', 'danger', 'success'] },
+    progress: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['mode'],
+      properties: {
+        mode: { enum: ['not-started', 'determinate', 'indeterminate', 'complete', 'none'] },
+        percent: { type: 'integer', minimum: 0, maximum: 100 },
+      },
+    },
+    primaryAction: { enum: ['view-progress', 'cancel', 'resolve-dependency', 'open-result', 'inspect-error', 'retry'] },
+    availableActions: {
+      type: 'array', minItems: 1, maxItems: 6, uniqueItems: true,
+      items: { enum: ['view-progress', 'cancel', 'resolve-dependency', 'open-result', 'inspect-error', 'retry'] },
+    },
+    terminal: { type: 'boolean' },
+  },
+}
+
 const publicOperationSchema = {
   type: 'object',
   additionalProperties: false,
@@ -6831,6 +6857,15 @@ const publicOperationSchemaV6 = {
         'canceled',
       ],
     },
+  },
+}
+
+const publicOperationSchemaV7 = {
+  ...publicOperationSchemaV6,
+  required: [...publicOperationSchemaV6.required, 'visibleState'],
+  properties: {
+    ...publicOperationSchemaV6.properties,
+    visibleState: visibleStateSchema,
   },
 }
 
@@ -12006,6 +12041,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV6 },
     }),
   ),
+  defineSchema('public-operation-detail', 7, 'Public operation detail with an honest actionable visible-state projection',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation'],
+      properties: { operation: publicOperationSchemaV7 },
+    }),
+  ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
     successSchema({
       type: 'object',
@@ -12430,6 +12473,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           maxLength: 1024,
           pattern: '^[A-Za-z0-9_-]+$',
         },
+      },
+    }),
+  ),
+  defineSchema('public-operation-list', 7, 'Public operation list with honest actionable visible-state projections',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV7 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
       },
     }),
   ),

@@ -58,6 +58,8 @@ Cada teste recebe ID `T-<FR>` no test plan da fase.
 | FR-233 | Partial invalidation | S2 | D3,D4 | mudança local enfileira só dependentes | integration |
 | FR-234 | Props/manifest | S2 | D3,D5 | manifest reproduz RenderInput | golden |
 | FR-236 | Estados | S7 | D0,D4,D6 | transições válidas e visíveis | state/e2e |
+
+Atualização local de FR-236 — `PublicOperation` agora possui a projeção fechada `visible-state/v1`: queued, in-progress, waiting, retry-scheduled, completed, failed e canceled mapeiam para tone, progresso honesto, ação primária, ações permitidas e terminalidade. Progresso running só é percentual quando `total` existe; waiting/retrying são indeterminados. As transições server-side `running → waiting → running` preservam attempt/progresso e rejeitam retomada para fase anterior. As capabilities `apollo.operations.list`, `dead-letter.list`, `read`, `cancel` e `retry` evoluíram para v7 com schemas aditivos, mantendo v1–v6 publicados. Testes locais cobrem os sete estados e estado inventado fail-closed; persistência/lease de waiting, projeto, versão, batch, artifact, PostgreSQL E2E, deploy e aceite permanecem pendentes.
 | FR-240 | Paridade API-first | S9 | D0,D3,D4,D10 | toda ação da UI, inclusive login/sessão/logout, possui capability e contrato externo sobre o mesmo domínio | contract/e2e |
 | FR-241 | Contrato público e descoberta | S9 | D0,D10 | OpenAPI/schemas/versionamento/capabilities publicados | contract/schema |
 | FR-242 | Clients, autenticação e escopos | S9 | D0,D7,D10 | sessão humana usa cookie seguro; client revogável usa Bearer e só acessa workspace/scope autorizado; senha nunca vira tool | security/e2e |

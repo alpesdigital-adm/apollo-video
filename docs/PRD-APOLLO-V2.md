@@ -1752,6 +1752,13 @@ Variantes × formatos × idiomas com preflight de volume/custo.
 
 Draft, ingesting, perceiving, planning, generating, reviewing-assets, rendering-proxy, reviewing-proxy, revising, rendering-final, completed, failed, canceled, archived.
 
+Estado técnico e estado visível são contratos distintos. A API expõe uma
+projeção versionada com label semântica, tone, progresso determinado somente
+quando existe denominador real, estado indeterminado explícito, ação primária,
+ações permitidas e terminalidade. `waiting` preserva attempt e checkpoint e só
+pode retomar na mesma fase ou adiante. Artifact disponível não se torna
+globalmente stale: stale é relação da versão/variant de saída.
+
 ---
 
 ## 7.24 API externa e automação

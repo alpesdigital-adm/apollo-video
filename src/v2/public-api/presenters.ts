@@ -10,6 +10,7 @@ import type { MediaArtifactRecord } from '../application/ports/media-artifact-qu
 import type { MediaColorProbe } from '../domain/color-and-export.ts'
 import { publicArtifactReference } from './public-media-identity.ts'
 import type { PublicOperation } from '../domain/public-operation.ts'
+import { presentPublicOperationVisibleState } from '../domain/visible-state.ts'
 import type {
   WebhookDeliveryDiagnosticRecord,
   WebhookDeliverySummaryRecord,
@@ -161,6 +162,13 @@ export function presentPublicOperation(operation: PublicOperation) {
     ...(operation.startedAt ? { startedAt: operation.startedAt } : {}),
     ...(operation.completedAt ? { completedAt: operation.completedAt } : {}),
   }
+}
+
+export function presentPublicOperationV2(operation: PublicOperation) {
+  return Object.freeze({
+    ...presentPublicOperation(operation),
+    visibleState: presentPublicOperationVisibleState(operation),
+  })
 }
 
 export function presentWebhookDeliverySummary(record: WebhookDeliverySummaryRecord) {

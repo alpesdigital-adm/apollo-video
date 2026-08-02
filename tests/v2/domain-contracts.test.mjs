@@ -73,13 +73,15 @@ import {
   rehydratePublicOperation,
   retryOrFailPublicOperation,
   retryPublicOperation,
+  resumeWaitingPublicOperation,
   startPublicOperationAttempt,
   succeedPublicOperation,
+  waitPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
 import { enqueueAuthorizedRenderService } from '../../src/v2/application/enqueue-authorized-render.ts'
 import { listDeadLetterOperationsService } from '../../src/v2/application/list-dead-letter-operations.ts'
 import { listPublicOperationsService } from '../../src/v2/application/list-public-operations.ts'
-import { presentPublicOperation } from '../../src/v2/public-api/presenters.ts'
+import { presentPublicOperation, presentPublicOperationV2 } from '../../src/v2/public-api/presenters.ts'
 import {
   PUBLIC_EVENT_CATALOG,
   assertUniquePublicEventIds,
@@ -931,6 +933,76 @@ test('PublicOperation attempt transitions reject stale order and exhaust retries
   const succeeded = succeedPublicOperation(persisted, '2026-07-14T12:00:05.000Z')
   assert.equal(succeeded.status, 'succeeded')
   assert.deepEqual(succeeded.result.resource, succeeded.target)
+})
+
+test('T-FR-236 real PublicOperation waiting transitions and visible states are honest and fail closed', () => {
+  const queued = createQueuedPublicOperation({
+    id: 'operation-visible-state-1', workspaceId: 'workspace-visible-state-1',
+    clientId: 'client-visible-state-1', type: 'artifact-render',
+    target: { type: 'media-artifact', id: 'artifact-visible-state-1', manifestId: 'manifest-visible-state-1' },
+    maxAttempts: 2, createdAt: '2026-08-01T12:00:00.000Z',
+  })
+  const running = advancePublicOperationPhase(
+    startPublicOperationAttempt(queued, '2026-08-01T12:00:01.000Z'),
+    'rendering',
+    '2026-08-01T12:00:02.000Z',
+  )
+  const waiting = waitPublicOperation(running, '2026-08-01T12:00:03.000Z')
+  const resumed = resumeWaitingPublicOperation(waiting, 'verifying', '2026-08-01T12:00:04.000Z')
+  assert.deepEqual(
+    { status: waiting.status, phase: waiting.phase, attempt: waiting.attempt, progress: waiting.progress },
+    { status: 'waiting', phase: 'waiting', attempt: 1, progress: running.progress },
+  )
+  assert.deepEqual(
+    { status: resumed.status, phase: resumed.phase, attempt: resumed.attempt, completed: resumed.progress.completed },
+    { status: 'running', phase: 'verifying', attempt: 1, completed: 2 },
+  )
+  expectDomainError(
+    () => resumeWaitingPublicOperation(waiting, 'materializing', '2026-08-01T12:00:04.000Z'),
+    'INVALID_PUBLIC_OPERATION',
+  )
+  expectDomainError(
+    () => waitPublicOperation(queued, '2026-08-01T12:00:01.000Z'),
+    'INVALID_PUBLIC_OPERATION',
+  )
+
+  const retrying = retryOrFailPublicOperation(
+    running,
+    { code: 'temporary_failure', message: 'Temporary failure', retryable: true },
+    '2026-08-01T12:00:03.000Z',
+    '2026-08-01T12:00:05.000Z',
+  )
+  const failed = retryOrFailPublicOperation(
+    running,
+    { code: 'terminal_failure', message: 'Terminal failure', retryable: false },
+    '2026-08-01T12:00:03.000Z',
+  )
+  const persisted = advancePublicOperationPhase(resumed, 'persisting', '2026-08-01T12:00:05.000Z')
+  const succeeded = succeedPublicOperation(persisted, '2026-08-01T12:00:06.000Z')
+  const canceled = cancelPublicOperation(queued, '2026-08-01T12:00:01.000Z')
+  const projections = [queued, running, waiting, retrying, succeeded, failed, canceled]
+    .map((operation) => presentPublicOperationV2(operation).visibleState)
+  assert.deepEqual(projections.map((state) => state.label), [
+    'queued', 'in-progress', 'waiting', 'retry-scheduled', 'completed', 'failed', 'canceled',
+  ])
+  assert.deepEqual(projections.map((state) => state.progress), [
+    { mode: 'not-started', percent: 0 },
+    { mode: 'determinate', percent: 25 },
+    { mode: 'indeterminate' },
+    { mode: 'indeterminate' },
+    { mode: 'complete', percent: 100 },
+    { mode: 'none' },
+    { mode: 'none' },
+  ])
+  assert.deepEqual(projections.map((state) => state.primaryAction), [
+    'view-progress', 'view-progress', 'resolve-dependency', 'view-progress',
+    'open-result', 'retry', 'retry',
+  ])
+  assert.ok(projections.every((state) => Object.isFrozen(state) && Object.isFrozen(state.progress)))
+  expectDomainError(
+    () => presentPublicOperationV2({ ...queued, status: 'invented' }),
+    'INVALID_PUBLIC_OPERATION',
+  )
 })
 
 test('PublicOperation cancellation is terminal, idempotent and clears retry scheduling', () => {

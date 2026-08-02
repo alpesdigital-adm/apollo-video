@@ -19,6 +19,13 @@ and reloads this full fixture before two independent authorized renders and
 compares every decoded video and audio frame. PostgreSQL/object-storage proof,
 deployment, and acceptance remain required.
 
+Public operation state is presented through the additive `visible-state/v1`
+projection rather than UI-specific inference. Technical status remains the
+source of truth. Determinate progress requires a real denominator; waiting and
+scheduled retry are explicitly indeterminate. `running → waiting → running`
+preserves attempt and progress and cannot resume behind its last known phase.
+Artifact availability remains separate from version-scoped stale output edges.
+
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.
 The record is content-addressed, frame-first and format-scoped; completed

@@ -276,6 +276,18 @@ const queuedLongFormIndexOperationExample = {
     manifestId: 'manifest-long-form-example-1',
   },
 }
+const queuedLongFormIndexOperationVisibleExample = {
+  ...queuedLongFormIndexOperationExample,
+  visibleState: {
+    schemaVersion: 'visible-state/v1',
+    label: 'queued',
+    tone: 'neutral',
+    progress: { mode: 'not-started', percent: 0 },
+    primaryAction: 'view-progress',
+    availableActions: ['view-progress', 'cancel'],
+    terminal: false,
+  },
+}
 const longFormStageVersionsExample = Object.fromEntries(
   ['probe', 'transcript', 'diarization', 'chunks', 'moments']
     .map((stage) => [
@@ -5261,6 +5273,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v6': [
       { data: { operation: queuedLongFormIndexOperationExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v7': [
+      { data: { operation: queuedLongFormIndexOperationVisibleExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -5293,6 +5308,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v6': [
       { data: { operations: [queuedLongFormIndexOperationExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v7': [
+      { data: { operations: [queuedLongFormIndexOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/webhook-delivery-list/v1': [
       {
