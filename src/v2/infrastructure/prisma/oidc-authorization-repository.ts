@@ -25,7 +25,9 @@ function hydrate(row: {
 }
 
 export class PrismaOidcAuthorizationRepository implements OidcAuthorizationRepository {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) { this.client = client }
 
   async create(input: Readonly<OidcAuthorizationTransaction>): Promise<void> {
     await this.client.v2OidcAuthorization.create({ data: {
