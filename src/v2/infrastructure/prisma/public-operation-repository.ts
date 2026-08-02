@@ -29,6 +29,10 @@ import {
   type PublicOperationResult,
   type PublicOperationRunningPhase,
 } from '../../domain/public-operation.ts'
+import {
+  projectStatusTransitionPath,
+  projectStatusTransitionSources,
+} from '../../domain/project.ts'
 
 type StoredOperation = Prisma.V2PublicOperationGetPayload<{
   include: {
@@ -1196,10 +1200,17 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               originalFileName: ingestContext!.originalFileName,
             },
           })
-          await transaction.v2Project.updateMany({
-            where: { id: ingestContext!.projectId, workspaceId: input.operation.workspaceId, status: { in: ['draft', 'failed'] } },
+          const project = await transaction.v2Project.updateMany({
+            where: {
+              id: ingestContext!.projectId,
+              workspaceId: input.operation.workspaceId,
+              status: { in: projectStatusTransitionSources('ingesting') },
+            },
             data: { status: 'ingesting' },
           })
+          if (project.count !== 1) {
+            throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter ingesting from its current status')
+          }
         } else if (projectRenderContext || projectReuseContext) {
           const context = projectRenderContext ?? projectReuseContext!
           await transaction.v2ProjectProxyRenderOperation.create({
@@ -1262,14 +1273,18 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               originalFileName: finalExportContext!.originalFileName,
             },
           })
-          await transaction.v2Project.updateMany({
+          const project = await transaction.v2Project.updateMany({
             where: {
               id: finalExportContext!.projectId,
               workspaceId: input.operation.workspaceId,
               currentVersionId: finalExportContext!.projectVersionId,
+              status: { in: projectStatusTransitionPath('reviewing-proxy', 'rendering-final') },
             },
             data: { status: 'rendering-final' },
           })
+          if (project.count !== 1) {
+            throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter final rendering from its current status')
+          }
         }
         const created = await transaction.v2PublicOperation.findUnique({
           where: { id: input.operation.id },

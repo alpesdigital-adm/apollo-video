@@ -1780,8 +1780,11 @@ processamento, ação de revisão nas duas fases de review e 100% somente em
 `completed`; `failed`, `canceled` e `archived` são terminais sem inventar
 percentual. Create/list e as duas leituras de workspace expõem esse contrato de
 forma aditiva; operações aninhadas no workspace usam a mesma projeção das
-capabilities de operações. Matriz canônica das transições persistidas, estado
-de versão, E2E PostgreSQL, deploy e aceite continuam pendentes.
+capabilities de operações. A matriz canônica de Project permite somente os
+avanços e retornos editoriais declarados, repetição convergente e terminais
+sem saída; os writers atuais cercam a transição no próprio update persistido.
+Estado/transições de versão e artifact, E2E PostgreSQL, deploy e aceite
+continuam pendentes.
 
 ---
 

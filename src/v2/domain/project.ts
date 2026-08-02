@@ -20,6 +20,57 @@ export const PROJECT_STATUSES = [
 
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number]
 
+const projectStatuses = (...values: ProjectStatus[]): readonly ProjectStatus[] =>
+  Object.freeze(values)
+
+export const PROJECT_STATUS_TRANSITIONS: Readonly<Record<ProjectStatus, readonly ProjectStatus[]>> =
+  Object.freeze({
+    draft: projectStatuses('ingesting', 'perceiving', 'reviewing-proxy', 'revising', 'canceled', 'archived'),
+    ingesting: projectStatuses('draft', 'failed', 'canceled'),
+    perceiving: projectStatuses('planning', 'failed', 'canceled'),
+    planning: projectStatuses('generating', 'failed', 'canceled'),
+    generating: projectStatuses('reviewing-assets', 'rendering-proxy', 'failed', 'canceled'),
+    'reviewing-assets': projectStatuses('generating', 'rendering-proxy', 'failed', 'canceled'),
+    'rendering-proxy': projectStatuses('reviewing-proxy', 'revising', 'failed', 'canceled'),
+    'reviewing-proxy': projectStatuses('revising', 'rendering-final', 'failed', 'canceled'),
+    revising: projectStatuses('rendering-proxy', 'reviewing-proxy', 'failed', 'canceled'),
+    'rendering-final': projectStatuses('completed', 'failed', 'canceled'),
+    completed: projectStatuses('archived'),
+    failed: projectStatuses('ingesting', 'canceled', 'archived'),
+    canceled: projectStatuses('archived'),
+    archived: projectStatuses(),
+  })
+
+export function canTransitionProjectStatus(from: ProjectStatus, to: ProjectStatus): boolean {
+  return from === to || PROJECT_STATUS_TRANSITIONS[from].includes(to)
+}
+
+export function projectStatusTransitionSources(
+  to: ProjectStatus,
+  options: { includeSame?: boolean } = {},
+): ProjectStatus[] {
+  return PROJECT_STATUSES.filter((from) =>
+    (options.includeSame === true && from === to) || PROJECT_STATUS_TRANSITIONS[from].includes(to))
+}
+
+export function projectStatusTransitionPath(
+  from: ProjectStatus,
+  to: ProjectStatus,
+  options: { includeSame?: boolean } = {},
+): ProjectStatus[] {
+  assertProjectStatusTransition(from, to)
+  return from === to || options.includeSame !== true ? [from] : [from, to]
+}
+
+export function assertProjectStatusTransition(from: ProjectStatus, to: ProjectStatus): void {
+  assertDomain(
+    canTransitionProjectStatus(from, to),
+    'PROJECT_TRANSITION_REJECTED',
+    'Project status transition is not allowed',
+    { from, to },
+  )
+}
+
 export interface Project {
   schemaVersion: 1
   id: string

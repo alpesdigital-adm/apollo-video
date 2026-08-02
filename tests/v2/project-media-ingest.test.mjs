@@ -351,6 +351,29 @@ test('completed ingest persists immutable source and proxy color probes atomical
   )
 })
 
+test('T-FR-236 ingest failure fences the exact project transition and rejects stale state', async () => {
+  let query
+  const repository = new PrismaProjectMediaRepository({
+    v2Project: {
+      async updateMany(input) {
+        query = input
+        return { count: 0 }
+      },
+    },
+  })
+  await assert.rejects(
+    () => repository.markIngestFailed({ workspaceId: 'workspace-ingest-1', projectId: 'project-ingest-1' }),
+    (error) => error.code === 'PROJECT_TRANSITION_REJECTED',
+  )
+  assert.deepEqual(query, {
+    where: {
+      id: 'project-ingest-1', workspaceId: 'workspace-ingest-1',
+      status: { in: ['ingesting', 'failed'] },
+    },
+    data: { status: 'failed' },
+  })
+})
+
 test('trusted color probe query rehydrates canonical evidence and remains workspace scoped', async () => {
   const probe = createMediaColorProbe({
     id: 'color-probe-query',

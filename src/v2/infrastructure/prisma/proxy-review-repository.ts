@@ -17,6 +17,7 @@ import {
 } from '../../application/render-workflow.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { projectStatusTransitionSources } from '../../domain/project.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 
 type StoredProxyReview = Prisma.V2ProxyReviewGetPayload<Record<string, never>>
@@ -191,6 +192,12 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           id: input.projectId,
           workspaceId: input.workspaceId,
           currentVersionId: input.review.projectVersionId,
+          status: {
+            in: projectStatusTransitionSources(
+              input.review.status === 'blocked' ? 'revising' : 'reviewing-proxy',
+              { includeSame: true },
+            ),
+          },
         },
         data: { status: input.review.status === 'blocked' ? 'revising' : 'reviewing-proxy' },
       })

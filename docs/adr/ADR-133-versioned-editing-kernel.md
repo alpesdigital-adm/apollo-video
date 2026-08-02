@@ -50,7 +50,15 @@ visible label and an exact tone/progress/action/terminality tuple; only complete
 may report 100%. Both workspace routes return the same full v6 shape, including
 visible nested operations. Unknown stored phases fail closed and older response
 schemas remain published. This is a presentation slice, not evidence of a
-complete lifecycle: persisted transition writers remain to be consolidated.
+complete lifecycle: version and artifact transitions remain separate work.
+
+Project transitions are governed by one exhaustive 14-state matrix. Repetition
+of the same state is convergent, archived is terminal, and transition paths for
+ingest, proxy review, compare decisions and final export are fenced in the
+atomic Prisma update. A stale or forbidden source state updates zero rows and
+aborts with a domain conflict; no writer may assign status without the canonical
+path/source helper. Processing phases without runtime writers are defined but
+are not claimed as integrated behavior.
 
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.

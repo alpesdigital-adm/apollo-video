@@ -7,6 +7,7 @@ import {
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { projectStatusTransitionPath } from '../../domain/project.ts'
 import type { MediaColorProbe } from '../../domain/color-and-export.ts'
 
 function colorProbeData(probe: Readonly<MediaColorProbe>) {
@@ -153,17 +154,29 @@ export class PrismaProjectMediaRepository implements ProjectMediaRepository {
           transcriptHash: input.transcript.transcriptHash, transcriptJson, createdAt: new Date(input.createdAt),
         } })
       }
-      await transaction.v2Project.updateMany({
-        where: { id: input.projectId, workspaceId: input.workspaceId, status: 'ingesting' },
+      const updatedProject = await transaction.v2Project.updateMany({
+        where: {
+          id: input.projectId, workspaceId: input.workspaceId,
+          status: { in: projectStatusTransitionPath('ingesting', 'draft', { includeSame: true }) },
+        },
         data: { status: 'draft' },
       })
+      if (updatedProject.count !== 1) {
+        throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot complete ingest from its current status')
+      }
     })
   }
 
   async markIngestFailed(input: { workspaceId: string; projectId: string }): Promise<void> {
-    await this.client.v2Project.updateMany({
-      where: { id: input.projectId, workspaceId: input.workspaceId, status: 'ingesting' },
+    const project = await this.client.v2Project.updateMany({
+      where: {
+        id: input.projectId, workspaceId: input.workspaceId,
+        status: { in: projectStatusTransitionPath('ingesting', 'failed', { includeSame: true }) },
+      },
       data: { status: 'failed' },
     })
+    if (project.count !== 1) {
+      throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot fail ingest from its current status')
+    }
   }
 }

@@ -8,6 +8,7 @@ import type {
 } from '../../application/ports/project-final-export-repository.ts'
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { projectStatusTransitionPath } from '../../domain/project.ts'
 import { PrismaProjectProxyRenderRepository } from './project-proxy-render-repository.ts'
 
 function parseQuality(value: string): { status: string; score: number } {
@@ -246,7 +247,11 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         }
       }
       const updated = await transaction.v2Project.updateMany({
-        where: { id: input.projectId, workspaceId: input.workspaceId, currentVersionId: input.projectVersionId },
+        where: {
+          id: input.projectId, workspaceId: input.workspaceId,
+          currentVersionId: input.projectVersionId,
+          status: { in: projectStatusTransitionPath('rendering-final', 'completed', { includeSame: true }) },
+        },
         data: { status: 'completed' },
       })
       if (updated.count !== 1) throw new DomainError('PERSISTENCE_CONFLICT', 'Final export no longer matches the current project version')
@@ -259,15 +264,18 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
       select: { projectVersionId: true },
     })
     if (!operation) return
-    await this.client.v2Project.updateMany({
+    const project = await this.client.v2Project.updateMany({
       where: {
         id: input.projectId,
         workspaceId: input.workspaceId,
         currentVersionId: operation.projectVersionId,
-        status: 'rendering-final',
+        status: { in: projectStatusTransitionPath('rendering-final', 'failed', { includeSame: true }) },
       },
       data: { status: 'failed' },
     })
+    if (project.count !== 1) {
+      throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot fail final export from its current status')
+    }
   }
 
   async recordAttempt(

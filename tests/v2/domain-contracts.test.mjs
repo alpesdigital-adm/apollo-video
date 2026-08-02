@@ -13,6 +13,14 @@ import {
 } from '../../src/v2/domain/output-spec.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import {
+  PROJECT_STATUSES,
+  PROJECT_STATUS_TRANSITIONS,
+  assertProjectStatusTransition,
+  canTransitionProjectStatus,
+  projectStatusTransitionPath,
+  projectStatusTransitionSources,
+} from '../../src/v2/domain/project.ts'
+import {
   assertMediaArtifactManifest,
   createMediaArtifactManifest,
   createMediaArtifactManifestV2,
@@ -1842,6 +1850,35 @@ test('project versions are immutable and require a parent after sequence one', (
         baseHash: 'hash-2',
       }),
     'INVALID_PROJECT_VERSION',
+  )
+})
+
+test('T-FR-236 project transitions are exhaustive, convergent and fail closed', () => {
+  assert.deepEqual(Object.keys(PROJECT_STATUS_TRANSITIONS), [...PROJECT_STATUSES])
+  for (const status of PROJECT_STATUSES) {
+    assert.equal(canTransitionProjectStatus(status, status), true)
+    assert.doesNotThrow(() => assertProjectStatusTransition(status, status))
+    assert.equal(Object.isFrozen(PROJECT_STATUS_TRANSITIONS[status]), true)
+  }
+
+  assert.deepEqual(projectStatusTransitionSources('ingesting'), ['draft', 'failed'])
+  assert.deepEqual(projectStatusTransitionSources('draft'), ['ingesting'])
+  assert.deepEqual(projectStatusTransitionSources('rendering-final'), ['reviewing-proxy'])
+  assert.deepEqual(projectStatusTransitionSources('completed'), ['rendering-final'])
+  assert.deepEqual(projectStatusTransitionSources('completed', { includeSame: true }), [
+    'rendering-final', 'completed',
+  ])
+  assert.deepEqual(
+    projectStatusTransitionPath('rendering-final', 'completed', { includeSame: true }),
+    ['rendering-final', 'completed'],
+  )
+  assert.equal(canTransitionProjectStatus('reviewing-proxy', 'rendering-final'), true)
+  assert.equal(canTransitionProjectStatus('rendering-final', 'completed'), true)
+  assert.equal(canTransitionProjectStatus('completed', 'rendering-final'), false)
+  assert.equal(canTransitionProjectStatus('archived', 'draft'), false)
+  expectDomainError(
+    () => assertProjectStatusTransition('completed', 'ingesting'),
+    'PROJECT_TRANSITION_REJECTED',
   )
 })
 

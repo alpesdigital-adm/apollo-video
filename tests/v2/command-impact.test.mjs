@@ -774,6 +774,7 @@ test('T-FR-233 completed final export resolves only stale finals for its exact v
   ])
   assert.deepEqual(projectUpdate.where, {
     id: projectId, workspaceId, currentVersionId: resultVersionId,
+    status: { in: ['rendering-final', 'completed'] },
   })
 })
 

@@ -71,6 +71,8 @@ Atualização local de Project em FR-236 — as 14 fases persistidas possuem uma
 
 Atualização local de workspace em FR-236 — `apollo.projects.workspace.read` e `apollo.projects.workspace.current.read` v5 agora convergem no mesmo `project-workspace/v6` completo, incluindo Project e operações aninhadas com projeção visível. A hidratação Prisma rejeita status persistido desconhecido. Testes validam ambas as capabilities, o schema novo e adulteração de status/label; versões anteriores permanecem publicadas. Matriz canônica das transições persistidas, estado de versão, PostgreSQL E2E, deploy e aceite permanecem pendentes.
 
+Atualização local de transições Project em FR-236 — uma matriz exaustiva governa as 14 fases, repetição convergente e terminais. Todos os writers atuais de status (ingest, proxy review, compare e export final) incluem no mesmo `UPDATE` os estados de origem válidos; resultado zero aborta a transação com conflito. Testes cobrem exaustividade, caminhos permitidos, terminais, salto inválido e fence persistido de falha de ingest. Fases sem writer executável não são contadas como integradas; E2E PostgreSQL dos demais writers, versão/artifact, deploy e aceite permanecem pendentes.
+
 | FR-240 | Paridade API-first | S9 | D0,D3,D4,D10 | toda ação da UI, inclusive login/sessão/logout, possui capability e contrato externo sobre o mesmo domínio | contract/e2e |
 | FR-241 | Contrato público e descoberta | S9 | D0,D10 | OpenAPI/schemas/versionamento/capabilities publicados | contract/schema |
 | FR-242 | Clients, autenticação e escopos | S9 | D0,D7,D10 | sessão humana usa cookie seguro; client revogável usa Bearer e só acessa workspace/scope autorizado; senha nunca vira tool | security/e2e |

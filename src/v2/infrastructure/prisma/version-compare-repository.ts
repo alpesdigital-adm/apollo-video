@@ -13,6 +13,7 @@ import { stableSerialize } from '../../application/version-hash.ts'
 import { parseCompareActionImpact } from '../../domain/compare-action-impact.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { projectStatusTransitionSources } from '../../domain/project.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 
 type StoredCompareCommand = Prisma.V2EditCommandGetPayload<{
@@ -197,6 +198,9 @@ export class PrismaVersionCompareRepository implements VersionCompareRepository 
             id: bundle.command.projectId,
             workspaceId: bundle.command.workspaceId,
             currentVersionId: bundle.command.baseVersionId,
+            status: {
+              in: projectStatusTransitionSources(bundle.projectStatus, { includeSame: true }),
+            },
           },
           data: { status: bundle.projectStatus },
         })

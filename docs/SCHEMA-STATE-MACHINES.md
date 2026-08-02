@@ -35,5 +35,12 @@ The public create v3, list v2, and workspace v6 responses expose it while
 retaining their older schemas. Both workspace routes now return the same full
 contract and nested operations carry their visible projection. Technical status
 and visible label must match; active phases are indeterminate, review phases
-request review, and only `completed` reports 100%. This does not yet define the
-canonical transition matrix: persisted mutations remain distributed.
+request review, and only `completed` reports 100%. The public projection never
+infers or performs a transition.
+
+The canonical Project transition matrix is exhaustive over all 14 phases.
+Self-transition is convergent, archived has no outgoing transition, and only
+declared paths can reach completed or leave review. Current ingest, proxy
+review, compare-decision and final-export writers put the allowed source state
+inside the same persisted update and reject a zero-row result as a domain
+conflict. Future writers must use the same matrix.
