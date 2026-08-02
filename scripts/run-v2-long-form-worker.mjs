@@ -2,15 +2,17 @@ import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 
 import * as importedRepositoryFactory from '../src/v2/infrastructure/repository-factory.ts'
-import {
-  disconnectV2PostgresClient,
-} from '../src/v2/infrastructure/prisma-postgres/client.ts'
+import * as importedPrismaClient from '../src/v2/infrastructure/prisma-postgres/client.ts'
 
 const repositoryFactory =
   importedRepositoryFactory.createLongFormIndexWorker
     ? importedRepositoryFactory
     : importedRepositoryFactory.default
 const { createLongFormIndexWorker } = repositoryFactory
+const prismaClient = importedPrismaClient.disconnectV2PostgresClient
+  ? importedPrismaClient
+  : importedPrismaClient.default
+const { disconnectV2PostgresClient } = prismaClient
 
 const pollIntervalMs = Number(
   process.env.APOLLO_V2_LONG_FORM_POLL_MS ??
@@ -66,6 +68,7 @@ try {
     } catch {
       if (!controller.signal.aborted) {
         console.error('Long-form worker iteration failed safely')
+        await waitForPoll()
       }
     }
   }

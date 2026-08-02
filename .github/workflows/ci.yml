@@ -187,7 +187,14 @@ jobs:
 
       - name: Start supervised app and workers
         run: |
-          touch .env.local
+          printf '%s\n' \
+            'GROQ_API_KEY=ci-not-a-real-groq-credential-000' \
+            'GROQ_TRANSCRIBE_MODEL=whisper-large-v3' \
+            'GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR=1' \
+            'OPENAI_API_KEY=ci-not-a-real-openai-credential-0' \
+            'OPENAI_DIARIZATION_MODEL=gpt-4o-transcribe-diarize' \
+            'OPENAI_DIARIZATION_COST_MINOR_UNITS_PER_HOUR=1' \
+            > .env.local
           docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml up -d --build --wait app ingest-worker render-worker webhook-worker long-form-worker
           curl --fail --silent --show-error http://127.0.0.1:3333/v1/health > /dev/null
           for service in app ingest-worker render-worker webhook-worker long-form-worker; do
@@ -196,7 +203,10 @@ jobs:
             restart_policy="$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$container_id")"
             printf '%s id=%s status=%s restart=%s\n' "$service" "$container_id" "$status" "$restart_policy"
             test -n "$container_id"
-            test "$status" = running
+            if test "$status" != running; then
+              docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml logs --no-color --tail 100 "$service"
+              exit 1
+            fi
             test "$restart_policy" = unless-stopped
           done
 
