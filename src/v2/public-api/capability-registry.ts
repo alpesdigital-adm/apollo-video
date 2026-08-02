@@ -4183,7 +4183,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.version-comparisons.act',
-    version: '3.0.0',
+    version: '4.0.0',
     title: 'Accept, reopen or restore a version comparison',
     description: 'Records an auditable accept/reopen decision with its explicit zero render impact, or restores the before snapshot as a new immutable child version without deleting either compared version.',
     exposure: 'public',
@@ -4191,7 +4191,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:write'],
     inputSchemaRef: 'apollo://schemas/project-version-comparison-action-request/v1',
-    outputSchemaRef: 'apollo://schemas/project-version-comparison-action-result/v3',
+    outputSchemaRef: 'apollo://schemas/project-version-comparison-action-result/v4',
     endpoint: { method: 'POST', path: '/v1/projects/{projectId}/version-comparisons' },
     toolName: 'apollo.projects.version-comparisons.act',
     supportsDryRun: false,

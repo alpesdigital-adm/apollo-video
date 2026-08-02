@@ -69,7 +69,8 @@ through the same projector while their prior schemas remain available. Commands
 v7/result v6 applies it to all three command branches and manual edit v3 covers
 apply/undo/redo/restore. Individual and batch patch v3 apply the same rule;
 LUT-selection read/set v3 covers renderable and deferred selection. Compare
-restore still requires additive evolution.
+action v4 exposes current only for the new restore head; accept/reopen keep the
+explicit zero-impact, version-preserving response.
 
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.

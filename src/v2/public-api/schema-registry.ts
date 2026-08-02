@@ -11266,6 +11266,7 @@ function projectManualEditAppliedBody(
 function projectVersionComparisonActionResultBody(
   timeline: Record<string, unknown>,
   impact?: Record<string, unknown>,
+  includeVisibleRestoreVersionState = false,
 ) {
   return successSchema({
     oneOf: [
@@ -11314,7 +11315,10 @@ function projectVersionComparisonActionResultBody(
           },
           version: {
             type: 'object', additionalProperties: false,
-            required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt'],
+            required: [
+              'id', 'sequence', 'parentVersionId', 'baseHash', 'snapshotRefs', 'createdAt',
+              ...(includeVisibleRestoreVersionState ? ['visibleState'] : []),
+            ],
             properties: {
               id: idSchema, sequence: { type: 'integer', minimum: 2 },
               parentVersionId: idSchema, baseHash: sha256Schema,
@@ -11323,6 +11327,9 @@ function projectVersionComparisonActionResultBody(
                 properties: { brief: idSchema, editPlan: idSchema, policies: idSchema },
               },
               createdAt: dateTimeSchema,
+              ...(includeVisibleRestoreVersionState
+                ? { visibleState: currentProjectVersionVisibleStateSchema }
+                : {}),
             },
           },
           timeline,
@@ -18181,6 +18188,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ),
   defineSchema('project-version-comparison-action-result', 3, 'Audited version comparison action result with the explicit zero impact of the accept or reopen decision',
     projectVersionComparisonActionResultBody(manualTimelineSchema, compareActionImpactSchema),
+  ),
+  defineSchema('project-version-comparison-action-result', 4, 'Audited comparison action with explicit current state on a restored ProjectVersion',
+    projectVersionComparisonActionResultBody(manualTimelineSchema, compareActionImpactSchema, true),
   ),
   defineSchema('project-proxy-review-response', 1, 'Version-bound post-render proxy review',
     successSchema({

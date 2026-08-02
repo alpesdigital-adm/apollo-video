@@ -1793,9 +1793,9 @@ preview quando um artifact realmente existe, ou inspecionar histórico quando
 não existe. Create v4, duplicate v2 e workspace v7 também expõem a versão
 corrente com essa projeção. Commands v7/result v6 faz o mesmo para remove,
 Director e transcript replacement; manual edit v3 cobre apply, undo, redo e
-restore. Patch individual e batch v3 usam a mesma projeção; LUT selection ainda
-read/set v3 cobre seleção renderable e deferred. Compare restore ainda precisa
-evoluir aditivamente.
+restore. Patch individual e batch v3 usam a mesma projeção; LUT selection
+read/set v3 cobre seleção renderable e deferred. Comparison action v4 projeta
+somente a nova versão de restore; accept/reopen continuam preservando versões.
 
 ---
 

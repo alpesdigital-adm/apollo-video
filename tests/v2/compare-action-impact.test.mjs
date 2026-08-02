@@ -15,6 +15,7 @@ import {
 } from '../../src/v2/domain/compare-action-impact.ts'
 import { versionComparisonFromEditPlans } from '../../src/v2/domain/manual-editing.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 const workspaceId = 'workspace-compare-1'
@@ -335,18 +336,18 @@ test('T-F0-027 the compare decision path never reaches a render or an invalidati
   }
 })
 
-test('T-F0-027 the public accept result carries the impact under result schema v3', () => {
+test('T-F0-027 and T-FR-236 preserve accept impact and expose restored version state under result schema v4', () => {
   const capability = FOUNDATION_CAPABILITIES
     .find((item) => item.id === 'apollo.projects.version-comparisons.act')
-  assert.equal(capability.version, '3.0.0')
+  assert.equal(capability.version, '4.0.0')
   assert.equal(
     capability.outputSchemaRef,
-    'apollo://schemas/project-version-comparison-action-result/v3',
+    'apollo://schemas/project-version-comparison-action-result/v4',
   )
   // The previous major stays published for clients that have not migrated.
   assert.equal(
-    getPublicSchema('apollo://schemas/project-version-comparison-action-result/v2').ref,
-    'apollo://schemas/project-version-comparison-action-result/v2',
+    getPublicSchema('apollo://schemas/project-version-comparison-action-result/v3').ref,
+    'apollo://schemas/project-version-comparison-action-result/v3',
   )
   assert.equal(
     getPublicSchema('apollo://schemas/project-version-comparison-action-request/v1').ref,
@@ -391,5 +392,15 @@ test('T-F0-027 the public accept result carries the impact under result schema v
     false,
   )
   const { impact: _removed, ...withoutImpact } = body.data
-  assert.equal(validate({ ...body, data: withoutImpact }), false, 'impact is required in v3')
+  assert.equal(validate({ ...body, data: withoutImpact }), false, 'impact is required in v4')
+
+  const examples = publicSchemaExamples(getPublicSchema(capability.outputSchemaRef))
+  assert.equal(examples.length, 2)
+  for (const example of examples) {
+    assert.equal(validate(example), true, ajv.errorsText(validate.errors))
+  }
+  const restore = structuredClone(examples.find((example) => example.data.action === 'restore'))
+  assert.equal(restore.data.version.visibleState.label, 'current')
+  restore.data.version.visibleState.label = 'superseded'
+  assert.equal(validate(restore), false)
 })

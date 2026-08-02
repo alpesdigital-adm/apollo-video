@@ -8996,6 +8996,67 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-version-comparison-action-result/v4': [
+      {
+        data: {
+          action: 'accept',
+          command: {
+            id: 'compare-command-example-3', type: 'compare-action',
+            baseVersionId: 'project-version-example-5', scope: { project: true },
+            payload: {
+              schemaVersion: 2, action: 'accept', expectedRevision: 5,
+              beforeVersionId: 'project-version-example-4', afterVersionId: 'project-version-example-5',
+              mode: 'split', comparison: versionComparisonExample, impact: compareActionImpactExample,
+            },
+            createdAt,
+          },
+          projectStatus: 'reviewing-proxy', comparison: versionComparisonExample,
+          impact: compareActionImpactExample, versionsPreserved: true, replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          action: 'restore',
+          command: {
+            id: 'manual-restore-command-example-1', type: 'manual-edit',
+            baseVersionId: 'project-version-example-5', resultVersionId: 'project-version-example-6',
+            scope: { project: true },
+            payload: {
+              schemaVersion: 1, action: 'restore', expectedRevision: 5,
+              variantId: 'output-spec-9x16', targetId: 'project-edit-plan',
+              restoresVersionId: 'project-version-example-4',
+            },
+            createdAt,
+          },
+          version: {
+            id: 'project-version-example-6', sequence: 6,
+            parentVersionId: 'project-version-example-5', baseHash: 'f'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1', editPlan: 'project-snapshot-edit-plan-6',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          timeline: {
+            versionId: 'project-version-example-6', revision: 6,
+            clips: [{
+              id: 'clip-example-1', sourceId: 'artifact-example-1', startMs: 0,
+              endMs: 10000, track: 0, selected: false, inspector: {},
+            }],
+            snapPointsMs: [0, 10000],
+          },
+          comparison: versionComparisonExample, versionsPreserved: true,
+          operation: queuedProjectProxyRenderOperationExample, replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-proxy-render-operation-accepted/v1': [
       {
         data: {

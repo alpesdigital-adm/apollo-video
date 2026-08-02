@@ -54,4 +54,5 @@ current version through the same projection. Commands v7/result v6 also covers
 remove-spoken-content, run-director and replace-source-transcript. Manual edit
 v3 covers apply, undo, redo and restore. Individual and batch patch v3 responses
 also use the same projector. LUT-selection read/set v3 covers renderable and
-deferred selections. Compare restore has not yet adopted this view.
+deferred selections. Comparison action v4 projects only the new restore head;
+accept and reopen correctly remain version-preserving actions.
