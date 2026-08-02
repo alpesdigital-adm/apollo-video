@@ -1089,6 +1089,7 @@ export function createRenderInputAssetResolver(
           ? { sessionToken: environment.APOLLO_V2_S3_SESSION_TOKEN }
           : {}),
         forcePathStyle: forcePathStyle !== 'false',
+        allowInsecureHttp: environment.APOLLO_V2_S3_ALLOW_INSECURE_HTTP?.trim().toLowerCase() === 'true',
         signedUrlTtlSeconds: Number(environment.APOLLO_V2_S3_SIGNED_URL_TTL_SECONDS || 120),
       }),
       nonMediaResolver,
@@ -1128,6 +1129,7 @@ export function createAuthorizedRenderInputMaterializer(
           ? { sessionToken: environment.APOLLO_V2_S3_SESSION_TOKEN }
           : {}),
         forcePathStyle: environment.APOLLO_V2_S3_FORCE_PATH_STYLE?.trim().toLowerCase() !== 'false',
+        allowInsecureHttp: environment.APOLLO_V2_S3_ALLOW_INSECURE_HTTP?.trim().toLowerCase() === 'true',
         signedUrlTtlSeconds: Number(environment.APOLLO_V2_S3_SIGNED_URL_TTL_SECONDS || 120),
         clock,
       })

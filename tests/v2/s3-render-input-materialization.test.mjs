@@ -39,6 +39,16 @@ function objectClient(endpoint) {
   })
 }
 
+test('S3 object client requires an explicit opt-in for isolated non-loopback HTTP', () => {
+  const options = {
+    endpoint: 'http://minio:9000', region: 'us-east-1', bucket: 'apollo-render-test',
+    accessKeyId: 'APOLLO_TEST_ACCESS', secretAccessKey: 'apollo-test-secret',
+    forcePathStyle: true, signedUrlTtlSeconds: 120,
+  }
+  assert.throws(() => new AwsS3RenderInputObjectClient(options), /not allowed/)
+  assert.doesNotThrow(() => new AwsS3RenderInputObjectClient({ ...options, allowInsecureHttp: true }))
+})
+
 test('T-FR-234 S3 adapter verifies full-object identity and signs the exact immutable version', async () => {
   const bytes = Buffer.from('immutable-s3-render-source')
   const sha256 = createHash('sha256').update(bytes).digest('hex')

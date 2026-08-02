@@ -29,12 +29,13 @@ export interface S3RenderInputObjectClientOptions {
   sessionToken?: string
   forcePathStyle: boolean
   signedUrlTtlSeconds: number
+  allowInsecureHttp?: boolean
   clock?: () => Date
   client?: S3Client
   presign?: typeof getSignedUrl
 }
 
-function endpoint(value: string): string {
+function endpoint(value: string, allowInsecureHttp: boolean): string {
   let parsed: URL
   try {
     parsed = new URL(value.trim())
@@ -44,7 +45,7 @@ function endpoint(value: string): string {
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
   if (
     !['http:', 'https:'].includes(parsed.protocol) ||
-    (parsed.protocol === 'http:' && !loopback) ||
+    (parsed.protocol === 'http:' && !loopback && !allowInsecureHttp) ||
     parsed.username || parsed.password || parsed.search || parsed.hash ||
     !['', '/'].includes(parsed.pathname)
   ) {
@@ -69,7 +70,7 @@ export class AwsS3RenderInputObjectClient implements S3RenderInputObjectClient {
   private readonly clock: () => Date
 
   constructor(options: S3RenderInputObjectClientOptions) {
-    const configuredEndpoint = endpoint(options.endpoint)
+    const configuredEndpoint = endpoint(options.endpoint, options.allowInsecureHttp === true)
     const region = required(options.region, 'S3 region', 63)
     const bucket = required(options.bucket, 'S3 bucket', 63)
     const accessKeyId = required(options.accessKeyId, 'S3 access key id', 256)
