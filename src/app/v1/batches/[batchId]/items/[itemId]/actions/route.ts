@@ -19,7 +19,7 @@ import {
 } from '@/v2/public-api/errors'
 import {
   parseProductionBatchItemActionBody,
-  presentProductionBatch,
+  presentProductionBatchV2,
 } from '@/v2/public-api/production-batch-contract'
 import { presentSuccess } from '@/v2/public-api/presenters'
 
@@ -65,7 +65,7 @@ export async function POST(
     })
     return NextResponse.json(
       presentSuccess({
-        batch: presentProductionBatch(result.batch),
+        batch: presentProductionBatchV2(result.batch),
         replayed: result.replayed,
       }),
       {

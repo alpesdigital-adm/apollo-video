@@ -11,6 +11,12 @@ import {
   retryBatchStep,
   transitionBatchItem,
 } from '../../src/v2/domain/production-batch.ts'
+import {
+  presentProductionBatchVisibleStates,
+} from '../../src/v2/domain/visible-state.ts'
+import {
+  presentProductionBatchV2,
+} from '../../src/v2/public-api/production-batch-contract.ts'
 
 const at = (second) =>
   new Date(Date.UTC(2026, 6, 27, 18, 0, second)).toISOString()
@@ -405,5 +411,50 @@ test('T-FR-080 rejects incompatible dimensions, stale transitions, and integrity
       items: [invalidItem, ...batch.items.slice(1)],
     }),
     /state does not match/,
+  )
+})
+
+test('T-FR-236 exposes partial batch failure and exact per-item progress without inventing completion', () => {
+  let batch = completeItem(batchFixture(), 'batch-item-one', 1, 'artifact-one')
+  batch = completeItem(batch, 'batch-item-three', 20, 'artifact-three')
+  batch = actOnItem(batch, 'batch-item-two', 'start-step', 40, { step: 'planning' })
+  batch = actOnItem(batch, 'batch-item-two', 'complete-step', 41, { step: 'planning' })
+  batch = actOnItem(batch, 'batch-item-two', 'start-step', 42, { step: 'materializing' })
+  batch = actOnItem(batch, 'batch-item-two', 'fail-step', 43, {
+    step: 'materializing',
+    error: { code: 'PROVIDER_TIMEOUT', message: 'Provider timed out.' },
+  })
+
+  const states = presentProductionBatchVisibleStates(batch)
+  assert.deepEqual(states.batch, {
+    schemaVersion: 'visible-state/v1',
+    label: 'partially-failed',
+    tone: 'danger',
+    progress: { mode: 'determinate', percent: 75 },
+    primaryAction: 'retry-failed',
+    availableActions: ['retry-failed', 'inspect-error', 'open-results'],
+    terminal: true,
+  })
+  assert.equal(states.items[0].visibleState.label, 'completed')
+  assert.deepEqual(states.items[1].visibleState.progress, {
+    mode: 'determinate',
+    percent: 25,
+  })
+  assert.equal(states.items[1].visibleState.label, 'failed')
+  assert.equal(states.items[2].visibleState.primaryAction, 'open-result')
+  assert.throws(() => states.items.push(states.items[0]))
+
+  const publicBatch = presentProductionBatchV2(batch)
+  assert.equal(publicBatch.visibleState.label, 'partially-failed')
+  assert.equal(publicBatch.items[1].visibleState.primaryAction, 'retry')
+  assert.equal(publicBatch.progress.percent, 75)
+  assert.equal(publicBatch.items[1].error.code, 'PROVIDER_TIMEOUT')
+
+  assert.throws(
+    () => presentProductionBatchVisibleStates({
+      ...batch,
+      items: [{ ...batch.items[0], state: 'invented' }, ...batch.items.slice(1)],
+    }),
+    /state is invalid/,
   )
 })

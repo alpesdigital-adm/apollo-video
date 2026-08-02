@@ -10,3 +10,11 @@ truthful progress mode, primary/available actions and terminality. `waiting`
 may only be entered from `running` and resumed without incrementing attempt at
 the same or a later running phase. The projection never invents a percentage
 without a positive total.
+
+`ProductionBatch` and each persisted batch item also receive a visible
+projection. Percent is the ratio of completed canonical steps, never an
+estimate. Mixed terminal outcomes are `partially-failed` when any item failed
+and `partially-completed` otherwise; completed items and their artifacts remain
+available while retry targets only failed work. Public v1 batch schemas remain
+published and the six batch capabilities returning the aggregate use additive
+v2 response schemas.

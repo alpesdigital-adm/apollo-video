@@ -1,4 +1,11 @@
 import { assertPublicOperation, type PublicOperation } from './public-operation.ts'
+import {
+  batchProgress,
+  deriveBatchStatus,
+  hydrateProductionBatch,
+  type BatchItem,
+  type ProductionBatch,
+} from './production-batch.ts'
 
 export const VISIBLE_STATE_LABELS = [
   'queued',
@@ -8,6 +15,10 @@ export const VISIBLE_STATE_LABELS = [
   'completed',
   'failed',
   'canceled',
+  'review-required',
+  'partially-completed',
+  'partially-failed',
+  'superseded',
 ] as const
 
 export const VISIBLE_STATE_ACTIONS = [
@@ -17,6 +28,10 @@ export const VISIBLE_STATE_ACTIONS = [
   'open-result',
   'inspect-error',
   'retry',
+  'review-output',
+  'open-results',
+  'retry-failed',
+  'inspect-history',
 ] as const
 
 export type VisibleStateLabel = (typeof VISIBLE_STATE_LABELS)[number]
@@ -52,6 +67,137 @@ function runningProgress(operation: PublicOperation): Readonly<VisibleProgress> 
   return Object.freeze({
     mode: 'determinate' as const,
     percent: Math.round((progress.completed / progress.total) * 100),
+  })
+}
+
+function determinateProgress(percent: number): Readonly<VisibleProgress> {
+  return Object.freeze({ mode: 'determinate' as const, percent })
+}
+
+function batchItemPercent(item: Readonly<BatchItem>): number {
+  return Math.floor(
+    item.steps.filter((step) => step.state === 'completed').length /
+      item.steps.length * 100,
+  )
+}
+
+function presentValidatedBatchItemVisibleState(
+  item: Readonly<BatchItem>,
+): Readonly<VisibleState> {
+  const progress = determinateProgress(batchItemPercent(item))
+  switch (item.state) {
+    case 'queued':
+      return freezeVisibleState({
+        label: 'queued', tone: 'neutral', progress,
+        primaryAction: 'view-progress', availableActions: ['view-progress', 'cancel'], terminal: false,
+      })
+    case 'planning':
+    case 'materializing':
+    case 'rendering':
+      return freezeVisibleState({
+        label: 'in-progress', tone: 'info', progress,
+        primaryAction: 'view-progress', availableActions: ['view-progress', 'cancel'], terminal: false,
+      })
+    case 'reviewing':
+      return freezeVisibleState({
+        label: 'review-required', tone: 'warning', progress,
+        primaryAction: 'review-output', availableActions: ['review-output', 'cancel'], terminal: false,
+      })
+    case 'completed':
+      return freezeVisibleState({
+        label: 'completed', tone: 'success', progress: { mode: 'complete', percent: 100 },
+        primaryAction: 'open-result', availableActions: ['open-result'], terminal: true,
+      })
+    case 'failed':
+      return freezeVisibleState({
+        label: 'failed', tone: 'danger', progress,
+        primaryAction: 'retry', availableActions: ['retry', 'inspect-error'], terminal: true,
+      })
+    case 'cancelled':
+      return freezeVisibleState({
+        label: 'canceled', tone: 'neutral', progress,
+        primaryAction: 'retry', availableActions: ['retry'], terminal: true,
+      })
+    case 'superseded':
+      return freezeVisibleState({
+        label: 'superseded', tone: 'neutral', progress: { mode: 'none' },
+        primaryAction: 'inspect-history', availableActions: ['inspect-history'], terminal: true,
+      })
+  }
+}
+
+export interface ProductionBatchVisibleStates {
+  batch: Readonly<VisibleState>
+  items: readonly Readonly<{ itemId: string; visibleState: Readonly<VisibleState> }>[]
+}
+
+export function presentProductionBatchVisibleStates(
+  input: Readonly<ProductionBatch>,
+): Readonly<ProductionBatchVisibleStates> {
+  const batch = hydrateProductionBatch(input)
+  const progress = batchProgress(batch)
+  const status = deriveBatchStatus(batch)
+  const allItemsTerminal = batch.items.every((item) =>
+    ['completed', 'failed', 'cancelled', 'superseded'].includes(item.state))
+  let visibleState: Readonly<VisibleState>
+  switch (status) {
+    case 'queued':
+      visibleState = freezeVisibleState({
+        label: 'queued', tone: 'neutral', progress: determinateProgress(progress.percent),
+        primaryAction: 'view-progress', availableActions: ['view-progress', 'cancel'], terminal: false,
+      })
+      break
+    case 'running':
+      visibleState = freezeVisibleState({
+        label: 'in-progress', tone: 'info', progress: determinateProgress(progress.percent),
+        primaryAction: 'view-progress', availableActions: ['view-progress', 'cancel'], terminal: false,
+      })
+      break
+    case 'review':
+      visibleState = freezeVisibleState({
+        label: 'review-required', tone: 'warning', progress: determinateProgress(progress.percent),
+        primaryAction: 'review-output', availableActions: ['review-output', 'cancel'], terminal: false,
+      })
+      break
+    case 'partially-completed': {
+      const hasFailures = progress.failedItems > 0
+      visibleState = freezeVisibleState({
+        label: hasFailures ? 'partially-failed' : 'partially-completed',
+        tone: hasFailures ? 'danger' : 'warning',
+        progress: determinateProgress(progress.percent),
+        primaryAction: hasFailures ? 'retry-failed' : 'open-results',
+        availableActions: hasFailures
+          ? ['retry-failed', 'inspect-error', 'open-results']
+          : ['open-results', 'retry'],
+        terminal: allItemsTerminal,
+      })
+      break
+    }
+    case 'completed':
+      visibleState = freezeVisibleState({
+        label: 'completed', tone: 'success', progress: { mode: 'complete', percent: 100 },
+        primaryAction: 'open-results', availableActions: ['open-results'], terminal: true,
+      })
+      break
+    case 'failed':
+      visibleState = freezeVisibleState({
+        label: 'failed', tone: 'danger', progress: determinateProgress(progress.percent),
+        primaryAction: 'retry-failed', availableActions: ['retry-failed', 'inspect-error'], terminal: true,
+      })
+      break
+    case 'cancelled':
+      visibleState = freezeVisibleState({
+        label: 'canceled', tone: 'neutral', progress: determinateProgress(progress.percent),
+        primaryAction: 'retry', availableActions: ['retry'], terminal: true,
+      })
+      break
+  }
+  return Object.freeze({
+    batch: visibleState,
+    items: Object.freeze(batch.items.map((item) => Object.freeze({
+      itemId: item.id,
+      visibleState: presentValidatedBatchItemVisibleState(item),
+    }))),
   })
 }
 

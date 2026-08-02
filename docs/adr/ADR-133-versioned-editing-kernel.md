@@ -26,6 +26,13 @@ scheduled retry are explicitly indeterminate. `running → waiting → running`
 preserves attempt and progress and cannot resume behind its last known phase.
 Artifact availability remains separate from version-scoped stale output edges.
 
+Production batch presentation follows the same rule over the persisted batch
+and its canonical four item steps. Aggregate and per-item percentages count
+only completed steps. Mixed terminal outcomes surface as `partially-failed` or
+`partially-completed`; they never erase completed item artifacts or promote the
+whole batch to success. Six batch capabilities use additive v2 response
+schemas, while their v1 schemas remain immutable and published.
+
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.
 The record is content-addressed, frame-first and format-scoped; completed

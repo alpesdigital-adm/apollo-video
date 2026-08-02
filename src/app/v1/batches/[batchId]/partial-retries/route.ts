@@ -25,7 +25,7 @@ import {
 } from '@/v2/public-api/errors'
 import { presentSuccess } from '@/v2/public-api/presenters'
 import {
-  presentProductionBatch,
+  presentProductionBatchV2,
 } from '@/v2/public-api/production-batch-contract'
 
 export const dynamic = 'force-dynamic'
@@ -93,7 +93,7 @@ export async function POST(
     })
     return NextResponse.json(
       presentSuccess({
-        batch: presentProductionBatch(result.batch),
+        batch: presentProductionBatchV2(result.batch),
         partialRetry: presentBatchPartialRetry(
           result.partialRetry,
         ),

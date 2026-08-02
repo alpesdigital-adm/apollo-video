@@ -3161,14 +3161,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.list',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'List production batches',
     description: 'Returns a filtered cursor page of workspace production batches with status and progress derived from persisted item steps.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['projects:read'],
-    outputSchemaRef: 'apollo://schemas/production-batch-page/v1',
+    outputSchemaRef: 'apollo://schemas/production-batch-page/v2',
     endpoint: { method: 'GET', path: '/v1/batches' },
     toolName: 'apollo.batches.list',
     supportsDryRun: false,
@@ -3222,7 +3222,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.create',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Create production batch',
     description: 'Creates an explicit bounded matrix of source groups, recipes and variants without implicitly materializing a Cartesian product.',
     exposure: 'public',
@@ -3230,7 +3230,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:write'],
     inputSchemaRef: 'apollo://schemas/create-production-batch-request/v1',
-    outputSchemaRef: 'apollo://schemas/production-batch-mutated/v1',
+    outputSchemaRef: 'apollo://schemas/production-batch-mutated/v2',
     endpoint: { method: 'POST', path: '/v1/batches' },
     toolName: 'apollo.batches.create',
     supportsDryRun: false,
@@ -3242,14 +3242,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.read',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Read production batch',
     description: 'Reads one workspace-isolated production batch with independent item state, errors, retries, artifacts and real step progress.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['projects:read'],
-    outputSchemaRef: 'apollo://schemas/production-batch-read/v1',
+    outputSchemaRef: 'apollo://schemas/production-batch-read/v2',
     endpoint: { method: 'GET', path: '/v1/batches/{batchId}' },
     toolName: 'apollo.batches.read',
     supportsDryRun: false,
@@ -3961,7 +3961,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.partial-retries.create',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Requeue failed production batch steps',
     description: 'Atomically requeues only explicitly selected failed item steps from one exact batch and item revision, preserving completed items, valid artifacts and already charged cost while recording stable retry lineage.',
     exposure: 'public',
@@ -3971,7 +3971,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     inputSchemaRef:
       'apollo://schemas/create-batch-partial-retry-request/v1',
     outputSchemaRef:
-      'apollo://schemas/batch-partial-retry-mutated/v1',
+      'apollo://schemas/batch-partial-retry-mutated/v2',
     endpoint: {
       method: 'POST',
       path: '/v1/batches/{batchId}/partial-retries',
@@ -4008,7 +4008,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.actions.apply',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Cancel or resume production batch',
     description: 'Cancels or resumes only unfinished batch items under optimistic concurrency while preserving completed outputs.',
     exposure: 'public',
@@ -4016,7 +4016,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:write'],
     inputSchemaRef: 'apollo://schemas/production-batch-action-request/v1',
-    outputSchemaRef: 'apollo://schemas/production-batch-mutated/v1',
+    outputSchemaRef: 'apollo://schemas/production-batch-mutated/v2',
     endpoint: {
       method: 'POST',
       path: '/v1/batches/{batchId}/actions',
@@ -4031,7 +4031,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.items.actions.apply',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Advance production batch item',
     description: 'Advances, fails, cancels, resumes or retries one exact item step with independent errors, cost and artifact lineage.',
     exposure: 'public',
@@ -4040,7 +4040,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     requiredScopes: ['projects:write'],
     inputSchemaRef:
       'apollo://schemas/production-batch-item-action-request/v1',
-    outputSchemaRef: 'apollo://schemas/production-batch-mutated/v1',
+    outputSchemaRef: 'apollo://schemas/production-batch-mutated/v2',
     endpoint: {
       method: 'POST',
       path: '/v1/batches/{batchId}/items/{itemId}/actions',

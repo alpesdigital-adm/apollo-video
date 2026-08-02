@@ -16,7 +16,7 @@ import {
   respondPublicError,
 } from '@/v2/public-api/errors'
 import {
-  presentProductionBatch,
+  presentProductionBatchV2,
 } from '@/v2/public-api/production-batch-contract'
 import { presentSuccess } from '@/v2/public-api/presenters'
 
@@ -38,7 +38,7 @@ export async function GET(
       batchId,
     })
     return NextResponse.json(
-      presentSuccess({ batch: presentProductionBatch(batch) }),
+      presentSuccess({ batch: presentProductionBatchV2(batch) }),
       { status: 200, headers: publicApiHeaders(requestId) },
     )
   } catch (error) {

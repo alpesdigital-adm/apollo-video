@@ -1759,6 +1759,11 @@ ações permitidas e terminalidade. `waiting` preserva attempt e checkpoint e s�
 pode retomar na mesma fase ou adiante. Artifact disponível não se torna
 globalmente stale: stale é relação da versão/variant de saída.
 
+Em lote, o progresso visível é derivado exclusivamente dos steps persistidos.
+Falha de um item não transforma itens concluídos em falha nem apresenta o lote
+como concluído: a projeção distingue `partially-failed`, preserva resultados
+válidos e oferece retry apenas para as falhas elegíveis.
+
 ---
 
 ## 7.24 API externa e automação

@@ -10,6 +10,7 @@ import {
   type ProductionBatch,
   type ProductionBatchStep,
 } from '../domain/production-batch.ts'
+import { presentProductionBatchVisibleStates } from '../domain/visible-state.ts'
 
 function record(value: unknown, field: string): Record<string, unknown> {
   if (
@@ -377,6 +378,36 @@ export function presentProductionBatch(
     ...batch,
     status: deriveBatchStatus(batch),
     progress: batchProgress(batch),
+  })
+}
+
+export function presentProductionBatchV2(
+  batch: Readonly<ProductionBatch>,
+) {
+  const visibleStates = presentProductionBatchVisibleStates(batch)
+  const itemStates = new Map(visibleStates.items.map((item) => [
+    item.itemId,
+    item.visibleState,
+  ]))
+  return Object.freeze({
+    ...batch,
+    items: Object.freeze(batch.items.map((item) => Object.freeze({
+      ...item,
+      visibleState: itemStates.get(item.id)!,
+    }))),
+    status: deriveBatchStatus(batch),
+    progress: batchProgress(batch),
+    visibleState: visibleStates.batch,
+  })
+}
+
+export function presentProductionBatchPageV2(input: {
+  batches: readonly Readonly<ProductionBatch>[]
+  nextCursor?: string
+}) {
+  return Object.freeze({
+    batches: Object.freeze(input.batches.map(presentProductionBatchV2)),
+    ...(input.nextCursor ? { nextCursor: input.nextCursor } : {}),
   })
 }
 

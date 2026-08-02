@@ -20,8 +20,8 @@ import {
 } from '@/v2/public-api/errors'
 import {
   parseCreateProductionBatchBody,
-  presentProductionBatch,
-  presentProductionBatchPage,
+  presentProductionBatchV2,
+  presentProductionBatchPageV2,
 } from '@/v2/public-api/production-batch-contract'
 import { presentSuccess } from '@/v2/public-api/presenters'
 
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
       cursor: request.nextUrl.searchParams.get('cursor') ?? undefined,
     })
     return NextResponse.json(
-      presentSuccess(presentProductionBatchPage(page)),
+      presentSuccess(presentProductionBatchPageV2(page)),
       { status: 200, headers: publicApiHeaders(requestId) },
     )
   } catch (error) {
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     })
     return NextResponse.json(
       presentSuccess({
-        batch: presentProductionBatch(result.batch),
+        batch: presentProductionBatchV2(result.batch),
         replayed: result.replayed,
       }),
       {

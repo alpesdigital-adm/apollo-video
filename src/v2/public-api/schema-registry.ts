@@ -6680,6 +6680,51 @@ const visibleStateSchema = {
   },
 }
 
+const productionBatchVisibleStateSchema = {
+  ...visibleStateSchema,
+  properties: {
+    ...visibleStateSchema.properties,
+    label: { enum: [
+      'queued', 'in-progress', 'completed', 'failed', 'canceled',
+      'review-required', 'partially-completed', 'partially-failed',
+      'superseded',
+    ] },
+    primaryAction: { enum: [
+      'view-progress', 'cancel', 'open-result', 'inspect-error', 'retry',
+      'review-output', 'open-results', 'retry-failed', 'inspect-history',
+    ] },
+    availableActions: {
+      type: 'array', minItems: 1, maxItems: 9, uniqueItems: true,
+      items: { enum: [
+        'view-progress', 'cancel', 'open-result', 'inspect-error', 'retry',
+        'review-output', 'open-results', 'retry-failed', 'inspect-history',
+      ] },
+    },
+  },
+}
+
+const productionBatchItemSchemaV2 = {
+  ...productionBatchItemSchema,
+  required: [...productionBatchItemSchema.required, 'visibleState'],
+  properties: {
+    ...productionBatchItemSchema.properties,
+    visibleState: productionBatchVisibleStateSchema,
+  },
+}
+
+const productionBatchSchemaV2 = {
+  ...productionBatchSchema,
+  required: [...productionBatchSchema.required, 'visibleState'],
+  properties: {
+    ...productionBatchSchema.properties,
+    items: {
+      ...productionBatchSchema.properties.items,
+      items: productionBatchItemSchemaV2,
+    },
+    visibleState: productionBatchVisibleStateSchema,
+  },
+}
+
 const publicOperationSchema = {
   type: 'object',
   additionalProperties: false,
@@ -15903,6 +15948,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('production-batch-mutated', 2, 'Created or mutated production batch with aggregate and per-item visible state',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['batch', 'replayed'],
+      properties: {
+        batch: productionBatchSchemaV2,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('production-batch-read', 1, 'Read one production batch with truthful aggregate status and progress',
     successSchema({
       type: 'object',
@@ -15910,6 +15966,16 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['batch'],
       properties: {
         batch: productionBatchSchema,
+      },
+    }),
+  ),
+  defineSchema('production-batch-read', 2, 'Read one production batch with truthful aggregate, per-item progress and visible actions',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['batch'],
+      properties: {
+        batch: productionBatchSchemaV2,
       },
     }),
   ),
@@ -15923,6 +15989,21 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           type: 'array',
           maxItems: 100,
           items: productionBatchSchema,
+        },
+        nextCursor: idSchema,
+      },
+    }),
+  ),
+  defineSchema('production-batch-page', 2, 'Filtered cursor page of production batches with aggregate and per-item visible state',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['batches'],
+      properties: {
+        batches: {
+          type: 'array',
+          maxItems: 100,
+          items: productionBatchSchemaV2,
         },
         nextCursor: idSchema,
       },
@@ -16031,6 +16112,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['batch', 'partialRetry', 'replayed'],
       properties: {
         batch: productionBatchSchema,
+        partialRetry: batchPartialRetrySchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('batch-partial-retry-mutated', 2, 'Persisted mixed partial retry with resulting visible batch state, stable lineage and idempotency evidence',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['batch', 'partialRetry', 'replayed'],
+      properties: {
+        batch: productionBatchSchemaV2,
         partialRetry: batchPartialRetrySchema,
         replayed: { type: 'boolean' },
       },

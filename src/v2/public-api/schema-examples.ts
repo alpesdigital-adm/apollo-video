@@ -2872,6 +2872,30 @@ const productionBatchExample = {
     remainingMinorUnits: 5000,
   },
 }
+const productionBatchVisibleExample = {
+  ...productionBatchExample,
+  items: productionBatchExample.items.map((item) => ({
+    ...item,
+    visibleState: {
+      schemaVersion: 'visible-state/v1',
+      label: 'queued',
+      tone: 'neutral',
+      progress: { mode: 'determinate', percent: 0 },
+      primaryAction: 'view-progress',
+      availableActions: ['view-progress', 'cancel'],
+      terminal: false,
+    },
+  })),
+  visibleState: {
+    schemaVersion: 'visible-state/v1',
+    label: 'queued',
+    tone: 'neutral',
+    progress: { mode: 'determinate', percent: 0 },
+    primaryAction: 'view-progress',
+    availableActions: ['view-progress', 'cancel'],
+    terminal: false,
+  },
+}
 const batchPartialRetryRequestExample = {
   expectedBatchRevision: 9,
   targets: [
@@ -7245,9 +7269,24 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/production-batch-mutated/v2': [
+      {
+        data: {
+          batch: productionBatchVisibleExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/production-batch-read/v1': [
       {
         data: { batch: productionBatchExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/production-batch-read/v2': [
+      {
+        data: { batch: productionBatchVisibleExample },
         meta: { apiVersion: 'v1' },
       },
     ],
@@ -7256,6 +7295,15 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           batches: [productionBatchExample],
           nextCursor: productionBatchExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/production-batch-page/v2': [
+      {
+        data: {
+          batches: [productionBatchVisibleExample],
+          nextCursor: productionBatchVisibleExample.id,
         },
         meta: { apiVersion: 'v1' },
       },
@@ -7309,6 +7357,16 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             ...productionBatchExample,
             revision: 10,
           },
+          partialRetry: batchPartialRetryExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/batch-partial-retry-mutated/v2': [
+      {
+        data: {
+          batch: productionBatchVisibleExample,
           partialRetry: batchPartialRetryExample,
           replayed: false,
         },
