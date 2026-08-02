@@ -23,7 +23,7 @@ O Apollo já publica login, leitura de sessão e logout em `/v1/session`, mas a 
 
 ## Consequências
 
-- Esta decisão fecha a seleção do mecanismo, expiração e recuperação. O bootstrap transitório agora usa sessão revogável, idle timeout, throttle distribuído e audit redigido no PostgreSQL; isso não afirma que OIDC, identificador opaco rotacionável, `WorkspaceMember` ou E2E de troca de workspace já estejam implementados.
+- Esta decisão fecha a seleção do mecanismo, expiração e recuperação. O bootstrap transitório agora usa identidade humana e `WorkspaceMember` ativos, sessão revogável, idle timeout, throttle distribuído e audit redigido no PostgreSQL; isso não afirma que OIDC, identificador opaco rotacionável ou E2E de troca de workspace já estejam implementados.
 - Deploy de produção permanece bloqueado enquanto `/v1/session` aceitar apenas o bootstrap local; as páginas V2 já exigem a sessão durável no boundary server-side.
 - Bearer de `ApiClient` continua sendo a única autenticação de automação; cookie humano não autentica MCP nem worker.
 
@@ -38,4 +38,4 @@ O Apollo já publica login, leitura de sessão e logout em `/v1/session`, mas a 
 
 ## Evidência incremental
 
-O run hospedado `30766068302` (attempt 2) aplicou as tabelas de sessão, throttle e tentativas em PostgreSQL limpo e passou 808 testes, contratos, build, integrações e goldens. Duas instâncias do repository observaram a mesma revogação e janela de brute force; o E2E HTTP confirmou que logout invalida o cookie anterior, a sexta tentativa falha retorna `429`, a senha correta permanece bloqueada durante a janela e o audit não persiste username nem senha. O run `30768229810` passou 809 testes e comprovou que as páginas V2 consultam essa sessão no SSR, inclusive após revogação, sem loop no login. O cookie assinado serve somente como envelope transitório e triagem do Proxy; OIDC, rotação e membership permanecem gates abertos.
+O run hospedado `30766068302` (attempt 2) aplicou as tabelas de sessão, throttle e tentativas em PostgreSQL limpo e passou 808 testes, contratos, build, integrações e goldens. Duas instâncias do repository observaram a mesma revogação e janela de brute force; o E2E HTTP confirmou que logout invalida o cookie anterior, a sexta tentativa falha retorna `429`, a senha correta permanece bloqueada durante a janela e o audit não persiste username nem senha. O run `30768229810` comprovou proteção SSR. O run `30768936087` aplicou identidade/membership em PostgreSQL limpo e provou papel ativo, replay sem elevação, FK de sessão e suspensão fail-closed. O cookie assinado serve somente como envelope transitório e triagem do Proxy; OIDC e rotação permanecem gates abertos.
