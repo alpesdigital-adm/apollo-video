@@ -441,6 +441,7 @@ export function executeHierarchicalProcessingService(dependencies: {
       dependencies.clock(),
       'hierarchical processing clock',
     )
+    /* eslint-disable prefer-const -- progressive tier state is read by runTier between assignments */
     let chunks: readonly Readonly<HierarchicalChunk>[]
     let evidenceSpans: readonly Readonly<HierarchicalEvidenceSpan>[]
     let visionObservations:
@@ -644,6 +645,7 @@ export function executeHierarchicalProcessingService(dependencies: {
       evidencePreserved: true,
       aggregationHash: aggregated.aggregationHash,
     })
+    /* eslint-enable prefer-const */
 
     const workingSetBytes = executions.reduce(
       (total, execution) => total + execution.workingSetBytes,

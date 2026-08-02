@@ -89,6 +89,8 @@ export class NodePinnedWebhookClient implements PinnedWebhookClient {
     return new Promise((resolve, reject) => {
       const options = createPinnedWebhookRequestOptions(input)
       let settled = false
+      // Assigned after the request exists because the deadline destroys that request.
+      // eslint-disable-next-line prefer-const
       let deadline: NodeJS.Timeout | undefined
       const finish = <T>(handler: (value: T) => void, value: T) => {
         if (settled) return

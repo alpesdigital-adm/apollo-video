@@ -34,6 +34,15 @@ FFmpeg. Each golden must materialize the current color compilation contract and
 assert observable frame, pixel, duration or audio outcomes; a smoke render
 alone is insufficient.
 
+Code lint is a separate CI gate from the Apollo architecture boundary scanner.
+It uses ESLint 9 with the official Next 16 core-web-vitals and TypeScript flat
+configs over application, scripts and tests, and permits no warnings. Stable
+Next, Hooks, JavaScript and TypeScript safety rules remain enabled. React
+Compiler-only purity/ref/effect/memoization heuristics and the noisy
+unused/explicit-any/empty-object rules are excluded until their underlying
+patterns can be migrated without a UI rewrite; architecture, typecheck and
+domain-language gates continue to cover their respective invariants.
+
 OIDC-verified identities become signed, expiring workspace sessions; production never trusts an unverified local identity. Workspace switching invalidates caches and subscriptions. Architecture imports are enforced by a CI boundary check. UI actions, REST endpoints and tests map through capability IDs, while sensitive internals have explicit deny-only reasons.
 
 Public operations generalize across ingest, Director, provider, sync, batch, render and export. Public conventions, deprecation/sunset headers, client kill switches and transition outbox events are stable application contracts.

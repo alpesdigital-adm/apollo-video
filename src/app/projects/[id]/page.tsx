@@ -1523,7 +1523,7 @@ export default function ProjectWorkspacePage() {
     if (!workspace?.version || workspace.media.length === 0) return
     void loadReview()
     void loadProxyReview(true, workspace.version.id)
-  }, [loadProxyReview, loadReview, workspace?.media.length, workspace?.version?.id])
+  }, [loadProxyReview, loadReview, workspace?.media.length, workspace?.version])
 
   const activeOperation = workspace?.operations[0]
   const operationActive = Boolean(activeOperation && !activeOperation.visibleState.terminal)
@@ -1670,7 +1670,7 @@ export default function ProjectWorkspacePage() {
     previewLoadStartedAt.current = performance.now()
     previewSeekSamples.current = []
     setPreviewPerformance({ firstFrameMs: 0, seekP95Ms: 0, droppedFrameRate: 0 })
-  }, [editingProxy?.artifactId, review?.session.fps])
+  }, [editingProxy?.artifactId, editingProxy?.probe?.fps, review?.session.fps])
 
   function togglePreview(): void {
     const video = previewVideo.current

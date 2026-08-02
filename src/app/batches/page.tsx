@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
 import LogoutButton from '@/components/LogoutButton'
@@ -3296,23 +3297,23 @@ export default function BatchesPage() {
     <main className="min-h-screen bg-[#070707] text-[#f4f1ea] selection:bg-[#eab83e]/25 selection:text-[#fff8df]">
       <div className="mx-auto flex min-h-screen max-w-[1800px]">
         <aside className="sticky top-0 hidden h-screen w-[236px] shrink-0 flex-col border-r border-white/[0.07] bg-[#0a0a0a] px-5 py-6 lg:flex">
-          <a className="flex items-center gap-3 px-2" href="/">
+          <Link className="flex items-center gap-3 px-2" href="/">
             <div className="grid h-9 w-9 place-items-center rounded-[10px] border border-[#e0af37]/35 bg-[#e0af37]/10 text-sm font-black text-[#efc75f]">A</div>
             <div>
               <p className="text-sm font-bold tracking-[0.22em] text-white">APOLLO</p>
               <p className="mt-0.5 text-[9px] uppercase tracking-[0.18em] text-[#66635c]">AI video director</p>
             </div>
-          </a>
+          </Link>
           <nav aria-label="Navegação principal" className="mt-10 space-y-1">
-            <a className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#8e8a82] transition hover:bg-white/[0.035] hover:text-white" href="/">
+            <Link className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#8e8a82] transition hover:bg-white/[0.035] hover:text-white" href="/">
               <Icon path="M4 5.5A1.5 1.5 0 0 1 5.5 4h5A1.5 1.5 0 0 1 12 5.5v5a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 4 10.5v-5Zm8 8A1.5 1.5 0 0 1 13.5 12h5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-5Z" />
               Projetos
-            </a>
-            <a className="flex items-center gap-3 rounded-xl border border-[#e0af37]/20 bg-[#e0af37]/10 px-3 py-2.5 text-sm font-medium text-[#f0c65c]" href="/batches">
+            </Link>
+            <Link className="flex items-center gap-3 rounded-xl border border-[#e0af37]/20 bg-[#e0af37]/10 px-3 py-2.5 text-sm font-medium text-[#f0c65c]" href="/batches">
               <Icon path="M5 4h14v4H5V4Zm0 6h14v4H5v-4Zm0 6h14v4H5v-4Zm3-10h8m-8 6h5m-5 6h7" />
               Lotes
               <span className="ml-auto rounded-md bg-[#e0af37]/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wider">V2</span>
-            </a>
+            </Link>
             <div className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[#5f5c56]">
               <Icon path="M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-11ZM8 5V3m8 2V3M4 9h16" />
               Biblioteca
@@ -3332,7 +3333,7 @@ export default function BatchesPage() {
           <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#070707]/92 px-5 py-4 backdrop-blur-xl sm:px-8 xl:px-10">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <a className="grid h-9 w-9 place-items-center rounded-[10px] border border-[#e0af37]/35 bg-[#e0af37]/10 text-sm font-black text-[#efc75f] lg:hidden" href="/">A</a>
+                <Link className="grid h-9 w-9 place-items-center rounded-[10px] border border-[#e0af37]/35 bg-[#e0af37]/10 text-sm font-black text-[#efc75f] lg:hidden" href="/">A</Link>
                 <div>
                   <p className="text-[9px] uppercase tracking-[0.2em] text-[#6e6a62]">Workspace · Alpes Digital</p>
                   <p className="mt-1 text-sm font-medium text-[#d7d2c8]">Controle de lotes</p>

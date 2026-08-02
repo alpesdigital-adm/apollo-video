@@ -931,8 +931,8 @@ export function hydrateProofIntegrityRun(
           : !evaluation.allowedForAssembly) &&
         (evaluation.outcome === 'blocked'
           ? Boolean(evaluation.issue) &&
-            evaluation.issue?.fabricationSuggested === false &&
-            evaluation.issue?.reasonCodes.length! > 0
+            evaluation.issue.fabricationSuggested === false &&
+            evaluation.issue.reasonCodes.length > 0
           : !evaluation.issue),
       'PERSISTENCE_CONFLICT',
       `Persisted ProofIntegrity evaluation ${index + 1} is invalid`,
