@@ -321,9 +321,14 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       Date.now() + 120_000,
       'project proxy render operation',
     )
-    assert.equal(renderOutcome.status, 'succeeded')
-
     const completed = await operations.findById(workspaceId, enqueued.operation.id)
+    assert.equal(
+      renderOutcome.status,
+      'succeeded',
+      completed?.operation.error
+        ? `${completed.operation.error.code}: ${completed.operation.error.message}`
+        : 'Project proxy worker returned no persisted failure detail',
+    )
     assert.equal(completed.operation.status, 'succeeded')
     assert.equal(completed.context.kind, 'project-proxy-render')
     const outputManifest = await prisma.v2MediaArtifactManifest.findUniqueOrThrow({
