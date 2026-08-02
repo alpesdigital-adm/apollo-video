@@ -19,7 +19,9 @@ function retryable(error: unknown): boolean {
 }
 
 export class PrismaWorkspaceMemberRepository implements WorkspaceMemberRepository {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) { this.client = client }
 
   async provisionBootstrapMembership(input: Parameters<WorkspaceMemberRepository['provisionBootstrapMembership']>[0], retry = 0): Promise<Readonly<WorkspaceMember>> {
     try {

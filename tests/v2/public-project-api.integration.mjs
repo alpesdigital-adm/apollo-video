@@ -96,6 +96,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     createUiPasswordHash,
     uiLoginThrottleKey,
     uiSessionNonceHash,
+    uiSessionSubjectHash,
     verifyUiPassword,
     verifyUiSession,
   } = await import('../../src/v2/infrastructure/security/ui-session.ts')
