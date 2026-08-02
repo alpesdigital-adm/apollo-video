@@ -10,11 +10,13 @@ import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
+import { createColorPipelineCompilationService } from '../../src/v2/application/color-pipeline-compilations.ts'
 import { createApiClientService } from '../../src/v2/application/create-api-client.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { runNextMediaIngestOperationService } from '../../src/v2/application/run-media-ingest-worker.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
+import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createWorkspace } from '../../src/v2/domain/workspace.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
@@ -45,6 +47,21 @@ const execFileAsync = promisify(execFile)
 function monotonicClock() {
   let now = Date.parse('2026-08-02T18:00:00.000Z')
   return () => new Date((now += 10))
+}
+
+function identityColorStages(metadata) {
+  const implementation = (provider, parameters) => ({
+    provider,
+    version: 'v1',
+    parameters,
+    parametersHash: calculateCanonicalHash(parameters),
+  })
+  return [
+    { id: 'technical-source', kind: 'technical', version: 'v1', enabled: true, output: metadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
+    { id: 'match-bypass', kind: 'match', version: 'v1', enabled: false, output: metadata, implementation: implementation('apollo-match', { mode: 'bypass' }) },
+    { id: 'creative-none', kind: 'creative-lut', version: 'v1', enabled: false, output: metadata, implementation: implementation('apollo-lut', { mode: 'none' }) },
+    { id: 'output-source', kind: 'output', version: 'v1', enabled: true, output: metadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
+  ]
 }
 
 async function waitForWork(run, deadline, label, signal) {
@@ -217,6 +234,33 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     assert.equal(ingestPlan.videoTracks[0].clips.length, 1)
     assert.equal(ingestPlan.videoTracks[0].clips[0].sourceArtifactId, seed.source.artifactId)
     assert.equal(ingestPlan.editorial.exclusions.length, 0)
+    const proxyProjects = new PrismaProjectProxyRenderRepository(prisma)
+    const colorPipelines = new PrismaColorPipelineCompilationRepository(prisma)
+    const staticSource = await proxyProjects.readCurrentSource({ workspaceId, projectId: seed.project.id })
+    assert.ok(staticSource)
+    const sourceProbe = await colorPipelines.loadTrustedProbe({
+      workspaceId,
+      projectId: seed.project.id,
+      sourceArtifactId: staticSource.sourceArtifactId,
+      sourceManifestId: staticSource.sourceManifestId,
+    })
+    assert.equal(sourceProbe?.detection.state, 'ready')
+    const sourceMetadata = sourceProbe.detection.metadata
+    const compiledColor = await createColorPipelineCompilationService({
+      repository: colorPipelines,
+      createId: () => 'vertical-color-pipeline-source',
+      clock,
+    })({
+      workspaceId,
+      projectId: seed.project.id,
+      sourceArtifactId: staticSource.sourceArtifactId,
+      sourceManifestId: staticSource.sourceManifestId,
+      outputMetadata: sourceMetadata,
+      stages: identityColorStages(sourceMetadata),
+      actor: { type: 'api-client', id: clientId },
+      idempotencyKey: 'vertical-smoke-color-source-v1',
+    })
+    assert.equal(compiledColor.replayed, false)
     const counters = new Map()
     const directed = await runProjectDirectorService({
       repository: new PrismaDirectorRunRepository(prisma),
@@ -241,9 +285,9 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     assert.ok(directed.run.editPlan.subtitleTracks[0].cues.length > 0)
 
     const enqueued = await enqueueProjectProxyRenderService({
-      projects: new PrismaProjectProxyRenderRepository(prisma),
+      projects: proxyProjects,
       operations,
-      colorPipelines: new PrismaColorPipelineCompilationRepository(prisma),
+      colorPipelines,
       clock,
       createId: (kind) => `vertical-${kind}-${randomUUID()}`,
     })({
@@ -255,13 +299,13 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     })
     const render = runNextProjectProxyRenderOperationService({
       operations,
-      projects: new PrismaProjectProxyRenderRepository(prisma),
+      projects: proxyProjects,
       artifacts,
       storage,
       renderer: new FfmpegEditorialProxyRenderer({ workRoot: join(root, '.render-work'), ffmpegPath }),
       renderElementMaps: new PrismaRenderElementMapRepository(prisma),
       proxyReviews: new PrismaProxyReviewRepository(prisma),
-      colorPipelines: new PrismaColorPipelineCompilationRepository(prisma),
+      colorPipelines,
       luts: new LocalProjectLutRenderMaterializer(
         new PrismaProjectLutSelectionRepository(prisma),
         join(root, '.lut-work'),
