@@ -11,6 +11,8 @@ import type { MediaColorProbe } from '../domain/color-and-export.ts'
 import { publicArtifactReference } from './public-media-identity.ts'
 import type { PublicOperation } from '../domain/public-operation.ts'
 import { presentPublicOperationVisibleState } from '../domain/visible-state.ts'
+import { presentCommandArtifactInvalidationVisibleState } from '../domain/visible-state.ts'
+import type { ManualEditInvalidationView } from '../application/ports/manual-edit-repository.ts'
 import type {
   WebhookDeliveryDiagnosticRecord,
   WebhookDeliverySummaryRecord,
@@ -168,6 +170,20 @@ export function presentPublicOperationV2(operation: PublicOperation) {
   return Object.freeze({
     ...presentPublicOperation(operation),
     visibleState: presentPublicOperationVisibleState(operation),
+  })
+}
+
+export function presentArtifactInvalidationViewV2(
+  view: Readonly<ManualEditInvalidationView>,
+) {
+  return Object.freeze({
+    ...view,
+    invalidations: Object.freeze(view.invalidations.map((invalidation) =>
+      Object.freeze({
+        ...invalidation,
+        availabilityEffect: 'none' as const,
+        visibleState: presentCommandArtifactInvalidationVisibleState(invalidation),
+      }))),
   })
 }
 

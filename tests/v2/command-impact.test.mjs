@@ -23,6 +23,9 @@ import { PrismaManualEditRepository } from '../../src/v2/infrastructure/prisma/m
 import { PrismaReviewPatchRepository } from '../../src/v2/infrastructure/prisma/review-patch-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
 import { PrismaProjectFinalExportRepository } from '../../src/v2/infrastructure/prisma/project-final-export-repository.ts'
+import {
+  presentArtifactInvalidationViewV2,
+} from '../../src/v2/public-api/presenters.ts'
 
 const workspaceId = 'workspace-impact-1'
 const projectId = 'project-impact-1'
@@ -123,6 +126,42 @@ test('T-FR-233 manual subtitle impact scopes exact range, variant and historical
     operation: { kind: 'inspect', clipId: 'clip-1', patch: { text: 'Texto revisado', layout: 'portrait-safe' } },
   })
   assert.deepEqual(combinedInspector.affectedRanges, [{ startFrame: 0, endFrame: 90 }])
+})
+
+test('T-FR-236 presents stale as a version-scoped relation without changing artifact availability', () => {
+  const invalidation = createCommandArtifactInvalidations({
+    impact: impact(),
+    createdAt,
+  })[0]
+  assert.ok(invalidation)
+  const presented = presentArtifactInvalidationViewV2({
+    projectId,
+    resultVersionId,
+    invalidations: [invalidation],
+  })
+  assert.equal(presented.invalidations[0].status, 'stale')
+  assert.equal(presented.invalidations[0].availabilityEffect, 'none')
+  assert.deepEqual(presented.invalidations[0].visibleState, {
+    schemaVersion: 'visible-state/v1',
+    label: 'stale-output',
+    tone: 'warning',
+    progress: { mode: 'none' },
+    primaryAction: 'rebuild-output',
+    availableActions: ['rebuild-output', 'open-historical-output'],
+    terminal: false,
+  })
+  assert.equal(presented.invalidations[0].artifactId, invalidation.artifactId)
+  assert.equal(presented.invalidations[0].baseVersionId, baseVersionId)
+  assert.equal(presented.invalidations[0].resultVersionId, resultVersionId)
+  assert.throws(() => presented.invalidations.push(presented.invalidations[0]))
+  assert.throws(
+    () => presentArtifactInvalidationViewV2({
+      projectId,
+      resultVersionId,
+      invalidations: [{ ...invalidation, status: 'available' }],
+    }),
+    /fields are invalid|invalid/,
+  )
 })
 
 test('T-FR-233 timing impact extends through shifted downstream frames while selection avoids render', () => {

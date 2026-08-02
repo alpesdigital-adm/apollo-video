@@ -6725,6 +6725,43 @@ const productionBatchSchemaV2 = {
   },
 }
 
+const artifactInvalidationVisibleStateSchema = {
+  ...visibleStateSchema,
+  properties: {
+    ...visibleStateSchema.properties,
+    label: { const: 'stale-output' },
+    tone: { const: 'warning' },
+    progress: {
+      type: 'object', additionalProperties: false,
+      required: ['mode'], properties: { mode: { const: 'none' } },
+    },
+    primaryAction: { const: 'rebuild-output' },
+    availableActions: {
+      type: 'array', minItems: 2, maxItems: 2, uniqueItems: true,
+      prefixItems: [
+        { const: 'rebuild-output' },
+        { const: 'open-historical-output' },
+      ],
+      items: false,
+    },
+    terminal: { const: false },
+  },
+}
+
+const commandArtifactInvalidationSchemaV2 = {
+  ...commandArtifactInvalidationSchema,
+  required: [
+    ...commandArtifactInvalidationSchema.required,
+    'availabilityEffect',
+    'visibleState',
+  ],
+  properties: {
+    ...commandArtifactInvalidationSchema.properties,
+    availabilityEffect: { const: 'none' },
+    visibleState: artifactInvalidationVisibleStateSchema,
+  },
+}
+
 const publicOperationSchema = {
   type: 'object',
   additionalProperties: false,
@@ -17257,6 +17294,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ),
   defineSchema('command-impact', 1, 'Content-addressed dependency impact persisted with a V2 Command', commandImpactSchema),
   defineSchema('command-artifact-invalidation', 1, 'Version-scoped stale relationship between a V2 Command and an affected historical output', commandArtifactInvalidationSchema),
+  defineSchema('command-artifact-invalidation', 2, 'Visible version-scoped stale relationship that leaves historical artifact availability unchanged', commandArtifactInvalidationSchemaV2),
   defineSchema('apply-project-manual-edit-request', 1, 'Apply, undo, redo or restore a scoped manual edit', {
     ...applyProjectManualEditRequestBody(manualGestureSchemaV1),
   }),
@@ -17279,6 +17317,20 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         resultVersionId: idSchema,
         invalidations: {
           type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema,
+        },
+      },
+    }),
+  ),
+  defineSchema('project-artifact-invalidations', 2, 'Visible unresolved stale output relationships that do not mutate historical artifact availability',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['projectId', 'resultVersionId', 'invalidations'],
+      properties: {
+        projectId: idSchema,
+        resultVersionId: idSchema,
+        invalidations: {
+          type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchemaV2,
         },
       },
     }),

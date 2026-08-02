@@ -33,6 +33,11 @@ only completed steps. Mixed terminal outcomes surface as `partially-failed` or
 whole batch to success. Six batch capabilities use additive v2 response
 schemas, while their v1 schemas remain immutable and published.
 
+The public invalidation view makes the same boundary executable. Its v2 schema
+adds `availabilityEffect: none` and a `stale-output` visible projection with
+rebuild and historical-open actions. Resolution removes only the matching
+unresolved version/variant edge; global artifact availability is never changed.
+
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.
 The record is content-addressed, frame-first and format-scoped; completed

@@ -1759,6 +1759,11 @@ ações permitidas e terminalidade. `waiting` preserva attempt e checkpoint e s�
 pode retomar na mesma fase ou adiante. Artifact disponível não se torna
 globalmente stale: stale é relação da versão/variant de saída.
 
+A leitura pública dessa relação declara `availabilityEffect: none`: o estado
+visível `stale-output` oferece reconstrução para a versão nova e abertura do
+resultado histórico. Uma resolução bem-sucedida remove a relação pendente; ela
+não altera nem apaga o artifact que continua válido para sua versão de origem.
+
 Em lote, o progresso visível é derivado exclusivamente dos steps persistidos.
 Falha de um item não transforma itens concluídos em falha nem apresenta o lote
 como concluído: a projeção distingue `partially-failed`, preserva resultados

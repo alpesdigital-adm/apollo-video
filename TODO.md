@@ -501,10 +501,10 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 ### F0.029 — Estados visíveis [FR-236]
 
-- [ ] Definir estados válidos de projeto, versão, job, item batch e artifact. Parcial F0.029: `PublicOperation`, `ProductionBatch` e seus itens reais possuem estados técnicos fechados e derivam projeções visíveis; projeto, relação de versão e artifact ainda precisam convergir sem confundir artifact disponível com relação stale. Evidência: T-FR-236 e ADR-133.
+- [ ] Definir estados válidos de projeto, versão, job, item batch e artifact. Parcial F0.029: `PublicOperation`, `ProductionBatch`, itens e a relação version-scoped de saída possuem projeções visíveis fechadas. A invalidation stale declara `availabilityEffect: none`; estados agregados de projeto e artifact ainda precisam convergir. Evidência: T-FR-236 e ADR-133.
 - [ ] Implementar transições server-side e rejeitar saltos inválidos. Parcial F0.029: `PublicOperation` ganhou transições puras `running → waiting → running`, preservando attempt/progresso e recusando espera fora de execução ou retomada para fase anterior. Persistência/lease e transições dos demais agregados permanecem abertas. Evidência: T-FR-236 e ADR-133.
-- [ ] Mapear estado técnico para label, progresso e ação na UI. Parcial F0.029: cinco capabilities de operações v7 e seis capabilities de batch v2 retornam projeção visível com label semântica, tone, progresso honesto, ação primária, ações permitidas e terminalidade; versões anteriores permanecem publicadas. Projeto, versão e artifact ainda não usam a projeção. Evidência: T-FR-236 e ADR-133.
-- [ ] Testar sucesso, espera, retry, cancel, falha parcial, stale e conclusão. Parcial F0.029: operações cobrem seus sete estados; batch real cobre progresso por step, conclusão por item e falha parcial `partially-failed` com retry restrito, preservando erro e recusando estado inventado. Stale version-scoped, projeto e artifact permanecem abertos. Evidência: T-FR-236 e ADR-133.
+- [ ] Mapear estado técnico para label, progresso e ação na UI. Parcial F0.029: cinco capabilities de operações v7, seis de batch v2 e a leitura de invalidations v2 retornam projeções visíveis; versões anteriores permanecem publicadas. Projeto e artifact agregado ainda não usam a projeção. Evidência: T-FR-236 e ADR-133.
+- [ ] Testar sucesso, espera, retry, cancel, falha parcial, stale e conclusão. Parcial F0.029: operações cobrem seus sete estados; batch cobre falha parcial; invalidation cobre stale relacional, artifact histórico acessível, resolução por proxy/final exato e payload adulterado fail-closed. Projeto e estados agregados de artifact permanecem abertos. Evidência: T-FR-236 e ADR-133.
 
 ### F0.030 — Infraestrutura e smoke vertical
 

@@ -10,7 +10,10 @@ import {
   resolveRequestId,
   respondPublicError,
 } from '@/v2/public-api/errors'
-import { presentSuccess } from '@/v2/public-api/presenters'
+import {
+  presentArtifactInvalidationViewV2,
+  presentSuccess,
+} from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,7 +40,7 @@ export async function GET(
       projectId,
       ...(resultVersionId ? { resultVersionId } : {}),
     })
-    return NextResponse.json(presentSuccess(result), {
+    return NextResponse.json(presentSuccess(presentArtifactInvalidationViewV2(result)), {
       headers: publicApiHeaders(requestId),
     })
   } catch (error) {

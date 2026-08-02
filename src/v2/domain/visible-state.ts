@@ -6,6 +6,10 @@ import {
   type BatchItem,
   type ProductionBatch,
 } from './production-batch.ts'
+import {
+  parseCommandArtifactInvalidation,
+  type CommandArtifactInvalidationV1,
+} from './command-impact.ts'
 
 export const VISIBLE_STATE_LABELS = [
   'queued',
@@ -19,6 +23,7 @@ export const VISIBLE_STATE_LABELS = [
   'partially-completed',
   'partially-failed',
   'superseded',
+  'stale-output',
 ] as const
 
 export const VISIBLE_STATE_ACTIONS = [
@@ -32,6 +37,8 @@ export const VISIBLE_STATE_ACTIONS = [
   'open-results',
   'retry-failed',
   'inspect-history',
+  'rebuild-output',
+  'open-historical-output',
 ] as const
 
 export type VisibleStateLabel = (typeof VISIBLE_STATE_LABELS)[number]
@@ -198,6 +205,20 @@ export function presentProductionBatchVisibleStates(
       itemId: item.id,
       visibleState: presentValidatedBatchItemVisibleState(item),
     }))),
+  })
+}
+
+export function presentCommandArtifactInvalidationVisibleState(
+  input: Readonly<CommandArtifactInvalidationV1>,
+): Readonly<VisibleState> {
+  parseCommandArtifactInvalidation(input)
+  return freezeVisibleState({
+    label: 'stale-output',
+    tone: 'warning',
+    progress: { mode: 'none' },
+    primaryAction: 'rebuild-output',
+    availableActions: ['rebuild-output', 'open-historical-output'],
+    terminal: false,
   })
 }
 

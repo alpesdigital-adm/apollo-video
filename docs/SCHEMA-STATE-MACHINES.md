@@ -18,3 +18,9 @@ and `partially-completed` otherwise; completed items and their artifacts remain
 available while retry targets only failed work. Public v1 batch schemas remain
 published and the six batch capabilities returning the aggregate use additive
 v2 response schemas.
+
+An unresolved `CommandArtifactInvalidation` is a relation state, not an
+artifact lifecycle state. Its additive v2 presentation is `stale-output`, has
+`availabilityEffect: none`, and exposes rebuild plus historical-open actions.
+Exact proxy/final completion resolves the matching edge; the historical
+artifact remains addressable under its source version.
