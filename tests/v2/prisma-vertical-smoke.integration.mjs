@@ -215,7 +215,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     const ingestPlan = JSON.parse(ingestPlanSnapshot.contentJson)
     assert.equal(ingestPlan.editorial.commandType, 'source-ingest')
     assert.equal(ingestPlan.videoTracks[0].clips.length, 1)
-    assert.equal(ingestPlan.videoTracks[0].clips[0].sourceArtifactId, seed.sourceArtifact.id)
+    assert.equal(ingestPlan.videoTracks[0].clips[0].sourceArtifactId, seed.source.artifactId)
     assert.equal(ingestPlan.editorial.exclusions.length, 0)
     const counters = new Map()
     const directed = await runProjectDirectorService({
