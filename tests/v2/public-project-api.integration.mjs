@@ -647,6 +647,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       uiLogoutResponse.headers.get('set-cookie') ?? '',
       new RegExp(`^${APOLLO_SESSION_COOKIE}=;`),
     )
+    assert.equal(serverDiagnostics.includes(uiPassword), false, 'UI password must never reach server logs')
 
     const openApiResponse = await fetch(`${baseUrl}/v1/openapi.json`)
     const openApi = await openApiResponse.json()

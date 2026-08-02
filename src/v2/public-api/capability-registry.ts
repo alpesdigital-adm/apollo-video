@@ -215,6 +215,12 @@ function validateCapability(capability: PublicCapability): void {
       { capabilityId: capability.id, toolName: capability.toolName },
     )
   }
+  assertDomain(
+    !capability.id.startsWith('apollo.sessions.') || capability.toolName === undefined,
+    'INVALID_CAPABILITY',
+    'Human session capabilities cannot be exposed as agent tools',
+    { capabilityId: capability.id },
+  )
 
   if (capability.costClass === 'high' || capability.costClass === 'variable') {
     assertDomain(

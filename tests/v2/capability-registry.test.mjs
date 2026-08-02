@@ -10,6 +10,8 @@ import {
   defineCapabilityAccessPolicy,
   defineCapabilityRegistry,
 } from '../../src/v2/public-api/capability-registry.ts'
+import { agentToolsForCapabilities } from '../../src/v2/public-api/agent-tool-catalog.ts'
+import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -49,6 +51,16 @@ test('human session capabilities are public contracts but never agent tools', ()
   ])
   assert.ok(sessions.every((capability) => capability.toolName === undefined))
   assert.equal(sessions.find((capability) => capability.id.endsWith('.read')).authScheme, 'ui-session')
+  const agentToolCapabilityIds = agentToolsForCapabilities(FOUNDATION_CAPABILITIES)
+    .map((tool) => tool.apollo.capabilityId)
+  assert.equal(agentToolCapabilityIds.some((id) => id.startsWith('apollo.sessions.')), false)
+  const loginSchema = getPublicSchema(sessions.find((capability) => capability.id.endsWith('.login')).inputSchemaRef).schema
+  assert.equal(loginSchema.properties.password.writeOnly, true)
+  for (const capability of sessions) {
+    assert.equal(JSON.stringify(getPublicSchema(capability.outputSchemaRef).schema).includes('password'), false)
+  }
+
+  expectDomainError(() => defineCapabilityRegistry([{ ...sessions[0], toolName: 'apollo.sessions.login' }]), 'INVALID_CAPABILITY')
 })
 test('scope filtering is deny-by-default', () => {
   const registry = defineCapabilityRegistry([
