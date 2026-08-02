@@ -370,18 +370,19 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     assert.equal(completed.context.kind, 'project-proxy-render')
     const outputManifest = await prisma.v2MediaArtifactManifest.findUniqueOrThrow({
       where: { id: completed.context.outputManifestId },
-      select: { artifactKey: true, artifactSha256: true },
+      select: { manifestJson: true },
     })
-    const outputPath = join(root, outputManifest.artifactKey)
+    const outputManifestDocument = JSON.parse(outputManifest.manifestJson)
+    const outputPath = join(root, outputManifestDocument.artifact.artifactKey)
     const outputStat = await stat(outputPath)
     const outputProbe = await probeVideo(outputPath)
     assert.ok(outputStat.size > 0)
     assert.equal(outputProbe.width, 540)
     assert.equal(outputProbe.height, 960)
     assert.ok(Math.abs(outputProbe.duration - 6) < 0.15)
-    assert.match(outputManifest.artifactSha256, /^[a-f0-9]{64}$/)
+    assert.match(outputManifestDocument.artifact.sha256, /^[a-f0-9]{64}$/)
     assert.equal(await prisma.v2RenderElementMap.count({
-      where: { workspaceId, projectId: seed.project.id, projectVersionId: directed.version.id },
+      where: { workspaceId, projectId: seed.project.id, projectVersionId: noLut.version.id },
     }), 1)
   } finally {
     await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } }).catch(() => undefined)
