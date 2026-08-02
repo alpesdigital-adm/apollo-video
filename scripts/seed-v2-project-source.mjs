@@ -91,7 +91,7 @@ export async function seedV2ProjectSource({
   clock = () => new Date(),
 }) {
   const clientRow = await client.v2ApiClient.findFirst({
-    where: { id: input.clientId, workspaceId: input.workspaceId, revokedAt: null },
+    where: { id: input.clientId, workspaceId: input.workspaceId, status: 'active' },
     select: { id: true },
   })
   if (!clientRow) throw new Error('Active API client was not found in the requested workspace')
