@@ -11,7 +11,10 @@ function EyeIcon({ crossed = false }: { crossed?: boolean }) {
   )
 }
 
-export default function LoginForm() {
+export default function LoginForm({ mode, recoveryUrl }: Readonly<{
+  mode: 'oidc' | 'bootstrap' | 'unavailable'
+  recoveryUrl?: string
+}>) {
   const router = useRouter()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -40,6 +43,45 @@ export default function LoginForm() {
       setLoading(false)
     }
   }
+
+  async function startOidc() {
+    setLoading(true)
+    setError('')
+    const next = new URLSearchParams(window.location.search).get('next') ?? '/'
+    try {
+      const response = await fetch('/v1/session/oidc', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ next }),
+      })
+      const result = await response.json()
+      if (!response.ok || typeof result.data?.authorizationUrl !== 'string') {
+        throw new Error(result.error?.message ?? 'NÃ£o foi possÃ­vel iniciar o acesso seguro.')
+      }
+      window.location.assign(result.data.authorizationUrl)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'NÃ£o foi possÃ­vel iniciar o acesso seguro.')
+      setLoading(false)
+    }
+  }
+
+  if (mode === 'oidc') return (
+    <div className="mt-10">
+      <button className="group flex h-12 w-full items-center justify-between rounded-xl bg-[#7167ff] px-5 text-sm font-semibold text-white transition hover:bg-[#8077ff] focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#101116] disabled:cursor-wait disabled:opacity-60" disabled={loading} onClick={startOidc} type="button">
+        <span>{loading ? 'Conectando ao provedorâ€¦' : 'Continuar com acesso seguro'}</span>
+        <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">â†’</span>
+      </button>
+      <div aria-live="polite" className="min-h-11 pt-3">
+        {error ? <p className="rounded-lg border border-red-400/20 bg-red-400/8 px-3 py-2 text-sm text-red-200">{error}</p> : null}
+      </div>
+      {recoveryUrl ? <a className="mt-2 block text-center text-xs text-[#8e87ff] hover:text-white" href={recoveryUrl}>Recuperar acesso no provedor de identidade</a> : null}
+      <p className="mt-5 text-center text-xs leading-5 text-[#686d7d]">O Apollo nunca recebe nem redefine sua senha.</p>
+    </div>
+  )
+
+  if (mode === 'unavailable') return (
+    <div className="mt-10 rounded-xl border border-amber-300/20 bg-amber-300/8 px-4 py-3 text-sm leading-6 text-amber-100">
+      O acesso humano ainda nÃ£o foi configurado neste ambiente.
+    </div>
+  )
 
   return (
     <form action="/v1/session" className="mt-10" method="post" onSubmit={submit}>

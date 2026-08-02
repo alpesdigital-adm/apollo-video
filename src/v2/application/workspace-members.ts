@@ -58,3 +58,13 @@ export function resolveWorkspaceSwitchTargetService(dependencies: { members: Wor
     return target
   }
 }
+
+export function resolveOidcWorkspaceMembershipService(dependencies: { members: WorkspaceMemberRepository }) {
+  return async function resolve(input: { issuer: string; subjectHash: string }) {
+    assertDomain(input.issuer.length > 0 && input.issuer.length <= 512, 'AUTH_INVALID', 'OIDC identity issuer is invalid')
+    assertDomain(HASH.test(input.subjectHash), 'AUTH_INVALID', 'OIDC identity subject is invalid')
+    const membership = await dependencies.members.resolveActiveOidcMembership(input)
+    if (!membership) throw new DomainError('AUTH_INVALID', 'OIDC identity has no active Apollo membership')
+    return membership
+  }
+}

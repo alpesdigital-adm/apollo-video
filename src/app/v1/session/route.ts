@@ -33,6 +33,7 @@ import {
 import { publicApiHeaders, resolveRequestId } from '@/v2/public-api/errors'
 import { resolveApiEnvironment } from '@/v2/public-api/authentication'
 import { presentSuccess } from '@/v2/public-api/presenters'
+import { resolveHumanAuthenticationMode } from '@/v2/infrastructure/security/oidc-provider'
 
 function clientKey(request: NextRequest): string {
   if (process.env.APOLLO_UI_TRUST_PROXY_HEADERS !== 'true') return 'direct'
@@ -100,7 +101,9 @@ export async function GET(request: NextRequest) {
     const workspaces = await listSelectableWorkspacesService({ members: createWorkspaceMemberRepository() })(actor.delegatedUserId!)
     return NextResponse.json(
       presentSuccess({
-        subject: configuredUiUsername(),
+        subject: resolveHumanAuthenticationMode() === 'bootstrap'
+          ? configuredUiUsername()
+          : actor.delegatedIdentityId,
         workspaceId: actor.workspaceId,
         memberId: actor.delegatedUserId,
         role: actor.workspaceRole,
@@ -116,6 +119,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const requestId = resolveRequestId(request)
+  if (resolveHumanAuthenticationMode() !== 'bootstrap') {
+    return sessionError(requestId, 403, 'AUTH_METHOD_DISABLED', 'O login por senha nÃ£o estÃ¡ disponÃ­vel.')
+  }
   const isFormLogin = request.headers.get('content-type')?.includes(
     'application/x-www-form-urlencoded',
   ) ?? false

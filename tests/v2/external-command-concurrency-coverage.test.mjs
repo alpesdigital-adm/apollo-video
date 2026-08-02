@@ -275,6 +275,8 @@ const coverage = Object.freeze({
     mode: 'durable-covered', evidence: 'F0-073',
   },
   'apollo.sessions.login': { mode: 'durable-covered', evidence: 'bounded signed UI session contract tests' },
+  'apollo.sessions.oidc-start': { mode: 'durable-covered', evidence: 'random state primary key and browser-bound authorization transaction' },
+  'apollo.sessions.oidc-callback': { mode: 'durable-covered', evidence: 'serializable one-shot state consumption before opaque session creation' },
   'apollo.sessions.logout': { mode: 'durable-covered', evidence: 'idempotent UI session revocation contract tests' },
   'apollo.sessions.switch-workspace': { mode: 'durable-covered', evidence: 'serializable atomic session rotation with active membership recheck' },
 })
@@ -306,7 +308,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    86,
+    88,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

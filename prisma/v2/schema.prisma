@@ -1669,6 +1669,24 @@ model V2UiSession {
   @@map("ui_sessions")
 }
 
+model V2OidcAuthorization {
+  stateHash               String    @id @db.Char(64)
+  browserBindingHash      String    @db.Char(64)
+  nonceHash               String    @db.Char(64)
+  protectedCodeVerifier   String    @db.Text
+  issuer                  String    @db.VarChar(512)
+  clientId                String    @db.VarChar(256)
+  redirectUri             String    @db.VarChar(2048)
+  returnTo                String    @db.VarChar(2048)
+  createdAt               DateTime  @db.Timestamptz(3)
+  expiresAt               DateTime  @db.Timestamptz(3)
+  consumedAt              DateTime? @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@index([consumedAt, expiresAt])
+  @@map("oidc_authorizations")
+}
+
 model V2HumanIdentity {
   id          String    @id @db.Uuid
   issuer      String    @db.VarChar(512)

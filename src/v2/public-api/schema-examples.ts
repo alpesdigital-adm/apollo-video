@@ -4772,6 +4772,34 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/oidc-authorization-start-request/v1': [
+      { next: '/projects' },
+    ],
+    'apollo://schemas/oidc-authorization-started/v1': [
+      {
+        data: {
+          authorizationUrl: 'https://identity.example.test/authorize?response_type=code',
+          recoveryUrl: 'https://identity.example.test/recovery',
+          expiresAt: '2026-08-02T20:10:00.000Z',
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/oidc-callback-request/v1': [
+      { code: 'authorization-code-123', state: 's'.repeat(43) },
+    ],
+    'apollo://schemas/oidc-session-created/v1': [
+      {
+        data: {
+          workspaceId,
+          memberId: '00000000-0000-4000-8000-000000000901',
+          role: 'administrator',
+          expiresAt: '2026-08-03T08:00:00.000Z',
+          redirectTo: '/projects',
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/ui-session-status/v1': [
       {
         data: {

@@ -135,4 +135,17 @@ export class PrismaWorkspaceMemberRepository implements WorkspaceMemberRepositor
     })
     return row ? hydrateSelection(row) : null
   }
+
+  async resolveActiveOidcMembership(input: Parameters<WorkspaceMemberRepository['resolveActiveOidcMembership']>[0]) {
+    const row = await this.client.v2WorkspaceMember.findFirst({
+      where: {
+        status: 'active',
+        identity: { issuer: input.issuer, subjectHash: input.subjectHash, status: 'active' },
+        workspace: { status: 'active', uiPrincipal: { is: { client: { status: 'active' } } } },
+      },
+      include: { workspace: { include: { uiPrincipal: true } } },
+      orderBy: [{ createdAt: 'asc' }, { workspaceId: 'asc' }],
+    })
+    return row ? hydrateSelection(row) : null
+  }
 }

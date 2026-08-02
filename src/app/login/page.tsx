@@ -4,6 +4,10 @@ import { redirect } from 'next/navigation'
 import { readActiveUiPageSession } from '../_auth/ui-page-session'
 import { safeUiRedirect } from '@/v2/infrastructure/security/ui-session'
 import LoginForm from './LoginForm'
+import {
+  resolveHumanAuthenticationMode,
+  resolveOidcProviderConfiguration,
+} from '@/v2/infrastructure/security/oidc-provider'
 
 export const metadata: Metadata = {
   title: 'Entrar — Apollo Studio',
@@ -25,6 +29,11 @@ export default async function LoginPage({
   if (activeSession) {
     const next = (await searchParams).next
     redirect(safeUiRedirect(Array.isArray(next) ? next[0] : next))
+  }
+  const authenticationMode = resolveHumanAuthenticationMode()
+  let recoveryUrl: string | undefined
+  if (authenticationMode === 'oidc') {
+    try { recoveryUrl = resolveOidcProviderConfiguration().recoveryUrl } catch { recoveryUrl = undefined }
   }
   return (
     <main className="min-h-screen overflow-hidden bg-[#08090d] text-[#f4f5f7] lg:grid lg:grid-cols-[minmax(0,1.08fr)_minmax(440px,0.92fr)]">
@@ -59,7 +68,7 @@ export default async function LoginPage({
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#8e87ff]">Acesso privado</p>
           <h2 className="mt-4 text-4xl font-semibold tracking-[-0.045em] text-white">Entre na sala de edição.</h2>
           <p className="mt-4 max-w-sm text-[15px] leading-6 text-[#8d92a2]">Use suas credenciais para continuar de onde parou.</p>
-          <LoginForm />
+          <LoginForm mode={authenticationMode} recoveryUrl={recoveryUrl} />
         </div>
       </section>
     </main>

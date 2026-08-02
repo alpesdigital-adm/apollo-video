@@ -11423,6 +11423,48 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('oidc-authorization-start-request', 1, 'OIDC authorization start request', {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      next: { type: 'string', minLength: 1, maxLength: 1024, pattern: '^/(?!/)' },
+    },
+  }),
+  defineSchema('oidc-authorization-started', 1, 'OIDC authorization start response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['authorizationUrl', 'recoveryUrl', 'expiresAt'],
+      properties: {
+        authorizationUrl: { type: 'string', format: 'uri', maxLength: 4096 },
+        recoveryUrl: { type: 'string', format: 'uri', maxLength: 2048 },
+        expiresAt: dateTimeSchema,
+      },
+    }),
+  ),
+  defineSchema('oidc-callback-request', 1, 'OIDC authorization callback request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['code', 'state'],
+    properties: {
+      code: { type: 'string', minLength: 8, maxLength: 2048, pattern: '^[A-Za-z0-9._~-]+$' },
+      state: { type: 'string', minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]+$' },
+    },
+  }),
+  defineSchema('oidc-session-created', 1, 'OIDC human session response',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['workspaceId', 'memberId', 'role', 'expiresAt', 'redirectTo'],
+      properties: {
+        workspaceId: idSchema,
+        memberId: { type: 'string', format: 'uuid' },
+        role: { enum: ['administrator', 'operator', 'director', 'reviewer', 'viewer'] },
+        expiresAt: dateTimeSchema,
+        redirectTo: { type: 'string', pattern: '^/(?!/)', maxLength: 1024 },
+      },
+    }),
+  ),
   defineSchema('ui-session-status', 1, 'Current human UI session response',
     successSchema({
       type: 'object',

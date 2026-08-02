@@ -5,6 +5,7 @@ import test from 'node:test'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { PrismaUiSessionSecurityRepository } from '../../src/v2/infrastructure/prisma/ui-session-security-repository.ts'
 import { PrismaWorkspaceMemberRepository } from '../../src/v2/infrastructure/prisma/workspace-member-repository.ts'
+import { PrismaOidcAuthorizationRepository } from '../../src/v2/infrastructure/prisma/oidc-authorization-repository.ts'
 
 test('UI session security is revocable, idle-bounded, distributed and auditable in PostgreSQL', async () => {
   const client = new PrismaClient()
@@ -116,6 +117,41 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     assert.equal((await reserve(second, 9, resetKeyHash)).allowed, true)
   } finally {
     await cleanup()
+    await client.$disconnect()
+  }
+})
+
+test('OIDC authorization transaction is browser-bound, atomic and one-shot in PostgreSQL', async () => {
+  const client = new PrismaClient()
+  const first = new PrismaOidcAuthorizationRepository(client)
+  const second = new PrismaOidcAuthorizationRepository(client)
+  const stateHash = '1'.repeat(64)
+  const input = {
+    stateHash,
+    browserBindingHash: '2'.repeat(64),
+    nonceHash: '3'.repeat(64),
+    protectedCodeVerifier: 'v1.test.encrypted.verifier.tag',
+    issuer: 'https://identity.example.test',
+    clientId: 'apollo-web',
+    redirectUri: 'https://apollo.example.test/v1/session/oidc/callback',
+    returnTo: '/projects',
+    createdAt: '2026-08-02T20:00:00.000Z',
+    expiresAt: '2026-08-02T20:10:00.000Z',
+  }
+  try {
+    await client.v2OidcAuthorization.deleteMany({ where: { stateHash } })
+    await first.create(input)
+    assert.equal(await second.consume({ stateHash, browserBindingHash: '4'.repeat(64), consumedAt: '2026-08-02T20:01:00.000Z' }), null)
+    const [left, right] = await Promise.all([
+      first.consume({ stateHash, browserBindingHash: input.browserBindingHash, consumedAt: '2026-08-02T20:02:00.000Z' }),
+      second.consume({ stateHash, browserBindingHash: input.browserBindingHash, consumedAt: '2026-08-02T20:02:00.000Z' }),
+    ])
+    assert.equal([left, right].filter(Boolean).length, 1)
+    assert.equal((left ?? right).consumedAt, '2026-08-02T20:02:00.000Z')
+    assert.equal(await first.consume({ stateHash, browserBindingHash: input.browserBindingHash, consumedAt: '2026-08-02T20:03:00.000Z' }), null)
+    assert.equal(await first.deleteExpired({ before: '2026-08-02T20:11:00.000Z', limit: 10 }), 1)
+  } finally {
+    await client.v2OidcAuthorization.deleteMany({ where: { stateHash } })
     await client.$disconnect()
   }
 })

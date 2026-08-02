@@ -71,6 +71,8 @@ assertSetContains(
 )
 
 const requiredChecks = [
+  'oidc_authorizations_hashes_check',
+  'oidc_authorizations_lifetime_check',
   'workspaces_status_check',
   'api_clients_status_check',
   'api_clients_environment_check',

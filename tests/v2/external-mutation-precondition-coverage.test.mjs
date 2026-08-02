@@ -277,6 +277,8 @@ const coverage = Object.freeze({
     mode: 'state-machine-action', evidence: 'F0-073',
   },
   'apollo.sessions.login': { mode: 'state-machine-action', evidence: 'credential verification creates a bounded server-signed session' },
+  'apollo.sessions.oidc-start': { mode: 'state-machine-action', evidence: 'same-origin request creates an expiring browser-bound PKCE transaction' },
+  'apollo.sessions.oidc-callback': { mode: 'state-machine-action', evidence: 'state, browser binding, PKCE, nonce, provider signature and membership must all match' },
   'apollo.sessions.logout': { mode: 'state-machine-action', evidence: 'session revocation is naturally idempotent' },
   'apollo.sessions.switch-workspace': { mode: 'state-machine-action', evidence: 'current session nonce and target membership are revalidated atomically' },
 })
@@ -495,7 +497,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'read-only-preflight': 2,
     'explicit-precondition': 5,
     'idempotent-create': 48,
-    'state-machine-action': 14,
+    'state-machine-action': 16,
     'single-flight-action': 1,
     'revision-bound-action': 7,
     'base-version-bound-action': 4,

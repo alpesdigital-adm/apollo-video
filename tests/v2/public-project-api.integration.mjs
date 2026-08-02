@@ -118,6 +118,8 @@ test('authenticated public API manages projects, clients and artifact inspection
   const uiPasswordHash = createUiPasswordHash(uiPassword, 'public-api-test-salt')
   const uiSessionSecret = 'public-api-ui-session-secret-with-at-least-32-characters'
   const uiEnvironment = {
+    APOLLO_AUTH_MODE: 'bootstrap',
+    APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true',
     APOLLO_UI_API_CLIENT_ID: apiClientId,
     APOLLO_UI_BOOTSTRAP_ROLE: 'administrator',
     APOLLO_UI_PASSWORD_HASH: uiPasswordHash,

@@ -5281,7 +5281,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.sessions.login": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "none",
@@ -5320,6 +5320,50 @@
         200
       ],
       "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
+    "apollo.sessions.oidc-callback": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "none",
+      "requiredScopes": [],
+      "inputSchemaRef": "apollo://schemas/oidc-callback-request/v1",
+      "outputSchemaRef": "apollo://schemas/oidc-session-created/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/session/oidc/callback"
+      },
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.sessions.oidc-start": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "none",
+      "requiredScopes": [],
+      "inputSchemaRef": "apollo://schemas/oidc-authorization-start-request/v1",
+      "outputSchemaRef": "apollo://schemas/oidc-authorization-started/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/session/oidc"
+      },
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
     "apollo.sessions.read": {
@@ -47003,6 +47047,149 @@
                   }
                 }
               }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/oidc-authorization-start-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "next": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^/(?!/)"
+        }
+      }
+    },
+    "apollo://schemas/oidc-authorization-started/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authorizationUrl",
+            "recoveryUrl",
+            "expiresAt"
+          ],
+          "properties": {
+            "authorizationUrl": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 4096
+            },
+            "recoveryUrl": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/oidc-callback-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "state"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 2048,
+          "pattern": "^[A-Za-z0-9._~-]+$"
+        },
+        "state": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 43,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      }
+    },
+    "apollo://schemas/oidc-session-created/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "workspaceId",
+            "memberId",
+            "role",
+            "expiresAt",
+            "redirectTo"
+          ],
+          "properties": {
+            "workspaceId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "memberId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "role": {
+              "enum": [
+                "administrator",
+                "operator",
+                "director",
+                "reviewer",
+                "viewer"
+              ]
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "redirectTo": {
+              "type": "string",
+              "pattern": "^/(?!/)",
+              "maxLength": 1024
             }
           }
         },

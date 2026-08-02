@@ -26,4 +26,8 @@ export interface WorkspaceMemberRepository {
     memberId: string
     workspaceId: string
   }>): Promise<Readonly<SelectableWorkspaceMembership> | null>
+  resolveActiveOidcMembership(input: Readonly<{
+    issuer: string
+    subjectHash: string
+  }>): Promise<Readonly<SelectableWorkspaceMembership> | null>
 }

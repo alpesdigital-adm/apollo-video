@@ -31,6 +31,8 @@ test('foundation registry exposes health and discovery without scopes', () => {
       'apollo.tools.list',
       'apollo.events.catalog.read',
       'apollo.sessions.switch-workspace',
+      'apollo.sessions.oidc-start',
+      'apollo.sessions.oidc-callback',
       'apollo.contracts.openapi.read',
       'apollo.contracts.schemas.read',
       'apollo.media.uploads.content.put',
@@ -50,6 +52,8 @@ test('human session capabilities are public contracts but never agent tools', ()
     'apollo.sessions.read',
     'apollo.sessions.logout',
     'apollo.sessions.switch-workspace',
+    'apollo.sessions.oidc-start',
+    'apollo.sessions.oidc-callback',
   ])
   assert.ok(sessions.every((capability) => capability.toolName === undefined))
   assert.equal(sessions.find((capability) => capability.id.endsWith('.read')).authScheme, 'ui-session')
