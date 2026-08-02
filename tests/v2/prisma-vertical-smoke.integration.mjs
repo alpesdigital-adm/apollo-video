@@ -47,11 +47,23 @@ function monotonicClock() {
   return () => new Date((now += 10))
 }
 
-async function waitForWork(run, deadline, label) {
+async function waitForWork(run, deadline, label, signal) {
   while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error(`${label} polling was canceled`)
     const result = await run()
     if (result) return result
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await new Promise((resolve, reject) => {
+      const canceled = () => {
+        clearTimeout(timer)
+        reject(new Error(`${label} polling was canceled`))
+      }
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', canceled)
+        resolve()
+      }, 25)
+      timer.unref?.()
+      signal?.addEventListener('abort', canceled, { once: true })
+    })
   }
   throw new Error(`${label} was not claimed before its deadline`)
 }
@@ -169,12 +181,21 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       },
       clock,
     })
+    const ingestPolling = new AbortController()
     const ingestOutcomePromise = waitForWork(
       () => ingest(`vertical-ingest-${randomUUID()}`),
       Date.now() + 60_000,
       'media ingest operation',
+      ingestPolling.signal,
     )
-    const [seed, ingestOutcome] = await Promise.all([seedPromise, ingestOutcomePromise])
+    let seed
+    let ingestOutcome
+    try {
+      [seed, ingestOutcome] = await Promise.all([seedPromise, ingestOutcomePromise])
+    } finally {
+      ingestPolling.abort()
+      await Promise.allSettled([seedPromise, ingestOutcomePromise])
+    }
     assert.equal(ingestOutcome.status, 'succeeded')
     assert.equal(seed.ingestOperation.status, 'succeeded')
 

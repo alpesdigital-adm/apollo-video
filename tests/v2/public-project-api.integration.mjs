@@ -7,6 +7,7 @@ import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 
 const require = createRequire(import.meta.url)
@@ -446,7 +447,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         manifestId: sourceColorProbe.manifestId,
         schemaVersion: sourceColorProbe.schemaVersion,
         state: sourceColorProbe.detection.state,
-        metadataJson: JSON.stringify(sourceColorProbe.detection.metadata),
+        metadataJson: stableSerialize(sourceColorProbe.detection.metadata),
         pixelFormat: sourceColorProbe.detection.pixelFormat,
         hdrMode: sourceColorProbe.detection.hdrMode,
         reasonsJson: '[]',
@@ -4040,7 +4041,11 @@ test('authenticated public API manages projects, clients and artifact inspection
     )
     const pipelineResponse = await createPipeline()
     const pipeline = await pipelineResponse.json()
-    assert.equal(pipelineResponse.status, 201)
+    assert.equal(
+      pipelineResponse.status,
+      201,
+      `color pipeline response: ${JSON.stringify(pipeline)}\nserver: ${serverDiagnostics}`,
+    )
     assert.equal(pipeline.data.replayed, false)
     assert.equal(pipeline.data.compilation.colorProbeHash, sourceColorProbe.probeHash)
     assert.deepEqual(pipeline.data.compilation.pipeline.sourceMetadata, pipelineSource)
