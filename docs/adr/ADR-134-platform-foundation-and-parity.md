@@ -67,6 +67,20 @@ integration and supervised cross-process runtime passed in hosted run
 `30761608326`. Provider/renderer child spans, complete metrics, dashboards and
 acceptance remain open under T-NFR-003.
 
+Provider and renderer boundaries use a second closed envelope,
+`public-operation-span-telemetry/v1`. The production composition root shares
+one sink between lifecycle persistence and worker execution, so normalization,
+transcription, long-form stages, proxy/final/authorized rendering and source
+cleanup inherit the durable trace instead of minting an unrelated identifier.
+Only a bounded span name/kind, deterministic span ID, job/workspace/project,
+attempt, terminal result and measured duration are emitted; provider payloads,
+paths, transcripts, URLs, artifact identities and exception text are absent.
+Hosted run `30762327139` proves the real PostgreSQL+FFmpeg vertical chain emits
+started/succeeded pairs for normalization, transcription and proxy rendering
+under stable trace/job identities, while unit tests cover failure and collector
+isolation. Wait/byte/token/cost metrics, dashboards, alerts and operational
+acceptance remain open.
+
 Canonical persisted documents must be compared with canonical serialization,
 never JavaScript insertion order. Hosted API integration exposed this at the
 project LUT impact boundary after the command-type constraint was corrected:
