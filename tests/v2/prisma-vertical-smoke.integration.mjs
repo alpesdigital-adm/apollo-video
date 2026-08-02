@@ -92,6 +92,7 @@ async function createFixture(path) {
     '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=6',
     '-map', '0:v:0', '-map', '1:a:0',
     '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+    '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-color_range', 'tv',
     '-c:a', 'aac', '-b:a', '128k', '-shortest', path,
   ], { windowsHide: true, timeout: 120_000 })
 }
