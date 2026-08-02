@@ -1150,7 +1150,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       ],
     )
 
-    const lutCube = 'TITLE "Coração 🎞️"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n0 0 1\n0 1 0\n0 1 1\n1 0 0\n1 0 1\n1 1 0\n1 1 1\n'
+    const lutCube = 'TITLE "Apollo Cinema"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n0 0 1\n0 1 0\n0 1 1\n1 0 0\n1 0 1\n1 1 0\n1 1 1\n'
     const lutBody = {
       lutId: 'public-api-lut-cinema', name: 'Coração 🎞️', owner: 'Apollo E2E',
       license: { policy: 'owned', name: 'Workspace E2E' }, tags: ['cinema', 'coração'],
@@ -1162,7 +1162,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     const importedLutResponse = await importLut()
     const importedLut = await importedLutResponse.json()
-    assert.equal(importedLutResponse.status, 201)
+    assert.equal(importedLutResponse.status, 201, JSON.stringify(importedLut))
     assert.equal(importedLut.data.lut.currentVersion.name, 'Coração 🎞️')
     assert.equal(importedLut.data.lut.currentVersion.cube.size, 2)
     assert.equal(importedLut.data.replayed, false)
