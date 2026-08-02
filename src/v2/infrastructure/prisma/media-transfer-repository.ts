@@ -6,7 +6,11 @@ import { DomainError } from '../../domain/errors.ts'
 import { createMediaUpload, createMediaUploadPart, type MediaUploadKind, type MediaUploadStatus } from '../../domain/media-transfer.ts'
 
 export class PrismaMediaTransferRepository implements MediaTransferRepository {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) {
+    this.client = client
+  }
 
   async createOrReplayUpload(record: Parameters<MediaTransferRepository['createOrReplayUpload']>[0]) {
     return this.client.$transaction(async (tx) => {
@@ -19,15 +23,7 @@ export class PrismaMediaTransferRepository implements MediaTransferRepository {
         if (existing.requestFingerprint !== record.requestFingerprint) {
           throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency-Key was already used with a different upload intent')
         }
-        return { upload: createMediaUpload({
-          id: existing.id, workspaceId: existing.workspaceId, clientId: existing.clientId,
-          ...(existing.projectId ? { projectId: existing.projectId } : {}),
-          ...(existing.fileName ? { fileName: existing.fileName } : {}),
-          rightsConfirmed: existing.rightsConfirmed,
-          kind: existing.kind as MediaUploadKind, byteSize: existing.byteSize.toString(), mimeType: existing.mimeType,
-          expectedSha256: existing.expectedSha256, status: existing.status as MediaUploadStatus,
-          expiresAt: existing.expiresAt.toISOString(), createdAt: existing.createdAt.toISOString(),
-        }), replayed: true }
+        return { upload: this.present(existing), replayed: true }
       }
       if (record.upload.projectId) {
         const project = await tx.v2Project.findFirst({

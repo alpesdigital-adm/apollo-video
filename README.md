@@ -69,6 +69,24 @@ npm run db:v2:bootstrap -- \
 npm run dev
 ```
 
+Com o worker de ingestão supervisionado e `APOLLO_V2_ARTIFACT_ROOT` apontando
+para o mesmo volume persistente, o seed de projeto aceita somente um master real.
+Ele cria/reutiliza o Project pela aplicação, persiste o OutputSpec no snapshot
+imutável, atravessa upload verificado e aguarda a operação durável concluir. O
+comando falha se source master e editing proxy não forem persistidos; não existe
+inserção sintética de Source pronto.
+
+```bash
+npm run db:v2:seed:project-source -- \
+  --seed-id welcome-v1 \
+  --workspace-id workspace-local \
+  --client-id apollo-ui-local \
+  --project-name "Boas-vindas" \
+  --source-file /seed-input/master.mp4 \
+  --source-mime video/mp4 \
+  --briefing "Briefing autorizado pelo owner"
+```
+
 O bootstrap imprime uma credencial Bearer uma única vez. `APOLLO_UI_API_CLIENT_ID` deve apontar para esse client. Configure `APOLLO_UI_PASSWORD_HASH` com um hash `scrypt` gerado por `createUiPasswordHash()` e nunca grave senha ou token no repositório.
 
 Interface: `http://localhost:3333`. OpenAPI: `GET /v1/openapi.json`. Catálogo externo: `GET /v1/capabilities` e `GET /v1/tools`.

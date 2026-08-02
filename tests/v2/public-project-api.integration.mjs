@@ -3204,7 +3204,11 @@ test('authenticated public API manages projects, clients and artifact inspection
     )
     const operationRead = await operationReadResponse.json()
     assert.equal(operationReadResponse.status, 200)
-    assert.deepEqual(operationRead.data.operation, renderOperation.data.operation)
+    const { visibleState: operationVisibleState, ...operationV1Fields } = operationRead.data.operation
+    assert.deepEqual(operationV1Fields, renderOperation.data.operation)
+    assert.equal(operationVisibleState.schemaVersion, 'visible-state/v1')
+    assert.equal(operationVisibleState.label, 'queued')
+    assert.deepEqual(operationVisibleState.availableActions, ['view-progress', 'cancel'])
     const childCancelResponse = await fetch(
       `${baseUrl}/v1/operations/${renderOperation.data.operation.id}/cancel`,
       { method: 'POST', headers: { authorization: childAuthorization } },

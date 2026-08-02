@@ -69,6 +69,7 @@
     "fixtures:contamination": "node scripts/generate-contamination-goldens.mjs",
     "db:v2:migrate:deploy": "npx prisma migrate deploy --schema prisma/v2/schema.prisma",
     "db:v2:bootstrap": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env scripts/bootstrap-v2-workspace.mjs",
+    "db:v2:seed:project-source": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env scripts/seed-v2-project-source.mjs",
     "postinstall": "node scripts/generate-prisma-clients.mjs"
   },
   "dependencies": {

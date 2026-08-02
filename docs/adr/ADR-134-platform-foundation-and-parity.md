@@ -18,6 +18,15 @@ Every long-running process has PID 1 supervision, restart policy, graceful stop
 and shared persistent artifact/work volumes. Static validation proves the
 topology contract; it is not evidence that Docker boot or lease recovery ran.
 
+Foundation data is never manufactured as a ready Source. Workspace/client
+bootstrap is followed by an idempotent project-source seed that calls the same
+project creation and media upload application services as the public API. The
+OutputSpec lives in the immutable brief snapshot. A real, rights-confirmed
+master must pass byte count and SHA-256 verification, then a durable ingest
+operation must finish and persist both source-master and editing-proxy
+relationships before the seed reports success. A queued operation alone is not
+seed completion.
+
 OIDC-verified identities become signed, expiring workspace sessions; production never trusts an unverified local identity. Workspace switching invalidates caches and subscriptions. Architecture imports are enforced by a CI boundary check. UI actions, REST endpoints and tests map through capability IDs, while sensitive internals have explicit deny-only reasons.
 
 Public operations generalize across ingest, Director, provider, sync, batch, render and export. Public conventions, deprecation/sunset headers, client kill switches and transition outbox events are stable application contracts.

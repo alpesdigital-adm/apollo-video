@@ -6,6 +6,8 @@ import { issueMediaUploadSessionService } from '../../src/v2/application/issue-m
 import { completeMediaUploadService, inspectMediaUploadService, recordMediaUploadPartService } from '../../src/v2/application/manage-media-upload.ts'
 import { HmacMediaUploadSessionSigner } from '../../src/v2/infrastructure/security/media-upload-session-signer.ts'
 import { HttpMediaUploadVerifier } from '../../src/v2/infrastructure/media-upload-verifier.ts'
+import { PrismaMediaTransferRepository } from '../../src/v2/infrastructure/prisma/media-transfer-repository.ts'
+import { readSeedArguments } from '../../scripts/seed-v2-project-source.mjs'
 
 function repository() {
   const records = new Map()
@@ -146,4 +148,72 @@ test('HTTP verifier requires a safe fixed origin and rejects oversized metadata'
     fetchImplementation: async () => new Response('{}', { status: 200, headers: { 'content-length': '65537' } }),
   })
   await assert.rejects(() => verifier.verify({ upload: multipartUpload, parts: [] }), /too large/)
+})
+
+test('project source seed arguments are explicit, bounded and deterministic', () => {
+  const parsed = readSeedArguments([
+    '--seed-id', 'welcome-v1',
+    '--workspace-id', 'workspace-seed-1',
+    '--client-id', 'client-seed-1',
+    '--project-name', 'Projeto de boas-vindas',
+    '--source-file', './master.mp4',
+  ])
+  assert.equal(parsed.seedId, 'welcome-v1')
+  assert.equal(parsed.objective, 'discovery')
+  assert.equal(parsed.format, '9:16')
+  assert.equal(parsed.locale, 'pt-BR')
+  assert.equal(parsed.sourceMime, 'video/mp4')
+  assert.match(parsed.sourceFile, /master\.mp4$/)
+  assert.throws(() => readSeedArguments(['--seed-id', 'x']), /3-80/)
+  assert.throws(() => readSeedArguments([
+    '--seed-id', 'welcome-v1', '--seed-id', 'again',
+  ]), /more than once/)
+  assert.throws(() => readSeedArguments([
+    '--seed-id', 'welcome-v1', '--workspace-id', 'workspace-seed-1',
+    '--client-id', 'client-seed-1', '--project-name', 'Projeto',
+    '--source-file', './master.mp4', '--unsafe-bypass', 'true',
+  ]), /not a supported seed argument/)
+})
+
+test('Prisma upload replay preserves verified source metadata needed by durable ingest', async () => {
+  const existing = {
+    id: '123e4567-e89b-42d3-a456-426614174199',
+    workspaceId: 'workspace-seed-1',
+    clientId: 'client-seed-1',
+    projectId: 'project-seed-1',
+    fileName: 'master.mp4',
+    rightsConfirmed: true,
+    kind: 'video',
+    byteSize: 42n,
+    mimeType: 'video/mp4',
+    expectedSha256: 'a'.repeat(64),
+    actualSha256: 'a'.repeat(64),
+    actualByteSize: 42n,
+    status: 'verified',
+    idempotencyKey: 'seed-upload:welcome-v1',
+    requestFingerprint: 'fingerprint-1',
+    expiresAt: new Date('2026-08-02T18:00:00.000Z'),
+    createdAt: new Date('2026-08-02T17:00:00.000Z'),
+    sessionMode: 'single',
+    partSize: null,
+    sessionExpiresAt: new Date('2026-08-02T17:10:00.000Z'),
+    verifiedAt: new Date('2026-08-02T17:01:00.000Z'),
+  }
+  const repository = new PrismaMediaTransferRepository({
+    async $transaction(callback) {
+      return callback({ v2MediaUpload: { async findUnique() { return existing } } })
+    },
+  })
+  const replay = await repository.createOrReplayUpload({
+    upload: multipartUpload,
+    idempotencyKey: existing.idempotencyKey,
+    requestFingerprint: existing.requestFingerprint,
+  })
+  assert.equal(replay.replayed, true)
+  assert.equal(replay.upload.projectId, existing.projectId)
+  assert.equal(replay.upload.fileName, existing.fileName)
+  assert.equal(replay.upload.rightsConfirmed, true)
+  assert.equal(replay.upload.status, 'verified')
+  assert.equal(replay.upload.actualSha256, existing.actualSha256)
+  assert.equal(replay.upload.sessionMode, 'single')
 })
