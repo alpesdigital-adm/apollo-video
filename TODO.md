@@ -508,11 +508,11 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 ### F0.030 — Infraestrutura e smoke vertical
 
-- [ ] Provisionar Postgres dedicado em desenvolvimento isolado. Evidência: Postgres 16 com volume próprio, porta restrita ao loopback e migration v2 aplicada.
-- [ ] Provisionar object storage em desenvolvimento isolado. Evidência: T-F0.030 e ADR-134.
+- [ ] Provisionar Postgres dedicado em desenvolvimento isolado. Parcial F0.030: compose fixa PostgreSQL 16/pgvector, volume próprio, healthcheck, segredos obrigatórios, `no-new-privileges`, porta `127.0.0.1:55432` e URL Prisma com pool/timeouts limitados; `infra:validate` protege o contrato local e roda no CI. Docker não existe neste host, portanto container, migration v2 limpa e bootstrap não foram executados. Evidência: T-F0-030 e ADR-134.
+- [ ] Provisionar object storage em desenvolvimento isolado. Parcial F0.030: MinIO pinado publica API/console somente em loopback, exige segredos, persiste em volume próprio e possui init convergente que cria o bucket declarado e habilita versionamento antes de expor o ambiente como pronto. O gate estático roda localmente/CI; container, upload versionado e leitura S3 real não foram executados neste host. Evidência: T-F0-030 e ADR-134.
 - [ ] Provisionar workflow durável em desenvolvimento isolado. Evidência: T-F0.030 e ADR-134.
 - [ ] Criar seeds mínimos para workspace, projeto, source e OutputSpec. Evidência: T-F0.030 e ADR-134.
-- [ ] Configurar audit, typecheck, unit, migration check, contract gate, build e integrações Postgres/API no CI. Evidência: `.github/workflows/ci.yml`.
+- [ ] Configurar audit, typecheck, unit, migration check, contract gate, build e integrações Postgres/API no CI. Parcial F0.030: o workflow já contém esses gates e agora também bloqueia drift dos contratos de infraestrutura local via `infra:validate`; faltam ampliar as integrações descobertas, golden determinístico e confirmação hospedada deste commit. Evidência: `.github/workflows/ci.yml`.
 - [ ] Configurar lint no CI após selecionar regras e corrigir o baseline da v1. Evidência: T-F0.030 e ADR-134.
 - [ ] Configurar golden tests no CI após existir fixture/render determinístico. Parcial F0-023: smoke render real e sem golden hash foi incluído no CI; faltam fixture persistida e tolerâncias visual/áudio cross-platform. Evidência: T-F0.030 e ADR-134.
 - [ ] Configurar E2E no CI após existir jornada vertical F0 executável. Evidência: T-F0.030 e ADR-134.

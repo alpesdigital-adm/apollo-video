@@ -30,6 +30,21 @@ As regras vinculantes e a definição estrita de pronto estão em `AGENTS.md`. O
 
 Pré-requisitos: Node.js 22, PostgreSQL 16 e as variáveis de `.env.local.example`.
 
+Para o ambiente descartável isolado, preencha os segredos locais e suba cada
+dependência explicitamente. Os dois serviços publicam somente em loopback; o
+MinIO cria `APOLLO_V2_S3_BUCKET` e habilita versionamento antes de concluir.
+
+```bash
+npm run infra:validate
+npm run infra:postgres:up
+npm run infra:object-storage:up
+```
+
+O Postgres fica em `127.0.0.1:55432`, e o endpoint S3 em
+`http://127.0.0.1:59000`. Esses comandos não executam migration nem bootstrap:
+faça os passos abaixo somente depois que ambos os health checks estiverem
+verdes. Não use esses volumes para produção ou E2E remoto.
+
 ```bash
 npm ci
 npm ci --prefix remotion
@@ -65,6 +80,7 @@ O worker de ingestão verifica o upload, promove o master, gera proxy e áudio, 
 npm run typecheck
 npm run lint
 npm run domain-language:validate
+npm run infra:validate
 npm test
 npm run api:v1:validate
 npm run db:v2:validate

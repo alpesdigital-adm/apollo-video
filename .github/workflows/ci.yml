@@ -76,6 +76,9 @@ jobs:
       - name: Verify canonical domain language
         run: npm run domain-language:validate
 
+      - name: Verify isolated local infrastructure contracts
+        run: npm run infra:validate
+
       - name: Run unit and contract tests
         run: npm test
 

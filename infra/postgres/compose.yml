@@ -20,6 +20,10 @@ services:
       start_period: 10s
     security_opt:
       - no-new-privileges:true
+    stop_grace_period: 30s
+    shm_size: 256mb
+    tmpfs:
+      - /tmp:size=64m,mode=1777
 
 volumes:
   apollo-video-postgres-data:
