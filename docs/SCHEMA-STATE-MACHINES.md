@@ -29,3 +29,10 @@ The media artifact aggregate has a separate closed lifecycle:
 `available|quarantined|deleted`. It never inherits `stale-output` from a
 version edge and never invents progress. The Prisma adapter and v3 public
 presenter share the domain allowlist and reject unknown persisted values.
+
+Project has a separate closed 14-phase enum and a canonical visible projection.
+The public create v3 and list v2 responses expose it while retaining their older
+schemas. Technical status and visible label must match; active phases are
+indeterminate, review phases request review, and only `completed` reports 100%.
+This does not yet define the canonical transition matrix: mutations remain
+distributed and workspace responses still require the same projection.

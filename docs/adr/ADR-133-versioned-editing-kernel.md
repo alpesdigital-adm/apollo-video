@@ -44,6 +44,13 @@ open, inspect or historical actions respectively. Both hydration and
 presentation fail closed for an unknown lifecycle value; `stale-output` is not
 an artifact status.
 
+Project presentation uses the same boundary over its closed 14-phase enum.
+Create v3 and list v2 bind technical status to an identical visible label and
+an exact tone/progress/action/terminality tuple; only completed may report 100%.
+Unknown phases fail closed and older response schemas remain published. This is
+a presentation slice, not evidence of a complete lifecycle: workspace responses
+and the still-dispersed persisted transition writers remain to be consolidated.
+
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.
 The record is content-addressed, frame-first and format-scoped; completed

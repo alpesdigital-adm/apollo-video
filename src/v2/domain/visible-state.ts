@@ -15,6 +15,7 @@ import {
   type MediaArtifactLifecycleStatus,
 } from './media-artifact.ts'
 import { assertDomain } from './errors.ts'
+import { PROJECT_STATUSES, type ProjectStatus } from './project.ts'
 
 export const VISIBLE_STATE_LABELS = [
   'queued',
@@ -32,6 +33,17 @@ export const VISIBLE_STATE_LABELS = [
   'available',
   'quarantined',
   'deleted',
+  'draft',
+  'ingesting',
+  'perceiving',
+  'planning',
+  'generating',
+  'reviewing-assets',
+  'rendering-proxy',
+  'reviewing-proxy',
+  'revising',
+  'rendering-final',
+  'archived',
 ] as const
 
 export const VISIBLE_STATE_ACTIONS = [
@@ -253,6 +265,62 @@ export function presentMediaArtifactVisibleState(
     case 'deleted':
       return freezeVisibleState({
         label: 'deleted', tone: 'neutral', progress: { mode: 'none' },
+        primaryAction: 'inspect-history', availableActions: ['inspect-history'], terminal: true,
+      })
+  }
+}
+
+export function presentProjectVisibleState(
+  status: ProjectStatus,
+): Readonly<VisibleState> {
+  assertDomain(
+    PROJECT_STATUSES.includes(status),
+    'INVALID_PROJECT',
+    'Project status is invalid',
+    { status },
+  )
+  switch (status) {
+    case 'draft':
+      return freezeVisibleState({
+        label: 'draft', tone: 'neutral',
+        progress: { mode: 'not-started', percent: 0 },
+        primaryAction: 'open-result', availableActions: ['open-result'], terminal: false,
+      })
+    case 'ingesting':
+    case 'perceiving':
+    case 'planning':
+    case 'generating':
+    case 'rendering-proxy':
+    case 'revising':
+    case 'rendering-final':
+      return freezeVisibleState({
+        label: status, tone: 'info', progress: { mode: 'indeterminate' },
+        primaryAction: 'view-progress', availableActions: ['view-progress'], terminal: false,
+      })
+    case 'reviewing-assets':
+    case 'reviewing-proxy':
+      return freezeVisibleState({
+        label: status, tone: 'warning', progress: { mode: 'none' },
+        primaryAction: 'review-output', availableActions: ['review-output'], terminal: false,
+      })
+    case 'completed':
+      return freezeVisibleState({
+        label: 'completed', tone: 'success', progress: { mode: 'complete', percent: 100 },
+        primaryAction: 'open-result', availableActions: ['open-result'], terminal: true,
+      })
+    case 'failed':
+      return freezeVisibleState({
+        label: 'failed', tone: 'danger', progress: { mode: 'none' },
+        primaryAction: 'inspect-error', availableActions: ['inspect-error'], terminal: true,
+      })
+    case 'canceled':
+      return freezeVisibleState({
+        label: 'canceled', tone: 'neutral', progress: { mode: 'none' },
+        primaryAction: 'inspect-history', availableActions: ['inspect-history'], terminal: true,
+      })
+    case 'archived':
+      return freezeVisibleState({
+        label: 'archived', tone: 'neutral', progress: { mode: 'none' },
         primaryAction: 'inspect-history', availableActions: ['inspect-history'], terminal: true,
       })
   }

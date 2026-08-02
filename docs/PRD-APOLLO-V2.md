@@ -1774,6 +1774,14 @@ Falha de um item não transforma itens concluídos em falha nem apresenta o lote
 como concluído: a projeção distingue `partially-failed`, preserva resultados
 válidos e oferece retry apenas para as falhas elegíveis.
 
+As 14 fases persistidas de Project também formam um enum fechado. Sua projeção
+mantém o mesmo label da fase técnica, usa progresso indeterminado durante
+processamento, ação de revisão nas duas fases de review e 100% somente em
+`completed`; `failed`, `canceled` e `archived` são terminais sem inventar
+percentual. Create/list expõem esse contrato de forma aditiva. Workspace,
+matriz canônica das transições persistidas, E2E PostgreSQL, deploy e aceite
+continuam pendentes.
+
 ---
 
 ## 7.24 API externa e automação

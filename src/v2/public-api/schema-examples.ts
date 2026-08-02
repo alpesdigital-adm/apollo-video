@@ -7334,6 +7334,65 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-created/v3': [
+      {
+        data: {
+          project: {
+            id: projectId,
+            workspaceId,
+            name: 'AnÃºncio de descoberta',
+            status: 'draft',
+            objective: 'discovery',
+            format: '9:16',
+            locale: 'pt-BR',
+            ownerId: clientId,
+            currentVersionId: 'project-version-example-1',
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1',
+              label: 'draft',
+              tone: 'neutral',
+              progress: { mode: 'not-started', percent: 0 },
+              primaryAction: 'open-result',
+              availableActions: ['open-result'],
+              terminal: false,
+            },
+          },
+          version: {
+            id: 'project-version-example-1',
+            sequence: 1,
+            baseHash: 'a'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-1',
+              editPlan: 'project-snapshot-edit-plan-1',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-list/v4': [
+      { data: { projects: [] }, meta: { apiVersion: 'v1' } },
+      {
+        data: {
+          projects: [{
+            id: projectId, workspaceId, name: 'Anúncio de descoberta', status: 'draft',
+            currentVersionId: 'project-version-example-1', objective: 'discovery', format: '9:16',
+            locale: 'pt-BR', ownerId: 'client-example-1', createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'draft', tone: 'neutral',
+              progress: { mode: 'not-started', percent: 0 },
+              primaryAction: 'open-result', availableActions: ['open-result'], terminal: false,
+            },
+          }],
+          nextCursor: Buffer.from('project-search-page-example').toString('base64url'),
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/production-batch-read/v1': [
       {
         data: { batch: productionBatchExample },

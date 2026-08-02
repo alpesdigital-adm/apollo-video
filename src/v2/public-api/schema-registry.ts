@@ -6852,6 +6852,129 @@ const mediaArtifactPublicSchemaV3 = {
   ],
 }
 
+const projectStatusValues = [
+  'draft', 'ingesting', 'perceiving', 'planning', 'generating',
+  'reviewing-assets', 'rendering-proxy', 'reviewing-proxy', 'revising',
+  'rendering-final', 'completed', 'failed', 'canceled', 'archived',
+] as const
+
+const projectVisibleStateSchema = {
+  ...visibleStateSchema,
+  properties: {
+    ...visibleStateSchema.properties,
+    label: { enum: projectStatusValues },
+    primaryAction: {
+      enum: ['open-result', 'view-progress', 'review-output', 'inspect-error', 'inspect-history'],
+    },
+    availableActions: {
+      type: 'array', minItems: 1, maxItems: 1, uniqueItems: true,
+      items: {
+        enum: ['open-result', 'view-progress', 'review-output', 'inspect-error', 'inspect-history'],
+      },
+    },
+  },
+  oneOf: [
+    {
+      type: 'object',
+      properties: {
+        label: { const: 'draft' }, tone: { const: 'neutral' },
+        progress: {
+          type: 'object',
+          properties: { mode: { const: 'not-started' }, percent: { const: 0 } },
+          required: ['mode', 'percent'],
+        },
+        primaryAction: { const: 'open-result' },
+        availableActions: { const: ['open-result'] }, terminal: { const: false },
+      },
+      required: ['label', 'tone', 'progress', 'primaryAction', 'availableActions', 'terminal'],
+    },
+    {
+      type: 'object',
+      properties: {
+        label: {
+          enum: [
+            'ingesting', 'perceiving', 'planning', 'generating',
+            'rendering-proxy', 'revising', 'rendering-final',
+          ],
+        },
+        tone: { const: 'info' },
+        progress: {
+          type: 'object', properties: { mode: { const: 'indeterminate' } }, required: ['mode'],
+        },
+        primaryAction: { const: 'view-progress' },
+        availableActions: { const: ['view-progress'] }, terminal: { const: false },
+      },
+      required: ['label', 'tone', 'progress', 'primaryAction', 'availableActions', 'terminal'],
+    },
+    {
+      type: 'object',
+      properties: {
+        label: { enum: ['reviewing-assets', 'reviewing-proxy'] }, tone: { const: 'warning' },
+        progress: { type: 'object', properties: { mode: { const: 'none' } }, required: ['mode'] },
+        primaryAction: { const: 'review-output' },
+        availableActions: { const: ['review-output'] }, terminal: { const: false },
+      },
+      required: ['label', 'tone', 'progress', 'primaryAction', 'availableActions', 'terminal'],
+    },
+    {
+      type: 'object',
+      properties: {
+        label: { const: 'completed' }, tone: { const: 'success' },
+        progress: {
+          type: 'object',
+          properties: { mode: { const: 'complete' }, percent: { const: 100 } },
+          required: ['mode', 'percent'],
+        },
+        primaryAction: { const: 'open-result' },
+        availableActions: { const: ['open-result'] }, terminal: { const: true },
+      },
+      required: ['label', 'tone', 'progress', 'primaryAction', 'availableActions', 'terminal'],
+    },
+    {
+      type: 'object',
+      properties: {
+        label: { const: 'failed' }, tone: { const: 'danger' },
+        progress: { type: 'object', properties: { mode: { const: 'none' } }, required: ['mode'] },
+        primaryAction: { const: 'inspect-error' },
+        availableActions: { const: ['inspect-error'] }, terminal: { const: true },
+      },
+      required: ['label', 'tone', 'progress', 'primaryAction', 'availableActions', 'terminal'],
+    },
+    {
+      type: 'object',
+      properties: {
+        label: { enum: ['canceled', 'archived'] }, tone: { const: 'neutral' },
+        progress: { type: 'object', properties: { mode: { const: 'none' } }, required: ['mode'] },
+        primaryAction: { const: 'inspect-history' },
+        availableActions: { const: ['inspect-history'] }, terminal: { const: true },
+      },
+      required: ['label', 'tone', 'progress', 'primaryAction', 'availableActions', 'terminal'],
+    },
+  ],
+}
+
+const searchableProjectSchemaV2 = {
+  ...searchableProjectSchema,
+  required: [...searchableProjectSchema.required, 'visibleState'],
+  properties: {
+    ...searchableProjectSchema.properties,
+    status: { enum: projectStatusValues },
+    visibleState: projectVisibleStateSchema,
+  },
+  allOf: projectStatusValues.map((status) => ({
+    if: { type: 'object', properties: { status: { const: status } } },
+    then: {
+      type: 'object',
+      properties: {
+        visibleState: {
+          type: 'object',
+          properties: { label: { const: status } },
+        },
+      },
+    },
+  })),
+}
+
 const publicOperationSchema = {
   type: 'object',
   additionalProperties: false,
@@ -12659,6 +12782,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('project-list', 4, 'Filtered paginated project list with explicit project visible state',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['projects'],
+      properties: {
+        projects: { type: 'array', items: searchableProjectSchemaV2 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+      },
+    }),
+  ),
   defineSchema('public-operation-list', 7, 'Public operation list with honest actionable visible-state projections',
     successSchema({
       type: 'object',
@@ -16082,6 +16216,34 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['batch', 'replayed'],
       properties: {
         batch: productionBatchSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-created', 3, 'Project creation response with direction snapshot and explicit visible state',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['project', 'version', 'replayed'],
+      properties: {
+        project: searchableProjectSchemaV2,
+        version: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'sequence', 'baseHash', 'snapshotRefs', 'createdAt'],
+          properties: {
+            id: idSchema,
+            sequence: { type: 'integer', minimum: 1 },
+            baseHash: sha256Schema,
+            snapshotRefs: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['brief', 'editPlan', 'policies'],
+              properties: { brief: idSchema, editPlan: idSchema, policies: idSchema },
+            },
+            createdAt: dateTimeSchema,
+          },
+        },
         replayed: { type: 'boolean' },
       },
     }),

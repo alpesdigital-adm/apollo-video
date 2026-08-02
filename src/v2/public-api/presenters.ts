@@ -14,7 +14,9 @@ import { presentPublicOperationVisibleState } from '../domain/visible-state.ts'
 import {
   presentCommandArtifactInvalidationVisibleState,
   presentMediaArtifactVisibleState,
+  presentProjectVisibleState,
 } from '../domain/visible-state.ts'
+import type { Project } from '../domain/project.ts'
 import type { ManualEditInvalidationView } from '../application/ports/manual-edit-repository.ts'
 import type {
   WebhookDeliveryDiagnosticRecord,
@@ -147,6 +149,28 @@ export function presentMediaArtifactV3(artifact: MediaArtifactRecord) {
       ...presented.artifact,
       visibleState: presentMediaArtifactVisibleState(artifact.status),
     }),
+  })
+}
+
+export function presentProjectV2(
+  project: Pick<
+    Project,
+    | 'id' | 'workspaceId' | 'name' | 'status' | 'objective' | 'format'
+    | 'locale' | 'ownerId' | 'currentVersionId' | 'createdAt'
+  >,
+) {
+  return Object.freeze({
+    id: project.id,
+    workspaceId: project.workspaceId,
+    name: project.name,
+    status: project.status,
+    objective: project.objective,
+    format: project.format,
+    locale: project.locale,
+    ownerId: project.ownerId,
+    currentVersionId: project.currentVersionId,
+    createdAt: project.createdAt,
+    visibleState: presentProjectVisibleState(project.status),
   })
 }
 

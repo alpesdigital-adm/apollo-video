@@ -17,35 +17,9 @@ import {
   resolveRequestId,
   respondPublicError,
 } from '@/v2/public-api/errors'
-import { presentSuccess } from '@/v2/public-api/presenters'
+import { presentProjectV2, presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
-
-function presentProject(project: {
-  id: string
-  workspaceId: string
-  name: string
-  status: string
-  objective?: string
-  format?: string
-  locale?: string
-  ownerId?: string
-  currentVersionId?: string
-  createdAt: string
-}) {
-  return {
-    id: project.id,
-    workspaceId: project.workspaceId,
-    name: project.name,
-    status: project.status,
-    objective: project.objective,
-    format: project.format,
-    locale: project.locale,
-    ownerId: project.ownerId,
-    currentVersionId: project.currentVersionId,
-    createdAt: project.createdAt,
-  }
-}
 
 export async function GET(request: NextRequest) {
   const requestId = resolveRequestId(request)
@@ -74,7 +48,7 @@ export async function GET(request: NextRequest) {
     })
     return NextResponse.json(
       presentSuccess({
-        projects: result.projects.map(presentProject),
+        projects: result.projects.map(presentProjectV2),
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
       }),
       { headers: publicApiHeaders(requestId) },
@@ -142,7 +116,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       presentSuccess({
-        project: presentProject(result.project),
+        project: presentProjectV2(result.project),
         version: {
           id: result.version.id,
           sequence: result.version.sequence,
