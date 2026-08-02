@@ -172,3 +172,50 @@ test('telemetry failures never change durable repository results', async () => {
     'operation.telemetry-failed',
   ])
 })
+
+test('lost leases evict cached job context before any later lifecycle event', async () => {
+  let operation = queuedOperation()
+  const events = []
+  const decorated = new TelemetryPublicOperationRepository({
+    async claimNext(input) {
+      operation = startPublicOperationAttempt(operation, input.now)
+      return {
+        operation,
+        context,
+        lease: {
+          owner: input.leaseOwner,
+          attempt: operation.attempt,
+          heartbeatAt: input.now,
+          expiresAt: input.leaseUntil,
+        },
+      }
+    },
+    async heartbeat() { return false },
+    async advancePhase() { return true },
+  }, {
+    emit(event) { events.push(event) },
+  })
+  const lease = {
+    operationId: operation.id,
+    leaseOwner: 'worker-lost-lease',
+    attempt: 1,
+  }
+
+  await decorated.claimNext({
+    leaseOwner: lease.leaseOwner,
+    now: '2026-08-02T17:00:01.000Z',
+    leaseUntil: '2026-08-02T17:01:01.000Z',
+  })
+  assert.equal(await decorated.heartbeat({
+    ...lease,
+    now: '2026-08-02T17:00:02.000Z',
+    leaseUntil: '2026-08-02T17:01:02.000Z',
+  }), false)
+  assert.equal(await decorated.advancePhase({
+    ...lease,
+    now: '2026-08-02T17:00:03.000Z',
+    phase: 'probing',
+  }), true)
+
+  assert.deepEqual(events.map((event) => event.event), ['operation.claimed'])
+})

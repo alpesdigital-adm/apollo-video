@@ -101,6 +101,7 @@ export class TelemetryPublicOperationRepository implements PublicOperationReposi
 
   async heartbeat(input: PublicOperationLeaseCommand & { leaseUntil: string }) {
     const renewed = await this.repository.heartbeat(input)
+    if (!renewed) this.claims.delete(input.operationId)
     const record = renewed ? this.claims.get(input.operationId) : undefined
     if (record) this.emit('operation.heartbeat', record, input.now)
     return renewed
@@ -112,6 +113,7 @@ export class TelemetryPublicOperationRepository implements PublicOperationReposi
     },
   ) {
     const advanced = await this.repository.advancePhase(input)
+    if (!advanced) this.claims.delete(input.operationId)
     const claimed = advanced ? this.claims.get(input.operationId) : undefined
     if (claimed) {
       const record = {
