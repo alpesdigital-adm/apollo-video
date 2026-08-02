@@ -45,6 +45,16 @@ O Postgres fica em `127.0.0.1:55432`, e o endpoint S3 em
 faça os passos abaixo somente depois que ambos os health checks estiverem
 verdes. Não use esses volumes para produção ou E2E remoto.
 
+Para subir o runtime novo completo de forma supervisionada, use o Compose
+combinado. Ele espera Postgres e o bucket versionado, aplica as migrations e só
+então inicia API, ingest, render, webhook e long-form workers. `down` preserva
+os volumes; não use `-v` sem revisar os dados locais que serão removidos.
+
+```bash
+npm run infra:local:up
+npm run infra:local:down
+```
+
 ```bash
 npm ci
 npm ci --prefix remotion
@@ -64,6 +74,10 @@ O bootstrap imprime uma credencial Bearer uma única vez. `APOLLO_UI_API_CLIENT_
 Interface: `http://localhost:3333`. OpenAPI: `GET /v1/openapi.json`. Catálogo externo: `GET /v1/capabilities` e `GET /v1/tools`.
 
 ## Workers
+
+Os comandos abaixo são úteis para desenvolvimento isolado de um worker. Para a
+topologia completa, prefira `infra:local:up`, que supervisiona os processos e
+compartilha os mesmos volumes persistentes.
 
 ```bash
 npm run worker:v2:ingest

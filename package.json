@@ -16,6 +16,8 @@
     "infra:validate": "node scripts/verify-local-infrastructure.mjs",
     "infra:postgres:up": "docker compose --env-file .env.local -f infra/postgres/compose.yml up -d --wait",
     "infra:object-storage:up": "docker compose --env-file .env.local -f infra/object-storage/compose.yml up -d --wait",
+    "infra:local:up": "docker compose --env-file .env.local -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml up -d --build --wait",
+    "infra:local:down": "docker compose --env-file .env.local -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml down",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test",
     "security:audit": "npm audit --audit-level=low",
     "security:audit:remotion": "npm audit --prefix remotion --audit-level=low",

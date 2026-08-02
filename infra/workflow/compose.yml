@@ -1,0 +1,75 @@
+x-apollo-runtime: &apollo-runtime
+  image: apollo-video-local:${APOLLO_BUILD_REVISION:-dev}
+  build:
+    context: ../..
+    args:
+      APOLLO_BUILD_REVISION: ${APOLLO_BUILD_REVISION:-dev}
+  env_file:
+    - ../../.env.local
+  environment: &apollo-environment
+    V2_DATABASE_URL: ${V2_DOCKER_DATABASE_URL:?V2_DOCKER_DATABASE_URL is required}
+    APOLLO_V2_S3_ENDPOINT: http://minio:9000
+    APOLLO_V2_ARTIFACT_ROOT: /app/artifacts
+    APOLLO_V2_RENDER_WORK_ROOT: /app/tmp/render
+    APOLLO_V2_RENDER_OUTPUT_ROOT: /app/render-outputs
+    APOLLO_FFMPEG_PATH: /usr/bin/ffmpeg
+  init: true
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 30s
+  volumes:
+    - apollo-local-artifacts:/app/artifacts
+    - apollo-local-render-work:/app/tmp
+    - apollo-local-render-outputs:/app/render-outputs
+  depends_on: &apollo-dependencies
+    migrate:
+      condition: service_completed_successfully
+    minio-init:
+      condition: service_completed_successfully
+
+services:
+  migrate:
+    <<: *apollo-runtime
+    command: ["npm", "run", "db:v2:migrate:deploy"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    <<: *apollo-runtime
+    command: ["npm", "run", "start"]
+    ports:
+      - "127.0.0.1:${APOLLO_APP_PORT:-3333}:3333"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3333/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  ingest-worker:
+    <<: *apollo-runtime
+    command: ["./node_modules/.bin/tsx", "scripts/run-v2-ingest-worker.mjs"]
+
+  render-worker:
+    <<: *apollo-runtime
+    command: ["./node_modules/.bin/tsx", "scripts/run-v2-render-worker.mjs"]
+
+  webhook-worker:
+    <<: *apollo-runtime
+    command: ["./node_modules/.bin/tsx", "scripts/run-v2-webhook-worker.mjs"]
+
+  long-form-worker:
+    <<: *apollo-runtime
+    command: ["./node_modules/.bin/tsx", "scripts/run-v2-long-form-worker.mjs"]
+
+volumes:
+  apollo-local-artifacts:
+  apollo-local-render-work:
+  apollo-local-render-outputs:

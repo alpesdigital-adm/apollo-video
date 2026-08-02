@@ -7,6 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (path) => readFileSync(resolve(root, path), 'utf8')
 const postgres = read('infra/postgres/compose.yml')
 const storage = read('infra/object-storage/compose.yml')
+const workflow = read('infra/workflow/compose.yml')
 const envExample = read('.env.local.example')
 const ci = read('.github/workflows/ci.yml')
 
@@ -42,11 +43,25 @@ requires(storage, /APOLLO_V2_S3_BUCKET: \$\{APOLLO_V2_S3_BUCKET:\?APOLLO_V2_S3_B
 requires(storage, /no-new-privileges:true/g, 'MinIO services must prevent privilege escalation')
 forbids(storage, /apollo-local-change-me|minioadmin|(?:^|["'])0\.0\.0\.0:/m, 'Object storage must not contain default credentials or public binds')
 
+for (const service of ['migrate', 'app', 'ingest-worker', 'render-worker', 'webhook-worker', 'long-form-worker']) {
+  requires(workflow, new RegExp(`\\n  ${service}:`), `Supervised local topology must declare ${service}`)
+}
+requires(workflow, /V2_DATABASE_URL: \$\{V2_DOCKER_DATABASE_URL:\?V2_DOCKER_DATABASE_URL is required\}/, 'Container runtime must require its internal PostgreSQL URL')
+requires(workflow, /APOLLO_V2_S3_ENDPOINT: http:\/\/minio:9000/, 'Container runtime must address object storage by service name')
+requires(workflow, /condition: service_healthy/, 'Runtime must wait for healthy PostgreSQL')
+requires(workflow, /condition: service_completed_successfully/, 'Runtime must wait for versioned bucket initialization')
+requires(workflow, /command: \["npm", "run", "db:v2:migrate:deploy"\]/, 'Runtime must apply clean migrations before app and workers start')
+requires(workflow, /restart: unless-stopped/, 'Runtime processes must be supervised')
+requires(workflow, /init: true/, 'Runtime processes must reap child processes')
+requires(workflow, /APOLLO_FFMPEG_PATH: \/usr\/bin\/ffmpeg/, 'Bundled API adapters must use the container FFmpeg binary')
+forbids(workflow, /(?:^|["'])0\.0\.0\.0:/m, 'Local runtime must not publish on every interface')
+
 requires(envExample, /V2_DATABASE_URL=postgresql:\/\/apollo:[^\r\n]+@127\.0\.0\.1:55432\/apollo_v2\?schema=public&application_name=apollo-video-local&connection_limit=5&pool_timeout=10&connect_timeout=10/, 'Local Prisma URL must match the isolated compose port and bounded pool')
+requires(envExample, /V2_DOCKER_DATABASE_URL=postgresql:\/\/apollo:[^\r\n]+@postgres:5432\/apollo_v2\?schema=public&application_name=apollo-video-local-runtime&connection_limit=5&pool_timeout=10&connect_timeout=10/, 'Container Prisma URL must use the service hostname and bounded pool')
 requires(envExample, /APOLLO_V2_S3_ENDPOINT=http:\/\/127\.0\.0\.1:59000/, 'Local S3 endpoint must match the loopback compose port')
 requires(envExample, /APOLLO_V2_S3_BUCKET=apollo-video/, 'Local bucket must be explicit')
 requires(envExample, /APOLLO_V2_S3_FORCE_PATH_STYLE=true/, 'Local MinIO must use path-style addressing')
 requires(ci, /services:\s+[\s\S]*?postgres:\s+[\s\S]*?image: pgvector\/pgvector:0\.8\.5-pg16-trixie/, 'CI PostgreSQL must include the pinned pgvector extension used by migrations')
 requires(ci, /run: npm run infra:validate/, 'CI must enforce the local infrastructure contract')
 
-console.log('Local infrastructure contracts verified: PostgreSQL 16 and versioned MinIO are isolated and fail closed')
+console.log('Local infrastructure contracts verified: PostgreSQL 16, versioned MinIO and supervised V2 runtime are isolated and fail closed')

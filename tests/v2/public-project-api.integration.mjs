@@ -1176,7 +1176,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     const invalidLutResponse = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts`, {
       method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-invalid-1' }, body: JSON.stringify({ ...lutBody, lutId: 'public-api-lut-invalid', cubeContent: 'LUT_3D_SIZE 33' }),
     })
-    assert.equal(invalidLutResponse.status, 400)
+    assert.equal(invalidLutResponse.status, 422)
     const lutListResponse = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts?status=active`, { headers: { authorization } })
     assert.equal(lutListResponse.status, 200)
     assert.equal((await lutListResponse.json()).data.items.length, 1)
