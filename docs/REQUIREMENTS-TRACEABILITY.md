@@ -214,6 +214,8 @@ Evidência integrada F0.030/FR-234 — o run `30763463127` promove master e deri
 
 Evidência integrada F0.030/NFR-003 — o run `30765019248` aplicou em PostgreSQL limpo as tabelas tipadas de eventos e alertas operacionais, comprovou gravação idempotente por hash, isolamento por workspace e agregados exatos de fila, execução, span, bytes, tokens e custo. A capability pública `GET /v1/operations/telemetry/summary` exige `operations:read`, limita a consulta a 31 dias e devolve somente contagens/somas/máximos sem trace, job, project ou payload do provider. O mesmo run passou 807 testes, contratos, build, integrações API/PostgreSQL, goldens e Compose supervisionado com cleanup. Dashboard por jornada/fase, hard-invariant alerts, implantação e aceite operacional permanecem abertos; NFR-003 e a caixa de F0.030 não estão concluídos.
 
+Evidência integrada F0.031/FR-242 — o ADR-142 seleciona OIDC Authorization Code + PKCE, sessão opaca PostgreSQL com idle/absoluta/rotação/revogação e recuperação exclusivamente no IdP, mantendo o bootstrap scrypt restrito a desenvolvimento isolado. O registry agora recusa qualquer `apollo.sessions.*` com `toolName`; catálogo de agente, MCP e Diretor não recebem login/read/logout, `password` é `writeOnly` e nenhum output o admite. O run `30765404717` passou 807 testes e o E2E API/PostgreSQL confirmou login JSON/form e ausência da senha em stdout/stderr. OIDC, store revogável, `WorkspaceMember`, rate limit distribuído e E2E de expiração/troca de workspace continuam abertos.
+
 ## F3 — Sintético e transformação
 
 | Req | Título | Spec | Dep. | Evidência de aceite | Teste |

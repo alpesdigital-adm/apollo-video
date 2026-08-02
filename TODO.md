@@ -24,8 +24,8 @@ Estado auditado após o gate F2.019, com a jornada integral do MVP Core e os
 dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **278 de 1.259 microtarefas verificadas como efetivamente entregues (22,1%, arredondamento conservador)**;
-- **981 microtarefas abertas ou aguardando nova comprovação**;
+- **280 de 1.259 microtarefas verificadas como efetivamente entregues (22,2%, arredondamento conservador)**;
+- **979 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
   permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
@@ -522,9 +522,9 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 ### F0.031 — Autenticação, shell e navegação
 
-- [ ] Selecionar mecanismo de autenticação e documentar sessão, expiração e recuperação de conta. Evidência: T-F0.031 e ADR-134.
+- [x] Selecionar mecanismo de autenticação e documentar sessão, expiração e recuperação de conta. Evidência F0.031: ADR-142 seleciona OIDC Authorization Code + PKCE para produção, sessão opaca server-side com idle de 30 min/absoluta de 12 h/rotação, revogação durável e recuperação exclusivamente pelo IdP; o bootstrap scrypt atual fica restrito a desenvolvimento isolado e bloqueia produção até substituição.
 - [x] Publicar `apollo.sessions.login`, `apollo.sessions.read` e `apollo.sessions.logout` no capability registry/OpenAPI; login humano usa cookie HTTP-only e automações usam Bearer de `ApiClient`. Evidência: `src/v2/public-api/capability-registry.ts`, `src/app/v1/session/route.ts`, OpenAPI validado e `tests/v2/public-project-api.integration.mjs` cobrindo login JSON/form, sessão, acesso a projetos e logout.
-- [ ] Impedir que capabilities de sessão humana recebam `toolName` ou sejam expostas ao MCP/Director; password deve ser `writeOnly` e ausente de logs/eventos. Evidência: security/contract tests de F0.031.
+- [x] Impedir que capabilities de sessão humana recebam `toolName` ou sejam expostas ao MCP/Director; password deve ser `writeOnly` e ausente de logs/eventos. Evidência F0.031: o registry falha fechado para qualquer `apollo.sessions.*` com `toolName`; catálogo de agente/MCP deriva apenas tools registradas, o schema mantém `password.writeOnly`, outputs não admitem password e o E2E API real do run `30765404717` confirmou que a senha usada no login JSON/form não aparece em stdout/stderr. O run passou 807 testes, contratos, build, PostgreSQL/API, goldens e Compose supervisionado.
 - [ ] Substituir rate limit local por store distribuído e auditável, com revogação de sessão e proteção contra brute force antes de produção. Evidência: security/integration tests de F0.031.
 - [ ] Implementar sign-in/sign-out e proteção server-side das rotas v2. Evidência: T-F0.031 e ADR-134.
 - [ ] Criar `WorkspaceMember` a partir de identidade autenticada e papel ativo. Evidência: T-F0.031 e ADR-134.

@@ -94,6 +94,6 @@ the stored impact had identical content and hash but alphabetized keys. The
 hydrator now revalidates with `stableSerialize`, and a regression test performs
 the same canonical persistence round-trip.
 
-OIDC-verified identities become signed, expiring workspace sessions; production never trusts an unverified local identity. Workspace switching invalidates caches and subscriptions. Architecture imports are enforced by a CI boundary check. UI actions, REST endpoints and tests map through capability IDs, while sensitive internals have explicit deny-only reasons.
+ADR-142 selects OIDC Authorization Code + PKCE and opaque server-side sessions for production; the current scrypt bootstrap remains isolated-development only and blocks production until replaced. Workspace switching invalidates caches and subscriptions. Architecture imports are enforced by a CI boundary check. UI actions, REST endpoints and tests map through capability IDs, while sensitive internals have explicit deny-only reasons. Hosted run `30765404717` also makes the session/tool separation fail closed in the capability registry and proves the login password is absent from real API server stdout/stderr.
 
 Public operations generalize across ingest, Director, provider, sync, batch, render and export. Public conventions, deprecation/sunset headers, client kill switches and transition outbox events are stable application contracts.
