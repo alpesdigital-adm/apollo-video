@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import LogoutButton from '@/components/LogoutButton'
+import type { VisibleState, VisibleStateLabel } from '@/v2/domain/visible-state'
 
 type BatchStatus =
   | 'queued'
@@ -610,6 +611,7 @@ interface BatchItem {
   retryCount: number
   error?: { code: string; message: string }
   updatedAt: string
+  visibleState: VisibleState
 }
 
 interface ProductionBatch {
@@ -643,6 +645,7 @@ interface ProductionBatch {
   createdAt: string
   updatedAt: string
   definitionHash: string
+  visibleState: VisibleState
 }
 
 const STATUSES: { value: 'all' | BatchStatus; label: string }[] = [
@@ -656,24 +659,24 @@ const STATUSES: { value: 'all' | BatchStatus; label: string }[] = [
   { value: 'queued', label: 'Na fila' },
 ]
 
-const STATUS_LABELS: Record<BatchStatus, string> = {
+const VISIBLE_STATE_LABELS: Partial<Record<VisibleStateLabel, string>> = {
   queued: 'Na fila',
-  running: 'Em produção',
-  review: 'Em revisão',
+  'in-progress': 'Em produção',
+  'review-required': 'Em revisão',
   'partially-completed': 'Conclusão parcial',
+  'partially-failed': 'Falha parcial',
   completed: 'Concluído',
   failed: 'Requer atenção',
-  cancelled: 'Cancelado',
+  canceled: 'Cancelado',
+  superseded: 'Substituído',
 }
 
-const STATUS_STYLES: Record<BatchStatus, string> = {
-  queued: 'border-[#8c877e]/20 bg-[#8c877e]/10 text-[#aaa59c]',
-  running: 'border-[#5d8cc9]/25 bg-[#5d8cc9]/10 text-[#7ea8db]',
-  review: 'border-[#b57ac0]/25 bg-[#b57ac0]/10 text-[#ca91d4]',
-  'partially-completed': 'border-[#dcaa35]/25 bg-[#dcaa35]/10 text-[#e6bd5d]',
-  completed: 'border-[#58a979]/25 bg-[#58a979]/10 text-[#75c393]',
-  failed: 'border-[#ce6565]/25 bg-[#ce6565]/10 text-[#e38181]',
-  cancelled: 'border-[#8c877e]/20 bg-[#8c877e]/10 text-[#aaa59c]',
+const VISIBLE_TONE_STYLES: Record<VisibleState['tone'], string> = {
+  neutral: 'border-[#8c877e]/20 bg-[#8c877e]/10 text-[#aaa59c]',
+  info: 'border-[#5d8cc9]/25 bg-[#5d8cc9]/10 text-[#7ea8db]',
+  warning: 'border-[#b57ac0]/25 bg-[#b57ac0]/10 text-[#ca91d4]',
+  danger: 'border-[#ce6565]/25 bg-[#ce6565]/10 text-[#e38181]',
+  success: 'border-[#58a979]/25 bg-[#58a979]/10 text-[#75c393]',
 }
 
 const STEP_LABELS: Record<StepName, string> = {
@@ -999,7 +1002,7 @@ export default function BatchesPage() {
   }, [fetchBatches])
 
   useEffect(() => {
-    const hasActive = batches.some((batch) => ['queued', 'running', 'review'].includes(batch.status))
+    const hasActive = batches.some((batch) => !batch.visibleState.terminal)
     if (!hasActive) return
     const handle = window.setInterval(() => void fetchBatches(true), 6000)
     return () => window.clearInterval(handle)
@@ -1636,9 +1639,9 @@ export default function BatchesPage() {
   const selectedCells = possibleCells.filter((cell) => matrix.has(cell))
   const totalCounts = useMemo(() => batches.reduce((counts, batch) => {
     counts.total += 1
-    if (batch.status === 'running') counts.running += 1
-    if (batch.status === 'review') counts.review += 1
-    if (batch.status === 'failed' || batch.status === 'partially-completed') counts.attention += 1
+    if (batch.visibleState.label === 'in-progress') counts.running += 1
+    if (batch.visibleState.label === 'review-required') counts.review += 1
+    if (batch.visibleState.tone === 'danger') counts.attention += 1
     return counts
   }, { total: 0, running: 0, review: 0, attention: 0 }), [batches])
 
@@ -1944,8 +1947,8 @@ export default function BatchesPage() {
     const candidates = batches.filter((batch) =>
       selectedIds.has(batch.id) &&
       (action === 'cancel'
-        ? !['completed', 'cancelled'].includes(batch.status)
-        : batch.status === 'cancelled'),
+        ? batch.visibleState.availableActions.includes('cancel')
+        : batch.visibleState.primaryAction === 'retry'),
     )
     if (candidates.length === 0) {
       setNotice(`Nenhum lote selecionado pode ser ${action === 'cancel' ? 'cancelado' : 'retomado'}.`)
@@ -3459,7 +3462,7 @@ export default function BatchesPage() {
                                   <h3 className="truncate text-sm font-semibold text-[#eee9e0]">{batch.name}</h3>
                                   <p className="mt-1 truncate text-[10px] uppercase tracking-[0.12em] text-[#66625b]">{projects.find((project) => project.id === batch.projectId)?.name ?? batch.projectId}</p>
                                 </div>
-                                <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[9px] ${STATUS_STYLES[batch.status]}`}>{STATUS_LABELS[batch.status]}</span>
+                                <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[9px] ${VISIBLE_TONE_STYLES[batch.visibleState.tone]}`} data-state={batch.visibleState.label}>{VISIBLE_STATE_LABELS[batch.visibleState.label] ?? batch.visibleState.label}</span>
                               </div>
                               <div className="mt-4 flex items-end gap-4">
                                 <div className="min-w-0 flex-1">
@@ -3507,9 +3510,9 @@ export default function BatchesPage() {
                           <p className="mt-1 text-xs text-[#6f6b64]">{selectedBatch.objective} · revisão {selectedBatch.revision}</p>
                         </div>
                         <div className="flex shrink-0 gap-2">
-                          {selectedBatch.status === 'cancelled' ? (
+                          {selectedBatch.visibleState.primaryAction === 'retry' ? (
                             <button className="rounded-lg border border-[#d5a638]/25 px-3 py-2 text-[10px] font-semibold text-[#dcba62] transition hover:bg-[#d5a638]/10 disabled:opacity-40" disabled={busy} onClick={() => void batchAction(selectedBatch, 'resume')} type="button">Retomar lote</button>
-                          ) : selectedBatch.status !== 'completed' ? (
+                          ) : selectedBatch.visibleState.availableActions.includes('cancel') ? (
                             <button className="rounded-lg border border-[#ba5e5e]/20 px-3 py-2 text-[10px] font-semibold text-[#d17a7a] transition hover:bg-[#ba5e5e]/10 disabled:opacity-40" disabled={busy} onClick={() => void batchAction(selectedBatch, 'cancel')} type="button">Cancelar lote</button>
                           ) : null}
                           <button aria-label="Atualizar detalhe" className="grid h-9 w-9 place-items-center rounded-lg border border-white/[0.08] text-[#77736c] transition hover:text-white" disabled={detailLoading} onClick={() => void readBatch(selectedBatch.id)} type="button">
@@ -3569,7 +3572,7 @@ export default function BatchesPage() {
                         const variant = selectedBatch.variants.find((candidate) => candidate.id === item.variantId)
                         const failedStep = item.steps.find((step) => step.state === 'failed')
                         return (
-                          <article className={`rounded-xl border p-3.5 ${item.state === 'failed' ? 'border-[#c95f5f]/25 bg-[#c95f5f]/[0.04]' : item.state === 'cancelled' ? 'border-white/[0.06] bg-white/[0.015] opacity-75' : 'border-white/[0.07] bg-[#0e0e0e]'}`} key={item.id}>
+                          <article className={`rounded-xl border p-3.5 ${item.visibleState.tone === 'danger' ? 'border-[#c95f5f]/25 bg-[#c95f5f]/[0.04]' : item.visibleState.label === 'canceled' ? 'border-white/[0.06] bg-white/[0.015] opacity-75' : 'border-white/[0.07] bg-[#0e0e0e]'}`} key={item.id}>
                             <div className="flex items-start gap-3">
                               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/[0.08] bg-[#090909] font-mono text-[10px] text-[#77736c]">{String(index + 1).padStart(2, '0')}</div>
                               <div className="min-w-0 flex-1">
@@ -3578,7 +3581,7 @@ export default function BatchesPage() {
                                     <h3 className="truncate text-xs font-semibold text-[#dcd6cc]">{recipe?.name ?? item.recipeId}</h3>
                                     <p className="mt-1 text-[9px] uppercase tracking-[0.12em] text-[#69655e]">{variant?.outputSpecId ?? item.variantId} · {variant?.locale ?? '—'} · retry {item.retryCount}</p>
                                   </div>
-                                  <span className={`shrink-0 text-[9px] ${item.state === 'failed' ? 'text-[#e08080]' : item.state === 'completed' ? 'text-[#70bc8b]' : 'text-[#8f8980]'}`}>{item.state}</span>
+                                  <span className={`shrink-0 text-[9px] ${item.visibleState.tone === 'danger' ? 'text-[#e08080]' : item.visibleState.tone === 'success' ? 'text-[#70bc8b]' : 'text-[#8f8980]'}`} data-state={item.visibleState.label}>{VISIBLE_STATE_LABELS[item.visibleState.label] ?? item.visibleState.label}</span>
                                 </div>
                                 <div className="mt-3"><StepRail compact steps={item.steps} /></div>
                                 {item.error ? (
@@ -3588,7 +3591,7 @@ export default function BatchesPage() {
                                       <button className="shrink-0 rounded-md border border-[#d5a638]/20 px-2 py-1 text-[9px] font-semibold text-[#d8b65c] hover:bg-[#d5a638]/10 disabled:opacity-40" disabled={busy} onClick={() => void itemAction(selectedBatch, item, 'retry-step', failedStep.step)} type="button">Retentar {STEP_LABELS[failedStep.step]}</button>
                                     ) : null}
                                   </div>
-                                ) : item.state === 'cancelled' && selectedBatch.status !== 'cancelled' ? (
+                                ) : item.visibleState.primaryAction === 'retry' && selectedBatch.visibleState.primaryAction !== 'retry' ? (
                                   <button className="mt-3 rounded-md border border-[#d5a638]/20 px-2 py-1 text-[9px] font-semibold text-[#d8b65c] hover:bg-[#d5a638]/10 disabled:opacity-40" disabled={busy} onClick={() => void itemAction(selectedBatch, item, 'resume')} type="button">Retomar item</button>
                                 ) : null}
                                 {item.artifactIds.length > 0 ? (

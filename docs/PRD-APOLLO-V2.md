@@ -1789,10 +1789,12 @@ processamento, ação de revisão nas duas fases de review e 100% somente em
 `completed`; `failed`, `canceled` e `archived` são terminais sem inventar
 percentual. Create/list e as duas leituras de workspace expõem esse contrato de
 forma aditiva; operações aninhadas no workspace usam a mesma projeção das
-capabilities de operações. A matriz canônica de Project permite somente os
+capabilities de operações. Dashboard, sala de lotes e editor consomem essa
+projeção para label, tone, ação, terminalidade, polling e bloqueios; não mantêm
+uma segunda tabela de tradução a partir do status técnico. A matriz canônica de Project permite somente os
 avanços e retornos editoriais declarados, repetição convergente e terminais
 sem saída; os writers atuais cercam a transição no próprio update persistido.
-Estado/transições de versão e artifact, E2E PostgreSQL, deploy e aceite
+E2E visual/browser, estado/transições de versão e artifact, E2E PostgreSQL, deploy e aceite
 continuam pendentes.
 
 ProjectVersion não recebe lifecycle mutável. `current` é derivado pela igualdade

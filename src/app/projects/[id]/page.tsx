@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import LogoutButton from '@/components/LogoutButton'
+import type { VisibleState } from '@/v2/domain/visible-state'
 
 interface ApiEnvelope<T> { data?: T; error?: { message?: string } }
 interface MediaRecord {
@@ -445,7 +446,7 @@ interface ProofModeRunData {
 }
 interface PublicOperation {
   id: string; type: 'artifact-render' | 'media-ingest' | 'project-proxy-render' | 'project-final-export' | 'source-cleanup'; status: string; phase: string;
-  progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string
+  progress?: { completed: number; total?: number; unit?: string }; error?: { message?: string }; updatedAt: string; visibleState: VisibleState
 }
 type ContiguousQualityDimension =
   | 'selfContained'
@@ -1525,8 +1526,9 @@ export default function ProjectWorkspacePage() {
   }, [loadProxyReview, loadReview, workspace?.media.length, workspace?.version?.id])
 
   const activeOperation = workspace?.operations[0]
+  const operationActive = Boolean(activeOperation && !activeOperation.visibleState.terminal)
   useEffect(() => {
-    if (!activeOperation || !['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status)) return
+    if (!activeOperation || activeOperation.visibleState.terminal) return
     const timer = window.setInterval(() => {
       void loadWorkspace(true)
       void loadReview(true, selectedReviewVersionId.current ?? undefined)
@@ -2951,8 +2953,8 @@ export default function ProjectWorkspacePage() {
             <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">{latestDirectorRun ? `DirectorRun ${latestDirectorRun.qualityStatus === 'approved' ? 'aprovado' : 'aprovado com ressalvas'} pelo critic, com ${latestDirectorRun.decisionCount} decisões editoriais persistidas.` : workspace.editPlan?.state === 'compiled' ? `Corte editorial V2 aplicado em ${workspace.editPlan.clipCount} trechos, com ${workspace.editPlan.cutCount} decisões persistidas.` : 'Ingestão verificável: master, proxy de edição, transcript e lineage.'}</p>
             {workspace.editPlan?.state === 'compiled' ? <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Zoom automático {workspace.editPlan.automaticZoom ? 'ativo' : 'desativado'}</span><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Proteção facial {workspace.editPlan.subtitleFaceProtection ? 'ativa' : 'pendente'}</span></div> : null}
             {latestDirectorRun ? <div className="mt-3 grid grid-cols-2 gap-2 text-center"><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.subtitleCueCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">blocos de legenda</span></div><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.transitionCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">transições</span></div></div> : null}
-            {workspace.editPlan?.state === 'compiled' && transcript ? <button className="mt-4 w-full rounded-lg bg-[#dbae3f] px-3 py-2.5 text-xs font-semibold text-[#171207] transition hover:bg-[#e5bb50] disabled:cursor-not-allowed disabled:opacity-45" disabled={directorRunning || exportRunning || Boolean(activeOperation && ['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status))} onClick={() => void runDirector()} type="button">{directorRunning ? 'Diretor planejando…' : latestDirectorRun ? 'Executar nova direção V2' : 'Executar Diretor V2'}</button> : null}
-            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && latestDirectorRun.qualityStatus !== 'blocked' ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || proxyReview?.projectVersionId !== workspace.version?.id || !proxyReview.finalAllowed || Boolean(activeOperation && ['queued', 'running', 'waiting', 'retrying'].includes(activeOperation.status))} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : proxyReview?.finalAllowed ? finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final' : 'Aguardando liberação do proxy'}</button> : null}
+            {workspace.editPlan?.state === 'compiled' && transcript ? <button className="mt-4 w-full rounded-lg bg-[#dbae3f] px-3 py-2.5 text-xs font-semibold text-[#171207] transition hover:bg-[#e5bb50] disabled:cursor-not-allowed disabled:opacity-45" disabled={directorRunning || exportRunning || operationActive} onClick={() => void runDirector()} type="button">{directorRunning ? 'Diretor planejando…' : latestDirectorRun ? 'Executar nova direção V2' : 'Executar Diretor V2'}</button> : null}
+            {latestDirectorRun?.status === 'succeeded' && latestDirectorRun.resultVersionId === workspace.version?.id && latestDirectorRun.qualityStatus !== 'blocked' ? <button className="mt-2 w-full rounded-lg border border-[#62b47d]/25 bg-[#62b47d]/10 px-3 py-2.5 text-xs font-semibold text-[#8bd0a2] transition hover:bg-[#62b47d]/15 disabled:cursor-not-allowed disabled:opacity-45" disabled={exportRunning || proxyReview?.projectVersionId !== workspace.version?.id || !proxyReview.finalAllowed || operationActive} onClick={() => void exportFinal()} type="button">{exportRunning ? 'Registrando aprovação…' : proxyReview?.finalAllowed ? finalOutput ? 'Exportar novamente em alta resolução' : 'Aprovar e exportar MP4 final' : 'Aguardando liberação do proxy'}</button> : null}
             {finalOutput ? <a className="mt-2 block w-full rounded-lg border border-white/[0.08] px-3 py-2.5 text-center text-xs text-[#aaa49a] transition hover:border-white/[0.16] hover:text-white" download={finalOutput.originalFileName} href={`/v1/artifacts/${encodeURIComponent(finalOutput.artifactId)}/content`}>Baixar MP4 final</a> : null}
           </div>
           <div className="mt-5 overflow-hidden rounded-xl border border-white/[0.07] bg-[#0d0d0d]" data-testid="proxy-review-gate">
@@ -5210,8 +5212,8 @@ export default function ProjectWorkspacePage() {
           <div className="flex items-center justify-between"><div><p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#b58d31]">Pipeline V2</p><h2 className="mt-2 text-lg font-semibold">{cleanupOperation ? 'Limpeza da fonte' : finalExportOperation ? 'Exportação final' : directorOperation ? 'Direção materializada' : 'Ingestão verificável'}</h2></div><span className="font-mono text-[9px] text-[#5f5c55]">{activeOperation?.id.slice(-8) ?? 'AGUARDANDO'}</span></div>
           <div className="mt-7 space-y-1">
             {pipelineSteps.map(([phase, title, description], index) => {
-              const failed = activeOperation?.status === 'failed' && currentStep === index
-              const state = failed ? 'failed' : activeOperation?.status === 'succeeded' || currentStep > index ? 'done' : currentStep === index ? 'active' : 'waiting'
+              const failed = activeOperation?.visibleState.tone === 'danger' && currentStep === index
+              const state = failed ? 'failed' : activeOperation?.visibleState.label === 'completed' || currentStep > index ? 'done' : currentStep === index ? 'active' : 'waiting'
               return <div className="grid grid-cols-[24px_1fr] gap-3 py-3" key={phase}><div className="flex flex-col items-center"><StepIcon state={state} />{index < pipelineSteps.length - 1 ? <span className="mt-2 h-8 w-px bg-white/[0.07]" /> : null}</div><div><p className={`text-xs font-medium ${state === 'active' ? 'text-[#e2b64e]' : state === 'done' ? 'text-[#b9c8bd]' : state === 'failed' ? 'text-[#de8585]' : 'text-[#77736b]'}`}>{title}</p><p className="mt-1 text-[10px] text-[#5f5c56]">{description}</p></div></div>
             })}
           </div>

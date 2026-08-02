@@ -57,11 +57,13 @@ or become deleted; deleted cannot be resurrected. It is a logical tombstone,
 not permission to bypass retention and remove immutable bytes.
 
 Project presentation uses the same boundary over its closed 14-phase enum.
-Create v3, list v2 and workspace v6 bind technical status to an identical
+Create v4, list v4 and workspace v7 bind technical status to an identical
 visible label and an exact tone/progress/action/terminality tuple; only completed
-may report 100%. Both workspace routes return the same full v6 shape, including
+may report 100%. Both workspace routes return the same full v7 shape, including
 visible nested operations. Unknown stored phases fail closed and older response
-schemas remain published. This is a presentation slice, not evidence of a
+schemas remain published. The project dashboard, production-batch room and
+editor consume the projection directly for display, polling and action gates;
+the unused legacy-status dashboard mapper is deleted. This is not evidence of a
 complete lifecycle: version and artifact transitions remain separate work.
 
 Project transitions are governed by one exhaustive 14-state matrix. Repetition

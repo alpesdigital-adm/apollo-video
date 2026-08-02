@@ -34,6 +34,18 @@ test('project editor prioritizes the version-bound review artifact with the appr
   assert.doesNotMatch(projectEditorSource, /<video[^>]+preload="metadata"/)
 })
 
+test('T-FR-236 project editor consumes operation visible state for polling, gates and pipeline state', () => {
+  assert.match(projectEditorSource, /visibleState: VisibleState/)
+  assert.match(projectEditorSource, /!activeOperation\.visibleState\.terminal/)
+  assert.match(projectEditorSource, /activeOperation\.visibleState\.terminal/)
+  assert.match(projectEditorSource, /activeOperation\?\.visibleState\.tone === 'danger'/)
+  assert.match(projectEditorSource, /activeOperation\?\.visibleState\.label === 'completed'/)
+  assert.doesNotMatch(
+    projectEditorSource,
+    /\['queued', 'running', 'waiting', 'retrying'\]\.includes\(activeOperation\.status\)/,
+  )
+})
+
 test('Apollo version is globally visible and receives the deployed build revision', () => {
   assert.match(appLayoutSource, /Apollo · \{versionLabel\}/)
   assert.match(appLayoutSource, /fixed bottom-2 right-3/)

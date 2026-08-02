@@ -59,6 +59,13 @@ test('T-FR-080 tracking renders truthful step, item, artifact, progress and cost
   assert.match(batchUiSource, /<StepRail compact steps=\{item\.steps\}/)
   assert.match(batchUiSource, /item\.artifactIds\.map/)
   assert.match(batchUiSource, /item\.retryCount/)
+  assert.match(batchUiSource, /batch\.visibleState\.tone/)
+  assert.match(batchUiSource, /batch\.visibleState\.label/)
+  assert.match(batchUiSource, /item\.visibleState\.tone/)
+  assert.match(batchUiSource, /item\.visibleState\.label/)
+  assert.match(batchUiSource, /batch\.visibleState\.availableActions\.includes\('cancel'\)/)
+  assert.doesNotMatch(batchUiSource, /STATUS_STYLES\[batch\.status\]/)
+  assert.doesNotMatch(batchUiSource, /STATUS_LABELS\[batch\.status\]/)
   assert.doesNotMatch(batchUiSource, /Math\.random|fakeProgress|simulatedProgress/)
 })
 

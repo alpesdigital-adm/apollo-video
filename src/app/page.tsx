@@ -12,6 +12,13 @@ import {
   OUTPUT_ASPECT_RATIOS,
   type OutputAspectRatio,
 } from '@/v2/domain/output-spec'
+import type {
+  VisibleState,
+  VisibleStateAction,
+  VisibleStateLabel,
+} from '@/v2/domain/visible-state'
+
+type ProjectStateBucket = 'draft' | 'processing' | 'review' | 'completed' | 'failed' | 'history'
 
 interface ProjectSummary {
   id: string
@@ -23,6 +30,7 @@ interface ProjectSummary {
   ownerId?: string
   currentVersionId?: string
   createdAt: string
+  visibleState: VisibleState
 }
 
 interface PublicApiEnvelope<T> {
@@ -57,12 +65,37 @@ const FORMAT_DETAILS: Record<OutputAspectRatio, { label: string; use: string; sh
   '21:9': { label: 'Cinema', use: 'Telas amplas', shape: 'h-[14px] w-8' },
 }
 
-const STATUS_LABELS: Record<string, string> = {
+const PROJECT_STATE_LABELS: Partial<Record<VisibleStateLabel, string>> = {
   draft: 'Configuração',
-  processing: 'Em produção',
-  review: 'Em revisão',
+  ingesting: 'Ingestão',
+  perceiving: 'Percepção',
+  planning: 'Planejamento',
+  generating: 'Geração',
+  'reviewing-assets': 'Revisar materiais',
+  'rendering-proxy': 'Renderizando proxy',
+  'reviewing-proxy': 'Revisar proxy',
+  revising: 'Aplicando revisão',
+  'rendering-final': 'Exportando final',
   completed: 'Concluído',
   failed: 'Requer atenção',
+  canceled: 'Cancelado',
+  archived: 'Arquivado',
+}
+
+const PROJECT_TONE_CLASSES: Record<VisibleState['tone'], string> = {
+  neutral: 'border-[#8d887e]/20 bg-[#8d887e]/10 text-[#aaa49a]',
+  info: 'border-[#648fc6]/20 bg-[#648fc6]/10 text-[#79a5da]',
+  warning: 'border-[#ba7fc4]/20 bg-[#ba7fc4]/10 text-[#ca92d4]',
+  danger: 'border-[#d16969]/20 bg-[#d16969]/10 text-[#e08b8b]',
+  success: 'border-[#65ad7f]/20 bg-[#65ad7f]/10 text-[#7ec397]',
+}
+
+const PROJECT_ACTION_LABELS: Partial<Record<VisibleStateAction, string>> = {
+  'open-result': 'Abrir workspace',
+  'view-progress': 'Acompanhar',
+  'review-output': 'Revisar agora',
+  'inspect-error': 'Ver erro',
+  'inspect-history': 'Ver histórico',
 }
 
 function ApiIcon({ path, className = 'h-5 w-5' }: { path: string; className?: string }) {
@@ -77,12 +110,15 @@ function errorMessage(payload: PublicApiEnvelope<unknown>, fallback: string): st
   return payload.error?.message?.trim() || fallback
 }
 
-function projectState(status: string): 'draft' | 'processing' | 'review' | 'completed' | 'failed' {
-  if (status === 'completed' || status === 'complete') return 'completed'
-  if (status === 'failed' || status === 'error') return 'failed'
-  if (status === 'review' || status === 'ready' || status === 'awaiting-review') return 'review'
-  if (['processing', 'ingesting', 'directing', 'rendering'].includes(status)) return 'processing'
-  return 'draft'
+function projectBucket(visibleState: VisibleState): ProjectStateBucket {
+  switch (visibleState.primaryAction) {
+    case 'view-progress': return 'processing'
+    case 'review-output': return 'review'
+    case 'inspect-error': return 'failed'
+    case 'inspect-history': return 'history'
+    case 'open-result': return visibleState.label === 'completed' ? 'completed' : 'draft'
+    default: return 'failed'
+  }
 }
 
 export default function Dashboard() {
@@ -143,13 +179,13 @@ export default function Dashboard() {
     const normalizedQuery = query.trim().toLocaleLowerCase('pt-BR')
     return projects.filter((project) => {
       if (normalizedQuery && !project.name.toLocaleLowerCase('pt-BR').includes(normalizedQuery)) return false
-      if (statusFilter !== 'all' && projectState(project.status) !== statusFilter) return false
+      if (statusFilter !== 'all' && projectBucket(project.visibleState) !== statusFilter) return false
       return true
     })
   }, [projects, query, statusFilter])
 
   const counts = useMemo(() => projects.reduce((result, project) => {
-    const state = projectState(project.status)
+    const state = projectBucket(project.visibleState)
     result[state] = (result[state] ?? 0) + 1
     return result
   }, {} as Record<string, number>), [projects])
@@ -352,6 +388,7 @@ export default function Dashboard() {
                     <option value="review">Em revisão</option>
                     <option value="completed">Concluído</option>
                     <option value="failed">Requer atenção</option>
+                    <option value="history">Histórico</option>
                   </select>
                 </div>
               </div>
@@ -376,8 +413,9 @@ export default function Dashboard() {
               ) : (
                 <div className="mt-5 grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
                   {visibleProjects.map((project) => {
-                    const state = projectState(project.status)
                     const objectiveLabel = STRATEGIC_OBJECTIVES.find((item) => item.id === project.objective)?.label ?? 'Objetivo não informado'
+                    const stateLabel = PROJECT_STATE_LABELS[project.visibleState.label] ?? project.visibleState.label
+                    const actionLabel = PROJECT_ACTION_LABELS[project.visibleState.primaryAction] ?? 'Abrir workspace'
                     return (
                       <article className="group overflow-hidden rounded-2xl border border-white/[0.075] bg-[#0b0b0b] transition hover:-translate-y-0.5 hover:border-[#d5a533]/30" key={project.id}>
                         <div className="relative h-24 overflow-hidden border-b border-white/[0.06] bg-[linear-gradient(130deg,#15130e_0%,#0e0e0e_48%,#11100d_100%)] px-5 py-4">
@@ -393,11 +431,11 @@ export default function Dashboard() {
                               <h3 className="truncate text-base font-semibold text-[#eee9e0]">{project.name}</h3>
                               <p className="mt-1 truncate text-xs text-[#77736c]">{objectiveLabel}</p>
                             </div>
-                            <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] ${state === 'failed' ? 'border-[#d16969]/20 bg-[#d16969]/10 text-[#e08b8b]' : state === 'completed' ? 'border-[#65ad7f]/20 bg-[#65ad7f]/10 text-[#7ec397]' : state === 'review' ? 'border-[#ba7fc4]/20 bg-[#ba7fc4]/10 text-[#ca92d4]' : state === 'processing' ? 'border-[#648fc6]/20 bg-[#648fc6]/10 text-[#79a5da]' : 'border-[#c99e36]/20 bg-[#c99e36]/10 text-[#d6b257]'}`}>{STATUS_LABELS[state]}</span>
+                            <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] ${PROJECT_TONE_CLASSES[project.visibleState.tone]}`} data-state={project.visibleState.label}>{stateLabel}</span>
                           </div>
                           <div className="mt-5 flex items-center justify-between border-t border-white/[0.06] pt-4">
                             <p className="text-[11px] text-[#625f59]">Criado em {new Date(project.createdAt).toLocaleDateString('pt-BR')}</p>
-                            <button className="text-xs font-semibold text-[#d6ac49] transition hover:text-[#f0ca6d]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)} type="button">Abrir workspace →</button>
+                            <button className="text-xs font-semibold text-[#d6ac49] transition hover:text-[#f0ca6d]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)} type="button">{actionLabel} →</button>
                           </div>
                         </div>
                       </article>

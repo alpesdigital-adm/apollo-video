@@ -22,6 +22,12 @@ available while retry targets only failed work. Public v1 batch schemas remain
 published and the six batch capabilities returning the aggregate use additive
 v2 response schemas.
 
+The new dashboard, batch room and editor consume these projections directly.
+They may group labels for navigation or translate copy, but do not reconstruct
+technical transitions to choose tone, terminality, polling or available
+actions. The former dashboard mapper for legacy status aliases is not part of
+the V2 domain.
+
 An unresolved `CommandArtifactInvalidation` is a relation state, not an
 artifact lifecycle state. Its additive v2 presentation is `stale-output`, has
 `availabilityEffect: none`, and exposes rebuild plus historical-open actions.

@@ -1,18 +1,25 @@
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
-import { deriveDashboardProject } from '../../src/v2/domain/project-dashboard.ts'
 
-test('dashboard derives every project state and recommended action', () => {
-  assert.equal(deriveDashboardProject({ status: 'created' }).state, 'draft')
-  assert.equal(deriveDashboardProject({ status: 'analyzing' }).state, 'processing')
-  assert.equal(deriveDashboardProject({ status: 'ready' }).action, 'Revisar edição')
-  assert.equal(deriveDashboardProject({ status: 'error' }).action, 'Tentar novamente')
-  assert.equal(deriveDashboardProject({ status: 'complete' }).state, 'completed')
-  assert.equal(deriveDashboardProject({ status: 'complete', archivedAt: '2026-07-17T00:00:00Z' }).state, 'archived')
-})
+const dashboardSource = readFileSync(
+  new URL('../../src/app/page.tsx', import.meta.url),
+  'utf8',
+)
 
-test('dashboard never fabricates progress without a measured total', () => {
-  assert.equal(deriveDashboardProject({ status: 'analyzing' }).progress, null)
-  assert.equal(deriveDashboardProject({ status: 'rendering', completed: 2, total: null }).progress, null)
-  assert.equal(deriveDashboardProject({ status: 'rendering', completed: 2, total: 4 }).progress, 50)
+test('T-FR-236 dashboard consumes the public visible-state contract without inferring legacy statuses', () => {
+  assert.match(dashboardSource, /visibleState: VisibleState/)
+  assert.match(dashboardSource, /projectBucket\(project\.visibleState\)/)
+  assert.match(dashboardSource, /PROJECT_TONE_CLASSES\[project\.visibleState\.tone\]/)
+  assert.match(dashboardSource, /PROJECT_STATE_LABELS\[project\.visibleState\.label\]/)
+  assert.match(dashboardSource, /PROJECT_ACTION_LABELS\[project\.visibleState\.primaryAction\]/)
+  assert.doesNotMatch(dashboardSource, /function projectState\(status:/)
+  assert.doesNotMatch(
+    dashboardSource,
+    /status === ['"](?:complete|error|ready|awaiting-review|directing|rendering)['"]/,
+  )
+  assert.equal(
+    existsSync(new URL('../../src/v2/domain/project-dashboard.ts', import.meta.url)),
+    false,
+  )
 })
