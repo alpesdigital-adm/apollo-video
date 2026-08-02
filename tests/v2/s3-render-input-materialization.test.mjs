@@ -47,6 +47,9 @@ test('S3 object client requires an explicit opt-in for isolated non-loopback HTT
   }
   assert.throws(() => new AwsS3RenderInputObjectClient(options), /not allowed/)
   assert.doesNotThrow(() => new AwsS3RenderInputObjectClient({ ...options, allowInsecureHttp: true }))
+  assert.throws(() => new AwsS3RenderInputObjectClient({
+    ...options, endpoint: 'http://objects.example:9000', allowInsecureHttp: true,
+  }), /not allowed/)
 })
 
 test('T-FR-234 S3 adapter verifies full-object identity and signs the exact immutable version', async () => {

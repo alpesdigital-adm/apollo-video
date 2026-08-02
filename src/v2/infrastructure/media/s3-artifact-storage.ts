@@ -199,7 +199,9 @@ export function createArtifactS3ClientFromEnvironment(environment: NodeJS.Proces
   let parsed: URL
   try { parsed = new URL(endpointValue) } catch { throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'S3 endpoint is invalid') }
   const allowInsecure = environment.APOLLO_V2_S3_ALLOW_INSECURE_HTTP?.trim().toLowerCase() === 'true'
-  if (!['http:', 'https:'].includes(parsed.protocol) || (parsed.protocol === 'http:' && !allowInsecure) || parsed.username || parsed.password || parsed.search || parsed.hash || !['', '/'].includes(parsed.pathname)) {
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+  const isolatedService = /^[a-z0-9][a-z0-9-]{0,62}$/.test(parsed.hostname)
+  if (!['http:', 'https:'].includes(parsed.protocol) || (parsed.protocol === 'http:' && !loopback && !(allowInsecure && isolatedService)) || parsed.username || parsed.password || parsed.search || parsed.hash || !['', '/'].includes(parsed.pathname)) {
     throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'S3 endpoint is not allowed')
   }
   const forcePathStyle = environment.APOLLO_V2_S3_FORCE_PATH_STYLE?.trim().toLowerCase()

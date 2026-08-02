@@ -43,9 +43,10 @@ function endpoint(value: string, allowInsecureHttp: boolean): string {
     throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'S3 endpoint is invalid')
   }
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+  const isolatedService = /^[a-z0-9][a-z0-9-]{0,62}$/.test(parsed.hostname)
   if (
     !['http:', 'https:'].includes(parsed.protocol) ||
-    (parsed.protocol === 'http:' && !loopback && !allowInsecureHttp) ||
+    (parsed.protocol === 'http:' && !loopback && !(allowInsecureHttp && isolatedService)) ||
     parsed.username || parsed.password || parsed.search || parsed.hash ||
     !['', '/'].includes(parsed.pathname)
   ) {
