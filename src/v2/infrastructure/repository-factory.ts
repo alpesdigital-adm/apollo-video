@@ -219,6 +219,7 @@ import { PrismaProjectFinalExportRepository } from './prisma/project-final-expor
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
 import { StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
+import type { OperationTelemetrySink } from '../application/ports/operation-telemetry.ts'
 import { PrismaWorkspaceRepository } from './prisma/workspace-repository.ts'
 import { PrismaWebhookRegistrationRepository } from './prisma/webhook-registration-repository.ts'
 import { PrismaWebhookFanoutRepository } from './prisma/webhook-fanout-repository.ts'
@@ -729,10 +730,12 @@ export function createMediaDownloadGrantRepository(): MediaDownloadGrantReposito
   return new PrismaMediaDownloadGrantRepository(resolveV2Client())
 }
 
-export function createPublicOperationRepository(): PublicOperationRepository {
+export function createPublicOperationRepository(
+  telemetry: OperationTelemetrySink = new StructuredConsoleOperationTelemetry(),
+): PublicOperationRepository {
   return new TelemetryPublicOperationRepository(
     new PrismaPublicOperationRepository(resolveV2Client()),
-    new StructuredConsoleOperationTelemetry(),
+    telemetry,
   )
 }
 
@@ -1151,12 +1154,14 @@ export function createPublicOperationWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  const telemetry = new StructuredConsoleOperationTelemetry()
   const configuredLease = Number(environment.APOLLO_V2_WORKER_LEASE_MS)
   const configuredHeartbeat = Number(environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
   const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
   const configuredRetryMax = Number(environment.APOLLO_V2_WORKER_RETRY_MAX_MS)
   return runNextPublicOperationService({
-    operations: createPublicOperationRepository(),
+    operations: createPublicOperationRepository(telemetry),
+    telemetry,
     checkpoints: createArtifactRenderCheckpointRepository(),
     render: createAuthorizedRenderExecutor(environment, clock),
     clock,
@@ -1179,12 +1184,14 @@ export function createMediaIngestWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  const telemetry = new StructuredConsoleOperationTelemetry()
   const configuredLease = Number(environment.APOLLO_V2_INGEST_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS)
   const configuredHeartbeat = Number(environment.APOLLO_V2_INGEST_HEARTBEAT_MS ?? environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
   const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
   const configuredRetryMax = Number(environment.APOLLO_V2_WORKER_RETRY_MAX_MS)
   return runNextMediaIngestOperationService({
-    operations: createPublicOperationRepository(),
+    operations: createPublicOperationRepository(telemetry),
+    telemetry,
     uploads: createMediaTransferRepository(),
     artifacts: createMediaArtifactPersistenceRepository(environment),
     projectMedia: createProjectMediaRepository(),
@@ -1204,6 +1211,7 @@ export function createLongFormIndexWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  const telemetry = new StructuredConsoleOperationTelemetry()
   const configuredLease = Number(
     environment.APOLLO_V2_LONG_FORM_LEASE_MS ??
       environment.APOLLO_V2_WORKER_LEASE_MS,
@@ -1219,7 +1227,8 @@ export function createLongFormIndexWorker(
     environment.APOLLO_V2_WORKER_RETRY_MAX_MS,
   )
   return runNextLongFormIndexOperationService({
-    operations: createPublicOperationRepository(),
+    operations: createPublicOperationRepository(telemetry),
+    telemetry,
     workflows: createLongFormIndexWorkflowRepository(),
     processor:
       createTranscribedLongFormStageProcessorFromEnvironment(
@@ -1250,6 +1259,7 @@ export function createProjectProxyRenderWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  const telemetry = new StructuredConsoleOperationTelemetry()
   const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
   if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
   const configuredLease = Number(environment.APOLLO_V2_RENDER_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS)
@@ -1257,7 +1267,8 @@ export function createProjectProxyRenderWorker(
   const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
   const configuredRetryMax = Number(environment.APOLLO_V2_WORKER_RETRY_MAX_MS)
   return runNextProjectProxyRenderOperationService({
-    operations: createPublicOperationRepository(), projects: createProjectProxyRenderRepository(),
+    operations: createPublicOperationRepository(telemetry), projects: createProjectProxyRenderRepository(),
+    telemetry,
     artifacts: createMediaArtifactPersistenceRepository(environment), storage: createLocalMediaUploadStorageFromEnvironment(environment),
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment), artifactRoot, clock,
     renderElementMaps: createRenderElementMapRepository(),
@@ -1275,6 +1286,7 @@ export function createProjectFinalExportWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  const telemetry = new StructuredConsoleOperationTelemetry()
   const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
   if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
   const configuredLease = Number(environment.APOLLO_V2_RENDER_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS)
@@ -1282,7 +1294,8 @@ export function createProjectFinalExportWorker(
   const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
   const configuredRetryMax = Number(environment.APOLLO_V2_WORKER_RETRY_MAX_MS)
   return runNextProjectFinalExportOperationService({
-    operations: createPublicOperationRepository(),
+    operations: createPublicOperationRepository(telemetry),
+    telemetry,
     projects: createProjectFinalExportRepository(),
     rights: createAssetRightsRepository(),
     artifacts: createMediaArtifactPersistenceRepository(environment),
@@ -1304,6 +1317,7 @@ export function createSourceCleanupWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  const telemetry = new StructuredConsoleOperationTelemetry()
   const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
   if (!artifactRoot) {
     throw new DomainError(
@@ -1326,7 +1340,8 @@ export function createSourceCleanupWorker(
     environment.APOLLO_V2_WORKER_RETRY_MAX_MS,
   )
   return runNextSourceCleanupOperationService({
-    operations: createPublicOperationRepository(),
+    operations: createPublicOperationRepository(telemetry),
+    telemetry,
     cleanups: createSourceCleanupRepository(),
     mediaArtifacts: createMediaArtifactQueryRepository(),
     artifacts: createMediaArtifactPersistenceRepository(environment),

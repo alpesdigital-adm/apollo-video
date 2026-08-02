@@ -1,6 +1,6 @@
 import type {
   OperationTelemetrySink,
-  PublicOperationTelemetryEvent,
+  OperationTelemetryEvent,
 } from '../application/ports/operation-telemetry.ts'
 
 interface StructuredLogWriter {
@@ -15,7 +15,7 @@ export class StructuredConsoleOperationTelemetry implements OperationTelemetrySi
     this.writer = writer
   }
 
-  emit(event: Readonly<PublicOperationTelemetryEvent>): void {
+  emit(event: Readonly<OperationTelemetryEvent>): void {
     try {
       this.writer.info(JSON.stringify(event))
     } catch {

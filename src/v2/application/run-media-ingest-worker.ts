@@ -5,6 +5,7 @@ import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-
 import type { MediaIngestProcessor, MediaTranscriber, ProjectMediaRepository, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import type { MediaTransferRepository } from './ports/media-transfer-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
+import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { assetRightsRevision } from '../domain/asset-rights.ts'
 import { createMediaColorProbe } from '../domain/color-and-export.ts'
 import { DomainError } from '../domain/errors.ts'
@@ -16,6 +17,7 @@ import { probeVideo } from '../infrastructure/media/video-probe.ts'
 import { setAssetRightsService } from './set-asset-rights.ts'
 import { calculatePublicOperationRetryDelayMs } from './run-public-operation-worker.ts'
 import { compileInitialSourceEditPlan } from './apply-editorial-cut-command.ts'
+import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 
 const NON_RETRYABLE_CODES = new Set([
@@ -56,6 +58,7 @@ export function runNextMediaIngestOperationService(dependencies: {
   heartbeatIntervalMs?: number
   retryBaseDelayMs?: number
   retryMaxDelayMs?: number
+  telemetry?: OperationTelemetrySink
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const leaseDurationMs = dependencies.leaseDurationMs ?? 60_000
@@ -152,7 +155,17 @@ export function runNextMediaIngestOperationService(dependencies: {
       await writeRights(context.sourceArtifactId)
 
       await enter('normalizing')
-      const normalized = await dependencies.processor.normalize({ sourcePath: master.path, operationId: operation.id, signal: abortController.signal })
+      const normalize = () => dependencies.processor.normalize({ sourcePath: master.path, operationId: operation.id, signal: abortController.signal })
+      const normalized = dependencies.telemetry
+        ? await runPublicOperationSpan({
+            telemetry: dependencies.telemetry,
+            record: claimed,
+            spanKind: 'renderer',
+            spanName: 'ffmpeg-media-normalize',
+            clock,
+            action: normalize,
+          })
+        : await normalize()
       const proxyStored = await dependencies.storage.promoteDerived({
         workspaceId: operation.workspaceId, sourcePath: normalized.proxyPath, sha256: normalized.proxySha256,
         extension: 'mp4', prefix: 'editing-proxies',
@@ -207,7 +220,17 @@ export function runNextMediaIngestOperationService(dependencies: {
       await enter('transcribing')
       const project = await dependencies.projectMedia.readProject({ workspaceId: operation.workspaceId, projectId: context.projectId })
       if (!project) throw new DomainError('PERSISTENCE_CONFLICT', 'Ingest project no longer exists')
-      const transcript = await dependencies.transcriber.transcribe({ audioPath: normalized.audioPath, language: project.locale, signal: abortController.signal })
+      const transcribe = () => dependencies.transcriber.transcribe({ audioPath: normalized.audioPath, language: project.locale, signal: abortController.signal })
+      const transcript = dependencies.telemetry
+        ? await runPublicOperationSpan({
+            telemetry: dependencies.telemetry,
+            record: claimed,
+            spanKind: 'provider',
+            spanName: 'groq-transcription',
+            clock,
+            action: transcribe,
+          })
+        : await transcribe()
       const transcriptId = `transcript-${workspaceNamespace}-${transcript.transcriptHash}`
       const planIdentity = createHash('sha256')
         .update(`${operation.id}:${context.sourceArtifactId}:${context.sourceManifestId}:${transcript.transcriptHash}`)

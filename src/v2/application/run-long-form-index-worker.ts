@@ -19,6 +19,11 @@ import type {
 import type {
   PublicOperationRepository,
 } from './ports/public-operation-repository.ts'
+import type {
+  OperationTelemetrySink,
+  PublicOperationSpanName,
+} from './ports/operation-telemetry.ts'
+import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import {
   calculatePublicOperationRetryDelayMs,
 } from './run-public-operation-worker.ts'
@@ -72,6 +77,7 @@ export function runNextLongFormIndexOperationService(
     heartbeatIntervalMs?: number
     retryBaseDelayMs?: number
     retryMaxDelayMs?: number
+    telemetry?: OperationTelemetrySink
   },
 ) {
   const clock = dependencies.clock ?? (() => new Date())
@@ -290,11 +296,12 @@ export function runNextLongFormIndexOperationService(
           })
         }
         workflow = persistedStart
-        const checkpoint = workflow.stages.find(
+        const processingWorkflow = workflow
+        const checkpoint = processingWorkflow.stages.find(
           (candidate) => candidate.stage === stage,
         )!
-        const result = await dependencies.processor.process({
-          workflow,
+        const processStage = () => dependencies.processor.process({
+          workflow: processingWorkflow,
           checkpoint,
           lease: Object.freeze({
             operationId,
@@ -304,6 +311,22 @@ export function runNextLongFormIndexOperationService(
           signal: abortController.signal,
           heartbeat,
         })
+        const spanName: PublicOperationSpanName =
+          stage === 'transcript'
+            ? 'long-form-transcript'
+            : stage === 'diarization'
+              ? 'openai-diarization'
+              : 'long-form-derived-analysis'
+        const result = dependencies.telemetry
+          ? await runPublicOperationSpan({
+              telemetry: dependencies.telemetry,
+              record: claimed,
+              spanKind: 'provider',
+              spanName,
+              clock,
+              action: processStage,
+            })
+          : await processStage()
         if (!(await heartbeat())) {
           return Object.freeze({
             operationId,

@@ -18,6 +18,8 @@ import type { PublicOperationRepository } from './ports/public-operation-reposit
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-materializer.ts'
+import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
+import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -68,6 +70,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   heartbeatIntervalMs?: number
   retryBaseDelayMs?: number
   retryMaxDelayMs?: number
+  telemetry?: OperationTelemetrySink
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const leaseDurationMs = dependencies.leaseDurationMs ?? 30_000
@@ -233,7 +236,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       await enter('rendering')
-      const rendered = await dependencies.renderer.render({
+      const render = () => dependencies.renderer.render({
         operationId: operation.id,
         renderKind: 'final',
         sources: source.renderSources.map((asset) => ({
@@ -252,6 +255,16 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         ...(composition ? { composition } : {}),
         signal: abortController.signal,
       })
+      const rendered = dependencies.telemetry
+        ? await runPublicOperationSpan({
+            telemetry: dependencies.telemetry,
+            record: claimed,
+            spanKind: 'renderer',
+            spanName: 'ffmpeg-final-export',
+            clock,
+            action: render,
+          })
+        : await render()
       await enter('verifying')
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Final export lease was lost')
       const expectedFrames = clips.reduce(

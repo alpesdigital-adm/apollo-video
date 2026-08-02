@@ -33,6 +33,8 @@ import type {
 import type {
   SourceCleanupProcessor,
 } from './ports/source-cleanup-processor.ts'
+import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
+import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import type {
   SourceCleanupRepository,
 } from './ports/source-cleanup-repository.ts'
@@ -105,6 +107,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
   heartbeatIntervalMs?: number
   retryBaseDelayMs?: number
   retryMaxDelayMs?: number
+  telemetry?: OperationTelemetrySink
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const leaseDurationMs = dependencies.leaseDurationMs ?? 30_000
@@ -321,7 +324,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
         )
       }
       await enter('rendering')
-      const processed = await dependencies.processor.process({
+      const processCleanup = () => dependencies.processor.process({
         operationId: operation.id,
         sourcePath,
         sourceDurationMs: cleanup.plan.sourceDurationMs,
@@ -331,6 +334,16 @@ export function runNextSourceCleanupOperationService(dependencies: {
         >,
         signal: abortController.signal,
       })
+      const processed = dependencies.telemetry
+        ? await runPublicOperationSpan({
+            telemetry: dependencies.telemetry,
+            record: claimed,
+            spanKind: 'renderer',
+            spanName: 'ffmpeg-source-cleanup',
+            clock,
+            action: processCleanup,
+          })
+        : await processCleanup()
       await enter('verifying')
       const sourceShaAfter = await calculateFileSha256(sourcePath)
       if (

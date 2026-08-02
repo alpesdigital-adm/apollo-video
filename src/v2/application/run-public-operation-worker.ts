@@ -2,6 +2,8 @@ import type { PublicOperationRepository } from './ports/public-operation-reposit
 import type { ArtifactRenderCheckpointRepository } from './ports/artifact-render-checkpoint-repository.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { AuthorizedRenderCompletion } from './render-authorized-input.ts'
+import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
+import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 
 type RenderAuthorized = (request: {
   workspaceId: string
@@ -63,6 +65,7 @@ export function runNextPublicOperationService(dependencies: {
   heartbeatIntervalMs?: number
   retryBaseDelayMs?: number
   retryMaxDelayMs?: number
+  telemetry?: OperationTelemetrySink
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const leaseDurationMs = dependencies.leaseDurationMs ?? 30_000
@@ -102,6 +105,7 @@ export function runNextPublicOperationService(dependencies: {
     if (claimed.context.kind !== 'artifact-render') {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Render worker claimed a non-render operation')
     }
+    const context = claimed.context
 
     const operationId = claimed.operation.id
     const attempt = claimed.lease.attempt
@@ -171,9 +175,9 @@ export function runNextPublicOperationService(dependencies: {
       }
       scheduleHeartbeat()
 
-      const receipt = await dependencies.render({
+      const render = () => dependencies.render({
         workspaceId: claimed.operation.workspaceId,
-        authorizationId: claimed.context.authorizationId,
+        authorizationId: context.authorizationId,
         signal: abortController.signal,
         beforeCommit: async () => {
           if (!(await heartbeat())) {
@@ -191,12 +195,22 @@ export function runNextPublicOperationService(dependencies: {
           }
         },
       })
+      const receipt = dependencies.telemetry
+        ? await runPublicOperationSpan({
+            telemetry: dependencies.telemetry,
+            record: claimed,
+            spanKind: 'renderer',
+            spanName: 'remotion-authorized-render',
+            clock,
+            action: render,
+          })
+        : await render()
 
       if (
-        receipt.authorizationId !== claimed.context.authorizationId ||
+        receipt.authorizationId !== context.authorizationId ||
         receipt.artifactId !== claimed.operation.target.id ||
         receipt.manifestId !== claimed.operation.target.manifestId ||
-        receipt.inputHash !== claimed.context.inputHash
+        receipt.inputHash !== context.inputHash
       ) {
         throw new DomainError(
           'PERSISTENCE_CONFLICT',

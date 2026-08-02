@@ -114,6 +114,10 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
   const storage = new LocalMediaUploadStorage(root)
   const operations = new PrismaPublicOperationRepository(prisma)
   const artifacts = new PrismaMediaArtifactRepository(prisma)
+  const telemetryEvents = []
+  const telemetry = {
+    emit(event) { telemetryEvents.push(event) },
+  }
 
   try {
     await createFixture(fixturePath)
@@ -139,6 +143,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
 
     const ingest = runNextMediaIngestOperationService({
       operations,
+      telemetry,
       uploads: new PrismaMediaTransferRepository(prisma),
       artifacts,
       projectMedia: new PrismaProjectMediaRepository(prisma),
@@ -337,6 +342,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     }
     const render = runNextProjectProxyRenderOperationService({
       operations,
+      telemetry,
       projects: proxyProjects,
       artifacts,
       storage,
@@ -384,6 +390,34 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     assert.equal(await prisma.v2RenderElementMap.count({
       where: { workspaceId, projectId: seed.project.id, projectVersionId: noLut.version.id },
     }), 1)
+    const spans = telemetryEvents.filter((event) =>
+      event.schemaVersion === 'public-operation-span-telemetry/v1')
+    assert.deepEqual(
+      spans.map((event) => [event.spanName, event.event]),
+      [
+        ['ffmpeg-media-normalize', 'operation.span-started'],
+        ['ffmpeg-media-normalize', 'operation.span-succeeded'],
+        ['groq-transcription', 'operation.span-started'],
+        ['groq-transcription', 'operation.span-succeeded'],
+        ['ffmpeg-editorial-proxy', 'operation.span-started'],
+        ['ffmpeg-editorial-proxy', 'operation.span-succeeded'],
+      ],
+    )
+    assert.equal(
+      spans.filter((event) => event.event === 'operation.span-succeeded')
+        .every((event) => Number.isSafeInteger(event.durationMs) && event.durationMs >= 0),
+      true,
+    )
+    for (const spanName of [
+      'ffmpeg-media-normalize',
+      'groq-transcription',
+      'ffmpeg-editorial-proxy',
+    ]) {
+      const pair = spans.filter((event) => event.spanName === spanName)
+      assert.equal(new Set(pair.map((event) => event.traceId)).size, 1)
+      assert.equal(new Set(pair.map((event) => event.jobId)).size, 1)
+      assert.equal(pair.every((event) => event.workspaceId === workspaceId), true)
+    }
   } finally {
     await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } }).catch(() => undefined)
     await prisma.$disconnect()

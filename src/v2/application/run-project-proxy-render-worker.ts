@@ -16,6 +16,8 @@ import type { PublicOperationRepository } from './ports/public-operation-reposit
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-materializer.ts'
+import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
+import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import { evaluateRenderedProxy } from './render-workflow.ts'
 import { projectProxyRenderInputHash } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
@@ -53,6 +55,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   heartbeatIntervalMs?: number
   retryBaseDelayMs?: number
   retryMaxDelayMs?: number
+  telemetry?: OperationTelemetrySink
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const leaseDurationMs = dependencies.leaseDurationMs ?? 30_000
@@ -153,7 +156,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       await enter('rendering')
-      const rendered = await dependencies.renderer.render({
+      const render = () => dependencies.renderer.render({
         operationId: operation.id,
         renderKind: 'proxy',
         sources: source.renderSources.map((asset) => ({
@@ -172,6 +175,16 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         } : {}),
         signal: abortController.signal,
       })
+      const rendered = dependencies.telemetry
+        ? await runPublicOperationSpan({
+            telemetry: dependencies.telemetry,
+            record: claimed,
+            spanKind: 'renderer',
+            spanName: 'ffmpeg-editorial-proxy',
+            clock,
+            action: render,
+          })
+        : await render()
       await enter('verifying')
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
       await enter('persisting')

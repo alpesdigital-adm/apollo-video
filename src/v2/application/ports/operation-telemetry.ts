@@ -34,6 +34,44 @@ export interface PublicOperationTelemetryEvent {
   attempt: number
 }
 
+export const PUBLIC_OPERATION_SPAN_TELEMETRY_SCHEMA_VERSION =
+  'public-operation-span-telemetry/v1' as const
+
+export type PublicOperationSpanKind = 'provider' | 'renderer'
+export type PublicOperationSpanName =
+  | 'ffmpeg-media-normalize'
+  | 'groq-transcription'
+  | 'ffmpeg-editorial-proxy'
+  | 'remotion-authorized-render'
+  | 'ffmpeg-final-export'
+  | 'ffmpeg-source-cleanup'
+  | 'long-form-transcript'
+  | 'openai-diarization'
+  | 'long-form-derived-analysis'
+
+export interface PublicOperationSpanTelemetryEvent {
+  schemaVersion: typeof PUBLIC_OPERATION_SPAN_TELEMETRY_SCHEMA_VERSION
+  event:
+    | 'operation.span-started'
+    | 'operation.span-succeeded'
+    | 'operation.span-failed'
+  occurredAt: string
+  traceId: string
+  spanId: string
+  jobId: string
+  workspaceId: string
+  projectId?: string
+  operationType: PublicOperation['type']
+  attempt: number
+  spanKind: PublicOperationSpanKind
+  spanName: PublicOperationSpanName
+  durationMs?: number
+}
+
+export type OperationTelemetryEvent =
+  | PublicOperationTelemetryEvent
+  | PublicOperationSpanTelemetryEvent
+
 export interface OperationTelemetrySink {
-  emit(event: Readonly<PublicOperationTelemetryEvent>): void | Promise<void>
+  emit(event: Readonly<OperationTelemetryEvent>): void | Promise<void>
 }
