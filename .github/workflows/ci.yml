@@ -134,3 +134,55 @@ jobs:
 
       - name: Run public API integration tests
         run: npm run test:integration:api
+
+  local-infrastructure:
+    name: Isolated Compose infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      COMPOSE_PROJECT_NAME: apollo-f0-${{ github.run_id }}
+      POSTGRES_DB: apollo_v2
+      POSTGRES_USER: apollo
+      POSTGRES_PASSWORD: apollo-ci-compose-password
+      POSTGRES_TUNNEL_PORT: 55432
+      MINIO_ROOT_USER: apollo-ci-storage
+      MINIO_ROOT_PASSWORD: apollo-ci-storage-password
+      MINIO_API_PORT: 59000
+      MINIO_CONSOLE_PORT: 59001
+      APOLLO_V2_S3_BUCKET: apollo-video-ci
+      V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-compose-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Start isolated PostgreSQL and MinIO
+        run: |
+          docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml up -d --wait postgres minio
+          docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml up --no-deps minio-init
+
+      - name: Migrate clean Compose PostgreSQL
+        run: npm run db:v2:migrate:deploy
+
+      - name: Verify PostgreSQL and versioned object round-trip
+        run: |
+          table_count="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from information_schema.tables where table_schema = 'public'")"
+          test "$table_count" -ge 128
+          docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e APOLLO_V2_S3_BUCKET="$APOLLO_V2_S3_BUCKET" minio sh -ec '
+            mc version info "local/$APOLLO_V2_S3_BUCKET" | grep -q Enabled
+            printf apollo-v2-compose-smoke | mc pipe "local/$APOLLO_V2_S3_BUCKET/gates/smoke.txt"
+            test "$(mc cat "local/$APOLLO_V2_S3_BUCKET/gates/smoke.txt")" = apollo-v2-compose-smoke
+          '
+
+      - name: Stop isolated infrastructure
+        if: always()
+        run: docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml down --volumes --remove-orphans --timeout 30
