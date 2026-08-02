@@ -4,6 +4,8 @@ Development infrastructure uses isolated PostgreSQL 16, MinIO S3-compatible stor
 
 The hosted CI run `30759468720` is the first fully green F0.030 vertical proof. It uses PostgreSQL 16/pgvector and real FFmpeg to cross verified upload, durable ingest, an immutable source-ingest EditPlan, Director planning, an explicit project LUT `none` Command, trusted color compilation, proxy enqueue, worker rendering, promotion, canonical manifest and RenderElementMap. The controlled transcript keeps the test deterministic; local filesystem storage is used by this smoke, so MinIO/object-storage reconstruction and the combined Compose runtime remain separate open gates.
 
+The parallel `Isolated Compose infrastructure` job became green in run `30759955783`: it boots the repository's pinned PostgreSQL and MinIO Compose definitions with fail-closed credentials and loopback ports, migrates a clean database, verifies the expected public-table floor, confirms bucket versioning, performs a byte-exact object write/read and always removes containers, networks and volumes. This proves the isolated database and object-storage provisioning items; it does not yet prove the combined app/worker Compose topology or reconstruction after process restart.
+
 Local PostgreSQL and MinIO publish only on explicit loopback ports and require
 operator-supplied secrets. PostgreSQL uses a dedicated volume and a bounded
 Prisma pool. MinIO initializes one declared bucket idempotently and enables
