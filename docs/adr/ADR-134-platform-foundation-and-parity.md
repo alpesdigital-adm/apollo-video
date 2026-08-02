@@ -6,6 +6,8 @@ The hosted CI run `30759468720` is the first fully green F0.030 vertical proof. 
 
 The parallel `Isolated Compose infrastructure` job became green in run `30759955783`: it boots the repository's pinned PostgreSQL and MinIO Compose definitions with fail-closed credentials and loopback ports, migrates a clean database, verifies the expected public-table floor, confirms bucket versioning, performs a byte-exact object write/read and always removes containers, networks and volumes. This proves the isolated database and object-storage provisioning items; it does not yet prove the combined app/worker Compose topology or reconstruction after process restart.
 
+Run `30760710159` extends that gate through the combined supervised topology. After clean migrations and the versioned-object round-trip, Compose builds one V2 image and starts the API plus ingest, render, webhook and long-form workers; the gate verifies API health, every container in `running`, restart policy `unless-stopped`, and unconditional teardown of containers, networks and volumes. The proof exposed a real ESM/CJS import incompatibility that made the long-form worker restart after initial health and now guards that boot contract. It concludes isolated durable-workflow provisioning, but does not claim proxy reconstruction from persisted state after restart.
+
 Local PostgreSQL and MinIO publish only on explicit loopback ports and require
 operator-supplied secrets. PostgreSQL uses a dedicated volume and a bounded
 Prisma pool. MinIO initializes one declared bucket idempotently and enables

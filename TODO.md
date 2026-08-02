@@ -24,8 +24,8 @@ Estado auditado após o gate F2.019, com a jornada integral do MVP Core e os
 dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **276 de 1.259 microtarefas verificadas como efetivamente entregues (21,9%, arredondamento conservador)**;
-- **983 microtarefas abertas ou aguardando nova comprovação**;
+- **277 de 1.259 microtarefas verificadas como efetivamente entregues (22,0%, arredondamento conservador)**;
+- **982 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
   permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
@@ -510,7 +510,7 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 - [x] Provisionar Postgres dedicado em desenvolvimento isolado. Evidência F0.030: o job `Isolated Compose infrastructure` do run `30759955783` subiu o Compose PostgreSQL 16/pgvector em loopback, aguardou healthcheck, aplicou todas as migrations sobre volume limpo, comprovou 128+ tabelas e removeu container/rede/volume no gate `always()`.
 - [x] Provisionar object storage em desenvolvimento isolado. Evidência F0.030: o mesmo job subiu MinIO pinado em loopback, criou convergentemente o bucket `apollo-video-ci`, confirmou versionamento, realizou upload/leitura byte-exata com `mc` e removeu container/rede/volume no cleanup.
-- [ ] Provisionar workflow durável em desenvolvimento isolado. Parcial F0.030: o Compose combinado constrói uma única imagem V2 e supervisiona API, ingest, render, webhook e long-form workers com `init`, restart, graceful stop e volumes compartilhados; migrations e bucket versionado são dependências concluídas antes do runtime. `infra:validate` cobre a topologia, mas Docker não existe neste host, portanto boot, recovery de lease e cleanup reais do conjunto ainda não foram executados. Evidência: T-F0-030 e ADR-134.
+- [x] Provisionar workflow durável em desenvolvimento isolado. Evidência F0.030: o job `Isolated Compose infrastructure` do run `30760710159` construiu uma única imagem V2 e iniciou API, ingest, render, webhook e long-form workers sobre PostgreSQL migrado e MinIO versionado; os cinco processos permaneceram `running` com `init`, healthcheck/restart `unless-stopped`, graceful stop e volumes isolados. O gate também revelou e corrigiu o boot incompatível do worker long-form e encerrou containers, redes e volumes em `always()`. Retomada de lease continua coberta pelas integrações PostgreSQL do run verde `30759468720`; reconstrução de proxy após restart permanece item separado. Evidência: T-F0-030 e ADR-134.
 - [x] Criar seeds mínimos para workspace, projeto, source e OutputSpec. Evidência F0.030: o bootstrap de workspace/client e o seed idempotente de Project + OutputSpec atravessaram upload verificado, ingest durável, PostgreSQL e FFmpeg reais no run hospedado `30759468720`, preservando source-master, editing-proxy e nova ProjectVersion imutável.
 - [x] Configurar audit, typecheck, unit, migration check, contract gate, build e integrações Postgres/API no CI. Evidência F0.030: o run hospedado integral `30759468720` concluiu todos os gates sobre PostgreSQL 16/pgvector, incluindo 795 testes, contratos, migrations, build, integrações e cleanup dos containers.
 - [x] Configurar lint no CI após selecionar regras e corrigir o baseline da v1. Evidência F0.030: ESLint 9 + Next core-web-vitals/TypeScript cobre `src`, `scripts` e `tests` com zero warnings; o gate integrou o run verde `30759468720`.
