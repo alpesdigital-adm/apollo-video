@@ -2,6 +2,7 @@ import type {
   MediaArtifactExecutionProvenance,
   MediaArtifactProbe,
   MediaArtifactType,
+  MediaArtifactLifecycleStatus,
 } from '../../domain/media-artifact.ts'
 import type { MediaColorProbe } from '../../domain/color-and-export.ts'
 
@@ -49,7 +50,7 @@ export interface MediaArtifactRecord {
   byteSize: bigint
   mediaType: MediaArtifactType
   container: string
-  status: 'available' | 'quarantined' | 'deleted'
+  status: MediaArtifactLifecycleStatus
   manifests: readonly MediaArtifactManifestRecord[]
   createdAt: string
 }

@@ -6762,6 +6762,96 @@ const commandArtifactInvalidationSchemaV2 = {
   },
 }
 
+const mediaArtifactVisibleStateSchema = {
+  ...visibleStateSchema,
+  properties: {
+    ...visibleStateSchema.properties,
+    label: { enum: ['available', 'quarantined', 'deleted'] },
+    progress: {
+      type: 'object', additionalProperties: false,
+      required: ['mode'], properties: { mode: { const: 'none' } },
+    },
+    primaryAction: { enum: ['open-result', 'inspect-error', 'inspect-history'] },
+    availableActions: {
+      type: 'array', minItems: 1, maxItems: 1, uniqueItems: true,
+      items: { enum: ['open-result', 'inspect-error', 'inspect-history'] },
+    },
+  },
+  oneOf: [
+    {
+      type: 'object',
+      properties: {
+        label: { const: 'available' }, tone: { const: 'success' },
+        primaryAction: { const: 'open-result' },
+        availableActions: {
+          type: 'array', minItems: 1, maxItems: 1,
+          prefixItems: [{ const: 'open-result' }], items: false,
+        },
+        terminal: { const: true },
+      },
+    },
+    {
+      type: 'object',
+      properties: {
+        label: { const: 'quarantined' }, tone: { const: 'warning' },
+        primaryAction: { const: 'inspect-error' },
+        availableActions: {
+          type: 'array', minItems: 1, maxItems: 1,
+          prefixItems: [{ const: 'inspect-error' }], items: false,
+        },
+        terminal: { const: false },
+      },
+    },
+    {
+      type: 'object',
+      properties: {
+        label: { const: 'deleted' }, tone: { const: 'neutral' },
+        primaryAction: { const: 'inspect-history' },
+        availableActions: {
+          type: 'array', minItems: 1, maxItems: 1,
+          prefixItems: [{ const: 'inspect-history' }], items: false,
+        },
+        terminal: { const: true },
+      },
+    },
+  ],
+}
+
+const mediaArtifactPublicSchemaV3 = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id', 'workspaceId', 'artifactKey', 'sha256', 'byteSize',
+    'mediaType', 'container', 'status', 'visibleState', 'createdAt',
+  ],
+  properties: {
+    id: idSchema,
+    workspaceId: idSchema,
+    artifactKey: { type: 'string', minLength: 1, maxLength: 512 },
+    sha256: sha256Schema,
+    byteSize: { type: 'string', pattern: '^[1-9][0-9]*$' },
+    mediaType: { enum: ['video', 'audio', 'image', 'font', 'data'] },
+    container: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$' },
+    status: { enum: ['available', 'quarantined', 'deleted'] },
+    visibleState: mediaArtifactVisibleStateSchema,
+    createdAt: dateTimeSchema,
+  },
+  allOf: [
+    {
+      if: { type: 'object', properties: { status: { const: 'available' } } },
+      then: { type: 'object', properties: { visibleState: { type: 'object', properties: { label: { const: 'available' } } } } },
+    },
+    {
+      if: { type: 'object', properties: { status: { const: 'quarantined' } } },
+      then: { type: 'object', properties: { visibleState: { type: 'object', properties: { label: { const: 'quarantined' } } } } },
+    },
+    {
+      if: { type: 'object', properties: { status: { const: 'deleted' } } },
+      then: { type: 'object', properties: { visibleState: { type: 'object', properties: { label: { const: 'deleted' } } } } },
+    },
+  ],
+}
+
 const publicOperationSchema = {
   type: 'object',
   additionalProperties: false,
@@ -12121,6 +12211,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['operation'],
       properties: { operation: publicOperationSchemaV6 },
+    }),
+  ),
+  defineSchema('artifact-detail', 3, 'Artifact detail response with explicit lifecycle visible state',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['artifact', 'manifests'],
+      properties: {
+        artifact: mediaArtifactPublicSchemaV3,
+        manifests: { type: 'array', items: artifactManifestSchema },
+      },
     }),
   ),
   defineSchema('public-operation-detail', 7, 'Public operation detail with an honest actionable visible-state projection',

@@ -14,6 +14,7 @@ import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
   assertMediaArtifactManifest,
+  MEDIA_ARTIFACT_LIFECYCLE_STATUSES,
   type MediaArtifactManifest,
 } from '../../domain/media-artifact.ts'
 import { createMediaColorProbe } from '../../domain/color-and-export.ts'
@@ -344,7 +345,9 @@ export class PrismaMediaArtifactRepository
       },
     })
     if (!row) return null
-    if (!['available', 'quarantined', 'deleted'].includes(row.status)) {
+    if (!MEDIA_ARTIFACT_LIFECYCLE_STATUSES.includes(
+      row.status as (typeof MEDIA_ARTIFACT_LIFECYCLE_STATUSES)[number],
+    )) {
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
         'Stored media artifact status is invalid',

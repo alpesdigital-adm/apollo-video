@@ -29,6 +29,14 @@ function assertExactKeys(
 export const MEDIA_ARTIFACT_TYPES = ['video', 'audio', 'image', 'font', 'data'] as const
 export type MediaArtifactType = (typeof MEDIA_ARTIFACT_TYPES)[number]
 
+export const MEDIA_ARTIFACT_LIFECYCLE_STATUSES = [
+  'available',
+  'quarantined',
+  'deleted',
+] as const
+export type MediaArtifactLifecycleStatus =
+  (typeof MEDIA_ARTIFACT_LIFECYCLE_STATUSES)[number]
+
 export interface MediaArtifactSource {
   artifactKey: string
   sha256: string

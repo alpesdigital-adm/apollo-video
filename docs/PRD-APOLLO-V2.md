@@ -1764,6 +1764,11 @@ visível `stale-output` oferece reconstrução para a versão nova e abertura do
 resultado histórico. Uma resolução bem-sucedida remove a relação pendente; ela
 não altera nem apaga o artifact que continua válido para sua versão de origem.
 
+O lifecycle global do artifact é um enum separado e fechado: `available`,
+`quarantined` ou `deleted`. Sua projeção não possui percentual, pois não é um
+job. Available abre o resultado, quarantined exige inspeção e deleted preserva
+somente a ação de histórico; qualquer estado desconhecido falha fechado.
+
 Em lote, o progresso visível é derivado exclusivamente dos steps persistidos.
 Falha de um item não transforma itens concluídos em falha nem apresenta o lote
 como concluído: a projeção distingue `partially-failed`, preserva resultados

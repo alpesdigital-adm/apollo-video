@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import Ajv2020 from 'ajv/dist/2020.js'
+import addFormats from 'ajv-formats'
 
 import { assertNoPermanentStorageIdentity, publicArtifactReference } from '../../src/v2/public-api/public-media-identity.ts'
-import { PUBLIC_SCHEMAS } from '../../src/v2/public-api/schema-registry.ts'
+import { getPublicSchema, PUBLIC_SCHEMAS } from '../../src/v2/public-api/schema-registry.ts'
 import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
-import { presentMediaArtifact } from '../../src/v2/public-api/presenters.ts'
+import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+import {
+  presentMediaArtifact,
+  presentMediaArtifactV3,
+} from '../../src/v2/public-api/presenters.ts'
 
 test('all public examples exclude permanent storage identities', () => {
   for (const schema of PUBLIC_SCHEMAS) {
@@ -28,4 +34,49 @@ test('storage-shaped keys and path-shaped artifact references fail closed', () =
   assert.throws(() => assertNoPermanentStorageIdentity({ storagePath: '/private/file.mp4' }), /forbidden/)
   assert.throws(() => assertNoPermanentStorageIdentity({ artifactKey: 'workspace/private/file.mp4' }), /opaque/)
   assert.throws(() => publicArtifactReference('../artifact'), /represented publicly/)
+})
+
+test('T-FR-236 maps the three persisted artifact lifecycle states without conflating stale', () => {
+  const base = {
+    id: 'artifact-output-1', workspaceId: 'workspace-1',
+    artifactKey: 'private/artifact-output-1.mp4', sha256: 'a'.repeat(64),
+    byteSize: 10n, mediaType: 'video', container: 'mp4',
+    createdAt: '2026-07-16T23:00:00.000Z', manifests: [],
+  }
+  const available = presentMediaArtifactV3({ ...base, status: 'available' })
+  const quarantined = presentMediaArtifactV3({ ...base, status: 'quarantined' })
+  const deleted = presentMediaArtifactV3({ ...base, status: 'deleted' })
+
+  assert.deepEqual(available.artifact.visibleState, {
+    schemaVersion: 'visible-state/v1', label: 'available', tone: 'success',
+    progress: { mode: 'none' }, primaryAction: 'open-result',
+    availableActions: ['open-result'], terminal: true,
+  })
+  assert.equal(quarantined.artifact.visibleState.label, 'quarantined')
+  assert.equal(quarantined.artifact.visibleState.primaryAction, 'inspect-error')
+  assert.equal(quarantined.artifact.visibleState.terminal, false)
+  assert.equal(deleted.artifact.visibleState.label, 'deleted')
+  assert.equal(deleted.artifact.visibleState.primaryAction, 'inspect-history')
+  assert.notEqual(available.artifact.visibleState.label, 'stale-output')
+  assert.throws(() => available.artifact.visibleState.availableActions.push('retry'))
+  assert.throws(
+    () => presentMediaArtifactV3({ ...base, status: 'stale' }),
+    /lifecycle status is invalid/,
+  )
+
+  const capability = FOUNDATION_CAPABILITIES.find((item) =>
+    item.id === 'apollo.artifacts.read')
+  assert.equal(capability.version, '3.0.0')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/artifact-detail/v3')
+  assert.equal(
+    getPublicSchema('apollo://schemas/artifact-detail/v2').ref,
+    'apollo://schemas/artifact-detail/v2',
+  )
+  const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+    .compile(getPublicSchema(capability.outputSchemaRef).schema)
+  const validBody = { data: available, meta: { apiVersion: 'v1' } }
+  assert.equal(validate(validBody), true, JSON.stringify(validate.errors))
+  const mismatched = structuredClone(validBody)
+  mismatched.data.artifact.visibleState = quarantined.artifact.visibleState
+  assert.equal(validate(mismatched), false)
 })

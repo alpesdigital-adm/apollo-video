@@ -24,3 +24,8 @@ artifact lifecycle state. Its additive v2 presentation is `stale-output`, has
 `availabilityEffect: none`, and exposes rebuild plus historical-open actions.
 Exact proxy/final completion resolves the matching edge; the historical
 artifact remains addressable under its source version.
+
+The media artifact aggregate has a separate closed lifecycle:
+`available|quarantined|deleted`. It never inherits `stale-output` from a
+version edge and never invents progress. The Prisma adapter and v3 public
+presenter share the domain allowlist and reject unknown persisted values.

@@ -38,6 +38,12 @@ adds `availabilityEffect: none` and a `stale-output` visible projection with
 rebuild and historical-open actions. Resolution removes only the matching
 unresolved version/variant edge; global artifact availability is never changed.
 
+Media artifact lifecycle is independently closed as available, quarantined or
+deleted. Its public v3 detail projection has no progress percentage and maps to
+open, inspect or historical actions respectively. Both hydration and
+presentation fail closed for an unknown lifecycle value; `stale-output` is not
+an artifact status.
+
 Partial invalidation is recorded as `command-impact/v1` inside the immutable
 Command payload, so it commits atomically without a parallel mutation model.
 The record is content-addressed, frame-first and format-scoped; completed

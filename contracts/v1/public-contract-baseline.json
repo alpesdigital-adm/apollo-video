@@ -170,14 +170,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.artifacts.read": {
-      "version": "2.0.0",
+      "version": "3.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "artifacts:read"
       ],
-      "outputSchemaRef": "apollo://schemas/artifact-detail/v2",
+      "outputSchemaRef": "apollo://schemas/artifact-detail/v3",
       "endpoint": {
         "method": "GET",
         "path": "/v1/artifacts/{artifactId}"
@@ -8518,6 +8518,453 @@
                   "format": "date-time"
                 }
               }
+            },
+            "manifests": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "schemaVersion",
+                  "manifestHash",
+                  "recipe",
+                  "sources",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "schemaVersion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "manifestHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "recipe": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "version",
+                      "parametersHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                      },
+                      "version": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                      },
+                      "parametersHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  },
+                  "probe": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "width",
+                      "height",
+                      "duration",
+                      "fps"
+                    ],
+                    "properties": {
+                      "width": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "height": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "duration": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "fps": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    }
+                  },
+                  "sources": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "artifactId",
+                        "artifactKey",
+                        "sha256",
+                        "role",
+                        "ordinal"
+                      ],
+                      "properties": {
+                        "artifactId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "artifactKey": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "role": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                        },
+                        "ordinal": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/artifact-detail/v3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact",
+            "manifests"
+          ],
+          "properties": {
+            "artifact": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "artifactKey",
+                "sha256",
+                "byteSize",
+                "mediaType",
+                "container",
+                "status",
+                "visibleState",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "artifactKey": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "byteSize": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                },
+                "mediaType": {
+                  "enum": [
+                    "video",
+                    "audio",
+                    "image",
+                    "font",
+                    "data"
+                  ]
+                },
+                "container": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                },
+                "status": {
+                  "enum": [
+                    "available",
+                    "quarantined",
+                    "deleted"
+                  ]
+                },
+                "visibleState": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "label",
+                    "tone",
+                    "progress",
+                    "primaryAction",
+                    "availableActions",
+                    "terminal"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "visible-state/v1"
+                    },
+                    "label": {
+                      "enum": [
+                        "available",
+                        "quarantined",
+                        "deleted"
+                      ]
+                    },
+                    "tone": {
+                      "enum": [
+                        "neutral",
+                        "info",
+                        "warning",
+                        "danger",
+                        "success"
+                      ]
+                    },
+                    "progress": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "mode"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "const": "none"
+                        }
+                      }
+                    },
+                    "primaryAction": {
+                      "enum": [
+                        "open-result",
+                        "inspect-error",
+                        "inspect-history"
+                      ]
+                    },
+                    "availableActions": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 1,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "open-result",
+                          "inspect-error",
+                          "inspect-history"
+                        ]
+                      }
+                    },
+                    "terminal": {
+                      "type": "boolean"
+                    }
+                  },
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "const": "available"
+                        },
+                        "tone": {
+                          "const": "success"
+                        },
+                        "primaryAction": {
+                          "const": "open-result"
+                        },
+                        "availableActions": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 1,
+                          "prefixItems": [
+                            {
+                              "const": "open-result"
+                            }
+                          ],
+                          "items": false
+                        },
+                        "terminal": {
+                          "const": true
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "const": "quarantined"
+                        },
+                        "tone": {
+                          "const": "warning"
+                        },
+                        "primaryAction": {
+                          "const": "inspect-error"
+                        },
+                        "availableActions": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 1,
+                          "prefixItems": [
+                            {
+                              "const": "inspect-error"
+                            }
+                          ],
+                          "items": false
+                        },
+                        "terminal": {
+                          "const": false
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "const": "deleted"
+                        },
+                        "tone": {
+                          "const": "neutral"
+                        },
+                        "primaryAction": {
+                          "const": "inspect-history"
+                        },
+                        "availableActions": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 1,
+                          "prefixItems": [
+                            {
+                              "const": "inspect-history"
+                            }
+                          ],
+                          "items": false
+                        },
+                        "terminal": {
+                          "const": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "available"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "available"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "quarantined"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "quarantined"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "deleted"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "deleted"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
             },
             "manifests": {
               "type": "array",

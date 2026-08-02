@@ -11,7 +11,10 @@ import type { MediaColorProbe } from '../domain/color-and-export.ts'
 import { publicArtifactReference } from './public-media-identity.ts'
 import type { PublicOperation } from '../domain/public-operation.ts'
 import { presentPublicOperationVisibleState } from '../domain/visible-state.ts'
-import { presentCommandArtifactInvalidationVisibleState } from '../domain/visible-state.ts'
+import {
+  presentCommandArtifactInvalidationVisibleState,
+  presentMediaArtifactVisibleState,
+} from '../domain/visible-state.ts'
 import type { ManualEditInvalidationView } from '../application/ports/manual-edit-repository.ts'
 import type {
   WebhookDeliveryDiagnosticRecord,
@@ -134,6 +137,17 @@ export function presentMediaArtifact(artifact: MediaArtifactRecord) {
       createdAt: manifest.createdAt,
     })),
   }
+}
+
+export function presentMediaArtifactV3(artifact: MediaArtifactRecord) {
+  const presented = presentMediaArtifact(artifact)
+  return Object.freeze({
+    ...presented,
+    artifact: Object.freeze({
+      ...presented.artifact,
+      visibleState: presentMediaArtifactVisibleState(artifact.status),
+    }),
+  })
 }
 
 export function presentMediaColorProbe(

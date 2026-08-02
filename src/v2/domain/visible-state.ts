@@ -10,6 +10,11 @@ import {
   parseCommandArtifactInvalidation,
   type CommandArtifactInvalidationV1,
 } from './command-impact.ts'
+import {
+  MEDIA_ARTIFACT_LIFECYCLE_STATUSES,
+  type MediaArtifactLifecycleStatus,
+} from './media-artifact.ts'
+import { assertDomain } from './errors.ts'
 
 export const VISIBLE_STATE_LABELS = [
   'queued',
@@ -24,6 +29,9 @@ export const VISIBLE_STATE_LABELS = [
   'partially-failed',
   'superseded',
   'stale-output',
+  'available',
+  'quarantined',
+  'deleted',
 ] as const
 
 export const VISIBLE_STATE_ACTIONS = [
@@ -220,6 +228,34 @@ export function presentCommandArtifactInvalidationVisibleState(
     availableActions: ['rebuild-output', 'open-historical-output'],
     terminal: false,
   })
+}
+
+export function presentMediaArtifactVisibleState(
+  status: MediaArtifactLifecycleStatus,
+): Readonly<VisibleState> {
+  assertDomain(
+    MEDIA_ARTIFACT_LIFECYCLE_STATUSES.includes(status),
+    'INVALID_MEDIA_ARTIFACT',
+    'Media artifact lifecycle status is invalid',
+    { status },
+  )
+  switch (status) {
+    case 'available':
+      return freezeVisibleState({
+        label: 'available', tone: 'success', progress: { mode: 'none' },
+        primaryAction: 'open-result', availableActions: ['open-result'], terminal: true,
+      })
+    case 'quarantined':
+      return freezeVisibleState({
+        label: 'quarantined', tone: 'warning', progress: { mode: 'none' },
+        primaryAction: 'inspect-error', availableActions: ['inspect-error'], terminal: false,
+      })
+    case 'deleted':
+      return freezeVisibleState({
+        label: 'deleted', tone: 'neutral', progress: { mode: 'none' },
+        primaryAction: 'inspect-history', availableActions: ['inspect-history'], terminal: true,
+      })
+  }
 }
 
 export function presentPublicOperationVisibleState(

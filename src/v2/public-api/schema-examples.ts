@@ -5297,6 +5297,62 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v6': [
       { data: { operation: queuedLongFormIndexOperationExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/artifact-detail/v3': [
+      {
+        data: {
+          artifact: {
+            id: 'artifact-font-example-1', workspaceId,
+            artifactKey: 'artifact:artifact-font-example-1', sha256: 'f'.repeat(64),
+            byteSize: '184320', mediaType: 'font', container: 'woff2',
+            status: 'available',
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'available', tone: 'success',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: true,
+            },
+            createdAt,
+          },
+          manifests: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          artifact: {
+            id: 'artifact-quarantined-example-1', workspaceId,
+            artifactKey: 'artifact:artifact-quarantined-example-1', sha256: 'e'.repeat(64),
+            byteSize: '1024', mediaType: 'data', container: 'json',
+            status: 'quarantined',
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'quarantined', tone: 'warning',
+              progress: { mode: 'none' }, primaryAction: 'inspect-error',
+              availableActions: ['inspect-error'], terminal: false,
+            },
+            createdAt,
+          },
+          manifests: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          artifact: {
+            id: 'artifact-deleted-example-1', workspaceId,
+            artifactKey: 'artifact:artifact-deleted-example-1', sha256: 'd'.repeat(64),
+            byteSize: '2048', mediaType: 'image', container: 'png',
+            status: 'deleted',
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'deleted', tone: 'neutral',
+              progress: { mode: 'none' }, primaryAction: 'inspect-history',
+              availableActions: ['inspect-history'], terminal: true,
+            },
+            createdAt,
+          },
+          manifests: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/public-operation-detail/v7': [
       { data: { operation: queuedLongFormIndexOperationVisibleExample }, meta: { apiVersion: 'v1' } },
     ],
