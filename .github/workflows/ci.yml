@@ -138,7 +138,7 @@ jobs:
   local-infrastructure:
     name: Isolated Compose infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       COMPOSE_PROJECT_NAME: apollo-f0-${{ github.run_id }}
       POSTGRES_DB: apollo_v2
@@ -151,6 +151,8 @@ jobs:
       MINIO_CONSOLE_PORT: 59001
       APOLLO_V2_S3_BUCKET: apollo-video-ci
       V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-compose-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+      V2_DOCKER_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@postgres:5432/apollo_v2?schema=public&application_name=apollo-video-compose-runtime-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+      APOLLO_BUILD_REVISION: compose-ci
 
     steps:
       - name: Check out repository
@@ -183,6 +185,18 @@ jobs:
           object_value="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T minio mc cat "local/$APOLLO_V2_S3_BUCKET/gates/smoke.txt")"
           test "$object_value" = apollo-v2-compose-smoke
 
+      - name: Start supervised app and workers
+        run: |
+          cp .env.local.example .env.local
+          docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml up -d --build --wait app ingest-worker render-worker webhook-worker long-form-worker
+          curl --fail --silent --show-error http://127.0.0.1:3333/v1/health > /dev/null
+          for service in app ingest-worker render-worker webhook-worker long-form-worker; do
+            container_id="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml ps -q "$service")"
+            test -n "$container_id"
+            test "$(docker inspect --format '{{.State.Status}}' "$container_id")" = running
+            test "$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$container_id")" = unless-stopped
+          done
+
       - name: Stop isolated infrastructure
         if: always()
-        run: docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml down --volumes --remove-orphans --timeout 30
+        run: docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml down --volumes --remove-orphans --timeout 30

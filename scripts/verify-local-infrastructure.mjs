@@ -48,6 +48,9 @@ for (const service of ['migrate', 'app', 'ingest-worker', 'render-worker', 'webh
 }
 requires(workflow, /V2_DATABASE_URL: \$\{V2_DOCKER_DATABASE_URL:\?V2_DOCKER_DATABASE_URL is required\}/, 'Container runtime must require its internal PostgreSQL URL')
 requires(workflow, /APOLLO_V2_S3_ENDPOINT: http:\/\/minio:9000/, 'Container runtime must address object storage by service name')
+requires(workflow, /APOLLO_V2_S3_BUCKET: \$\{APOLLO_V2_S3_BUCKET:\?APOLLO_V2_S3_BUCKET is required\}/, 'Container runtime must require the initialized bucket')
+requires(workflow, /APOLLO_V2_S3_ACCESS_KEY_ID: \$\{MINIO_ROOT_USER:\?MINIO_ROOT_USER is required\}/, 'Container runtime must use the MinIO access identity')
+requires(workflow, /APOLLO_V2_S3_SECRET_ACCESS_KEY: \$\{MINIO_ROOT_PASSWORD:\?MINIO_ROOT_PASSWORD is required\}/, 'Container runtime must use the MinIO secret')
 requires(workflow, /condition: service_healthy/, 'Runtime must wait for healthy PostgreSQL')
 requires(workflow, /condition: service_completed_successfully/, 'Runtime must wait for versioned bucket initialization')
 requires(workflow, /command: \["npm", "run", "db:v2:migrate:deploy"\]/, 'Runtime must apply clean migrations before app and workers start')
@@ -63,5 +66,6 @@ requires(envExample, /APOLLO_V2_S3_BUCKET=apollo-video/, 'Local bucket must be e
 requires(envExample, /APOLLO_V2_S3_FORCE_PATH_STYLE=true/, 'Local MinIO must use path-style addressing')
 requires(ci, /services:\s+[\s\S]*?postgres:\s+[\s\S]*?image: pgvector\/pgvector:0\.8\.5-pg16-trixie/, 'CI PostgreSQL must include the pinned pgvector extension used by migrations')
 requires(ci, /run: npm run infra:validate/, 'CI must enforce the local infrastructure contract')
+requires(ci, /Start supervised app and workers/, 'CI must boot the combined supervised Compose topology')
 
 console.log('Local infrastructure contracts verified: PostgreSQL 16, versioned MinIO and supervised V2 runtime are isolated and fail closed')
