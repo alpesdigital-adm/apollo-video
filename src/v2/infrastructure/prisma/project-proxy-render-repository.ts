@@ -6,6 +6,7 @@ import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { ProjectProxyRenderRepository, ProjectProxyRenderSource } from '../../application/ports/project-proxy-render-repository.ts'
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
 import type { ProxyQualityIssue } from '../../application/render-workflow.ts'
+import { calculateVersionHash } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
   parseCommandArtifactInvalidation,
@@ -79,7 +80,10 @@ function hydrateSource(
   const manifestBody = parseRecord(manifest.manifestJson, 'project proxy source manifest')
   const artifactBody = manifestBody.artifact
   if (
-    editPlan.schemaVersion !== 2 || editPlan.state !== 'compiled' || editPlan.projectVersionId !== version.id ||
+    editPlan.schemaVersion !== 2 || editPlan.state !== 'compiled' ||
+    version.editPlanSnapshot.workspaceId !== project.workspaceId ||
+    version.editPlanSnapshot.projectId !== project.id ||
+    calculateVersionHash(editPlan) !== version.editPlanSnapshot.contentHash ||
     typeof artifactBody !== 'object' || artifactBody === null || Array.isArray(artifactBody) ||
     typeof (artifactBody as Record<string, unknown>).artifactKey !== 'string'
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project proxy source is inconsistent')
@@ -166,6 +170,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
       where: { id: input.projectId, workspaceId: input.workspaceId },
       select: {
         id: true,
+        workspaceId: true,
         format: true,
         currentVersionId: true,
         versions: {
