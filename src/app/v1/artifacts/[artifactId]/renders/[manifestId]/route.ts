@@ -63,6 +63,7 @@ export async function POST(
       ...parseRequest(body),
       actor: { type: 'api-client', id: actor.clientId },
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
+      traceId: requestId,
     })
     return NextResponse.json(
       presentSuccess({

@@ -31,6 +31,7 @@ export function enqueueProjectProxyRenderService(dependencies: {
     expectedProjectVersionId?: string
     actor: { type: 'api-client'; id: string }
     idempotencyKey: string
+    traceId?: string
   }) {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const projectId = validateId(request.projectId, 'projectId')
@@ -97,6 +98,7 @@ export function enqueueProjectProxyRenderService(dependencies: {
       },
       idempotencyKey,
       requestFingerprint,
+      traceId: request.traceId,
     })
   }
 }

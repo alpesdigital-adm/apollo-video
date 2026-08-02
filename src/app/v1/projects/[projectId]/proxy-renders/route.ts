@@ -23,6 +23,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     })({
       workspaceId: actor.workspaceId, projectId, actor: { type: 'api-client', id: actor.clientId },
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
+      traceId: requestId,
     })
     return NextResponse.json(presentSuccess({ operation: presentPublicOperation(result.operation), replayed: result.replayed }), {
       status: 202, headers: publicApiHeaders(requestId),

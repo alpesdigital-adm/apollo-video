@@ -40,6 +40,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       workspaceId: actor.workspaceId, projectId, expectedProjectVersionId: result.version.id,
       actor: { type: 'api-client', id: actor.clientId },
       idempotencyKey: `lut-proxy:${calculateVersionHash(idempotencyKey).slice(0, 64)}`,
+      traceId: requestId,
     })
     return NextResponse.json(presentSuccess({
       ...presented, operation: presentPublicOperation(proxy.operation),

@@ -55,6 +55,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       projectId,
       actor: { type: 'api-client', id: actor.clientId },
       idempotencyKey: `patch-batch-proxy:${calculateVersionHash(idempotencyKey).slice(0, 58)}`,
+      traceId: requestId,
     })
     const batch = await repository.attachRenderOperation({
       workspaceId: actor.workspaceId,

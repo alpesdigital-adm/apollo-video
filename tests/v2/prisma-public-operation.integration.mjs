@@ -141,6 +141,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       context: { authorizationId, inputHash: sha('d') },
       idempotencyKey: 'operation-render-request',
       requestFingerprint: sha('f'),
+      traceId: 'request_trace_prisma_operation_001',
     }
     const concurrentResults = await Promise.all([
       repository.createOrReplay(input),
@@ -156,6 +157,8 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(created.replayed, false)
     assert.equal(replayed.replayed, true)
     assert.equal(replayed.operation.id, operationId)
+    assert.equal(created.traceId, input.traceId)
+    assert.equal(replayed.traceId, input.traceId)
     assert.deepEqual(replayed.context, { kind: 'artifact-render', ...input.context })
     assert.equal(await client.v2PublicOperation.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2ArtifactRenderOperation.count({ where: { workspaceId } }), 1)
@@ -173,6 +176,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     )
 
     const storedCore = await client.v2PublicOperation.findUnique({ where: { id: operationId } })
+    assert.equal(storedCore.traceId, input.traceId)
     assert.equal(storedCore.resultJson, null)
     assert.equal(JSON.stringify(storedCore).includes(authorizationId), false)
     assert.equal(JSON.stringify(storedCore).includes(sha('d')), false)

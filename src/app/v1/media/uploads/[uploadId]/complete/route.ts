@@ -18,7 +18,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ up
       ? createMediaUploadVerifierFromEnvironment()
       : createLocalMediaUploadStorageFromEnvironment()
     const result = await completeMediaUploadService({ repository: createMediaTransferRepository(), verifier })({ workspaceId: actor.workspaceId, clientId: actor.clientId, uploadId })
-    const queued = await enqueueMediaIngestService({ operations: createPublicOperationRepository() })({ upload: result.upload! })
+    const queued = await enqueueMediaIngestService({ operations: createPublicOperationRepository() })({
+      upload: result.upload!,
+      traceId: requestId,
+    })
     return NextResponse.json(presentSuccess({
       uploadId: result.upload!.id, status: result.upload!.status, verifiedAt: result.upload!.verifiedAt,
       operation: queued.operation, replayed: result.replayed || queued.replayed,

@@ -1548,6 +1548,7 @@ model V2PublicOperation {
   errorRetryable     Boolean?
   idempotencyKey     String    @db.VarChar(128)
   requestFingerprint String    @db.Char(64)
+  traceId             String?   @db.VarChar(100)
   createdAt          DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
   startedAt          DateTime? @db.Timestamptz(3)

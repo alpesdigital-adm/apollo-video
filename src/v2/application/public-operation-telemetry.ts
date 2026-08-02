@@ -33,7 +33,7 @@ export function createPublicOperationTelemetryEvent(input: {
     schemaVersion: PUBLIC_OPERATION_TELEMETRY_SCHEMA_VERSION,
     event: input.event,
     occurredAt: input.occurredAt ?? input.record.operation.updatedAt,
-    traceId: publicOperationTraceId({
+    traceId: input.record.traceId ?? publicOperationTraceId({
       workspaceId: input.record.operation.workspaceId,
       operationId: input.record.operation.id,
     }),

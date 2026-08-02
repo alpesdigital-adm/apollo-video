@@ -13,7 +13,7 @@ export function enqueueMediaIngestService(dependencies: {
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const createId = dependencies.createId ?? ((kind) => `${kind}-${randomUUID()}`)
-  return async function enqueue(input: { upload: Readonly<MediaUpload> }) {
+  return async function enqueue(input: { upload: Readonly<MediaUpload>; traceId?: string }) {
     const upload = input.upload
     assertDomain(upload.status === 'verified' && upload.actualSha256 === upload.expectedSha256, 'MEDIA_UPLOAD_TRANSITION_REJECTED', 'Upload must be verified before ingest')
     assertDomain(Boolean(upload.projectId && upload.fileName && upload.rightsConfirmed), 'MEDIA_UPLOAD_TRANSITION_REJECTED', 'Project, file name and rights confirmation are required before ingest')
@@ -52,6 +52,7 @@ export function enqueueMediaIngestService(dependencies: {
       },
       idempotencyKey,
       requestFingerprint,
+      traceId: input.traceId,
     })
   }
 }

@@ -206,6 +206,7 @@ export async function POST(
       projectId,
       actor: { type: 'api-client', id: actor.clientId },
       idempotencyKey: `${idempotencyKey}:proxy`,
+      traceId: requestId,
     })
     return NextResponse.json(presentSuccess({
       command: {

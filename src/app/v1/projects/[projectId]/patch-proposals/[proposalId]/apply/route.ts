@@ -45,7 +45,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       colorPipelines: createColorPipelineCompilationRepository(),
       clock: () => new Date(),
       createId: (kind) => `${kind}-${randomUUID()}`,
-    })({ workspaceId: actor.workspaceId, projectId, actor: { type: 'api-client', id: actor.clientId }, idempotencyKey: `patch-proxy:${calculateVersionHash(idempotencyKey).slice(0, 64)}` })
+    })({
+      workspaceId: actor.workspaceId,
+      projectId,
+      actor: { type: 'api-client', id: actor.clientId },
+      idempotencyKey: `patch-proxy:${calculateVersionHash(idempotencyKey).slice(0, 64)}`,
+      traceId: requestId,
+    })
     const proposal = await repository.attachRenderOperation({ workspaceId: actor.workspaceId, projectId, proposalId, renderOperationId: render.operation.id })
     return NextResponse.json(presentSuccess({
       proposal,

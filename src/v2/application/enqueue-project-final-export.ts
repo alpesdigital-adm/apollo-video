@@ -51,6 +51,7 @@ export function enqueueProjectFinalExportService(dependencies: {
     approval: { approved: true; note?: string }
     actor: { type: 'api-client'; id: string }
     idempotencyKey: string
+    traceId?: string
   }) {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const projectId = validateId(request.projectId, 'projectId')
@@ -178,6 +179,7 @@ export function enqueueProjectFinalExportService(dependencies: {
       },
       idempotencyKey,
       requestFingerprint,
+      traceId: request.traceId,
     })
   }
 }

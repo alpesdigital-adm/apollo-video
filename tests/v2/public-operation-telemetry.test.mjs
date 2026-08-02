@@ -68,10 +68,27 @@ test('public operation telemetry carries canonical identifiers and no operation 
   assert.equal(serialized.includes(context.sourceArtifactId), false)
 })
 
+test('persisted request trace overrides the deterministic fallback across processes', () => {
+  const event = createPublicOperationTelemetryEvent({
+    event: 'operation.claimed',
+    record: {
+      operation: queuedOperation(),
+      context,
+      traceId: 'request_trace_telemetry_001',
+    },
+  })
+
+  assert.equal(event.traceId, 'request_trace_telemetry_001')
+})
+
 test('telemetry repository emits the durable worker lifecycle with one stable trace', async () => {
   let operation = queuedOperation()
   let lease
-  const record = () => ({ operation, context })
+  const record = () => ({
+    operation,
+    context,
+    traceId: 'request_trace_worker_lifecycle_001',
+  })
   const repository = {
     async claimNext(input) {
       operation = startPublicOperationAttempt(operation, input.now)
@@ -143,6 +160,7 @@ test('telemetry repository emits the durable worker lifecycle with one stable tr
     'operation.succeeded',
   ])
   assert.equal(new Set(events.map((event) => event.traceId)).size, 1)
+  assert.equal(events[0].traceId, 'request_trace_worker_lifecycle_001')
   assert.equal(events.every((event) => event.jobId === operation.id), true)
   assert.equal(events.at(-1).status, 'succeeded')
   assert.equal(events.at(-1).phase, 'completed')

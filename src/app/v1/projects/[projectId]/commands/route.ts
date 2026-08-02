@@ -122,6 +122,7 @@ export async function POST(
         expectedProjectVersionId: result.version.id,
         actor: { type: 'api-client', id: actor.clientId },
         idempotencyKey: `${idempotencyKey}:proxy`,
+        traceId: requestId,
       })
       const refs = result.command.payload.snapshotRefs
       return NextResponse.json(presentSuccess({
@@ -253,6 +254,7 @@ export async function POST(
       expectedProjectVersionId: result.version.id,
       actor: { type: 'api-client', id: actor.clientId },
       idempotencyKey: `${idempotencyKey}:proxy`,
+      traceId: requestId,
     })
     return NextResponse.json(
       presentSuccess({

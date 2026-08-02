@@ -507,6 +507,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     })
     return Object.freeze({
       operation,
+      ...(row.traceId ? { traceId: row.traceId } : {}),
       context: Object.freeze(isRender ? {
         kind: 'artifact-render' as const,
         authorizationId: renderDetail!.authorizationId,
@@ -867,6 +868,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     context: PublicOperationCreationContext
     idempotencyKey: string
     requestFingerprint: string
+    traceId?: string
   }, serializationAttempt = 1): Promise<PublicOperationPersistenceResult> {
     assertPublicOperation(input.operation)
     const renderContext = input.operation.type === 'artifact-render' && 'authorizationId' in input.context
@@ -889,6 +891,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         (input.operation.status === 'queued' && !projectReuseContext) ||
         (input.operation.status === 'succeeded' && Boolean(projectReuseContext))
       ) || !SHA256_PATTERN.test(input.requestFingerprint) ||
+      (input.traceId !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(input.traceId)) ||
       (!renderContext && !ingestContext && !projectRenderContext && !projectReuseContext && !finalExportContext) ||
       (renderContext && (!SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
       (ingestContext && (
@@ -1173,6 +1176,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             maxAttempts: input.operation.maxAttempts,
             idempotencyKey: input.idempotencyKey,
             requestFingerprint: input.requestFingerprint,
+            traceId: input.traceId,
             createdAt: new Date(input.operation.createdAt),
             updatedAt: new Date(input.operation.updatedAt),
             ...(input.operation.result ? { resultJson: stableSerialize(input.operation.result) } : {}),

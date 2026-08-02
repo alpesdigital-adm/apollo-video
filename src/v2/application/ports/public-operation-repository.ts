@@ -127,6 +127,7 @@ export type PublicOperationCreationContext = Exclude<
 export interface PublicOperationRecord {
   operation: Readonly<PublicOperation>
   context: Readonly<PublicOperationContext>
+  traceId?: string
 }
 
 export interface PublicOperationPersistenceResult extends PublicOperationRecord {
@@ -199,6 +200,7 @@ export interface PublicOperationRepository {
     context: PublicOperationCreationContext
     idempotencyKey: string
     requestFingerprint: string
+    traceId?: string
   }): Promise<PublicOperationPersistenceResult>
   claimNext(input: {
     leaseOwner: string

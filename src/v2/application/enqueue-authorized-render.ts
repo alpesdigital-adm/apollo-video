@@ -28,6 +28,7 @@ export function enqueueAuthorizedRenderService(dependencies: {
     authorizationId: string
     actor: { type: 'api-client'; id: string }
     idempotencyKey: string
+    traceId?: string
   }) {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const artifactId = validateId(request.artifactId, 'artifactId')
@@ -111,6 +112,7 @@ export function enqueueAuthorizedRenderService(dependencies: {
       },
       idempotencyKey,
       requestFingerprint,
+      traceId: request.traceId,
     })
   }
 }
