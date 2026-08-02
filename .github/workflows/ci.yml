@@ -129,3 +129,8 @@ jobs:
 
       - name: Run public API integration tests
         run: npm run test:integration:api
+
+      - name: Run vertical upload-to-proxy smoke
+        run: npm run test:integration:vertical-smoke
+        env:
+          APOLLO_V2_VERTICAL_SMOKE: "1"

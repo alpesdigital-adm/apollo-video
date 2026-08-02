@@ -165,7 +165,11 @@ function isPrismaCode(error: unknown, code: string): boolean {
 }
 
 export class PrismaDirectorRunRepository implements DirectorRunRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async findIdempotentResult(input: { workspaceId: string; projectId: string; idempotencyKey: string }) {
     const command = await this.client.v2EditCommand.findUnique({
