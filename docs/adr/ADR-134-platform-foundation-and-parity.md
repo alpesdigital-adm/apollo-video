@@ -2,6 +2,8 @@
 
 Development infrastructure uses isolated PostgreSQL 16, MinIO S3-compatible storage and the same durable operation/checkpoint model as production. A deterministic vertical smoke crosses upload, normalization, static plan, proxy render and reconstruction with shared trace/workspace/project/job context.
 
+The hosted CI run `30759468720` is the first fully green F0.030 vertical proof. It uses PostgreSQL 16/pgvector and real FFmpeg to cross verified upload, durable ingest, an immutable source-ingest EditPlan, Director planning, an explicit project LUT `none` Command, trusted color compilation, proxy enqueue, worker rendering, promotion, canonical manifest and RenderElementMap. The controlled transcript keeps the test deterministic; local filesystem storage is used by this smoke, so MinIO/object-storage reconstruction and the combined Compose runtime remain separate open gates.
+
 Local PostgreSQL and MinIO publish only on explicit loopback ports and require
 operator-supplied secrets. PostgreSQL uses a dedicated volume and a bounded
 Prisma pool. MinIO initializes one declared bucket idempotently and enables
