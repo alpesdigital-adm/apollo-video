@@ -53,14 +53,19 @@ Durable public-operation telemetry is emitted through an application port, not
 from domain code. The production repository factory decorates operation
 lifecycle writes and emits a closed `public-operation-telemetry/v1` JSON
 envelope for creation/replay, claim, heartbeat, phase changes, waiting/resume,
-retry, cancellation, success and failure. The trace is deterministic from the
-workspace and operation identities, the operation ID is the job ID, and project
-ID is included only when the persisted operation context has that relationship.
+retry, cancellation, success and failure. API-created operations persist the
+validated `Apollo-Request-Id` as their trace before crossing the process
+boundary; ingest, authorized render, proxy, final export, source cleanup and
+long-form workers therefore retain the same trace after claim and replay.
+Pre-existing and internal operations retain a deterministic workspace+operation
+fallback. The operation ID is the job ID, and project ID is included only when
+the persisted operation context has that relationship.
 Type, status, phase and attempt are allowed; editorial payloads, file names,
 transcripts, URLs and artifact identities are structurally absent. Telemetry is
-best-effort and may never change the durable result. This is the worker-runtime
-foundation only: inbound request trace propagation, provider/renderer spans,
-complete metrics, dashboards and acceptance remain open under T-NFR-003.
+best-effort and may never change the durable result. Migration, Prisma/API
+integration and supervised cross-process runtime passed in hosted run
+`30761608326`. Provider/renderer child spans, complete metrics, dashboards and
+acceptance remain open under T-NFR-003.
 
 Canonical persisted documents must be compared with canonical serialization,
 never JavaScript insertion order. Hosted API integration exposed this at the
