@@ -1,4 +1,4 @@
-import { calculateCanonicalHash } from './canonical-hash.ts'
+import { calculateCanonicalHash, stableSerialize } from './canonical-hash.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference, CommandImpactRange } from './command-impact.ts'
 import { assertDomain } from './errors.ts'
 
@@ -133,7 +133,7 @@ export function parseEditorialCutImpact(value: unknown): Readonly<EditorialCutIm
     proxyVariantId: impact.minimalRenders[0]!.variantId,
     outputReferences: impact.affectedArtifacts,
   })
-  assertDomain(JSON.stringify(recreated) === JSON.stringify(impact), 'PERSISTENCE_CONFLICT', 'Stored editorial cut impact is inconsistent')
+  assertDomain(stableSerialize(recreated) === stableSerialize(impact), 'PERSISTENCE_CONFLICT', 'Stored editorial cut impact is inconsistent')
   return Object.freeze(impact)
 }
 

@@ -5,6 +5,7 @@ import {
   applyEditorialCutCommandService,
   compileInitialSourceEditPlan,
 } from '../../src/v2/application/apply-editorial-cut-command.ts'
+import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
@@ -188,6 +189,10 @@ test('typed editorial Command creates an immutable retimed EditPlan without auto
   assert.equal(result.invalidations.length, 2)
   assert.equal(result.invalidations.every((item) => item.status === 'stale'), true)
   assert.equal(repository.lastBundle.event.data.commandImpactHash, result.impact.impactHash)
+  assert.deepEqual(
+    parseEditorialCutImpact(JSON.parse(stableSerialize(result.impact))),
+    result.impact,
+  )
   const tampered = structuredClone(result.impact)
   tampered.affectedRanges[0].endFrame -= 1
   assert.throws(
