@@ -27,6 +27,13 @@ operation must finish and persist both source-master and editing-proxy
 relationships before the seed reports success. A queued operation alone is not
 seed completion.
 
+Deterministic media evidence belongs to CI as explicit jobs rather than the
+default unit-test discovery. The hosted workflow runs the editorial renderer,
+retimed-transcript worker and two-hour contiguous extraction goldens with real
+FFmpeg. Each golden must materialize the current color compilation contract and
+assert observable frame, pixel, duration or audio outcomes; a smoke render
+alone is insufficient.
+
 OIDC-verified identities become signed, expiring workspace sessions; production never trusts an unverified local identity. Workspace switching invalidates caches and subscriptions. Architecture imports are enforced by a CI boundary check. UI actions, REST endpoints and tests map through capability IDs, while sensitive internals have explicit deny-only reasons.
 
 Public operations generalize across ingest, Director, provider, sync, batch, render and export. Public conventions, deprecation/sunset headers, client kill switches and transition outbox events are stable application contracts.

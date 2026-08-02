@@ -11,6 +11,9 @@ import {
   calculateContiguousMomentEvaluationHash,
   extractContiguous,
 } from '../../src/v2/domain/contiguous-extraction.ts'
+import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
+import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
+import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { calculateFileSha256 } from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
 import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
@@ -19,6 +22,37 @@ const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
 const execFileAsync = promisify(execFile)
 const hex = (value) => value.repeat(64).slice(0, 64)
+const colorMetadata = Object.freeze({
+  colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709',
+  range: 'limited', bitDepth: 8,
+})
+
+function colorCompilation(artifactId) {
+  const manifestId = 'manifest-two-hour-golden'
+  const probe = createMediaColorProbe({
+    id: 'probe-two-hour-golden', workspaceId: 'workspace-two-hour-golden',
+    artifactId, manifestId,
+    detection: { state: 'ready', metadata: colorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+    producer: { provider: 'ffprobe', version: 'json-v1', binaryDigest: '9'.repeat(64) },
+    createdAt: '2026-08-02T12:00:00.000Z',
+  })
+  const implementation = (provider, parameters) => ({
+    provider, version: 'v1', parameters,
+    parametersHash: calculateCanonicalHash(parameters),
+  })
+  return createColorPipelineCompilation({
+    id: 'compilation-two-hour-golden', workspaceId: probe.workspaceId,
+    projectId: 'project-two-hour-golden', sourceArtifactId: artifactId,
+    sourceManifestId: manifestId, probe, outputMetadata: colorMetadata,
+    createdByClientId: 'client-two-hour-golden', createdAt: '2026-08-02T12:01:00.000Z',
+    stages: [
+      { id: 'technical-rec709', kind: 'technical', version: 'v1', enabled: true, input: colorMetadata, output: colorMetadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
+      { id: 'match-bypass', kind: 'match', version: 'v1', enabled: false, input: colorMetadata, output: colorMetadata, implementation: implementation('apollo-match', { mode: 'bypass' }) },
+      { id: 'creative-none', kind: 'creative-lut', version: 'v1', enabled: false, input: colorMetadata, output: colorMetadata, implementation: implementation('apollo-lut', { mode: 'none' }) },
+      { id: 'output-rec709', kind: 'output', version: 'v1', enabled: true, input: colorMetadata, output: colorMetadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
+    ],
+  })
+}
 
 function quality(value, evidenceRef) {
   return { value, evidenceRefs: [evidenceRef] }
@@ -251,6 +285,7 @@ test(
             artifactId: 'artifact-two-hour-golden',
             path: masterPath,
             mediaType: 'video',
+            colorPipelineCompilation: colorCompilation('artifact-two-hour-golden'),
           },
         ],
         clips: [clip],

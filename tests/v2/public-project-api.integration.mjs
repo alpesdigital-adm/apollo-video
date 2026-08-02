@@ -131,6 +131,7 @@ test('authenticated public API manages projects, clients and artifact inspection
   const webhookReplayAttemptId = '00000000-0000-4000-8000-000000000908'
   const sha = (character) => character.repeat(64)
   let server
+  let serverDiagnostics = ''
 
   const cleanup = async () => {
     await client.v2WebhookDeliveryAttempt.deleteMany({
@@ -573,9 +574,14 @@ test('authenticated public API manages projects, clients and artifact inspection
           APOLLO_FFMPEG_PATH: ffmpegPath,
           ...uiEnvironment,
         },
-        stdio: 'ignore',
+        stdio: ['ignore', 'pipe', 'pipe'],
       },
     )
+    const retainServerDiagnostic = (chunk) => {
+      serverDiagnostics = `${serverDiagnostics}${chunk.toString('utf8')}`.slice(-64 * 1024)
+    }
+    server.stdout.on('data', retainServerDiagnostic)
+    server.stderr.on('data', retainServerDiagnostic)
     await waitForServer(baseUrl, server)
 
     const healthResponse = await fetch(`${baseUrl}/v1/health`)
@@ -3926,7 +3932,11 @@ test('authenticated public API manages projects, clients and artifact inspection
       body: JSON.stringify({ baseVersionId: created.data.version.id, baseHash: created.data.version.baseHash, selection: { mode: 'workspace-default' }, reason: 'Use approved workspace look.' }),
     })
     const projectLutResponse = await setProjectLut(); const projectLut = await projectLutResponse.json()
-    assert.equal(projectLutResponse.status, 201)
+    assert.equal(
+      projectLutResponse.status,
+      201,
+      `project LUT response: ${JSON.stringify(projectLut)}\nserver: ${serverDiagnostics}`,
+    )
     assert.equal(projectLut.data.selection.requested.mode, 'workspace-default')
     assert.equal(projectLut.data.selection.resolved.lut.version, 2)
     assert.equal(projectLut.data.selection.workspaceDefaultRevision, 3)

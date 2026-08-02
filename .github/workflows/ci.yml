@@ -94,6 +94,15 @@ jobs:
       - name: Run FFmpeg integration tests
         run: npm run test:integration:media
 
+      - name: Run editorial renderer goldens
+        run: npm run test:integration:editorial-renderer
+
+      - name: Run transcript retiming worker goldens
+        run: npm run test:integration:transcript-rate
+
+      - name: Run long-form extraction golden
+        run: npm run test:integration:contiguous-extraction-golden
+
       - name: Bundle Remotion renderer
         run: npm run remotion:build
 
