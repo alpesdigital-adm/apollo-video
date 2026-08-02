@@ -512,10 +512,11 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
   let proxyLookup
   const reusableProxyRepository = new PrismaProjectProxyRenderRepository({
     v2Project: { async findFirst() { return {
-      id: projectId, format: '9:16', currentVersionId: resultVersionId,
+      id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
       versions: [{
         id: resultVersionId, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
         editPlanSnapshot: {
+          workspaceId, projectId,
           contentJson: committed.snapshot.contentJson,
           contentHash: committed.snapshot.contentHash,
         },
@@ -569,10 +570,11 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
   })
   const selectionRepository = new PrismaProjectProxyRenderRepository({
     v2Project: { async findFirst() { return {
-      id: projectId, format: '9:16', currentVersionId: resultVersionId,
+      id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
       versions: [{
         id: resultVersionId, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
         editPlanSnapshot: {
+          workspaceId, projectId,
           contentJson: committed.snapshot.contentJson,
           contentHash: committed.snapshot.contentHash,
         },
@@ -1138,10 +1140,10 @@ test('T-FR-233 applied review patch persists impact v2 and normalized invalidati
   }))
   const rangeRepository = new PrismaProjectProxyRenderRepository({
     v2Project: { async findFirst() { return {
-      id: projectId, format: '9:16', currentVersionId: resultVersionId,
+      id: projectId, workspaceId, format: '9:16', currentVersionId: resultVersionId,
       versions: [{
         id: resultVersionId, editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
-        editPlanSnapshot: { contentJson: committed.snapshot.contentJson, contentHash: committed.snapshot.contentHash },
+        editPlanSnapshot: { workspaceId, projectId, contentJson: committed.snapshot.contentJson, contentHash: committed.snapshot.contentHash },
         directorRunAsResult: null,
         command: {
           id: committed.command.id, type: 'apply-review-patch', baseVersionId,
