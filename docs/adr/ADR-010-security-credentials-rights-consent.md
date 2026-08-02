@@ -34,7 +34,7 @@ A Public API já manipula recursos de workspace e precisa ser operável sem aces
 - O cookie resolve um `ApiClient` ativo no Postgres para obter workspace e scopes; IDs ou scopes fornecidos pelo navegador nunca ampliam autoridade.
 - Password é `writeOnly`, limitada, comparada em tempo constante após `scrypt` e omitida de logs, eventos, analytics e erros.
 - Capabilities de sessão humana não são expostas como tools MCP/IA. Agentes usam Bearer próprio e revogável; compartilhar senha/cookie humano com agente é proibido.
-- Rate limit em memória serve apenas ao desenvolvimento local. Produção exige store distribuído, audit redigido, revogação de sessões e recuperação de conta antes de concluir F0.031.
+- Rate limit, audit redigido e revogação de sessões usam PostgreSQL e falham fechado quando o store está indisponível. O bootstrap local continua proibido em produção; OIDC/recuperação no IdP e proteção server-side das páginas permanecem gates de F0.031.
 
 ## Idempotência e concorrência
 

@@ -23,8 +23,8 @@ O Apollo já publica login, leitura de sessão e logout em `/v1/session`, mas a 
 
 ## Consequências
 
-- Esta decisão fecha a seleção do mecanismo, expiração e recuperação, mas não afirma que OIDC, `WorkspaceMember`, store distribuído, revogação ou E2E de troca de workspace já estejam implementados.
-- Deploy de produção permanece bloqueado enquanto `/v1/session` aceitar apenas o bootstrap local ou enquanto sessão não puder ser revogada server-side.
+- Esta decisão fecha a seleção do mecanismo, expiração e recuperação. O bootstrap transitório agora usa sessão revogável, idle timeout, throttle distribuído e audit redigido no PostgreSQL; isso não afirma que OIDC, identificador opaco rotacionável, `WorkspaceMember` ou E2E de troca de workspace já estejam implementados.
+- Deploy de produção permanece bloqueado enquanto `/v1/session` aceitar apenas o bootstrap local ou enquanto as páginas V2 não exigirem a sessão durável no boundary server-side.
 - Bearer de `ApiClient` continua sendo a única autenticação de automação; cookie humano não autentica MCP nem worker.
 
 ## Evidências exigidas para implementação
@@ -35,3 +35,7 @@ O Apollo já publica login, leitura de sessão e logout em `/v1/session`, mas a 
 - recuperação exercitada no IdP sem criar endpoint de password reset Apollo;
 - testes provando que senha/cookie/token não chegam a tools, logs, eventos ou telemetria;
 - E2E de expiração, logout, suspensão, revogação, acesso negado e isolamento entre workspaces.
+
+## Evidência incremental
+
+O run hospedado `30766068302` (attempt 2) aplicou as tabelas de sessão, throttle e tentativas em PostgreSQL limpo e passou 808 testes, contratos, build, integrações e goldens. Duas instâncias do repository observaram a mesma revogação e janela de brute force; o E2E HTTP confirmou que logout invalida o cookie anterior, a sexta tentativa falha retorna `429`, a senha correta permanece bloqueada durante a janela e o audit não persiste username nem senha. O cookie assinado ainda serve somente como envelope transitório e triagem do Proxy; OIDC, rotação e proteção server-side das páginas permanecem gates abertos.
