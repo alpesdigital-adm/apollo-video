@@ -315,6 +315,7 @@ function operationData(
   operation: Readonly<PublicOperation>,
   idempotencyKey: string,
   requestFingerprint: string,
+  traceId?: string,
 ) {
   return {
     id: operation.id,
@@ -334,6 +335,7 @@ function operationData(
     maxAttempts: operation.maxAttempts,
     idempotencyKey,
     requestFingerprint,
+    traceId,
     createdAt: new Date(operation.createdAt),
     updatedAt: new Date(operation.updatedAt),
   }
@@ -524,6 +526,7 @@ implements SourceCleanupRepository {
               record.operation,
               record.idempotencyKey,
               record.requestFingerprint,
+              record.traceId,
             ),
           })
         }

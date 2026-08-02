@@ -99,6 +99,7 @@ export async function POST(
       actor: { type: 'api-client', id: actor.clientId },
       idempotencyKey:
         request.headers.get('idempotency-key')?.trim() ?? '',
+      traceId: requestId,
     })
     return NextResponse.json(
       presentSuccess({

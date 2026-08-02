@@ -92,6 +92,7 @@ export function createSourceCleanupService(dependencies: {
     policy?: Readonly<SourceCleanupPolicy>
     actor: Readonly<{ type: 'api-client'; id: string }>
     idempotencyKey: string
+    traceId?: string
   }) {
     const workspaceId = identity(
       request.workspaceId,
@@ -252,6 +253,7 @@ export function createSourceCleanupService(dependencies: {
         : {}),
       requestFingerprint: fingerprint,
       idempotencyKey: replayKey,
+      traceId: request.traceId,
     })
   }
 }

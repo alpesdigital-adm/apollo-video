@@ -74,6 +74,7 @@ function request(overrides = {}) {
 
 function repositoryFixture() {
   const records = []
+  const createInputs = []
   const repository = {
     async readSourceContext() {
       return {
@@ -102,6 +103,7 @@ function repositoryFixture() {
         record.idempotencyKey === input.idempotencyKey) ?? null
     },
     async create(input) {
+      createInputs.push(input)
       const record = Object.freeze({
         workflow: input.workflow,
         operation: input.operation,
@@ -130,7 +132,7 @@ function repositoryFixture() {
       }
     },
   }
-  return { repository, records }
+  return { repository, records, createInputs }
 }
 
 test('F2.022 creates one API-first durable workflow and reuses exact probe and transcript hashes', async () => {
@@ -141,8 +143,14 @@ test('F2.022 creates one API-first durable workflow and reuses exact probe and t
     createWorkflowId: () => 'workflow-long-form-1',
     createOperationId: () => 'operation-long-form-1',
   })
-  const created = await create(request())
+  const created = await create(request({
+    traceId: 'request_trace_long_form_001',
+  }))
   assert.equal(created.replayed, false)
+  assert.equal(
+    fixture.createInputs[0].traceId,
+    'request_trace_long_form_001',
+  )
   assert.equal(created.record.operation.type, 'long-form-index')
   assert.deepEqual(created.record.operation.target, {
     type: 'media-artifact',

@@ -74,6 +74,7 @@ export interface LongFormIndexWorkflowRepository {
     requestFingerprint: string
     idempotencyKey: string
     expectedRightsSnapshotId: string
+    traceId?: string
   }): Promise<Readonly<{
     record: Readonly<PersistedLongFormIndexWorkflow>
     replayed: boolean

@@ -518,6 +518,7 @@ function stageMutableData(
 function operationData(operation: Readonly<PublicOperation>, input: {
   requestFingerprint: string
   idempotencyKey: string
+  traceId?: string
 }) {
   assertPublicOperation(operation)
   return {
@@ -538,6 +539,7 @@ function operationData(operation: Readonly<PublicOperation>, input: {
     maxAttempts: operation.maxAttempts,
     idempotencyKey: input.idempotencyKey,
     requestFingerprint: input.requestFingerprint,
+    traceId: input.traceId,
     createdAt: new Date(operation.createdAt),
     updatedAt: new Date(operation.updatedAt),
   }

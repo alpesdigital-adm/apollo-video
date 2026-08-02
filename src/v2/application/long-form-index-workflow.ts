@@ -157,6 +157,7 @@ export function createLongFormIndexWorkflowService(dependencies: {
     }>
     actor: Readonly<{ type: 'api-client'; id: string }>
     idempotencyKey: string
+    traceId?: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
@@ -346,6 +347,7 @@ export function createLongFormIndexWorkflowService(dependencies: {
       requestFingerprint,
       idempotencyKey: key,
       expectedRightsSnapshotId: context.rightsSnapshotId,
+      traceId: request.traceId,
     })
   }
 }

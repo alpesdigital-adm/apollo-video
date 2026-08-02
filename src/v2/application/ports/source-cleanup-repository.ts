@@ -19,6 +19,7 @@ export interface SourceCleanupCreateRecord {
   operationContext?: Readonly<SourceCleanupOperationContext>
   requestFingerprint: string
   idempotencyKey: string
+  traceId?: string
 }
 
 export interface SourceCleanupReplay {
