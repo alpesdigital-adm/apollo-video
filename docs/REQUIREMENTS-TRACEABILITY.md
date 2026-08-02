@@ -210,6 +210,8 @@ Correção local de FR-234 — `media-artifact-manifest/v4` deixou de aceitar Re
 
 Complemento local de FR-234 — o golden de reconstrução serializa em disco `media-artifact-manifest/v4`, payload canônico de `render-input/v1`, rights e identidades dos assets e, depois dessa fronteira, reidrata somente a fixture salva. Duas autorizações independentes passam pelos services reais de autorização, materialização verificada e render Remotion. Os dois MP4s mantêm 270×480, 30 fps, duração tolerante à cauda AAC e hashes `framemd5` idênticos para toda a sequência decodificada de vídeo e áudio. PostgreSQL/MinIO reais, deploy e aceite continuam pendentes; a caixa permanece aberta.
 
+Evidência integrada F0.030/FR-234 — o run `30763463127` promove master e derivados com SHA-256 full-object e `VersionId` obrigatório, apaga o namespace local antes do proxy, relê ProjectVersion/EditPlan, artifacts e manifests do PostgreSQL, rematerializa a versão exata do MinIO em storage efêmero pertencente à operação e executa FFmpeg real. O proxy promovido é reaberto por outro work root e validado por bytes, checksum, 540×960 e duração. O mesmo run mantém API e quatro workers supervisionados sem restart e executa teardown integral. A exceção HTTP aceita somente loopback ou service name Compose de rótulo único com opt-in explícito; hostname público/dotted continua exigindo HTTPS. Isso fecha a microtarefa de reconstrução do proxy, mas não conclui toda F0.028/FR-234, deploy ou aceite.
+
 ## F3 — Sintético e transformação
 
 | Req | Título | Spec | Dep. | Evidência de aceite | Teste |

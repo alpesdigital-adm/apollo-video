@@ -24,8 +24,8 @@ Estado auditado após o gate F2.019, com a jornada integral do MVP Core e os
 dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **277 de 1.259 microtarefas verificadas como efetivamente entregues (22,0%, arredondamento conservador)**;
-- **982 microtarefas abertas ou aguardando nova comprovação**;
+- **278 de 1.259 microtarefas verificadas como efetivamente entregues (22,1%, arredondamento conservador)**;
+- **981 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
   permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
@@ -518,7 +518,7 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 - [x] Configurar E2E no CI após existir jornada vertical F0 executável. Evidência F0.030: `tests/v2/prisma-vertical-smoke.integration.mjs` passou no run `30759468720` com PostgreSQL e FFmpeg reais, processos supervisionados e cleanup em `finally`.
 - [ ] Criar telemetria comum com trace, job, workspace e project IDs. Parcial F0.030: o runtime criado pela repository factory envolve todas as operações públicas com ports de telemetria e adapters JSON estruturados. O `Apollo-Request-Id` validado atravessa ingest, render autorizado, proxy, export, cleanup e long-form, é persistido em PostgreSQL e reaparece após claim/replay; operações anteriores ou internas mantêm fallback determinístico. Além do lifecycle durável, spans fechados de provider/renderer cobrem normalização FFmpeg, Groq/transcrição long-form, OpenAI diarization, análise derivada, proxy, render autorizado, export final e cleanup, sempre com trace/span/job/workspace/project quando vinculado, attempt, nome permitido, resultado e duração — sem payload, arquivo, transcript, URL, artifact ou mensagem de erro. O run `30762327139` passou 798 testes, build, integrações Prisma/API, topologia Compose e smoke PostgreSQL+FFmpeg que observa os pares started/succeeded de ingest→transcrição→proxy com trace estável. Ainda faltam métricas de espera/bytes/tokens/custo, dashboards, alertas e aceite; a caixa e T-NFR-003 permanecem abertos. Evidência: T-F0.030 e ADR-134.
 - [x] Fazer upload de fixture, normalizar, criar plano estático e renderizar proxy. Evidência F0.030: o run `30759468720` promoveu a fixture Rec.709, persistiu transcript controlado e EditPlan inicial, executou Diretor + seleção LUT explícita `none`, compilou color pipeline confiável e materializou proxy 540×960 de 6s, manifest e RenderElementMap pelo worker real.
-- [ ] Reconstruir o proxy usando apenas banco, object storage e manifest. Evidência: T-F0.030 e ADR-134.
+- [x] Reconstruir o proxy usando apenas banco, object storage e manifest. Evidência F0.030: o run hospedado `30763463127` ingeriu a fixture em PostgreSQL + MinIO versionado, removeu o namespace local de artifacts, rematerializou o master por key/SHA-256/tamanho/VersionId, executou o worker e FFmpeg reais, promoveu o proxy ao MinIO e o reabriu em um work root novo para validar bytes, probe 540×960 e duração; API e quatro workers permaneceram `running`, `unless-stopped` e com zero restarts antes do teardown integral. Evidência: T-F0.030 e ADR-134.
 
 ### F0.031 — Autenticação, shell e navegação
 
