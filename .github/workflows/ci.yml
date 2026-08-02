@@ -176,7 +176,7 @@ jobs:
         run: npm run db:v2:migrate:deploy
 
       - name: Reconstruct proxy from PostgreSQL and versioned MinIO only
-        run: npm run test:integration:vertical-smoke
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/prisma-vertical-smoke.integration.mjs
         env:
           APOLLO_V2_VERTICAL_SMOKE: "1"
           APOLLO_V2_S3_RECONSTRUCTION_SMOKE: "1"
