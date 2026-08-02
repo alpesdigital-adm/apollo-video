@@ -7,6 +7,7 @@ import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 
 import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
+import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createProjectLutSelection, projectLutRef } from '../../src/v2/domain/project-lut-selection.ts'
 import { createWorkspaceLutVersion } from '../../src/v2/domain/workspace-lut.ts'
@@ -156,6 +157,25 @@ test('T-FR-233 LUT selection before a timeline defers rendering without fabricat
   assert.deepEqual(result.impact.affectedArtifacts, [])
   assert.deepEqual(result.impact.minimalRenders, [])
   assert.deepEqual(result.invalidations, [])
+})
+
+test('project LUT impact survives canonical persistence key ordering', () => {
+  const impact = createProjectLutSelectionImpact({
+    commandId: 'command-lut-persistence',
+    baseVersionId: 'version-lut-persistence-base',
+    resultVersionId: 'version-lut-persistence-result',
+    selectionId: 'selection-lut-persistence',
+    selectionHash: 'e'.repeat(64),
+    resolvedMode: 'none',
+    intensity: 0.75,
+    durationFrames: 180,
+    proxyVariantId: '9:16',
+    outputReferences: [],
+  })
+  const persisted = JSON.parse(stableSerialize(impact))
+
+  assert.deepEqual(parseProjectLutSelectionImpact(persisted), persisted)
+  assert.equal(parseProjectLutSelectionImpact(persisted).impactHash, impact.impactHash)
 })
 
 test('T-FR-181 public project LUT selection contract is exact and hides persistence fields', () => {
