@@ -543,15 +543,15 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 ### F0.033 — Modelo conceitual e tecnologia-alvo
 
-- [ ] Mapear todas as entidades das seções 10.1–10.6 para aggregates, tabelas e value objects, sem implementar tabela genérica sem contrato. Evidência: T-F0.033 e ADR-134.
-- [ ] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution. Evidência: T-F0.033 e ADR-134.
+- [ ] Mapear todas as entidades das seções 10.1–10.6 para aggregates, tabelas e value objects, sem implementar tabela genérica sem contrato. Evidência parcial integrada F0.033: `docs/specs/10-conceptual-model.md` cobre exatamente as 57 entidades do PRD em 26 targets de tabela, 5 snapshots, 14 value objects e 12 lacunas `planned`; o gate rejeita ausência, duplicação, model/símbolo inexistente e tabela genérica. O run `30775662600` passou 827 testes. As 12 lacunas precisam de contratos próprios antes de concluir. Evidência: T-F0.033 e ADR-134.
+- [ ] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution. Evidência parcial integrada F0.033: cada uma das 57 linhas declara owner, lifecycle e chave, e T-F0.033 exige o owner canônico da seção. Relações e integridade das 12 entidades ainda planejadas permanecem abertas. Evidência: T-F0.033 e ADR-134.
 - [ ] Validar que `SourceAsset`, `TimelineSegment`, `OutputSpec`, adapter e `EditCommand` são compatíveis com as specs 02, 03 e 06. Evidência: T-F0.033 e ADR-134.
 - [ ] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008. Evidência: T-F0.033 e ADR-134.
 - [ ] Atualizar Next.js/React para uma linha suportada sem quebrar App Router, Remotion ou os contratos `/v1`. Evidência: Next 16.2.10, React 19.2.7, codemod async params e validação completa.
 - [ ] Corrigir advisories não-major de `uuid`, `postcss` e `form-data`. Evidência: versões corrigidas/override PostCSS e `npm audit` com zero vulnerabilidades.
 - [ ] Configurar S3-compatible storage. Evidência: T-F0.033 e ADR-134.
 - [ ] Impedir SQLite como domínio final fora de protótipos locais. Evidência: `resolveV2PersistenceMode` exige Postgres em produção e não possui fallback silencioso.
-- [ ] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais. Evidência: T-F0.033 e ADR-134.
+- [ ] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais. Evidência parcial integrada F0.033: a Spec 10 inclui o diagrama de ownership e o gate cruza targets com o schema Prisma e os snapshot kinds reais. Ainda falta testar as relações/FKs centrais como grafo e cobrir as entidades planejadas. Evidência: T-F0.033 e ADR-134.
 
 ### F0.034 — Paridade API-first [FR-240]
 

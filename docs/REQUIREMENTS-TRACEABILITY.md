@@ -287,6 +287,8 @@ Evidência integrada F0.032 — o run hospedado `30774673461` tornou a direção
 
 Complemento integrado F0.032 — o run `30775230222` adicionou ports tipados com referências versionadas entre Provider Registry/perception, Director, Critic, Compiler e Renderer. O orchestrator valida contexto/outputs, propaga cancelamento, exige hash canônico do RenderInput e não chama Compiler/Renderer após reprovação. T-F0.032 atravessa a cadeia completa com fakes e cobre cancelamento e input não canônico antes do provider. Os 826 testes e toda a matriz hospedada passaram; conexão ao pipeline produtivo, deploy e aceite permanecem abertos.
 
+Evidência integrada F0.033 — o run `30775662600` transformou as 57 entidades normativas do PRD 10.1–10.6 em inventário verificável: 26 targets de tabela, 5 snapshot kinds, 14 value objects e 12 lacunas `planned`. T-F0.033 deriva o conjunto do PRD, exige unicidade/owner/lifecycle, valida models Prisma, símbolos exportados e kinds e proíbe tabela conceitual genérica. A Spec 10 inclui o diagrama de ownership. O gate não afirma que as 12 lacunas foram implementadas nem substitui teste do grafo completo de FKs, deploy ou aceite; as caixas permanecem abertas.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.
