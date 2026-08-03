@@ -90,7 +90,7 @@ try {
     `${JSON.stringify(
       {
         workspace: { id: workspaceId, slug: workspaceSlug },
-        client: { id: issued.client.id, scopes: issued.client.scopes },
+        client: { id: issued.client.id, scopes: issued.client.scopeGrants },
         credential: { id: issued.credential.id, token: issued.token },
         warning: 'Store the token now. Apollo cannot recover it later.',
       },

@@ -51,7 +51,7 @@ export function authenticateUiSessionService(dependencies: {
       throw new DomainError('AUTH_INVALID', 'Apollo session is no longer authorized')
     }
     const client = await dependencies.repository.findActiveClientById(durable.clientId)
-    if (!client || client.environment !== dependencies.environment || client.workspaceId !== durable.workspaceId) {
+    if (!client || !client.allowedEnvironments.includes(dependencies.environment) || client.workspaceId !== durable.workspaceId) {
       throw new DomainError('AUTH_INVALID', 'Apollo session is no longer authorized')
     }
     return Object.freeze({
@@ -61,8 +61,8 @@ export function authenticateUiSessionService(dependencies: {
       delegatedUserId: durable.memberId,
       delegatedIdentityId: durable.identityId,
       workspaceRole: durable.memberRole,
-      environment: client.environment,
-      scopes: new Set(client.scopes),
+      environment: dependencies.environment,
+      scopes: new Set(client.scopeGrants),
       sessionExpiresAt: durable.expiresAt,
       sessionTokenRotated: refreshed?.rotated ?? false,
     })

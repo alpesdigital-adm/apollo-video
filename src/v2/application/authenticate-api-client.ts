@@ -42,7 +42,7 @@ export function authenticateApiClientService(
       !stored ||
       stored.client.status !== 'active' ||
       !isApiCredentialUsable(stored.credential, dependencies.clock()) ||
-      stored.client.environment !== dependencies.environment ||
+      !stored.client.allowedEnvironments.includes(dependencies.environment) ||
       !(await dependencies.credentialCrypto.verify(
         parsed.secret,
         stored.secretSalt,
@@ -62,8 +62,8 @@ export function authenticateApiClientService(
       clientId: stored.client.id,
       credentialId: stored.credential.id,
       workspaceId: stored.client.workspaceId,
-      environment: stored.client.environment,
-      scopes: new Set(stored.client.scopes),
+      environment: dependencies.environment,
+      scopes: new Set(stored.client.scopeGrants),
     }) as AuthenticatedExternalActor
   }
 }

@@ -13,7 +13,6 @@ export type VariantRecipe={id:CanonicalId<'variant-recipe'>;hookId:string;bodyId
 export type DirectorRun={id:CanonicalId<'director-run'>;projectVersionId:string;policySnapshotId:string;decisionIds:string[];modelRoute:string;cost:number};
 export type QualityReport={id:CanonicalId<'quality-report'>;artifactId:string;hardIssues:number;warnings:number;criticVersions:string[];passed:boolean};
 export type CaptureSession={id:CanonicalId<'capture-session'>;workspaceId:string;clockRate:number;trackIds:string[];protocolId?:string;syncDiagnosticId?:string};
-export type ApiClient={id:CanonicalId<'api-client'>;workspaceId:string;scopes:string[];environment:string;status:string};
 export type PublicCapability={id:CanonicalId<'public-capability'>;inputSchema:string;outputSchema:string;scopes:string[];preflight:boolean};
 export type PublicOperation={id:CanonicalId<'public-operation'>;capabilityId:PublicCapability['id'];status:string;phase:string;resultRef?:string;errorCode?:string};
 export type PublicEvent={id:CanonicalId<'public-event'>;type:string;version:number;resourceId:string;sequence:number;occurredAt:string};

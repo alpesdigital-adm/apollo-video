@@ -6656,6 +6656,36 @@ const publicOperationTargetSchema = {
   },
 }
 
+const apiClientV2Schema = {
+  ...apiClientSchema,
+  required: [
+    ...apiClientSchema.required,
+    'type',
+    'allowedEnvironments',
+    'scopeGrants',
+    'createdBy',
+  ],
+  properties: {
+    ...apiClientSchema.properties,
+    type: {
+      enum: ['service-account', 'oauth-application', 'personal-development'],
+    },
+    allowedEnvironments: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 2,
+      uniqueItems: true,
+      items: { enum: ['sandbox', 'production'] },
+    },
+    scopeGrants: {
+      type: 'array',
+      uniqueItems: true,
+      items: { type: 'string', pattern: '^[a-z-]+:[a-z-]+$' },
+    },
+    createdBy: { type: 'string', pattern: '^[A-Za-z0-9:_-]{3,128}$' },
+  },
+}
+
 const reviewVersionVisibleStateSchema = {
   type: 'object',
   additionalProperties: false,
@@ -8123,6 +8153,14 @@ const credentialMutationDataSchema = {
       else: { properties: { token: false } },
     },
   ],
+}
+
+const credentialMutationDataV2Schema = {
+  ...credentialMutationDataSchema,
+  properties: {
+    ...credentialMutationDataSchema.properties,
+    client: apiClientV2Schema,
+  },
 }
 
 const sourceDeconstructionRangeMsSchema = {
@@ -18693,6 +18731,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { clients: { type: 'array', items: apiClientSchema } },
     }),
   ),
+  defineSchema('api-client-list', 2, 'API client list response with typed identities and grants',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['clients'],
+      properties: { clients: { type: 'array', items: apiClientV2Schema } },
+    }),
+  ),
   defineSchema('create-api-client-request', 1, 'Create API client request', {
     type: 'object',
     additionalProperties: false,
@@ -18711,6 +18757,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('api-client-created', 1, 'API client creation response',
     successSchema(credentialMutationDataSchema),
   ),
+  defineSchema('api-client-created', 2, 'Typed API client creation response',
+    successSchema(credentialMutationDataV2Schema),
+  ),
   defineSchema('rotate-api-credential-request', 1, 'Rotate API credential request', {
     type: 'object',
     additionalProperties: false,
@@ -18720,6 +18769,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   }),
   defineSchema('api-credential-created', 1, 'API credential creation response',
     successSchema(credentialMutationDataSchema),
+  ),
+  defineSchema('api-credential-created', 2, 'API credential creation response with typed client identity',
+    successSchema(credentialMutationDataV2Schema),
   ),
   defineSchema('api-credential-revoked', 1, 'API credential revocation response',
     successSchema({

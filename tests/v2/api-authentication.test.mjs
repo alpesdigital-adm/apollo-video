@@ -7,6 +7,11 @@ import {
 } from '../../src/v2/application/authenticate-api-client.ts'
 import { createApiClientService } from '../../src/v2/application/create-api-client.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import {
+  apiCredentialRef,
+  createApiClient,
+  createServiceAccount,
+} from '../../src/v2/domain/api-client.ts'
 import { nodeApiCredentialCrypto } from '../../src/v2/infrastructure/security/api-credential.ts'
 
 class InMemoryApiClientRepository {
@@ -28,6 +33,44 @@ class InMemoryApiClientRepository {
     this.lastUsed.set(`${clientId}:${credentialId}`, usedAt)
   }
 }
+
+test('service-account identity owns canonical grants, environments and credential refs', () => {
+  const account = createServiceAccount({
+    id: 'client-model-1', workspaceId: 'workspace-1', name: ' Model Agent ',
+    status: 'active', scopeGrants: ['projects:write', 'projects:read'],
+    allowedEnvironments: ['production', 'sandbox'], createdBy: 'client:administrator',
+    createdAt: '2026-08-03T15:00:00.000Z',
+  })
+  assert.equal(account.schemaVersion, 2)
+  assert.equal(account.type, 'service-account')
+  assert.equal(account.name, 'Model Agent')
+  assert.deepEqual(account.scopeGrants, ['projects:read', 'projects:write'])
+  assert.deepEqual(account.allowedEnvironments, ['production', 'sandbox'])
+  assert.equal(Object.isFrozen(account), true)
+  assert.equal(Object.isFrozen(account.scopeGrants), true)
+  assert.deepEqual(apiCredentialRef(account.id, 'credential-model-1'), {
+    clientId: account.id, credentialId: 'credential-model-1',
+  })
+
+  const valid = { ...account, schemaVersion: undefined }
+  delete valid.schemaVersion
+  for (const mutation of [
+    { type: 'unknown-client' },
+    { allowedEnvironments: [] },
+    { allowedEnvironments: ['sandbox', 'sandbox'] },
+    { scopeGrants: ['projects:read', 'projects:read'] },
+    { createdBy: 'unsafe creator' },
+  ]) {
+    assert.throws(
+      () => createApiClient({ ...valid, ...mutation }),
+      (error) => error instanceof DomainError && error.code === 'INVALID_API_CLIENT',
+    )
+  }
+  assert.throws(
+    () => apiCredentialRef('../client', 'credential-model-1'),
+    (error) => error instanceof DomainError && error.code === 'INVALID_API_CLIENT',
+  )
+})
 
 async function createFixture() {
   const repository = new InMemoryApiClientRepository()

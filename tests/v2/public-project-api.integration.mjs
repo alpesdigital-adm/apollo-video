@@ -2644,10 +2644,31 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(childCreated.data.secretAvailable, true)
     assert.equal(typeof childCreated.data.token, 'string')
     assert.equal(childCreated.data.replayed, false)
+    assert.equal(childCreated.data.client.type, 'service-account')
+    assert.deepEqual(childCreated.data.client.allowedEnvironments, [apiEnvironment])
+    assert.deepEqual(childCreated.data.client.scopeGrants, ['projects:read'])
+    assert.equal(childCreated.data.client.createdBy, apiClientId)
+    assert.equal(childCreated.data.client.environment, apiEnvironment)
+    assert.deepEqual(childCreated.data.client.scopes, ['projects:read'])
     assert.equal(childReplay.data.replayed, true)
     assert.equal(childReplay.data.secretAvailable, false)
     assert.equal('token' in childReplay.data, false)
     assert.equal(childReplay.data.client.id, childCreated.data.client.id)
+
+    const listedClientsResponse = await fetch(
+      `${baseUrl}/v1/workspaces/${workspaceId}/clients`,
+      { headers: { authorization } },
+    )
+    const listedClients = await listedClientsResponse.json()
+    assert.equal(listedClientsResponse.status, 200)
+    const listedChild = listedClients.data.clients.find(
+      (client) => client.id === childCreated.data.client.id,
+    )
+    assert.ok(listedChild)
+    assert.equal(listedChild.type, 'service-account')
+    assert.deepEqual(listedChild.allowedEnvironments, [apiEnvironment])
+    assert.deepEqual(listedChild.scopeGrants, ['projects:read'])
+    assert.equal(listedChild.createdBy, apiClientId)
 
     const responseLossRequest = () =>
       fetch(`${baseUrl}/v1/workspaces/${workspaceId}/clients`, {
@@ -3950,6 +3971,10 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.ok(rotateReplay)
     assert.equal(rotated.data.secretAvailable, true)
     assert.equal(typeof rotated.data.token, 'string')
+    assert.equal(rotated.data.client.type, 'service-account')
+    assert.deepEqual(rotated.data.client.allowedEnvironments, [apiEnvironment])
+    assert.deepEqual(rotated.data.client.scopeGrants, ['projects:read'])
+    assert.equal(rotated.data.client.createdBy, apiClientId)
     assert.equal(rotateReplay.data.secretAvailable, false)
     assert.equal('token' in rotateReplay.data, false)
     assert.equal(rotateReplay.data.credential.id, rotated.data.credential.id)

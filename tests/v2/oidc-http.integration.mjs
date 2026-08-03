@@ -121,7 +121,8 @@ test('OIDC HTTP journey verifies provider evidence and creates only authorized o
     await cleanup()
     await client.v2Workspace.create({ data: { id: workspaceId, slug: 'oidc-http', name: 'OIDC HTTP' } })
     await client.v2ApiClient.create({ data: {
-      id: apiClientId, workspaceId, name: 'OIDC HTTP UI', environment: 'production', scopesJson: '[]',
+      id: apiClientId, workspaceId, name: 'OIDC HTTP UI', type: 'service-account',
+      allowedEnvironmentsJson: '["production"]', scopeGrantsJson: '[]', createdBy: 'system:test',
       secretSalt: 'not-used-by-ui', secretHash: 'a'.repeat(64),
     } })
     await client.v2WorkspaceUiPrincipal.create({ data: { workspaceId, clientId: apiClientId, createdAt: new Date(), updatedAt: new Date() } })

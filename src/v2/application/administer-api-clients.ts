@@ -4,7 +4,7 @@ import type {
   ApiCredentialMutationResult,
 } from './ports/api-client-administration-repository.ts'
 import type { ApiCredentialCrypto } from './ports/api-credential-crypto.ts'
-import { createApiClient, type ApiEnvironment } from '../domain/api-client.ts'
+import { createServiceAccount, type ApiEnvironment } from '../domain/api-client.ts'
 import { createApiCredential } from '../domain/api-credential.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -89,13 +89,14 @@ export function createApiClientAdministrationService(
 
     const now = dependencies.clock()
     const createdAt = now.toISOString()
-    const client = createApiClient({
+    const client = createServiceAccount({
       id: dependencies.createId('api-client'),
       workspaceId: request.workspaceId,
       name: request.name,
       status: 'active',
-      environment,
-      scopes: request.scopes,
+      allowedEnvironments: [environment],
+      scopeGrants: request.scopes,
+      createdBy: request.actor.clientId,
       createdAt,
     })
     const credential = createApiCredential({
@@ -119,7 +120,8 @@ export function createApiClientAdministrationService(
           operation: 'api-client.create',
           name: client.name,
           environment,
-          scopes: client.scopes,
+          scopeGrants: client.scopeGrants,
+          allowedEnvironments: client.allowedEnvironments,
         }),
         expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString(),
       },

@@ -909,7 +909,7 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
     })
 
     const scopes = actor
-      ? array(parseJson(actor.scopesJson, 'API client scopes'))
+      ? array(parseJson(actor.scopeGrantsJson, 'API client scope grants'))
       : []
     const externalActorAuthorized = Boolean(
       actor?.status === 'active' &&

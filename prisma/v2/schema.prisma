@@ -150,9 +150,11 @@ model V2ApiClient {
   id          String    @id @db.VarChar(80)
   workspaceId String    @db.VarChar(128)
   name        String    @db.VarChar(120)
+  type        String    @default("service-account") @db.VarChar(32)
   status      String    @default("active") @db.VarChar(32)
-  environment String    @default("sandbox") @db.VarChar(32)
-  scopesJson  String    @db.Text
+  allowedEnvironmentsJson String @db.Text
+  scopeGrantsJson         String @db.Text
+  createdBy               String @db.VarChar(128)
   secretSalt  String    @db.VarChar(128)
   secretHash  String    @db.VarChar(128)
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)

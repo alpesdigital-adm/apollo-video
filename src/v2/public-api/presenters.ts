@@ -85,13 +85,18 @@ export function presentCapability(capability: PublicCapability) {
 }
 
 export function presentApiClient(client: ApiClient) {
+  const environment = client.allowedEnvironments[0]
   return {
     id: client.id,
     workspaceId: client.workspaceId,
     name: client.name,
     status: client.status,
-    environment: client.environment,
-    scopes: [...client.scopes],
+    type: client.type,
+    environment,
+    scopes: [...client.scopeGrants],
+    allowedEnvironments: [...client.allowedEnvironments],
+    scopeGrants: [...client.scopeGrants],
+    createdBy: client.createdBy,
     createdAt: client.createdAt,
     lastUsedAt: client.lastUsedAt,
   }

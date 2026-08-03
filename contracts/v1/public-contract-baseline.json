@@ -1401,7 +1401,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.clients.create": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "workspace-admin",
       "operationKind": "command",
       "authMode": "required",
@@ -1409,7 +1409,7 @@
         "clients:admin"
       ],
       "inputSchemaRef": "apollo://schemas/create-api-client-request/v1",
-      "outputSchemaRef": "apollo://schemas/api-client-created/v1",
+      "outputSchemaRef": "apollo://schemas/api-client-created/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/workspaces/{workspaceId}/clients"
@@ -1450,7 +1450,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.clients.credentials.rotate": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "workspace-admin",
       "operationKind": "command",
       "authMode": "required",
@@ -1458,7 +1458,7 @@
         "clients:admin"
       ],
       "inputSchemaRef": "apollo://schemas/rotate-api-credential-request/v1",
-      "outputSchemaRef": "apollo://schemas/api-credential-created/v1",
+      "outputSchemaRef": "apollo://schemas/api-credential-created/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/workspaces/{workspaceId}/clients/{clientId}/credentials"
@@ -1476,14 +1476,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.clients.list": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "workspace-admin",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "clients:admin"
       ],
-      "outputSchemaRef": "apollo://schemas/api-client-list/v1",
+      "outputSchemaRef": "apollo://schemas/api-client-list/v2",
       "endpoint": {
         "method": "GET",
         "path": "/v1/workspaces/{workspaceId}/clients"
@@ -6935,6 +6935,218 @@
         }
       }
     },
+    "apollo://schemas/api-client-created/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "client",
+            "credential",
+            "secretAvailable",
+            "replayed"
+          ],
+          "properties": {
+            "client": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "name",
+                "status",
+                "environment",
+                "scopes",
+                "createdAt",
+                "type",
+                "allowedEnvironments",
+                "scopeGrants",
+                "createdBy"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 120
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "environment": {
+                  "enum": [
+                    "sandbox",
+                    "production"
+                  ]
+                },
+                "scopes": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z-]+:[a-z-]+$"
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastUsedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "type": {
+                  "enum": [
+                    "service-account",
+                    "oauth-application",
+                    "personal-development"
+                  ]
+                },
+                "allowedEnvironments": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 2,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "sandbox",
+                      "production"
+                    ]
+                  }
+                },
+                "scopeGrants": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z-]+:[a-z-]+$"
+                  }
+                },
+                "createdBy": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9:_-]{3,128}$"
+                }
+              }
+            },
+            "credential": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "clientId",
+                "status",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "clientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "revoked"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastUsedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "token": {
+              "type": "string",
+              "pattern": "^apollo_v2\\."
+            },
+            "secretAvailable": {
+              "type": "boolean"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "secretAvailable": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "secretAvailable"
+                ]
+              },
+              "then": {
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "pattern": "^apollo_v2\\."
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "token": false
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/api-client-list/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -7008,6 +7220,134 @@
                   "lastUsedAt": {
                     "type": "string",
                     "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/api-client-list/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "clients"
+          ],
+          "properties": {
+            "clients": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "workspaceId",
+                  "name",
+                  "status",
+                  "environment",
+                  "scopes",
+                  "createdAt",
+                  "type",
+                  "allowedEnvironments",
+                  "scopeGrants",
+                  "createdBy"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "suspended",
+                      "revoked"
+                    ]
+                  },
+                  "environment": {
+                    "enum": [
+                      "sandbox",
+                      "production"
+                    ]
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z-]+:[a-z-]+$"
+                    }
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "lastUsedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "type": {
+                    "enum": [
+                      "service-account",
+                      "oauth-application",
+                      "personal-development"
+                    ]
+                  },
+                  "allowedEnvironments": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "uniqueItems": true,
+                    "items": {
+                      "enum": [
+                        "sandbox",
+                        "production"
+                      ]
+                    }
+                  },
+                  "scopeGrants": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z-]+:[a-z-]+$"
+                    }
+                  },
+                  "createdBy": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9:_-]{3,128}$"
                   }
                 }
               }
@@ -7102,6 +7442,218 @@
                 "lastUsedAt": {
                   "type": "string",
                   "format": "date-time"
+                }
+              }
+            },
+            "credential": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "clientId",
+                "status",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "clientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "revoked"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastUsedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "token": {
+              "type": "string",
+              "pattern": "^apollo_v2\\."
+            },
+            "secretAvailable": {
+              "type": "boolean"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "secretAvailable": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "secretAvailable"
+                ]
+              },
+              "then": {
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "pattern": "^apollo_v2\\."
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "token": false
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/api-credential-created/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "client",
+            "credential",
+            "secretAvailable",
+            "replayed"
+          ],
+          "properties": {
+            "client": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "name",
+                "status",
+                "environment",
+                "scopes",
+                "createdAt",
+                "type",
+                "allowedEnvironments",
+                "scopeGrants",
+                "createdBy"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 120
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "environment": {
+                  "enum": [
+                    "sandbox",
+                    "production"
+                  ]
+                },
+                "scopes": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z-]+:[a-z-]+$"
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lastUsedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "type": {
+                  "enum": [
+                    "service-account",
+                    "oauth-application",
+                    "personal-development"
+                  ]
+                },
+                "allowedEnvironments": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 2,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "sandbox",
+                      "production"
+                    ]
+                  }
+                },
+                "scopeGrants": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z-]+:[a-z-]+$"
+                  }
+                },
+                "createdBy": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9:_-]{3,128}$"
                 }
               }
             },

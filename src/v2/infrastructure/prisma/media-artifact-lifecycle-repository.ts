@@ -122,7 +122,9 @@ implements MediaArtifactLifecycleRepository {
         const existing = await transaction.v2IdempotencyRecord.findUnique({
           where: idempotencyWhere,
         })
-        if (existing && existing.expiresAt > new Date()) {
+        // The application clock owns command time. Using the host wall clock here
+        // makes replay semantics nondeterministic in tests and during clock skew.
+        if (existing && existing.expiresAt > new Date(bundle.createdAt)) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',

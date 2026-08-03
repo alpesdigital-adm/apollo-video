@@ -206,11 +206,27 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
             identity: { status: 'active' },
             workspace: {
               status: 'active',
-              uiPrincipal: { is: { clientId: input.clientId, client: { status: 'active', environment: input.environment } } },
+              uiPrincipal: { is: { clientId: input.clientId, client: { status: 'active' } } },
             },
           },
+          include: {
+            workspace: { include: { uiPrincipal: { include: { client: true } } } },
+          },
         })
-        if (!target || input.grant.clientId !== input.clientId) {
+        let allowedEnvironments: unknown = null
+        try {
+          allowedEnvironments = target?.workspace.uiPrincipal
+            ? JSON.parse(target.workspace.uiPrincipal.client.allowedEnvironmentsJson)
+            : null
+        } catch {
+          allowedEnvironments = null
+        }
+        if (
+          !target ||
+          input.grant.clientId !== input.clientId ||
+          !Array.isArray(allowedEnvironments) ||
+          !allowedEnvironments.includes(input.environment)
+        ) {
           throw new DomainError('AUTH_INVALID', 'Target workspace is not authorized')
         }
 

@@ -40,12 +40,14 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     await client.v2Workspace.create({ data: { id: workspaceId, slug: 'ui-session-security', name: 'UI Session Security' } })
     await client.v2Workspace.create({ data: { id: otherWorkspaceId, slug: 'ui-session-security-other', name: 'Other UI Session Security' } })
     await client.v2ApiClient.create({ data: {
-      id: clientId, workspaceId, name: 'UI Session Security Client', environment: 'production',
-      scopesJson: '[]', secretSalt: 'test-salt', secretHash: 'e'.repeat(64),
+      id: clientId, workspaceId, name: 'UI Session Security Client', type: 'service-account',
+      allowedEnvironmentsJson: '["production"]', scopeGrantsJson: '[]', createdBy: 'system:test',
+      secretSalt: 'test-salt', secretHash: 'e'.repeat(64),
     } })
     await client.v2ApiClient.create({ data: {
-      id: otherClientId, workspaceId: otherWorkspaceId, name: 'Other UI Session Security Client', environment: 'production',
-      scopesJson: '["projects:read"]', secretSalt: 'test-salt', secretHash: 'f'.repeat(64),
+      id: otherClientId, workspaceId: otherWorkspaceId, name: 'Other UI Session Security Client', type: 'service-account',
+      allowedEnvironmentsJson: '["production"]', scopeGrantsJson: '["projects:read"]', createdBy: 'system:test',
+      secretSalt: 'test-salt', secretHash: 'f'.repeat(64),
     } })
     await members.provisionBootstrapUiPrincipal({ workspaceId, clientId, now: '2026-08-02T00:00:00.000Z' })
     await members.provisionBootstrapUiPrincipal({ workspaceId: otherWorkspaceId, clientId: otherClientId, now: '2026-08-02T00:00:00.000Z' })

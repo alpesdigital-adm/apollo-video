@@ -60,8 +60,8 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
         ? {
             id,
             workspaceId: 'workspace-1',
-            environment: 'production',
-            scopes: ['projects:read', 'projects:write'],
+            allowedEnvironments: ['production'],
+            scopeGrants: ['projects:read', 'projects:write'],
           }
         : null
     },
@@ -99,7 +99,7 @@ test('UI session refresh requests bounded deterministic identifier rotation', as
   }
   const actor = await authenticateUiSessionService({
     repository: { async findActiveClientById() {
-      return { id: 'apollo-ui-client', workspaceId: 'workspace-1', environment: 'production', scopes: [] }
+      return { id: 'apollo-ui-client', workspaceId: 'workspace-1', allowedEnvironments: ['production'], scopeGrants: [] }
     } },
     sessions: { async refreshActiveSession(input) {
       calls.push(input)

@@ -9389,6 +9389,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/api-client-list/v1': [
       { data: { clients: [] }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/api-client-list/v2': [
+      { data: { clients: [] }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/create-api-client-request/v1': [
       {
         name: 'Automation Agent',
@@ -9421,6 +9424,35 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/api-client-created/v2': [
+      {
+        data: {
+          client: {
+            id: clientId,
+            workspaceId,
+            name: 'Automation Agent',
+            status: 'active',
+            type: 'service-account',
+            environment: 'sandbox',
+            scopes: ['projects:read'],
+            allowedEnvironments: ['sandbox'],
+            scopeGrants: ['projects:read'],
+            createdBy: 'client-example-admin',
+            createdAt,
+          },
+          credential: {
+            id: credentialId,
+            clientId,
+            status: 'active',
+            createdAt,
+          },
+          token: `apollo_v2.${clientId}.${credentialId}.example-secret-that-is-not-valid`,
+          secretAvailable: true,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/rotate-api-credential-request/v1': [
       {},
       { overlapSeconds: 900 },
@@ -9435,6 +9467,34 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             status: 'active',
             environment: 'sandbox',
             scopes: ['projects:read'],
+            createdAt,
+          },
+          credential: {
+            id: 'credential-example-2',
+            clientId,
+            status: 'active',
+            createdAt,
+          },
+          secretAvailable: false,
+          replayed: true,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/api-credential-created/v2': [
+      {
+        data: {
+          client: {
+            id: clientId,
+            workspaceId,
+            name: 'Automation Agent',
+            status: 'active',
+            type: 'service-account',
+            environment: 'sandbox',
+            scopes: ['projects:read'],
+            allowedEnvironments: ['sandbox'],
+            scopeGrants: ['projects:read'],
+            createdBy: 'client-example-admin',
             createdAt,
           },
           credential: {
