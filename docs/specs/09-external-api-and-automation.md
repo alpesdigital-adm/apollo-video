@@ -201,6 +201,8 @@ Possuir scope não implica autorização final: resource ownership, role, rights
 
 ## 9. Convenções HTTP/JSON
 
+A fonte executável destas convenções é `src/v2/public-api/conventions.ts`; `PUBLIC_API_VERSION`, presenters e os schemas comuns não mantêm constantes paralelas. O registry declara a allowlist de query por capability. Requisições autenticadas validam nome, duplicidade e obrigatoriedade depois da autenticação e antes do Application service; endpoints com token assinado executam a mesma validação localmente. A resolução de pathname segue a precedência do App Router: entre templates compatíveis, vence o de maior número de segmentos literais; empate continua erro de paridade.
+
 - JSON UTF-8 para metadata; transferência de mídia fora do body comum.
 - Datas ISO 8601 UTC.
 - Frames/timecodes seguem contratos da spec 02; não usar float de segundos para edição.
@@ -215,6 +217,8 @@ Possuir scope não implica autorização final: resource ownership, role, rights
 - Operação aceita: 202 com `operation`.
 - Validation error: 422; conflict: 409; `If-Match` obsoleto: 412;
   precondição obrigatória ausente: 428; rate limit: 429.
+
+T-FR-241 deriva os endpoints implementados dos 189 handlers em `src/app/v1`, exige correspondência um-para-um com as 189 capabilities e verifica que toda query está declarada. OpenAPI 3.1, os 339 schemas Draft 2020-12, discovery e tool descriptors são projeções desses registries; não existe arquivo OpenAPI mantido à mão.
 
 ## 10. Error envelope
 

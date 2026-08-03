@@ -1829,6 +1829,8 @@ Evidência executável F0.034: o relatório versionado `ui-capability-parity-rep
 
 A API deve publicar OpenAPI e JSON Schemas versionados, IDs estáveis, enums, paginação, filtros, erros estruturados, exemplos e capability discovery. Alteração incompatível exige nova versão e janela de depreciação.
 
+Evidência executável F0.035: `public-api/conventions.ts` define `/v1`, JSON UTF-8 fechado, IDs opacos, RFC 3339 UTC, frames inteiros semiabertos, cursor estável e filtros allowlisted. O registry é a fonte única de 189 handlers/capabilities, 339 schemas Draft 2020-12 e 151 paths OpenAPI 3.1; o gate compara todos os handlers e query params implementados com essa fonte antes do service. A evolução aditiva que publicou o `limit` já aceito pelo MVP Core elevou somente essa capability a 1.1.0. O run `30815677386` passou a matriz completa após uma falsificação real de precedência entre rota literal e dinâmica ser corrigida fail-closed.
+
 ### FR-242 — Clientes, autenticação e escopos
 
 O sistema deve suportar clientes externos e service accounts com credenciais revogáveis, escopos granulares, workspace explícito, expiração/rotação e autorização server-side. A escolha exata entre OAuth 2.1, chaves assinadas ou ambos será fechada em ADR.

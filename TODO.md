@@ -24,8 +24,8 @@ Estado auditado após o gate F2.019, com a jornada integral do MVP Core e os
 dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **295 de 1.259 microtarefas verificadas como efetivamente entregues (23,4%, arredondamento conservador)**;
-- **964 microtarefas abertas ou aguardando nova comprovação**;
+- **297 de 1.259 microtarefas verificadas como efetivamente entregues (23,5%, arredondamento conservador)**;
+- **962 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
   permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
@@ -564,8 +564,8 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 ### F0.035 — Contrato público e descoberta [FR-241]
 
-- [ ] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros. Parcial F0-030: `GET /v1/operations` formaliza cursor opaco estável, `limit/after/nextCursor`, ordenação total e allowlist de filtros; convenções transversais dos demais recursos continuam abertas. Evidência: T-FR-241 e ADR-134.
-- [ ] Criar source of truth para OpenAPI, JSON Schemas e capability discovery. Evidência: `schema-registry.ts`, `openapi.ts`, endpoints `/v1/openapi.json` e `/v1/schemas/{id}/{version}`.
+- [x] Definir `/v1`, convenções JSON, IDs, datas, frames, cursor pagination e filtros. Evidência F0.035: `public-api/conventions.ts` é a fonte executável para versão/base path, JSON UTF-8 fechado, ID opaco, RFC 3339 UTC, frame inteiro e intervalo semiaberto, cursor estável e filtros declarados. Version/presenters e os schemas comuns de ID/data importam esse contrato. Query names e duplicatas são validados genericamente contra a capability após autenticação; downloads/uploads assinados usam a mesma allowlist explicitamente. O primeiro CI passou em `30814516664`; a integração seguinte revelou colisão real entre `/operations/dead-letter` e `/{operationId}`, e `776558a` passou a escolher o template literal mais específico. O run final `30815677386` aprovou 841 testes, API/PostgreSQL, build, media/Remotion e teardown. Evidência: T-FR-241, Spec 09 e ADR-134.
+- [x] Criar source of truth para OpenAPI, JSON Schemas e capability discovery. Evidência F0.035: as 189 capabilities canônicas resolvem 339 schemas Draft 2020-12 e geram 151 paths OpenAPI 3.1, discovery e tools sem cópia paralela. T-FR-241 cruza estaticamente os 189 handlers `src/app/v1/**/route.ts` com exatamente um endpoint do registry e compara cada query lida com `PublicCapability.queryParameters`; o audit encontrou e publicou `limit` de `apollo.projects.mvp-core-gates.list` como evolução aditiva 1.1.0, com diff deliberado de 14 adições/1 remoção na baseline. `/v1/openapi.json` e `/v1/schemas/{schemaId}/{version}` servem esses mesmos objetos. O run `30815677386` aprovou contratos, baseline e matriz completa. Evidência: `schema-registry.ts`, `openapi.ts`, T-FR-241 e ADR-134.
 - [ ] Implementar error envelope e catálogo de códigos estáveis. Evidência: `public-api/errors.ts` e testes HTTP.
 - [ ] Publicar examples validados e documentação por build. Evidência: 16 examples validados por Ajv Draft 2020-12 e publicados nos schemas/OpenAPI.
 - [ ] Implementar breaking-change detector contra baseline versionado. Evidência: `contract-snapshot.ts` e `contracts/v1/public-contract-baseline.json`.
