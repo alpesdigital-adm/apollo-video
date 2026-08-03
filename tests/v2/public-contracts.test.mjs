@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createHash } from 'node:crypto'
 
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { createPublicApiDocumentationBundle } from '../../scripts/build-public-api-documentation.mjs'
 import { PUBLIC_EVENT_CATALOG } from '../../src/v2/domain/public-event.ts'
 import {
   FOUNDATION_CAPABILITIES,
@@ -36,6 +38,30 @@ test('every public capability resolves all declared schema references', () => {
     if (capability.inputSchemaRef) {
       assert.equal(getPublicSchema(capability.inputSchemaRef).ref, capability.inputSchemaRef)
     }
+  }
+})
+
+test('documentation build deterministically publishes OpenAPI and every versioned schema', () => {
+  const first = createPublicApiDocumentationBundle()
+  const second = createPublicApiDocumentationBundle()
+  assert.equal(first.manifest.bundleHash, second.manifest.bundleHash)
+  assert.equal(first.manifest.capabilityCount, FOUNDATION_CAPABILITIES.length)
+  assert.equal(first.manifest.schemaCount, PUBLIC_SCHEMAS.length)
+  assert.equal(first.files.length, PUBLIC_SCHEMAS.length + 1)
+  assert.match(first.manifest.bundleHash, /^[a-f0-9]{64}$/)
+
+  for (const file of first.files) {
+    assert.equal(createHash('sha256').update(file.content).digest('hex'), file.sha256)
+    assert.equal(Buffer.byteLength(file.content), file.bytes)
+    assert.doesNotThrow(() => JSON.parse(file.content))
+  }
+  const openApi = JSON.parse(first.files.find((file) => file.path === 'openapi.json').content)
+  assert.equal(Object.keys(openApi.paths).length, first.manifest.pathCount)
+  for (const definition of PUBLIC_SCHEMAS) {
+    const path = `schemas/${definition.id}/v${definition.version}.json`
+    const document = JSON.parse(first.files.find((file) => file.path === path).content)
+    assert.equal(document.$id, definition.ref)
+    assert.ok(document.examples.length > 0)
   }
 })
 

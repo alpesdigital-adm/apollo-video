@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "next dev --webpack -p 3333",
     "build": "next build --webpack",
-    "prebuild": "npm run api:v1:validate",
+    "prebuild": "npm run api:v1:validate && npm run api:v1:docs:build",
     "start": "next start -p 3333",
     "typecheck": "next typegen && tsc --noEmit",
     "lint": "node scripts/lint-architecture.mjs",
@@ -61,6 +61,7 @@
     "test:integration:compatibility-graphs": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-compatibility-graph.integration.mjs",
     "test:e2e:mvp-core-full": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/mvp-core-full-journey.e2e.mjs",
     "api:v1:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-public-contracts.mjs",
+    "api:v1:docs:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-public-api-documentation.mjs",
     "api:v1:baseline:update": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/update-public-contract-baseline.mjs",
     "api:parity:report": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/generate-ui-capability-parity-report.mjs",
     "api:parity:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/generate-ui-capability-parity-report.mjs --check",
