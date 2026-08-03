@@ -3169,7 +3169,7 @@
       "exposure": "workspace-admin",
       "endpoint": "GET /v1/workspaces/{workspaceId}/clients",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/api-client-list/v1",
+      "outputSchemaRef": "apollo://schemas/api-client-list/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3180,7 +3180,7 @@
       "exposure": "workspace-admin",
       "endpoint": "POST /v1/workspaces/{workspaceId}/clients",
       "inputSchemaRef": "apollo://schemas/create-api-client-request/v1",
-      "outputSchemaRef": "apollo://schemas/api-client-created/v1",
+      "outputSchemaRef": "apollo://schemas/api-client-created/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3191,7 +3191,7 @@
       "exposure": "workspace-admin",
       "endpoint": "POST /v1/workspaces/{workspaceId}/clients/{clientId}/credentials",
       "inputSchemaRef": "apollo://schemas/rotate-api-credential-request/v1",
-      "outputSchemaRef": "apollo://schemas/api-credential-created/v1",
+      "outputSchemaRef": "apollo://schemas/api-credential-created/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
