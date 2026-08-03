@@ -34,6 +34,12 @@ function validSeconds(value: number): boolean {
   return Number.isInteger(value) && value > 0 && value <= 24 * 60 * 60
 }
 
+class RetryableUiSessionConflict extends Error {}
+
+const retryDelay = (attempt: number) => new Promise<void>((resolve) => {
+  setTimeout(resolve, 10 * (2 ** attempt))
+})
+
 export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepository {
   private readonly client: PrismaClient
 
@@ -112,13 +118,10 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
             successor.issuedAt.getTime() + input.identifierMaxAgeSeconds * 1000 <= now.getTime() ||
             successor.member.status !== 'active' || successor.member.identity.status !== 'active'
           ) return null
-          const idleExpiresAt = new Date(Math.min(successor.expiresAt.getTime(), now.getTime() + input.idleTtlSeconds * 1000))
-          const touched = await transaction.v2UiSession.update({
-            where: { nonceHash: successor.nonceHash },
-            data: { lastSeenAt: now, idleExpiresAt },
-            include: { member: true },
+          return Object.freeze({
+            session: hydrate(successor, successor.member.role, successor.member.identityId),
+            rotated: true,
           })
-          return Object.freeze({ session: hydrate(touched, touched.member.role, touched.member.identityId), rotated: true })
         }
 
         if (
@@ -139,7 +142,7 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
           where: { nonceHash: current.nonceHash, revokedAt: null },
           data: { revokedAt: now, rotatedAt: now, successorNonceHash: input.successorNonceHash },
         })
-        if (revoked.count !== 1) throw new DomainError('PERSISTENCE_CONFLICT', 'UI session changed during periodic rotation')
+        if (revoked.count !== 1) throw new RetryableUiSessionConflict('UI session changed during periodic rotation')
         const idleExpiresAt = new Date(Math.min(current.expiresAt.getTime(), now.getTime() + input.idleTtlSeconds * 1000))
         const successor = await transaction.v2UiSession.create({
           data: {
@@ -158,10 +161,14 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
         return Object.freeze({ session: hydrate(successor, successor.member.role, successor.member.identityId), rotated: true })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if ((prismaCode(error, 'P2034') || prismaCode(error, 'P2002')) && retry < 3) {
+      if (
+        (error instanceof RetryableUiSessionConflict || prismaCode(error, 'P2034') || prismaCode(error, 'P2002')) &&
+        retry < 3
+      ) {
+        await retryDelay(retry)
         return this.refreshActiveSession(input, retry + 1)
       }
-      if (prismaCode(error, 'P2034') || prismaCode(error, 'P2002')) {
+      if (error instanceof RetryableUiSessionConflict || prismaCode(error, 'P2034') || prismaCode(error, 'P2002')) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'UI session could not be rotated periodically')
       }
       throw error

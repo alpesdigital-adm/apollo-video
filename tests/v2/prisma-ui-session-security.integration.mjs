@@ -101,10 +101,9 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     const notDue = await first.refreshActiveSession(refreshInput('2026-08-02T02:14:00.000Z'))
     assert.equal(notDue.rotated, false)
     assert.equal(notDue.session.nonceHash, nextNonceHash)
-    const concurrentRefresh = await Promise.all([
-      first.refreshActiveSession(refreshInput('2026-08-02T02:15:00.000Z')),
-      second.refreshActiveSession(refreshInput('2026-08-02T02:15:00.000Z')),
-    ])
+    const concurrentRefresh = await Promise.all(Array.from({ length: 8 }, (_, index) =>
+      (index % 2 === 0 ? first : second).refreshActiveSession(refreshInput('2026-08-02T02:15:00.000Z')),
+    ))
     assert.equal(concurrentRefresh.every((result) => result?.rotated && result.session.nonceHash === periodicNonceHash), true)
     assert.equal(await client.v2UiSession.count({ where: { nonceHash: periodicNonceHash } }), 1)
     assert.deepEqual(await client.v2UiSession.findUnique({
