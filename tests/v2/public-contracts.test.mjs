@@ -62,21 +62,26 @@ test('public error catalog classifies every domain code exactly once and fails c
   assert.equal(Object.isFrozen(PUBLIC_ERROR_CATALOG), true)
   assert.deepEqual(PUBLIC_ERROR_CATALOG.AUTH_INVALID, {
     code: 'AUTH_INVALID', status: 401, category: 'auth', retryable: false,
+    message: 'Auth invalid',
   })
   assert.deepEqual(PUBLIC_ERROR_CATALOG.VERSION_CONFLICT, {
     code: 'VERSION_CONFLICT', status: 409, category: 'conflict', retryable: false,
+    message: 'Version conflict',
   })
   assert.deepEqual(PUBLIC_ERROR_CATALOG.ASSET_RIGHTS_BLOCKED, {
     code: 'ASSET_RIGHTS_BLOCKED', status: 422, category: 'policy', retryable: false,
+    message: 'Asset rights blocked',
   })
   assert.deepEqual(PUBLIC_ERROR_CATALOG.WEBHOOK_CHALLENGE_TRANSPORT_FAILED, {
     code: 'WEBHOOK_CHALLENGE_TRANSPORT_FAILED',
     status: 502,
     category: 'provider',
     retryable: true,
+    message: 'An external provider request could not be completed',
   })
   assert.deepEqual(PUBLIC_ERROR_CATALOG.PERSISTENCE_NOT_CONFIGURED, {
     code: 'PERSISTENCE_NOT_CONFIGURED', status: 503, category: 'internal', retryable: true,
+    message: 'The request could not be completed',
   })
 
   assert.throws(
@@ -235,6 +240,16 @@ test('version conflicts expose only the bounded semantic diff', async () => {
   const errorSchema =
     document.paths['/v1/projects'].post.responses['409'].content['application/json'].schema
   assert.deepEqual(errorSchema, { $ref: '#/components/schemas/ErrorEnvelopeV3' })
+})
+
+test('public errors never expose a domain diagnostic through the client message', () => {
+  const secret = 'provider-secret-and-private-diagnostic'
+  const body = presentPublicDomainError(
+    new DomainError('WEBHOOK_CHALLENGE_TRANSPORT_FAILED', secret),
+    'request-redaction-1',
+  )
+  assert.equal(body.error.message, 'An external provider request could not be completed')
+  assert.equal(JSON.stringify(body).includes(secret), false)
 })
 
 test('agent tools compose transport inputs and structured outputs from capabilities', () => {

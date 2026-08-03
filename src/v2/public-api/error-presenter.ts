@@ -81,7 +81,7 @@ export function presentPublicDomainError(error: DomainError, requestId: string) 
   return {
     error: {
       code: error.code,
-      message: error.message,
+      message: descriptor.message,
       category: descriptor.category,
       retryable: descriptor.retryable,
       requestId,

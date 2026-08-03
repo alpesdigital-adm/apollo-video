@@ -18,6 +18,7 @@ export interface PublicErrorDescriptor {
   status: number
   category: PublicErrorCategory
   retryable: boolean
+  message: string
 }
 
 interface PublicErrorGroup {
@@ -25,6 +26,13 @@ interface PublicErrorGroup {
   status: number
   category: PublicErrorCategory
   retryable?: boolean
+  message?: string
+}
+
+function safePublicMessage(code: DomainErrorCode, group: PublicErrorGroup): string {
+  if (group.message) return group.message
+  const words = code.toLowerCase().replaceAll('_', ' ')
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`
 }
 
 export function definePublicErrorCatalog(
@@ -50,6 +58,7 @@ export function definePublicErrorCatalog(
         status: group.status,
         category: group.category,
         retryable: group.retryable ?? false,
+        message: safePublicMessage(code, group),
       }))
     }
   }
@@ -159,10 +168,12 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
   },
   {
     status: 502, category: 'provider', retryable: true,
+    message: 'An external provider request could not be completed',
     codes: ['WEBHOOK_CHALLENGE_TRANSPORT_FAILED'],
   },
   {
     status: 503, category: 'internal', retryable: true,
+    message: 'The request could not be completed',
     codes: ['AUTH_NOT_CONFIGURED', 'PERSISTENCE_NOT_CONFIGURED', 'INVALID_CAPABILITY_POLICY'],
   },
   {

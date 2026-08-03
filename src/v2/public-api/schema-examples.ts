@@ -9578,7 +9578,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       {
         error: {
           code: 'WEBHOOK_CHALLENGE_TRANSPORT_FAILED',
-          message: 'Webhook challenge transport failed',
+          message: 'An external provider request could not be completed',
           category: 'provider',
           retryable: true,
           requestId: 'request-provider-example-1',
