@@ -289,6 +289,8 @@ Complemento integrado F0.032 — o run `30775230222` adicionou ports tipados com
 
 Evidência integrada F0.033 — o run `30775662600` transformou as 57 entidades normativas do PRD 10.1–10.6 em inventário verificável: 26 targets de tabela, 5 snapshot kinds, 14 value objects e 12 lacunas `planned`. T-F0.033 deriva o conjunto do PRD, exige unicidade/owner/lifecycle, valida models Prisma, símbolos exportados e kinds e proíbe tabela conceitual genérica. A Spec 10 inclui o diagrama de ownership. O gate não afirma que as 12 lacunas foram implementadas nem substitui teste do grafo completo de FKs, deploy ou aceite; as caixas permanecem abertas.
 
+Complemento integrado F0.033 — o run `30776437393` validou os seams centrais das Specs 02/03/06: manifest de SourceAsset sem URI pública, TimelineSegment frame-first, OutputSpec, EditCommand e um novo port AsyncMediaProviderAdapter completo. O boundary de capabilities é fechado, imutável e TTL-bound e rejeita campos extras/secrets, duplicatas, operações desconhecidas e ranges inválidos. Os 832 testes, build, PostgreSQL/MinIO, goldens, API/OIDC e Compose passaram. DocumentAsset e ProviderJob/provider real durável continuam pendentes; a caixa permanece aberta.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.
