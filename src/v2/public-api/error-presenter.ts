@@ -1,4 +1,5 @@
 import type { DomainError } from '../domain/errors.ts'
+import { PUBLIC_ERROR_CATALOG } from './public-error-catalog.ts'
 
 function boundedStrings(value: unknown, maximum: number, maximumLength = 256): string[] | null {
   if (
@@ -67,7 +68,8 @@ function presentVersionConflict(value: unknown) {
   }
 }
 
-export function presentPublicDomainError(error: DomainError, requestId: string, status: number) {
+export function presentPublicDomainError(error: DomainError, requestId: string) {
+  const descriptor = PUBLIC_ERROR_CATALOG[error.code]
   const details =
     error.code === 'AUTH_SCOPE_REQUIRED'
       ? { requiredScope: error.details.requiredScope }
@@ -80,15 +82,8 @@ export function presentPublicDomainError(error: DomainError, requestId: string, 
     error: {
       code: error.code,
       message: error.message,
-      category:
-        status === 401 || status === 403
-          ? 'auth'
-          : status === 409 || status === 412
-            ? 'conflict'
-            : status >= 500
-              ? 'internal'
-              : 'validation',
-      retryable: error.code === 'WEBHOOK_CHALLENGE_TRANSPORT_FAILED',
+      category: descriptor.category,
+      retryable: descriptor.retryable,
       requestId,
       ...(details ? { details } : {}),
       ...(conflict ? { conflict } : {}),

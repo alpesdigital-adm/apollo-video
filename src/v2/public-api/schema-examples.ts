@@ -9574,6 +9574,17 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         },
       },
     ],
+    'apollo://schemas/error-envelope/v3': [
+      {
+        error: {
+          code: 'WEBHOOK_CHALLENGE_TRANSPORT_FAILED',
+          message: 'Webhook challenge transport failed',
+          category: 'provider',
+          retryable: true,
+          requestId: 'request-provider-example-1',
+        },
+      },
+    ],
     'apollo://schemas/openapi-document/v1': [
       {
         openapi: '3.1.0',

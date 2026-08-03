@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { DomainError } from '../../src/v2/domain/errors.ts'
+import { DOMAIN_ERROR_CODES, DomainError } from '../../src/v2/domain/errors.ts'
 import { PUBLIC_EVENT_CATALOG } from '../../src/v2/domain/public-event.ts'
 import {
   FOUNDATION_CAPABILITIES,
@@ -9,6 +9,10 @@ import {
 } from '../../src/v2/public-api/capability-registry.ts'
 import { createOpenApiDocument } from '../../src/v2/public-api/openapi.ts'
 import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
+import {
+  PUBLIC_ERROR_CATALOG,
+  definePublicErrorCatalog,
+} from '../../src/v2/public-api/public-error-catalog.ts'
 import {
   agentDataBoundaryForSchemas,
   agentToolsForCapabilities,
@@ -50,6 +54,52 @@ test('schema routes are stable, versioned and reject unknown documents', () => {
   assert.throws(
     () => getPublicSchemaByRoute('missing-schema', 'v1'),
     (error) => error instanceof DomainError && error.code === 'PUBLIC_SCHEMA_NOT_FOUND',
+  )
+})
+
+test('public error catalog classifies every domain code exactly once and fails closed', () => {
+  assert.deepEqual(Object.keys(PUBLIC_ERROR_CATALOG).sort(), [...DOMAIN_ERROR_CODES].sort())
+  assert.equal(Object.isFrozen(PUBLIC_ERROR_CATALOG), true)
+  assert.deepEqual(PUBLIC_ERROR_CATALOG.AUTH_INVALID, {
+    code: 'AUTH_INVALID', status: 401, category: 'auth', retryable: false,
+  })
+  assert.deepEqual(PUBLIC_ERROR_CATALOG.VERSION_CONFLICT, {
+    code: 'VERSION_CONFLICT', status: 409, category: 'conflict', retryable: false,
+  })
+  assert.deepEqual(PUBLIC_ERROR_CATALOG.ASSET_RIGHTS_BLOCKED, {
+    code: 'ASSET_RIGHTS_BLOCKED', status: 422, category: 'policy', retryable: false,
+  })
+  assert.deepEqual(PUBLIC_ERROR_CATALOG.WEBHOOK_CHALLENGE_TRANSPORT_FAILED, {
+    code: 'WEBHOOK_CHALLENGE_TRANSPORT_FAILED',
+    status: 502,
+    category: 'provider',
+    retryable: true,
+  })
+  assert.deepEqual(PUBLIC_ERROR_CATALOG.PERSISTENCE_NOT_CONFIGURED, {
+    code: 'PERSISTENCE_NOT_CONFIGURED', status: 503, category: 'internal', retryable: true,
+  })
+
+  assert.throws(
+    () => definePublicErrorCatalog([{
+      codes: DOMAIN_ERROR_CODES,
+      status: 422,
+      category: 'validation',
+    }, {
+      codes: ['AUTH_INVALID'],
+      status: 401,
+      category: 'auth',
+    }]),
+    (error) => error instanceof DomainError && error.code === 'INVALID_PUBLIC_SCHEMA',
+  )
+  assert.throws(
+    () => definePublicErrorCatalog([{
+      codes: DOMAIN_ERROR_CODES.slice(1),
+      status: 422,
+      category: 'validation',
+    }]),
+    (error) =>
+      error instanceof DomainError && error.code === 'INVALID_PUBLIC_SCHEMA' &&
+      error.details.missing.includes('INVALID_ARGUMENT'),
   )
 })
 
@@ -160,7 +210,6 @@ test('version conflicts expose only the bounded semantic diff', async () => {
       },
     }),
     'request-version-conflict-1',
-    409,
   )
   assert.deepEqual(body.error.conflict, {
     currentVersionId: 'version-current-2',
@@ -185,7 +234,7 @@ test('version conflicts expose only the bounded semantic diff', async () => {
   const document = createOpenApiDocument()
   const errorSchema =
     document.paths['/v1/projects'].post.responses['409'].content['application/json'].schema
-  assert.deepEqual(errorSchema, { $ref: '#/components/schemas/ErrorEnvelopeV2' })
+  assert.deepEqual(errorSchema, { $ref: '#/components/schemas/ErrorEnvelopeV3' })
 })
 
 test('agent tools compose transport inputs and structured outputs from capabilities', () => {

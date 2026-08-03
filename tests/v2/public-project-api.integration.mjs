@@ -1219,6 +1219,15 @@ test('authenticated public API manages projects, clients and artifact inspection
       body: JSON.stringify({ name: 'Should not exist' }),
     })
     assert.equal(unauthorized.status, 401)
+    assert.deepEqual(await unauthorized.json(), {
+      error: {
+        code: 'AUTH_INVALID',
+        message: 'Bearer API credential is required',
+        category: 'auth',
+        retryable: false,
+        requestId: unauthorized.headers.get('apollo-request-id'),
+      },
+    })
 
     const authorization = `Bearer ${issued.token}`
     const anonymousCapabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`)
@@ -3071,7 +3080,10 @@ test('authenticated public API manages projects, clients and artifact inspection
       },
     )
     assert.equal(missingRightsIfMatchResponse.status, 428)
-    assert.equal((await missingRightsIfMatchResponse.json()).error.code, 'PRECONDITION_REQUIRED')
+    const missingRightsIfMatch = await missingRightsIfMatchResponse.json()
+    assert.equal(missingRightsIfMatch.error.code, 'PRECONDITION_REQUIRED')
+    assert.equal(missingRightsIfMatch.error.category, 'policy')
+    assert.equal(missingRightsIfMatch.error.retryable, false)
     const malformedRightsIfMatchResponse = await fetch(
       `${baseUrl}/v1/artifacts/${sourceArtifactId}/rights`,
       {

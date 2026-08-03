@@ -136,7 +136,7 @@ export function agentToolDescriptor(capability: Readonly<PublicCapability>) {
           : capability.description,
     inputSchema,
     outputSchema,
-    errorSchema: Object.freeze(embeddedSchema('apollo://schemas/error-envelope/v2')),
+    errorSchema: Object.freeze(embeddedSchema('apollo://schemas/error-envelope/v3')),
     annotations: Object.freeze({
       readOnlyHint:
         capability.operationKind === 'query' || capability.operationKind === 'preflight',

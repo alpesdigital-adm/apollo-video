@@ -1,4 +1,4 @@
-import { DomainError, assertDomain } from '../domain/errors.ts'
+import { DOMAIN_ERROR_CODES, DomainError, assertDomain } from '../domain/errors.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import {
@@ -18872,6 +18872,41 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           code: { type: 'string' },
           message: { type: 'string' },
           category: { enum: ['auth', 'conflict', 'validation', 'internal'] },
+          retryable: { type: 'boolean' },
+          requestId: { type: 'string' },
+          details: { type: 'object' },
+          conflict: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['currentVersionId', 'conflictingTargets', 'diff'],
+            properties: {
+              currentVersionId: idSchema,
+              conflictingTargets: {
+                type: 'array', minItems: 1, maxItems: 1024, uniqueItems: true,
+                items: { type: 'string', minLength: 1, maxLength: 256 },
+              },
+              diff: versionDiffSchema,
+            },
+          },
+        },
+      },
+    },
+  }),
+  defineSchema('error-envelope', 3, 'Public API error envelope with stable error categories', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['error'],
+    properties: {
+      error: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'message', 'category', 'retryable', 'requestId'],
+        properties: {
+          code: { enum: DOMAIN_ERROR_CODES },
+          message: { type: 'string' },
+          category: {
+            enum: ['validation', 'auth', 'policy', 'conflict', 'quota', 'provider', 'internal'],
+          },
           retryable: { type: 'boolean' },
           requestId: { type: 'string' },
           details: { type: 'object' },
