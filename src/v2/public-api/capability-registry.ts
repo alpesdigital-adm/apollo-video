@@ -81,7 +81,46 @@ export interface UiActionDescriptor {
   internalOnlyReason?: string
 }
 
+const CAPABILITY_EXPOSURES = Object.freeze<readonly CapabilityExposure[]>([
+  'public', 'workspace-admin', 'internal-only',
+])
+const CAPABILITY_OPERATION_KINDS = Object.freeze<readonly CapabilityOperationKind[]>([
+  'query', 'command', 'preflight', 'job',
+])
+const CAPABILITY_COST_CLASSES = Object.freeze<readonly CapabilityCostClass[]>([
+  'free', 'low', 'medium', 'high', 'variable',
+])
+const CAPABILITY_CONFIRMATIONS = Object.freeze<readonly CapabilityConfirmation[]>([
+  'none', 'preflight-token', 'human-approval',
+])
+const CAPABILITY_SCHEMA_REF = /^apollo:\/\/schemas\/[a-z0-9-]+\/v[1-9][0-9]*$/
+const CAPABILITY_SCOPE = /^[a-z][a-z0-9-]{1,63}:[a-z][a-z0-9-]{1,63}$/
+
 function validateCapability(capability: PublicCapability): void {
+  assertDomain(
+    CAPABILITY_EXPOSURES.includes(capability.exposure),
+    'INVALID_CAPABILITY',
+    'Capability exposure is invalid',
+    { capabilityId: capability.id, exposure: capability.exposure },
+  )
+  assertDomain(
+    CAPABILITY_OPERATION_KINDS.includes(capability.operationKind),
+    'INVALID_CAPABILITY',
+    'Capability operation kind is invalid',
+    { capabilityId: capability.id, operationKind: capability.operationKind },
+  )
+  assertDomain(
+    CAPABILITY_COST_CLASSES.includes(capability.costClass),
+    'INVALID_CAPABILITY',
+    'Capability cost class is invalid',
+    { capabilityId: capability.id, costClass: capability.costClass },
+  )
+  assertDomain(
+    CAPABILITY_CONFIRMATIONS.includes(capability.confirmation),
+    'INVALID_CAPABILITY',
+    'Capability confirmation policy is invalid',
+    { capabilityId: capability.id, confirmation: capability.confirmation },
+  )
   assertDomain(
     /^apollo\.[a-z0-9.-]+$/.test(capability.id),
     'INVALID_CAPABILITY',
@@ -101,15 +140,26 @@ function validateCapability(capability: PublicCapability): void {
     { capabilityId: capability.id },
   )
   assertDomain(
-    capability.outputSchemaRef.trim().length > 0,
+    typeof capability.outputSchemaRef === 'string' &&
+      CAPABILITY_SCHEMA_REF.test(capability.outputSchemaRef),
     'INVALID_CAPABILITY',
-    'Capability outputSchemaRef is required',
+    'Capability outputSchemaRef must be a canonical Apollo schema reference',
     { capabilityId: capability.id },
   )
   assertDomain(
-    new Set(capability.requiredScopes).size === capability.requiredScopes.length,
+    capability.inputSchemaRef === undefined ||
+      (typeof capability.inputSchemaRef === 'string' &&
+        CAPABILITY_SCHEMA_REF.test(capability.inputSchemaRef)),
     'INVALID_CAPABILITY',
-    'Capability scopes cannot contain duplicates',
+    'Capability inputSchemaRef must be a canonical Apollo schema reference',
+    { capabilityId: capability.id },
+  )
+  assertDomain(
+    Array.isArray(capability.requiredScopes) &&
+      capability.requiredScopes.every((scope) => CAPABILITY_SCOPE.test(scope)) &&
+      new Set(capability.requiredScopes).size === capability.requiredScopes.length,
+    'INVALID_CAPABILITY',
+    'Capability scopes must be canonical and cannot contain duplicates',
     { capabilityId: capability.id },
   )
   assertDomain(

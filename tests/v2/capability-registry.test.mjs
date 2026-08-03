@@ -179,6 +179,36 @@ test('registry rejects duplicate capabilities and unsafe high-cost actions', () 
   )
 })
 
+test('T-F0-034 registry fails closed for exposure, scopes, schema, cost and confirmation drift', () => {
+  const base = FOUNDATION_CAPABILITIES.find((capability) => capability.id === 'apollo.projects.create')
+  assert.ok(base)
+  const mutations = [
+    { exposure: 'partner' },
+    { operationKind: 'mutation' },
+    { requiredScopes: ['projects read'] },
+    { inputSchemaRef: 'https://schemas.example/create-project.json' },
+    { outputSchemaRef: 'apollo://schemas/project-created/v0' },
+    { costClass: 'unbounded' },
+    { confirmation: 'click-through' },
+  ]
+
+  for (const mutation of mutations) {
+    expectDomainError(
+      () => defineCapabilityRegistry([{ ...base, ...mutation }]),
+      'INVALID_CAPABILITY',
+    )
+  }
+
+  assert.ok(FOUNDATION_CAPABILITIES.length >= 189)
+  for (const capability of FOUNDATION_CAPABILITIES) {
+    assert.ok(['public', 'workspace-admin', 'internal-only'].includes(capability.exposure))
+    assert.ok(['free', 'low', 'medium', 'high', 'variable'].includes(capability.costClass))
+    assert.ok(['none', 'preflight-token', 'human-approval'].includes(capability.confirmation))
+    assert.doesNotThrow(() => getPublicSchema(capability.outputSchemaRef))
+    if (capability.inputSchemaRef) assert.doesNotThrow(() => getPublicSchema(capability.inputSchemaRef))
+  }
+})
+
 test('UI parity requires a public capability or an internal-only reason', () => {
   assert.doesNotThrow(() =>
     assertCapabilityParity(
