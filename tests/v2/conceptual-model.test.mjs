@@ -149,10 +149,18 @@ test('T-F0-033 documents and enforces the central aggregate reference graph', as
   }
 
   const manifestBindings = rows.filter((row) => row.parent === 'V2MediaArtifactManifest' && row.child !== 'V2MediaArtifactLineage')
-  assert.ok(manifestBindings.length >= 8)
+  assert.ok(manifestBindings.length >= 5)
   for (const row of manifestBindings) {
     assert.ok(row.fields.some((field) => /artifactId$/i.test(field)), `${row.child}.${row.relation} must bind its artifact`)
     assert.deepEqual(row.references, ['id', 'artifactId', 'workspaceId'])
+  }
+
+  for (const [model, relation] of [
+    ['V2MediaIngestOperation', 'sourceArtifact'],
+    ['V2ProjectProxyRenderOperation', 'outputArtifact'],
+    ['V2ProjectFinalExportOperation', 'outputArtifact'],
+  ]) {
+    assert.doesNotMatch(modelBlock(prisma, model), new RegExp(`^\\s*${relation}\\s+V2`, 'm'), `${model}.${relation} is a future output reservation`)
   }
 
   const crossProjectMutation = prisma.replace(

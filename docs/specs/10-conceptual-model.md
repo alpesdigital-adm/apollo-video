@@ -31,8 +31,6 @@ flowchart LR
   M --> L[V2MediaArtifactLineage]
   A --> L
   P --> I[V2MediaIngestOperation]
-  A --> I
-  M --> I
   P --> R[V2ProjectProxyRenderOperation]
   V --> R
   S --> R
@@ -72,8 +70,6 @@ flowchart LR
 | V2AssetRightsSnapshot | artifact | artifactId,workspaceId | V2MediaArtifact | id,workspaceId | Cascade |
 | V2PublicOperation | workspace | workspaceId | V2Workspace | id | Restrict |
 | V2MediaIngestOperation | project | projectId,workspaceId | V2Project | id,workspaceId | Restrict |
-| V2MediaIngestOperation | sourceArtifact | sourceArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
-| V2MediaIngestOperation | sourceManifest | sourceManifestId,sourceArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
 | V2ArtifactRenderOperation | operation | operationId,workspaceId | V2PublicOperation | id,workspaceId | Cascade |
 | V2ArtifactRenderOperation | artifact | artifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
 | V2ArtifactRenderOperation | manifest | manifestId,artifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
@@ -82,8 +78,6 @@ flowchart LR
 | V2ProjectProxyRenderOperation | editPlanSnapshot | editPlanSnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
 | V2ProjectProxyRenderOperation | sourceArtifact | sourceArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
 | V2ProjectProxyRenderOperation | sourceManifest | sourceManifestId,sourceArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
-| V2ProjectProxyRenderOperation | outputArtifact | outputArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
-| V2ProjectProxyRenderOperation | outputManifest | outputManifestId,outputArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
 | V2ProxyReview | project | projectId,workspaceId | V2Project | id,workspaceId | Cascade |
 | V2ProxyReview | projectVersion | projectVersionId,projectId,workspaceId | V2ProjectVersion | id,projectId,workspaceId | Restrict |
 | V2ProxyReview | operation | operationId,projectId,workspaceId | V2ProjectProxyRenderOperation | operationId,projectId,workspaceId | Restrict |
@@ -98,11 +92,11 @@ flowchart LR
 | V2ProjectFinalExportOperation | proxyArtifact | proxyArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
 | V2ProjectFinalExportOperation | sourceArtifact | sourceArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
 | V2ProjectFinalExportOperation | sourceManifest | sourceManifestId,sourceArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
-| V2ProjectFinalExportOperation | outputArtifact | outputArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
-| V2ProjectFinalExportOperation | outputManifest | outputManifestId,outputArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
 | V2ProjectFinalExportAttempt | operation | operationId,workspaceId | V2ProjectFinalExportOperation | operationId,workspaceId | Cascade |
 | V2ProjectFinalExportAttempt | outputArtifact | outputArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
 | V2ProjectFinalExportAttempt | outputManifest | outputManifestId,outputArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
+
+Os IDs de output na operacao de ingest, proxy e export final sao reservas deterministicas para um artifact que ainda nao existe quando o job e enfileirado. Por isso eles nao fingem ser FKs antecipadas. A integridade artifact/manifest passa a ser obrigatoria no registro terminal de `V2ProjectFinalExportAttempt`; inputs ja materializados permanecem protegidos no enqueue.
 
 | PRD | Entity | Owner | Representation | Canonical target | Lifecycle / key |
 |---|---|---|---|---|---|

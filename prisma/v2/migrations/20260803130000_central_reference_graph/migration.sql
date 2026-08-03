@@ -101,16 +101,6 @@ ALTER TABLE "project_versions"
     REFERENCES "project_snapshots"("id", "projectId", "workspaceId")
     ON DELETE RESTRICT ON UPDATE CASCADE;
 
-ALTER TABLE "media_ingest_operations"
-  ADD CONSTRAINT "media_ingest_operations_sourceArtifactId_workspaceId_fkey"
-    FOREIGN KEY ("sourceArtifactId", "workspaceId")
-    REFERENCES "media_artifacts"("id", "workspaceId")
-    ON DELETE RESTRICT ON UPDATE CASCADE,
-  ADD CONSTRAINT "media_ingest_operations_sourceManifestId_sourceArtifactId__fkey"
-    FOREIGN KEY ("sourceManifestId", "sourceArtifactId", "workspaceId")
-    REFERENCES "media_artifact_manifests"("id", "artifactId", "workspaceId")
-    ON DELETE RESTRICT ON UPDATE CASCADE;
-
 ALTER TABLE "project_proxy_render_operations"
   DROP CONSTRAINT "project_proxy_render_operations_projectVersionId_workspace_fkey",
   ADD CONSTRAINT "project_proxy_render_operations_projectVersionId_projectId_fkey"
@@ -127,14 +117,6 @@ ALTER TABLE "project_proxy_render_operations"
     ON DELETE RESTRICT ON UPDATE CASCADE,
   ADD CONSTRAINT "project_proxy_render_operations_sourceManifestId_sourceArt_fkey"
     FOREIGN KEY ("sourceManifestId", "sourceArtifactId", "workspaceId")
-    REFERENCES "media_artifact_manifests"("id", "artifactId", "workspaceId")
-    ON DELETE RESTRICT ON UPDATE CASCADE,
-  ADD CONSTRAINT "project_proxy_render_operations_outputArtifactId_workspace_fkey"
-    FOREIGN KEY ("outputArtifactId", "workspaceId")
-    REFERENCES "media_artifacts"("id", "workspaceId")
-    ON DELETE RESTRICT ON UPDATE CASCADE,
-  ADD CONSTRAINT "project_proxy_render_operations_outputManifestId_outputArt_fkey"
-    FOREIGN KEY ("outputManifestId", "outputArtifactId", "workspaceId")
     REFERENCES "media_artifact_manifests"("id", "artifactId", "workspaceId")
     ON DELETE RESTRICT ON UPDATE CASCADE;
 
@@ -173,14 +155,6 @@ ALTER TABLE "project_final_export_operations"
     ON DELETE RESTRICT ON UPDATE CASCADE,
   ADD CONSTRAINT "project_final_export_operations_sourceManifestId_sourceArt_fkey"
     FOREIGN KEY ("sourceManifestId", "sourceArtifactId", "workspaceId")
-    REFERENCES "media_artifact_manifests"("id", "artifactId", "workspaceId")
-    ON DELETE RESTRICT ON UPDATE CASCADE,
-  ADD CONSTRAINT "project_final_export_operations_outputArtifactId_workspace_fkey"
-    FOREIGN KEY ("outputArtifactId", "workspaceId")
-    REFERENCES "media_artifacts"("id", "workspaceId")
-    ON DELETE RESTRICT ON UPDATE CASCADE,
-  ADD CONSTRAINT "project_final_export_operations_outputManifestId_outputArt_fkey"
-    FOREIGN KEY ("outputManifestId", "outputArtifactId", "workspaceId")
     REFERENCES "media_artifact_manifests"("id", "artifactId", "workspaceId")
     ON DELETE RESTRICT ON UPDATE CASCADE;
 
