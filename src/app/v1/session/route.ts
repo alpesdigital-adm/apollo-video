@@ -22,6 +22,7 @@ import {
   configuredUiApiClientId,
   configuredUiBootstrapRole,
   configuredUiUsername,
+  deriveUiSessionRotationToken,
   issueUiSession,
   safeUiRedirect,
   uiLoginThrottleKey,
@@ -79,12 +80,16 @@ export async function GET(request: NextRequest) {
     return sessionError(requestId, 401, 'AUTH_INVALID', 'Entre para continuar.')
   }
   let actor
+  let successorToken = ''
   try {
+    successorToken = deriveUiSessionRotationToken(sessionToken)
     actor = await authenticateUiSessionService({
       repository: createApiClientRepository(),
       sessions: createUiSessionSecurityRepository(),
       environment: resolveApiEnvironment(),
-    })(sessionToken, uiSessionNonceHash(sessionToken))
+    })(sessionToken, uiSessionNonceHash(sessionToken), {
+      successorNonceHash: uiSessionNonceHash(successorToken),
+    })
   } catch (error) {
     if (error instanceof DomainError && error.code === 'AUTH_INVALID') {
       return sessionError(requestId, 401, 'AUTH_INVALID', 'A sessão não está mais autorizada.')
@@ -99,7 +104,7 @@ export async function GET(request: NextRequest) {
   }
   try {
     const workspaces = await listSelectableWorkspacesService({ members: createWorkspaceMemberRepository() })(actor.delegatedUserId!)
-    return NextResponse.json(
+    const response = NextResponse.json(
       presentSuccess({
         subject: resolveHumanAuthenticationMode() === 'bootstrap'
           ? configuredUiUsername()
@@ -112,8 +117,28 @@ export async function GET(request: NextRequest) {
       }),
       { headers: publicApiHeaders(requestId) },
     )
+    if (actor.sessionTokenRotated) {
+      response.cookies.set(APOLLO_SESSION_COOKIE, successorToken, {
+        httpOnly: true,
+        secure: secureCookie(request),
+        sameSite: 'strict',
+        path: '/',
+        maxAge: Math.max(0, Math.ceil((new Date(actor.sessionExpiresAt).getTime() - Date.now()) / 1000)),
+      })
+    }
+    return response
   } catch {
-    return sessionError(requestId, 503, 'AUTH_UNAVAILABLE', 'Não foi possível listar os workspaces agora.', { retryable: true, category: 'internal' })
+    const response = sessionError(requestId, 503, 'AUTH_UNAVAILABLE', 'Não foi possível listar os workspaces agora.', { retryable: true, category: 'internal' })
+    if (actor.sessionTokenRotated) {
+      response.cookies.set(APOLLO_SESSION_COOKIE, successorToken, {
+        httpOnly: true,
+        secure: secureCookie(request),
+        sameSite: 'strict',
+        path: '/',
+        maxAge: Math.max(0, Math.ceil((new Date(actor.sessionExpiresAt).getTime() - Date.now()) / 1000)),
+      })
+    }
+    return response
   }
 }
 

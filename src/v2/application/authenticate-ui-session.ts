@@ -4,6 +4,10 @@ import type { ApiClientRepository } from './ports/api-client-repository.ts'
 import type { UiSessionSecurityRepository } from './ports/ui-session-security-repository.ts'
 
 export const UI_SESSION_IDLE_TTL_SECONDS = 30 * 60
+export const UI_SESSION_ROTATE_AFTER_SECONDS = 10 * 60
+export const UI_SESSION_IDENTIFIER_MAX_AGE_SECONDS = 15 * 60
+export const UI_SESSION_ROTATION_RECOVERY_SECONDS = 60
+const SESSION_HASH = /^[a-f0-9]{64}$/
 
 export function authenticateUiSessionService(dependencies: {
   repository: ApiClientRepository
@@ -11,13 +15,36 @@ export function authenticateUiSessionService(dependencies: {
   environment: ApiEnvironment
   now?: () => Date
 }) {
-  return async function authenticate(sessionToken: string | null, nonceHash?: string) {
+  return async function authenticate(
+    sessionToken: string | null,
+    nonceHash?: string,
+    rotation?: Readonly<{ successorNonceHash: string }>,
+  ) {
     if (!sessionToken) throw new DomainError('AUTH_INVALID', 'Apollo session is required')
-    if (!nonceHash) throw new DomainError('AUTH_INVALID', 'Apollo session is required')
+    if (!nonceHash || !SESSION_HASH.test(nonceHash)) throw new DomainError('AUTH_INVALID', 'Apollo session is required')
+    if (rotation && (!SESSION_HASH.test(rotation.successorNonceHash) || rotation.successorNonceHash === nonceHash)) {
+      throw new DomainError('AUTH_INVALID', 'Apollo session rotation is invalid')
+    }
     const now = dependencies.now?.() ?? new Date()
-    const durable = await dependencies.sessions.readActiveAndTouch({
-      nonceHash, now: now.toISOString(), idleTtlSeconds: UI_SESSION_IDLE_TTL_SECONDS,
-    })
+    const refreshed = rotation
+      ? await dependencies.sessions.refreshActiveSession({
+        currentNonceHash: nonceHash,
+        successorNonceHash: rotation.successorNonceHash,
+        now: now.toISOString(),
+        idleTtlSeconds: UI_SESSION_IDLE_TTL_SECONDS,
+        rotateAfterSeconds: UI_SESSION_ROTATE_AFTER_SECONDS,
+        identifierMaxAgeSeconds: UI_SESSION_IDENTIFIER_MAX_AGE_SECONDS,
+        recoverySeconds: UI_SESSION_ROTATION_RECOVERY_SECONDS,
+      })
+      : null
+    const durable = refreshed?.session ?? (!rotation
+      ? await dependencies.sessions.readActiveAndTouch({
+        nonceHash,
+        now: now.toISOString(),
+        idleTtlSeconds: UI_SESSION_IDLE_TTL_SECONDS,
+        identifierMaxAgeSeconds: UI_SESSION_IDENTIFIER_MAX_AGE_SECONDS,
+      })
+      : null)
     if (
       !durable
     ) {
@@ -37,6 +64,7 @@ export function authenticateUiSessionService(dependencies: {
       environment: client.environment,
       scopes: new Set(client.scopes),
       sessionExpiresAt: durable.expiresAt,
+      sessionTokenRotated: refreshed?.rotated ?? false,
     })
   }
 }

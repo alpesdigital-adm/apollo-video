@@ -67,16 +67,16 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     assert.equal((await members.resolveSelectableForMember({ memberId, workspaceId: otherWorkspaceId }))?.uiClientId, otherClientId)
     const grant = { clientId, issuedAt: '2026-08-02T00:00:00.000Z', expiresAt: '2026-08-02T12:00:00.000Z' }
     await first.createSession({ grant, nonceHash, subjectHash, workspaceId, memberId, idleTtlSeconds: 1800 })
-    const touched = await second.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:10:00.000Z', idleTtlSeconds: 1800 })
+    const touched = await second.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:10:00.000Z', idleTtlSeconds: 1800, identifierMaxAgeSeconds: 900 })
     assert.equal(touched.idleExpiresAt, '2026-08-02T00:40:00.000Z')
     assert.equal(touched.memberId, memberId)
     assert.equal(touched.memberRole, 'operator')
     await client.v2WorkspaceMember.update({ where: { id: memberId }, data: { status: 'suspended' } })
-    assert.equal(await first.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:11:00.000Z', idleTtlSeconds: 1800 }), null)
+    assert.equal(await first.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:11:00.000Z', idleTtlSeconds: 1800, identifierMaxAgeSeconds: 900 }), null)
     await client.v2WorkspaceMember.update({ where: { id: memberId }, data: { status: 'active' } })
-    assert.equal(await first.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:40:00.000Z', idleTtlSeconds: 1800 }), null)
+    assert.equal(await first.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:40:00.000Z', idleTtlSeconds: 1800, identifierMaxAgeSeconds: 900 }), null)
     await second.revokeSession({ nonceHash, revokedAt: '2026-08-02T00:20:00.000Z' })
-    assert.equal(await first.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:21:00.000Z', idleTtlSeconds: 1800 }), null)
+    assert.equal(await first.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:21:00.000Z', idleTtlSeconds: 1800, identifierMaxAgeSeconds: 900 }), null)
 
     const rotationNonceHash = 'e'.repeat(64)
     const nextNonceHash = 'f'.repeat(64)
@@ -90,8 +90,58 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     })
     assert.equal(rotated.workspaceId, otherWorkspaceId)
     assert.equal(rotated.memberRole, 'director')
-    assert.equal(await first.readActiveAndTouch({ nonceHash: rotationNonceHash, now: '2026-08-02T02:06:00.000Z', idleTtlSeconds: 1800 }), null)
-    assert.equal((await first.readActiveAndTouch({ nonceHash: nextNonceHash, now: '2026-08-02T02:06:00.000Z', idleTtlSeconds: 1800 }))?.workspaceId, otherWorkspaceId)
+    assert.equal(await first.readActiveAndTouch({ nonceHash: rotationNonceHash, now: '2026-08-02T02:06:00.000Z', idleTtlSeconds: 1800, identifierMaxAgeSeconds: 900 }), null)
+    assert.equal((await first.readActiveAndTouch({ nonceHash: nextNonceHash, now: '2026-08-02T02:06:00.000Z', idleTtlSeconds: 1800, identifierMaxAgeSeconds: 900 }))?.workspaceId, otherWorkspaceId)
+
+    const periodicNonceHash = '9'.repeat(64)
+    const refreshInput = (now) => ({
+      currentNonceHash: nextNonceHash, successorNonceHash: periodicNonceHash, now,
+      idleTtlSeconds: 1800, rotateAfterSeconds: 600, identifierMaxAgeSeconds: 900, recoverySeconds: 60,
+    })
+    const notDue = await first.refreshActiveSession(refreshInput('2026-08-02T02:14:00.000Z'))
+    assert.equal(notDue.rotated, false)
+    assert.equal(notDue.session.nonceHash, nextNonceHash)
+    const concurrentRefresh = await Promise.all([
+      first.refreshActiveSession(refreshInput('2026-08-02T02:15:00.000Z')),
+      second.refreshActiveSession(refreshInput('2026-08-02T02:15:00.000Z')),
+    ])
+    assert.equal(concurrentRefresh.every((result) => result?.rotated && result.session.nonceHash === periodicNonceHash), true)
+    assert.equal(await client.v2UiSession.count({ where: { nonceHash: periodicNonceHash } }), 1)
+    assert.deepEqual(await client.v2UiSession.findUnique({
+      where: { nonceHash: nextNonceHash },
+      select: { successorNonceHash: true, rotatedAt: true, revokedAt: true },
+    }), {
+      successorNonceHash: periodicNonceHash,
+      rotatedAt: new Date('2026-08-02T02:15:00.000Z'),
+      revokedAt: new Date('2026-08-02T02:15:00.000Z'),
+    })
+    assert.equal(await first.readActiveAndTouch({
+      nonceHash: nextNonceHash, now: '2026-08-02T02:15:30.000Z', idleTtlSeconds: 1800, identifierMaxAgeSeconds: 900,
+    }), null, 'a rotated identifier cannot authenticate ordinary API requests')
+    assert.equal((await first.readActiveAndTouch({
+      nonceHash: periodicNonceHash, now: '2026-08-02T02:15:30.000Z', idleTtlSeconds: 1800, identifierMaxAgeSeconds: 900,
+    }))?.workspaceId, otherWorkspaceId)
+    assert.equal(await second.refreshActiveSession(refreshInput('2026-08-02T02:16:00.000Z')), null, 'rotation recovery is bounded')
+
+    const hardExpiredHash = '8'.repeat(64)
+    await first.createSession({
+      grant: { clientId, issuedAt: '2026-08-02T03:00:00.000Z', expiresAt: '2026-08-02T12:00:00.000Z' },
+      nonceHash: hardExpiredHash, subjectHash, workspaceId, memberId, idleTtlSeconds: 1800,
+    })
+    assert.equal(await first.readActiveAndTouch({
+      nonceHash: hardExpiredHash, now: '2026-08-02T03:15:00.000Z', idleTtlSeconds: 1800, identifierMaxAgeSeconds: 900,
+    }), null, 'an unrotated identifier expires after fifteen minutes')
+
+    const loggedOutHash = '7'.repeat(64)
+    await first.createSession({
+      grant: { clientId, issuedAt: '2026-08-02T04:00:00.000Z', expiresAt: '2026-08-02T12:00:00.000Z' },
+      nonceHash: loggedOutHash, subjectHash, workspaceId, memberId, idleTtlSeconds: 1800,
+    })
+    await first.revokeSession({ nonceHash: loggedOutHash, revokedAt: '2026-08-02T04:01:00.000Z' })
+    assert.equal(await second.refreshActiveSession({
+      currentNonceHash: loggedOutHash, successorNonceHash: '6'.repeat(64), now: '2026-08-02T04:01:01.000Z',
+      idleTtlSeconds: 1800, rotateAfterSeconds: 600, identifierMaxAgeSeconds: 900, recoverySeconds: 60,
+    }), null, 'logout cannot be recovered as a rotation')
 
     const reserve = (repository, attempt, throttleKey = keyHash) => repository.reserveLoginAttempt({
       attemptId: randomUUID(), keyHash: throttleKey, subjectHash, requestId: `request-ui-security-${attempt}`,

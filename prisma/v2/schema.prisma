@@ -1657,6 +1657,8 @@ model V2UiSession {
   idleExpiresAt  DateTime  @db.Timestamptz(3)
   expiresAt      DateTime  @db.Timestamptz(3)
   revokedAt      DateTime? @db.Timestamptz(3)
+  rotatedAt      DateTime? @db.Timestamptz(3)
+  successorNonceHash String? @db.Char(64)
   createdAt      DateTime  @default(now()) @db.Timestamptz(3)
 
   workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -1666,6 +1668,7 @@ model V2UiSession {
   @@index([workspaceId, clientId, expiresAt])
   @@index([memberId, expiresAt])
   @@index([expiresAt])
+  @@index([successorNonceHash])
   @@map("ui_sessions")
 }
 

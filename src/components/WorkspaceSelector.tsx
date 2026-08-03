@@ -37,20 +37,42 @@ export default function WorkspaceSelector() {
 
   useEffect(() => {
     const controller = new AbortController()
-    void fetch('/v1/session', { cache: 'no-store', signal: controller.signal })
-      .then(async (response) => {
+    let inFlight = false
+    const refreshSession = async (initial: boolean) => {
+      if (inFlight || controller.signal.aborted) return
+      inFlight = true
+      try {
+        const response = await fetch('/v1/session', { cache: 'no-store', signal: controller.signal })
         const payload = await response.json() as SessionEnvelope
+        if (response.status === 401) {
+          const returnTo = `${window.location.pathname}${window.location.search}`
+          window.location.assign(`/login?next=${encodeURIComponent(returnTo)}`)
+          return
+        }
         if (!response.ok) throw new Error(payload.error?.message ?? 'Não foi possível ler o workspace.')
         setCurrent(payload.data?.workspaceId ?? '')
         setWorkspaces(payload.data?.workspaces ?? [])
+        setMessage('')
         setState('ready')
-      })
-      .catch((error: unknown) => {
+      } catch (error) {
         if (controller.signal.aborted) return
         setMessage(error instanceof Error ? error.message : 'Não foi possível ler o workspace.')
-        setState('error')
-      })
-    return () => controller.abort()
+        if (initial) setState('error')
+      } finally {
+        inFlight = false
+      }
+    }
+    void refreshSession(true)
+    const interval = window.setInterval(() => void refreshSession(false), 5 * 60 * 1000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void refreshSession(false)
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      controller.abort()
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [])
 
   async function switchWorkspace(workspaceId: string) {

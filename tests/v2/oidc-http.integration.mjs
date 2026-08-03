@@ -9,6 +9,7 @@ import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { oidcIdentitySubjectHash } from '../../src/v2/infrastructure/security/oidc-provider.ts'
+import { uiSessionNonceHash } from '../../src/v2/infrastructure/security/ui-session.ts'
 
 async function freePort() {
   return new Promise((resolve, reject) => {
@@ -191,6 +192,45 @@ test('OIDC HTTP journey verifies provider evidence and creates only authorized o
     const statusPayload = await statusResponse.json()
     assert.equal(statusResponse.status, 200, JSON.stringify(statusPayload))
     assert.equal(statusPayload.data.subject, identityId)
+
+    const rotationNow = new Date()
+    await client.v2UiSession.update({
+      where: { nonceHash: uiSessionNonceHash(session) },
+      data: {
+        issuedAt: new Date(rotationNow.getTime() - 601_000),
+        lastSeenAt: rotationNow,
+        idleExpiresAt: new Date(rotationNow.getTime() + 1_800_000),
+      },
+    })
+    const concurrentRotation = await Promise.all([
+      fetch(`${baseUrl}/v1/session`, { headers: { cookie: `apollo_session=${session}` } }),
+      fetch(`${baseUrl}/v1/session`, { headers: { cookie: `apollo_session=${session}` } }),
+    ])
+    assert.deepEqual(concurrentRotation.map((response) => response.status), [200, 200])
+    const rotatedSessions = concurrentRotation.map((response) => cookie(response, 'apollo_session'))
+    assert.match(rotatedSessions[0], /^[A-Za-z0-9_-]{43}$/)
+    assert.equal(rotatedSessions[0], rotatedSessions[1], 'concurrent refreshes must converge on one successor')
+    assert.notEqual(rotatedSessions[0], session)
+    assert.equal((await fetch(`${baseUrl}/v1/capabilities`, {
+      headers: { cookie: `apollo_session=${session}` },
+    })).status, 401, 'the rotated identifier cannot authenticate ordinary API requests')
+    assert.equal((await fetch(`${baseUrl}/v1/session`, {
+      headers: { cookie: `apollo_session=${rotatedSessions[0]}` },
+    })).status, 200)
+    const storedSessions = await client.v2UiSession.findMany({ where: { workspaceId } })
+    assert.equal(JSON.stringify(storedSessions).includes(session), false)
+    assert.equal(JSON.stringify(storedSessions).includes(rotatedSessions[0]), false)
+    const expiredRotation = new Date(Date.now() - 61_000)
+    await client.v2UiSession.update({
+      where: { nonceHash: uiSessionNonceHash(session) },
+      data: {
+        rotatedAt: expiredRotation,
+        revokedAt: expiredRotation,
+      },
+    })
+    assert.equal((await fetch(`${baseUrl}/v1/session`, {
+      headers: { cookie: `apollo_session=${session}` },
+    })).status, 401, 'the predecessor cannot recover after the bounded grace window')
     assert.equal((await callback(browserBound, 'authorization-code-replay')).status, 401)
 
     assert.equal((await callback(await start(), 'authorization-code-wrong-nonce')).status, 401)

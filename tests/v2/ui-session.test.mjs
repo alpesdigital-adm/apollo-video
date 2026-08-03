@@ -7,6 +7,7 @@ import { provisionBootstrapWorkspaceMemberService, provisionOidcWorkspaceMemberS
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   createUiPasswordHash,
+  deriveUiSessionRotationToken,
   issueUiSession,
   isTrustedUiMutationOrigin,
   safeUiRedirect,
@@ -25,7 +26,7 @@ const environment = {
   APOLLO_UI_PASSWORD_HASH: createUiPasswordHash('a-valid-test-password', 'fixed-test-salt'),
 }
 
-test('UI password and signed session authenticate without storing plaintext', () => {
+test('UI password and opaque session authenticate without storing plaintext', () => {
   assert.equal(verifyUiPassword('leandro', 'a-valid-test-password', environment), true)
   assert.equal(verifyUiPassword('leandro', 'wrong-password', environment), false)
   assert.equal(environment.APOLLO_UI_PASSWORD_HASH.includes('a-valid-test-password'), false)
@@ -44,6 +45,12 @@ test('UI session and throttle identities are one-way and source-wide', () => {
   assert.equal(sourceKey.includes('203.0.113.8'), false)
   assert.notEqual(uiSessionSubjectHash('leandro', environment), uiSessionSubjectHash('another-user', environment))
   assert.match(uiSessionNonceHash('fixed-session-nonce'), /^[a-f0-9]{64}$/)
+  const current = 'a'.repeat(43)
+  const successor = deriveUiSessionRotationToken(current, environment)
+  assert.match(successor, /^[A-Za-z0-9_-]{43}$/)
+  assert.notEqual(successor, current)
+  assert.equal(deriveUiSessionRotationToken(current, environment), successor)
+  assert.notEqual(deriveUiSessionRotationToken('b'.repeat(43), environment), successor)
 })
 
 test('UI session resolves the active Postgres API actor and its scopes', async () => {
@@ -80,6 +87,33 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
     () => authenticateUiSessionService({ repository, sessions, environment: 'sandbox' })('a'.repeat(43), 'a'.repeat(64)),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
   )
+})
+
+test('UI session refresh requests bounded deterministic identifier rotation', async () => {
+  const calls = []
+  const durable = {
+    nonceHash: 'b'.repeat(64), workspaceId: 'workspace-1', clientId: 'apollo-ui-client',
+    memberId: 'member-1', identityId: 'identity-1', memberRole: 'director', subjectHash: 'c'.repeat(64),
+    issuedAt: '2026-08-02T20:10:00.000Z', lastSeenAt: '2026-08-02T20:10:00.000Z',
+    idleExpiresAt: '2026-08-02T20:40:00.000Z', expiresAt: '2026-08-03T08:00:00.000Z',
+  }
+  const actor = await authenticateUiSessionService({
+    repository: { async findActiveClientById() {
+      return { id: 'apollo-ui-client', workspaceId: 'workspace-1', environment: 'production', scopes: [] }
+    } },
+    sessions: { async refreshActiveSession(input) {
+      calls.push(input)
+      return { session: durable, rotated: true }
+    } },
+    environment: 'production',
+    now: () => new Date('2026-08-02T20:10:00.000Z'),
+  })('a'.repeat(43), 'a'.repeat(64), { successorNonceHash: 'b'.repeat(64) })
+  assert.equal(actor.sessionTokenRotated, true)
+  assert.deepEqual(calls, [{
+    currentNonceHash: 'a'.repeat(64), successorNonceHash: 'b'.repeat(64),
+    now: '2026-08-02T20:10:00.000Z', idleTtlSeconds: 1800,
+    rotateAfterSeconds: 600, identifierMaxAgeSeconds: 900, recoverySeconds: 60,
+  }])
 })
 
 test('UI redirect accepts only local application paths', () => {

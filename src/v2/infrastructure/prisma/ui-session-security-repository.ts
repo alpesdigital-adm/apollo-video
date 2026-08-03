@@ -10,6 +10,7 @@ import { DomainError } from '../../domain/errors.ts'
 function hydrate(row: {
   nonceHash: string; workspaceId: string; clientId: string; memberId: string; subjectHash: string
   issuedAt: Date; lastSeenAt: Date; idleExpiresAt: Date; expiresAt: Date; revokedAt: Date | null
+  rotatedAt: Date | null; successorNonceHash: string | null
 }, memberRole: string, identityId: string): Readonly<DurableUiSessionRecord> {
   return Object.freeze({
     nonceHash: row.nonceHash, workspaceId: row.workspaceId, clientId: row.clientId,
@@ -18,11 +19,19 @@ function hydrate(row: {
     subjectHash: row.subjectHash, issuedAt: row.issuedAt.toISOString(), lastSeenAt: row.lastSeenAt.toISOString(),
     idleExpiresAt: row.idleExpiresAt.toISOString(), expiresAt: row.expiresAt.toISOString(),
     ...(row.revokedAt ? { revokedAt: row.revokedAt.toISOString() } : {}),
+    ...(row.rotatedAt ? { rotatedAt: row.rotatedAt.toISOString() } : {}),
+    ...(row.successorNonceHash ? { successorNonceHash: row.successorNonceHash } : {}),
   })
 }
 
 function prismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
+}
+
+const SHA256 = /^[a-f0-9]{64}$/
+
+function validSeconds(value: number): boolean {
+  return Number.isInteger(value) && value > 0 && value <= 24 * 60 * 60
 }
 
 export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepository {
@@ -43,10 +52,17 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
 
   async readActiveAndTouch(input: Parameters<UiSessionSecurityRepository['readActiveAndTouch']>[0], retry = 0): Promise<Readonly<DurableUiSessionRecord> | null> {
     const now = new Date(input.now)
+    if (!SHA256.test(input.nonceHash) || !Number.isFinite(now.getTime()) || !validSeconds(input.idleTtlSeconds) || !validSeconds(input.identifierMaxAgeSeconds)) {
+      throw new DomainError('INVALID_ARGUMENT', 'UI session refresh input is invalid')
+    }
     try {
       return await this.client.$transaction(async (transaction) => {
         const current = await transaction.v2UiSession.findUnique({ where: { nonceHash: input.nonceHash }, include: { member: { include: { identity: true } } } })
-        if (!current || current.revokedAt || current.expiresAt <= now || current.idleExpiresAt <= now || current.member.status !== 'active' || current.member.identity.status !== 'active') return null
+        if (
+          !current || current.revokedAt || current.expiresAt <= now || current.idleExpiresAt <= now ||
+          current.issuedAt.getTime() + input.identifierMaxAgeSeconds * 1000 <= now.getTime() ||
+          current.member.status !== 'active' || current.member.identity.status !== 'active'
+        ) return null
         const idleExpiresAt = new Date(Math.min(current.expiresAt.getTime(), now.getTime() + input.idleTtlSeconds * 1000))
         const updated = await transaction.v2UiSession.update({
           where: { nonceHash: input.nonceHash }, data: { lastSeenAt: now, idleExpiresAt }, include: { member: true },
@@ -56,6 +72,98 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
     } catch (error) {
       if (prismaCode(error, 'P2034') && retry < 3) return this.readActiveAndTouch(input, retry + 1)
       if (prismaCode(error, 'P2034')) throw new DomainError('PERSISTENCE_CONFLICT', 'UI session could not be refreshed')
+      throw error
+    }
+  }
+
+  async refreshActiveSession(
+    input: Parameters<UiSessionSecurityRepository['refreshActiveSession']>[0],
+    retry = 0,
+  ): Promise<Awaited<ReturnType<UiSessionSecurityRepository['refreshActiveSession']>>> {
+    const now = new Date(input.now)
+    if (
+      !SHA256.test(input.currentNonceHash) || !SHA256.test(input.successorNonceHash) ||
+      input.currentNonceHash === input.successorNonceHash || !Number.isFinite(now.getTime()) ||
+      !validSeconds(input.idleTtlSeconds) || !validSeconds(input.rotateAfterSeconds) ||
+      !validSeconds(input.identifierMaxAgeSeconds) || !validSeconds(input.recoverySeconds) ||
+      input.rotateAfterSeconds >= input.identifierMaxAgeSeconds || input.recoverySeconds > input.identifierMaxAgeSeconds
+    ) throw new DomainError('INVALID_ARGUMENT', 'Periodic UI session rotation input is invalid')
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const current = await transaction.v2UiSession.findUnique({
+          where: { nonceHash: input.currentNonceHash },
+          include: { member: { include: { identity: true } } },
+        })
+        if (!current || current.expiresAt <= now || current.idleExpiresAt <= now) return null
+
+        if (current.revokedAt) {
+          if (!current.rotatedAt || current.successorNonceHash !== input.successorNonceHash) return null
+          const recoveryUntil = Math.min(
+            current.issuedAt.getTime() + input.identifierMaxAgeSeconds * 1000,
+            current.rotatedAt.getTime() + input.recoverySeconds * 1000,
+          )
+          if (recoveryUntil <= now.getTime()) return null
+          const successor = await transaction.v2UiSession.findUnique({
+            where: { nonceHash: input.successorNonceHash },
+            include: { member: { include: { identity: true } } },
+          })
+          if (
+            !successor || successor.revokedAt || successor.expiresAt <= now || successor.idleExpiresAt <= now ||
+            successor.issuedAt.getTime() + input.identifierMaxAgeSeconds * 1000 <= now.getTime() ||
+            successor.member.status !== 'active' || successor.member.identity.status !== 'active'
+          ) return null
+          const idleExpiresAt = new Date(Math.min(successor.expiresAt.getTime(), now.getTime() + input.idleTtlSeconds * 1000))
+          const touched = await transaction.v2UiSession.update({
+            where: { nonceHash: successor.nonceHash },
+            data: { lastSeenAt: now, idleExpiresAt },
+            include: { member: true },
+          })
+          return Object.freeze({ session: hydrate(touched, touched.member.role, touched.member.identityId), rotated: true })
+        }
+
+        if (
+          current.member.status !== 'active' || current.member.identity.status !== 'active' ||
+          current.issuedAt.getTime() + input.identifierMaxAgeSeconds * 1000 <= now.getTime()
+        ) return null
+        if (current.issuedAt.getTime() + input.rotateAfterSeconds * 1000 > now.getTime()) {
+          const idleExpiresAt = new Date(Math.min(current.expiresAt.getTime(), now.getTime() + input.idleTtlSeconds * 1000))
+          const touched = await transaction.v2UiSession.update({
+            where: { nonceHash: current.nonceHash },
+            data: { lastSeenAt: now, idleExpiresAt },
+            include: { member: true },
+          })
+          return Object.freeze({ session: hydrate(touched, touched.member.role, touched.member.identityId), rotated: false })
+        }
+
+        const revoked = await transaction.v2UiSession.updateMany({
+          where: { nonceHash: current.nonceHash, revokedAt: null },
+          data: { revokedAt: now, rotatedAt: now, successorNonceHash: input.successorNonceHash },
+        })
+        if (revoked.count !== 1) throw new DomainError('PERSISTENCE_CONFLICT', 'UI session changed during periodic rotation')
+        const idleExpiresAt = new Date(Math.min(current.expiresAt.getTime(), now.getTime() + input.idleTtlSeconds * 1000))
+        const successor = await transaction.v2UiSession.create({
+          data: {
+            nonceHash: input.successorNonceHash,
+            workspaceId: current.workspaceId,
+            clientId: current.clientId,
+            memberId: current.memberId,
+            subjectHash: current.subjectHash,
+            issuedAt: now,
+            lastSeenAt: now,
+            idleExpiresAt,
+            expiresAt: current.expiresAt,
+          },
+          include: { member: true },
+        })
+        return Object.freeze({ session: hydrate(successor, successor.member.role, successor.member.identityId), rotated: true })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if ((prismaCode(error, 'P2034') || prismaCode(error, 'P2002')) && retry < 3) {
+        return this.refreshActiveSession(input, retry + 1)
+      }
+      if (prismaCode(error, 'P2034') || prismaCode(error, 'P2002')) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'UI session could not be rotated periodically')
+      }
       throw error
     }
   }

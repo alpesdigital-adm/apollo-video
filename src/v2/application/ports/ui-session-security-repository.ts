@@ -17,6 +17,13 @@ export interface DurableUiSessionRecord {
   idleExpiresAt: string
   expiresAt: string
   revokedAt?: string
+  rotatedAt?: string
+  successorNonceHash?: string
+}
+
+export interface RefreshedUiSession {
+  session: Readonly<DurableUiSessionRecord>
+  rotated: boolean
 }
 
 export interface UiSessionSecurityRepository {
@@ -28,7 +35,21 @@ export interface UiSessionSecurityRepository {
     memberId: string
     idleTtlSeconds: number
   }>): Promise<Readonly<DurableUiSessionRecord>>
-  readActiveAndTouch(input: Readonly<{ nonceHash: string; now: string; idleTtlSeconds: number }>): Promise<Readonly<DurableUiSessionRecord> | null>
+  readActiveAndTouch(input: Readonly<{
+    nonceHash: string
+    now: string
+    idleTtlSeconds: number
+    identifierMaxAgeSeconds: number
+  }>): Promise<Readonly<DurableUiSessionRecord> | null>
+  refreshActiveSession(input: Readonly<{
+    currentNonceHash: string
+    successorNonceHash: string
+    now: string
+    idleTtlSeconds: number
+    rotateAfterSeconds: number
+    identifierMaxAgeSeconds: number
+    recoverySeconds: number
+  }>): Promise<Readonly<RefreshedUiSession> | null>
   revokeSession(input: Readonly<{ nonceHash: string; revokedAt: string }>): Promise<void>
   rotateSession(input: Readonly<{
     currentNonceHash: string

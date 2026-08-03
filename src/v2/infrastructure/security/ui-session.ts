@@ -56,6 +56,16 @@ export function uiSessionNonceHash(nonce: string): string {
   return createHash('sha256').update(nonce).digest('hex')
 }
 
+export function deriveUiSessionRotationToken(
+  currentToken: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  if (!verifyUiSession(currentToken)) throw new DomainError('INVALID_ARGUMENT', 'UI session token is invalid')
+  return createHmac('sha256', sessionSecret(environment))
+    .update(`session-rotation:${currentToken}`)
+    .digest('base64url')
+}
+
 export function uiSessionSubjectHash(subject: string, environment: NodeJS.ProcessEnv = process.env): string {
   return createHmac('sha256', sessionSecret(environment)).update(`subject:${subject}`).digest('hex')
 }

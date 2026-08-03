@@ -118,9 +118,12 @@ test('F0.031 shell declares six canonical destinations and retains fail-closed u
   assert.doesNotMatch(capabilityHubSource, /@prisma|PrismaClient|DATABASE_URL/)
 })
 
-test('F0.031 workspace selector rotates through the public API and destroys prior workspace client state', () => {
+test('F0.031 workspace selector refreshes identifiers and destroys prior workspace client state', () => {
   assert.match(appShellSource, /<WorkspaceSelector \/>/)
   assert.match(workspaceSelectorSource, /fetch\('\/v1\/session', \{ cache: 'no-store'/)
+  assert.match(workspaceSelectorSource, /setInterval\(\(\) => void refreshSession\(false\), 5 \* 60 \* 1000\)/)
+  assert.match(workspaceSelectorSource, /visibilitychange/)
+  assert.match(workspaceSelectorSource, /response\.status === 401/)
   assert.match(workspaceSelectorSource, /fetch\('\/v1\/session\/workspace'/)
   assert.match(workspaceSelectorSource, /apollo:workspace-changing/)
   assert.match(workspaceSelectorSource, /startsWith\('apollo:workspace:'\)/)
