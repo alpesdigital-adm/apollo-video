@@ -20,12 +20,12 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.019, o fechamento estrutural de F0.035 e a primeira entrega de F0.036, com a jornada integral do MVP Core e os
+Estado auditado após o gate F2.019, o fechamento estrutural de F0.035 e as duas primeiras entregas de F0.036, com a jornada integral do MVP Core e os
 dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **303 de 1.259 microtarefas verificadas como efetivamente entregues (24,0%, arredondamento conservador)**;
-- **956 microtarefas abertas ou aguardando nova comprovação**;
+- **304 de 1.259 microtarefas verificadas como efetivamente entregues (24,1%, arredondamento conservador)**;
+- **955 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
   permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
@@ -575,7 +575,7 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 ### F0.036 — Clients, autenticação e escopos [FR-242]
 
 - [x] Modelar `ApiClient`, `ServiceAccount`, credential ref, scope grants e environments. Evidência F0.036: `ApiClient` v2 é uma identidade tipada e imutável, `ServiceAccount` possui factory própria, `ApiCredentialRef` vincula client/credential sem secret, e grants/ambientes permitidos são canônicos e fail-closed. A migration `20260803150000_api_client_identity_model` remove as colunas singulares antigas no mesmo contrato, persiste type/grants/ambientes/criador no PostgreSQL e autenticação humana/Bearer resolve autoridade exclusivamente desses campos. As três capabilities administrativas evoluíram para response v2 mantendo os schemas v1 publicados, e criação/listagem/rotação expõem a identidade canônica sem token em replay. O run `30827500404` aprovou 1.036 testes, migration limpa, contratos/paridade, PostgreSQL/MinIO, API HTTP, FFmpeg/Remotion, build e teardown. Evidência: T-FR-242, Spec 09 e ADR-134.
-- [ ] Implementar emissão/validação de token conforme ADR-013. Evidência: service-account token com `scrypt` e comparação constante.
+- [x] Implementar emissão/validação de token conforme ADR-013. Evidência F0.036: o Bearer opaco carrega somente prefixo, client ID, credential ID e secret aleatório de 256 bits; salt aleatório de 128 bits e hash `scrypt` ficam server-side. Parâmetros `N=16384/r=8/p=1`, limites e formatos são explícitos, hash é comparado com `timingSafeEqual`, header/token malformado ou material persistido corrompido falha uniformemente com `AUTH_INVALID`, e um único instante canônico governa expiry/last-used. Testes falsificam padding, segmentos/tamanhos, header ambíguo/excessivo, IDs inseguros e salt/hash inválidos, além de fixar um vetor `scrypt`. O run `30829124000` aprovou 1.036 testes, API/PostgreSQL real, migrations, contracts/paridade, build, goldens e teardown. Evidência: `infrastructure/security/api-credential.ts`, T-FR-242 e ADR-010/013.
 - [ ] Criar secrets exibidos uma vez, armazenados por referência e rotacionáveis. Evidência: `ApiCredential`, token one-shot, hashes `scrypt` e endpoints de rotação/revogação.
 - [ ] Implementar deny-by-default e matriz `<resource>:<action>` server-side. Evidência: `authenticate-api-client.ts` e scopes dos endpoints.
 - [ ] Vincular client, workspace e delegated user ao audit context. Evidência: T-FR-242 e ADR-134.

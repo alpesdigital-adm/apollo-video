@@ -53,5 +53,6 @@ Autenticação humana também obedece à regra API-first. `POST`, `GET` e `DELET
 - Um baseline versionado impede remover capabilities ou alterar schemas existentes sob o mesmo ref sem revisão explícita.
 - Novas capabilities e novos schema refs são aditivos; atualizar o baseline exige comando separado e diff revisável.
 - O primeiro `PublicOperation` durável é `artifact-render`: enqueue idempotente responde `202`, leitura é workspace-scoped e o presenter omite client/workspace internos, authorization ID, RenderInput hash e storage details.
+- O Bearer de service account implementa o ADR-010 com 256 bits aleatórios, hash `scrypt` parametrizado e comparação constante; parsing e header são estritamente limitados e todos os estados inválidos convergem para `AUTH_INVALID`.
 - A persistência geral da operação e o contexto específico de render usam tabelas distintas. O ADR-014 implementa claim/lease, o ADR-016 agenda retries, o ADR-017 expõe cancelamento, o ADR-018 retry manual, o ADR-019 listagem workspace-scoped e o ADR-020 descoberta de dead-letter; métricas e administração agregada permanecem posteriores.
 - O ADR-021 implementa o tipo canônico `PublicEvent`, o schema e o catálogo inicial descobrível. Outbox, subscriptions, entrega assinada e replay permanecem posteriores.

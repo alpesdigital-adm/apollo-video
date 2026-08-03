@@ -20,6 +20,8 @@ A Public API já manipula recursos de workspace e precisa ser operável sem aces
 - Um `ApiClient` é a identidade autorizável. Cada client pode possuir várias `ApiCredential` independentes.
 - O bearer token contém somente prefixo, `clientId`, `credentialId` e secret aleatório. Autoridade, workspace, environment, status e scopes são sempre resolvidos server-side.
 - O banco armazena apenas salt e hash `scrypt` do secret. O token completo não entra em banco, logs, audit, webhook ou error envelope.
+- O formato `apollo_v2.<clientId>.<credentialId>.<secret>` exige IDs seguros, secret base64url de 256 bits e salt aleatório de 128 bits. A derivação produz 32 bytes com `scrypt` `N=16384`, `r=8`, `p=1` e limite explícito de memória; mudanças de parâmetro exigem nova versão/migração, nunca drift do runtime.
+- Header, segmentos, salt e hash possuem limites exatos antes de qualquer derivação. A comparação usa `timingSafeEqual`; material malformado ou corrompido falha como autenticação inválida sem expor qual verificação recusou a credencial.
 - Criação e rotação retornam o token somente na primeira resposta. Replay idempotente devolve metadata do mesmo recurso com `secretAvailable=false`; perda do primeiro response exige nova rotação.
 - Credenciais possuem status, criação, expiração opcional, último uso e revogação. Revogar client invalida todas as credenciais antes da resolução de resources.
 - Rotação cria nova credencial antes de expirar/revogar a anterior. O overlap é explícito, curto e limitado pela policy; não há atualização in-place do hash.
