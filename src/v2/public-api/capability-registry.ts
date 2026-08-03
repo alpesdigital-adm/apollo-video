@@ -638,16 +638,30 @@ function endpointMatchesPath(template: string, path: string): boolean {
   )
 }
 
+function endpointSpecificity(template: string): number {
+  return template.split('/').filter((segment) => segment && !/^\{[^}]+\}$/.test(segment)).length
+}
+
 export function assertPublicCapabilityQuery(
   method: string,
   path: string,
   parameters: URLSearchParams,
   registry: readonly PublicCapability[] = FOUNDATION_CAPABILITIES,
 ): PublicCapability {
-  const matches = registry.filter((capability) =>
+  const candidates = registry.filter((capability) =>
     capability.exposure !== 'internal-only' &&
       capability.endpoint?.method === method &&
       endpointMatchesPath(capability.endpoint.path, path),
+  )
+  const highestSpecificity = candidates.reduce(
+    (highest, capability) => Math.max(
+      highest,
+      endpointSpecificity(capability.endpoint!.path),
+    ),
+    -1,
+  )
+  const matches = candidates.filter(
+    (capability) => endpointSpecificity(capability.endpoint!.path) === highestSpecificity,
   )
   assertDomain(
     matches.length === 1,

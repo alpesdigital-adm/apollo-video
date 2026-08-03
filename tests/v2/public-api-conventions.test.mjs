@@ -93,6 +93,13 @@ test('T-FR-241 capability query allowlists resolve concrete /v1 paths through th
     FOUNDATION_CAPABILITIES,
   )
   assert.equal(workspace.id, 'apollo.projects.workspace.current.read')
+  const deadLetter = assertPublicCapabilityQuery(
+    'GET',
+    '/v1/operations/dead-letter',
+    new URLSearchParams(),
+    FOUNDATION_CAPABILITIES,
+  )
+  assert.equal(deadLetter.id, 'apollo.operations.dead-letter.list')
 
   rejects(() => assertPublicCapabilityQuery(
     'GET', '/v1/projects', new URLSearchParams('unknown=true'), FOUNDATION_CAPABILITIES,
