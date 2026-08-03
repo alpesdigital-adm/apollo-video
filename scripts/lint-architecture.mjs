@@ -2,7 +2,11 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { architectureImportViolation, webDataAccessViolation } from './architecture-boundaries.mjs'
+import {
+  architectureImportViolation,
+  v2PersistenceConfigurationViolations,
+  webDataAccessViolation,
+} from './architecture-boundaries.mjs'
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url))
 const v2Root = join(repositoryRoot, 'src', 'v2')
@@ -53,6 +57,9 @@ function resolvesIntoLegacyRuntime(file, specifier) {
 }
 
 const violations = []
+const rootPackage = JSON.parse(await readFile(join(repositoryRoot, 'package.json'), 'utf8'))
+const v2PrismaSchema = await readFile(join(repositoryRoot, 'prisma', 'v2', 'schema.prisma'), 'utf8')
+violations.push(...v2PersistenceConfigurationViolations(rootPackage, v2PrismaSchema))
 for (const forbiddenPath of forbiddenLegacyPaths) {
   try {
     const target = join(repositoryRoot, forbiddenPath)
