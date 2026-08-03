@@ -297,6 +297,10 @@ Evidência concluída F0.033 — as fontes oficiais verificadas em 2 de agosto d
 
 Evidência concluída F0.033 — o run `30778629569` aprovou audits root/Remotion com zero vulnerabilidades após instalação limpa. O gate de plataforma exige `uuid` 11.1.1, `postcss` 8.5.18 nos dois locks e no override root, e ausência de `form-data` nas duas árvores; assim, a correção não depende somente da disponibilidade temporal do advisory no registry. A microtarefa dos três advisories não-major está concluída.
 
+Evidência concluída F0.033 — no run `30807744785`, o runtime selecionou S3 explicitamente e atravessou PostgreSQL + MinIO versionado: promoveu bytes imutáveis, removeu o namespace local, rematerializou por key/checksum/tamanho/VersionId, renderizou, reabriu e validou o proxy e executou teardown integral. O boundary de render ainda limita signed URL pela autorização e relê identidade workspace-scoped antes do storage. A configuração S3-compatible está concluída.
+
+Evidência concluída F0.033 — `createV2PostgresClient` recusa ausência, `file:` e protocolos não-PostgreSQL, e o schema V2 declara somente PostgreSQL. O commit `3aba0f9` adicionou gate contra imports e dependências SQLite e contra alteração do datasource, com testes que falsificam cada caso. O run `30807744785` aprovou 832 testes, migrations limpas e a matriz API-first. A microtarefa PostgreSQL-only está concluída.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.
