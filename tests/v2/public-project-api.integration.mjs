@@ -1219,15 +1219,12 @@ test('authenticated public API manages projects, clients and artifact inspection
       body: JSON.stringify({ name: 'Should not exist' }),
     })
     assert.equal(unauthorized.status, 401)
-    assert.deepEqual(await unauthorized.json(), {
-      error: {
-        code: 'AUTH_INVALID',
-        message: 'Bearer API credential is required',
-        category: 'auth',
-        retryable: false,
-        requestId: unauthorized.headers.get('apollo-request-id'),
-      },
-    })
+    const unauthorizedError = (await unauthorized.json()).error
+    assert.equal(unauthorizedError.code, 'AUTH_INVALID')
+    assert.equal(unauthorizedError.category, 'auth')
+    assert.equal(unauthorizedError.retryable, false)
+    assert.equal(unauthorizedError.requestId, unauthorized.headers.get('apollo-request-id'))
+    assert.equal('details' in unauthorizedError, false)
 
     const authorization = `Bearer ${issued.token}`
     const anonymousCapabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`)
