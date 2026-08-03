@@ -15,6 +15,95 @@ flowchart LR
   E --> M
 ```
 
+## Grafo referencial central executavel
+
+O caminho central usa FKs compostas, nao apenas IDs individualmente validos. Assim, uma versao ou snapshot de outro projeto e um manifest de outro artifact falham no banco antes de chegar ao Diretor ou ao renderer. A tabela abaixo e verificada contra o schema Prisma por `T-F0-033`; os campos referenciados tambem precisam formar uma chave primaria ou unica.
+
+```mermaid
+flowchart LR
+  W[V2Workspace] --> P[V2Project]
+  P --> V[V2ProjectVersion]
+  P --> S[V2ProjectSnapshot]
+  V --> D[V2DirectorRun]
+  S --> D
+  W --> A[V2MediaArtifact]
+  A --> M[V2MediaArtifactManifest]
+  M --> L[V2MediaArtifactLineage]
+  A --> L
+  P --> I[V2MediaIngestOperation]
+  A --> I
+  M --> I
+  P --> R[V2ProjectProxyRenderOperation]
+  V --> R
+  S --> R
+  A --> R
+  M --> R
+  R --> Q[V2ProxyReview]
+  Q --> F[V2ProjectFinalExportOperation]
+  D --> F
+  A --> F
+  M --> F
+```
+
+| Child model | Relation | FK fields | Parent model | Reference fields | On delete |
+|---|---|---|---|---|---|
+| V2Project | workspace | workspaceId | V2Workspace | id | Restrict |
+| V2Project | currentVersion | currentVersionId,id,workspaceId | V2ProjectVersion | id,projectId,workspaceId | Restrict |
+| V2ProjectSnapshot | project | projectId,workspaceId | V2Project | id,workspaceId | Cascade |
+| V2ProjectVersion | project | projectId,workspaceId | V2Project | id,workspaceId | Cascade |
+| V2ProjectVersion | parent | parentVersionId,projectId,workspaceId | V2ProjectVersion | id,projectId,workspaceId | Restrict |
+| V2ProjectVersion | briefSnapshot | briefSnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2ProjectVersion | treatmentSnapshot | treatmentSnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2ProjectVersion | storySnapshot | storySnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2ProjectVersion | editPlanSnapshot | editPlanSnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2ProjectVersion | policiesSnapshot | policiesSnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2DirectorRun | project | projectId,workspaceId | V2Project | id,workspaceId | Cascade |
+| V2DirectorRun | baseVersion | baseVersionId,projectId,workspaceId | V2ProjectVersion | id,projectId,workspaceId | Restrict |
+| V2DirectorRun | resultVersion | resultVersionId,projectId,workspaceId | V2ProjectVersion | id,projectId,workspaceId | Restrict |
+| V2DirectorRun | perceptionSnapshot | perceptionSnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2DirectorRun | treatmentSnapshot | treatmentSnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2DirectorRun | storySnapshot | storySnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2DirectorRun | editPlanSnapshot | editPlanSnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2DirectorRun | qualitySnapshot | qualitySnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2MediaArtifact | workspace | workspaceId | V2Workspace | id | Restrict |
+| V2MediaArtifactManifest | artifact | artifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2MediaArtifactLineage | manifest | manifestId,workspaceId | V2MediaArtifactManifest | id,workspaceId | Restrict |
+| V2MediaArtifactLineage | sourceArtifact | sourceArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2AssetRightsSnapshot | artifact | artifactId,workspaceId | V2MediaArtifact | id,workspaceId | Cascade |
+| V2PublicOperation | workspace | workspaceId | V2Workspace | id | Restrict |
+| V2MediaIngestOperation | project | projectId,workspaceId | V2Project | id,workspaceId | Restrict |
+| V2MediaIngestOperation | sourceArtifact | sourceArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2MediaIngestOperation | sourceManifest | sourceManifestId,sourceArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
+| V2ArtifactRenderOperation | operation | operationId,workspaceId | V2PublicOperation | id,workspaceId | Cascade |
+| V2ArtifactRenderOperation | artifact | artifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2ArtifactRenderOperation | manifest | manifestId,artifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
+| V2ProjectProxyRenderOperation | project | projectId,workspaceId | V2Project | id,workspaceId | Restrict |
+| V2ProjectProxyRenderOperation | version | projectVersionId,projectId,workspaceId | V2ProjectVersion | id,projectId,workspaceId | Restrict |
+| V2ProjectProxyRenderOperation | editPlanSnapshot | editPlanSnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2ProjectProxyRenderOperation | sourceArtifact | sourceArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2ProjectProxyRenderOperation | sourceManifest | sourceManifestId,sourceArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
+| V2ProjectProxyRenderOperation | outputArtifact | outputArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2ProjectProxyRenderOperation | outputManifest | outputManifestId,outputArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
+| V2ProxyReview | project | projectId,workspaceId | V2Project | id,workspaceId | Cascade |
+| V2ProxyReview | projectVersion | projectVersionId,projectId,workspaceId | V2ProjectVersion | id,projectId,workspaceId | Restrict |
+| V2ProxyReview | operation | operationId,projectId,workspaceId | V2ProjectProxyRenderOperation | operationId,projectId,workspaceId | Restrict |
+| V2ProxyReview | proxyArtifact | proxyArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2ProxyReview | proxyManifest | proxyManifestId,proxyArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | project | projectId,workspaceId | V2Project | id,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | version | projectVersionId,projectId,workspaceId | V2ProjectVersion | id,projectId,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | directorRun | directorRunId,projectId,workspaceId | V2DirectorRun | id,projectId,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | editPlanSnapshot | editPlanSnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | qualitySnapshot | qualitySnapshotId,projectId,workspaceId | V2ProjectSnapshot | id,projectId,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | proxyReview | proxyReviewId,projectId,workspaceId | V2ProxyReview | id,projectId,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | proxyArtifact | proxyArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | sourceArtifact | sourceArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | sourceManifest | sourceManifestId,sourceArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | outputArtifact | outputArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2ProjectFinalExportOperation | outputManifest | outputManifestId,outputArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
+| V2ProjectFinalExportAttempt | operation | operationId,workspaceId | V2ProjectFinalExportOperation | operationId,workspaceId | Cascade |
+| V2ProjectFinalExportAttempt | outputArtifact | outputArtifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |
+| V2ProjectFinalExportAttempt | outputManifest | outputManifestId,outputArtifactId,workspaceId | V2MediaArtifactManifest | id,artifactId,workspaceId | Restrict |
+
 | PRD | Entity | Owner | Representation | Canonical target | Lifecycle / key |
 |---|---|---|---|---|---|
 | 10.1 | Workspace | Workspace | table | V2Workspace | root; id |

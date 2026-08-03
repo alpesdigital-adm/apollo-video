@@ -313,7 +313,7 @@ model V2Project {
   workspace                     V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   versions                      V2ProjectVersion[]               @relation("ProjectVersions")
   snapshots                     V2ProjectSnapshot[]
-  currentVersion                V2ProjectVersion?                @relation("CurrentProjectVersion", fields: [currentVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  currentVersion                V2ProjectVersion?                @relation("CurrentProjectVersion", fields: [currentVersionId, id, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   duplicatedFromProject         V2Project?                       @relation("ProjectDuplicateSource", fields: [duplicatedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   duplicates                    V2Project[]                      @relation("ProjectDuplicateSource")
   versionsForkedFrom            V2ProjectVersion[]               @relation("ForkedFromProject")
@@ -424,8 +424,11 @@ model V2ProjectSnapshot {
   storyDirectorRuns      V2DirectorRun[]                 @relation("DirectorRunStorySnapshot")
   editPlanDirectorRuns   V2DirectorRun[]                 @relation("DirectorRunEditPlanSnapshot")
   qualityDirectorRuns    V2DirectorRun[]                 @relation("DirectorRunQualitySnapshot")
+  proxyRenderOperations  V2ProjectProxyRenderOperation[] @relation("ProjectProxyEditPlanSnapshot")
+  finalEditPlanOperations V2ProjectFinalExportOperation[] @relation("FinalExportEditPlanSnapshot")
   finalExportOperations  V2ProjectFinalExportOperation[] @relation("FinalExportQualitySnapshot")
 
+  @@unique([id, projectId, workspaceId])
   @@unique([projectId, kind, contentHash])
   @@index([workspaceId, kind])
   @@map("project_snapshots")
@@ -451,16 +454,16 @@ model V2ProjectVersion {
 
   project                 V2Project                       @relation("ProjectVersions", fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   currentForProjects      V2Project[]                     @relation("CurrentProjectVersion")
-  parent                  V2ProjectVersion?               @relation("VersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  parent                  V2ProjectVersion?               @relation("VersionParent", fields: [parentVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   children                V2ProjectVersion[]              @relation("VersionParent")
   forkedFromProject       V2Project?                      @relation("ForkedFromProject", fields: [forkedFromProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   forkedFromVersion       V2ProjectVersion?               @relation("ForkedFromVersion", fields: [forkedFromVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   forkedVersions          V2ProjectVersion[]              @relation("ForkedFromVersion")
-  briefSnapshot           V2ProjectSnapshot               @relation("BriefSnapshot", fields: [briefSnapshotId], references: [id], onDelete: Restrict)
-  treatmentSnapshot       V2ProjectSnapshot?              @relation("TreatmentSnapshot", fields: [treatmentSnapshotId], references: [id], onDelete: Restrict)
-  storySnapshot           V2ProjectSnapshot?              @relation("StorySnapshot", fields: [storySnapshotId], references: [id], onDelete: Restrict)
-  editPlanSnapshot        V2ProjectSnapshot               @relation("EditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
-  policiesSnapshot        V2ProjectSnapshot               @relation("PoliciesSnapshot", fields: [policiesSnapshotId], references: [id], onDelete: Restrict)
+  briefSnapshot           V2ProjectSnapshot               @relation("BriefSnapshot", fields: [briefSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  treatmentSnapshot       V2ProjectSnapshot?              @relation("TreatmentSnapshot", fields: [treatmentSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  storySnapshot           V2ProjectSnapshot?              @relation("StorySnapshot", fields: [storySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  editPlanSnapshot        V2ProjectSnapshot               @relation("EditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  policiesSnapshot        V2ProjectSnapshot               @relation("PoliciesSnapshot", fields: [policiesSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   command                 V2EditCommand?                  @relation("CommandResultVersion", fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   commandsBasedOn         V2EditCommand[]                 @relation("CommandBaseVersion")
   proxyRenderOperations   V2ProjectProxyRenderOperation[]
@@ -486,6 +489,7 @@ model V2ProjectVersion {
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
+  @@unique([id, projectId, workspaceId])
   @@unique([commandId, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([workspaceId, forkedFromProjectId, forkedFromVersionId])
@@ -780,18 +784,19 @@ model V2DirectorRun {
   workspace             V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project               V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   command               V2EditCommand                   @relation("DirectorRunCommand", fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  baseVersion           V2ProjectVersion                @relation("DirectorRunBaseVersion", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  resultVersion         V2ProjectVersion                @relation("DirectorRunResultVersion", fields: [resultVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  perceptionSnapshot    V2ProjectSnapshot               @relation("DirectorRunPerceptionSnapshot", fields: [perceptionSnapshotId], references: [id], onDelete: Restrict)
-  treatmentSnapshot     V2ProjectSnapshot               @relation("DirectorRunTreatmentSnapshot", fields: [treatmentSnapshotId], references: [id], onDelete: Restrict)
-  storySnapshot         V2ProjectSnapshot               @relation("DirectorRunStorySnapshot", fields: [storySnapshotId], references: [id], onDelete: Restrict)
-  editPlanSnapshot      V2ProjectSnapshot               @relation("DirectorRunEditPlanSnapshot", fields: [editPlanSnapshotId], references: [id], onDelete: Restrict)
-  qualitySnapshot       V2ProjectSnapshot               @relation("DirectorRunQualitySnapshot", fields: [qualitySnapshotId], references: [id], onDelete: Restrict)
+  baseVersion           V2ProjectVersion                @relation("DirectorRunBaseVersion", fields: [baseVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  resultVersion         V2ProjectVersion                @relation("DirectorRunResultVersion", fields: [resultVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  perceptionSnapshot    V2ProjectSnapshot               @relation("DirectorRunPerceptionSnapshot", fields: [perceptionSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  treatmentSnapshot     V2ProjectSnapshot               @relation("DirectorRunTreatmentSnapshot", fields: [treatmentSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  storySnapshot         V2ProjectSnapshot               @relation("DirectorRunStorySnapshot", fields: [storySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  editPlanSnapshot      V2ProjectSnapshot               @relation("DirectorRunEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  qualitySnapshot       V2ProjectSnapshot               @relation("DirectorRunQualitySnapshot", fields: [qualitySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   finalExportOperations V2ProjectFinalExportOperation[]
 
   @@unique([id, workspaceId])
+  @@unique([id, projectId, workspaceId])
   @@unique([commandId, workspaceId])
-  @@unique([resultVersionId, workspaceId])
+  @@unique([resultVersionId, projectId, workspaceId])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, status, updatedAt(sort: Desc)])
   @@map("director_runs")
@@ -870,6 +875,13 @@ model V2MediaArtifact {
   commandArtifactInvalidations V2CommandArtifactInvalidation[]
   invalidationResolutions      V2CommandArtifactInvalidationResolution[]
   lifecycleTransitions         V2MediaArtifactLifecycleTransition[]
+  mediaIngestSources           V2MediaIngestOperation[]
+  proxyRenderSources           V2ProjectProxyRenderOperation[] @relation("ProjectProxySourceArtifact")
+  proxyRenderOutputs           V2ProjectProxyRenderOperation[] @relation("ProjectProxyOutputArtifact")
+  finalProxyArtifacts          V2ProjectFinalExportOperation[] @relation("FinalExportProxyArtifact")
+  finalSourceArtifacts         V2ProjectFinalExportOperation[] @relation("FinalExportSourceArtifact")
+  finalOutputArtifacts         V2ProjectFinalExportOperation[] @relation("FinalExportOutputArtifact")
+  finalExportAttemptOutputs    V2ProjectFinalExportAttempt[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -960,6 +972,12 @@ model V2MediaArtifactManifest {
   colorProbes                V2MediaColorProbe[]
   colorPipelineCompilations  V2ColorPipelineCompilation[]
   invalidationResolutions    V2CommandArtifactInvalidationResolution[]
+  mediaIngestSources         V2MediaIngestOperation[]
+  proxyRenderSources         V2ProjectProxyRenderOperation[] @relation("ProjectProxySourceManifest")
+  proxyRenderOutputs         V2ProjectProxyRenderOperation[] @relation("ProjectProxyOutputManifest")
+  finalExportSources         V2ProjectFinalExportOperation[] @relation("FinalExportSourceManifest")
+  finalExportOutputs         V2ProjectFinalExportOperation[] @relation("FinalExportOutputManifest")
+  finalExportAttemptOutputs  V2ProjectFinalExportAttempt[]
 
   @@unique([id, workspaceId])
   @@unique([id, artifactId, workspaceId])
@@ -1776,6 +1794,8 @@ model V2MediaIngestOperation {
   operation V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   upload    V2MediaUpload     @relation(fields: [uploadId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   project   V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact V2MediaArtifact @relation(fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceManifest V2MediaArtifactManifest @relation(fields: [sourceManifestId, sourceArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
 
   @@unique([operationId, workspaceId])
   @@unique([uploadId, workspaceId])
@@ -1806,7 +1826,12 @@ model V2ProjectProxyRenderOperation {
   workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   operation V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   project   V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  version   V2ProjectVersion  @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  version   V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot @relation("ProjectProxyEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  sourceArtifact V2MediaArtifact @relation("ProjectProxySourceArtifact", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceManifest V2MediaArtifactManifest @relation("ProjectProxySourceManifest", fields: [sourceManifestId, sourceArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
+  outputArtifact V2MediaArtifact @relation("ProjectProxyOutputArtifact", fields: [outputArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  outputManifest V2MediaArtifactManifest @relation("ProjectProxyOutputManifest", fields: [outputManifestId, outputArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
   review    V2ProxyReview?
   reusedFrom V2ProjectProxyRenderOperation? @relation("ProjectProxyOperationReuse", fields: [reusedFromOperationId, workspaceId], references: [operationId, workspaceId], onDelete: Restrict)
   reuses     V2ProjectProxyRenderOperation[] @relation("ProjectProxyOperationReuse")
@@ -1814,6 +1839,7 @@ model V2ProjectProxyRenderOperation {
   reuseBaseVersion V2ProjectVersion? @relation("ProjectProxyReuseBaseVersion", fields: [reuseBaseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@unique([operationId, workspaceId])
+  @@unique([operationId, projectId, workspaceId])
   @@unique([workspaceId, projectVersionId, inputHash])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId])
@@ -1851,16 +1877,18 @@ model V2ProxyReview {
 
   workspace         V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project           V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  projectVersion    V2ProjectVersion                @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  operation         V2ProjectProxyRenderOperation   @relation(fields: [operationId, workspaceId], references: [operationId, workspaceId], onDelete: Restrict)
+  projectVersion    V2ProjectVersion                @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  operation         V2ProjectProxyRenderOperation   @relation(fields: [operationId, projectId, workspaceId], references: [operationId, projectId, workspaceId], onDelete: Restrict)
   proxyArtifact     V2MediaArtifact                 @relation(fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  proxyManifest     V2MediaArtifactManifest         @relation(fields: [proxyManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  proxyManifest     V2MediaArtifactManifest         @relation(fields: [proxyManifestId, proxyArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
   decisions         V2ProxyReviewDecision[]
   finalExports      V2ProjectFinalExportOperation[]
   qualityIterations V2QualityIteration[]
 
   @@unique([id, workspaceId])
+  @@unique([id, projectId, workspaceId])
   @@unique([operationId, workspaceId])
+  @@unique([operationId, projectId, workspaceId])
   @@unique([workspaceId, projectVersionId, inputHash])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, projectVersionId, status])
@@ -1932,10 +1960,16 @@ model V2ProjectFinalExportOperation {
   workspace       V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   operation       V2PublicOperation             @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   project         V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  version         V2ProjectVersion              @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  directorRun     V2DirectorRun                 @relation(fields: [directorRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  qualitySnapshot V2ProjectSnapshot             @relation("FinalExportQualitySnapshot", fields: [qualitySnapshotId], references: [id], onDelete: Restrict)
-  proxyReview     V2ProxyReview                 @relation(fields: [proxyReviewId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  version         V2ProjectVersion              @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  directorRun     V2DirectorRun                 @relation(fields: [directorRunId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot            @relation("FinalExportEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  qualitySnapshot V2ProjectSnapshot             @relation("FinalExportQualitySnapshot", fields: [qualitySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  proxyArtifact   V2MediaArtifact               @relation("FinalExportProxyArtifact", fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceArtifact  V2MediaArtifact               @relation("FinalExportSourceArtifact", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  sourceManifest  V2MediaArtifactManifest       @relation("FinalExportSourceManifest", fields: [sourceManifestId, sourceArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
+  outputArtifact  V2MediaArtifact               @relation("FinalExportOutputArtifact", fields: [outputArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  outputManifest  V2MediaArtifactManifest       @relation("FinalExportOutputManifest", fields: [outputManifestId, outputArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
+  proxyReview     V2ProxyReview                 @relation(fields: [proxyReviewId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   attempts        V2ProjectFinalExportAttempt[]
 
   @@unique([operationId, workspaceId])
@@ -1965,6 +1999,8 @@ model V2ProjectFinalExportAttempt {
 
   workspace V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   operation V2ProjectFinalExportOperation @relation(fields: [operationId, workspaceId], references: [operationId, workspaceId], onDelete: Cascade)
+  outputArtifact V2MediaArtifact? @relation(fields: [outputArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  outputManifest V2MediaArtifactManifest? @relation(fields: [outputManifestId, outputArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
 
   @@id([operationId, attempt])
   @@unique([operationId, workspaceId, attempt])
@@ -4334,7 +4370,7 @@ model V2ArtifactRenderOperation {
   workspace     V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   operation     V2PublicOperation              @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   artifact      V2MediaArtifact                @relation("ArtifactRenderTarget", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  manifest      V2MediaArtifactManifest        @relation(fields: [manifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  manifest      V2MediaArtifactManifest        @relation(fields: [manifestId, artifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
   authorization V2MaterializationAuthorization @relation(fields: [authorizationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@unique([operationId, workspaceId])
