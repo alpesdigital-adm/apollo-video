@@ -1,6 +1,9 @@
 import type { NextRequest } from 'next/server'
 
-import { authenticateApiClientService } from '../application/authenticate-api-client.ts'
+import {
+  authenticateApiClientService,
+  type AuthenticatedExternalActor,
+} from '../application/authenticate-api-client.ts'
 import { authenticateUiSessionService } from '../application/authenticate-ui-session.ts'
 import type { ApiEnvironment } from '../domain/api-client.ts'
 import { DomainError } from '../domain/errors.ts'
@@ -12,6 +15,8 @@ import {
   verifyUiSession,
 } from '../infrastructure/security/ui-session.ts'
 import {
+  FOUNDATION_CAPABILITIES,
+  assertPublicCapabilityQuery,
   capabilitiesForAccess,
   defineCapabilityAccessPolicy,
   type PublicCapability,
@@ -30,21 +35,28 @@ export async function authenticateExternalRequest(request: NextRequest) {
   const repository = createApiClientRepository()
   const environment = resolveApiEnvironment()
   const authorization = request.headers.get('authorization')
+  let actor: AuthenticatedExternalActor
   if (!authorization) {
     const sessionToken = verifyUiSession(request.cookies.get(APOLLO_SESSION_COOKIE)?.value)
-    return authenticateUiSessionService({ repository, sessions: createUiSessionSecurityRepository(), environment })(
+    actor = await authenticateUiSessionService({ repository, sessions: createUiSessionSecurityRepository(), environment })(
       sessionToken,
       sessionToken ? uiSessionNonceHash(sessionToken) : undefined,
     )
+  } else {
+    const authenticate = authenticateApiClientService({
+      repository,
+      credentialCrypto: nodeApiCredentialCrypto,
+      clock: () => new Date(),
+      environment,
+    })
+    actor = await authenticate(authorization)
   }
-  const authenticate = authenticateApiClientService({
-    repository,
-    credentialCrypto: nodeApiCredentialCrypto,
-    clock: () => new Date(),
-    environment,
-  })
-
-  return authenticate(authorization)
+  assertPublicCapabilityQuery(
+    request.method,
+    request.nextUrl.pathname,
+    request.nextUrl.searchParams,
+  )
+  return actor
 }
 
 export function resolveCapabilityAccessPolicy(
@@ -80,6 +92,12 @@ export async function discoverExternalCapabilities(
   request: NextRequest,
   registry: readonly PublicCapability[],
 ) {
+  assertPublicCapabilityQuery(
+    request.method,
+    request.nextUrl.pathname,
+    request.nextUrl.searchParams,
+    registry,
+  )
   const environment = resolveApiEnvironment()
   const actor = request.headers.get('authorization') || request.cookies.has(APOLLO_SESSION_COOKIE)
     ? await authenticateExternalRequest(request)

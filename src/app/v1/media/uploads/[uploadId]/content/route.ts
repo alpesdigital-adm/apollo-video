@@ -6,6 +6,7 @@ import { createLocalMediaUploadStorageFromEnvironment } from '@/v2/infrastructur
 import { createMediaTransferRepository } from '@/v2/infrastructure/repository-factory'
 import { createMediaUploadSessionAuthorizerFromEnvironment } from '@/v2/infrastructure/security/media-upload-session-signer'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
+import { assertAllowlistedPublicQuery } from '@/v2/public-api/conventions'
 import { presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
@@ -15,11 +16,9 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ upl
   const requestId = resolveRequestId(request)
   try {
     const { uploadId } = await context.params
+    assertAllowlistedPublicQuery(request.nextUrl.searchParams, new Set(['token', 'partNumber']))
     const tokenValues = request.nextUrl.searchParams.getAll('token')
     const partValues = request.nextUrl.searchParams.getAll('partNumber')
-    for (const name of request.nextUrl.searchParams.keys()) {
-      if (!['token', 'partNumber'].includes(name)) throw new DomainError('INVALID_ARGUMENT', `${name} is not supported`)
-    }
     if (tokenValues.length !== 1 || partValues.length > 1) throw new DomainError('INVALID_ARGUMENT', 'Signed upload URL is invalid')
     const authorization = createMediaUploadSessionAuthorizerFromEnvironment().authorize(tokenValues[0]!)
     if (authorization.uploadId !== uploadId) throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Signed upload target does not match')

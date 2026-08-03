@@ -10,6 +10,7 @@ import {
   createMediaDownloadGrantSignerFromEnvironment,
 } from '@/v2/infrastructure/repository-factory'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
+import { assertAllowlistedPublicQuery } from '@/v2/public-api/conventions'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +20,7 @@ export async function GET(
 ) {
   const requestId = resolveRequestId(request)
   try {
+    assertAllowlistedPublicQuery(request.nextUrl.searchParams, new Set(['token']))
     const token = request.nextUrl.searchParams.get('token')?.trim() ?? ''
     const claims = createMediaDownloadGrantSignerFromEnvironment().verify(token)
     const { grantId } = await context.params

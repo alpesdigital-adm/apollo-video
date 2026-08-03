@@ -1,5 +1,6 @@
 import { assertDomain } from '../domain/errors.ts'
 import { API_ENVIRONMENTS, type ApiEnvironment } from '../domain/api-client.ts'
+import { assertAllowlistedPublicQuery } from './conventions.ts'
 
 export type CapabilityExposure = 'public' | 'workspace-admin' | 'internal-only'
 export type CapabilityOperationKind = 'query' | 'command' | 'preflight' | 'job'
@@ -627,6 +628,48 @@ export function assertCapabilityParity(
 
 function endpointShape(path: string): string {
   return path.split('?', 1)[0].replace(/\{[^}]+\}/g, '{}')
+}
+
+function endpointMatchesPath(template: string, path: string): boolean {
+  const templateSegments = template.split('/').filter(Boolean)
+  const pathSegments = path.replace(/\/$/, '').split('/').filter(Boolean)
+  return templateSegments.length === pathSegments.length && templateSegments.every(
+    (segment, index) => /^\{[^}]+\}$/.test(segment) || segment === pathSegments[index],
+  )
+}
+
+export function assertPublicCapabilityQuery(
+  method: string,
+  path: string,
+  parameters: URLSearchParams,
+  registry: readonly PublicCapability[] = FOUNDATION_CAPABILITIES,
+): PublicCapability {
+  const matches = registry.filter((capability) =>
+    capability.exposure !== 'internal-only' &&
+      capability.endpoint?.method === method &&
+      endpointMatchesPath(capability.endpoint.path, path),
+  )
+  assertDomain(
+    matches.length === 1,
+    'CAPABILITY_PARITY_MISSING',
+    'Public request must resolve to exactly one capability endpoint',
+    { method, path, matches: matches.map((capability) => capability.id) },
+  )
+  const capability = matches[0]
+  const queryParameters = capability.queryParameters ?? []
+  assertAllowlistedPublicQuery(
+    parameters,
+    new Set(queryParameters.map((parameter) => parameter.name)),
+  )
+  for (const parameter of queryParameters.filter((item) => item.required)) {
+    assertDomain(
+      parameters.has(parameter.name),
+      'INVALID_ARGUMENT',
+      `Query parameter ${parameter.name} is required`,
+      { capabilityId: capability.id, parameter: parameter.name },
+    )
+  }
+  return capability
 }
 
 export function bindUiNetworkActionsToCapabilities(
@@ -1994,7 +2037,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.mvp-core-gates.list',
-    version: '1.0.0',
+    version: '1.1.0',
     title: 'List MVP Core gates',
     description: 'Lists integrity-verified immutable MVP Core gate reports for one primary project.',
     exposure: 'public',
@@ -2012,6 +2055,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     confirmation: 'none',
     successStatuses: [200],
     idempotency: 'not-applicable',
+    queryParameters: [
+      {
+        name: 'limit',
+        description: 'Maximum number of immutable gate reports to return.',
+        required: false,
+        schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+      },
+    ],
   },
   {
     id: 'apollo.projects.speech-segments.catalog',
