@@ -156,6 +156,8 @@ Regras:
 
 ADR-013 escolhe OAuth 2.1, signed service keys ou ambos. O domínio depende de `AuthenticatedExternalActor`, não do mecanismo concreto.
 
+Evidência integrada F0.036: o contrato acima é executável em `domain/api-client.ts` como schema v2. `createServiceAccount` fixa o tipo sem cast do caller; `apiCredentialRef` valida e congela somente os identificadores; grants e ambientes são deduplicados, ordenados e recusados quando inválidos. PostgreSQL persiste `type`, `scopeGrantsJson`, `allowedEnvironmentsJson` e `createdBy`, com constraints e sem leitura das colunas substituídas. Os presenters v2 incluem esses campos e mantêm `environment`/`scopes` apenas na projeção pública versionada durante o ciclo de suporte, nunca como fonte de autoridade. O run `30827500404` comprovou migration limpa e os fluxos HTTP reais de create/list/rotate. Os demais requisitos desta seção continuam pertencendo às microtarefas abertas de F0.036.
+
 ### 7.1 Sessão humana também é API
 
 A Web App não possui um caminho privilegiado de autenticação. O contrato público inicial é:
