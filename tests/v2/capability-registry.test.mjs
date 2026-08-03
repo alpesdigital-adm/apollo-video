@@ -6,6 +6,7 @@ import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   FOUNDATION_CAPABILITIES,
   INTERNAL_ONLY_SURFACES,
+  assertCapabilityAccess,
   assertCapabilityParity,
   bindUiNetworkActionsToCapabilities,
   capabilitiesForAccess,
@@ -103,6 +104,40 @@ test('scope filtering is deny-by-default', () => {
 
   assert.equal(capabilitiesForScopes(registry, new Set()).length, 0)
   assert.equal(capabilitiesForScopes(registry, new Set(['projects:read'])).length, 1)
+  assert.throws(
+    () => assertCapabilityAccess(registry, 'apollo.projects.read', {
+      environment: 'production',
+      actor: {
+        clientId: 'client-scope-1', workspaceId: 'workspace-scope-1',
+        environment: 'production', scopes: new Set(),
+      },
+    }),
+    (error) => error instanceof DomainError && error.code === 'AUTH_SCOPE_REQUIRED',
+  )
+  assert.equal(
+    assertCapabilityAccess(registry, 'apollo.projects.read', {
+      environment: 'production',
+      actor: {
+        clientId: 'client-scope-1', workspaceId: 'workspace-scope-1',
+        environment: 'production', scopes: new Set(['projects:read']),
+      },
+    }).id,
+    'apollo.projects.read',
+  )
+  assert.throws(
+    () => assertCapabilityAccess(registry, 'apollo.projects.read', {
+      environment: 'production',
+      actor: {
+        clientId: 'client-scope-1', workspaceId: 'workspace-scope-1',
+        environment: 'production', scopes: new Set(['projects:read']),
+      },
+      policy: defineCapabilityAccessPolicy(
+        { byClient: { 'client-scope-1': ['apollo.projects.read'] } },
+        registry,
+      ),
+    }),
+    (error) => error instanceof DomainError && error.code === 'AUTH_SCOPE_REQUIRED',
+  )
 })
 
 test('capability discovery intersects scopes, environment and deny-only policy', () => {
@@ -209,6 +244,10 @@ test('T-F0-034 registry fails closed for exposure, scopes, schema, cost and conf
       'INVALID_CAPABILITY',
     )
   }
+  expectDomainError(
+    () => defineCapabilityRegistry([{ ...base, requiredScopes: [] }]),
+    'INVALID_CAPABILITY',
+  )
 
   assert.ok(FOUNDATION_CAPABILITIES.length >= 189)
   for (const capability of FOUNDATION_CAPABILITIES) {

@@ -309,6 +309,14 @@ function validateCapability(capability: PublicCapability): void {
     { capabilityId: capability.id, authScheme },
   )
   assertDomain(
+    capability.authMode !== 'required' ||
+      authScheme !== 'bearer' ||
+      capability.requiredScopes.length > 0,
+    'INVALID_CAPABILITY',
+    'Bearer-authenticated capabilities must declare at least one API scope',
+    { capabilityId: capability.id },
+  )
+  assertDomain(
     capability.availableIn === undefined ||
       (capability.availableIn.length > 0 &&
         new Set(capability.availableIn).size === capability.availableIn.length &&
@@ -624,6 +632,27 @@ export function assertCapabilityParity(
       { actionId: action.id, capabilityId: action.capabilityId },
     )
   }
+}
+
+export function assertCapabilityAccess(
+  registry: readonly PublicCapability[],
+  capabilityId: string,
+  context: CapabilityAccessContext,
+): PublicCapability {
+  const capability = registry.find((candidate) => candidate.id === capabilityId)
+  assertDomain(
+    capability,
+    'AUTH_SCOPE_REQUIRED',
+    'Authenticated actor is not authorized for this capability',
+    { capabilityId },
+  )
+  assertDomain(
+    capabilitiesForAccess(registry, context).some((candidate) => candidate.id === capabilityId),
+    'AUTH_SCOPE_REQUIRED',
+    'Authenticated actor is not authorized for this capability',
+    { capabilityId },
+  )
+  return capability
 }
 
 function endpointShape(path: string): string {

@@ -16,6 +16,7 @@ import {
 } from '../infrastructure/security/ui-session.ts'
 import {
   FOUNDATION_CAPABILITIES,
+  assertCapabilityAccess,
   assertPublicCapabilityQuery,
   capabilitiesForAccess,
   defineCapabilityAccessPolicy,
@@ -32,8 +33,14 @@ export function resolveApiEnvironment(): ApiEnvironment {
 }
 
 export async function authenticateExternalRequest(request: NextRequest) {
-  const repository = createApiClientRepository()
+  const capability = assertPublicCapabilityQuery(
+    request.method,
+    request.nextUrl.pathname,
+    request.nextUrl.searchParams,
+  )
   const environment = resolveApiEnvironment()
+  const policy = resolveCapabilityAccessPolicy(FOUNDATION_CAPABILITIES)
+  const repository = createApiClientRepository()
   const authorization = request.headers.get('authorization')
   let actor: AuthenticatedExternalActor
   if (!authorization) {
@@ -51,11 +58,11 @@ export async function authenticateExternalRequest(request: NextRequest) {
     })
     actor = await authenticate(authorization)
   }
-  assertPublicCapabilityQuery(
-    request.method,
-    request.nextUrl.pathname,
-    request.nextUrl.searchParams,
-  )
+  assertCapabilityAccess(FOUNDATION_CAPABILITIES, capability.id, {
+    environment,
+    actor,
+    policy,
+  })
   return actor
 }
 
