@@ -285,6 +285,8 @@ Correção operacional de FR-233 — tanto a promoção de proxy quanto a de fin
 
 Evidência integrada F0.032 — o run hospedado `30774673461` tornou a direção das dependências um gate executável para Domain, Application, Infrastructure, Public API, Agent, MCP e UI. O scanner cobre também Web/Editor e rejeita acesso direto a Prisma gerado, repository factory, storage e adapters fora de composition roots nomeados. O próprio gate revelou e removeu Application→Infrastructure nos workers de ingest/cleanup e Agent→MCP no Diretor; T-F0.032 prova violações representativas e atravessa sinteticamente web→application→domain→orchestrator→provider→critic→compiler→renderer. A matriz completa de PostgreSQL, MinIO, FFmpeg, Remotion, API/OIDC e Compose ficou verde. A prova ainda é estrutural e parcial: não substitui E2E de todos os componentes, isolamento operacional completo, deploy ou aceite, portanto nenhuma caixa de F0.032 foi fechada.
 
+Complemento integrado F0.032 — o run `30775230222` adicionou ports tipados com referências versionadas entre Provider Registry/perception, Director, Critic, Compiler e Renderer. O orchestrator valida contexto/outputs, propaga cancelamento, exige hash canônico do RenderInput e não chama Compiler/Renderer após reprovação. T-F0.032 atravessa a cadeia completa com fakes e cobre cancelamento e input não canônico antes do provider. Os 826 testes e toda a matriz hospedada passaram; conexão ao pipeline produtivo, deploy e aceite permanecem abertos.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.
