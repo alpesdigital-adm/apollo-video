@@ -1,14 +1,14 @@
 export interface ParsedApiCredential {
-  clientId: string
-  credentialId: string
-  secret: string
+  readonly clientId: string
+  readonly credentialId: string
+  readonly secret: string
 }
 
 export interface IssuedApiCredential {
-  token: string
-  credentialId: string
-  secretSalt: string
-  secretHash: string
+  readonly token: string
+  readonly credentialId: string
+  readonly secretSalt: string
+  readonly secretHash: string
 }
 
 export interface ApiCredentialCrypto {

@@ -101,10 +101,36 @@ test('issued API secret verifies and is only returned as an opaque token', async
 
   assert.equal(parsed.clientId, issued.client.id)
   assert.equal(parsed.credentialId, issued.credential.id)
+  assert.equal(Object.isFrozen(parsed), true)
+  assert.match(parsed.secret, /^[A-Za-z0-9_-]{43}$/)
+  assert.equal(Buffer.from(parsed.secret, 'base64url').byteLength, 32)
+  assert.match(stored.secretSalt, /^[A-Za-z0-9_-]{22}$/)
+  assert.equal(Buffer.from(stored.secretSalt, 'base64url').byteLength, 16)
+  assert.match(stored.secretHash, /^[a-f0-9]{64}$/)
   assert.notEqual(stored.secretHash, parsed.secret)
   assert.equal(
     await nodeApiCredentialCrypto.verify(parsed.secret, stored.secretSalt, stored.secretHash),
     true,
+  )
+  assert.equal(
+    await nodeApiCredentialCrypto.verify(parsed.secret, 'invalid salt', stored.secretHash),
+    false,
+  )
+  assert.equal(
+    await nodeApiCredentialCrypto.verify(parsed.secret, stored.secretSalt, 'not-a-hash'),
+    false,
+  )
+  assert.equal(
+    await nodeApiCredentialCrypto.verify(
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'bbbbbbbbbbbbbbbbbbbbbb',
+      'b0a5e1349475499bf3b5ecfc1ad0ab16ef8d220f6a55a8758d80c092f8034a10',
+    ),
+    true,
+  )
+  assert.throws(
+    () => nodeApiCredentialCrypto.issue('../client', 'credential-test-1'),
+    (error) => error instanceof DomainError && error.code === 'INVALID_API_CLIENT',
   )
 })
 
@@ -150,14 +176,43 @@ test('invalid token, wrong environment and missing scope are denied', async () =
     () => nodeApiCredentialCrypto.parse(`apollo_v2.${issued.client.id}.obsolete-secret-format`),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
   )
+  const parsed = nodeApiCredentialCrypto.parse(issued.token)
+  for (const malformed of [
+    `${issued.token}=`,
+    `${issued.token}.extra`,
+    `apollo_v2.${issued.client.id}.${issued.credential.id}.${'a'.repeat(42)}`,
+    `apollo_v2.${issued.client.id}.${issued.credential.id}.${'a'.repeat(44)}`,
+  ]) {
+    assert.throws(
+      () => nodeApiCredentialCrypto.parse(malformed),
+      (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+    )
+  }
+  await assert.rejects(
+    () => sandboxAuth(`Bearer  ${issued.token}`),
+    (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+  )
+  await assert.rejects(
+    () => sandboxAuth(`Bearer ${issued.token}${'a'.repeat(256)}`),
+    (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+  )
   await assert.rejects(
     () => productionAuth(`Bearer ${issued.token}`),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
   )
 
-  const actor = await sandboxAuth(`Bearer ${issued.token}`)
+  const actor = await sandboxAuth(`bearer ${issued.token}`)
   assert.throws(
     () => requireScope(actor, 'projects:approve'),
     (error) => error instanceof DomainError && error.code === 'AUTH_SCOPE_REQUIRED',
   )
+
+  const key = `${issued.client.id}:${issued.credential.id}`
+  const stored = repository.credentials.get(key)
+  repository.credentials.set(key, { ...stored, secretSalt: 'corrupted' })
+  await assert.rejects(
+    () => sandboxAuth(`Bearer ${issued.token}`),
+    (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+  )
+  assert.equal(parsed.secret.length, 43)
 })

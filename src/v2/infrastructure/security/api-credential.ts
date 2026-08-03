@@ -1,5 +1,4 @@
 import { randomBytes, scrypt, scryptSync, timingSafeEqual } from 'node:crypto'
-import { promisify } from 'node:util'
 
 import { DomainError } from '../../domain/errors.ts'
 import type {
@@ -10,23 +9,41 @@ import type {
 
 const TOKEN_PREFIX = 'apollo_v2'
 const HASH_BYTES = 32
-const scryptAsync = promisify(scrypt)
+const SECRET_BYTES = 32
+const SALT_BYTES = 16
+const SAFE_ID = /^[A-Za-z0-9_-]{3,80}$/
+const SECRET = /^[A-Za-z0-9_-]{43}$/
+const SALT = /^[A-Za-z0-9_-]{22}$/
+const HASH = /^[a-f0-9]{64}$/
+const SCRYPT_OPTIONS = Object.freeze({ N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 })
 
 function hashSecret(secret: string, salt: string): Buffer {
-  return scryptSync(secret, salt, HASH_BYTES)
+  return scryptSync(secret, salt, HASH_BYTES, SCRYPT_OPTIONS)
+}
+
+function hashSecretAsync(secret: string, salt: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(secret, salt, HASH_BYTES, SCRYPT_OPTIONS, (error, derivedKey) => {
+      if (error) reject(error)
+      else resolve(derivedKey)
+    })
+  })
 }
 
 export function issueApiCredential(clientId: string, credentialId: string): IssuedApiCredential {
-  const secret = randomBytes(32).toString('base64url')
-  const secretSalt = randomBytes(16).toString('base64url')
+  if (!SAFE_ID.test(clientId) || !SAFE_ID.test(credentialId)) {
+    throw new DomainError('INVALID_API_CLIENT', 'API credential identifiers are invalid')
+  }
+  const secret = randomBytes(SECRET_BYTES).toString('base64url')
+  const secretSalt = randomBytes(SALT_BYTES).toString('base64url')
   const secretHash = hashSecret(secret, secretSalt).toString('hex')
 
-  return {
+  return Object.freeze({
     token: `${TOKEN_PREFIX}.${clientId}.${credentialId}.${secret}`,
     credentialId,
     secretSalt,
     secretHash,
-  }
+  })
 }
 
 export function parseApiCredential(token: string): ParsedApiCredential {
@@ -38,14 +55,14 @@ export function parseApiCredential(token: string): ParsedApiCredential {
     !credentialId ||
     !secret ||
     parts.length !== 4 ||
-    !/^[A-Za-z0-9_-]{3,80}$/.test(clientId) ||
-    !/^[A-Za-z0-9_-]{3,80}$/.test(credentialId) ||
-    secret.length < 32
+    !SAFE_ID.test(clientId) ||
+    !SAFE_ID.test(credentialId) ||
+    !SECRET.test(secret)
   ) {
     throw new DomainError('AUTH_INVALID', 'Invalid API credential')
   }
 
-  return { clientId, credentialId, secret }
+  return Object.freeze({ clientId, credentialId, secret })
 }
 
 export async function verifyApiCredential(
@@ -53,10 +70,14 @@ export async function verifyApiCredential(
   secretSalt: string,
   expectedHash: string,
 ): Promise<boolean> {
-  if (!/^[a-f0-9]{64}$/.test(expectedHash)) return false
-  const actual = (await scryptAsync(secret, secretSalt, HASH_BYTES)) as Buffer
-  const expected = Buffer.from(expectedHash, 'hex')
-  return actual.length === expected.length && timingSafeEqual(actual, expected)
+  if (!SECRET.test(secret) || !SALT.test(secretSalt) || !HASH.test(expectedHash)) return false
+  try {
+    const actual = await hashSecretAsync(secret, secretSalt)
+    const expected = Buffer.from(expectedHash, 'hex')
+    return actual.length === expected.length && timingSafeEqual(actual, expected)
+  } catch {
+    return false
+  }
 }
 
 export const nodeApiCredentialCrypto: ApiCredentialCrypto = Object.freeze({

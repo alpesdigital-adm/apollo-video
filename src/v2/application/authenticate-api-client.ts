@@ -26,22 +26,24 @@ export function authenticateApiClientService(
   dependencies: AuthenticateApiClientDependencies,
 ) {
   return async function authenticate(authorizationHeader: string | null) {
-    if (!authorizationHeader?.startsWith('Bearer ')) {
+    const authorization = authorizationHeader && authorizationHeader.length <= 256
+      ? /^Bearer ([A-Za-z0-9._~-]+)$/i.exec(authorizationHeader)
+      : null
+    if (!authorization) {
       throw new DomainError('AUTH_INVALID', 'Bearer API credential is required')
     }
 
-    const parsed = dependencies.credentialCrypto.parse(
-      authorizationHeader.slice('Bearer '.length).trim(),
-    )
+    const parsed = dependencies.credentialCrypto.parse(authorization[1])
     const stored = await dependencies.repository.findCredentialById(
       parsed.clientId,
       parsed.credentialId,
     )
 
+    const authenticatedAt = dependencies.clock()
     if (
       !stored ||
       stored.client.status !== 'active' ||
-      !isApiCredentialUsable(stored.credential, dependencies.clock()) ||
+      !isApiCredentialUsable(stored.credential, authenticatedAt) ||
       !stored.client.allowedEnvironments.includes(dependencies.environment) ||
       !(await dependencies.credentialCrypto.verify(
         parsed.secret,
@@ -55,7 +57,7 @@ export function authenticateApiClientService(
     await dependencies.repository.touchLastUsed(
       stored.client.id,
       stored.credential.id,
-      dependencies.clock().toISOString(),
+      authenticatedAt.toISOString(),
     )
 
     return Object.freeze({
