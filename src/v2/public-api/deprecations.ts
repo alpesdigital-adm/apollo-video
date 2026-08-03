@@ -50,6 +50,12 @@ export const PUBLIC_DEPRECATIONS = definePublicDeprecationRegistry([
   },
 ] as const)
 
+export function isPublicMigrationGuidePath(pathname: string): boolean {
+  return Object.values(PUBLIC_DEPRECATIONS).some(
+    (definition) => definition.migrationGuide === pathname,
+  )
+}
+
 export function publicDeprecationHeadersForSchema(
   schemaRef: string,
 ): Readonly<Record<string, string>> {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { isPublicMigrationGuidePath } from '@/v2/public-api/deprecations'
 import {
   APOLLO_SESSION_COOKIE,
   verifyUiSession,
@@ -18,6 +19,7 @@ export function proxy(request: NextRequest) {
     // checks the durable PostgreSQL session before redirecting an active user.
     return NextResponse.next()
   }
+  if (isPublicMigrationGuidePath(pathname)) return NextResponse.next()
 
   if (!authenticated) {
     const login = new URL('/login', request.url)

@@ -14,6 +14,7 @@ import { presentPublicDomainError } from '../../src/v2/public-api/error-presente
 import {
   PUBLIC_DEPRECATIONS,
   definePublicDeprecationRegistry,
+  isPublicMigrationGuidePath,
   publicDeprecationHeadersForSchema,
 } from '../../src/v2/public-api/deprecations.ts'
 import {
@@ -117,6 +118,9 @@ test('deprecated public schemas publish stable RFC headers and a local migration
     Link: '</migration-guides/error-envelope-v1-to-v3.md>; rel="deprecation"; type="text/markdown"',
   })
   assert.deepEqual(publicDeprecationHeadersForSchema('apollo://schemas/error-envelope/v3'), {})
+  assert.equal(isPublicMigrationGuidePath(definition.migrationGuide), true)
+  assert.equal(isPublicMigrationGuidePath('/migration-guides/unregistered.md'), false)
+  assert.equal(isPublicMigrationGuidePath('/login'), false)
 
   const valid = { ...definition }
   assert.throws(() => definePublicDeprecationRegistry([valid, valid]), /duplicate/)
