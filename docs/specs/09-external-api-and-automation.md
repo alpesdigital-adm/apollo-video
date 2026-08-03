@@ -218,7 +218,9 @@ A fonte executável destas convenções é `src/v2/public-api/conventions.ts`; `
 - Validation error: 422; conflict: 409; `If-Match` obsoleto: 412;
   precondição obrigatória ausente: 428; rate limit: 429.
 
-T-FR-241 deriva os endpoints implementados dos 189 handlers em `src/app/v1`, exige correspondência um-para-um com as 189 capabilities e verifica que toda query está declarada. OpenAPI 3.1, os 339 schemas Draft 2020-12, discovery e tool descriptors são projeções desses registries; não existe arquivo OpenAPI mantido à mão.
+T-FR-241 deriva os endpoints implementados dos 189 handlers em `src/app/v1`, exige correspondência um-para-um com as 189 capabilities e verifica que toda query está declarada. OpenAPI 3.1, os 340 schemas Draft 2020-12, discovery e tool descriptors são projeções desses registries; não existe arquivo OpenAPI mantido à mão.
+
+O mesmo build valida 385 examples com Ajv 2020-12 e gera um bundle determinístico com `openapi.json`, os 340 schemas versionados e `manifest.json`. O manifest registra SHA-256, bytes, contagens e hash global sem timestamp volátil; CI publica os 342 arquivos como artefato ligado ao commit. A baseline precisa incorporar tanto alterações quanto adições deliberadas: uma capability/schema nova pode ser compatível, mas não fica desprotegida contra remoção futura por permanecer fora do snapshot.
 
 ## 10. Error envelope
 
@@ -239,6 +241,8 @@ interface PublicError {
 ```
 
 `message` é segura para client. Diagnóstico interno, prompt, stack, signed URL, provider secret e conteúdo sensível não aparecem no envelope.
+
+`PUBLIC_ERROR_CATALOG` é a fonte executável dos 117 códigos atuais: cada código possui status HTTP, uma das sete categorias, retry explícito e mensagem pública canônica. O envelope v3 publica exatamente esse enum e preserva v1/v2. `INTERNAL_ERROR` usa o mesmo catálogo que DomainError; presenter e fallback nunca ecoam diagnóstico interno. Código novo sem classificação ou classificação duplicada impede a inicialização/CI.
 
 Códigos são estáveis dentro da major version, incluindo:
 
