@@ -295,6 +295,8 @@ Evidência concluída F0.033 — o run `30776962496` integrou a fonte única `co
 
 Evidência concluída F0.033 — as fontes oficiais verificadas em 2 de agosto de 2026 classificam Next.js 16.x como Active LTS e React 19.2 como a linha atual, com o patch 19.2.7 publicado. O upgrade controlado `c350181` aplicou o codemod de params assíncronos; a baseline corrente usa Next 16.2.12/React 19.2.7. O primeiro run de fechamento revelou um `503` na disputa de rotação de sessão OIDC; `c491c9c` tornou esse conflito recuperável por retry limitado e comprovou oito refreshes PostgreSQL concorrentes convergindo. No run `30778010953`, `next typegen` e TypeScript validaram os dynamic routes, os 189 contratos `/v1` e a integração OIDC permaneceram íntegros, Remotion foi empacotado e renderizado com Chromium real e o build App Router passou junto à matriz completa. A microtarefa de atualização sem quebra está concluída.
 
+Evidência concluída F0.033 — o run `30778629569` aprovou audits root/Remotion com zero vulnerabilidades após instalação limpa. O gate de plataforma exige `uuid` 11.1.1, `postcss` 8.5.18 nos dois locks e no override root, e ausência de `form-data` nas duas árvores; assim, a correção não depende somente da disponibilidade temporal do advisory no registry. A microtarefa dos três advisories não-major está concluída.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.
