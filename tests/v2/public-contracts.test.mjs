@@ -12,6 +12,11 @@ import {
 import { createOpenApiDocument } from '../../src/v2/public-api/openapi.ts'
 import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
 import {
+  PUBLIC_DEPRECATIONS,
+  definePublicDeprecationRegistry,
+  publicDeprecationHeadersForSchema,
+} from '../../src/v2/public-api/deprecations.ts'
+import {
   PUBLIC_ERROR_CATALOG,
   PUBLIC_ERROR_CODES,
   definePublicErrorCatalog,
@@ -47,13 +52,19 @@ test('documentation build deterministically publishes OpenAPI and every versione
   assert.equal(first.manifest.bundleHash, second.manifest.bundleHash)
   assert.equal(first.manifest.capabilityCount, FOUNDATION_CAPABILITIES.length)
   assert.equal(first.manifest.schemaCount, PUBLIC_SCHEMAS.length)
-  assert.equal(first.files.length, PUBLIC_SCHEMAS.length + 1)
+  assert.equal(first.manifest.migrationGuideCount, Object.keys(PUBLIC_DEPRECATIONS).length)
+  assert.equal(first.files.length, PUBLIC_SCHEMAS.length + 2)
   assert.match(first.manifest.bundleHash, /^[a-f0-9]{64}$/)
 
   for (const file of first.files) {
     assert.equal(createHash('sha256').update(file.content).digest('hex'), file.sha256)
     assert.equal(Buffer.byteLength(file.content), file.bytes)
-    assert.doesNotThrow(() => JSON.parse(file.content))
+    if (file.path.endsWith('.json')) {
+      assert.doesNotThrow(() => JSON.parse(file.content))
+    } else {
+      assert.match(file.path, /^migration-guides\/[a-z0-9-]+\.md$/)
+      assert.match(file.content, /^# /)
+    }
   }
   const openApi = JSON.parse(first.files.find((file) => file.path === 'openapi.json').content)
   assert.equal(Object.keys(openApi.paths).length, first.manifest.pathCount)
@@ -63,6 +74,10 @@ test('documentation build deterministically publishes OpenAPI and every versione
     assert.equal(document.$id, definition.ref)
     assert.ok(document.examples.length > 0)
   }
+  const migrationGuide = first.files.find(
+    (file) => file.path === 'migration-guides/error-envelope-v1-to-v3.md',
+  )
+  assert.match(migrationGuide.content, /apollo:\/\/schemas\/error-envelope\/v3/)
 })
 
 test('schema routes are stable, versioned and reject unknown documents', () => {
@@ -81,6 +96,45 @@ test('schema routes are stable, versioned and reject unknown documents', () => {
   assert.throws(
     () => getPublicSchemaByRoute('missing-schema', 'v1'),
     (error) => error instanceof DomainError && error.code === 'PUBLIC_SCHEMA_NOT_FOUND',
+  )
+})
+
+test('deprecated public schemas publish stable RFC headers and a local migration guide', () => {
+  const definition = PUBLIC_DEPRECATIONS['apollo://schemas/error-envelope/v1']
+  assert.equal(Object.isFrozen(PUBLIC_DEPRECATIONS), true)
+  assert.equal(Object.keys(PUBLIC_DEPRECATIONS).length, 1)
+  assert.equal(Object.isFrozen(definition), true)
+  assert.equal(getPublicSchema(definition.schemaRef).ref, definition.schemaRef)
+  assert.deepEqual(definition, {
+    schemaRef: 'apollo://schemas/error-envelope/v1',
+    deprecatedAt: '2026-08-03T00:00:00.000Z',
+    sunsetAt: '2027-08-03T00:00:00.000Z',
+    migrationGuide: '/migration-guides/error-envelope-v1-to-v3.md',
+  })
+  assert.deepEqual(publicDeprecationHeadersForSchema(definition.schemaRef), {
+    Deprecation: '@1785715200',
+    Sunset: 'Tue, 03 Aug 2027 00:00:00 GMT',
+    Link: '</migration-guides/error-envelope-v1-to-v3.md>; rel="deprecation"; type="text/markdown"',
+  })
+  assert.deepEqual(publicDeprecationHeadersForSchema('apollo://schemas/error-envelope/v3'), {})
+
+  const valid = { ...definition }
+  assert.throws(() => definePublicDeprecationRegistry([valid, valid]), /duplicate/)
+  assert.throws(
+    () => definePublicDeprecationRegistry([{ ...valid, schemaRef: 'not-a-schema' }]),
+    /schemaRef/,
+  )
+  assert.throws(
+    () => definePublicDeprecationRegistry([{ ...valid, deprecatedAt: '2026-08-03' }]),
+    /deprecatedAt/,
+  )
+  assert.throws(
+    () => definePublicDeprecationRegistry([{ ...valid, sunsetAt: valid.deprecatedAt }]),
+    /180 days/,
+  )
+  assert.throws(
+    () => definePublicDeprecationRegistry([{ ...valid, migrationGuide: '/../private.md' }]),
+    /migrationGuide/,
   )
 })
 
@@ -168,6 +222,14 @@ test('OpenAPI document contains one operation per exposed endpoint', () => {
       assert.ok(operation.responses[String(status)])
     }
   }
+
+  const schemaHeaders = document.paths['/v1/schemas/{schemaId}/{version}']
+    .get.responses['200'].headers
+  assert.deepEqual(schemaHeaders.Deprecation.schema, {
+    type: 'string', pattern: '^@[0-9]+$',
+  })
+  assert.match(schemaHeaders.Sunset.description, /HTTP-date/)
+  assert.match(schemaHeaders.Link.description, /Migration guide/)
 
   assert.equal(JSON.stringify(document).includes('undefined'), false)
 })

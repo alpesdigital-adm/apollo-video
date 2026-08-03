@@ -84,6 +84,22 @@ function responsesFor(capability: PublicCapability) {
       headers: {
         'Apollo-API-Version': { schema: { type: 'string', const: 'v1' } },
         'Apollo-Request-Id': { schema: { type: 'string' } },
+        ...(capability.id === 'apollo.contracts.schemas.read'
+          ? {
+              Deprecation: {
+                description: 'Structured Field Date present when the requested schema is deprecated.',
+                schema: { type: 'string', pattern: '^@[0-9]+$' },
+              },
+              Sunset: {
+                description: 'HTTP-date after which the deprecated schema may be withdrawn.',
+                schema: { type: 'string' },
+              },
+              Link: {
+                description: 'Migration guide with the deprecation link relation.',
+                schema: { type: 'string' },
+              },
+            }
+          : {}),
         ...(capability.responseEtag
           ? {
               ETag: {

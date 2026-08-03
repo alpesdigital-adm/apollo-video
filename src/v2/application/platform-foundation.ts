@@ -11,8 +11,6 @@ export function verifyWorkspaceSession(token:string,secret:string,now:number){co
 export const APP_SHELL_NAVIGATION=APP_SHELL_DESTINATIONS;
 export function switchWorkspace(previous:string,next:string){if(previous===next)return {changed:false,invalidate:[],unsubscribe:[]};return {changed:true,invalidate:[`workspace:${previous}:*`],unsubscribe:[`events:${previous}`],subscribe:[`events:${next}`],navigate:'/'};}
 
-export function deprecationHeaders(input:{deprecatedAt:string;sunsetAt:string;guide:string}){return {Deprecation:input.deprecatedAt,Sunset:input.sunsetAt,Link:`<${input.guide}>; rel="deprecation"`};}
-
 export type ClientGovernance={clientId:string;workspaceId:string;delegatedUserId?:string;status:'active'|'suspended'|'revoked';scopes:string[];environment:'development'|'preview'|'production';killSwitch:boolean};
 export function authorizeGovernedClient(client:ClientGovernance,input:{workspaceId:string;scope:string}){const reasons=[...(client.workspaceId!==input.workspaceId?['cross-workspace']:[]),...(client.status!=='active'?[client.status]:[]),...(client.killSwitch?['kill-switch']:[]),...(!client.scopes.includes(input.scope)?['scope']:[])];return {allowed:reasons.length===0,reasons,audit:{clientId:client.clientId,workspaceId:client.workspaceId,delegatedUserId:client.delegatedUserId,environment:client.environment}};}
 

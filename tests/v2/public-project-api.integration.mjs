@@ -1171,6 +1171,35 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(schema.examples[0].objective, 'discovery')
     assert.equal(schema.examples[0].format, '9:16')
 
+    const deprecatedSchemaResponse = await fetch(
+      `${baseUrl}/v1/schemas/error-envelope/v1`,
+    )
+    assert.equal(deprecatedSchemaResponse.status, 200)
+    assert.equal(deprecatedSchemaResponse.headers.get('deprecation'), '@1785715200')
+    assert.equal(
+      deprecatedSchemaResponse.headers.get('sunset'),
+      'Tue, 03 Aug 2027 00:00:00 GMT',
+    )
+    assert.equal(
+      deprecatedSchemaResponse.headers.get('link'),
+      '</migration-guides/error-envelope-v1-to-v3.md>; rel="deprecation"; type="text/markdown"',
+    )
+    const migrationGuideResponse = await fetch(
+      `${baseUrl}/migration-guides/error-envelope-v1-to-v3.md`,
+    )
+    assert.equal(migrationGuideResponse.status, 200)
+    const migrationGuide = await migrationGuideResponse.text()
+    assert.match(migrationGuide, /apollo:\/\/schemas\/error-envelope\/v3/)
+    assert.match(migrationGuide, /does not deprecate[\s\S]*`\/v1` API major/)
+
+    const currentErrorSchemaResponse = await fetch(
+      `${baseUrl}/v1/schemas/error-envelope/v3`,
+    )
+    assert.equal(currentErrorSchemaResponse.status, 200)
+    assert.equal(currentErrorSchemaResponse.headers.get('deprecation'), null)
+    assert.equal(currentErrorSchemaResponse.headers.get('sunset'), null)
+    assert.equal(currentErrorSchemaResponse.headers.get('link'), null)
+
     const missingSchemaResponse = await fetch(`${baseUrl}/v1/schemas/missing/v1`)
     assert.equal(missingSchemaResponse.status, 404)
 

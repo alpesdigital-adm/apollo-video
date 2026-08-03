@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { FOUNDATION_CAPABILITIES } from '../src/v2/public-api/capability-registry.ts'
 import { createOpenApiDocument } from '../src/v2/public-api/openapi.ts'
+import { PUBLIC_DEPRECATIONS } from '../src/v2/public-api/deprecations.ts'
 import {
   PUBLIC_SCHEMA_EXAMPLES,
   publicSchemaDocument,
@@ -25,8 +26,15 @@ function digest(content) {
 
 export function createPublicApiDocumentationBundle() {
   const openApi = createOpenApiDocument()
+  const migrationGuides = Object.values(PUBLIC_DEPRECATIONS).map((definition) => {
+    const path = definition.migrationGuide.slice(1)
+    const source = resolve(repositoryRoot, 'public', path)
+    const content = readFileSync(source, 'utf8').replace(/\r\n/g, '\n')
+    return [path, content.endsWith('\n') ? content : `${content}\n`]
+  })
   const documents = [
     ['openapi.json', serialize(openApi)],
+    ...migrationGuides,
     ...PUBLIC_SCHEMAS.map((definition) => [
       `schemas/${definition.id}/v${definition.version}.json`,
       serialize(publicSchemaDocument(definition)),
@@ -48,6 +56,7 @@ export function createPublicApiDocumentationBundle() {
     openApiPath: 'openapi.json',
     capabilityCount: FOUNDATION_CAPABILITIES.length,
     schemaCount: PUBLIC_SCHEMAS.length,
+    migrationGuideCount: migrationGuides.length,
     exampleCount: Object.values(PUBLIC_SCHEMA_EXAMPLES)
       .reduce((total, examples) => total + examples.length, 0),
     pathCount: Object.keys(openApi.paths).length,

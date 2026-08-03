@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
+import { publicDeprecationHeadersForSchema } from '@/v2/public-api/deprecations'
 import { getPublicSchemaByRoute } from '@/v2/public-api/schema-registry'
 import { publicSchemaDocument } from '@/v2/public-api/schema-examples'
 
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest, props: RouteContext) {
     return NextResponse.json(publicSchemaDocument(definition), {
       headers: {
         ...publicApiHeaders(requestId),
+        ...publicDeprecationHeadersForSchema(definition.ref),
         'Content-Type': 'application/schema+json; charset=utf-8',
       },
     })
