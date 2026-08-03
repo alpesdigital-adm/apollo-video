@@ -4,6 +4,7 @@
     "uiActions": 73,
     "capabilities": 66,
     "endpoints": 66,
+    "registeredCapabilities": 189,
     "operableCapabilities": 189,
     "publicContractCapabilities": 189,
     "internalOnlyCapabilities": 0,

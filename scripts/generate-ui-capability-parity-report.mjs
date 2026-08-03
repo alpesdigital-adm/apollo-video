@@ -15,6 +15,9 @@ const REPORT_TESTS = Object.freeze([
   'tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary',
   'tests/v2/public-contracts.test.mjs:public-contract-registry',
 ])
+const uiActionCache = new Map()
+const applicationServiceCache = new Map()
+const reachableServiceCache = new Map()
 
 function sourceFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -65,6 +68,8 @@ function enclosingFunctionName(node) {
 }
 
 export function discoverUiNetworkActions(root) {
+  const cached = uiActionCache.get(root)
+  if (cached) return cached
   const actions = []
   for (const path of [
     ...sourceFiles(resolve(root, 'src/app')),
@@ -101,7 +106,11 @@ export function discoverUiNetworkActions(root) {
     }
     visit(file)
   }
-  return actions.sort((left, right) => left.id.localeCompare(right.id))
+  const discovered = Object.freeze(actions
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((action) => Object.freeze(action)))
+  uiActionCache.set(root, discovered)
+  return discovered
 }
 
 function routeFileForEndpoint(root, endpoint) {
@@ -128,6 +137,8 @@ function resolveLocalModule(root, fromPath, specifier) {
 
 function reachableApplicationServices(root, path, functionName, visited = new Set()) {
   const visitKey = `${path}#${functionName}`
+  const cached = reachableServiceCache.get(visitKey)
+  if (cached) return new Set(cached)
   if (visited.has(visitKey)) return new Set()
   visited.add(visitKey)
   const source = readFileSync(path, 'utf8')
@@ -175,16 +186,22 @@ function reachableApplicationServices(root, path, functionName, visited = new Se
     ts.forEachChild(node, visit)
   }
   visit(target)
+  reachableServiceCache.set(visitKey, Object.freeze([...services]))
   return services
 }
 
 export function applicationServicesForEndpoint(root, endpoint) {
+  const cacheKey = `${root}#${endpoint.method} ${endpoint.path}`
+  const cached = applicationServiceCache.get(cacheKey)
+  if (cached) return cached
   const path = routeFileForEndpoint(root, endpoint)
   assert.ok(existsSync(path), `capability route does not exist: ${endpoint.method} ${endpoint.path}`)
   const services = [...reachableApplicationServices(root, path, endpoint.method)].sort()
   assert.ok(services.length > 0,
     `public UI route does not reach a V2 application service: ${endpoint.method} ${endpoint.path}`)
-  return services
+  const discovered = Object.freeze(services)
+  applicationServiceCache.set(cacheKey, discovered)
+  return discovered
 }
 
 export function createUiCapabilityParityReport(root, registry = FOUNDATION_CAPABILITIES) {
@@ -226,7 +243,10 @@ export function createUiCapabilityParityReport(root, registry = FOUNDATION_CAPAB
       uiActions: rows.length,
       capabilities: capabilityCount,
       endpoints: endpointCount,
-      operableCapabilities: registry.length,
+      registeredCapabilities: registry.length,
+      operableCapabilities: capabilityContracts.filter(
+        (capability) => capability.exposure !== 'internal-only',
+      ).length,
       publicContractCapabilities: capabilityContracts.filter(
         (capability) => capability.exposure !== 'internal-only',
       ).length,

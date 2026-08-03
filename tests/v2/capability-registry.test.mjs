@@ -357,6 +357,7 @@ test('T-F0-034 generated parity report covers actions, capabilities, endpoints a
   assert.ok(report.summary.endpoints > 0)
   assert.equal(report.summary.unboundActions, 0)
   assert.equal(report.summary.routesWithoutApplicationService, 0)
+  assert.equal(report.summary.registeredCapabilities, FOUNDATION_CAPABILITIES.length)
   assert.equal(report.summary.operableCapabilities, FOUNDATION_CAPABILITIES.length)
   assert.equal(report.summary.publicContractCapabilities, FOUNDATION_CAPABILITIES.length)
   assert.equal(report.summary.unjustifiedCapabilities, 0)

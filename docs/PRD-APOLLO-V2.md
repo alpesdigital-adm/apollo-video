@@ -1823,6 +1823,8 @@ Critérios adicionais de paridade:
 - uma operação da UI sem capability pública e contract test bloqueia o release;
 - endpoints de sessão humana podem ser consumidos por um cliente HTTP que preserve cookies, enquanto integrações não humanas usam Bearer de service account.
 
+Evidência executável F0.034: o relatório versionado `ui-capability-parity-report/v1` deriva do AST da UI e do registry canônico, relaciona 73 call sites a 66 capabilities/endpoints e aos Application services alcançáveis e cobre as 189 capabilities públicas. Seis superfícies estritamente internas possuem allowlist tipada e justificativa; exceções textuais livres são recusadas. Os gates `api:v1:validate` e `api:parity:validate` bloqueiam capability externa sem contrato, interna sem justificativa, ação da UI sem binding, rota divergente ou drift do relatório. O run hospedado `30812924567` aprovou a matriz completa com zero lacunas.
+
 ### FR-241 — Contrato público e descoberta
 
 A API deve publicar OpenAPI e JSON Schemas versionados, IDs estáveis, enums, paginação, filtros, erros estruturados, exemplos e capability discovery. Alteração incompatível exige nova versão e janela de depreciação.
