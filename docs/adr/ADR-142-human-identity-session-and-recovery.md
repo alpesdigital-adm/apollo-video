@@ -24,7 +24,7 @@ O Apollo já publica login, leitura de sessão e logout em `/v1/session`, mas a 
 ## Consequências
 
 - Esta decisão fecha a seleção do mecanismo, expiração e recuperação. O adapter OIDC, identificador opaco, revogação, idle timeout, throttle distribuído, identidade e membership já estão integrados localmente e em CI; isso não equivale a IdP real configurado, deploy ou aceite.
-- Deploy de produção permanece bloqueado até configurar o IdP real, pré-vincular a identidade administrativa, provar recuperação no IdP e concluir rotação periódica do identificador em até 15 minutos.
+- Deploy de produção permanece bloqueado até configurar o IdP real, pré-vincular a identidade administrativa e provar recuperação no IdP.
 - Bearer de `ApiClient` continua sendo a única autenticação de automação; cookie humano não autentica MCP nem worker.
 
 ## Evidências exigidas para implementação
@@ -38,4 +38,4 @@ O Apollo já publica login, leitura de sessão e logout em `/v1/session`, mas a 
 
 ## Evidência incremental
 
-O run hospedado `30766068302` (attempt 2) aplicou as tabelas de sessão, throttle e tentativas em PostgreSQL limpo. Os runs `30768229810`, `30768936087` e `30770605092` comprovaram proteção SSR, identidade/membership ativa e troca de workspace isolada. O run `30771147749` substituiu o envelope assinado por cookie aleatório opaco de 256 bits, com toda autoridade reidratada do PostgreSQL. O run `30773060731` passou 822 testes, build, migrations, goldens e Compose; seu E2E iniciou um IdP OIDC local real, verificou discovery, Authorization Code, S256 PKCE, state, browser binding, nonce, issuer, audience, assinatura/JWKS e criou sessão opaca somente para membership pré-autorizada. Binder incorreto, replay, nonce incorreto e identidade sem membership foram negados; o modo OIDC também recusou login por senha. Permanecem abertos IdP real, recuperação exercitada, rotação periódica em 15 minutos, deploy e aceite.
+O run hospedado `30766068302` (attempt 2) aplicou as tabelas de sessão, throttle e tentativas em PostgreSQL limpo. Os runs `30768229810`, `30768936087` e `30770605092` comprovaram proteção SSR, identidade/membership ativa e troca de workspace isolada. O run `30771147749` substituiu o envelope assinado por cookie aleatório opaco de 256 bits, com toda autoridade reidratada do PostgreSQL. O run `30773060731` iniciou um IdP OIDC local real, verificou discovery, Authorization Code, S256 PKCE, state, browser binding, nonce, issuer, audience, assinatura/JWKS e criou sessão opaca somente para membership pré-autorizada. O run `30773970385` passou 823 testes, build, migrations, goldens e Compose e comprovou em PostgreSQL/HTTP reais: rotação HMAC com chave obrigatória aos 10 minutos, convergência concorrente, predecessor bloqueado em APIs comuns, recovery de 60 segundos, idade máxima de 15 minutos e nenhum token bruto no banco. Permanecem abertos IdP real, recuperação exercitada, deploy e aceite.
