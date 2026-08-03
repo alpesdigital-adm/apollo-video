@@ -38,6 +38,14 @@ export interface MediaIngestProcessor {
   cleanup(operationId: string): Promise<void>
 }
 
+export interface MediaSourceProber {
+  probe(sourcePath: string, options?: { signal?: AbortSignal }): Promise<Readonly<MediaIngestProbe>>
+}
+
+export interface ArtifactFileIntegrity {
+  sha256(filePath: string): Promise<string>
+}
+
 export interface MediaTranscriber {
   transcribe(input: { audioPath: string; language: string; signal?: AbortSignal }): Promise<Readonly<MediaTranscript>>
 }

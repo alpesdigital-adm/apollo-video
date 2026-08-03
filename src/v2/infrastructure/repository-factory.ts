@@ -269,6 +269,8 @@ import {
 } from './media/s3-artifact-storage.ts'
 import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
+import { calculateFileSha256 } from './media/local-artifact-manifest.ts'
+import { probeVideo } from './media/video-probe.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
 import { createFfmpegSourceCleanupProcessorFromEnvironment } from './media/ffmpeg-source-cleanup-processor.ts'
@@ -1267,6 +1269,7 @@ export function createMediaIngestWorker(
     projectMedia: createProjectMediaRepository(),
     storage: createVerifiedMediaStorage(environment),
     processor: createFfmpegIngestProcessorFromEnvironment(environment),
+    prober: { probe: probeVideo },
     transcriber: createMediaTranscriberFromEnvironment(environment),
     rights: createAssetRightsRepository(),
     clock,
@@ -1422,6 +1425,7 @@ export function createSourceCleanupWorker(
     processor:
       createFfmpegSourceCleanupProcessorFromEnvironment(environment),
     sources: createArtifactSourceMaterializer(environment),
+    integrity: { sha256: calculateFileSha256 },
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0
       ? { leaseDurationMs: configuredLease }

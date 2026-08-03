@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
-import type { MediaIngestProcessor, MediaTranscriber, ProjectMediaRepository, VerifiedMediaStorage } from './ports/media-ingest.ts'
+import type { MediaIngestProcessor, MediaSourceProber, MediaTranscriber, ProjectMediaRepository, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import type { MediaTransferRepository } from './ports/media-transfer-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
@@ -13,7 +13,6 @@ import { createMediaArtifactManifest, createMediaArtifactManifestV2 } from '../d
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
-import { probeVideo } from '../infrastructure/media/video-probe.ts'
 import { setAssetRightsService } from './set-asset-rights.ts'
 import { calculatePublicOperationRetryDelayMs } from './run-public-operation-worker.ts'
 import { compileInitialSourceEditPlan } from './apply-editorial-cut-command.ts'
@@ -51,6 +50,7 @@ export function runNextMediaIngestOperationService(dependencies: {
   projectMedia: ProjectMediaRepository
   storage: VerifiedMediaStorage
   processor: MediaIngestProcessor
+  prober: MediaSourceProber
   transcriber: MediaTranscriber
   rights: AssetRightsRepository
   clock?: () => Date
@@ -122,7 +122,7 @@ export function runNextMediaIngestOperationService(dependencies: {
       const workspaceNamespace = createHash('sha256').update(operation.workspaceId).digest('hex').slice(0, 12)
 
       await enter('probing')
-      const sourceProbe = await probeVideo(master.path, { signal: abortController.signal })
+      const sourceProbe = await dependencies.prober.probe(master.path, { signal: abortController.signal })
       const now = clock().toISOString()
       const sourceManifest = createMediaArtifactManifest({
         artifactKey: master.key, artifactSha256: master.sha256, byteSize: master.byteSize,

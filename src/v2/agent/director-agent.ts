@@ -7,7 +7,7 @@ import {
   type LanguageModel,
 } from 'ai'
 
-import type { ApolloMcpPublicApiClient } from '../mcp/public-api-client.ts'
+import type { AgentToolDescriptor } from '../public-api/agent-tool-catalog.ts'
 
 const DIRECTOR_INSTRUCTIONS = `You are the Apollo video director.
 Use only the tools included in this exact session. Never invent or request a hidden tool.
@@ -18,7 +18,13 @@ If a required capability is absent, report that it is unauthorized or unavailabl
 
 export async function createApolloDirectorAgent(input: {
   model: LanguageModel
-  api: Pick<ApolloMcpPublicApiClient, 'listTools' | 'callTool'>
+  api: Readonly<{
+    listTools(): Promise<readonly AgentToolDescriptor[]>
+    callTool(
+      tool: AgentToolDescriptor,
+      input: Record<string, unknown>,
+    ): Promise<Readonly<{ ok: boolean; status: number; payload: unknown }>>
+  }>
 }) {
   const descriptors = await input.api.listTools()
   const tools = Object.fromEntries(descriptors.map((descriptor) => [

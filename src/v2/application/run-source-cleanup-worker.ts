@@ -10,7 +10,6 @@ import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import {
   createPostCleanupReview,
 } from '../domain/source-cleanup.ts'
-import { calculateFileSha256 } from '../infrastructure/media/local-artifact-manifest.ts'
 import type {
   AssetRightsRepository,
 } from './ports/asset-rights-repository.ts'
@@ -22,6 +21,7 @@ import type {
 } from './ports/media-artifact-query-repository.ts'
 import type {
   ArtifactSourceMaterializer,
+  ArtifactFileIntegrity,
   VerifiedMediaStorage,
 } from './ports/media-ingest.ts'
 import type {
@@ -76,6 +76,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
   storage: VerifiedMediaStorage
   processor: SourceCleanupProcessor
   sources: ArtifactSourceMaterializer
+  integrity: ArtifactFileIntegrity
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -292,7 +293,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
         sha256: source.sha256,
         byteSize: Number(source.byteSize),
       })).path
-      const sourceShaBefore = await calculateFileSha256(sourcePath)
+      const sourceShaBefore = await dependencies.integrity.sha256(sourcePath)
       if (sourceShaBefore !== context.sourceArtifactSha256) {
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
@@ -322,7 +323,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
           })
         : await processCleanup()
       await enter('verifying')
-      const sourceShaAfter = await calculateFileSha256(sourcePath)
+      const sourceShaAfter = await dependencies.integrity.sha256(sourcePath)
       if (
         sourceShaAfter !== sourceShaBefore ||
         sourceShaAfter !== context.sourceArtifactSha256

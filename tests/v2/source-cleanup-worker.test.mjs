@@ -19,6 +19,7 @@ import {
 import {
   runNextSourceCleanupOperationService,
 } from '../../src/v2/application/run-source-cleanup-worker.ts'
+import { calculateFileSha256 } from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
 
 const sourceSha =
   'dfefeece888b706f3cff0ebe7a4d420e28ef84ae721b30771db590d52c0fc04f'
@@ -349,6 +350,7 @@ test('T-FR-122 cleanup worker publishes only after immutable-source, lineage, ri
       },
       async cleanup() {},
     },
+    integrity: { sha256: calculateFileSha256 },
     clock: () => new Date((clockMs += 100)),
   })
 

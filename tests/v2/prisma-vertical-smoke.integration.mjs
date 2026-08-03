@@ -157,6 +157,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       projectMedia: new PrismaProjectMediaRepository(prisma),
       storage,
       processor: new FfmpegIngestProcessor({ workRoot: join(root, '.ingest-work'), ffmpegPath }),
+      prober: { probe: probeVideo },
       transcriber: {
         async transcribe() {
           return createMediaTranscript({

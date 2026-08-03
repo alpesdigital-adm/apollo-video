@@ -2,10 +2,15 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { architectureImportViolation, webDataAccessViolation } from './architecture-boundaries.mjs'
+
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url))
 const v2Root = join(repositoryRoot, 'src', 'v2')
 const publicRoutesRoot = join(repositoryRoot, 'src', 'app', 'v1')
-const applicationUiRoot = join(repositoryRoot, 'src', 'app')
+const applicationUiRoots = [
+  join(repositoryRoot, 'src', 'app'),
+  join(repositoryRoot, 'src', 'components'),
+]
 const legacyRuntimeRoot = join(repositoryRoot, 'src', 'lib')
 const operationalRoots = [
   join(repositoryRoot, 'scripts'),
@@ -70,6 +75,8 @@ for (const file of await files(v2Root)) {
     violations.push(`${rel}: public API imports infrastructure`)
   }
   for (const specifier of staticImports(source)) {
+    const layerViolation = architectureImportViolation(rel, specifier)
+    if (layerViolation) violations.push(layerViolation)
     if (resolvesIntoLegacyRuntime(file, specifier)) {
       violations.push(`${rel}: V2 imports legacy runtime ${specifier}`)
     }
@@ -93,17 +100,22 @@ for (const file of await files(publicRoutesRoot)) {
   }
 }
 
-for (const file of await files(applicationUiRoot)) {
-  if (!/\.tsx$/.test(file)) continue
-  const rel = normalized(relative(repositoryRoot, file))
-  const source = await readFile(file, 'utf8')
-  for (const specifier of staticImports(source)) {
-    if (resolvesIntoLegacyRuntime(file, specifier)) {
-      violations.push(`${rel}: V2 UI imports legacy runtime ${specifier}`)
+for (const root of applicationUiRoots) {
+  for (const file of await files(root)) {
+    if (!/\.(ts|tsx)$/.test(file)) continue
+    const rel = normalized(relative(repositoryRoot, file))
+    const source = await readFile(file, 'utf8')
+    const specifiers = staticImports(source)
+    for (const specifier of specifiers) {
+      if (resolvesIntoLegacyRuntime(file, specifier)) {
+        violations.push(`${rel}: V2 UI imports legacy runtime ${specifier}`)
+      }
+      if (specifier === '@prisma/client') {
+        violations.push(`${rel}: V2 UI bypasses the public API through the legacy Prisma client`)
+      }
     }
-    if (specifier === '@prisma/client') {
-      violations.push(`${rel}: V2 UI bypasses the public API through the legacy Prisma client`)
-    }
+    const dataAccessViolation = webDataAccessViolation(rel, source, specifiers)
+    if (dataAccessViolation) violations.push(dataAccessViolation)
   }
 }
 
