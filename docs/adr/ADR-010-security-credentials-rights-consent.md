@@ -72,7 +72,7 @@ O mesmo evaluator será ligado incrementalmente à busca, Director, geração si
 
 ## Consequências
 
-- A migration de credenciais segue expand-contract: cria a tabela nova e migra hashes legados antes de remover colunas antigas em release posterior.
+- A separação expand-contract foi concluída: `ApiCredential` é o único owner do verifier one-way e `ApiClient` não possui mais salt/hash. A migration contrativa removeu fisicamente as cópias após o backfill, sem dual-read.
 - Credenciais comprometidas podem ser revogadas sem trocar identidade, scopes ou integrações não afetadas.
 - O secret store futuro poderá substituir o hash local por referência sem alterar o contrato de domínio.
 - O audit de decisão de uso já é persistido; deleção/export do audit, rate limit, anomaly detection e kill switch de workspace permanecem gates antes de abrir a API amplamente.

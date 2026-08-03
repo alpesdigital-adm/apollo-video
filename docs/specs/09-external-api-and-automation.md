@@ -147,7 +147,7 @@ interface ApiClient {
 Regras:
 
 - client pertence a um workspace, salvo integração multi-tenant futura explicitamente aprovada;
-- credencial aponta para secret manager, não banco em claro;
+- credencial aponta para verifier one-way ou referência de secret manager conforme o mecanismo; nunca para secret em claro;
 - secret é rotacionável com overlap curto e revogação imediata;
 - token contém client, workspace, scopes, environment, issue/expiry e nonce/jti;
 - usuário interativo delegado mantém `subjectUserId` além de `clientId`;
@@ -158,7 +158,9 @@ ADR-013 escolhe OAuth 2.1, signed service keys ou ambos. O domínio depende de `
 
 Evidência integrada F0.036: o contrato acima é executável em `domain/api-client.ts` como schema v2. `createServiceAccount` fixa o tipo sem cast do caller; `apiCredentialRef` valida e congela somente os identificadores; grants e ambientes são deduplicados, ordenados e recusados quando inválidos. PostgreSQL persiste `type`, `scopeGrantsJson`, `allowedEnvironmentsJson` e `createdBy`, com constraints e sem leitura das colunas substituídas. Os presenters v2 incluem esses campos e mantêm `environment`/`scopes` apenas na projeção pública versionada durante o ciclo de suporte, nunca como fonte de autoridade. O run `30827500404` comprovou migration limpa e os fluxos HTTP reais de create/list/rotate.
 
-O token inicial é opaco e versionado pelo prefixo `apollo_v2`: IDs seguros identificam client/credential e o segmento secreto contém exatamente 32 bytes aleatórios em base64url. A persistência recebe somente salt aleatório de 16 bytes e derivação `scrypt` de 32 bytes com parâmetros `N=16384`, `r=8`, `p=1`; a validação limita o header, exige quatro segmentos exatos e usa comparação constante. Expiração, status, ambiente e grants continuam resolvidos server-side no mesmo instante de autenticação. O run `30829124000` comprovou o fluxo real. Os demais requisitos desta seção continuam pertencendo às microtarefas abertas de F0.036.
+O token inicial é opaco e versionado pelo prefixo `apollo_v2`: IDs seguros identificam client/credential e o segmento secreto contém exatamente 32 bytes aleatórios em base64url. A persistência recebe somente salt aleatório de 16 bytes e derivação `scrypt` de 32 bytes com parâmetros `N=16384`, `r=8`, `p=1`; a validação limita o header, exige quatro segmentos exatos e usa comparação constante. Expiração, status, ambiente e grants continuam resolvidos server-side no mesmo instante de autenticação. O run `30829124000` comprovou o fluxo real.
+
+Cada `ApiCredentialRef` resolve uma linha independente de credential; `ApiClient` não armazena nem duplica verifier. A migration contrativa `20260803190000_contract_api_credential_verifiers` remove as cópias históricas, estreita salt/hash aos formatos canônicos e adiciona constraint do salt. Create/rotate persistem somente verifier e idempotency metadata; o token aparece uma vez e não entra no replay. O run `30830871011` comprovou perda de response, concorrência, overlap, rotação, revogação e 401 do token revogado em HTTP/PostgreSQL real. Os demais requisitos desta seção continuam pertencendo às microtarefas abertas de F0.036.
 
 ### 7.1 Sessão humana também é API
 
