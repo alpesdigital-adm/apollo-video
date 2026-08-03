@@ -82,6 +82,16 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
   assert.equal(actor.delegatedUserId, 'member-1')
   assert.equal(actor.delegatedIdentityId, 'identity-1')
   assert.equal(actor.workspaceRole, 'director')
+  assert.deepEqual(actor.auditContext, {
+    clientId: 'apollo-ui-client',
+    credentialId: `ui-session:${'a'.repeat(64)}`,
+    workspaceId: 'workspace-1',
+    environment: 'production',
+    delegatedUserId: 'member-1',
+    delegatedIdentityId: 'identity-1',
+    workspaceRole: 'director',
+    actor: { type: 'api-client', id: 'apollo-ui-client', delegatedUserId: 'member-1' },
+  })
   assert.equal(actor.scopes.has('projects:write'), true)
   await assert.rejects(
     () => authenticateUiSessionService({ repository, sessions, environment: 'sandbox' })('a'.repeat(43), 'a'.repeat(64)),

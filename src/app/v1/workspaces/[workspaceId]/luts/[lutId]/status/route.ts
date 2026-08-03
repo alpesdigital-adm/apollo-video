@@ -29,7 +29,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     if (workspaceId !== actor.workspaceId) throw new DomainError('WORKSPACE_NOT_FOUND', 'Workspace was not found')
     const body = parseSetWorkspaceLutStatusBody(await request.json())
     const result = await setWorkspaceLutStatusService({ repository: createWorkspaceLutRepository(), createCommandId: () => `lut-status-${randomUUID()}` })({
-      ...body, workspaceId, lutId, actor: { type: 'api-client', id: actor.clientId }, idempotencyKey: request.headers.get('idempotency-key') ?? '',
+      ...body, workspaceId, lutId, actor: actor.auditContext.actor, idempotencyKey: request.headers.get('idempotency-key') ?? '',
     })
     return NextResponse.json(presentSuccess({ lifecycle: presentWorkspaceLutLifecycle(result.record), command: presentWorkspaceLutStatusCommand(result.command), replayed: result.replayed }), { headers: publicApiHeaders(requestId) })
   } catch (error) { return respondPublicError(error, requestId) }

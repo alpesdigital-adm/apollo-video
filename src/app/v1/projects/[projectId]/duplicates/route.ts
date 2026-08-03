@@ -90,7 +90,7 @@ export async function POST(
       expectedVersionId: body.expectedVersionId,
       expectedVersionHash: body.expectedVersionHash,
       ...(body.name ? { name: body.name } : {}),
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotency: {
         clientId: actor.clientId,
         key: idempotencyKey,

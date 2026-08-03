@@ -192,7 +192,7 @@ export async function POST(
       ...(typeof body.reason === 'string' && body.reason.trim()
         ? { reason: body.reason.trim() }
         : {}),
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey,
     })
     const proxy = await enqueueProjectProxyRenderService({
@@ -204,7 +204,7 @@ export async function POST(
     })({
       workspaceId: actor.workspaceId,
       projectId,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey: `${idempotencyKey}:proxy`,
       traceId: requestId,
     })

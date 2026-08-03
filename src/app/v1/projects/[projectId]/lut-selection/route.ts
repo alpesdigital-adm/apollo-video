@@ -26,7 +26,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const body = parseSetProjectLutSelectionBody(await request.json())
     const idempotencyKey = request.headers.get('idempotency-key') ?? ''
     const result = await setProjectLutSelectionService({ repository: createProjectLutSelectionRepository(), createId: (kind) => `project-lut-${kind}-${randomUUID()}`, createEventId: () => randomUUID() })({
-      ...body, workspaceId: actor.workspaceId, projectId, actor: { type: 'api-client', id: actor.clientId }, idempotencyKey,
+      ...body, workspaceId: actor.workspaceId, projectId, actor: actor.auditContext.actor, idempotencyKey,
     })
     const presented = presentProjectLutSelectionResult(result)
     if (result.impact.renderDeferredUntilTimeline) {
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       createId: (kind) => `${kind}-${randomUUID()}`,
     })({
       workspaceId: actor.workspaceId, projectId, expectedProjectVersionId: result.version.id,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey: `lut-proxy:${calculateVersionHash(idempotencyKey).slice(0, 64)}`,
       traceId: requestId,
     })

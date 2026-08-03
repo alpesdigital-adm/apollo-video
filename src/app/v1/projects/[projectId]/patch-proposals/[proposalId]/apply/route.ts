@@ -36,7 +36,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       projectId,
       proposalId,
       confirmed: true,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey,
     })
     const render = await enqueueProjectProxyRenderService({
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     })({
       workspaceId: actor.workspaceId,
       projectId,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey: `patch-proxy:${calculateVersionHash(idempotencyKey).slice(0, 64)}`,
       traceId: requestId,
     })

@@ -53,10 +53,7 @@ export async function POST(
       batchId,
       runId: libraryId,
       ...body,
-      actor: {
-        type: 'api-client',
-        id: actor.clientId,
-      },
+      actor: actor.auditContext.actor,
       idempotencyKey:
         request.headers.get('idempotency-key')?.trim() ?? '',
     })

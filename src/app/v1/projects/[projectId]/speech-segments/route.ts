@@ -336,7 +336,7 @@ export async function POST(
       extractionPolicyVersion: body.extractionPolicyVersion,
       producer: body.producer,
       annotations: body.annotations,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey,
     })
     return NextResponse.json(

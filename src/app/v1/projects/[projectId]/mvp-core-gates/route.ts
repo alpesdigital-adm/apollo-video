@@ -113,7 +113,7 @@ export async function POST(
       companionVersionId: body.companionVersionId,
       companionVersionHash: body.companionVersionHash,
       duplicateProjectId: body.duplicateProjectId,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey,
     })
     return NextResponse.json(

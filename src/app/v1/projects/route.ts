@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
       ...(locale ? { locale } : {}),
       ...(briefing ? { briefing } : {}),
       ...(destination ? { destination } : {}),
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
     })
 

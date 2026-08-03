@@ -58,7 +58,7 @@ export async function POST(
       workspaceId: actor.workspaceId,
       projectId,
       ...body,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey,
     })
     return NextResponse.json(

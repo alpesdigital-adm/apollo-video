@@ -13,6 +13,59 @@ export interface AuthenticatedExternalActor {
   delegatedUserId?: string
   delegatedIdentityId?: string
   workspaceRole?: string
+  auditContext: ExternalAuditContext
+}
+
+export interface ExternalAuditContext {
+  clientId: string
+  credentialId: string
+  workspaceId: string
+  environment: ApiEnvironment
+  delegatedUserId?: string
+  delegatedIdentityId?: string
+  workspaceRole?: string
+  actor: Readonly<{
+    type: 'api-client'
+    id: string
+    delegatedUserId?: string
+  }>
+}
+
+function assertAuditIdentifier(value: string, field: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(value)) {
+    throw new DomainError('AUTH_INVALID', `Authenticated ${field} is invalid`)
+  }
+}
+
+export function createExternalAuditContext(input: {
+  clientId: string
+  credentialId: string
+  workspaceId: string
+  environment: ApiEnvironment
+  delegatedUserId?: string
+  delegatedIdentityId?: string
+  workspaceRole?: string
+}): Readonly<ExternalAuditContext> {
+  assertAuditIdentifier(input.clientId, 'client identity')
+  assertAuditIdentifier(input.credentialId, 'credential identity')
+  assertAuditIdentifier(input.workspaceId, 'workspace identity')
+  const delegation = [input.delegatedUserId, input.delegatedIdentityId, input.workspaceRole]
+  if (delegation.some(Boolean) && !delegation.every(Boolean)) {
+    throw new DomainError('AUTH_INVALID', 'Authenticated delegation context is incomplete')
+  }
+  for (const [field, value] of [
+    ['delegated user identity', input.delegatedUserId],
+    ['delegated login identity', input.delegatedIdentityId],
+    ['workspace role', input.workspaceRole],
+  ] as const) {
+    if (value) assertAuditIdentifier(value, field)
+  }
+  const actor = Object.freeze({
+    type: 'api-client' as const,
+    id: input.clientId,
+    ...(input.delegatedUserId ? { delegatedUserId: input.delegatedUserId } : {}),
+  })
+  return Object.freeze({ ...input, actor })
 }
 
 export interface AuthenticateApiClientDependencies {
@@ -60,12 +113,16 @@ export function authenticateApiClientService(
       authenticatedAt.toISOString(),
     )
 
-    return Object.freeze({
+    const auditContext = createExternalAuditContext({
       clientId: stored.client.id,
       credentialId: stored.credential.id,
       workspaceId: stored.client.workspaceId,
       environment: dependencies.environment,
+    })
+    return Object.freeze({
+      ...auditContext,
       scopes: new Set(stored.client.scopeGrants),
+      auditContext,
     }) as AuthenticatedExternalActor
   }
 }

@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   authenticateApiClientService,
+  createExternalAuditContext,
   requireScope,
 } from '../../src/v2/application/authenticate-api-client.ts'
 import { createApiClientService } from '../../src/v2/application/create-api-client.ts'
@@ -147,10 +148,36 @@ test('authentication returns workspace-scoped actor and updates last use', async
   assert.equal(actor.clientId, issued.client.id)
   assert.equal(actor.workspaceId, 'workspace-1')
   assert.equal(actor.scopes.has('projects:write'), true)
+  assert.deepEqual(actor.auditContext, {
+    clientId: issued.client.id,
+    credentialId: issued.credential.id,
+    workspaceId: 'workspace-1',
+    environment: 'sandbox',
+    actor: { type: 'api-client', id: issued.client.id },
+  })
+  assert.equal(Object.isFrozen(actor.auditContext), true)
+  assert.equal(Object.isFrozen(actor.auditContext.actor), true)
   assert.equal(
     repository.lastUsed.get(`${issued.client.id}:${issued.credential.id}`),
     '2026-07-12T15:00:00.000Z',
   )
+})
+
+test('audit context rejects partial delegation and unsafe identities', () => {
+  const base = {
+    clientId: 'client-audit-1', credentialId: 'credential-audit-1',
+    workspaceId: 'workspace-audit-1', environment: 'production',
+  }
+  for (const mutation of [
+    { delegatedUserId: 'member-audit-1' },
+    { delegatedUserId: 'member-audit-1', delegatedIdentityId: 'identity-audit-1' },
+    { clientId: '../client' },
+  ]) {
+    assert.throws(
+      () => createExternalAuditContext({ ...base, ...mutation }),
+      (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+    )
+  }
 })
 
 test('invalid token, wrong environment and missing scope are denied', async () => {

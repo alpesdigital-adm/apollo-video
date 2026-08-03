@@ -154,7 +154,7 @@ export async function PUT(
       artifactId,
       baseRevision,
       draft: parseDraft(body),
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
     })
     return NextResponse.json(
       presentSuccess({

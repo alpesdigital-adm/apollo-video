@@ -52,7 +52,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       projectVersionHash: body.projectVersionHash,
       format: body.format,
       approval: { approved: true, ...(typeof approval.note === 'string' ? { note: approval.note } : {}) },
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
       traceId: requestId,
     })

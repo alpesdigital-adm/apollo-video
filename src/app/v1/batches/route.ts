@@ -76,10 +76,7 @@ export async function POST(request: NextRequest) {
     })({
       workspaceId: actor.workspaceId,
       ...body,
-      actor: {
-        type: 'api-client',
-        id: actor.clientId,
-      },
+      actor: actor.auditContext.actor,
       idempotencyKey:
         request.headers.get('idempotency-key')?.trim() ?? '',
     })

@@ -2,6 +2,7 @@ import type { ApiEnvironment } from '../domain/api-client.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { ApiClientRepository } from './ports/api-client-repository.ts'
 import type { UiSessionSecurityRepository } from './ports/ui-session-security-repository.ts'
+import { createExternalAuditContext } from './authenticate-api-client.ts'
 
 export const UI_SESSION_IDLE_TTL_SECONDS = 30 * 60
 export const UI_SESSION_ROTATE_AFTER_SECONDS = 10 * 60
@@ -54,7 +55,7 @@ export function authenticateUiSessionService(dependencies: {
     if (!client || !client.allowedEnvironments.includes(dependencies.environment) || client.workspaceId !== durable.workspaceId) {
       throw new DomainError('AUTH_INVALID', 'Apollo session is no longer authorized')
     }
-    return Object.freeze({
+    const auditContext = createExternalAuditContext({
       clientId: client.id,
       credentialId: `ui-session:${nonceHash}`,
       workspaceId: client.workspaceId,
@@ -62,7 +63,11 @@ export function authenticateUiSessionService(dependencies: {
       delegatedIdentityId: durable.identityId,
       workspaceRole: durable.memberRole,
       environment: dependencies.environment,
+    })
+    return Object.freeze({
+      ...auditContext,
       scopes: new Set(client.scopeGrants),
+      auditContext,
       sessionExpiresAt: durable.expiresAt,
       sessionTokenRotated: refreshed?.rotated ?? false,
     })

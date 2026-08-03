@@ -720,6 +720,35 @@ test('authenticated public API manages projects, clients and artifact inspection
       headers: { cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}` },
     })
     assert.equal(uiProjectListResponse.status, 200)
+    const uiProjectCreateResponse = await fetch(`${baseUrl}/v1/projects`, {
+      method: 'POST',
+      headers: {
+        cookie: `${APOLLO_SESSION_COOKIE}=${uiSession}`,
+        'content-type': 'application/json',
+        'idempotency-key': 'public-ui-create-project-audit-1',
+        origin: baseUrl,
+        'sec-fetch-site': 'same-origin',
+      },
+      body: JSON.stringify({
+        name: 'UI delegated audit project',
+        objective: 'discovery',
+        format: '9:16',
+        locale: 'pt-BR',
+      }),
+    })
+    const uiProjectCreated = await uiProjectCreateResponse.json()
+    assert.equal(uiProjectCreateResponse.status, 201, JSON.stringify(uiProjectCreated))
+    const uiProjectEvents = await client.v2PublicEventOutbox.findMany({
+      where: {
+        workspaceId,
+        resourceId: {
+          in: [uiProjectCreated.data.project.id, uiProjectCreated.data.version.id],
+        },
+      },
+    })
+    assert.equal(uiProjectEvents.length, 2)
+    assert.ok(uiProjectEvents.every((event) => event.actorClientId === apiClientId))
+    assert.ok(uiProjectEvents.every((event) => event.actorUserId === persistedMember.id))
     const initialSession = uiSession
     const initialDecodedSession = verifyUiSession(initialSession)
     assert.ok(initialDecodedSession)
@@ -4311,8 +4340,11 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     const list = await listResponse.json()
     assert.equal(listResponse.status, 200)
-    assert.equal(list.data.projects.length, 1)
-    assert.equal(list.data.projects[0].id, created.data.project.id)
+    assert.equal(list.data.projects.length, 2)
+    assert.deepEqual(
+      new Set(list.data.projects.map((project) => project.id)),
+      new Set([created.data.project.id, uiProjectCreated.data.project.id]),
+    )
   } finally {
     if (server && server.exitCode === null) {
       server.kill()

@@ -111,7 +111,7 @@ export async function POST(
       baseReviewHash: body.baseRevision,
       expectedRevision: body.expectedRevision as number,
       action: 'acknowledge-warnings',
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
     })
     return NextResponse.json(

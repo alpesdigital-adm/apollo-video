@@ -108,7 +108,7 @@ export async function POST(
       workspaceId: actor.workspaceId,
       projectId,
       ...body,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey:
         request.headers.get('idempotency-key')?.trim() ?? '',
       traceId: requestId,

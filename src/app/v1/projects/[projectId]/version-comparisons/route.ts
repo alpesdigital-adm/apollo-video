@@ -136,7 +136,7 @@ export async function POST(
         baseVersionId: body.baseVersionId,
         baseHash: body.baseHash,
         expectedRevision: body.expectedRevision,
-        actor: { type: 'api-client', id: actor.clientId },
+        actor: actor.auditContext.actor,
         idempotencyKey,
         ...(typeof body.reason === 'string' && body.reason.trim()
           ? { reason: body.reason.trim() }
@@ -198,7 +198,7 @@ export async function POST(
       variantId: body.variantId,
       targetId: 'project-edit-plan',
       targetVersionId: body.beforeVersionId,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey,
       ...(typeof body.reason === 'string' && body.reason.trim()
         ? { reason: body.reason.trim() }
@@ -213,7 +213,7 @@ export async function POST(
     })({
       workspaceId: actor.workspaceId,
       projectId,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey: `${idempotencyKey}:proxy`,
       traceId: requestId,
     })

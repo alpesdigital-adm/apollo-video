@@ -106,7 +106,7 @@ export async function POST(
         projectId,
         baseVersionId: body.baseVersionId,
         baseHash: body.baseHash,
-        actor: { type: 'api-client', id: actor.clientId },
+        actor: actor.auditContext.actor,
         idempotency: { key: idempotencyKey },
         ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
       })
@@ -120,7 +120,7 @@ export async function POST(
         workspaceId: actor.workspaceId,
         projectId,
         expectedProjectVersionId: result.version.id,
-        actor: { type: 'api-client', id: actor.clientId },
+        actor: actor.auditContext.actor,
         idempotencyKey: `${idempotencyKey}:proxy`,
         traceId: requestId,
       })
@@ -190,7 +190,7 @@ export async function POST(
         replacementTranscriptId: body.sourceTranscriptId,
         expectedTranscriptHash: body.expectedTranscriptHash,
         ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
-        actor: { type: 'api-client', id: actor.clientId },
+        actor: actor.auditContext.actor,
         idempotencyKey,
       })
       return NextResponse.json(presentSuccess({
@@ -239,7 +239,7 @@ export async function POST(
       rules: parseRules(body.rules),
       ...(exclusionOverrides ? { exclusionOverrides } : {}),
       ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
     })
     const proxy = await enqueueProjectProxyRenderService({
@@ -252,7 +252,7 @@ export async function POST(
       workspaceId: actor.workspaceId,
       projectId,
       expectedProjectVersionId: result.version.id,
-      actor: { type: 'api-client', id: actor.clientId },
+      actor: actor.auditContext.actor,
       idempotencyKey: `${idempotencyKey}:proxy`,
       traceId: requestId,
     })
