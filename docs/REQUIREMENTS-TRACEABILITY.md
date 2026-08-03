@@ -301,6 +301,8 @@ Evidência concluída F0.033 — no run `30807744785`, o runtime selecionou S3 e
 
 Evidência concluída F0.033 — `createV2PostgresClient` recusa ausência, `file:` e protocolos não-PostgreSQL, e o schema V2 declara somente PostgreSQL. O commit `3aba0f9` adicionou gate contra imports e dependências SQLite e contra alteração do datasource, com testes que falsificam cada caso. O run `30807744785` aprovou 832 testes, migrations limpas e a matriz API-first. A microtarefa PostgreSQL-only está concluída.
 
+Evidência concluída F0.033 — a Spec 10 passou a documentar o grafo relacional executável dos aggregates centrais, e T-F0.033 verifica relações, campos compostos, targets únicos, delete policy, alcance a Workspace e falsificações cross-project/cross-artifact diretamente contra Prisma. A migration `20260803130000_central_reference_graph` torna ProjectVersion, snapshots, DirectorRun e os inputs materializados de ingest/render/review/export fail-closed no PostgreSQL. O run inicial `30809633413` revelou que IDs de output de ingest são reservas anteriores à materialização; a correção preserva essas reservas como escalares e exige artifact+manifest no registro terminal. O run final `30809793462` aprovou schema limpo com 137 tabelas, 677 índices e 525 FKs, 833 testes, vertical smoke, reconstrução PostgreSQL/MinIO, build, Remotion, integrações Prisma/API e teardown completo. A microtarefa de documentação e integridade do grafo central está concluída; as 12 entidades `planned` continuam visíveis nas duas primeiras microtarefas de F0.033.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.

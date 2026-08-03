@@ -24,8 +24,8 @@ Estado auditado após o gate F2.019, com a jornada integral do MVP Core e os
 dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **288 de 1.259 microtarefas verificadas como efetivamente entregues (22,8%, arredondamento conservador)**;
-- **971 microtarefas abertas ou aguardando nova comprovação**;
+- **289 de 1.259 microtarefas verificadas como efetivamente entregues (22,9%, arredondamento conservador)**;
+- **970 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
   permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
@@ -551,7 +551,7 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 - [x] Corrigir advisories não-major de `uuid`, `postcss` e `form-data`. Evidência F0.033: `uuid` 11.1.1 está pinado no manifest/lock, `postcss` 8.5.18 está pinado e forçado por override nos locks do app e renderer, e `form-data` está ausente das duas árvores. O gate `platform:validate` impede drift dessas condições; o run `30778629569` aprovou os audits root/Remotion com zero vulnerabilidades e toda a matriz hospedada. Evidência: T-F0.033 e ADR-134.
 - [x] Configurar S3-compatible storage. Evidência F0.033: o composition root seleciona `s3` explicitamente; MinIO pinado e loopback-only cria convergentemente um bucket versionado, enquanto app e workers recebem somente configuração requerida. Promoção e rematerialização exigem key content-addressed, SHA-256, tamanho e VersionId; signed URLs são curtas, limitadas pela autorização e não atravessam a API. No run `30807744785`, a jornada hospedada removeu o estado local, reconstruiu o proxy exclusivamente de PostgreSQL + MinIO versionado, reabriu e validou os bytes e encerrou toda a topologia. Evidência: T-F0.033, ADR-003 e ADR-134.
 - [x] Impedir SQLite como domínio final fora de protótipos locais. Evidência F0.033: `createV2PostgresClient` recusa URL ausente, `file:` e qualquer protocolo não-PostgreSQL; o schema V2 usa exclusivamente `provider = "postgresql"`. O gate `3aba0f9` agora também rejeita imports/dependências SQLite e drift do datasource, com casos de falsificação executáveis. O run `30807744785` aprovou o gate, migrations limpas, 832 testes e toda a matriz PostgreSQL/API-first. Evidência: T-F0.033 e ADR-134.
-- [ ] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais. Evidência parcial integrada F0.033: a Spec 10 inclui o diagrama de ownership e o gate cruza targets com o schema Prisma e os snapshot kinds reais. Ainda falta testar as relações/FKs centrais como grafo e cobrir as entidades planejadas. Evidência: T-F0.033 e ADR-134.
+- [x] Gerar diagrama/schema documentation e testar integridade referencial dos aggregates centrais. Evidência F0.033: a Spec 10 documenta o grafo executável e T-F0.033 cruza cada relação, campos, target único e ação de delete com o schema Prisma, prova alcance até Workspace e falsifica mistura entre projetos e entre artifact/manifest. A migration `central_reference_graph` prende ProjectVersion, snapshots, DirectorRun, ingest inputs materializados, proxy/review e export/attempt aos aggregates corretos; reservas de outputs futuros permanecem escalares até a gravação terminal. O primeiro run revelou uma FK prematura no lifecycle de ingest e falhou fechado; após a correção, o run `30809793462` aprovou migration limpa, 833 testes, vertical smoke, PostgreSQL/MinIO, build, Remotion, Prisma/API e teardown. Evidência: T-F0.033, Spec 10 e ADR-134.
 
 ### F0.034 — Paridade API-first [FR-240]
 
