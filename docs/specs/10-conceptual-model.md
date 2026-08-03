@@ -81,3 +81,13 @@ flowchart LR
 - `snapshot` aponta para `V2ProjectSnapshot` e declara o kind imutável.
 - `value-object` aponta para um símbolo exportado real.
 - `planned` é falha de cobertura visível e nunca autoriza blob/tabela genérica.
+
+## Compatibilidade dos contratos centrais
+
+| Contract | Canonical implementation | Specs | Compatibility decision |
+|---|---|---|---|
+| SourceAsset | `V2MediaArtifact` + `media-artifact-manifest/v1+` + rights snapshot | 03 | identidade/checksum/lineage são canônicos; localização permanente não atravessa domínio/API; `DocumentAsset` segue lacuna explícita |
+| TimelineSegment | `EditorialCutClip` + `clip-timing.ts` | 02 | source/timeline são frames semiabertos; rate é positivo e frame-first; reverse falha fechado |
+| OutputSpec | `output-spec.ts#OutputSpec` | 02 | locale, canvas par, fps, ratio e safe-area normalizada são validados antes do RenderInput |
+| AsyncMediaProviderAdapter | `application/ports/async-media-provider.ts` | 06 | capabilities com TTL, estimate, submit idempotente, status, retrieve, cancel e webhook ficam atrás do port; secrets não pertencem ao contrato |
+| EditCommand | `edit-command.ts#EditCommand` + `edit-command-registry.ts` | 02 | base version/hash, actor, scope, payload, idempotência e política de invalidação registrada são obrigatórios |

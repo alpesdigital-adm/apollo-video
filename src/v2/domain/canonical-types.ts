@@ -12,7 +12,6 @@ export type LocalizationVariant={id:CanonicalId<'localization-variant'>;editPlan
 export type VariantRecipe={id:CanonicalId<'variant-recipe'>;hookId:string;bodyIds:string[];ctaId:string;proofIds:string[];formatIds:string[];localeIds:string[]};
 export type DirectorRun={id:CanonicalId<'director-run'>;projectVersionId:string;policySnapshotId:string;decisionIds:string[];modelRoute:string;cost:number};
 export type QualityReport={id:CanonicalId<'quality-report'>;artifactId:string;hardIssues:number;warnings:number;criticVersions:string[];passed:boolean};
-export interface ProviderAdapter<Input,Result>{readonly capability:string;submit(input:Input):Promise<{providerJobId:string}>;poll(providerJobId:string):Promise<Result>;cancel(providerJobId:string):Promise<void>}
 export type CaptureSession={id:CanonicalId<'capture-session'>;workspaceId:string;clockRate:number;trackIds:string[];protocolId?:string;syncDiagnosticId?:string};
 export type ApiClient={id:CanonicalId<'api-client'>;workspaceId:string;scopes:string[];environment:string;status:string};
 export type PublicCapability={id:CanonicalId<'public-capability'>;inputSchema:string;outputSchema:string;scopes:string[];preflight:boolean};
