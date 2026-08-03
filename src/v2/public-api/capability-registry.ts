@@ -78,7 +78,7 @@ export interface CapabilityAccessContext {
 export interface UiActionDescriptor {
   id: string
   capabilityId?: string
-  internalOnlyReason?: string
+  internalOnlySurfaceId?: string
 }
 
 export interface UiNetworkActionDescriptor {
@@ -90,6 +90,91 @@ export interface UiNetworkActionDescriptor {
 export interface UiCapabilityBinding extends UiNetworkActionDescriptor {
   capabilityId: string
 }
+
+export type InternalOnlySurfaceCategory =
+  | 'persistence'
+  | 'storage'
+  | 'secret'
+  | 'sensitive-content'
+  | 'worker-fencing'
+
+export interface InternalOnlySurface {
+  id: string
+  category: InternalOnlySurfaceCategory
+  reason: string
+  forbiddenPublicKeys: readonly string[]
+}
+
+const INTERNAL_ONLY_SURFACE_CATEGORIES = Object.freeze<readonly InternalOnlySurfaceCategory[]>([
+  'persistence', 'storage', 'secret', 'sensitive-content', 'worker-fencing',
+])
+
+export function defineInternalOnlySurfaceAllowlist(
+  entries: readonly InternalOnlySurface[],
+): readonly Readonly<InternalOnlySurface>[] {
+  const ids = new Set<string>()
+  return Object.freeze(entries.map((entry) => {
+    assertDomain(
+      /^[a-z][a-z0-9-]{2,63}$/.test(entry.id) && !ids.has(entry.id),
+      'CAPABILITY_PARITY_MISSING',
+      'Internal-only surface id must be canonical and unique',
+      { surfaceId: entry.id },
+    )
+    ids.add(entry.id)
+    assertDomain(
+      INTERNAL_ONLY_SURFACE_CATEGORIES.includes(entry.category),
+      'CAPABILITY_PARITY_MISSING',
+      'Internal-only surface category is invalid',
+      { surfaceId: entry.id, category: entry.category },
+    )
+    assertDomain(
+      entry.reason.trim().length >= 20,
+      'CAPABILITY_PARITY_MISSING',
+      'Internal-only surface requires a durable justification',
+      { surfaceId: entry.id },
+    )
+    assertDomain(
+      entry.forbiddenPublicKeys.length > 0 &&
+        new Set(entry.forbiddenPublicKeys).size === entry.forbiddenPublicKeys.length &&
+        entry.forbiddenPublicKeys.every((key) => /^[a-z][A-Za-z0-9]{2,63}$/.test(key)),
+      'CAPABILITY_PARITY_MISSING',
+      'Internal-only surface requires unique forbidden public contract keys',
+      { surfaceId: entry.id },
+    )
+    return Object.freeze({
+      ...entry,
+      forbiddenPublicKeys: Object.freeze([...entry.forbiddenPublicKeys]),
+    })
+  }))
+}
+
+export const INTERNAL_ONLY_SURFACES = defineInternalOnlySurfaceAllowlist([
+  {
+    id: 'database-row', category: 'persistence', forbiddenPublicKeys: ['databaseRow'],
+    reason: 'Persistence records are implementation details; public resources use stable projections.',
+  },
+  {
+    id: 'storage-location', category: 'storage', forbiddenPublicKeys: ['storageLocation'],
+    reason: 'Storage topology stays private; access is granted through bounded signed operations.',
+  },
+  {
+    id: 'render-input-plaintext', category: 'sensitive-content',
+    forbiddenPublicKeys: ['renderInputPlaintext'],
+    reason: 'Materialized renderer plaintext is worker-only; public contracts expose references and hashes.',
+  },
+  {
+    id: 'provider-credential', category: 'secret', forbiddenPublicKeys: ['providerCredential'],
+    reason: 'Provider credentials are opened only by infrastructure adapters and are never serialized publicly.',
+  },
+  {
+    id: 'raw-prompt', category: 'sensitive-content', forbiddenPublicKeys: ['rawPrompt'],
+    reason: 'Raw prompts may contain untrusted or sensitive content; public contracts expose redacted evidence.',
+  },
+  {
+    id: 'worker-lease-token', category: 'worker-fencing', forbiddenPublicKeys: ['workerLeaseToken'],
+    reason: 'Worker lease tokens are one-shot fencing secrets and must remain process-local.',
+  },
+])
 
 const CAPABILITY_EXPOSURES = Object.freeze<readonly CapabilityExposure[]>([
   'public', 'workspace-admin', 'internal-only',
@@ -498,20 +583,27 @@ export function assertCapabilityParity(
       .filter((capability) => capability.exposure !== 'internal-only')
       .map((capability) => capability.id),
   )
+  const internalOnlySurfaceIds = new Set(INTERNAL_ONLY_SURFACES.map((surface) => surface.id))
 
   for (const action of actions) {
     const hasCapability =
       Boolean(action.capabilityId) && exposedCapabilities.has(action.capabilityId as string)
-    const hasInternalReason = Boolean(action.internalOnlyReason?.trim())
+    const hasInternalSurface =
+      Boolean(action.internalOnlySurfaceId) &&
+      internalOnlySurfaceIds.has(action.internalOnlySurfaceId as string)
 
     assertDomain(
-      hasCapability || hasInternalReason,
+      hasCapability || hasInternalSurface,
       'CAPABILITY_PARITY_MISSING',
-      'UI action must map to a public capability or an explicit internal-only reason',
-      { actionId: action.id, capabilityId: action.capabilityId },
+      'UI action must map to a public capability or an allowlisted internal-only surface',
+      {
+        actionId: action.id,
+        capabilityId: action.capabilityId,
+        internalOnlySurfaceId: action.internalOnlySurfaceId,
+      },
     )
     assertDomain(
-      !(hasCapability && hasInternalReason),
+      !(hasCapability && hasInternalSurface),
       'CAPABILITY_PARITY_MISSING',
       'UI action cannot be both public and internal-only',
       { actionId: action.id, capabilityId: action.capabilityId },

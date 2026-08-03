@@ -11,9 +11,6 @@ export function verifyWorkspaceSession(token:string,secret:string,now:number){co
 export const APP_SHELL_NAVIGATION=APP_SHELL_DESTINATIONS;
 export function switchWorkspace(previous:string,next:string){if(previous===next)return {changed:false,invalidate:[],unsubscribe:[]};return {changed:true,invalidate:[`workspace:${previous}:*`],unsubscribe:[`events:${previous}`],subscribe:[`events:${next}`],navigate:'/'};}
 
-export const INTERNAL_ONLY=['database-row','storage-location','render-input-plaintext','provider-credential','raw-prompt','worker-lease-token'] as const;
-export function capabilityParityReport(items:{action:string;capabilityId?:string;endpoint?:string;test?:string;internalReason?:string}[]){const missing=items.filter(x=>!(x.capabilityId&&x.endpoint&&x.test)&&!x.internalReason);return {passed:missing.length===0,missing,rows:items};}
-
 export const PUBLIC_CONVENTIONS={version:'/v1',id:'opaque-string',date:'RFC3339 UTC',frame:'non-negative integer in declared fps',pagination:'opaque cursor bound to workspace and filters',filters:'allowlisted',json:'application/json; charset=utf-8'} as const;
 export function deprecationHeaders(input:{deprecatedAt:string;sunsetAt:string;guide:string}){return {Deprecation:input.deprecatedAt,Sunset:input.sunsetAt,Link:`<${input.guide}>; rel="deprecation"`};}
 

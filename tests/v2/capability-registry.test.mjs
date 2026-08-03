@@ -7,15 +7,17 @@ import ts from 'typescript'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   FOUNDATION_CAPABILITIES,
+  INTERNAL_ONLY_SURFACES,
   assertCapabilityParity,
   bindUiNetworkActionsToCapabilities,
   capabilitiesForAccess,
   capabilitiesForScopes,
   defineCapabilityAccessPolicy,
   defineCapabilityRegistry,
+  defineInternalOnlySurfaceAllowlist,
 } from '../../src/v2/public-api/capability-registry.ts'
 import { agentToolsForCapabilities } from '../../src/v2/public-api/agent-tool-catalog.ts'
-import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
+import { PUBLIC_SCHEMAS, getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -383,12 +385,12 @@ test('T-F0-034 registry fails closed for exposure, scopes, schema, cost and conf
   }
 })
 
-test('UI parity requires a public capability or an internal-only reason', () => {
+test('UI parity requires a public capability or an allowlisted internal-only surface', () => {
   assert.doesNotThrow(() =>
     assertCapabilityParity(
       [
         { id: 'health-button', capabilityId: 'apollo.health.read' },
-        { id: 'internal-debug-panel', internalOnlyReason: 'Infrastructure diagnostics only' },
+        { id: 'internal-debug-panel', internalOnlySurfaceId: 'database-row' },
       ],
       FOUNDATION_CAPABILITIES,
     ),
@@ -402,6 +404,44 @@ test('UI parity requires a public capability or an internal-only reason', () => 
       ),
     'CAPABILITY_PARITY_MISSING',
   )
+  expectDomainError(
+    () => assertCapabilityParity(
+      [{ id: 'invented-exception', internalOnlySurfaceId: 'because-this-is-private' }],
+      FOUNDATION_CAPABILITIES,
+    ),
+    'CAPABILITY_PARITY_MISSING',
+  )
+})
+
+test('T-F0-034 internal-only allowlist is justified and absent from public schema keys', () => {
+  assert.equal(INTERNAL_ONLY_SURFACES.length, 6)
+  const publicPropertyNames = new Set()
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return
+    if (!Array.isArray(value) && value.properties && typeof value.properties === 'object') {
+      for (const key of Object.keys(value.properties)) publicPropertyNames.add(key)
+    }
+    for (const nested of Array.isArray(value) ? value : Object.values(value)) visit(nested)
+  }
+  for (const definition of PUBLIC_SCHEMAS) visit(definition.schema)
+  for (const surface of INTERNAL_ONLY_SURFACES) {
+    assert.ok(surface.reason.length >= 20)
+    assert.ok(surface.forbiddenPublicKeys.every((key) => !publicPropertyNames.has(key)))
+  }
+
+  const valid = INTERNAL_ONLY_SURFACES[0]
+  for (const entries of [
+    [valid, valid],
+    [{ ...valid, id: 'Invalid Id' }],
+    [{ ...valid, category: 'miscellaneous' }],
+    [{ ...valid, reason: 'too short' }],
+    [{ ...valid, forbiddenPublicKeys: [] }],
+  ]) {
+    expectDomainError(
+      () => defineInternalOnlySurfaceAllowlist(entries),
+      'CAPABILITY_PARITY_MISSING',
+    )
+  }
 })
 
 test('T-F0-034 every operable UI network action resolves to an exposed capabilityId', () => {
