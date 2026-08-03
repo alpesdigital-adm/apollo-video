@@ -220,7 +220,9 @@ A fonte executável destas convenções é `src/v2/public-api/conventions.ts`; `
 
 T-FR-241 deriva os endpoints implementados dos 189 handlers em `src/app/v1`, exige correspondência um-para-um com as 189 capabilities e verifica que toda query está declarada. OpenAPI 3.1, os 340 schemas Draft 2020-12, discovery e tool descriptors são projeções desses registries; não existe arquivo OpenAPI mantido à mão.
 
-O mesmo build valida 385 examples com Ajv 2020-12 e gera um bundle determinístico com `openapi.json`, os 340 schemas versionados e `manifest.json`. O manifest registra SHA-256, bytes, contagens e hash global sem timestamp volátil; CI publica os 342 arquivos como artefato ligado ao commit. A baseline precisa incorporar tanto alterações quanto adições deliberadas: uma capability/schema nova pode ser compatível, mas não fica desprotegida contra remoção futura por permanecer fora do snapshot.
+O mesmo build valida 385 examples com Ajv 2020-12 e gera um bundle determinístico com `openapi.json`, os 340 schemas versionados, migration guides registrados e `manifest.json`. O manifest registra SHA-256, bytes, contagens e hash global sem timestamp volátil; o bundle atual possui 343 arquivos incluindo o manifest. A baseline precisa incorporar tanto alterações quanto adições deliberadas: uma capability/schema nova pode ser compatível, mas não fica desprotegida contra remoção futura por permanecer fora do snapshot.
+
+`public-api/deprecations.ts` é o registro fail-closed de versões depreciadas. Cada entrada exige schema ref versionada, timestamps UTC canônicos, pelo menos 180 dias entre depreciação e sunset e guide Markdown local canônico. A leitura do schema emite `Deprecation: @<unix-seconds>`, `Sunset` em HTTP-date e `Link` com `rel="deprecation"`; versões correntes não recebem esses headers. O proxy libera anonimamente somente paths de guide presentes nesse registro. T-FR-241 cria um subtest para cada uma das 189 capabilities e vincula rota executável, boundary, OpenAPI, autenticação, parâmetros, status, media type, schemas/examples e envelope de erro.
 
 ## 10. Error envelope
 
