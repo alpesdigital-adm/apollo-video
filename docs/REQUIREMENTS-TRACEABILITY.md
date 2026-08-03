@@ -283,6 +283,8 @@ Complemento local de FR-233/FR-215 — `apply-review-patch-batch` persiste o mes
 
 Correção operacional de FR-233 — tanto a promoção de proxy quanto a de final resolvem somente relações stale da versão-resultado, kind e variant exatos. A leitura considera a resolução apenas depois que a operação relacionada está `succeeded`. Para tolerar perda de lease entre promoção e settlement, o adapter atualiza por upsert a identidade `(invalidationId, operationId)`: um retry do mesmo operation ID substitui artifact/manifest anteriores antes de poder tornar a resolução efetiva. Isso impede que bytes de uma tentativa órfã sejam apresentados como substituto válido quando outra tentativa conclui. A prova local usa adapters Prisma controlados; PostgreSQL real e deploy permanecem pendentes.
 
+Evidência integrada F0.032 — o run hospedado `30774673461` tornou a direção das dependências um gate executável para Domain, Application, Infrastructure, Public API, Agent, MCP e UI. O scanner cobre também Web/Editor e rejeita acesso direto a Prisma gerado, repository factory, storage e adapters fora de composition roots nomeados. O próprio gate revelou e removeu Application→Infrastructure nos workers de ingest/cleanup e Agent→MCP no Diretor; T-F0.032 prova violações representativas e atravessa sinteticamente web→application→domain→orchestrator→provider→critic→compiler→renderer. A matriz completa de PostgreSQL, MinIO, FFmpeg, Remotion, API/OIDC e Compose ficou verde. A prova ainda é estrutural e parcial: não substitui E2E de todos os componentes, isolamento operacional completo, deploy ou aceite, portanto nenhuma caixa de F0.032 foi fechada.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.
