@@ -96,3 +96,24 @@ export function findBreakingContractChanges(
 
   return Object.freeze(changes)
 }
+
+export function findUntrackedContractAdditions(
+  baseline: PublicContractSnapshot,
+  current: PublicContractSnapshot,
+): readonly string[] {
+  if (baseline.schemaVersion !== current.schemaVersion || baseline.apiMajor !== current.apiMajor) {
+    return Object.freeze(['contract snapshot format or API major changed'])
+  }
+  const additions: string[] = []
+  for (const capabilityId of Object.keys(current.capabilities).sort()) {
+    if (!baseline.capabilities[capabilityId]) {
+      additions.push(`capability missing from baseline: ${capabilityId}`)
+    }
+  }
+  for (const schemaRef of Object.keys(current.schemas).sort()) {
+    if (!baseline.schemas[schemaRef]) {
+      additions.push(`schema missing from baseline: ${schemaRef}`)
+    }
+  }
+  return Object.freeze(additions)
+}

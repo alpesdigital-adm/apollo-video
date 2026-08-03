@@ -10,6 +10,7 @@ import { PUBLIC_SCHEMAS, getPublicSchema } from '../src/v2/public-api/schema-reg
 import {
   createPublicContractSnapshot,
   findBreakingContractChanges,
+  findUntrackedContractAdditions,
 } from '../src/v2/public-api/contract-snapshot.ts'
 import {
   PUBLIC_SCHEMA_EXAMPLES,
@@ -60,14 +61,24 @@ assert.doesNotThrow(() => JSON.parse(serialized))
 const baseline = JSON.parse(
   readFileSync('contracts/v1/public-contract-baseline.json', 'utf8'),
 )
+const currentSnapshot = createPublicContractSnapshot()
 const breakingChanges = findBreakingContractChanges(
   baseline,
-  createPublicContractSnapshot(),
+  currentSnapshot,
 )
 assert.deepEqual(
   breakingChanges,
   [],
   `Breaking public contract changes detected:\n${breakingChanges.join('\n')}`,
+)
+const untrackedAdditions = findUntrackedContractAdditions(
+  baseline,
+  currentSnapshot,
+)
+assert.deepEqual(
+  untrackedAdditions,
+  [],
+  `Additive public contracts require a reviewed baseline update:\n${untrackedAdditions.join('\n')}`,
 )
 
 process.stdout.write(
