@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
 
+import { PUBLIC_API_VERSION } from './conventions.ts'
+export { PUBLIC_API_VERSION } from './conventions.ts'
+
 import {
   resolveCapabilityAuthScheme,
   type PublicCapability,
@@ -36,8 +39,6 @@ import {
   webhookSubscriptionRevision,
   type WebhookSubscription,
 } from '../domain/webhook.ts'
-
-export const PUBLIC_API_VERSION = 'v1' as const
 
 export interface PublicSuccess<T> {
   data: T

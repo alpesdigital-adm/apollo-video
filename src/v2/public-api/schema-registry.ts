@@ -1,4 +1,5 @@
 import { DomainError, assertDomain } from '../domain/errors.ts'
+import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
@@ -16,8 +17,8 @@ export interface PublicSchemaDefinition {
   schema: JsonSchema
 }
 
-const idSchema = { type: 'string', minLength: 3, maxLength: 128 }
-const dateTimeSchema = { type: 'string', format: 'date-time' }
+const idSchema = PUBLIC_ID_SCHEMA
+const dateTimeSchema = PUBLIC_DATE_TIME_SCHEMA
 const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
 const workspaceLutSchema = {
   type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'status', 'currentVersion'],

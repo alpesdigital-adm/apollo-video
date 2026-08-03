@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { listPublicOperationsService } from '@/v2/application/list-public-operations'
-import { DomainError } from '@/v2/domain/errors'
 import { createPublicOperationRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
+import { assertAllowlistedPublicQuery } from '@/v2/public-api/conventions'
 import {
   publicApiHeaders,
   resolveRequestId,
@@ -21,16 +21,7 @@ export async function GET(request: NextRequest) {
     requireScope(actor, 'operations:read')
     const params = request.nextUrl.searchParams
     const allowedParameters = new Set(['limit', 'after', 'status', 'type', 'targetId'])
-    for (const name of params.keys()) {
-      if (!allowedParameters.has(name)) {
-        throw new DomainError('INVALID_ARGUMENT', `${name} is not a supported filter`)
-      }
-    }
-    for (const name of allowedParameters) {
-      if (params.getAll(name).length > 1) {
-        throw new DomainError('INVALID_ARGUMENT', `${name} cannot be repeated`)
-      }
-    }
+    assertAllowlistedPublicQuery(params, allowedParameters)
     const rawLimit = params.get('limit')
     const list = listPublicOperationsService({
       operations: createPublicOperationRepository(),

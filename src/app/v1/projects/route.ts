@@ -12,6 +12,7 @@ import {
   createProjectQueryRepository,
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
+import { assertAllowlistedPublicQuery } from '@/v2/public-api/conventions'
 import {
   publicApiHeaders,
   resolveRequestId,
@@ -28,11 +29,10 @@ export async function GET(request: NextRequest) {
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'projects:read')
     const params = request.nextUrl.searchParams
-    for (const name of params.keys()) {
-      if (!['limit', 'after', 'text', 'status', 'objective', 'format', 'locale', 'createdFrom', 'createdTo', 'ownerId'].includes(name) || params.getAll(name).length > 1) {
-        throw new DomainError('INVALID_ARGUMENT', `${name} is not a supported project list parameter`)
-      }
-    }
+    assertAllowlistedPublicQuery(params, new Set([
+      'limit', 'after', 'text', 'status', 'objective', 'format', 'locale',
+      'createdFrom', 'createdTo', 'ownerId',
+    ]))
     const result = await listProjectsService({ projects: createProjectQueryRepository() })({
       workspaceId: actor.workspaceId,
       ...(params.has('limit') ? { limit: Number(params.get('limit')) } : {}),
