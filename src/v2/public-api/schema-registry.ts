@@ -1,6 +1,7 @@
-import { DOMAIN_ERROR_CODES, DomainError, assertDomain } from '../domain/errors.ts'
+import { DomainError, assertDomain } from '../domain/errors.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
+import { PUBLIC_ERROR_CODES } from './public-error-catalog.ts'
 import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
   MVP_CORE_CRITERION_CHECKS,
@@ -18902,7 +18903,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         additionalProperties: false,
         required: ['code', 'message', 'category', 'retryable', 'requestId'],
         properties: {
-          code: { enum: DOMAIN_ERROR_CODES },
+          code: { enum: PUBLIC_ERROR_CODES },
           message: { type: 'string' },
           category: {
             enum: ['validation', 'auth', 'policy', 'conflict', 'quota', 'provider', 'internal'],

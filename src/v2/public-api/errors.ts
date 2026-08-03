@@ -29,16 +29,17 @@ export function respondPublicError(error: unknown, requestId: string) {
   }
 
   console.error('Apollo public API error', { requestId, error })
+  const descriptor = PUBLIC_ERROR_CATALOG.INTERNAL_ERROR
   return NextResponse.json(
     {
       error: {
-        code: 'INTERNAL_ERROR',
-        message: 'The request could not be completed',
-        category: 'internal',
-        retryable: true,
+        code: descriptor.code,
+        message: descriptor.message,
+        category: descriptor.category,
+        retryable: descriptor.retryable,
         requestId,
       },
     },
-    { status: 500, headers: publicApiHeaders(requestId) },
+    { status: descriptor.status, headers: publicApiHeaders(requestId) },
   )
 }

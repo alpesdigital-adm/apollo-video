@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { DOMAIN_ERROR_CODES, DomainError } from '../../src/v2/domain/errors.ts'
+import { DomainError } from '../../src/v2/domain/errors.ts'
 import { PUBLIC_EVENT_CATALOG } from '../../src/v2/domain/public-event.ts'
 import {
   FOUNDATION_CAPABILITIES,
@@ -11,6 +11,7 @@ import { createOpenApiDocument } from '../../src/v2/public-api/openapi.ts'
 import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
 import {
   PUBLIC_ERROR_CATALOG,
+  PUBLIC_ERROR_CODES,
   definePublicErrorCatalog,
 } from '../../src/v2/public-api/public-error-catalog.ts'
 import {
@@ -57,8 +58,8 @@ test('schema routes are stable, versioned and reject unknown documents', () => {
   )
 })
 
-test('public error catalog classifies every domain code exactly once and fails closed', () => {
-  assert.deepEqual(Object.keys(PUBLIC_ERROR_CATALOG).sort(), [...DOMAIN_ERROR_CODES].sort())
+test('public error catalog classifies every public code exactly once and fails closed', () => {
+  assert.deepEqual(Object.keys(PUBLIC_ERROR_CATALOG).sort(), [...PUBLIC_ERROR_CODES].sort())
   assert.equal(Object.isFrozen(PUBLIC_ERROR_CATALOG), true)
   assert.deepEqual(PUBLIC_ERROR_CATALOG.AUTH_INVALID, {
     code: 'AUTH_INVALID', status: 401, category: 'auth', retryable: false,
@@ -83,10 +84,14 @@ test('public error catalog classifies every domain code exactly once and fails c
     code: 'PERSISTENCE_NOT_CONFIGURED', status: 503, category: 'internal', retryable: true,
     message: 'The request could not be completed',
   })
+  assert.deepEqual(PUBLIC_ERROR_CATALOG.INTERNAL_ERROR, {
+    code: 'INTERNAL_ERROR', status: 500, category: 'internal', retryable: true,
+    message: 'The request could not be completed',
+  })
 
   assert.throws(
     () => definePublicErrorCatalog([{
-      codes: DOMAIN_ERROR_CODES,
+      codes: PUBLIC_ERROR_CODES,
       status: 422,
       category: 'validation',
     }, {
@@ -98,7 +103,7 @@ test('public error catalog classifies every domain code exactly once and fails c
   )
   assert.throws(
     () => definePublicErrorCatalog([{
-      codes: DOMAIN_ERROR_CODES.slice(1),
+      codes: PUBLIC_ERROR_CODES.slice(1),
       status: 422,
       category: 'validation',
     }]),

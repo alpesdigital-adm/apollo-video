@@ -1,8 +1,10 @@
 import {
   DOMAIN_ERROR_CODES,
   assertDomain,
-  type DomainErrorCode,
 } from '../domain/errors.ts'
+
+export const PUBLIC_ERROR_CODES = [...DOMAIN_ERROR_CODES, 'INTERNAL_ERROR'] as const
+export type PublicErrorCode = (typeof PUBLIC_ERROR_CODES)[number]
 
 export type PublicErrorCategory =
   | 'validation'
@@ -14,7 +16,7 @@ export type PublicErrorCategory =
   | 'internal'
 
 export interface PublicErrorDescriptor {
-  code: DomainErrorCode
+  code: PublicErrorCode
   status: number
   category: PublicErrorCategory
   retryable: boolean
@@ -22,14 +24,14 @@ export interface PublicErrorDescriptor {
 }
 
 interface PublicErrorGroup {
-  codes: readonly DomainErrorCode[]
+  codes: readonly PublicErrorCode[]
   status: number
   category: PublicErrorCategory
   retryable?: boolean
   message?: string
 }
 
-function safePublicMessage(code: DomainErrorCode, group: PublicErrorGroup): string {
+function safePublicMessage(code: PublicErrorCode, group: PublicErrorGroup): string {
   if (group.message) return group.message
   const words = code.toLowerCase().replaceAll('_', ' ')
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`
@@ -37,9 +39,9 @@ function safePublicMessage(code: DomainErrorCode, group: PublicErrorGroup): stri
 
 export function definePublicErrorCatalog(
   groups: readonly PublicErrorGroup[],
-): Readonly<Record<DomainErrorCode, Readonly<PublicErrorDescriptor>>> {
-  const known = new Set<DomainErrorCode>(DOMAIN_ERROR_CODES)
-  const entries = new Map<DomainErrorCode, Readonly<PublicErrorDescriptor>>()
+): Readonly<Record<PublicErrorCode, Readonly<PublicErrorDescriptor>>> {
+  const known = new Set<PublicErrorCode>(PUBLIC_ERROR_CODES)
+  const entries = new Map<PublicErrorCode, Readonly<PublicErrorDescriptor>>()
   for (const group of groups) {
     assertDomain(
       Number.isInteger(group.status) && group.status >= 400 && group.status <= 599,
@@ -62,15 +64,15 @@ export function definePublicErrorCatalog(
       }))
     }
   }
-  const missing = DOMAIN_ERROR_CODES.filter((code) => !entries.has(code))
+  const missing = PUBLIC_ERROR_CODES.filter((code) => !entries.has(code))
   assertDomain(
     missing.length === 0,
     'INVALID_PUBLIC_SCHEMA',
-    'Every domain error code requires an explicit public classification',
+    'Every public error code requires an explicit public classification',
     { missing },
   )
   return Object.freeze(Object.fromEntries(entries)) as Readonly<
-    Record<DomainErrorCode, Readonly<PublicErrorDescriptor>>
+    Record<PublicErrorCode, Readonly<PublicErrorDescriptor>>
   >
 }
 
@@ -165,6 +167,11 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
   },
   {
     status: 428, category: 'policy', codes: ['PRECONDITION_REQUIRED'],
+  },
+  {
+    status: 500, category: 'internal', retryable: true,
+    message: 'The request could not be completed',
+    codes: ['INTERNAL_ERROR'],
   },
   {
     status: 502, category: 'provider', retryable: true,
