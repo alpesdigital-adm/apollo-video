@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync, readdirSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
+import ts from 'typescript'
 
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   FOUNDATION_CAPABILITIES,
   assertCapabilityParity,
+  bindUiNetworkActionsToCapabilities,
   capabilitiesForAccess,
   capabilitiesForScopes,
   defineCapabilityAccessPolicy,
@@ -15,6 +19,96 @@ import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
+}
+
+const root = resolve(import.meta.dirname, '../..')
+
+function sourceFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = resolve(directory, entry.name)
+    if (entry.isDirectory()) return sourceFiles(path)
+    if (!entry.isFile()) return []
+    if (entry.name.endsWith('.tsx')) return [path]
+    if (!entry.name.endsWith('.ts')) return []
+    return /^\s*(['\"])use client\1/m.test(readFileSync(path, 'utf8')) ? [path] : []
+  })
+}
+
+function staticUiPath(node) {
+  if (ts.isStringLiteralLike(node)) return node.text
+  if (ts.isTemplateExpression(node)) {
+    let value = node.head.text
+    for (const span of node.templateSpans) {
+      if (!(ts.isIdentifier(span.expression) && span.expression.text === 'suffix')) value += '{param}'
+      value += span.literal.text
+    }
+    return value
+  }
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticUiPath(node.left)
+    const right = staticUiPath(node.right)
+    return left === undefined || right === undefined ? undefined : left + right
+  }
+  return undefined
+}
+
+function requestMethod(call) {
+  const options = call.arguments[1]
+  if (!options || !ts.isObjectLiteralExpression(options)) return 'GET'
+  const property = options.properties.find((candidate) =>
+    ts.isPropertyAssignment(candidate) && candidate.name.getText().replaceAll(/["']/g, '') === 'method')
+  return property && ts.isPropertyAssignment(property) && ts.isStringLiteralLike(property.initializer)
+    ? property.initializer.text
+    : 'GET'
+}
+
+function enclosingFunctionName(node) {
+  let current = node.parent
+  while (current) {
+    if (ts.isFunctionDeclaration(current) && current.name) return current.name.text
+    current = current.parent
+  }
+  return undefined
+}
+
+function uiNetworkActions() {
+  const actions = []
+  for (const path of [
+    ...sourceFiles(resolve(root, 'src/app')),
+    ...sourceFiles(resolve(root, 'src/components')),
+  ]) {
+    const source = readFileSync(path, 'utf8')
+    const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+          (node.expression.text === 'fetch' || node.expression.text === 'requestJson')) {
+        let pathPattern = staticUiPath(node.arguments[0])
+        let method = requestMethod(node)
+        if (!pathPattern && node.expression.text === 'fetch' && enclosingFunctionName(node) !== 'requestJson') {
+          const signedUpload = enclosingFunctionName(node) === 'transfer' && (
+            (ts.isCallExpression(node.arguments[0]) &&
+              ts.isIdentifier(node.arguments[0].expression) &&
+              node.arguments[0].expression.text === 'localSignedUrl') ||
+            (ts.isIdentifier(node.arguments[0]) && node.arguments[0].text === 'url')
+          )
+          assert.ok(signedUpload, `dynamic UI fetch is not explicitly classified: ${relative(root, path)}`)
+          pathPattern = '/v1/media/uploads/{uploadId}/content'
+          method = 'PUT'
+        }
+        if (pathPattern?.startsWith('/v1/')) {
+          const line = file.getLineAndCharacterOfPosition(node.getStart()).line + 1
+          actions.push({
+            id: `${relative(root, path).replaceAll('\\', '/')}:${line}`,
+            method,
+            path: pathPattern.split('?', 1)[0],
+          })
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(file)
+  }
+  return actions
 }
 
 test('foundation registry exposes health and discovery without scopes', () => {
@@ -226,6 +320,29 @@ test('UI parity requires a public capability or an internal-only reason', () => 
         [{ id: 'orphan-ui-action', capabilityId: 'apollo.projects.missing' }],
         FOUNDATION_CAPABILITIES,
       ),
+    'CAPABILITY_PARITY_MISSING',
+  )
+})
+
+test('T-F0-034 every operable UI network action resolves to an exposed capabilityId', () => {
+  const actions = uiNetworkActions()
+  const bindings = bindUiNetworkActionsToCapabilities(actions, FOUNDATION_CAPABILITIES)
+  assert.ok(bindings.length >= 70)
+  assert.equal(bindings.length, actions.length)
+  assert.ok(bindings.every((binding) => binding.capabilityId.startsWith('apollo.')))
+  assert.ok(bindings.some((binding) => binding.capabilityId === 'apollo.media.uploads.content.put'))
+  assert.ok(bindings.some((binding) => binding.capabilityId === 'apollo.projects.version-comparisons.act'))
+  assert.ok(bindings.some((binding) => binding.capabilityId === 'apollo.batches.edit-preflights.commit'))
+
+  expectDomainError(
+    () => bindUiNetworkActionsToCapabilities(
+      [{ id: 'unregistered', method: 'POST', path: '/v1/unregistered' }],
+      FOUNDATION_CAPABILITIES,
+    ),
+    'CAPABILITY_PARITY_MISSING',
+  )
+  expectDomainError(
+    () => bindUiNetworkActionsToCapabilities([actions[0], actions[0]], FOUNDATION_CAPABILITIES),
     'CAPABILITY_PARITY_MISSING',
   )
 })

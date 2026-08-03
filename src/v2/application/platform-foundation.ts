@@ -11,7 +11,6 @@ export function verifyWorkspaceSession(token:string,secret:string,now:number){co
 export const APP_SHELL_NAVIGATION=APP_SHELL_DESTINATIONS;
 export function switchWorkspace(previous:string,next:string){if(previous===next)return {changed:false,invalidate:[],unsubscribe:[]};return {changed:true,invalidate:[`workspace:${previous}:*`],unsubscribe:[`events:${previous}`],subscribe:[`events:${next}`],navigate:'/'};}
 
-export const UI_CAPABILITIES=[{action:'project:create',capabilityId:'projects.create',endpoint:'/v1/projects',test:'public-project-api'},{action:'project:list',capabilityId:'projects.list',endpoint:'/v1/projects',test:'public-project-api'},{action:'render:start',capabilityId:'artifacts.renders.create',endpoint:'/v1/artifacts/{artifactId}/renders/{manifestId}',test:'remotion-renderer'},{action:'operation:cancel',capabilityId:'operations.cancel',endpoint:'/v1/operations/{operationId}/cancel',test:'public-operation-worker'},{action:'operation:retry',capabilityId:'operations.retry',endpoint:'/v1/operations/{operationId}/retry',test:'public-operation-worker'}] as const;
 export const INTERNAL_ONLY=['database-row','storage-location','render-input-plaintext','provider-credential','raw-prompt','worker-lease-token'] as const;
 export function capabilityParityReport(items:{action:string;capabilityId?:string;endpoint?:string;test?:string;internalReason?:string}[]){const missing=items.filter(x=>!(x.capabilityId&&x.endpoint&&x.test)&&!x.internalReason);return {passed:missing.length===0,missing,rows:items};}
 

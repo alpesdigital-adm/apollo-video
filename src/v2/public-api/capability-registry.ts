@@ -81,6 +81,16 @@ export interface UiActionDescriptor {
   internalOnlyReason?: string
 }
 
+export interface UiNetworkActionDescriptor {
+  id: string
+  method: HttpMethod
+  path: string
+}
+
+export interface UiCapabilityBinding extends UiNetworkActionDescriptor {
+  capabilityId: string
+}
+
 const CAPABILITY_EXPOSURES = Object.freeze<readonly CapabilityExposure[]>([
   'public', 'workspace-admin', 'internal-only',
 ])
@@ -507,6 +517,44 @@ export function assertCapabilityParity(
       { actionId: action.id, capabilityId: action.capabilityId },
     )
   }
+}
+
+function endpointShape(path: string): string {
+  return path.split('?', 1)[0].replace(/\{[^}]+\}/g, '{}')
+}
+
+export function bindUiNetworkActionsToCapabilities(
+  actions: readonly UiNetworkActionDescriptor[],
+  registry: readonly PublicCapability[],
+): readonly Readonly<UiCapabilityBinding>[] {
+  const endpointCapabilities = new Map(
+    registry
+      .filter((capability) => capability.exposure !== 'internal-only' && capability.endpoint)
+      .map((capability) => [
+        `${capability.endpoint!.method} ${endpointShape(capability.endpoint!.path)}`,
+        capability.id,
+      ]),
+  )
+  const actionIds = new Set<string>()
+  return Object.freeze(actions.map((action) => {
+    assertDomain(
+      action.id.trim().length > 0 && !actionIds.has(action.id),
+      'CAPABILITY_PARITY_MISSING',
+      'UI network action identity must be non-empty and unique',
+      { actionId: action.id },
+    )
+    actionIds.add(action.id)
+    const capabilityId = endpointCapabilities.get(
+      `${action.method} ${endpointShape(action.path)}`,
+    )
+    assertDomain(
+      Boolean(capabilityId),
+      'CAPABILITY_PARITY_MISSING',
+      'UI network action must resolve to one exposed capability endpoint',
+      { actionId: action.id, method: action.method, path: action.path },
+    )
+    return Object.freeze({ ...action, capabilityId: capabilityId as string })
+  }))
 }
 
 export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
