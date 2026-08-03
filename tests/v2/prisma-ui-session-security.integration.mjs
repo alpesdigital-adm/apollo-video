@@ -42,12 +42,10 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     await client.v2ApiClient.create({ data: {
       id: clientId, workspaceId, name: 'UI Session Security Client', type: 'service-account',
       allowedEnvironmentsJson: '["production"]', scopeGrantsJson: '[]', createdBy: 'system:test',
-      secretSalt: 'test-salt', secretHash: 'e'.repeat(64),
     } })
     await client.v2ApiClient.create({ data: {
       id: otherClientId, workspaceId: otherWorkspaceId, name: 'Other UI Session Security Client', type: 'service-account',
       allowedEnvironmentsJson: '["production"]', scopeGrantsJson: '["projects:read"]', createdBy: 'system:test',
-      secretSalt: 'test-salt', secretHash: 'f'.repeat(64),
     } })
     await members.provisionBootstrapUiPrincipal({ workspaceId, clientId, now: '2026-08-02T00:00:00.000Z' })
     await members.provisionBootstrapUiPrincipal({ workspaceId: otherWorkspaceId, clientId: otherClientId, now: '2026-08-02T00:00:00.000Z' })

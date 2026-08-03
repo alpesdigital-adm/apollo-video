@@ -74,8 +74,6 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
         allowedEnvironmentsJson: '["sandbox"]',
         scopeGrantsJson: JSON.stringify(['artifacts:render', 'operations:read']),
         createdBy: 'system:test',
-        secretSalt: 'integration-salt',
-        secretHash: sha('1'),
         createdAt: now,
         updatedAt: now,
       },

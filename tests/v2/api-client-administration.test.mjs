@@ -35,19 +35,26 @@ class InMemoryAdministrationRepository {
 
   async rotateOrReplay(bundle) {
     this.lastRotateBundle = bundle
-    return {
+    const identity = `${bundle.idempotency.workspaceId}:${bundle.idempotency.actorClientId}:${bundle.idempotency.key}`
+    const existing = this.idempotency.get(identity)
+    if (existing) return { ...existing, replayed: true }
+    const result = {
       client: {
         id: bundle.targetClientId,
         workspaceId: bundle.workspaceId,
         name: 'Target client',
+        type: 'service-account',
         status: 'active',
-        environment: 'sandbox',
-        scopes: ['projects:read'],
+        allowedEnvironments: ['sandbox'],
+        scopeGrants: ['projects:read'],
+        createdBy: 'admin-client',
         createdAt: bundle.credential.createdAt,
       },
       credential: bundle.credential,
       replayed: false,
     }
+    this.idempotency.set(identity, result)
+    return result
   }
 
   async revokeCredential() {
@@ -115,6 +122,29 @@ test('idempotent client creation only returns the bearer token once', async () =
   assert.equal(replay.token, undefined)
   assert.equal(replay.client.id, first.client.id)
   assert.equal(replay.credential.id, first.credential.id)
+  assert.equal(repository.lastCreateBundle.idempotency.createdAt, '2026-07-12T23:45:00.000Z')
+  assert.equal(JSON.stringify(repository.lastCreateBundle).includes('apollo_v2.'), false)
+})
+
+test('idempotent credential rotation only returns the new bearer token once', async () => {
+  const repository = new InMemoryAdministrationRepository()
+  const execute = rotateApiCredentialService(dependencies(repository))
+  const request = {
+    actor: actor(), workspaceId: 'workspace-1', targetClientId: 'target-client',
+    idempotencyKey: 'rotate-read-agent', overlapSeconds: 30,
+  }
+
+  const first = await execute(request)
+  const replay = await execute(request)
+
+  assert.equal(first.secretAvailable, true)
+  assert.match(first.token, /^apollo_v2\./)
+  assert.equal(replay.secretAvailable, false)
+  assert.equal(replay.token, undefined)
+  assert.equal(replay.credential.id, first.credential.id)
+  assert.equal(repository.lastRotateBundle.idempotency.createdAt, '2026-07-12T23:45:00.000Z')
+  assert.equal(repository.lastRotateBundle.overlapUntil, '2026-07-12T23:45:30.000Z')
+  assert.equal(JSON.stringify(repository.lastRotateBundle).includes('apollo_v2.'), false)
 })
 
 test('API client creation retries concurrent write conflicts before failing explicitly', async () => {

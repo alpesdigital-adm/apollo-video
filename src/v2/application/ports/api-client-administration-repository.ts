@@ -7,6 +7,7 @@ export interface ApiAdministrationIdempotency {
   actorClientId: string
   key: string
   requestFingerprint: string
+  createdAt: string
   expiresAt: string
 }
 

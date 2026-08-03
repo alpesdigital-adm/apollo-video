@@ -155,8 +155,6 @@ model V2ApiClient {
   allowedEnvironmentsJson String @db.Text
   scopeGrantsJson         String @db.Text
   createdBy               String @db.VarChar(128)
-  secretSalt  String    @db.VarChar(128)
-  secretHash  String    @db.VarChar(128)
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
   lastUsedAt  DateTime? @db.Timestamptz(3)
@@ -224,8 +222,8 @@ model V2ApiCredential {
   workspaceId String    @db.VarChar(128)
   clientId    String    @db.VarChar(80)
   status      String    @default("active") @db.VarChar(32)
-  secretSalt  String    @db.VarChar(128)
-  secretHash  String    @db.VarChar(128)
+  secretSalt  String    @db.VarChar(22)
+  secretHash  String    @db.VarChar(64)
   expiresAt   DateTime? @db.Timestamptz(3)
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)
   lastUsedAt  DateTime? @db.Timestamptz(3)

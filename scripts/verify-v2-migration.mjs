@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 const prismaCli = fileURLToPath(new URL('../node_modules/prisma/build/index.js', import.meta.url))
 const schemaPath = 'prisma/v2/schema.prisma'
 const migrationsPath = 'prisma/v2/migrations'
+const schema = readFileSync(schemaPath, 'utf8')
 const environment = {
   ...process.env,
   V2_DATABASE_URL:
@@ -54,6 +55,21 @@ assert.match(
   'the output-key check must use a PostgreSQL-compatible unbounded repetition plus length guard',
 )
 
+const apiClientModel = schema.match(/model V2ApiClient \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const apiCredentialModel = schema.match(/model V2ApiCredential \{([\s\S]*?)\n\}/)?.[1] ?? ''
+assert.doesNotMatch(
+  apiClientModel,
+  /secretSalt|secretHash/,
+  'ApiClient identity must reference credentials instead of duplicating verifiers',
+)
+assert.match(apiCredentialModel, /secretSalt\s+String\s+@db\.VarChar\(22\)/)
+assert.match(apiCredentialModel, /secretHash\s+String\s+@db\.VarChar\(64\)/)
+assert.match(
+  committed,
+  /ALTER TABLE "api_clients"[\s\S]*DROP COLUMN "secretSalt"[\s\S]*DROP COLUMN "secretHash"/,
+  'the credential contract migration must remove verifier copies from api_clients',
+)
+
 assertSetContains(
   names(committed, /CREATE TABLE "([^"]+)"/g),
   names(generated, /CREATE TABLE "([^"]+)"/g),
@@ -75,8 +91,12 @@ const requiredChecks = [
   'oidc_authorizations_lifetime_check',
   'workspaces_status_check',
   'api_clients_status_check',
-  'api_clients_environment_check',
+  'api_clients_type_check',
+  'api_clients_allowed_environments_json_check',
+  'api_clients_scope_grants_json_check',
+  'api_clients_created_by_check',
   'api_credentials_status_check',
+  'api_credentials_salt_check',
   'api_credentials_hash_check',
   'api_credentials_revocation_check',
   'projects_status_check',

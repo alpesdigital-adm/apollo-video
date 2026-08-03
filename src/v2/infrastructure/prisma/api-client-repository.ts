@@ -184,9 +184,6 @@ export class PrismaApiClientRepository
           allowedEnvironmentsJson: JSON.stringify(stored.client.allowedEnvironments),
           scopeGrantsJson: JSON.stringify(stored.client.scopeGrants),
           createdBy: stored.client.createdBy,
-          // Retained during expand-contract for compatibility with the first migration.
-          secretSalt: stored.secretSalt,
-          secretHash: stored.secretHash,
           createdAt: new Date(stored.client.createdAt),
         },
       })
@@ -267,7 +264,7 @@ export class PrismaApiClientRepository
         },
       }
       const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
-      if (existing && existing.expiresAt > new Date()) {
+      if (existing && existing.expiresAt > new Date(bundle.idempotency.createdAt)) {
         assertIdempotencyFingerprint(existing, bundle.idempotency.requestFingerprint)
         const stored = parseAdministrationResponse(existing, 'api-client.create')
         const [clientRow, credentialRow] = await Promise.all([
@@ -307,6 +304,7 @@ export class PrismaApiClientRepository
           key: bundle.idempotency.key,
           requestFingerprint: bundle.idempotency.requestFingerprint,
           status: 'processing',
+          createdAt: new Date(bundle.idempotency.createdAt),
           expiresAt: new Date(bundle.idempotency.expiresAt),
         },
       })
@@ -320,8 +318,6 @@ export class PrismaApiClientRepository
           allowedEnvironmentsJson: JSON.stringify(bundle.client.allowedEnvironments),
           scopeGrantsJson: JSON.stringify(bundle.client.scopeGrants),
           createdBy: bundle.client.createdBy,
-          secretSalt: bundle.secret.secretSalt,
-          secretHash: bundle.secret.secretHash,
           createdAt: new Date(bundle.client.createdAt),
         },
       })
@@ -382,7 +378,7 @@ export class PrismaApiClientRepository
         },
       }
       const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
-      if (existing && existing.expiresAt > new Date()) {
+      if (existing && existing.expiresAt > new Date(bundle.idempotency.createdAt)) {
         assertIdempotencyFingerprint(existing, bundle.idempotency.requestFingerprint)
         const stored = parseAdministrationResponse(existing, 'api-credential.rotate')
         const [clientRow, credentialRow] = await Promise.all([
@@ -425,6 +421,7 @@ export class PrismaApiClientRepository
           key: bundle.idempotency.key,
           requestFingerprint: bundle.idempotency.requestFingerprint,
           status: 'processing',
+          createdAt: new Date(bundle.idempotency.createdAt),
           expiresAt: new Date(bundle.idempotency.expiresAt),
         },
       })

@@ -123,6 +123,7 @@ export function createApiClientAdministrationService(
           scopeGrants: client.scopeGrants,
           allowedEnvironments: client.allowedEnvironments,
         }),
+        createdAt,
         expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString(),
       },
     })
@@ -181,6 +182,7 @@ export function rotateApiCredentialService(
           targetClientId: request.targetClientId,
           overlapSeconds,
         }),
+        createdAt: now.toISOString(),
         expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString(),
       },
     })
