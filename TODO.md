@@ -24,8 +24,8 @@ Estado auditado após o gate F2.019, com a jornada integral do MVP Core e os
 dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **289 de 1.259 microtarefas verificadas como efetivamente entregues (22,9%, arredondamento conservador)**;
-- **970 microtarefas abertas ou aguardando nova comprovação**;
+- **290 de 1.259 microtarefas verificadas como efetivamente entregues (23,0%, arredondamento conservador)**;
+- **969 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
   permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
@@ -555,7 +555,7 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 ### F0.034 — Paridade API-first [FR-240]
 
-- [ ] Criar `PublicCapability` registry com exposure, scopes, schema, custo e confirmação. Evidência: `capability-registry.ts`.
+- [x] Criar `PublicCapability` registry com exposure, scopes, schema, custo e confirmação. Evidência F0.034: `capability-registry.ts` é a fonte canônica das 189 capabilities e exige exposure, operation kind, scopes, input/output schema refs, cost class e confirmation, além de endpoint, auth, idempotência e preconditions. O commit `6a96e39` removeu a confiança exclusiva no TypeScript: allowlists e padrões runtime rejeitam drift nos seis metadados centrais, high/variable cost sem gate e schemas inexistentes; T-F0.034 falsifica cada dimensão e o verificador resolve todos os refs. O run `30810405231` aprovou 834 testes, baseline de 189 capabilities, build, PostgreSQL/MinIO, Remotion, Prisma/API e teardown. Evidência: T-F0.034 e ADR-134.
 - [ ] Associar cada ação operável da UI a um `capabilityId`. Evidência: T-FR-240 e ADR-134.
 - [ ] Fazer UI e API chamarem o mesmo application service/Command handler. Evidência: T-FR-240 e ADR-134.
 - [ ] Criar allowlist explícita para internals que não podem ser publicados. Evidência: T-FR-240 e ADR-134.
