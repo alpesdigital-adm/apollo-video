@@ -40,9 +40,9 @@ renderer ◄── RenderInput materializado
 
 ## Runtime baseline da Fundação
 
-- Next.js 16.2.10 e React/React DOM 19.2.7.
+- Next.js 16.2.12 e React/React DOM 19.2.7.
 - Remotion, CLI, Player e Renderer 4.0.489; o subprojeto usa React/React DOM 19.2.7.
-- Node.js 20.9+; desenvolvimento atual validado também em Node 24.
+- Node.js 20.9+; a imagem de aplicação usa Node 22 bookworm-slim e desenvolvimento atual também é validado em Node 24.
 - Dynamic route `params` é assíncrono em pages e route handlers.
 - Builds usam Webpack explicitamente enquanto os aliases de Remotion não forem migrados para Turbopack.
 - O adapter FFmpeg invoca `ffmpeg`/`ffprobe` com `execFile` e arrays de argumentos, sem shell ou wrapper abandonado.

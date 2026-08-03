@@ -15,6 +15,7 @@
     "lint:code": "eslint src scripts tests --max-warnings=0",
     "domain-language:validate": "node scripts/lint-domain-language.mjs",
     "infra:validate": "node scripts/verify-local-infrastructure.mjs",
+    "platform:validate": "node scripts/verify-platform-versions.mjs",
     "infra:postgres:up": "docker compose --env-file .env.local -f infra/postgres/compose.yml up -d --wait",
     "infra:object-storage:up": "docker compose --env-file .env.local -f infra/object-storage/compose.yml up -d --wait",
     "infra:local:up": "docker compose --env-file .env.local -f infra/postgres/compose.yml -f infra/object-storage/compose.yml -f infra/workflow/compose.yml up -d --build --wait",

@@ -1,7 +1,6 @@
 import {createHash,createHmac,timingSafeEqual} from 'node:crypto';
 import {APP_SHELL_DESTINATIONS} from '../domain/app-shell.ts';
 
-export const FOUNDATION_INFRA={database:{engine:'postgresql',version:'16',isolated:true},objectStorage:{protocol:'s3-compatible',development:'minio',masterBucket:'apollo-masters',derivativeBucket:'apollo-derivatives'},workflow:{store:'postgresql',durable:true,checkpointed:true},renderer:{remotion:'4.0.489',ffmpeg:'8'},web:{next:'16.2.10',react:'19.2.7'},vector:{engine:'pgvector',embeddingVersion:'v1'}} as const;
 export type TraceContext={traceId:string;correlationId:string;workspaceId:string;projectId?:string;jobId?:string};
 export function createTraceContext(input:Omit<TraceContext,'traceId'|'correlationId'>):TraceContext{const identity=JSON.stringify(input);return {...input,traceId:createHash('sha256').update(`trace:${identity}`).digest('hex').slice(0,32),correlationId:createHash('sha256').update(`correlation:${identity}`).digest('hex').slice(0,24)};}
 

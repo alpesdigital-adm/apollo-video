@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "node": { "minimum": "20.9.0", "containerMajor": "22" },
+  "web": { "next": "16.2.12", "react": "19.2.7", "reactDom": "19.2.7" },
+  "render": { "remotion": "4.0.489", "ffmpegTarget": "8.1.1", "ffprobeTarget": "8.1.1" },
+  "database": { "postgresMajor": "16", "pgvector": "0.8.5", "image": "pgvector/pgvector:0.8.5-pg16-trixie", "prisma": "5.22.0" },
+  "storage": { "protocol": "s3-compatible", "minioImage": "minio/minio:RELEASE.2025-04-22T22-12-26Z", "awsSdkS3": "3.1100.0" },
+  "clients": { "aiSdk": "7.0.30", "mcpSdk": "1.29.0", "typescript": "5.9.3" }
+}

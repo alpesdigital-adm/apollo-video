@@ -82,6 +82,9 @@ jobs:
       - name: Verify isolated local infrastructure contracts
         run: npm run infra:validate
 
+      - name: Verify pinned platform versions
+        run: npm run platform:validate
+
       - name: Run unit and contract tests
         run: npm test
 

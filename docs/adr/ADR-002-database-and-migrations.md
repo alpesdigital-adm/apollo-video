@@ -4,6 +4,7 @@
 
 - Operações, tentativas e auditoria redigida ficam 90 dias online e depois seguem a política versionada do workspace. Versões, decisões de direitos e lineage acompanham o projeto, salvo deleção verificada.
 - PostgreSQL 16 com pgvector foi escolhido porque a busca precisa pré-filtrar workspace, direitos, consentimento, tipo e metadata. Embeddings guardam modelo, versão, dimensões, hash e revisão de elegibilidade; mudança de dimensão cria índice aditivo.
+- A imagem reproduzível da Fundação é `pgvector/pgvector:0.8.5-pg16-trixie`; o adapter e a CLI permanecem pinados por lock em Prisma 5.22.0.
 - O limite inicial é um milhão de segmentos elegíveis por workspace e 2.000 candidatos antes do reranking. Particionamento ou outro motor exige métricas e novo ADR.
 - Custo de storage, índices vetoriais, retenção e cardinalidade de embeddings aparece nas métricas do workspace.
 
