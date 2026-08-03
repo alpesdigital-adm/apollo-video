@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { dirname, relative, resolve } from 'node:path'
-import ts from 'typescript'
+import { resolve } from 'node:path'
 
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
@@ -18,180 +16,17 @@ import {
 } from '../../src/v2/public-api/capability-registry.ts'
 import { agentToolsForCapabilities } from '../../src/v2/public-api/agent-tool-catalog.ts'
 import { PUBLIC_SCHEMAS, getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
+import {
+  applicationServicesForEndpoint,
+  createUiCapabilityParityReport,
+  discoverUiNetworkActions,
+} from '../../scripts/generate-ui-capability-parity-report.mjs'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
 }
 
 const root = resolve(import.meta.dirname, '../..')
-
-function sourceFiles(directory) {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = resolve(directory, entry.name)
-    if (entry.isDirectory()) return sourceFiles(path)
-    if (!entry.isFile()) return []
-    if (entry.name.endsWith('.tsx')) return [path]
-    if (!entry.name.endsWith('.ts')) return []
-    return /^\s*(['\"])use client\1/m.test(readFileSync(path, 'utf8')) ? [path] : []
-  })
-}
-
-function staticUiPath(node) {
-  if (ts.isStringLiteralLike(node)) return node.text
-  if (ts.isTemplateExpression(node)) {
-    let value = node.head.text
-    for (const span of node.templateSpans) {
-      if (!(ts.isIdentifier(span.expression) && span.expression.text === 'suffix')) value += '{param}'
-      value += span.literal.text
-    }
-    return value
-  }
-  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-    const left = staticUiPath(node.left)
-    const right = staticUiPath(node.right)
-    return left === undefined || right === undefined ? undefined : left + right
-  }
-  return undefined
-}
-
-function requestMethod(call) {
-  const options = call.arguments[1]
-  if (!options || !ts.isObjectLiteralExpression(options)) return 'GET'
-  const property = options.properties.find((candidate) =>
-    ts.isPropertyAssignment(candidate) && candidate.name.getText().replaceAll(/["']/g, '') === 'method')
-  return property && ts.isPropertyAssignment(property) && ts.isStringLiteralLike(property.initializer)
-    ? property.initializer.text
-    : 'GET'
-}
-
-function enclosingFunctionName(node) {
-  let current = node.parent
-  while (current) {
-    if (ts.isFunctionDeclaration(current) && current.name) return current.name.text
-    current = current.parent
-  }
-  return undefined
-}
-
-function uiNetworkActions() {
-  const actions = []
-  for (const path of [
-    ...sourceFiles(resolve(root, 'src/app')),
-    ...sourceFiles(resolve(root, 'src/components')),
-  ]) {
-    const source = readFileSync(path, 'utf8')
-    const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-    const visit = (node) => {
-      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
-          (node.expression.text === 'fetch' || node.expression.text === 'requestJson')) {
-        let pathPattern = staticUiPath(node.arguments[0])
-        let method = requestMethod(node)
-        if (!pathPattern && node.expression.text === 'fetch' && enclosingFunctionName(node) !== 'requestJson') {
-          const signedUpload = enclosingFunctionName(node) === 'transfer' && (
-            (ts.isCallExpression(node.arguments[0]) &&
-              ts.isIdentifier(node.arguments[0].expression) &&
-              node.arguments[0].expression.text === 'localSignedUrl') ||
-            (ts.isIdentifier(node.arguments[0]) && node.arguments[0].text === 'url')
-          )
-          assert.ok(signedUpload, `dynamic UI fetch is not explicitly classified: ${relative(root, path)}`)
-          pathPattern = '/v1/media/uploads/{uploadId}/content'
-          method = 'PUT'
-        }
-        if (pathPattern?.startsWith('/v1/')) {
-          const line = file.getLineAndCharacterOfPosition(node.getStart()).line + 1
-          actions.push({
-            id: `${relative(root, path).replaceAll('\\', '/')}:${line}`,
-            method,
-            path: pathPattern.split('?', 1)[0],
-          })
-        }
-      }
-      ts.forEachChild(node, visit)
-    }
-    visit(file)
-  }
-  return actions
-}
-
-function routeFileForAction(action) {
-  const routeSegments = action.path
-    .split('?', 1)[0]
-    .replaceAll(/\{([^}]+)\}/g, '[$1]')
-    .split('/')
-    .filter(Boolean)
-  return resolve(root, 'src/app', ...routeSegments, 'route.ts')
-}
-
-function resolveLocalModule(fromPath, specifier) {
-  const base = specifier.startsWith('@/')
-    ? resolve(root, 'src', specifier.slice(2))
-    : specifier.startsWith('.')
-      ? resolve(dirname(fromPath), specifier)
-      : undefined
-  if (!base) return undefined
-  for (const candidate of [base, `${base}.ts`, `${base}.tsx`]) {
-    if (existsSync(candidate)) return candidate
-  }
-  return undefined
-}
-
-function reachableApplicationServices(path, functionName, visited = new Set()) {
-  const visitKey = `${path}#${functionName}`
-  if (visited.has(visitKey)) return new Set()
-  visited.add(visitKey)
-  const source = readFileSync(path, 'utf8')
-  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true,
-    path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
-  const imports = new Map()
-  const functions = new Map()
-  for (const statement of file.statements) {
-    if (ts.isFunctionDeclaration(statement) && statement.name) functions.set(statement.name.text, statement)
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteralLike(statement.moduleSpecifier)) continue
-    const clause = statement.importClause
-    if (clause?.name) imports.set(clause.name.text, {
-      imported: 'default', source: statement.moduleSpecifier.text,
-    })
-    if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
-      for (const element of clause.namedBindings.elements) imports.set(element.name.text, {
-        imported: element.propertyName?.text ?? element.name.text,
-        source: statement.moduleSpecifier.text,
-      })
-    }
-  }
-  const target = functions.get(functionName)
-  if (!target) return new Set()
-  const services = new Set()
-  const visit = (node) => {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      const called = node.expression.text
-      if (functions.has(called)) {
-        for (const service of reachableApplicationServices(path, called, visited)) services.add(service)
-      }
-      const imported = imports.get(called)
-      if (imported) {
-        if (/[/\\]application[/\\]/.test(imported.source)) {
-          services.add(imported.imported)
-        } else {
-          const importedPath = resolveLocalModule(path, imported.source)
-          if (importedPath) {
-            for (const service of reachableApplicationServices(importedPath, imported.imported, visited)) {
-              services.add(service)
-            }
-          }
-        }
-      }
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(target)
-  return services
-}
-
-function applicationServiceCalls(action) {
-  const path = routeFileForAction(action)
-  assert.ok(existsSync(path), `UI capability route does not exist: ${action.method} ${action.path}`)
-  return [...reachableApplicationServices(path, action.method)].sort()
-}
 
 test('foundation registry exposes health and discovery without scopes', () => {
   const visible = capabilitiesForScopes(FOUNDATION_CAPABILITIES, new Set())
@@ -442,10 +277,38 @@ test('T-F0-034 internal-only allowlist is justified and absent from public schem
       'CAPABILITY_PARITY_MISSING',
     )
   }
+
+  const publicCapability = FOUNDATION_CAPABILITIES[0]
+  expectDomainError(
+    () => defineCapabilityRegistry([{
+      ...publicCapability,
+      id: 'apollo.internal.test',
+      exposure: 'internal-only',
+      endpoint: undefined,
+      toolName: undefined,
+      internalOnlySurfaceId: undefined,
+    }]),
+    'INVALID_CAPABILITY',
+  )
+  expectDomainError(
+    () => defineCapabilityRegistry([{
+      ...publicCapability,
+      internalOnlySurfaceId: 'database-row',
+    }]),
+    'INVALID_CAPABILITY',
+  )
+  assert.doesNotThrow(() => defineCapabilityRegistry([{
+    ...publicCapability,
+    id: 'apollo.internal.test',
+    exposure: 'internal-only',
+    endpoint: undefined,
+    toolName: undefined,
+    internalOnlySurfaceId: 'database-row',
+  }]))
 })
 
-test('T-F0-034 every operable UI network action resolves to an exposed capabilityId', () => {
-  const actions = uiNetworkActions()
+test('T-F0-034-ui-capability-binding every operable UI network action resolves to an exposed capabilityId', () => {
+  const actions = discoverUiNetworkActions(root)
   const bindings = bindUiNetworkActionsToCapabilities(actions, FOUNDATION_CAPABILITIES)
   assert.ok(bindings.length >= 70)
   assert.equal(bindings.length, actions.length)
@@ -467,15 +330,15 @@ test('T-F0-034 every operable UI network action resolves to an exposed capabilit
   )
 })
 
-test('T-F0-034 UI and external API converge on the same application service boundary', () => {
-  const actions = uiNetworkActions()
+test('T-F0-034-shared-service-boundary UI and external API converge on the same application service boundary', () => {
+  const actions = discoverUiNetworkActions(root)
   const bindings = bindUiNetworkActionsToCapabilities(actions, FOUNDATION_CAPABILITIES)
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((capability) => [capability.id, capability]))
   const missing = bindings
     .map((binding) => {
       const endpoint = capabilities.get(binding.capabilityId)?.endpoint
       assert.ok(endpoint, `bound UI capability lacks public endpoint: ${binding.capabilityId}`)
-      return { binding, calls: applicationServiceCalls(endpoint) }
+      return { binding, calls: applicationServicesForEndpoint(root, endpoint) }
     })
     .filter(({ calls }) => calls.length === 0)
   assert.deepEqual(
@@ -483,4 +346,20 @@ test('T-F0-034 UI and external API converge on the same application service boun
     [],
     'every UI-reachable public API handler must call an imported V2 application service',
   )
+})
+
+test('T-F0-034 generated parity report covers actions, capabilities, endpoints and tests', () => {
+  const report = createUiCapabilityParityReport(root)
+  assert.equal(report.schemaVersion, 'ui-capability-parity-report/v1')
+  assert.equal(report.summary.uiActions, report.rows.length)
+  assert.ok(report.summary.uiActions >= 70)
+  assert.ok(report.summary.capabilities > 0)
+  assert.ok(report.summary.endpoints > 0)
+  assert.equal(report.summary.unboundActions, 0)
+  assert.equal(report.summary.routesWithoutApplicationService, 0)
+  assert.equal(report.summary.operableCapabilities, FOUNDATION_CAPABILITIES.length)
+  assert.equal(report.summary.publicContractCapabilities, FOUNDATION_CAPABILITIES.length)
+  assert.equal(report.summary.unjustifiedCapabilities, 0)
+  assert.ok(report.rows.every((row) => row.tests.length === 3))
+  assert.ok(report.capabilityContracts.every((capability) => capability.tests.length === 1))
 })

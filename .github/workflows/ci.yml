@@ -91,6 +91,9 @@ jobs:
       - name: Validate public API contracts
         run: npm run api:v1:validate
 
+      - name: Verify UI capability parity report
+        run: npm run api:parity:validate
+
       - name: Validate database schema and migrations
         run: npm run db:v2:validate
 

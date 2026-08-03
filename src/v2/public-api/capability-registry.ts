@@ -33,6 +33,7 @@ export interface PublicCapability {
   title: string
   description: string
   exposure: CapabilityExposure
+  internalOnlySurfaceId?: string
   operationKind: CapabilityOperationKind
   authMode: CapabilityAuthMode
   authScheme?: CapabilityAuthScheme
@@ -335,12 +336,25 @@ function validateCapability(capability: PublicCapability): void {
       'Internal-only capabilities cannot publish endpoints or tools',
       { capabilityId: capability.id },
     )
+    assertDomain(
+      Boolean(capability.internalOnlySurfaceId) &&
+        INTERNAL_ONLY_SURFACES.some((surface) => surface.id === capability.internalOnlySurfaceId),
+      'INVALID_CAPABILITY',
+      'Internal-only capability requires an allowlisted surface justification',
+      { capabilityId: capability.id, internalOnlySurfaceId: capability.internalOnlySurfaceId },
+    )
   } else {
     assertDomain(
       Boolean(capability.endpoint),
       'INVALID_CAPABILITY',
       'Externally exposed capabilities require an endpoint',
       { capabilityId: capability.id },
+    )
+    assertDomain(
+      capability.internalOnlySurfaceId === undefined,
+      'INVALID_CAPABILITY',
+      'Externally exposed capability cannot claim an internal-only justification',
+      { capabilityId: capability.id, internalOnlySurfaceId: capability.internalOnlySurfaceId },
     )
   }
 

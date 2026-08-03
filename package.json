@@ -62,6 +62,8 @@
     "test:e2e:mvp-core-full": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/mvp-core-full-journey.e2e.mjs",
     "api:v1:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-public-contracts.mjs",
     "api:v1:baseline:update": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/update-public-contract-baseline.mjs",
+    "api:parity:report": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/generate-ui-capability-parity-report.mjs",
+    "api:parity:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/generate-ui-capability-parity-report.mjs --check",
     "remotion:dev": "cd remotion && npx remotion studio src/index.ts",
     "remotion:render": "cd remotion && npx remotion render src/index.ts",
     "remotion:build": "npm run build --prefix remotion",
