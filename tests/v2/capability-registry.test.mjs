@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readFileSync, readdirSync } from 'node:fs'
-import { relative, resolve } from 'node:path'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { dirname, relative, resolve } from 'node:path'
 import ts from 'typescript'
 
 import { DomainError } from '../../src/v2/domain/errors.ts'
@@ -109,6 +109,86 @@ function uiNetworkActions() {
     visit(file)
   }
   return actions
+}
+
+function routeFileForAction(action) {
+  const routeSegments = action.path
+    .split('?', 1)[0]
+    .replaceAll(/\{([^}]+)\}/g, '[$1]')
+    .split('/')
+    .filter(Boolean)
+  return resolve(root, 'src/app', ...routeSegments, 'route.ts')
+}
+
+function resolveLocalModule(fromPath, specifier) {
+  const base = specifier.startsWith('@/')
+    ? resolve(root, 'src', specifier.slice(2))
+    : specifier.startsWith('.')
+      ? resolve(dirname(fromPath), specifier)
+      : undefined
+  if (!base) return undefined
+  for (const candidate of [base, `${base}.ts`, `${base}.tsx`]) {
+    if (existsSync(candidate)) return candidate
+  }
+  return undefined
+}
+
+function reachableApplicationServices(path, functionName, visited = new Set()) {
+  const visitKey = `${path}#${functionName}`
+  if (visited.has(visitKey)) return new Set()
+  visited.add(visitKey)
+  const source = readFileSync(path, 'utf8')
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true,
+    path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
+  const imports = new Map()
+  const functions = new Map()
+  for (const statement of file.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) functions.set(statement.name.text, statement)
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteralLike(statement.moduleSpecifier)) continue
+    const clause = statement.importClause
+    if (clause?.name) imports.set(clause.name.text, {
+      imported: 'default', source: statement.moduleSpecifier.text,
+    })
+    if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+      for (const element of clause.namedBindings.elements) imports.set(element.name.text, {
+        imported: element.propertyName?.text ?? element.name.text,
+        source: statement.moduleSpecifier.text,
+      })
+    }
+  }
+  const target = functions.get(functionName)
+  if (!target) return new Set()
+  const services = new Set()
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const called = node.expression.text
+      if (functions.has(called)) {
+        for (const service of reachableApplicationServices(path, called, visited)) services.add(service)
+      }
+      const imported = imports.get(called)
+      if (imported) {
+        if (/[/\\]application[/\\]/.test(imported.source)) {
+          services.add(imported.imported)
+        } else {
+          const importedPath = resolveLocalModule(path, imported.source)
+          if (importedPath) {
+            for (const service of reachableApplicationServices(importedPath, imported.imported, visited)) {
+              services.add(service)
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(target)
+  return services
+}
+
+function applicationServiceCalls(action) {
+  const path = routeFileForAction(action)
+  assert.ok(existsSync(path), `UI capability route does not exist: ${action.method} ${action.path}`)
+  return [...reachableApplicationServices(path, action.method)].sort()
 }
 
 test('foundation registry exposes health and discovery without scopes', () => {
@@ -344,5 +424,23 @@ test('T-F0-034 every operable UI network action resolves to an exposed capabilit
   expectDomainError(
     () => bindUiNetworkActionsToCapabilities([actions[0], actions[0]], FOUNDATION_CAPABILITIES),
     'CAPABILITY_PARITY_MISSING',
+  )
+})
+
+test('T-F0-034 UI and external API converge on the same application service boundary', () => {
+  const actions = uiNetworkActions()
+  const bindings = bindUiNetworkActionsToCapabilities(actions, FOUNDATION_CAPABILITIES)
+  const capabilities = new Map(FOUNDATION_CAPABILITIES.map((capability) => [capability.id, capability]))
+  const missing = bindings
+    .map((binding) => {
+      const endpoint = capabilities.get(binding.capabilityId)?.endpoint
+      assert.ok(endpoint, `bound UI capability lacks public endpoint: ${binding.capabilityId}`)
+      return { binding, calls: applicationServiceCalls(endpoint) }
+    })
+    .filter(({ calls }) => calls.length === 0)
+  assert.deepEqual(
+    missing,
+    [],
+    'every UI-reachable public API handler must call an imported V2 application service',
   )
 })
