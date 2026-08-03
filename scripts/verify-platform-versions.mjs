@@ -21,6 +21,13 @@ equal(remotionPackage.dependencies?.remotion, versions.render.remotion, 'Remotio
 equal(locked(remotionLock, 'remotion'), versions.render.remotion, 'Remotion lock')
 equal(locked(remotionLock, '@remotion/renderer'), versions.render.remotion, 'Remotion renderer lock')
 for (const [name, expected] of [['@prisma/client', versions.database.prisma], ['prisma', versions.database.prisma], ['@aws-sdk/client-s3', versions.storage.awsSdkS3], ['ai', versions.clients.aiSdk], ['@modelcontextprotocol/sdk', versions.clients.mcpSdk], ['typescript', versions.clients.typescript]]) equal(locked(rootLock, name), expected, `${name} lock`)
+equal(rootPackage.dependencies?.uuid, versions.clients.uuid, 'uuid manifest')
+equal(locked(rootLock, 'uuid'), versions.clients.uuid, 'uuid lock')
+equal(rootPackage.devDependencies?.postcss, versions.clients.postcss, 'postcss manifest')
+equal(rootPackage.overrides?.postcss, versions.clients.postcss, 'postcss override')
+equal(locked(rootLock, 'postcss'), versions.clients.postcss, 'postcss root lock')
+equal(locked(remotionLock, 'postcss'), versions.clients.postcss, 'postcss renderer lock')
+if (locked(rootLock, 'form-data') || locked(remotionLock, 'form-data')) failures.push('form-data must remain absent from locked dependency trees')
 
 const [dockerfile, postgresCompose, storageCompose, adr001, adr002, adr008] = await Promise.all(['Dockerfile', 'infra/postgres/compose.yml', 'infra/object-storage/compose.yml', 'docs/adr/ADR-001-v2-modular-architecture.md', 'docs/adr/ADR-002-database-and-migrations.md', 'docs/adr/ADR-008-render-architecture-cache.md'].map((path) => readFile(resolve(root, path), 'utf8')))
 if (!dockerfile.includes(`FROM node:${versions.node.containerMajor}-bookworm-slim`)) failures.push('Dockerfile Node image drifted')
