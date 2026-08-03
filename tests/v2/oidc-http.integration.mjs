@@ -142,6 +142,7 @@ test('OIDC HTTP journey verifies provider evidence and creates only authorized o
         APOLLO_OIDC_REDIRECT_URI: redirectUri, APOLLO_OIDC_RECOVERY_URL: `${issuer}/recovery`,
         APOLLO_OIDC_TRANSACTION_SECRET: 'oidc-http-transaction-secret-at-least-32-bytes',
         APOLLO_IDENTITY_HASH_SECRET: identityHashSecret,
+        APOLLO_UI_SESSION_SECRET: 'oidc-http-session-rotation-secret-at-least-32-bytes',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
