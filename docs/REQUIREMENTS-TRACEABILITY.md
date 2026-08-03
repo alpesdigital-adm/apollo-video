@@ -291,6 +291,8 @@ Evidência integrada F0.033 — o run `30775662600` transformou as 57 entidades 
 
 Complemento integrado F0.033 — o run `30776437393` validou os seams centrais das Specs 02/03/06: manifest de SourceAsset sem URI pública, TimelineSegment frame-first, OutputSpec, EditCommand e um novo port AsyncMediaProviderAdapter completo. O boundary de capabilities é fechado, imutável e TTL-bound e rejeita campos extras/secrets, duplicatas, operações desconhecidas e ranges inválidos. Os 832 testes, build, PostgreSQL/MinIO, goldens, API/OIDC e Compose passaram. DocumentAsset e ProviderJob/provider real durável continuam pendentes; a caixa permanece aberta.
 
+Evidência concluída F0.033 — o run `30776962496` integrou a fonte única `config/platform-versions.json` e o gate `platform:validate`, que cruza manifests, lockfiles, imagens Postgres/pgvector/MinIO e ADR-001/002/008. O drift do Next foi corrigido para 16.2.12 e o registry parcial foi removido. FFmpeg/ffprobe 8.1.1 são alvos explícitos; probes e goldens continuam comprovando a versão/comportamento executados. Audits root/Remotion ficaram em zero vulnerabilidades e a matriz completa passou. A microtarefa de fixação de versões está concluída.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.

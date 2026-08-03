@@ -24,8 +24,8 @@ Estado auditado após o gate F2.019, com a jornada integral do MVP Core e os
 dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **283 de 1.259 microtarefas verificadas como efetivamente entregues (22,4%, arredondamento conservador)**;
-- **976 microtarefas abertas ou aguardando nova comprovação**;
+- **284 de 1.259 microtarefas verificadas como efetivamente entregues (22,5%, arredondamento conservador)**;
+- **975 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
   permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
@@ -546,7 +546,7 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 - [ ] Mapear todas as entidades das seções 10.1–10.6 para aggregates, tabelas e value objects, sem implementar tabela genérica sem contrato. Evidência parcial integrada F0.033: `docs/specs/10-conceptual-model.md` cobre exatamente as 57 entidades do PRD em 26 targets de tabela, 5 snapshots, 14 value objects e 12 lacunas `planned`; o gate rejeita ausência, duplicação, model/símbolo inexistente e tabela genérica. O run `30775662600` passou 827 testes. As 12 lacunas precisam de contratos próprios antes de concluir. Evidência: T-F0.033 e ADR-134.
 - [ ] Definir relações, ownership, lifecycle e chaves de Workspace, Project, Media, Capture, Synthetic e Execution. Evidência parcial integrada F0.033: cada uma das 57 linhas declara owner, lifecycle e chave, e T-F0.033 exige o owner canônico da seção. Relações e integridade das 12 entidades ainda planejadas permanecem abertas. Evidência: T-F0.033 e ADR-134.
 - [ ] Validar que `SourceAsset`, `TimelineSegment`, `OutputSpec`, adapter e `EditCommand` são compatíveis com as specs 02, 03 e 06. Evidência parcial integrada F0.033: a matriz da Spec 10 e T-F0.033 provam manifest content-addressed sem localização pública, timing frame-first/reverse fail-closed, OutputSpec, Command preso à base/scope/registry e o novo `AsyncMediaProviderAdapter` com capabilities TTL, estimate, submit, status, retrieve, cancel e webhook sem secrets. O run `30776437393` passou 832 testes e toda a matriz. `DocumentAsset` e integração do adapter com ProviderJob durável/provider real permanecem abertas. Evidência: T-F0.033 e ADR-134.
-- [ ] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008. Evidência: T-F0.033 e ADR-134.
+- [x] Fixar versões-alvo de Next.js/React, Remotion, FFmpeg/ffprobe, Postgres/vector e client libraries no ADR-001/002/008. Evidência F0.033: `config/platform-versions.json` é a fonte única; `platform:validate` cruza manifests, locks, imagens pinadas e ADRs no CI. O drift Next 16.2.10→16.2.12 e o registry duplicado foram removidos; FFmpeg/ffprobe 8.1.1 permanecem alvos declarados, enquanto probes/goldens comprovam separadamente o binário executado. O run `30776962496` passou o novo gate, 832 testes, dois audits com zero vulnerabilidades e toda a matriz hospedada. Evidência: T-F0.033 e ADR-134.
 - [ ] Atualizar Next.js/React para uma linha suportada sem quebrar App Router, Remotion ou os contratos `/v1`. Evidência: Next 16.2.10, React 19.2.7, codemod async params e validação completa.
 - [ ] Corrigir advisories não-major de `uuid`, `postcss` e `form-data`. Evidência: versões corrigidas/override PostCSS e `npm audit` com zero vulnerabilidades.
 - [ ] Configurar S3-compatible storage. Evidência: T-F0.033 e ADR-134.
